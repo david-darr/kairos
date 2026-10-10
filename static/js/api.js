@@ -278,19 +278,30 @@ export function openOptionMenu(anchor, items, onPick) {
   // Below the control, or above it when there is more room there, never
   // taller than the space on that side (2026-10-05: a long list near the
   // bottom of Settings ran off the window). From the chat composer it opens
-  // above the whole composer, like its other menus.
+  // above the whole composer, like its other menus. Forge Home's composer
+  // sits near the top, so its pickers open below the whole box instead.
   const GAP = 6, MARGIN = 12, MAX = 260;
+  const composerNode = anchor.closest(".chat-input-bar");
+  const belowComposer = composerNode?.classList.contains("forge-composer");
+  // A short window may leave no usable list below the Home composer.
+  // Scroll the composer into view first, keeping the list below it.
+  const scrolled = new Map();
+  if (belowComposer && window.innerHeight - composerNode.getBoundingClientRect().bottom - GAP - MARGIN < 120) {
+    composerNode.scrollIntoView({ block: 'start', behavior: 'instant' });
+    for (let node = composerNode.parentElement; node; node = node.parentElement) scrolled.set(node, { top: node.scrollTop, left: node.scrollLeft });
+  }
   const rect = anchor.getBoundingClientRect();
-  const composer = anchor.closest(".chat-input-bar")?.getBoundingClientRect();
+  const composer = composerNode?.getBoundingClientRect();
   const top = composer ? composer.top - 2 : rect.top;
-  const below = window.innerHeight - rect.bottom - GAP - MARGIN;
+  const bottom = belowComposer ? composer.bottom : rect.bottom;
+  const below = window.innerHeight - bottom - GAP - MARGIN;
   const above = top - GAP - MARGIN;
-  const up = composer ? true : below < Math.min(MAX, menu.scrollHeight) && above > below;
-  menu.style.maxHeight = `${Math.max(120, Math.min(MAX, up ? above : below))}px`;
-  const width = Math.max(rect.width, 160);
+  const up = belowComposer ? false : composer ? true : below < Math.min(MAX, menu.scrollHeight) && above > below;
+  menu.style.maxHeight = `${Math.max(0, Math.min(MAX, up ? above : below))}px`;
+  const width = Math.min(Math.max(rect.width, 160), Math.max(0, window.innerWidth - 2 * MARGIN));
   menu.style.width = `${width}px`;
   menu.style.left = `${Math.max(MARGIN, Math.min(rect.left, window.innerWidth - width - MARGIN))}px`;
-  menu.style.top = up ? "" : `${rect.bottom + GAP}px`;
+  menu.style.top = up ? "" : `${Math.min(bottom + GAP, window.innerHeight - MARGIN)}px`;
   menu.style.bottom = up ? `${window.innerHeight - top + GAP}px` : "";
   (menu.querySelector(".custom-select-item.active") || menu.querySelector(".custom-select-item:not(.disabled)"))?.scrollIntoView({ block: "nearest" });
 
@@ -313,7 +324,13 @@ export function openOptionMenu(anchor, items, onPick) {
   // Scrolling the page moves the control out from under a fixed menu, so it
   // closes, but not when the scroll is the menu's own list (2026-10-05: the
   // 18-platform list in Settings closed the moment it was scrolled).
-  const onScroll = (e) => { if (!menu.contains(e.target)) closeOptionMenu(); };
+  const onScroll = (e) => {
+    if (menu.contains(e.target)) return;
+    // The programmatic scroll's event arrives after the menu is mounted.
+    const position = scrolled.get(e.target);
+    if (position && position.top === e.target.scrollTop && position.left === e.target.scrollLeft) return;
+    closeOptionMenu();
+  };
   document.addEventListener("keydown", onKey, true);
   document.addEventListener("click", onClick, true);
   window.addEventListener("scroll", onScroll, true);
