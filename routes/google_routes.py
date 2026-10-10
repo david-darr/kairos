@@ -214,3 +214,8 @@ async def calendar_events(start: str, end: str, calendar_ids: str = "primary", u
 @router.post("/calendar/action")
 async def calendar_action(body: CalendarActionRequest, user: str = Depends(require_admin)) -> dict:
     return await _run(google.calendar_action(**body.model_dump()))
+
+
+@router.get("/calendar/events/{event_id}")
+async def calendar_event(event_id: str, calendar_id: str = "primary", user: str = Depends(require_admin)) -> dict:
+    return await _run(google.calendar_event(calendar_id, event_id))

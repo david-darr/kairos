@@ -216,6 +216,16 @@ class TaskService:
             self._check_dependencies(task_id, fields["depends_on"] or [])
         if fields.get("report_when") not in (None, "always", "notable"):
             raise ValueError("report_when is 'always' or 'notable'")
+        if fields.get("enabled") is True and not task.get("enabled"):
+            kind = task["schedule_kind"]
+            if kind == "once":
+                stamp = task.get("next_run_at")
+                if not stamp or datetime.fromisoformat(stamp).timestamp() <= time.time():
+                    raise ValueError("This one-time schedule has ended. Use Run now or schedule a new task.")
+            elif kind == "daily":
+                task["next_run_at"] = _next_daily(task["run_time"])
+            elif kind == "interval":
+                task["next_run_at"] = _iso_in(task["interval_seconds"])
         for key in ("name", "prompt", "enabled", "deliver_to_channel", "endpoint_id", "depends_on", "report_when"):
             if key in fields:
                 task[key] = list(fields[key] or []) if key == "depends_on" else fields[key]

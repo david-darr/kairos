@@ -1,5 +1,5 @@
 """Calendar CRUD + range listing (merges real events with due-dated Notes)."""
-from typing import Optional
+from typing import Optional, Literal
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +20,8 @@ class CreateEventRequest(BaseModel):
     all_day: bool = False
     location: str = ""
     description: str = ""
+    recurrence: Optional[dict] = None
+    time_zone: str = "UTC"
 
 
 class UpdateEventRequest(BaseModel):
@@ -30,11 +32,17 @@ class UpdateEventRequest(BaseModel):
     location: Optional[str] = None
     description: Optional[str] = None
     completed: Optional[bool] = None
+    recurrence: Optional[dict] = None
+    time_zone: Optional[str] = None
+    scope: Literal["occurrence", "series"] = "occurrence"
 
 
 @router.get("/events")
 async def list_events(start: str = Query(...), end: str = Query(...), user: str = Depends(require_user)) -> list[dict]:
-    events = calendar_service.list_range(start, end)
+    try:
+        events = calendar_service.list_range(start, end)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     from core import tab_hooks
     events += await tab_hooks.calendar_items(user, start, end)
     if auth_manager.is_admin(user):
@@ -52,19 +60,36 @@ async def list_archived_events(user: str = Depends(require_user)) -> list[dict]:
 
 @router.post("/events")
 async def create_event(body: CreateEventRequest, user: str = Depends(require_user)) -> dict:
-    return calendar_service.create_event(body.title, body.start, body.end, body.all_day, body.location, body.description)
+    try:
+        return calendar_service.create_event(body.title, body.start, body.end, body.all_day, body.location, body.description,
+            recurrence=body.recurrence, time_zone=body.time_zone)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/events/{event_id}")
+async def get_event(event_id: str, scope: Literal["occurrence", "series"] = "occurrence", user: str = Depends(require_user)) -> dict:
+    try:
+        return calendar_service.get_event(event_id, scope)
+    except KeyError:
+        raise HTTPException(404, "event not found")
 
 
 @router.patch("/events/{event_id}")
 async def update_event(event_id: str, body: UpdateEventRequest, user: str = Depends(require_user)) -> dict:
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k == "recurrence"}
     try:
         return calendar_service.update_event(event_id, **fields)
     except KeyError:
         raise HTTPException(status_code=404, detail="event not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.delete("/events/{event_id}")
-async def delete_event(event_id: str, user: str = Depends(require_user)) -> dict:
-    calendar_service.delete_event(event_id)
+async def delete_event(event_id: str, scope: Literal["occurrence", "series"] = "occurrence", user: str = Depends(require_user)) -> dict:
+    try:
+        calendar_service.delete_event(event_id, scope)
+    except KeyError:
+        raise HTTPException(404, "event not found")
     return {"ok": True}
