@@ -238,6 +238,7 @@
 .forge-shell .forge-sidebar-panel, .forge-shell .forge-session-cards { overscroll-behavior: contain; }
 @media (min-width: 769px) {
   .sidebar-collapsed .forge-project-section > header > span, .sidebar-collapsed .forge-project-name, .sidebar-collapsed .forge-project-row > .forge-counts { display: none; }
+  .sidebar-collapsed .forge-rail-message { display: none; }
   .sidebar-collapsed .forge-project-row { padding: 0; justify-content: center; }
   .sidebar-collapsed .forge-project-section > header { justify-content: center; padding: 0; }
 }
@@ -1593,11 +1594,13 @@ input[type="checkbox"]:checked::after {
    .msg-thinking-dot's own keyframe for a consistent "still working" look
    between the chat view itself and this overlay. */
 #chat-progress-host {
-  position: fixed; top: 20px; right: 20px; z-index: 3000;
+  position: fixed; top: calc(var(--titlebar-h) + 20px); right: 20px; z-index: 3000;
   display: flex; flex-direction: column; gap: 8px;
+  max-width: calc(100vw - 40px); max-height: calc(100dvh - var(--titlebar-h) - 40px); overflow-y: auto;
   pointer-events: none;
 }
 .chat-progress-card {
+  flex-shrink: 0;
   pointer-events: auto; cursor: pointer;
   display: flex; align-items: center; gap: 8px;
   max-width: 280px; padding: 9px 13px; font-size: 12.5px; color: var(--text);
@@ -2122,7 +2125,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .vault-caption { font-size: 10px; flex-direction: column; gap: 2px; }
   .vault-panel { inset: 8px; width: auto !important; max-width: none; min-width: 0; }
   .vault-panel-resize-handle { display: none; }
-  #chat-progress-host { top: 68px; right: 12px; }
+  #chat-progress-host { top: calc(var(--titlebar-h) + 68px); right: 12px; max-width: calc(100vw - 24px); max-height: calc(100dvh - var(--titlebar-h) - 80px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2448,6 +2451,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
 .cal-event-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100vh - 32px); overflow: auto; }
 .cal-event-dialog .form-grid { align-items: start; }
 .cal-event-dialog .field { min-width: 0; }
+.cal-event-dialog [hidden] { display: none !important; }
 .cal-event-dialog input, .cal-event-dialog select, .cal-event-dialog textarea { width: 100%; min-width: 0; }
 /* A real checkbox: the form's text-input sizing otherwise squashes it into a bar. */
 .cal-event-dialog .cal-checkbox-label input { width: 16px; height: 16px; min-height: 0; padding: 0; flex: none; accent-color: var(--accent); }

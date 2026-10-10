@@ -451,15 +451,6 @@ export async function render(container) {
         await refreshTabs();
       }, { class: item.enabled ? "btn quiet danger" : "btn primary", disabled: !item.enabled && ["invalid", "needs_newer_kairos"].includes(item.status) }));
       else {
-        actions.append(action(item.enabled === false ? "Turn on" : "Turn off", async (dialog) => {
-          const result = await api(`/api/system/custom-tabs/${slug}/enabled`, {
-            method: "POST", body: JSON.stringify({ enabled: item.enabled === false }), signal: dialog?.signal });
-          if (dialog?.signal.aborted) return;
-          toast(result.restart_required ? "Restart Kairos to load the current tab version."
-            : item.enabled === false ? "Tab turned on. Source approval still applies." : "Tab turned off. Files and data kept.", "success");
-          await refreshTabs(dialog?.signal);
-          dialog?.close();
-        }, { disabled: item.enabled === false && ["invalid", "needs_newer_kairos"].includes(item.status) }));
         if (item.enabled !== false && !item.approved && item.status !== "on") actions.append(action("Approve", async (dialog) => {
           const ok = await confirmDialog({ title: `Approve ${item.name}?`, danger: false, confirmLabel: "Approve source",
             message: `Inspect all files before allowing this code to run inside Kairos.\n\n${(item.files || []).join("\n")}\n\nFingerprint: ${item.fingerprint}` });
@@ -471,6 +462,16 @@ export async function render(container) {
           await refreshTabs(dialog?.signal);
           dialog?.close();
         }, { class: "btn primary", disabled: !item.fingerprint || ["invalid", "needs_newer_kairos"].includes(item.status) }));
+        // Approve stays the lead action; Turn on leads only on a turned-off card.
+        actions.append(action(item.enabled === false ? "Turn on" : "Turn off", async (dialog) => {
+          const result = await api(`/api/system/custom-tabs/${slug}/enabled`, {
+            method: "POST", body: JSON.stringify({ enabled: item.enabled === false }), signal: dialog?.signal });
+          if (dialog?.signal.aborted) return;
+          toast(result.restart_required ? "Restart Kairos to load the current tab version."
+            : item.enabled === false ? "Tab turned on. Source approval still applies." : "Tab turned off. Files and data kept.", "success");
+          await refreshTabs(dialog?.signal);
+          dialog?.close();
+        }, { ...(item.enabled === false ? { class: "btn primary" } : {}), disabled: item.enabled === false && ["invalid", "needs_newer_kairos"].includes(item.status) }));
         actions.append(action("Remove", async (dialog) => {
           if (!await confirmDialog({ title: `Remove ${item.name}?`, message: "This removes the tab's source files. Its saved data is kept.", confirmLabel: "Remove tab" })) return;
           if (!actions.isConnected || dialog?.signal.aborted) return;

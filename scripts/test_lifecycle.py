@@ -1,15 +1,18 @@
 """Reversible user tabs and automation schedules, with isolated fixture data."""
 import asyncio
+from copy import deepcopy
+import importlib
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import test_tabs as fixtures
 from services import task_service as tasks
 from routes import task_routes
+from core import task_scheduler
 
 
 class UserTabLifecycleTests(unittest.TestCase):
@@ -19,6 +22,50 @@ class UserTabLifecycleTests(unittest.TestCase):
     legacy = fixtures.TabTests.legacy
     approve = fixtures.TabTests.approve
     status = fixtures.TabTests.status
+    hook_folder = fixtures.TabTests.hook_folder
+
+    def test_off_stops_hooks_and_on_restores_the_same_module_and_saved_data(self):
+        self.hook_folder(source='''from . import service
+events = []
+async def start():
+    events.append("start")
+    service.answer += 1
+async def stop(): events.append("stop")
+def calendar_items(user, start, end):
+    return [{"id": "fixture", "source": "tab", "source_label": "Fixture", "toggle_url": "/api/fixture/completed"}]
+''')
+        fixtures.tabs.mount_all(self.app)
+        asyncio.run(fixtures.tab_hooks.reconcile())
+        module = importlib.import_module("kairos_tabs.alpha.hooks")
+        data = self.root / "data" / "tab-data" / "alpha" / "saved.json"
+        data.parent.mkdir(parents=True)
+        data.write_text('{"answer": 42}', encoding="utf-8")
+        self.assertEqual(module.events, ["start"])
+        self.assertEqual(self.client.get("/fixture/alpha").json(), {"answer": 43})
+        self.client.post("/api/system/custom-tabs/alpha/enabled", json={"enabled": False}).raise_for_status()
+        self.assertEqual(module.events, ["start", "stop"])
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("kairos_tabs.alpha.hooks")
+        self.assertEqual(asyncio.run(fixtures.tab_hooks.calendar_items("fixture", "first", "last")), [])
+        self.client.post("/api/system/custom-tabs/alpha/enabled", json={"enabled": True}).raise_for_status()
+        self.assertIs(importlib.import_module("kairos_tabs.alpha.hooks"), module)
+        self.assertEqual(module.events, ["start", "stop", "start"])
+        self.assertEqual(self.client.get("/fixture/alpha").json(), {"answer": 44})
+        self.assertEqual(len(asyncio.run(fixtures.tab_hooks.calendar_items("fixture", "first", "last"))), 1)
+        self.assertEqual(data.read_text(encoding="utf-8"), '{"answer": 42}')
+
+    def test_changed_approved_source_never_restores_suspended_modules(self):
+        folder = self.folder()
+        self.approve("alpha"); fixtures.tabs.mount_all(self.app)
+        old = importlib.import_module("kairos_tabs.alpha.service")
+        self.client.post("/api/system/custom-tabs/alpha/enabled", json={"enabled": False}).raise_for_status()
+        (folder / "service.py").write_text("answer = 99\n", encoding="utf-8")
+        self.approve("alpha")
+        on = self.client.post("/api/system/custom-tabs/alpha/enabled", json={"enabled": True})
+        self.assertEqual(on.status_code, 200)
+        self.assertTrue(on.json()["restart_required"])
+        self.assertIsNot(importlib.import_module("kairos_tabs.alpha.service"), old)
+        self.assertEqual(self.client.get("/fixture/alpha").status_code, 409)
 
     def test_off_on_both_formats_preserves_approval_source_and_loaded_route(self):
         self.folder(); self.legacy()
@@ -105,6 +152,52 @@ class AutomationLifecycleTests(unittest.TestCase):
         self.assertTrue(resumed["enabled"])
         self.assertEqual(resumed["deliver_to_channel"], "discord")
         self.assertEqual(self.service._runs[0]["id"], "history")
+
+    def test_paused_task_and_history_survive_restart(self):
+        task = self.service.create_task("Fixture", "Run", "interval", interval_seconds=60)
+        self.service.record_run(task["id"], "Kept result")
+        self.service.update_task(task["id"], enabled=False)
+        stored = deepcopy(task)
+        reloaded = tasks.TaskService()
+        self.assertEqual(reloaded.get_task(task["id"]), stored)
+        self.assertEqual(reloaded.list_runs(task["id"])[0]["output"], "Kept result")
+        reloaded.update_task(task["id"], enabled=True)
+        self.assertEqual(reloaded.list_runs(task["id"])[0]["output"], "Kept result")
+
+
+class QueuedAutomationTests(unittest.IsolatedAsyncioTestCase):
+    setUp = AutomationLifecycleTests.setUp
+
+    def due(self, name):
+        task = self.service.create_task(name, "Run", "interval", interval_seconds=60)
+        task["next_run_at"] = "2000-01-01T00:00:00+00:00"
+        return task
+
+    async def test_off_task_in_the_schedulers_existing_due_snapshot_never_runs(self):
+        first, queued = self.due("First"), self.due("Queued")
+        async def run(task, source):
+            self.service.update_task(queued["id"], enabled=False)
+        with patch.object(task_scheduler, "task_service", self.service), \
+             patch.object(task_scheduler, "_run_task", AsyncMock(side_effect=run)) as execute:
+            await task_scheduler._run_due()
+        self.assertEqual(execute.await_count, 1)
+        self.assertEqual(execute.call_args.args[0]["id"], first["id"])
+        self.assertNotIn("run_started_at", queued)
+        self.assertEqual(queued["next_run_at"], "2000-01-01T00:00:00+00:00")
+
+    async def test_scheduled_run_waiting_on_a_lock_rechecks_live_enabled_state(self):
+        task = self.due("Queued")
+        with patch.object(task_scheduler, "task_service", self.service), \
+             patch.object(task_scheduler, "_run_task", AsyncMock()) as execute:
+            lock = task_scheduler._lock(task["id"])
+            await lock.acquire()
+            queued = asyncio.create_task(task_scheduler.start_run(deepcopy(task), "schedule", wait=True))
+            await asyncio.sleep(0)
+            self.service.update_task(task["id"], enabled=False)
+            lock.release()
+            await queued
+            execute.assert_not_awaited()
+        self.assertNotIn("run_started_at", task)
 
 
 if __name__ == "__main__":

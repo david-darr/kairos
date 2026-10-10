@@ -92,7 +92,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await js("document.querySelector('.cal-create-bar button').click()");
   await waitFor("!!document.querySelector('.cal-event-dialog')");
   assert.equal(await js("document.querySelector('.cal-event-dialog select').value"), 'demo@example.com');
-  assert.equal(await js("document.querySelectorAll('.cal-event-dialog select option').length"), 3);
+  assert.equal(await js("document.querySelectorAll('.cal-event-dialog select[aria-label=Calendar] option').length"), 3);
   await capture(label + '-calendar-create-picker');
   const createWrite = writes.length;
   await js(`document.querySelector('.cal-event-dialog input[aria-label="Event title"]').value='Smoke Google event'; document.querySelector('.cal-event-dialog').requestSubmit()`);
@@ -110,9 +110,9 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   const edited = JSON.parse(writes.slice(editWrite).find(w => w.path === '/api/google/calendar/action').body);
   await waitFor("!document.querySelector('.cal-event-dialog') && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Smoke edited event'))");
   await js(`[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Smoke edited event')).querySelector('button[aria-label="Delete event"]').click()`);
-  await waitFor("!!document.querySelector('.confirm-panel')");
+  await waitFor("!!document.querySelector('.panel-dialog')");
   const deleteWrite = writes.length;
-  await js("document.querySelector('.confirm-panel .btn.danger').click()");
+  await js("document.querySelector('.panel-dialog .btn.danger').click()");
   await requestAfter(writes, deleteWrite, w => w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'delete' && JSON.parse(w.body).event_id === edited.event_id);
   await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Smoke edited event'))");
   const monthRead = reads.length;

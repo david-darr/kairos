@@ -41,38 +41,104 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
   await waitFor("document.getElementById('view-content').dataset.view === 'home' && !document.documentElement.classList.contains('tab-transition')");
   await navigate('chat', { sessionId: 's1' }); await closeDocuments();
   await waitFor("!!document.querySelector('.chat-documents-toggle') && !!document.querySelector('.artifact-card')");
-  await js("localStorage.removeItem('kairos:chat-pane-width')");
-  // Pause the real opening animation halfway: geometry must interpolate,
-  // rather than only asserting that a transition is declared in CSS.
-  const checkOpening = async trigger => {
-    await js(trigger);
-    const result = await js("(() => { const main = document.querySelector('#chat-main'), panel = document.querySelector('.chat-layout .artifact-panel'); const a = main.getAnimations().find(a => a.effect.getKeyframes().some(k => /^\\d/.test(k.width))); const entrance = panel.getAnimations().find(a => a.effect.getKeyframes().some(k => 'transform' in k)); if (!a || !entrance) return {animations:main.getAnimations().map(a => a.effect.getKeyframes())}; a.pause(); entrance.pause(); a.currentTime = 55; entrance.currentTime = 55; const frames = a.effect.getKeyframes(); return {from: parseFloat(frames[0].width), to:parseFloat(frames.at(-1).width), mid:main.getBoundingClientRect().width}; })()");
-    assert.ok(result && result.from > result.mid && result.mid > result.to, 'Document opening narrows the chat through intermediate widths: ' + JSON.stringify(result));
-    await js("for (const node of document.querySelectorAll('#chat-main, .chat-layout > .artifact-panel')) for (const a of node.getAnimations()) a.finish()");
-    await delay(230);
+  const entries = [
+    ['documents', "document.querySelector('.chat-documents-toggle').click()"],
+    ['session-files', "document.querySelector('.chat-files-toggle').click()"],
+    ['session-document', "document.querySelector('.artifact-card').click()"],
+  ];
+  const hidePanes = () => js("Promise.all([import('/static/js/chatContent.js'), import('/static/js/chatFilesPane.js')]).then(([docs, files]) => { docs.hideArtifact(); files.closeChatFiles(); })");
+  const assertSettled = async label => {
+    const result = await js(`(() => {
+      const host = document.querySelector('.chat-layout'), main = host.querySelector('#chat-main'), panel = host.querySelector('.artifact-panel');
+      const saved = Number(localStorage.getItem('kairos:chat-pane-width'));
+      const expected = Math.max(380, Math.min(Math.floor(host.clientWidth * .7), saved >= 380 ? saved : Math.round(host.clientWidth * .6)));
+      // Count only motion that moves the split or the pane: script/CSS animations
+      // and geometry transitions. Focus outlines and the scrollbar fade are not openings.
+      const moving = ['width', 'flex-basis', 'transform', 'translate', 'opacity', 'all'];
+      const motion = [...main.getAnimations(), ...panel.getAnimations()].filter(a => !(a instanceof CSSTransition) || moving.includes(a.transitionProperty));
+      return {width:main.getBoundingClientRect().width, expected, panel:panel.getBoundingClientRect().width,
+        opening:host.classList.contains('pane-opening'), animations:motion.length,
+        names:motion.map(a => (a.animationName || a.transitionProperty || a.constructor.name) + '@' + a.effect?.target?.className)};
+    })()`);
+    assert.ok(Math.abs(result.width - result.expected) < 2 && result.panel > 0 && !result.opening && result.animations === 0,
+      `${label} settles at the clamped split without a second animation: ${JSON.stringify(result)}`);
   };
-  await checkOpening("document.querySelector('.chat-documents-toggle').click()");
-  await closeMenus();
-  await js("import('/static/js/chatContent.js').then(m => m.hideArtifact())");
-  await checkOpening("document.querySelector('.artifact-card').click()");
+  // Sample real geometry at the start, middle and end of all three entrances,
+  // using default, saved and over-limit widths. Inspect in the click's task so
+  // loading a preview cannot race the animation assertions.
+  for (const saved of [null, 580, 99999]) {
+    for (const [label, trigger] of entries) {
+      await hidePanes(); await closeMenus();
+      await js(saved === null ? "localStorage.removeItem('kairos:chat-pane-width')" : `localStorage.setItem('kairos:chat-pane-width', '${saved}')`);
+      const result = await js(`(() => {
+        const main = document.querySelector('#chat-main'), before = main.getBoundingClientRect().width;
+        ${trigger};
+        const panel = document.querySelector('.chat-layout > .artifact-panel'), widths = main.getAnimations(), entrances = panel.getAnimations();
+        if (widths.length !== 1 || entrances.length !== 1) return {widths:widths.length, entrances:entrances.length};
+        const a = widths[0], entrance = entrances[0], frames = a.effect.getKeyframes(), timing = a.effect.getTiming();
+        a.pause(); entrance.pause(); a.currentTime = entrance.currentTime = 0;
+        const start = main.getBoundingClientRect().width, opacity = getComputedStyle(panel).opacity;
+        a.currentTime = entrance.currentTime = timing.duration / 2;
+        return {before, start, opacity, from:parseFloat(frames[0].width), to:parseFloat(frames.at(-1).width),
+          mid:main.getBoundingClientRect().width, duration:timing.duration, easing:timing.easing, panelTiming:entrance.effect.getTiming()};
+      })()`);
+      assert.ok(result.from > result.mid && result.mid > result.to && Math.abs(result.start - result.before) < 2 && result.opacity === '0',
+        `${label} opens without a jump or flash: ${JSON.stringify(result)}`);
+      assert.ok(result.duration >= 250 && result.duration <= 350);
+      assert.equal(result.duration, result.panelTiming.duration, 'Pane and chat use the same duration');
+      assert.equal(result.easing, result.panelTiming.easing, 'Pane and chat use the same ease-out');
+      if (saved === null) await capture(`patch-${label}-opening-mid`);
+      await js("for (const node of document.querySelectorAll('#chat-main, .chat-layout > .artifact-panel')) for (const a of node.getAnimations()) a.finish()");
+      await delay(40); await assertSettled(label);
+      await delay(350); await assertSettled(label);
+      if (saved === null) await capture(`patch-${label}-open`);
+    }
+  }
   await waitFor("!!document.querySelector('.chat-layout .artifact-document')");
   await js("window.patchRetainedDocument = document.querySelector('.chat-layout .artifact-document'); import('/static/js/chatContent.js').then(m => m.hideArtifact())");
-  await checkOpening("document.querySelector('.chat-documents-toggle').click()");
+  await js("document.querySelector('.chat-documents-toggle').click()"); await delay(350);
+  await assertSettled('Natural retained-document reopen');
   assert.ok(await js("document.querySelector('.chat-layout .artifact-document') === window.patchRetainedDocument"), 'Reopening keeps document DOM');
-  await checkOpening("document.querySelector('.chat-files-toggle').click()");
+  await js("document.querySelector('.chat-files-toggle').click()");
+  await assertSettled('Replace viewer with session files');
   await waitFor("!!document.querySelector('.chat-file-row')");
-  await js("document.querySelector('.chat-file-row').click()");
-  assert.ok(await js("document.querySelector('.chat-layout .artifact-viewer').getAnimations().some(a => a.effect.getKeyframes().some(k => 'transform' in k))"), 'Individual session file replays pane entrance');
-  await delay(250); await capture('patch-documents-open');
+  await js("window.patchFilesPanel = document.querySelector('.chat-files-panel'); document.querySelector('.chat-files-toggle').click()");
+  assert.ok(await js("document.querySelector('.chat-files-panel') === window.patchFilesPanel"), 'Repeated session-files button keeps the open pane');
+  await assertSettled('Repeated session-files button');
+  const switchResult = await js(`(() => {
+    const before = document.querySelector('#chat-main').getBoundingClientRect().width;
+    document.querySelector('.chat-file-row').click();
+    return {before, after:document.querySelector('#chat-main').getBoundingClientRect().width};
+  })()`);
+  assert.ok(Math.abs(switchResult.before - switchResult.after) < 2, 'Selecting a session file keeps the open split steady');
+  await assertSettled('Session file selection');
+  await js("document.querySelector('.artifact-card').click(); document.querySelector('.chat-documents-toggle').click(); document.querySelector('.artifact-tab-label').click()");
+  await assertSettled('Switch already-open documents');
+  await capture('patch-documents-open');
   // Rapid reopen cancels the old registration without replacing saved DOM.
   await js("import('/static/js/chatContent.js').then(m => { m.hideArtifact(); m.showArtifactPane(); m.hideArtifact(); m.showArtifactPane(); })");
   assert.equal(await js("document.querySelectorAll('.chat-layout > .artifact-panel').length"), 1);
   assert.equal(await js("document.querySelectorAll('.chat-pane-resizer').length"), 1);
-  await delay(250);
+  await delay(350); await assertSettled('Rapid reopen');
+  // Keyboard input immediately after a rapid reopen must cancel the entrance,
+  // then land on the same default + 24px without a second opening transition.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await js("localStorage.removeItem('kairos:chat-pane-width'); import('/static/js/chatContent.js').then(m => { m.hideArtifact(); m.showArtifactPane(); document.querySelector('.chat-pane-resizer').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true})); })");
+    await delay(350);
+    assert.ok(await js("Math.abs(document.querySelector('#chat-main').getBoundingClientRect().width - (Math.round(document.querySelector('.has-pane').clientWidth * .6) + 24)) < 2 && !document.querySelector('.has-pane').classList.contains('pane-opening')"), 'Rapid reopen and keyboard resize lands on exact width');
+  }
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  await js("import('/static/js/chatContent.js').then(m => { m.hideArtifact(); m.showArtifactPane(); })");
-  assert.ok(await js("[document.querySelector('#chat-main'), document.querySelector('.chat-layout .artifact-panel')].every(n => n.getAnimations().every(a => !a.effect.getKeyframes().some(k => 'width' in k || 'transform' in k)))"), 'Reduced motion skips pane movement');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+  try {
+    for (const [label, trigger] of entries) {
+      await hidePanes(); await closeMenus(); await js(trigger);
+      await assertSettled(`Reduced motion ${label}`);
+      assert.equal(await js("getComputedStyle(document.querySelector('#chat-main')).transitionDuration"), '0s');
+    }
+  } finally {
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+    await hidePanes(); await closeMenus();
+    await js("localStorage.removeItem('kairos:chat-pane-width'); delete window.patchRetainedDocument; delete window.patchFilesPanel");
+  }
   await closeDocuments();
   // Real progress subscription, held locally: no model or account is used.
   await js("window.patchFetch = window.fetch; window.fetch = (url, options) => url === '/api/chat/stream' ? Promise.resolve(new Response(new ReadableStream({start(c) { window.patchProgressStream = c; }}), {headers:{'Content-Type':'text/event-stream'}})) : window.patchFetch(url, options); import('/static/js/chatStream.js').then(m => m.startTurn('patch-progress', 'Patch progress', 'Test', []))");

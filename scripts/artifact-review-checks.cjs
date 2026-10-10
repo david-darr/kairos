@@ -13,7 +13,9 @@ module.exports = async function checkArtifactReview({ js, win, waitFor, capture,
   const pick = async (selector, modifiers = 0, x = .5) => { const p = await point(selector, x); await mouse('mouseMoved', p); await mouse('mousePressed', p, modifiers); await mouse('mouseReleased', p, modifiers); };
   const drag = async (from, to) => { await mouse('mouseMoved', from); await mouse('mousePressed', from); await mouse('mouseMoved', to); await mouse('mouseReleased', to); await delay(80); };
   win.setContentSize(1920, 1080); await navigate('chat', { sessionId: 's1' });
-  await open('workspace.pptx'); await click(`${active} [aria-label="Go to slide 2"]`);
+  // Coordinate picks need the settled split, not the opening animation's frame.
+  await open('workspace.pptx'); await waitFor("!document.querySelector('.chat-layout.pane-opening')");
+  await click(`${active} [aria-label="Go to slide 2"]`);
   await click(`${active} .artifact-select`);
   await pick(`${active} [data-pick="pptx:slide=2;shape=2"]`);
   await pick(`${active} [data-pick="pptx:slide=2;shape=3"]`, 2); // Control

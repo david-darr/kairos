@@ -237,11 +237,13 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.dashboard-core').classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
     assert.ok(await js("!document.querySelector('.kairos-sky-image, .kairos-sky-point, .core-motion-toggle, .core-caption, .kairos-mark')"), "Home has no sky scene, dot or motion control");
     assert.ok(await js("Number(document.querySelector('.dashboard-core').dataset.drawMs) < 400"), "Home banner draws quickly");
+    await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./artifact-review-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
     await require('./artifact-continuity-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads });
+    await require('./settings-patch-checks.cjs')({ js, win, waitFor, delay, capture });
     await js("(async () => { const overlay=document.getElementById('onboarding-overlay'); overlay.classList.remove('hidden'); await import('/static/js/onboarding.js').then(m => m.run(overlay, () => {})); })()");
     assert.equal(await js("document.querySelector('.onboarding-card h2').textContent"), 'Not more time. The right time.');
     await capture('desktop-onboarding');
@@ -978,7 +980,7 @@ app.whenReady().then(async () => {
           await js("[...document.querySelectorAll('.confirm-panel button')].find(b=>b.textContent==='Approve source').click()");
           await waitFor("!document.querySelector('.panel-dialog') && document.querySelector('[data-tab-slug=project_tracker] .set-pill-ok')?.textContent === 'On'");
           assert.ok(writes.slice(tabStoreWrites).some(w=>w.path==='/api/system/custom-tabs/project_tracker/approve' && JSON.parse(w.body).fingerprint===reviewedFingerprint), label + ' approval binds to the reviewed fingerprint');
-          fixture(new URL('/api/system/tabs', base)).find(t=>t.slug==='project_tracker').status='needs_approval';
+          Object.assign(fixture(new URL('/api/system/tabs', base)).find(t=>t.slug==='project_tracker'), { status: 'needs_approval', approved: false });
           if (label === "desktop") {
             // The card at the end of Yours opens the same brief as the header button.
             await openPopup("document.querySelector('.tool-store-build-card button')", "!!document.querySelector('.modal-panel .tab-build-form:not([data-builder])')", label + ' tab build handoff');
@@ -1006,6 +1008,7 @@ app.whenReady().then(async () => {
           assert.ok(writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"), label + " Calendar PATCHes the tab toggle URL");
           writes.splice(calendarWrites);
           await require('./google-workspace-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
+          await require('./lifecycle-calendar-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
         }
         if (tab === "tasks" && !demoState.empty) {
           // The work board (Hermes track 2026-09-23): cards sit in their

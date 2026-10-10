@@ -28,7 +28,10 @@ def _overlaps(ev_start: str, ev_end: str, start_iso: str, end_iso: str, *, end_e
     through its last instant.
     """
     if end_exclusive or ("T" in ev_start and "T" in ev_end):
-        return repeats.stamp(ev_start, time_zone) < repeats.stamp(end_iso) and repeats.stamp(ev_end, time_zone) > repeats.stamp(start_iso)
+        first, last = repeats.stamp(ev_start, time_zone), repeats.stamp(ev_end, time_zone)
+        lower, upper = repeats.stamp(start_iso), repeats.stamp(end_iso)
+        # Existing imported deadlines may be timed points rather than spans.
+        return first < upper and (last > lower or (first == last and first == lower))
     if len(ev_end) == 10:
         ev_end = ev_end + "T23:59:59.999999"
     return ev_start < end_iso and ev_end >= start_iso
@@ -223,7 +226,28 @@ class CalendarService:
             self._save()
 
     def _calendar_items(self, first: str, last: str, *, instants=False) -> list[dict]:
+        if instants:
+            if repeats.stamp(first) >= repeats.stamp(last):
+                raise ValueError("The range must end after it starts")
+        elif repeats.day(first) > repeats.day(last):
+            raise ValueError("The range must end on or after it starts")
         items = []
+        expanded = 0
+
+        def append_instance(item):
+            nonlocal expanded
+            if instants:
+                overlaps = _overlaps(item["start"], item["end"], first, last,
+                    end_exclusive=item.get("end_exclusive", False), time_zone=item.get("time_zone", "UTC"))
+            else:
+                overlaps = (item["start"][:10] <= last and (item["end"][:10] > first
+                    if item.get("all_day") and item.get("end_exclusive") else item["end"][:10] >= first))
+            if overlaps:
+                expanded += 1
+                if expanded > repeats.MAX_OCCURRENCES:
+                    repeats.expansion_limit()
+                items.append(item)
+
         for event in self._events.values():
             if not event.get("recurrence"):
                 items.append(self._public(event))
@@ -235,13 +259,13 @@ class CalendarService:
             for key, start, end in repeats.occurrences(event, first_date, last_date):
                 seen.add(key)
                 if not event.get("_exceptions", {}).get(key, {}).get("deleted"):
-                    items.append(self._instance(event, key, start, end))
+                    append_instance(self._instance(event, key, start, end))
             # A moved occurrence must also appear at its new date, even if its
             # original date lies outside the requested range.
             for key, override in event.get("_exceptions", {}).items():
-                if key not in seen and "start" in override and not override.get("deleted"):
+                if key not in seen and ("start" in override or "end" in override) and not override.get("deleted"):
                     try:
-                        items.append(self.get_event(f"{event['id']}~{key}"))
+                        append_instance(self.get_event(f"{event['id']}~{key}"))
                     except KeyError:
                         pass
         return items

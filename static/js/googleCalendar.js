@@ -23,7 +23,7 @@ export function itemsOnDay(items, day) {
       return item.source === 'google' || item.end_exclusive ? item.start <= key && key < item.end : item.start === key;
     }
     const start = new Date(item.start), end = item.end ? new Date(item.end) : new Date(start.getTime() + 1);
-    return start < next && end > day;
+    return start < next && (end > day || (start.getTime() === end.getTime() && start >= day));
   });
 }
 
@@ -119,21 +119,28 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
     repeat.setAvailable(!repeat.host.hidden);
   };
   repeat.load(item || {}); updateRepeat();
-  const updateFields = () => {
+  const followingDate = value => {
+    const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + 1);
+    return dateOnly(date);
+  };
+  const updateFields = (loadItem = true) => {
+    const selectedDate = start.value.slice(0, 10) || dateOnly(day);
     zoneField.hidden = allDay.checked; zone.disabled = false;
     start.type = end.type = allDay.checked ? 'date' : 'datetime-local';
     endLabel.textContent = allDay.checked ? 'End date (exclusive)' : 'End';
-    const next = new Date(day); next.setDate(next.getDate() + 1);
     if (allDay.checked) {
-      start.value = item?.all_day ? String(item.start).slice(0, 10) : dateOnly(day);
-      const storedEnd = item?.all_day && item.end ? (item.end.includes('T') ? dateOnly(new Date(item.end)) : item.end) : '';
-      end.value = storedEnd > start.value ? storedEnd : dateOnly(next);
+      start.value = loadItem && item?.all_day ? String(item.start).slice(0, 10) : selectedDate;
+      let storedEnd = loadItem && item?.all_day && item.end ? (item.end.includes('T') ? dateOnly(new Date(item.end)) : item.end) : '';
+      // Older local/feed date-only ends include their final date. The editor
+      // always shows the equivalent exclusive boundary, including multi-day spans.
+      if (storedEnd && !item.end.includes('T') && item.source !== 'google' && !item.end_exclusive) storedEnd = followingDate(storedEnd);
+      end.value = storedEnd > start.value ? storedEnd : followingDate(start.value);
     } else {
-      start.value = item && !item.all_day ? timeInput(item.start, zone.value) : `${dateOnly(day)}T09:00`;
-      end.value = item && !item.all_day && item.end ? timeInput(item.end, zone.value) : `${dateOnly(day)}T09:30`;
+      start.value = loadItem && item && !item.all_day ? timeInput(item.start, zone.value) : `${selectedDate}T09:00`;
+      end.value = loadItem && item && !item.all_day && item.end ? timeInput(item.end, zone.value) : `${selectedDate}T09:30`;
     }
   };
-  allDay.onchange = updateFields; target.onchange = updateFields;
+  allDay.onchange = () => updateFields(false);
   updateFields();
   const close = el('button', { type: 'button', class: 'btn quiet', text: 'Cancel' });
   const save = el('button', { type: 'submit', class: 'btn primary', text: item ? 'Save event' : 'Create event' });
@@ -186,7 +193,9 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
     }
   };
   form.onsubmit = async event => {
-    event.preventDefault(); save.disabled = true;
+    event.preventDefault();
+    if (save.disabled) return;
+    save.disabled = true; editScope.disabled = true;
     try {
       const google = target.value !== 'kairos';
       if (!title.value.trim() || !start.value || !end.value) throw new Error('Enter a title, start and end');
@@ -211,7 +220,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
         }) });
       }
       dispose(); await refresh(); toast(item ? 'Event saved' : 'Event created', 'success');
-    } catch (error) { feedback.textContent = error.message; save.disabled = false; }
+    } catch (error) { feedback.textContent = error.message; save.disabled = false; editScope.disabled = false; }
   };
   document.body.append(backdrop); document.addEventListener('keydown', onKey); title.focus();
 }
@@ -221,12 +230,15 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
     el('option', { value: 'occurrence', text: 'This event' }), el('option', { value: 'series', text: 'All events in this series' }),
   ]);
   const feedback = el('div', { class: 'meta', role: 'status' });
+  const cancel = el('button', { type: 'button', class: 'btn', text: 'Cancel' });
   const remove = el('button', { type: 'button', class: 'btn danger', text: 'Delete event' });
   const body = el('div', {}, [el('p', { text: `“${item.title}” will be permanently removed from your calendar.` }),
     ...(item.series_id ? [el('div', { class: 'field' }, [el('label', { text: 'Delete' }), scope])] : []), feedback,
-    el('div', { class: 'row-actions' }, [remove]),
   ]);
-  const dialog = openPanelDialog({ title: 'Delete this event?', body, owner, opener: document.activeElement, group: 'calendar-delete' });
+  // The shared dialog footer, as confirmDialog uses; .row-actions is hover-revealed.
+  const dialog = openPanelDialog({ title: 'Delete this event?', body, footer: el('div', {}, [cancel, remove]),
+    className: 'confirm-panel', owner, opener: document.activeElement, group: 'calendar-delete' });
+  cancel.onclick = () => dialog.close();
   remove.onclick = async () => {
     remove.disabled = true;
     try {

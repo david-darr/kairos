@@ -595,6 +595,8 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
                                            **({"pageToken": page} if page else {})})
             events.extend(_map_calendar_event(item, calendar) for item in result.get("items", [])
                           if item.get("status") != "cancelled" and item.get("start"))
+            if len(events) > repeats.MAX_OCCURRENCES:
+                raise GoogleError("Too many Google Calendar events in this range. Choose a shorter range.")
             page = result.get("nextPageToken")
             if not page:
                 break

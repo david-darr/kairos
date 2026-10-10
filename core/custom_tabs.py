@@ -525,7 +525,7 @@ def set_user_tab_enabled(slug: str, enabled: bool) -> dict:
         disabled.add(slug)
     settings_store.update_settings(disabled_user_tabs=sorted(disabled))
     if not enabled:
-        tab_folders.unregister(slug)
+        tab_folders.suspend(slug)
     return {"slug": slug, "enabled": enabled}
 
 

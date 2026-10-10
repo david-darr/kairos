@@ -170,7 +170,8 @@ module.exports = async function checkArtifactPanes({ js, win, waitFor, capture, 
   await js("window.originalStorageGet = Storage.prototype.getItem; window.originalStorageSet = Storage.prototype.setItem; Storage.prototype.getItem = Storage.prototype.setItem = () => { throw new Error('Storage unavailable'); }; true");
   try {
     await open('review-notes.txt'); await arrow('ArrowRight'); await delay(250);
-    assert.ok(Math.abs(await width() - ((await defaultWidth()) + 24)) < 2);
+    const actualWidth = await width(), expectedWidth = (await defaultWidth()) + 24;
+    assert.ok(Math.abs(actualWidth - expectedWidth) < 2, 'Storage-unavailable keyboard resize: ' + JSON.stringify(await js("({actual:document.querySelector('#chat-main').getBoundingClientRect().width, expected:Math.round(document.querySelector('.has-pane').clientWidth*.6)+24, preferred:document.querySelector('.has-pane').style.getPropertyValue('--chat-pane-width'), aria:document.querySelector('.chat-pane-resizer').getAttribute('aria-valuenow'), animations:document.querySelector('#chat-main').getAnimations().map(a=>({state:a.playState,time:a.currentTime,keyframes:a.effect.getKeyframes()}))})")));
     await close();
   } finally {
     await js("Storage.prototype.getItem = window.originalStorageGet; Storage.prototype.setItem = window.originalStorageSet; delete window.originalStorageGet; delete window.originalStorageSet; localStorage.removeItem('kairos:chat-pane-width')");

@@ -28,6 +28,8 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   assert.ok(await js(`document.querySelector('${active} .artifact-document') === window.retainedArtifact`));
   // Let the restored scroll offset's scroll event land first; app menus
   // close on any outside scroll, as a person can't click within that frame.
+  // The reopen entrance resizes the chat column, so wait for the settled split too.
+  await waitFor("!document.querySelector('.chat-layout.pane-opening')");
   await delay(100);
   await click('.artifact-tab-add');
   await waitFor("[...document.querySelectorAll('.artifact-open-menu .custom-select-item')].some(n => n.textContent === 'weekly-plan.md')");

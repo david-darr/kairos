@@ -108,6 +108,34 @@
       toggle_url: "/api/tab-school/assignments/a1", completed: false },
   ];
   const dayString = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  // Bounded synthetic instances for the demo and renderer checks. Backend
+  // recurrence and time-zone correctness are covered by the Python suites.
+  function calendarInstances(collection) {
+    return collection.flatMap(master => {
+      if (!master.recurrence) return [{ ...master }];
+      const anchor = new Date(master.start.length === 10 ? master.start + 'T00:00:00Z' : master.start);
+      const finish = new Date(master.end.length === 10 ? master.end + 'T00:00:00Z' : master.end);
+      const duration = finish - anchor;
+      const instances = [];
+      let emitted = 0;
+      for (let index = 0; index < 12000 && emitted < Math.min(master.recurrence.count || 60, 10000); index++) {
+        const start = new Date(anchor), step = index * (master.recurrence.interval || 1);
+        if (master.recurrence.frequency === 'monthly') {
+          start.setUTCDate(1); start.setUTCMonth(anchor.getUTCMonth() + step); start.setUTCDate(anchor.getUTCDate());
+          if (start.getUTCDate() !== anchor.getUTCDate()) continue;
+        } else start.setUTCDate(anchor.getUTCDate() + step * (master.recurrence.frequency === 'weekly' ? 7 : 1));
+        const key = start.toISOString().slice(0, 10);
+        if (master.recurrence.until && key > master.recurrence.until) break;
+        emitted++;
+        const end = new Date(start.getTime() + duration), override = master._exceptions?.[key] || {};
+        if (override.deleted) continue;
+        instances.push({ ...master, start: master.all_day ? key : start.toISOString(),
+          end: master.all_day ? end.toISOString().slice(0, 10) : end.toISOString(), ...override,
+          id: master.id + '~' + key, series_id: master.id, occurrence_date: key, source: master.source || 'calendar' });
+      }
+      return instances;
+    });
+  }
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const afterTomorrow = new Date(tomorrow); afterTomorrow.setDate(afterTomorrow.getDate() + 2);
   const googleStart = new Date(); googleStart.setHours(Math.min(22, googleStart.getHours() + 1), 0, 0, 0);
@@ -233,6 +261,25 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    if (route === '/api/calendar/events' && method === 'POST') {
+      const created = { ...body, id: 'local-created-' + now + '-' + events.length, source: 'calendar', completed: false,
+        end_exclusive: Boolean(body.all_day && body.end > body.start) };
+      events.push(created); return created;
+    }
+    const localEvent = route.match(/^\/api\/calendar\/events\/([^/]+)$/);
+    if (localEvent && ['PATCH', 'DELETE'].includes(method)) {
+      const [id, occurrence] = decodeURIComponent(localEvent[1]).split('~');
+      const master = events.find(e => e.id === id);
+      if (!master) return { _status: 404, detail: 'Event not found.' };
+      if (occurrence && (body.scope || query.scope) !== 'series') {
+        const override = (master._exceptions ||= {})[occurrence] ||= {};
+        if (method === 'DELETE') override.deleted = true;
+        else Object.assign(override, body, Object.hasOwn(body, 'all_day') ? { end_exclusive: Boolean(body.all_day && body.end > body.start) } : {});
+        return calendarInstances([master]).find(e => e.occurrence_date === occurrence) || { ok: true };
+      }
+      if (method === 'DELETE') { events.splice(events.indexOf(master), 1); return { ok: true }; }
+      Object.assign(master, body, Object.hasOwn(body, 'all_day') ? { end_exclusive: Boolean(body.all_day && body.end > body.start) } : {}); return master;
+    }
     if (route === '/api/model-setup/codex/install') {
       state.setupInstall = { id: 'setup-install', state: 'running', reads: 0, answered: false };
       return { id: 'setup-install' };
@@ -488,14 +535,22 @@
     if (route === '/api/google/calendar/settings' && method === 'PATCH') { state.googleCalendarIds = body.calendar_ids; return body; }
     if (route === '/api/google/oauth/start') { state.googleCalendarMissing = false; return { url: 'https://accounts.google.com/o/oauth2/v2/auth' }; }
     if (route === '/api/google/calendar/action') {
-      const index = googleEvents.findIndex(e => e.id === body.event_id && e.calendar_id === body.calendar_id);
-      if (body.action === 'delete') { if (index >= 0) googleEvents.splice(index, 1); return { deleted: true }; }
+      const [masterId, occurrence] = String(body.event_id || '').split('~');
+      const index = googleEvents.findIndex(e => e.id === masterId && e.calendar_id === body.calendar_id);
+      if (body.action === 'delete') {
+        if (index >= 0 && occurrence) ((googleEvents[index]._exceptions ||= {})[occurrence] ||= {}).deleted = true;
+        else if (index >= 0) googleEvents.splice(index, 1);
+        return { deleted: true };
+      }
       const calendar = googleCalendars.find(c => c.id === body.calendar_id) || googleCalendars[0];
       const event = body.event || {};
       const item = { id: body.event_id || `g-created-${googleEvents.length}`, title: event.summary || body.text, start: event.start?.date || event.start?.dateTime,
         end: event.end?.date || event.end?.dateTime, all_day: Boolean(event.start?.date), source: 'google', calendar_id: calendar.id,
-        calendar_name: calendar.name, calendar_color: calendar.color, time_zone: event.start?.timeZone || calendar.time_zone, editable: true };
-      if (index >= 0) Object.assign(googleEvents[index], item); else googleEvents.push(item);
+        calendar_name: calendar.name, calendar_color: calendar.color, time_zone: event.start?.timeZone || calendar.time_zone, editable: true,
+        recurrence_supported: true, ...(Object.hasOwn(event, 'repeat') ? { recurrence: event.repeat } : {}) };
+      if (index >= 0 && occurrence) Object.assign((googleEvents[index]._exceptions ||= {})[occurrence] ||= {}, item);
+      else if (index >= 0) Object.assign(googleEvents[index], item);
+      else googleEvents.push(item);
       return item;
     }
     if (route === '/api/google/drive/action') {
@@ -583,8 +638,37 @@
     const approve = route.match(/^\/api\/system\/custom-tabs\/([^/]+)\/approve$/);
     if (approve && method === "POST") {
       const tab = tabs.find((t) => t.slug === approve[1]);
-      tab.status = "on";
+      tab.approved = true; tab.enabled = tab.enabled !== false;
+      tab.status = tab.enabled ? "on" : "off";
       return { id: tab.slug, restart_required: false };
+    }
+    const tabToggle = route.match(/^\/api\/system\/custom-tabs\/([^/]+)\/enabled$/);
+    if (tabToggle && method === 'POST') {
+      const tab = tabs.find(t => t.slug === tabToggle[1] && t.kind === 'user');
+      if (!tab) return { _status: 404, detail: 'Custom tab not found.' };
+      tab.approved ??= tab.status === 'on';
+      tab.enabled = Boolean(body.enabled);
+      tab.status = !tab.enabled ? 'off' : tab.approved ? 'on' : 'needs_approval';
+      return { slug: tab.slug, enabled: tab.enabled, restart_required: false };
+    }
+    const taskRoute = route.match(/^\/api\/tasks\/([^/]+)$/);
+    if (taskRoute && method === 'PATCH') {
+      const task = tasks.find(t => t.id === taskRoute[1]);
+      if (!task) return { _status: 404, detail: 'Task not found.' };
+      Object.assign(task, body);
+      if (body.enabled === true) task.next_run_at = future(6);
+      return task;
+    }
+    const builtinEnable = route.match(/^\/api\/tasks\/builtin\/([^/]+)\/enable$/);
+    if (builtinEnable && method === 'POST') {
+      let task = tasks.find(t => t.builtin_action === builtinEnable[1]);
+      if (!task) {
+        task = { id: 'builtin-' + builtinEnable[1], name: 'Demo routine', builtin_action: builtinEnable[1],
+          schedule_kind: 'daily', run_time: '07:00', deliver_to_channel: body.deliver_to_channel || null };
+        tasks.push(task);
+      }
+      task.enabled = true; task.next_run_at = future(6);
+      return task;
     }
     const remove = route.match(/^\/api\/system\/custom-tabs\/([^/]+)$/);
     if (remove && method === "DELETE") {
@@ -597,7 +681,7 @@
     return null;
   }
   const tasks = [
-    { id: "t1", name: "Daily briefing", enabled: true, schedule_kind: "daily", run_time: "07:00", next_run_at: future(6), last_run_at: now - 3000,
+    { id: "t1", name: "Daily briefing", builtin_action: "routine0", enabled: true, schedule_kind: "daily", run_time: "07:00", next_run_at: future(6), last_run_at: now - 3000,
       deliver_to_channel: "discord" },
     // Running right now (roadmap phase 4): offers Stop instead of Run now.
     { id: "t2", name: "Market check", enabled: true, schedule_kind: "interval", interval_seconds: 3600, next_run_at: future(1), run_started_at: now - 30 },
@@ -883,7 +967,14 @@
     if (route === '/api/google/status') return { configured: true, connected: true, email: 'demo@example.com', client_id: 'demo.apps.googleusercontent.com',
       calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null };
     if (route === '/api/google/calendar/calendars') return googleCalendars;
-    if (route === '/api/google/calendar/events') return list(googleEvents);
+    if (route === '/api/google/calendar/events') return list(calendarInstances(googleEvents));
+    const googleEventRead = route.match(/^\/api\/google\/calendar\/events\/([^/]+)$/);
+    if (googleEventRead) {
+      const [id, occurrence] = decodeURIComponent(googleEventRead[1]).split('~');
+      const master = googleEvents.find(e => e.id === id && e.calendar_id === url.searchParams.get('calendar_id'));
+      if (!master) throw new Error('Missing Google event fixture: ' + id);
+      return occurrence ? calendarInstances([master]).find(e => e.occurrence_date === occurrence) : master;
+    }
     if (route === '/api/google/drive/storage') return { storageQuota: { usage: '2147483648', limit: '16106127360' } };
     if (route === '/api/google/drive/files') {
       const section = url.searchParams.get('section'), parent = url.searchParams.get('parent'), q = url.searchParams.get('q')?.toLowerCase();
@@ -899,8 +990,16 @@
       : { spreadsheetId: 'drive-sheet', sheets: [{ properties: { sheetId: 0, title: 'Budget', gridProperties: { rowCount: 100, columnCount: 12 } } }] };
     if (route.startsWith('/api/google/forms/')) return url.searchParams.get('responses') === 'true' ? { responses: [] }
       : { info: { title: 'Feedback form' }, items: [{ title: 'What would you improve?', questionItem: { question: { textQuestion: { paragraph: true } } } }] };
-    if (route === "/api/calendar/events") return list([...events, ...googleEvents.filter(e => !state.googleCalendarMissing && (state.googleCalendarIds == null || state.googleCalendarIds.includes(e.calendar_id)))]);
+    if (route === "/api/calendar/events") return list([...calendarInstances(events), ...calendarInstances(googleEvents).filter(e => !state.googleCalendarMissing && (state.googleCalendarIds == null || state.googleCalendarIds.includes(e.calendar_id)))]);
     if (route === "/api/calendar/events/archived") return [];
+    const localEventRead = route.match(/^\/api\/calendar\/events\/([^/]+)$/);
+    if (localEventRead) {
+      const [id, occurrence] = decodeURIComponent(localEventRead[1]).split('~');
+      const master = events.find(e => e.id === id);
+      if (!master) throw new Error('Missing calendar fixture: ' + id);
+      return occurrence && url.searchParams.get('scope') !== 'series'
+        ? calendarInstances([master]).find(e => e.occurrence_date === occurrence) : master;
+    }
     if (route === "/api/tasks") return list(tasks);
     // Webhook triggers (2026-10-05): one waiting for approval, one runs straight away.
     if (route === "/api/triggers") return state.empty ? { triggers: [], pending: [] } : {
@@ -921,7 +1020,12 @@
     if (route === "/api/swarm/systems") return { items: state.empty ? [] : [{ id: "s1", name: "Launch team", mission: "Launch the newsletter with two agents and a fact checker.",
       state: "active", active_tasks: 1, configuration: {} }], total: state.empty ? 0 : 1, offset: 0 };
     if (/^\/api\/tasks\/[^/]+\/runs$/.test(route)) return state.empty ? [] : runs[route.split("/")[3]] || [];
-    if (route === "/api/tasks/builtin") return ["Daily briefing", "Review priorities", "Organize memory", "Inbox triage"].map((label, i) => ({ label, description: "Keep the important things in view with a regular review.", action_id: "routine" + i, enabled: i === 0 && !state.empty, task_id: "t1", uses_model: true, default_daily_time: "07:00" }));
+    if (route === "/api/tasks/builtin") return ["Daily briefing", "Review priorities", "Organize memory", "Inbox triage"].map((label, i) => {
+      const task = tasks.find(t => t.builtin_action === 'routine' + i);
+      return { label, description: "Keep the important things in view with a regular review.", action_id: "routine" + i,
+        enabled: Boolean(task?.enabled) && !state.empty, task_id: state.empty ? null : task?.id || null,
+        deliver_to_channel: task?.deliver_to_channel || null, uses_model: true, default_daily_time: "07:00" };
+    });
     if (route === "/api/models") return allModels();
     if (route === "/api/models/choices") return allModels().map((m) => ({ ...m, supports_images: m.kind !== "local" }));
     if (route === "/api/speech/status") return { engine_available: true, active_model: null, models: [

@@ -11,6 +11,11 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     throw new Error('Lifecycle/calendar request missing: ' + JSON.stringify(records.slice(before).slice(-6)));
   };
   const writeStart = writes.length;
+  const shot = async name => {
+    // Rapid synthetic actions must not fill later screenshots with stale toasts.
+    await js("document.querySelector('#toast-host')?.replaceChildren()");
+    await capture(name);
+  };
   const change = (selector, value) => js(`{ const n=document.querySelector(${JSON.stringify(selector)}); n.value=${JSON.stringify(value)}; n.dispatchEvent(new Event('change',{bubbles:true})); }`);
   const getItems = () => js("import('/static/js/api.js').then(m=>m.api('/api/calendar/events?start=2020-01-01T00:00:00Z&end=2035-01-01T00:00:00Z'))");
   const show = async (item = null, google = false) => {
@@ -36,7 +41,8 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await requestAfter(writes, before, w => w.path === '/api/system/custom-tabs/project_tracker/enabled' && JSON.parse(w.body).enabled === false);
   await waitFor("!!document.querySelector('[data-disabled-tabs]') && [...document.querySelectorAll('[data-tab-slug=project_tracker] button')].some(b=>b.textContent==='Turn on')");
   assert.ok(await js("document.querySelector('[data-disabled-tabs]').nextElementSibling.contains(document.querySelector('[data-tab-slug=project_tracker]'))"), label + ' off tabs are retained at the bottom');
-  await capture(label + '-tabs-turned-off');
+  await js("document.querySelector('[data-disabled-tabs]').scrollIntoView({block:'center'})");
+  await shot(label + '-tabs-turned-off');
   before = writes.length;
   await js("[...document.querySelectorAll('[data-tab-slug=project_tracker] button')].find(b=>b.textContent==='Turn on').click()");
   await requestAfter(writes, before, w => w.path === '/api/system/custom-tabs/project_tracker/enabled' && JSON.parse(w.body).enabled === true);
@@ -50,7 +56,8 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await requestAfter(writes, before, w => w.path === '/api/tasks/t1' && JSON.parse(w.body).enabled === false);
   await waitFor("!!document.querySelector('[data-task=t1][data-enabled=false]') && !!document.querySelector('[data-disabled-tasks]')");
   assert.ok(await js("!!(document.querySelector('[data-disabled-tasks]').compareDocumentPosition(document.querySelector('[data-task=t1]')) & Node.DOCUMENT_POSITION_FOLLOWING) && document.querySelector('#tasks-list [data-task]:last-child')?.dataset.task==='t1'"), label + ' disabled automations follow enabled ones');
-  await capture(label + '-automations-turned-off');
+  await js("document.querySelector('[data-task=t1]').scrollIntoView({block:'center'})");
+  await shot(label + '-automations-turned-off');
   before = writes.length;
   // Restore through the library to exercise builtin reuse as well as the generic toggle.
   await js("[...[...document.querySelectorAll('.automation-card')].find(c=>c.textContent.includes('Daily briefing')).querySelectorAll('button')].find(b=>b.textContent==='Enable').click()");
@@ -61,6 +68,22 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   assert.equal(restored.deliver_to_channel, original.deliver_to_channel, label + ' reenable keeps delivery');
 
   await navigate('calendar');
+  assert.ok(await js("import('/static/js/googleCalendar.js').then(m=>{ const day=new Date(2031,0,31); return m.itemsOnDay([{start:day.toISOString(),end:day.toISOString(),source:'note'}],day).length===1; })"), label + ' midnight note deadlines remain visible');
+  // A legacy inclusive all-day end must load as the equivalent exclusive
+  // boundary, relative to the event's date instead of today's date.
+  for (const lastDate of ['2031-01-31', '2031-02-02']) {
+    await show({ id: 'legacy-editor-fixture', source: 'calendar', title: 'Legacy all-day event',
+      all_day: true, start: '2031-01-31', end: lastDate });
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-01-31');
+    assert.equal(await js("document.querySelector('[aria-label=End]').value"), lastDate === '2031-01-31' ? '2031-02-01' : '2031-02-03');
+    await js("document.querySelector('.cal-checkbox-label input').click()");
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-01-31T09:00');
+    await change('[aria-label="Start"]', '2031-03-10T10:00');
+    await js("document.querySelector('.cal-checkbox-label input').click()");
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-03-10');
+    assert.equal(await js("document.querySelector('[aria-label=End]').value"), '2031-03-11');
+    await js("[...document.querySelectorAll('.cal-event-dialog button')].find(b=>b.textContent==='Cancel').click()");
+  }
   for (const google of [false, true]) {
     const name = `${label} ${google ? 'Google' : 'Kairos'} repeated event`;
     await show(null, google);
@@ -78,7 +101,11 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     assert.equal(await visible('[aria-label="Repeat end date"]'), false);
     assert.equal(await visible('[aria-label="Repeat count"]'), true);
     await setTitle(name);
-    await capture(label + (google ? '-google' : '-local') + '-repeat-create');
+    await shot(label + (google ? '-google' : '-local') + '-repeat-create');
+    if (await js("window.innerWidth < 680")) {
+      await js("document.querySelector('[data-repeat-controls]').scrollIntoView({block:'center'})");
+      await shot(label + (google ? '-google' : '-local') + '-repeat-options');
+    }
     const created = await submit(w => google ? w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'create' : w.path === '/api/calendar/events' && w.method === 'POST');
     assert.deepEqual(google ? created.event.repeat : created.recurrence, { frequency: 'weekly', interval: 2, count: 3 });
     let instances = (await getItems()).filter(e => e.title === name);
@@ -116,7 +143,8 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     await js(`import('/static/js/googleCalendar.js').then(m=>m.deleteCalendarEvent(${JSON.stringify(instances[0])},async()=>{}))`);
     await waitFor("!!document.querySelector('[aria-label=\"Delete recurring event\"]')");
     await change('[aria-label="Delete recurring event"]', 'series');
-    await capture(label + (google ? '-google' : '-local') + '-repeat-delete-scope');
+    await shot(label + (google ? '-google' : '-local') + '-repeat-delete-scope');
+    assert.ok(await js("[...document.querySelectorAll('.panel-dialog .modal-footer button')].every(b => b.getClientRects().length && getComputedStyle(b).opacity === '1' && getComputedStyle(b.parentElement).opacity === '1')"), label + ' delete dialog buttons are visible without hovering');
     before = writes.length;
     await js("document.querySelector('.panel-dialog .btn.danger').click()");
     const seriesDeletion = await requestAfter(writes, before, w => google ? w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'delete' : w.path.startsWith('/api/calendar/events/') && w.method === 'DELETE');

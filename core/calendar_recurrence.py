@@ -10,6 +10,11 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 FREQUENCIES = {"daily": "DAILY", "weekly": "WEEKLY", "monthly": "MONTHLY"}
+MAX_OCCURRENCES = 10000
+
+
+def expansion_limit():
+    raise ValueError("Too many calendar events in this range. Choose a shorter range.")
 
 
 def zone(name):
@@ -81,8 +86,11 @@ def occurrences(event, first_date, last_date):
     first, end = boundaries(event)
     anchor = first if event["all_day"] else first.date()
     duration = end - first
-    lower = day(first_date) - timedelta(days=max(0, duration.days) + 1)
+    requested_first = day(first_date)
+    lower = requested_first - timedelta(days=min(requested_first.toordinal() - 1, max(0, duration.days) + 1))
     upper = day(last_date)
+    if upper < requested_first:
+        raise ValueError("The range must end on or after it starts")
     rule = event["recurrence"]
     until = day(rule["until"]) if rule.get("until") else date.max
     upper = min(upper, until)
@@ -91,9 +99,13 @@ def occurrences(event, first_date, last_date):
     frequency, interval = rule["frequency"], rule["interval"]
     step = interval * (7 if frequency == "weekly" else 1)
     index = 0
-    if not rule.get("count") and frequency != "monthly":
-        index = max(0, (lower - anchor).days // step)
+    if not rule.get("count"):
+        if frequency == "monthly":
+            index = max(0, ((lower.year - anchor.year) * 12 + lower.month - anchor.month) // interval)
+        else:
+            index = max(0, (lower - anchor).days // step)
     emitted = 0
+    yielded = 0
     for _ in range(120000):  # at most the entire supported datetime calendar
         try:
             if frequency == "monthly":
@@ -113,7 +125,10 @@ def occurrences(event, first_date, last_date):
             break
         index += 1
         starts = current if event["all_day"] else datetime.combine(current, first.timetz()).replace(fold=0)
-        ends = starts + duration
+        try:
+            ends = starts + duration
+        except OverflowError:
+            break
         if not event["all_day"] and (not _valid_wall(starts) or not _valid_wall(ends)):
             continue
         emitted += 1
@@ -121,6 +136,9 @@ def occurrences(event, first_date, last_date):
             break
         if current < lower:
             continue
+        yielded += 1
+        if yielded > MAX_OCCURRENCES:
+            expansion_limit()
         yield current.isoformat(), starts.isoformat(), ends.isoformat()
 
 
