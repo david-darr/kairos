@@ -53,7 +53,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await capture(label + '-automations-turned-off');
   before = writes.length;
   // Restore through the library to exercise builtin reuse as well as the generic toggle.
-  await js("[...document.querySelectorAll('.automation-card')].find(c=>c.textContent.includes('Daily briefing')).querySelector('button').click()");
+  await js("[...[...document.querySelectorAll('.automation-card')].find(c=>c.textContent.includes('Daily briefing')).querySelectorAll('button')].find(b=>b.textContent==='Enable').click()");
   await requestAfter(writes, before, w => w.path === '/api/tasks/builtin/routine0/enable');
   await waitFor("!!document.querySelector('[data-task=t1][data-enabled=true]')");
   const restored = await js("import('/static/js/api.js').then(async m=>(await m.api('/api/tasks')).find(t=>t.id==='t1'))");
