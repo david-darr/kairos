@@ -2451,6 +2451,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
 .cal-event-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100vh - 32px); overflow: auto; }
 .cal-event-dialog .form-grid { align-items: start; }
 .cal-event-dialog .field { min-width: 0; }
+.cal-event-dialog [hidden] { display: none !important; }
 .cal-event-dialog input, .cal-event-dialog select, .cal-event-dialog textarea { width: 100%; min-width: 0; }
 /* A real checkbox: the form's text-input sizing otherwise squashes it into a bar. */
 .cal-event-dialog .cal-checkbox-label input { width: 16px; height: 16px; min-height: 0; padding: 0; flex: none; accent-color: var(--accent); }

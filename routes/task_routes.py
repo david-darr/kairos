@@ -56,9 +56,11 @@ async def list_tasks(user: str = Depends(require_user)) -> list[dict]:
 # isn't swallowed by the dynamic task_id route.
 @router.get("/builtin")
 async def get_builtin_tasks(user: str = Depends(require_user)) -> list[dict]:
-    enabled_by_action = {t["builtin_action"]: t["id"] for t in task_service.list_tasks() if t.get("builtin_action")}
+    by_action = {t["builtin_action"]: t for t in task_service.list_tasks() if t.get("builtin_action")}
     return [
-        {**b, "enabled": b["action_id"] in enabled_by_action, "task_id": enabled_by_action.get(b["action_id"])}
+        {**b, "enabled": bool(by_action.get(b["action_id"], {}).get("enabled")),
+         "task_id": by_action.get(b["action_id"], {}).get("id"),
+         "deliver_to_channel": by_action.get(b["action_id"], {}).get("deliver_to_channel")}
         for b in list_builtin_tasks()
     ]
 
@@ -73,7 +75,7 @@ async def enable_builtin_task(action_id: str, body: Optional[EnableBuiltinReques
         raise HTTPException(status_code=404, detail="unknown built-in task")
     existing = next((t for t in task_service.list_tasks() if t.get("builtin_action") == action_id), None)
     if existing:
-        return existing
+        return task_service.update_task(existing["id"], enabled=True)
     defn = BUILTIN_TASKS[action_id]
     # A built-in with a default_daily_time wants a wall-clock slot, not a
     # drifting 24h interval — the Daily Brief is only a "daily brief" if it

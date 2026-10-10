@@ -269,7 +269,7 @@ export async function render(container) {
       results.append(grid);
     }
     for (const [kind, label] of [["prebuilt", "Prebuilt"], ["user", "Yours"]]) {
-      const entries = tabs.filter((item) => item.kind === kind);
+      const entries = tabs.filter((item) => item.kind === kind && (kind !== "user" || item.enabled !== false));
       // Yours always ends with the way to build one, and is that card alone when empty.
       const offerBuild = kind === "user" && state.kind === "tabs" && !q;
       if (!entries.length && !offerBuild) continue;
@@ -279,12 +279,19 @@ export async function render(container) {
       if (offerBuild) grid.append(buildTabCard());
       results.append(grid);
     }
+    const offTabs = tabs.filter(item => item.kind === "user" && item.enabled === false);
     if (state.admin) {
       results.append(el("h3", { class: "tool-store-heading", text: `Community · ${community.length}`, "data-community-heading": "" }));
       results.append(githubHost);
       if (state.communityError) results.append(el("div", { class: "tool-store-notice", role: "status", text: state.communityError }));
       const grid = el("div", { class: "tool-store-grid tool-store-community" });
       for (const item of community) grid.append(communityCard(item));
+      results.append(grid);
+    }
+    if (offTabs.length) {
+      results.append(el("h3", { class: "tool-store-heading", text: `Turned off · ${offTabs.length}`, "data-disabled-tabs": "" }));
+      const grid = el("div", { class: "tool-store-grid" });
+      for (const item of offTabs) grid.append(tabCard(item));
       results.append(grid);
     }
     if (["all", "tabs"].includes(state.kind) && state.tabsError) results.append(el("div", { class: "tool-store-notice", text: state.tabsError }));
@@ -444,7 +451,16 @@ export async function render(container) {
         await refreshTabs();
       }, { class: item.enabled ? "btn quiet danger" : "btn primary", disabled: !item.enabled && ["invalid", "needs_newer_kairos"].includes(item.status) }));
       else {
-        if (item.status !== "on") actions.append(action("Approve", async (dialog) => {
+        actions.append(action(item.enabled === false ? "Turn on" : "Turn off", async (dialog) => {
+          const result = await api(`/api/system/custom-tabs/${slug}/enabled`, {
+            method: "POST", body: JSON.stringify({ enabled: item.enabled === false }), signal: dialog?.signal });
+          if (dialog?.signal.aborted) return;
+          toast(result.restart_required ? "Restart Kairos to load the current tab version."
+            : item.enabled === false ? "Tab turned on. Source approval still applies." : "Tab turned off. Files and data kept.", "success");
+          await refreshTabs(dialog?.signal);
+          dialog?.close();
+        }, { disabled: item.enabled === false && ["invalid", "needs_newer_kairos"].includes(item.status) }));
+        if (item.enabled !== false && !item.approved && item.status !== "on") actions.append(action("Approve", async (dialog) => {
           const ok = await confirmDialog({ title: `Approve ${item.name}?`, danger: false, confirmLabel: "Approve source",
             message: `Inspect all files before allowing this code to run inside Kairos.\n\n${(item.files || []).join("\n")}\n\nFingerprint: ${item.fingerprint}` });
           if (!ok) return;

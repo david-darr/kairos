@@ -85,6 +85,7 @@ export async function render(container) {
   );
 
   const list = el("div", { id: "tasks-list", style: "margin-top:14px;" });
+  list.builtinCard = builtinCard;
   const boardCard = el("div", { class: "glass card task-board-card" });
   // Webhook triggers (2026-10-05): outside events that start work.
   const triggersCard = el("div", { class: "glass card triggers-card" });
@@ -135,35 +136,30 @@ async function refreshBuiltins(card) {
     el("div", { class: "meta", style: "margin:4px 0 18px;", text: "Useful routines, ready to make your own." }),
   );
   const grid = el("div", { class: "automation-grid" });
-  for (const b of builtins) {
+  for (const b of builtins.sort((a, b) => Number(Boolean(b.enabled)) - Number(Boolean(a.enabled)))) {
     const channelSelect = customSelect({ style: "font-size:11px;", disabled: b.enabled }, [
       el("option", { value: "", text: "Tasks tab only" }),
       ...channels.map((c) => el("option", { value: c.id, text: c.label })),
     ]);
+    channelSelect.value = b.deliver_to_channel || "";
+    channelSelect.disabled = Boolean(b.task_id);
     const toggleBtn = el("button", { class: b.enabled ? "btn danger" : "btn", text: b.enabled ? "Disable" : "Enable" });
     toggleBtn.addEventListener("click", async () => {
-      if (b.enabled) {
-        // "Disable" reads reversible, but it really DELETEs the task — which
-        // also discards its run history for good (audit 2026-09-03). Worth
-        // one confirm since re-enabling can't bring that history back.
-        const ok = await confirmDialog({
-          title: `Turn off ${b.label}?`,
-          message: "The task stops running and its past run history is discarded. You can turn it back on any time, but the history won't return.",
-          confirmLabel: "Turn it off",
-        });
-        if (!ok) return;
-      }
       toggleBtn.disabled = true;
-      if (b.enabled) {
-        await api(`/api/tasks/${b.task_id}`, { method: "DELETE" });
-        toast(`${b.label} turned off`, "success");
-      } else {
-        await api(`/api/tasks/builtin/${b.action_id}/enable`, { method: "POST", body: JSON.stringify({ deliver_to_channel: channelSelect.value || null }) });
-        toast(`${b.label} turned on`, "success");
+      try {
+        if (b.enabled) {
+          await api(`/api/tasks/${b.task_id}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
+          toast(`${b.label} turned off. History kept.`, "success");
+        } else {
+          await api(`/api/tasks/builtin/${b.action_id}/enable`, { method: "POST", body: JSON.stringify({ deliver_to_channel: channelSelect.value || null }) });
+          toast(`${b.label} turned on`, "success");
+        }
+        await refreshBuiltins(card);
+        const list = document.getElementById("tasks-list");
+        if (list) await refresh(list);
+      } catch (error) {
+        toast(error.message, "error"); toggleBtn.disabled = false;
       }
-      await refreshBuiltins(card);
-      const list = document.getElementById("tasks-list");
-      if (list) await refresh(list);
     });
     grid.appendChild(el("div", { class: "automation-card" }, [
       el("div", {}, [
@@ -183,7 +179,7 @@ async function refresh(list) {
   clearTimeout(list.pollTimer);
   const [allTasks, channels, models, auth] = await Promise.all([api("/api/tasks"), api("/api/channels"), api("/api/models").catch(() => []), api("/api/auth/status").catch(() => ({}))]);
   // Cards live on the work board above, not in the scheduled list.
-  const tasks = allTasks.filter((t) => t.schedule_kind !== "card");
+  const tasks = allTasks.filter((t) => t.schedule_kind !== "card").sort((a, b) => Number(!a.enabled) - Number(!b.enabled));
   list.innerHTML = "";
   // While something runs, keep the list current so its Stop button and then
   // its result appear without a reload (roadmap phase 4).
@@ -198,7 +194,24 @@ async function refresh(list) {
     }));
     return;
   }
+  let offHeading = false;
   for (const task of tasks) {
+    if (!task.enabled && !offHeading) {
+      list.append(el("h3", { class: "tool-store-heading", text: "Turned off", "data-disabled-tasks": "" }));
+      offHeading = true;
+    }
+    const canEnable = task.schedule_kind !== "once" || (task.next_run_at && new Date(task.next_run_at) > new Date());
+    const toggleBtn = el("button", { type: "button", class: "btn quiet", text: task.enabled ? "Turn off" : "Turn on",
+      disabled: !task.enabled && !canEnable, title: !canEnable ? "This one-time schedule has ended. Use Run now or schedule a new task." : "",
+      onclick: async () => {
+        toggleBtn.disabled = true;
+        try {
+          await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !task.enabled }) });
+          toast(task.enabled ? "Schedule turned off. History kept; an active run can finish." : "Schedule turned on for its next time.", "success");
+          if (task.builtin_action && list.builtinCard) await refreshBuiltins(list.builtinCard);
+          await refresh(list);
+        } catch (error) { toast(error.message, "error"); toggleBtn.disabled = false; }
+      } });
     const schedText = task.schedule_kind === "once"
       ? `Once at ${task.next_run_at ? new Date(task.next_run_at).toLocaleString() : "(done)"}`
       : task.schedule_kind === "daily"
@@ -271,13 +284,13 @@ async function refresh(list) {
     // most recent run's output/error directly in the card.
     const runsHost = el("div", { style: "margin-top:8px;" });
 
-    const card = el("div", { class: "glass bracket card has-row-actions" }, [
+    const card = el("div", { class: "glass bracket card has-row-actions", "data-task": task.id, "data-enabled": String(Boolean(task.enabled)) }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", text: task.name + (task.builtin_action ? " · built-in" : "") + (task.enabled ? "" : "  (disabled)") }),
           el("div", { class: "meta", text: schedText }),
         ]),
-        el("div", { class: "card-row", style: "gap:6px;" }, [modelSelect, deliverySelect, task.run_started_at ? stopBtn : runBtn,
+        el("div", { class: "card-row", style: "gap:6px;" }, [modelSelect, deliverySelect, toggleBtn, task.run_started_at ? stopBtn : runBtn,
           auth.is_admin && !task.builtin_action ? shareButton("automation", task.id) : null,
           el("div", { class: "row-actions" }, [delBtn])]),
       ]),

@@ -208,6 +208,27 @@ class TabTemplateRequest(BaseModel):
     enabled: bool
 
 
+@router.post("/custom-tabs/{slug}/enabled")
+async def set_custom_tab_enabled(slug: str, body: TabTemplateRequest, request: Request,
+                                 user: str = Depends(require_admin)) -> dict:
+    try:
+        result = custom_tabs.set_user_tab_enabled(slug, body.enabled)
+        result["restart_required"] = False
+        if body.enabled:
+            entry = next((e for e in custom_tabs.list_tabs() if e["slug"] == slug and e["kind"] == "user"), None)
+            if entry is None:
+                raise KeyError(slug)
+            if entry["status"] == "on":
+                result["restart_required"] = not custom_tabs.mount_one(request.app, slug)
+        from core import tab_hooks
+        await tab_hooks.reconcile()
+        return result
+    except KeyError:
+        raise HTTPException(status_code=404, detail="custom tab not found")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.post("/tab-templates/{slug}")
 async def set_tab_template(slug: str, body: TabTemplateRequest, request: Request,
                            user: str = Depends(require_admin)) -> dict:
