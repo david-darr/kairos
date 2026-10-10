@@ -83,6 +83,8 @@ let backendReady = false;
 // on, where along that edge (0 = top/left end, 1 = bottom/right end), and
 // whether it folds to a sliver until hovered. displayId null = the main display.
 const placement = require("./usage-overlay-placement");
+const { trackOverlay } = require("./usage-overlay-tracking");
+let overlayTracking = null;
 const OVERLAY_EDGES = placement.EDGES;
 let overlayConfig = { edge: "right", displayId: null, offset: 0.5, foldOnHover: true };
 let overlayDrag = null;
@@ -152,9 +154,11 @@ async function setUsageOverlayVisible(visible) {
       usageOverlay.webContents.on("will-navigate", (event, url) => {
         if (url !== `${BACKEND_URL}/usage-overlay`) event.preventDefault();
       });
-      usageOverlay.on("closed", () => { usageOverlay = null; });
+      overlayTracking = trackOverlay(usageOverlay, screen, overlayBounds);
+      usageOverlay.on("closed", () => { usageOverlay = null; overlayTracking = null; });
       await usageOverlay.loadURL(`${BACKEND_URL}/usage-overlay`);
     }
+    overlayTracking.place();
     usageOverlay.showInactive();
   } else if (usageOverlay && !usageOverlay.isDestroyed()) {
     usageOverlay.hide();
@@ -170,7 +174,7 @@ function setOverlayConfig(changes) {
     overlayConfig.displayId = changes.displayId;
   }
   saveOverlayPreference();
-  if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.setBounds(overlayBounds());
+  overlayTracking?.place();
   notifyOverlayState();
   return overlayState();
 }
@@ -726,7 +730,7 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     loadOverlayPreference();
     const replaceOverlay = () => {
-      if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.setBounds(overlayBounds());
+      overlayTracking?.place();
       notifyOverlayState();
     };
     screen.on("display-added", replaceOverlay);

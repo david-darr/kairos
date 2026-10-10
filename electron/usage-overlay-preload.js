@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld("usageOverlay", {
   moveEnd: () => ipcRenderer.send("usage-overlay:move-end"),
   getConfig: () => ipcRenderer.invoke("usage-overlay:config"),
   onConfig: (handler) => ipcRenderer.on("usage-overlay:config", (_event, config) => handler(config)),
+  onPointer: (handler) => ipcRenderer.on("usage-overlay:pointer", (_event, point) => handler(point)),
 });
