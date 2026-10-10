@@ -294,7 +294,7 @@ function scheduleFold() {
 
 /* ---- Pointer ------------------------------------------------------------------ */
 let press = null;
-document.addEventListener('mousemove', e => {
+function pointerMoved(e) {
   lastPointer = { x: e.clientX, y: e.clientY };
   if (carrying) { bridge.moveTo && bridge.moveTo(e.screenX, e.screenY); return; }
   const over = overNotch(e.clientX, e.clientY);
@@ -311,6 +311,11 @@ document.addEventListener('mousemove', e => {
     if (id && id !== hoverId) { hoverId = id; if (card.classList.contains('show')) renderCard(); }
     if (!card.classList.contains('show') && providers().length) showCard();
   } else if (card.classList.contains('show')) scheduleHide();
+}
+document.addEventListener('mousemove', pointerMoved);
+bridge.onPointer && bridge.onPointer(point => {
+  if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y) || carrying) return;
+  pointerMoved({ clientX: point.x, clientY: point.y });
 });
 document.addEventListener('mouseleave', () => {
   if (carrying) return;
@@ -377,3 +382,8 @@ setInterval(refresh, 60_000);
 window.refreshUsageReadings = refresh;
 setInterval(() => { renderRing(); if (card.classList.contains('show')) renderCard(); }, 30_000);  // reset copy moves with time
 requestAnimationFrame(placeHandles);
+window.addEventListener('resize', () => {
+  placeHandles();
+  if (card.classList.contains('show')) placeCard();
+  updateInteractive();
+});

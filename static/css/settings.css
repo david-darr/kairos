@@ -145,6 +145,18 @@
 .set-group > .set-group-toolbar + .set-row { border-top: none; }
 .mcp-catalog-list { max-height: 420px; overflow-y: auto; margin: 0 -16px; border-top: 1px solid var(--border); }
 .mcp-catalog .set-toolbar { margin-top: 10px; }
+.set-section details.mcp-catalog { padding: 0 16px; margin: 0; }
+.set-section details.mcp-catalog > summary {
+  display: flex; width: 100%; margin: 0; padding: 13px 0; border: 0;
+  border-radius: 0; background: transparent; justify-content: space-between;
+}
+.set-section details.mcp-catalog > summary::after { content: "+"; color: var(--text-faint); }
+.set-section details.mcp-catalog[open] > summary::after { content: "−"; }
+.set-section details.mcp-catalog[open] { padding-bottom: 0; }
+.mcp-catalog .mcp-catalog-list { margin-bottom: 0; }
+.mcp-catalog-row .set-row-control { max-width: 100%; }
+.mcp-catalog-row .btn, .model-setup-start { white-space: normal; text-align: center; }
+.set-toolbar .segmented-tabs { flex-wrap: wrap; }
 
 /* -- Channels: platform picker ------------------------------------------------ */
 .set-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
@@ -173,6 +185,9 @@
 
 /* -- narrow panes: controls go under their labels ------------------------------ */
 @container (max-width: 560px) {
+  .set-page { padding: 20px 18px 48px; }
+  .set-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .set-header-actions { flex-wrap: wrap; max-width: 100%; }
   .set-row:not(.is-link) { grid-template-columns: minmax(0, 1fr); }
   .set-row:not(.is-link):has(> .set-badge), .set-row:not(.is-link):has(> .set-icon) { grid-template-columns: auto minmax(0, 1fr); }
   .set-row:not(.is-link):has(> .set-badge) > .set-row-control,
