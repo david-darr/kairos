@@ -18,6 +18,7 @@ from types import ModuleType
 SLUG = re.compile(r"^[a-z][a-z0-9_]*$")
 FILES_URL = "/tab-files"
 _registered = {}
+_suspended = {}
 _allowed = None
 
 
@@ -146,6 +147,7 @@ def inspect_folder(folder: str, *, user: bool, api_version: int) -> dict:
 
 
 def unregister(slug: str) -> None:
+    _suspended.pop(slug, None)
     from core import tab_hooks
     tab_hooks.retire(slug)
     prefix = f"kairos_tabs.{slug}"
@@ -158,10 +160,26 @@ def unregister(slug: str) -> None:
     _registered.pop(slug, None)
 
 
+def suspend(slug: str) -> None:
+    """Hide imports and stop hooks, retaining unchanged modules for off/on.
+
+    Mounted FastAPI routes still reference these modules. Loading fresh service
+    modules on resume would give routes and hooks different runtime state.
+    """
+    entry = _registered.get(slug)
+    if entry is None:
+        return
+    prefix = f"kairos_tabs.{slug}"
+    modules = {name: module for name, module in list(sys.modules.items())
+               if name == prefix or name.startswith(prefix + ".")}
+    unregister(slug)
+    _suspended[slug] = (entry, modules)
+
+
 def unregister_prebuilt(slug: str) -> None:
     entry = _registered.get(slug)
     if entry and entry["kind"] == "prebuilt":
-        unregister(slug)
+        suspend(slug)
 
 
 def register_all(entries: list[dict], allowed) -> None:
@@ -173,10 +191,20 @@ def register_all(entries: list[dict], allowed) -> None:
     global _allowed
     _allowed = allowed
     eligible = {e["slug"]: e for e in entries if e["status"] == "on"}
+    by_slug = {e["slug"]: e for e in entries}
+    for slug, (old, _) in list(_suspended.items()):
+        current = by_slug.get(slug)
+        if (not current or current["status"] not in ("on", "off")
+                or (current["kind"], current["_path"], current["_snapshot"]) != (old["kind"], old["_path"], old["_snapshot"])):
+            unregister(slug)
     for slug, old in list(_registered.items()):
         new = eligible.get(slug)
         if not new or (new["_path"], new["_snapshot"]) != (old["_path"], old["_snapshot"]):
-            unregister(slug)
+            current = by_slug.get(slug)
+            if current and current["status"] == "off" and (current["_path"], current["_snapshot"]) == (old["_path"], old["_snapshot"]):
+                suspend(slug)
+            else:
+                unregister(slug)
     if "kairos_tabs" not in sys.modules:
         root = ModuleType("kairos_tabs")
         root.__path__ = []
@@ -188,6 +216,14 @@ def register_all(entries: list[dict], allowed) -> None:
     for slug, entry in eligible.items():
         if slug in _registered:
             continue
+        paused = _suspended.pop(slug, None)
+        if paused:
+            old, modules = paused
+            if (entry["kind"], entry["_path"], entry["_snapshot"]) == (old["kind"], old["_path"], old["_snapshot"]) and allowed(entry):
+                sys.modules.update(modules)
+                setattr(sys.modules["kairos_tabs"], slug, modules[f"kairos_tabs.{slug}"])
+                _registered[slug] = entry
+                continue
         name = f"kairos_tabs.{slug}"
         package = ModuleType(name)
         package.__path__ = [entry["_path"]]

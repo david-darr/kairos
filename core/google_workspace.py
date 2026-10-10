@@ -24,6 +24,7 @@ import httpx
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.secret_storage import decrypt, encrypt
+from core import calendar_recurrence as repeats
 
 
 FILE = os.path.join(DATA_DIR, "google_workspace.json")
@@ -535,6 +536,7 @@ def _map_calendar_event(item: dict, calendar: dict) -> dict:
     start, end = item.get("start", {}), item.get("end", {})
     all_day = "date" in start
     zone = start.get("timeZone") or calendar.get("time_zone") or "UTC"
+    repeat = repeats.parse_google_rule(item.get("recurrence"), start.get("date") if all_day else start.get("dateTime"), zone, all_day)
     return {"id": item["id"], "title": item.get("summary") or "Untitled event",
             "start": start.get("date") if all_day else _timed(start.get("dateTime") or "", zone),
             "end": end.get("date") if all_day else _timed(end.get("dateTime") or start.get("dateTime") or "", end.get("timeZone") or zone),
@@ -542,7 +544,20 @@ def _map_calendar_event(item: dict, calendar: dict) -> dict:
             "description": item.get("description") or "", "source": "google",
             "calendar_id": calendar["id"], "calendar_color": calendar.get("color"),
             "calendar_name": calendar.get("name"), "editable": calendar.get("access_role") in ("owner", "writer"),
-            "web_link": item.get("htmlLink")}
+            "web_link": item.get("htmlLink"), "series_id": item.get("recurringEventId"),
+            "original_start": item.get("originalStartTime"), "recurrence": repeat if repeat is not False else None,
+            "recurrence_supported": repeat is not False, "recurrence_raw": item.get("recurrence") or []}
+
+
+async def calendar_event(calendar_id: str, event_id: str) -> dict:
+    """Read the actual series master for the all-events editor."""
+    _calendar_access()
+    path = f"/calendars/{_calendar_id(calendar_id)}/events/{_id(event_id)}"
+    calendars = await calendar_list()
+    calendar = next((c for c in calendars if c["id"] == calendar_id or (calendar_id == "primary" and c["primary"])), None)
+    if calendar is None:
+        raise GoogleError("Google calendar no longer available", 404)
+    return _map_calendar_event(await request("calendar", "GET", path), calendar)
 
 
 def calendar_event_time(item: dict) -> float:
@@ -580,6 +595,8 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
                                            **({"pageToken": page} if page else {})})
             events.extend(_map_calendar_event(item, calendar) for item in result.get("items", [])
                           if item.get("status") != "cancelled" and item.get("start"))
+            if len(events) > repeats.MAX_OCCURRENCES:
+                raise GoogleError("Too many Google Calendar events in this range. Choose a shorter range.")
             page = result.get("nextPageToken")
             if not page:
                 break
@@ -646,6 +663,19 @@ async def calendar_action(action: str, *, calendar_id: str = "primary", event_id
             key = "date" if date_only else "dateTime"
             if datetime.fromisoformat(body["start"][key]) >= datetime.fromisoformat(body["end"][key]):
                 raise GoogleError("The event must end after it starts; all-day end dates are exclusive")
+        if "repeat" in fields:
+            try:
+                if not all(body.get(k) for k in ("start", "end")):
+                    raise ValueError("Changing a repeat rule needs start and end")
+                all_day = "date" in body["start"]
+                time_zone = body["start"].get("timeZone") or "UTC"
+                repeats.zone(time_zone)
+                if fields["repeat"] and not all_day and not body["start"].get("timeZone"):
+                    raise ValueError("A timed repeat needs an IANA time zone")
+                body["recurrence"] = repeats.google_rule(fields["repeat"],
+                    body["start"].get("date") if all_day else body["start"]["dateTime"], time_zone, all_day)
+            except (ValueError, TypeError) as exc:
+                raise GoogleError(str(exc)) from exc
     method = {"create": "POST", "update": "PATCH", "delete": "DELETE", "quick_add": "POST"}[action]
     result = await request("calendar", method, path, body=body, params=params)
     invalidate_calendar()

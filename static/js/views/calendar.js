@@ -1,5 +1,5 @@
-import { dateOnly, eventColor, itemsOnDay, googleCalendars, eventDialog, weekGrid } from '../googleCalendar.js';
-import { api, el, toast, confirmDialog, iconButton } from "../api.js";
+import { dateOnly, eventColor, itemsOnDay, googleCalendars, eventDialog, weekGrid, deleteCalendarEvent } from '../googleCalendar.js';
+import { api, el, iconButton } from "../api.js";
 import { ICONS } from "../icons.js";
 
 // Real visual monthly grid, resized to leave room for a day-detail panel
@@ -294,11 +294,7 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
     const actions = el('div', { class: 'row-actions' });
     if (item.editable) actions.append(
       el('button', { type: 'button', class: 'btn quiet', text: 'Edit', onclick: edit }),
-      iconButton(ICONS.trash, 'Delete event', async () => {
-        if (!await confirmDialog({ title: 'Delete this Google event?', message: item.title, confirmLabel: 'Delete event' })) return;
-        await api('/api/google/calendar/action', { method: 'POST', body: JSON.stringify({ action: 'delete', calendar_id: item.calendar_id, event_id: item.id }) });
-        await refreshGrid(); toast('Event deleted', 'success');
-      }, { danger: true }),
+      iconButton(ICONS.trash, 'Delete event', () => deleteCalendarEvent(item, refreshGrid, dayPanel._createBar?._owner), { danger: true }),
     );
     dayPanel.append(eventColor(el('div', { class: 'glass card has-row-actions' }, [
       el('div', { class: 'title', text: item.title }),
@@ -323,17 +319,7 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
   const trailing = canDelete
     ? el("div", { class: "row-actions" }, [
         el("button", { type: "button", class: "btn quiet", text: "Edit", onclick: edit }),
-        iconButton(ICONS.trash, "Delete event", async () => {
-          const ok = await confirmDialog({
-            title: "Delete this event?",
-            message: `"${item.title}" will be permanently removed from your calendar.`,
-            confirmLabel: "Delete event",
-          });
-          if (!ok) return;
-          await api(`/api/calendar/events/${item.id}`, { method: "DELETE" });
-          await refreshGrid();
-          toast("Event deleted", "success");
-        }, { danger: true }),
+        iconButton(ICONS.trash, "Delete event", () => deleteCalendarEvent(item, refreshGrid, dayPanel._createBar?._owner), { danger: true }),
       ])
     : el("span", { class: "meta", text: item.source === "tab" ? item.source_label : "From Notes" });
 

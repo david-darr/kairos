@@ -202,7 +202,7 @@ def _approved_fingerprints() -> dict[str, str]:
 
 
 def user_tab_is_approved(slug: str) -> bool:
-    if not _TAB_SLUG.fullmatch(slug):
+    if not _TAB_SLUG.fullmatch(slug) or slug in (settings_store.get_setting("disabled_user_tabs") or []):
         return False
     if os.path.lexists(os.path.join(USER_TABS_DIR, slug)):
         entry = _folder_entry(slug, user=True)
@@ -242,7 +242,7 @@ def pending_approvals() -> list[dict]:
     pending = [e for e in _legacy_pending_approvals() if e["id"] not in folder_slugs]
     approved = settings_store.get_setting(_FOLDER_APPROVALS_KEY) or {}
     pending += [dict(id=e["slug"], fingerprint=e["fingerprint"], files=e["files"], format="folder",
-                     previous_fingerprint=approved.get(e["slug"]), approved=e["status"] == "on",
+                     previous_fingerprint=approved.get(e["slug"]), approved=approved.get(e["slug"]) == e["fingerprint"],
                      blocked=e["status"] in ("invalid", "needs_newer_kairos"), reason=e["reason"])
                 for e in folders]
     return sorted(pending, key=lambda e: e["id"])
@@ -326,13 +326,14 @@ def _folder_entry(slug: str, *, user: bool) -> dict | None:
 
 def _apply_folder_policy(entry: dict) -> None:
     user = entry["kind"] == "user"
-    entry["enabled"] = None if user else entry["slug"] in enabled_templates()
+    entry["enabled"] = entry["slug"] not in (settings_store.get_setting("disabled_user_tabs") or []) if user else entry["slug"] in enabled_templates()
+    approved = settings_store.get_setting(_FOLDER_APPROVALS_KEY) or {}
+    entry["approved"] = approved.get(entry["slug"]) == entry["fingerprint"] if user else True
     if entry["status"] is None:
-        approved = settings_store.get_setting(_FOLDER_APPROVALS_KEY) or {}
         entry["status"] = ("on" if approved.get(entry["slug"]) == entry["fingerprint"]
                            else "needs_approval") if user else ("on" if entry["enabled"] else "off")
-    if user and entry["slug"] in (settings_store.get_setting("disabled_user_tabs") or []):
-        entry.update(enabled=False, status="off")
+    if user and not entry["enabled"] and entry["status"] not in ("invalid", "needs_newer_kairos"):
+        entry["status"] = "off"
 
 
 def _folder_allowed(entry: dict) -> bool:
@@ -368,6 +369,7 @@ def _entry_allowed(entry: dict) -> bool:
     fingerprint = entry["fingerprint"]
     if (os.path.lexists(os.path.join(USER_TABS_DIR, slug))
             or not os.path.isfile(os.path.join(USER_ROUTES_DIR, f"{TAB_MODULE_PREFIX}{slug}.py"))
+            or slug in (settings_store.get_setting("disabled_user_tabs") or [])
             or _approved_fingerprints().get(slug) != fingerprint):
         return False
     try:
@@ -392,9 +394,10 @@ def _candidates() -> dict[str, dict]:
     legacy = {e["id"]: e for e in _legacy_pending_approvals()}
     for slug in _user_tab_slugs():
         approval = legacy[slug]
+        enabled = slug not in (settings_store.get_setting("disabled_user_tabs") or [])
         candidates[slug] = dict(slug=slug, name=slug, description="", version="", blurb="", detail="",
-            kind="user", format="legacy", enabled=None,
-            status="invalid" if approval["blocked"] else ("on" if approval["approved"] else "needs_approval"),
+            kind="user", format="legacy", enabled=enabled, approved=approval["approved"],
+            status="invalid" if approval["blocked"] else ("off" if not enabled else "on" if approval["approved"] else "needs_approval"),
             reason="could not verify legacy source tree" if approval["blocked"] else None,
             fingerprint=approval["fingerprint"], files=approval["files"])
     # A folder is the new format; if both user formats exist, the folder wins.
@@ -482,7 +485,8 @@ def _mount(app, slug: str, mod: ModuleType) -> bool:
         allowed = await asyncio.to_thread(_entry_allowed, entry)
         if not allowed:
             reason = "This tab was removed or changed. Restart Kairos to load the current version."
-            if entry["kind"] == "prebuilt" and slug not in enabled_templates():
+            if ((entry["kind"] == "prebuilt" and slug not in enabled_templates())
+                    or (entry["kind"] == "user" and slug in (settings_store.get_setting("disabled_user_tabs") or []))):
                 reason = "This tab is off."
             raise HTTPException(409, reason)
     owned = getattr(app.state, "custom_tab_routes", {})
@@ -510,9 +514,9 @@ def mount_one(app, slug: str) -> bool:
 
 
 def set_user_tab_enabled(slug: str, enabled: bool) -> dict:
-    """Suspend a folder tab without deleting source or granting approval."""
+    """Suspend either user format without deleting source or granting approval."""
     entry = _folder_entry(slug, user=True)
-    if entry is None:
+    if entry is None and (not _TAB_SLUG.fullmatch(slug) or slug not in _user_tab_slugs()):
         raise KeyError(slug)
     disabled = set(settings_store.get_setting("disabled_user_tabs") or [])
     if enabled:
@@ -521,7 +525,7 @@ def set_user_tab_enabled(slug: str, enabled: bool) -> dict:
         disabled.add(slug)
     settings_store.update_settings(disabled_user_tabs=sorted(disabled))
     if not enabled:
-        tab_folders.unregister(slug)
+        tab_folders.suspend(slug)
     return {"slug": slug, "enabled": enabled}
 
 
@@ -622,5 +626,6 @@ def delete(slug: str) -> dict:
     approved = dict(_approved_fingerprints())
     if slug in approved:
         del approved[slug]
-        settings_store.update_settings(**{_APPROVED_FINGERPRINTS_KEY: approved})
+    settings_store.update_settings(**{_APPROVED_FINGERPRINTS_KEY: approved,
+        "disabled_user_tabs": [s for s in settings_store.get_setting("disabled_user_tabs") or [] if s != slug]})
     return {"removed": removed, "restart_required": True}

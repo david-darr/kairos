@@ -242,13 +242,16 @@ export async function openSettingsWindow(section) {
   const modal = getModal();
   modal.classList.remove("hidden");
   hidePageBehind();
-  const panel = modal.querySelector(".settings-window");
-  pinInitialRect(panel);
-  // The window keeps its position between opens, so the viewport may have
-  // changed since it was last on screen.
-  clampToViewport(panel);
-  buildNav();
-  await selectSection(activeSectionId);
+  try {
+    const panel = modal.querySelector(".settings-window");
+    pinInitialRect(panel);
+    clampToViewport(panel);
+    buildNav();
+    await selectSection(activeSectionId);
+  } catch (error) {
+    closeSettingsWindow();
+    throw error;
+  }
 }
 
 const SETTINGS_TITLE = () => el("div", { class: "title" }, [
@@ -318,7 +321,11 @@ function minimizeSettingsWindow() {
   // meant to be visible again — same as closing, from the pane's side.
   restorePageBehind();
   if (pillEl) return;
-  pillEl = el("div", { class: "glass bracket settings-minimized-pill", onclick: () => { pillEl.remove(); pillEl = null; modalEl.classList.remove("hidden"); hidePageBehind(); } }, [
+  pillEl = el("div", { class: "glass bracket settings-minimized-pill", onclick: () => {
+    pillEl.remove(); pillEl = null; modalEl.classList.remove("hidden"); hidePageBehind();
+    const panel = modalEl.querySelector(".settings-window");
+    pinInitialRect(panel); clampToViewport(panel);
+  } }, [
     el("span", { text: "⚙" }),
     el("span", { text: "Settings" }),
   ]);
@@ -376,14 +383,18 @@ function getModal() {
 const MIN_WIDTH = 480;
 const MIN_HEIGHT = 360;
 function pinInitialRect(panel) {
-  if (panel.dataset.pinned) return; // only the very first real open
+  if (panel.dataset.pinned && panel.offsetWidth > 0 && panel.offsetHeight > 0) return;
+  // Recover a previous hidden resize's zero rect. Measure layout size rather
+  // than the generic modal's animated/scaled bounding rect.
+  for (const property of ["position", "left", "top", "width", "height", "maxWidth", "maxHeight"]) panel.style[property] = "";
+  const width = panel.offsetWidth, height = panel.offsetHeight;
+  if (!width || !height) return;
   panel.dataset.pinned = "1";
-  const rect = panel.getBoundingClientRect();
   panel.style.position = "fixed";
-  panel.style.left = `${rect.left}px`;
-  panel.style.top = `${rect.top}px`;
-  panel.style.width = `${rect.width}px`;
-  panel.style.height = `${rect.height}px`;
+  panel.style.left = `${(window.innerWidth - width) / 2}px`;
+  panel.style.top = `${(window.innerHeight - height) / 2}px`;
+  panel.style.width = `${width}px`;
+  panel.style.height = `${height}px`;
   panel.style.maxWidth = "none";
   panel.style.maxHeight = "none";
 }
@@ -393,15 +404,18 @@ function pinInitialRect(panel) {
 // before repositioning so an oversized window ends up fully visible.
 function clampToViewport(panel) {
   if (!panel || !panel.dataset.pinned) return;
-  const maxWidth = Math.max(MIN_WIDTH, window.innerWidth);
-  const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight);
-  const width = Math.min(panel.offsetWidth, maxWidth);
-  const height = Math.min(panel.offsetHeight, maxHeight);
+  // Hidden panels have no layout box. Keep their last real size until open.
+  if (panel.closest(".modal-backdrop")?.classList.contains("hidden")) return;
+  if (!panel.offsetWidth || !panel.offsetHeight) pinInitialRect(panel);
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--titlebar-h")) || 0;
+  const maxWidth = window.innerWidth;
+  const maxHeight = Math.max(0, window.innerHeight - top);
+  const width = Math.min(Math.max(panel.offsetWidth, Math.min(MIN_WIDTH, maxWidth)), maxWidth);
+  const height = Math.min(Math.max(panel.offsetHeight, Math.min(MIN_HEIGHT, maxHeight)), maxHeight);
   panel.style.width = `${width}px`;
   panel.style.height = `${height}px`;
   panel.style.left = `${Math.max(0, Math.min(parseFloat(panel.style.left) || 0, window.innerWidth - width))}px`;
   // Never under the desktop title bar, which sits above everything.
-  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--titlebar-h")) || 0;
   panel.style.top = `${Math.max(top, Math.min(parseFloat(panel.style.top) || 0, window.innerHeight - height))}px`;
 }
 
@@ -658,7 +672,8 @@ function renderAddModelsPanel(body) {
   const done = () => selectSection("added-models");
   body.replaceChildren(
     group({ title: "Model setup", description: "Choose a model with a step-by-step guide, including sign-in and installation." }, [
-      el("button", { class: "btn primary", text: "Help me set up a model", onclick: () => openModelSetup() }),
+      row({ title: "Setup guide", description: "Install or connect your preferred model.",
+        control: el("button", { class: "btn primary model-setup-start", text: "Help me set up a model", onclick: () => openModelSetup() }) }),
     ]),
     modelForm("Claude Code CLI", "Uses the claude CLI already installed and signed in on this machine. No key needed.", "claude_cli", done),
     modelForm("Codex CLI", "Uses the codex CLI already installed and signed in on this machine. No key needed.", "codex_cli", done),

@@ -2,13 +2,16 @@
 // account call: the page is served from a local stub with synthetic readings,
 // and the main-process side of its bridge is stubbed here to record what the
 // page asks for. Run: node scripts/run-electron-test.cjs usage-overlay-smoke
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { trackOverlay } = require('../electron/usage-overlay-tracking');
+const placement = require('../electron/usage-overlay-placement');
 const { exitAfterFlush } = require('./electron-exit.cjs');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
+app.setPath('userData', path.join(root, 'data', 'usage-overlay-smoke-profile'));
 const output = path.join(root, 'data', 'usage-overlay-review');
 const now = Date.now() / 1000;
 let claudeStatus = 'ok';
@@ -57,10 +60,14 @@ const server = http.createServer((req, res) => {
 const servedMarks = [];
 const interactive = [];
 let openedApp = 0;
-ipcMain.on('usage-overlay:interactive', (_e, on) => interactive.push(on));
+ipcMain.on('usage-overlay:interactive', (event, on) => {
+  interactive.push(on);
+  if (nativeWin && event.sender === nativeWin.webContents) nativeWin.setIgnoreMouseEvents(!on, { forward: true });
+});
 ipcMain.on('usage-overlay:open-app', () => { openedApp += 1; });
 ipcMain.handle('usage-overlay:config', () => ({ edge: 'right', foldOnHover: true }));
 let win;
+let nativeWin;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 async function run() {
   await app.whenReady();
@@ -119,6 +126,27 @@ async function run() {
   await waitFor("document.body.classList.contains('folded')");
   assert.equal(interactive[interactive.length - 1], false, 'pointer off the notch passes clicks through');
 
+  // Native cursor IPC must wake the click-through notch without a DOM mousemove.
+  win.webContents.send('usage-overlay:pointer', { x: rest[0], y: rest[1] });
+  await waitFor("!document.body.classList.contains('folded')");
+  await delay(400);
+  win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
+  await waitFor("document.getElementById('card').classList.contains('show')");
+  // Forwarding can send mouseleave as click-through changes. Repeated native
+  // samples must repair hover even when the physical cursor has not moved.
+  await js("document.dispatchEvent(new MouseEvent('mouseleave'))");
+  win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
+  await delay(550);
+  assert.equal(await js("document.body.classList.contains('folded')"), false, 'stationary native pointer cancels stray mouseleave');
+  // Samples faster than the grace timers must still allow the card to close
+  // and the notch to fold when the pointer stays outside.
+  for (let i = 0; i < 8; i++) {
+    win.webContents.send('usage-overlay:pointer', { x: -1, y: -1 });
+    await delay(80);
+    if (i === 4) assert.equal(await js("document.getElementById('card').classList.contains('show')"), false, 'repeated outside samples do not defer card hide');
+  }
+  await waitFor("document.body.classList.contains('folded')");
+
   // Signed out: a dash on the ring and the sign-in note on the card.
   claudeStatus = 'needs_sign_in';
   await js('refreshUsageReadings()');
@@ -156,9 +184,39 @@ async function run() {
 
   // Nothing the page renders may come from a script-capable source.
   assert.equal(await js("document.querySelectorAll('#card script, #card img, #card iframe').length"), 0);
+  // Real transparent native window, actual screen geometry, actual IPC bridge.
+  // This checks this machine's compositor/DPI; it cannot reproduce every user's monitor.
+  nativeWin = new BrowserWindow({ ...placement.boundsFor({ edge:'right', offset:0.5 }, screen.getPrimaryDisplay()),
+    frame:false, transparent:true, hasShadow:false, focusable:false, skipTaskbar:true, show:false,
+    webPreferences:{ contextIsolation:true, nodeIntegration:false, backgroundThrottling:false, preload:path.join(root,'electron/usage-overlay-preload.js') } });
+  nativeWin.setIgnoreMouseEvents(true, { forward:true });
+  let desired = placement.boundsFor({ edge:'right', offset:0.5 }, screen.getPrimaryDisplay());
+  const tracking = trackOverlay(nativeWin, screen, () => desired);
+  await nativeWin.loadURL(`http://127.0.0.1:${server.address().port}/usage-overlay`);
+  nativeWin.showInactive();
+  for (const edge of placement.EDGES) {
+    desired = placement.boundsFor({ edge, offset:0.5 }, screen.getPrimaryDisplay());
+    tracking.place(); await delay(100);
+    const actual = nativeWin.getBounds();
+    for (const key of ['x','y','width','height']) assert.ok(Math.abs(actual[key]-desired[key]) <= 1,
+      edge + ': native DIP rounding stays within one pixel: ' + JSON.stringify({actual,desired}));
+  }
+  // Move this disposable window under the existing cursor, without moving the
+  // system cursor or clicking anything. Native polling alone must unfold it.
+  desired = placement.boundsFor({ edge:'right', offset:0.5 }, screen.getPrimaryDisplay());
+  tracking.place(); nativeWin.webContents.send('usage-overlay:config', { edge:'right', foldOnHover:true });
+  await delay(150);
+  const restAt = await nativeWin.webContents.executeJavaScript("(r => ({x:r.left+r.width/2,y:r.top+r.height/2}))(document.getElementById('rest').getBoundingClientRect())");
+  const cursor = screen.getCursorScreenPoint();
+  desired = { ...desired, x:Math.round(cursor.x-restAt.x), y:Math.round(cursor.y-restAt.y) };
+  tracking.place(); await delay(250);
+  assert.equal(await nativeWin.webContents.executeJavaScript("document.body.classList.contains('folded')"), false, 'actual native cursor wakes click-through window');
+  nativeWin.hide(); nativeWin.destroy(); nativeWin = null;
+  console.log('PASS: actual native transparent window bounds on all edges and native cursor wake on this display');
   console.log('PASS: usage notch folded/unfold, card, click-through, ring refresh, signed-out state, logos, all four edges. Screenshots: ' + output);
 }
 run().then(() => exitAfterFlush(0), (error) => { console.error(error); exitAfterFlush(1); }).finally(() => {
   if (win && !win.isDestroyed()) win.destroy();
+  if (nativeWin && !nativeWin.isDestroyed()) nativeWin.destroy();
   server.close();
 });

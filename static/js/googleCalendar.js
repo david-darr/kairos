@@ -1,4 +1,5 @@
-import { api, el, toast } from './api.js';
+import { api, el, toast, openPanelDialog } from './api.js';
+import { repeatControls } from './calendarRepeat.js';
 
 export function dateOnly(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -19,10 +20,10 @@ export function itemsOnDay(items, day) {
     if (item.all_day && !item.start.includes('T')) {
       const key = dateOnly(day);
       // Google all-day ends are exclusive; feed/local date semantics stay intact.
-      return item.source === 'google' ? item.start <= key && key < item.end : item.start === key;
+      return item.source === 'google' || item.end_exclusive ? item.start <= key && key < item.end : item.start === key;
     }
     const start = new Date(item.start), end = item.end ? new Date(item.end) : new Date(start.getTime() + 1);
-    return start < next && end > day;
+    return start < next && (end > day || (start.getTime() === end.getTime() && start >= day));
   });
 }
 
@@ -89,6 +90,7 @@ function timeInput(value, zone) {
 }
 
 export function eventDialog(calendars, refresh, item = null, day = new Date(), owner = null) {
+  const originalItem = item;
   const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const editingGoogle = item?.source === 'google';
   const title = el('input', { value: item?.title || '', required: true, 'aria-label': 'Event title' });
@@ -99,7 +101,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   ]);
   target.value = item ? (editingGoogle ? item.calendar_id : 'kairos') : (calendars.find(c => c.primary && ['owner', 'writer'].includes(c.access_role))?.id || 'kairos');
   const allDay = el('input', { type: 'checkbox', checked: Boolean(item?.all_day) });
-  const zone = el('input', { value: editingGoogle ? item.time_zone || browserZone : browserZone, 'aria-label': 'Time zone' });
+  const zone = el('input', { value: item?.time_zone || browserZone, 'aria-label': 'Time zone' });
   const zoneField = el('div', { class: 'field' }, [el('label', { text: 'Time zone' }), zone]);
   const start = el('input', { type: 'datetime-local', required: true, 'aria-label': 'Start' });
   const end = el('input', { type: 'datetime-local', required: true, 'aria-label': 'End' });
@@ -107,22 +109,38 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   const location = el('input', { value: item?.location || '', 'aria-label': 'Location' });
   const description = el('textarea', { 'aria-label': 'Description' }); description.value = item?.description || '';
   const feedback = el('div', { class: 'meta', role: 'status' });
-  const updateFields = () => {
-    const isGoogle = target.value !== 'kairos';
-    zoneField.hidden = allDay.checked; zone.disabled = !isGoogle;
-    if (!isGoogle) zone.value = browserZone;
+  const repeat = repeatControls();
+  const editScope = el('select', { 'aria-label': 'Edit recurring event' }, [
+    el('option', { value: 'occurrence', text: 'This event' }), el('option', { value: 'series', text: 'All events in this series' }),
+  ]);
+  const scopeField = el('div', { class: 'field field-grow', hidden: !originalItem?.series_id }, [el('label', { text: 'Apply changes to' }), editScope]);
+  const updateRepeat = () => {
+    repeat.host.hidden = Boolean(originalItem?.series_id) && editScope.value === 'occurrence';
+    repeat.setAvailable(!repeat.host.hidden);
+  };
+  repeat.load(item || {}); updateRepeat();
+  const followingDate = value => {
+    const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + 1);
+    return dateOnly(date);
+  };
+  const updateFields = (loadItem = true) => {
+    const selectedDate = start.value.slice(0, 10) || dateOnly(day);
+    zoneField.hidden = allDay.checked; zone.disabled = false;
     start.type = end.type = allDay.checked ? 'date' : 'datetime-local';
     endLabel.textContent = allDay.checked ? 'End date (exclusive)' : 'End';
-    const next = new Date(day); next.setDate(next.getDate() + 1);
     if (allDay.checked) {
-      start.value = item?.all_day ? String(item.start).slice(0, 10) : dateOnly(day);
-      end.value = editingGoogle && item.all_day ? item.end : dateOnly(next);
+      start.value = loadItem && item?.all_day ? String(item.start).slice(0, 10) : selectedDate;
+      let storedEnd = loadItem && item?.all_day && item.end ? (item.end.includes('T') ? dateOnly(new Date(item.end)) : item.end) : '';
+      // Older local/feed date-only ends include their final date. The editor
+      // always shows the equivalent exclusive boundary, including multi-day spans.
+      if (storedEnd && !item.end.includes('T') && item.source !== 'google' && !item.end_exclusive) storedEnd = followingDate(storedEnd);
+      end.value = storedEnd > start.value ? storedEnd : followingDate(start.value);
     } else {
-      start.value = item && !item.all_day ? timeInput(item.start, zone.value) : `${dateOnly(day)}T09:00`;
-      end.value = item && !item.all_day && item.end ? timeInput(item.end, zone.value) : `${dateOnly(day)}T09:30`;
+      start.value = loadItem && item && !item.all_day ? timeInput(item.start, zone.value) : `${selectedDate}T09:00`;
+      end.value = loadItem && item && !item.all_day && item.end ? timeInput(item.end, zone.value) : `${selectedDate}T09:30`;
     }
   };
-  allDay.onchange = updateFields; target.onchange = updateFields;
+  allDay.onchange = () => updateFields(false);
   updateFields();
   const close = el('button', { type: 'button', class: 'btn quiet', text: 'Cancel' });
   const save = el('button', { type: 'submit', class: 'btn primary', text: item ? 'Save event' : 'Create event' });
@@ -132,10 +150,11 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
       el('div', { class: 'field field-grow' }, [el('label', { text: 'Event title' }), title]),
       el('div', { class: 'field' }, [el('label', { text: 'Calendar' }), target]),
       el('div', { class: 'field' }, [el('label', { text: 'Start' }), start]),
-      el('div', { class: 'field' }, [endLabel, end]), zoneField,
+      el('div', { class: 'field' }, [endLabel, end]), zoneField, scopeField,
       el('label', { class: 'cal-checkbox-label' }, [allDay, 'All day']),
       el('div', { class: 'field' }, [el('label', { text: 'Location' }), location]),
       el('div', { class: 'field field-grow' }, [el('label', { text: 'Description' }), description]),
+      repeat.host,
     ]), feedback, el('div', { class: 'row-actions' }, [close, save]),
   ]);
   const backdrop = el('div', { class: 'modal-backdrop' }, [form]);
@@ -153,30 +172,83 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   const observer = new MutationObserver(() => { if (owner && !owner.isConnected) dispose(); });
   observer.observe(document.body, { childList: true, subtree: true });
   close.onclick = dispose; backdrop.onclick = event => { if (event.target === backdrop) dispose(); };
+  let scopeGeneration = 0;
+  editScope.onchange = async () => {
+    const generation = ++scopeGeneration;
+    save.disabled = true; feedback.textContent = 'Loading event…';
+    try {
+      const nextItem = editScope.value === 'series' ? await api(editingGoogle
+        ? `/api/google/calendar/events/${encodeURIComponent(originalItem.series_id)}?calendar_id=${encodeURIComponent(originalItem.calendar_id)}`
+        : `/api/calendar/events/${encodeURIComponent(originalItem.id)}?scope=series`) : originalItem;
+      if (!form.isConnected || generation !== scopeGeneration) return;
+      item = nextItem;
+      title.value = item.title || ''; location.value = item.location || ''; description.value = item.description || '';
+      allDay.checked = Boolean(item.all_day); zone.value = item.time_zone || browserZone;
+      repeat.load(item); updateFields(); updateRepeat(); feedback.textContent = '';
+      save.disabled = false;
+    } catch (error) {
+      if (!form.isConnected || generation !== scopeGeneration) return;
+      feedback.textContent = error.message;
+      // Keep Save unavailable: it must never apply stale fields to a different scope.
+    }
+  };
   form.onsubmit = async event => {
-    event.preventDefault(); save.disabled = true;
+    event.preventDefault();
+    if (save.disabled) return;
+    save.disabled = true; editScope.disabled = true;
     try {
       const google = target.value !== 'kairos';
       if (!title.value.trim() || !start.value || !end.value) throw new Error('Enter a title, start and end');
       if (end.value <= start.value) throw new Error('End must be after start');
+      const changeRepeat = !originalItem?.series_id || editScope.value === 'series';
+      const repeatValue = changeRepeat ? repeat.value(start.value.slice(0, 10)) : undefined;
       if (google) {
         await api('/api/google/calendar/action', { method: 'POST', body: JSON.stringify({
           action: item ? 'update' : 'create', calendar_id: target.value, ...(item ? { event_id: item.id } : {}),
           event: { summary: title.value.trim(), location: location.value, description: description.value,
             start: allDay.checked ? { date: start.value } : { dateTime: `${start.value}:00`, timeZone: zone.value },
-            end: allDay.checked ? { date: end.value } : { dateTime: `${end.value}:00`, timeZone: zone.value } },
+            end: allDay.checked ? { date: end.value } : { dateTime: `${end.value}:00`, timeZone: zone.value },
+            ...(repeatValue !== undefined ? { repeat: repeatValue } : {}) },
         }) });
       } else {
         await api(item ? `/api/calendar/events/${item.id}` : '/api/calendar/events', { method: item ? 'PATCH' : 'POST', body: JSON.stringify({
-          title: title.value.trim(), start: allDay.checked ? start.value : new Date(start.value).toISOString(),
-          end: allDay.checked ? new Date(`${end.value}T00:00:00`).toISOString() : new Date(end.value).toISOString(),
+          title: title.value.trim(), start: allDay.checked ? start.value : `${start.value}:00`,
+          end: allDay.checked ? end.value : `${end.value}:00`,
           all_day: allDay.checked, location: location.value, description: description.value,
+          time_zone: zone.value, scope: editScope.value,
+          ...(repeatValue !== undefined ? { recurrence: repeatValue } : {}),
         }) });
       }
       dispose(); await refresh(); toast(item ? 'Event saved' : 'Event created', 'success');
-    } catch (error) { feedback.textContent = error.message; save.disabled = false; }
+    } catch (error) { feedback.textContent = error.message; save.disabled = false; editScope.disabled = false; }
   };
   document.body.append(backdrop); document.addEventListener('keydown', onKey); title.focus();
+}
+
+export function deleteCalendarEvent(item, refresh, owner = null) {
+  const scope = el('select', { 'aria-label': 'Delete recurring event' }, [
+    el('option', { value: 'occurrence', text: 'This event' }), el('option', { value: 'series', text: 'All events in this series' }),
+  ]);
+  const feedback = el('div', { class: 'meta', role: 'status' });
+  const cancel = el('button', { type: 'button', class: 'btn', text: 'Cancel' });
+  const remove = el('button', { type: 'button', class: 'btn danger', text: 'Delete event' });
+  const body = el('div', {}, [el('p', { text: `“${item.title}” will be permanently removed from your calendar.` }),
+    ...(item.series_id ? [el('div', { class: 'field' }, [el('label', { text: 'Delete' }), scope])] : []), feedback,
+  ]);
+  // The shared dialog footer, as confirmDialog uses; .row-actions is hover-revealed.
+  const dialog = openPanelDialog({ title: 'Delete this event?', body, footer: el('div', {}, [cancel, remove]),
+    className: 'confirm-panel', owner, opener: document.activeElement, group: 'calendar-delete' });
+  cancel.onclick = () => dialog.close();
+  remove.onclick = async () => {
+    remove.disabled = true;
+    try {
+      if (item.source === 'google') {
+        await api('/api/google/calendar/action', { method: 'POST', signal: dialog.signal, body: JSON.stringify({ action: 'delete',
+          calendar_id: item.calendar_id, event_id: scope.value === 'series' ? item.series_id || item.id : item.id }) });
+      } else await api(`/api/calendar/events/${encodeURIComponent(item.id)}?scope=${scope.value}`, { method: 'DELETE', signal: dialog.signal });
+      dialog.close(); await refresh(); toast('Event deleted', 'success');
+    } catch (error) { if (body.isConnected) { feedback.textContent = error.message; remove.disabled = false; } }
+  };
 }
 
 export function weekGrid(grid, start, items, selectDay, edit) {

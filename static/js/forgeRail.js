@@ -47,7 +47,7 @@ export function mountForgeRail(nav) {
       row.onkeydown = event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); context(); } };
       return row;
     }));
-    if (!groups.length) list.append(el('p', { class: 'meta', text: 'Open a folder to begin.' }));
+    if (!groups.length) list.append(el('p', { class: 'meta forge-rail-message', text: 'Open a folder to begin.' }));
   }
   async function refresh() {
     const at = ++version;
@@ -60,7 +60,7 @@ export function mountForgeRail(nav) {
       })));
       if (disposed || at !== version) return;
       groups = next; draw();
-    } catch { if (!disposed) list.textContent = 'Projects could not load.'; }
+    } catch { if (!disposed && at === version) list.replaceChildren(el('p', { class: 'meta forge-rail-message', text: 'Projects could not load.' })); }
   }
   const selection = event => { selected = event.detail.projectId; draw(); };
   const unsubscribe = subscribeAll(() => { draw(); });

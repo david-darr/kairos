@@ -83,6 +83,8 @@ let backendReady = false;
 // on, where along that edge (0 = top/left end, 1 = bottom/right end), and
 // whether it folds to a sliver until hovered. displayId null = the main display.
 const placement = require("./usage-overlay-placement");
+const { trackOverlay } = require("./usage-overlay-tracking");
+let overlayTracking = null;
 const OVERLAY_EDGES = placement.EDGES;
 let overlayConfig = { edge: "right", displayId: null, offset: 0.5, foldOnHover: true };
 let overlayDrag = null;
@@ -141,7 +143,7 @@ async function setUsageOverlayVisible(visible) {
         ...overlayBounds(), frame: false, transparent: true, hasShadow: false,
         alwaysOnTop: true, skipTaskbar: true, resizable: false, movable: false,
         focusable: false, show: false, backgroundColor: "#00000000",
-        webPreferences: { contextIsolation: true, nodeIntegration: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
           preload: path.join(__dirname, "usage-overlay-preload.js") },
       });
       // Click-through by default; the page asks for clicks only while the pointer
@@ -152,17 +154,22 @@ async function setUsageOverlayVisible(visible) {
       usageOverlay.webContents.on("will-navigate", (event, url) => {
         if (url !== `${BACKEND_URL}/usage-overlay`) event.preventDefault();
       });
-      usageOverlay.on("closed", () => { usageOverlay = null; });
+      overlayTracking = trackOverlay(usageOverlay, screen, overlayBounds);
+      usageOverlay.on("closed", () => { usageOverlay = null; overlayTracking = null; overlayDrag = null; });
       await usageOverlay.loadURL(`${BACKEND_URL}/usage-overlay`);
     }
+    overlayTracking.place();
     usageOverlay.showInactive();
   } else if (usageOverlay && !usageOverlay.isDestroyed()) {
     usageOverlay.hide();
+    overlayDrag = null;
+    overlayTracking.setDragging(false);
   }
   notifyOverlayState();
   return overlayState();
 }
 function setOverlayConfig(changes) {
+  overlayDrag = null;
   if (changes && OVERLAY_EDGES.includes(changes.edge)) overlayConfig.edge = changes.edge;
   if (changes && typeof changes.foldOnHover === "boolean") overlayConfig.foldOnHover = changes.foldOnHover;
   if (changes && Number.isFinite(changes.offset)) overlayConfig.offset = Math.min(1, Math.max(0, changes.offset));
@@ -170,7 +177,7 @@ function setOverlayConfig(changes) {
     overlayConfig.displayId = changes.displayId;
   }
   saveOverlayPreference();
-  if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.setBounds(overlayBounds());
+  overlayTracking?.setDragging(false);
   notifyOverlayState();
   return overlayState();
 }
@@ -594,20 +601,25 @@ ipcMain.on("usage-overlay:interactive", (event, on) => {
 // The move handle slides the notch along its edge: the window follows the
 // pointer's screen y, clamped to the work area, and the place is remembered.
 // Along the edge means y on the left and right edges, x on the top and bottom.
-ipcMain.on("usage-overlay:move-start", (event, point) => {
+ipcMain.on("usage-overlay:move-start", (event) => {
   if (!fromOverlayWindow(event)) return;
   const b = usageOverlay.getBounds();
+  // DOM screenX/screenY can disagree across mixed-DPI monitors. Dragging uses
+  // the same Electron screen DIPs as placement and native hover tracking.
+  const point = screen.getCursorScreenPoint();
   overlayDrag = { start: overlayVertical() ? point.y : point.x, window: overlayVertical() ? b.y : b.x };
+  overlayTracking.setDragging(true);
 });
-ipcMain.on("usage-overlay:move-to", (event, point) => {
+ipcMain.on("usage-overlay:move-to", (event) => {
   if (!fromOverlayWindow(event) || !overlayDrag) return;
-  usageOverlay.setBounds(placement.dragTo(overlayConfig.edge, usageOverlay.getBounds(), overlayDisplay(), overlayDrag, point));
+  usageOverlay.setBounds(placement.dragTo(overlayConfig.edge, usageOverlay.getBounds(), overlayDisplay(), overlayDrag, screen.getCursorScreenPoint()));
 });
 ipcMain.on("usage-overlay:move-end", (event) => {
   if (!fromOverlayWindow(event) || !overlayDrag) return;
   overlayDrag = null;
   overlayConfig.offset = placement.offsetOf(overlayConfig.edge, usageOverlay.getBounds(), overlayDisplay());
   saveOverlayPreference();
+  overlayTracking.setDragging(false);
   notifyOverlayState();  // the Appearance slider follows the handle
 });
 ipcMain.on("usage-overlay:hide", (event) => {
@@ -726,7 +738,8 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     loadOverlayPreference();
     const replaceOverlay = () => {
-      if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.setBounds(overlayBounds());
+      overlayDrag = null;
+      overlayTracking?.setDragging(false);
       notifyOverlayState();
     };
     screen.on("display-added", replaceOverlay);

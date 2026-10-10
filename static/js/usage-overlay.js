@@ -153,9 +153,10 @@ function placeCard() {
 
 /* Hover: stays open while the pill or the card is under the pointer; closes after CodeNotch's 250 ms grace */
 let hideTimer = null;
-function showCard() { clearTimeout(hideTimer); card.classList.add('show'); renderCard(); }
-function hideCard() { card.classList.remove('show'); }
-function scheduleHide() { clearTimeout(hideTimer); hideTimer = setTimeout(hideCard, 250); }
+function cancelHide() { clearTimeout(hideTimer); hideTimer = null; }
+function showCard() { cancelHide(); card.classList.add('show'); renderCard(); }
+function hideCard() { cancelHide(); card.classList.remove('show'); }
+function scheduleHide() { if (hideTimer === null) hideTimer = setTimeout(hideCard, 250); }
 
 function inRect(x, y, r, pad) { return x >= r.left - pad && y >= r.top - pad && x < r.right + pad && y < r.bottom + pad; }
 function cellAt(x, y) {
@@ -281,36 +282,46 @@ function foldAllowed() { return onHover && !pointerIn && !carrying; }
 function setFolded(f) {
   if (f === folded) return;
   folded = f;
-  if (f) { clearTimeout(hideTimer); hideCard(); setHovered(null); }
+  if (f) { hideCard(); setHovered(null); }
   document.body.classList.toggle('folded', f);
   requestAnimationFrame(() => { placeHandles(); updateInteractive(); });
 }
-function unfold() { clearTimeout(foldTimer); setFolded(false); }
+function cancelFold() { clearTimeout(foldTimer); foldTimer = null; }
+function unfold() { cancelFold(); setFolded(false); }
 function scheduleFold() {
-  clearTimeout(foldTimer);
-  if (!onHover) { setFolded(false); return; }
-  if (foldAllowed()) foldTimer = setTimeout(() => { if (foldAllowed()) setFolded(true); }, FOLD_GRACE);
+  if (!onHover) { cancelFold(); setFolded(false); return; }
+  // Native samples arrive every 80 ms, even with a stationary cursor. Start
+  // the grace period once; repeated outside samples must not postpone folding.
+  if (foldAllowed() && foldTimer === null) foldTimer = setTimeout(() => {
+    foldTimer = null;
+    if (foldAllowed()) setFolded(true);
+  }, FOLD_GRACE);
 }
 
 /* ---- Pointer ------------------------------------------------------------------ */
 let press = null;
-document.addEventListener('mousemove', e => {
+function pointerMoved(e) {
   lastPointer = { x: e.clientX, y: e.clientY };
-  if (carrying) { bridge.moveTo && bridge.moveTo(e.screenX, e.screenY); return; }
+  if (carrying) { bridge.moveTo && bridge.moveTo(); return; }
   const over = overNotch(e.clientX, e.clientY);
   if (over && folded) { pointerIn = true; unfold(); }
   pointerIn = over || pointerInHot(e.clientX, e.clientY);
-  if (!pointerIn) scheduleFold(); else clearTimeout(foldTimer);
+  if (!pointerIn) scheduleFold(); else cancelFold();
   updateInteractive();
   if (folded) return;
   setHovered(onHandle(e.clientX, e.clientY));
-  if (hovered) { if (card.classList.contains('show')) { clearTimeout(hideTimer); hideCard(); } return; }
+  if (hovered) { if (card.classList.contains('show')) hideCard(); return; }
   if (pointerInHot(e.clientX, e.clientY)) {
-    clearTimeout(hideTimer);
+    cancelHide();
     const id = cellAt(e.clientX, e.clientY);
     if (id && id !== hoverId) { hoverId = id; if (card.classList.contains('show')) renderCard(); }
     if (!card.classList.contains('show') && providers().length) showCard();
   } else if (card.classList.contains('show')) scheduleHide();
+}
+document.addEventListener('mousemove', pointerMoved);
+bridge.onPointer && bridge.onPointer(point => {
+  if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y) || carrying) return;
+  pointerMoved({ clientX: point.x, clientY: point.y });
 });
 document.addEventListener('mouseleave', () => {
   if (carrying) return;
@@ -338,8 +349,8 @@ moveHandle.addEventListener('mousedown', e => {
   carrying = true;
   moveHandle.classList.add('armed', 'hover');
   moveHandle.style.setProperty('--spins', ++moveSpins);
-  clearTimeout(hideTimer); hideCard();
-  bridge.moveStart && bridge.moveStart(e.screenX, e.screenY);
+  hideCard();
+  bridge.moveStart && bridge.moveStart();
   updateInteractive();
 });
 document.addEventListener('contextmenu', e => e.preventDefault());
@@ -347,6 +358,11 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 /* ---- Edge and settings, from the main process --------------------------------- */
 let notchEdge = 'right';
 function applyConfig(config) {
+  // Changing displays/edges cancels the main process drag as well.
+  carrying = false;
+  moveHandle.classList.remove('armed');
+  setHovered(null);
+  cancelFold();
   const edge = config && ['left', 'top', 'bottom'].includes(config.edge) ? config.edge : 'right';
   notchEdge = edge;
   document.body.dataset.edge = edge;
@@ -377,3 +393,8 @@ setInterval(refresh, 60_000);
 window.refreshUsageReadings = refresh;
 setInterval(() => { renderRing(); if (card.classList.contains('show')) renderCard(); }, 30_000);  // reset copy moves with time
 requestAnimationFrame(placeHandles);
+window.addEventListener('resize', () => {
+  placeHandles();
+  if (card.classList.contains('show')) placeCard();
+  updateInteractive();
+});

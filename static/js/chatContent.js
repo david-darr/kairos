@@ -162,8 +162,8 @@ function attachViewer(current, host) {
   if (current.layout && current.panel.parentElement === host) return;
   // mountChatPane closes the prior pane; move the live document only after
   // that registration has released the region.
-  current.layout = mountChatPane(host, current.panel, hideArtifact);
   current.panel.classList.add('artifact-panel', 'artifact-viewer');
+  current.layout = mountChatPane(host, current.panel, hideArtifact);
   current.visible = true;
   current.layout.setMaximized(current.maximized);
   if (current.active) restoreScroll(current.active);
