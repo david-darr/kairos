@@ -2,6 +2,8 @@
 // objects ({id, workArea: {x, y, width, height}}), with no Electron import, so
 // scripts/test_overlay_placement.cjs can check every edge and display without a
 // screen; electron/main.js passes in Electron's screen.getAllDisplays().
+// All sizes and coordinates are DIPs. scaleFactor is only for display labels;
+// multiplying these rectangles by it would move the notch away from the edge.
 
 const EDGES = ["right", "left", "top", "bottom"];
 

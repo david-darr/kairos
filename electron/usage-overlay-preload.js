@@ -7,9 +7,10 @@ contextBridge.exposeInMainWorld("usageOverlay", {
   setInteractive: (on) => ipcRenderer.send("usage-overlay:interactive", !!on),
   openApp: () => ipcRenderer.send("usage-overlay:open-app"),
   hide: () => ipcRenderer.send("usage-overlay:hide"),
-  // The move handle: slide the notch along its edge, following the pointer on screen.
-  moveStart: (x, y) => ipcRenderer.send("usage-overlay:move-start", { x: Number(x) || 0, y: Number(y) || 0 }),
-  moveTo: (x, y) => ipcRenderer.send("usage-overlay:move-to", { x: Number(x) || 0, y: Number(y) || 0 }),
+  // The main process reads the native cursor in DIPs; DOM screen coordinates
+  // are not used for placement on mixed-DPI monitors.
+  moveStart: () => ipcRenderer.send("usage-overlay:move-start"),
+  moveTo: () => ipcRenderer.send("usage-overlay:move-to"),
   moveEnd: () => ipcRenderer.send("usage-overlay:move-end"),
   getConfig: () => ipcRenderer.invoke("usage-overlay:config"),
   onConfig: (handler) => ipcRenderer.on("usage-overlay:config", (_event, config) => handler(config)),

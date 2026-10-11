@@ -132,7 +132,19 @@ async function run() {
   await delay(400);
   win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
   await waitFor("document.getElementById('card').classList.contains('show')");
-  win.webContents.send('usage-overlay:pointer', { x: -1, y: -1 });
+  // Forwarding can send mouseleave as click-through changes. Repeated native
+  // samples must repair hover even when the physical cursor has not moved.
+  await js("document.dispatchEvent(new MouseEvent('mouseleave'))");
+  win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
+  await delay(550);
+  assert.equal(await js("document.body.classList.contains('folded')"), false, 'stationary native pointer cancels stray mouseleave');
+  // Samples faster than the grace timers must still allow the card to close
+  // and the notch to fold when the pointer stays outside.
+  for (let i = 0; i < 8; i++) {
+    win.webContents.send('usage-overlay:pointer', { x: -1, y: -1 });
+    await delay(80);
+    if (i === 4) assert.equal(await js("document.getElementById('card').classList.contains('show')"), false, 'repeated outside samples do not defer card hide');
+  }
   await waitFor("document.body.classList.contains('folded')");
 
   // Signed out: a dash on the ring and the sign-in note on the card.
@@ -176,7 +188,7 @@ async function run() {
   // This checks this machine's compositor/DPI; it cannot reproduce every user's monitor.
   nativeWin = new BrowserWindow({ ...placement.boundsFor({ edge:'right', offset:0.5 }, screen.getPrimaryDisplay()),
     frame:false, transparent:true, hasShadow:false, focusable:false, skipTaskbar:true, show:false,
-    webPreferences:{ contextIsolation:true, nodeIntegration:false, preload:path.join(root,'electron/usage-overlay-preload.js') } });
+    webPreferences:{ contextIsolation:true, nodeIntegration:false, backgroundThrottling:false, preload:path.join(root,'electron/usage-overlay-preload.js') } });
   nativeWin.setIgnoreMouseEvents(true, { forward:true });
   let desired = placement.boundsFor({ edge:'right', offset:0.5 }, screen.getPrimaryDisplay());
   const tracking = trackOverlay(nativeWin, screen, () => desired);
