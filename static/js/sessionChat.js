@@ -11,7 +11,7 @@ import { api, el, toast, customSelect } from './api.js';
 import * as chatStream from './chatStream.js';
 import { renderMessageBody } from './chatContent.js';
 import { showPermissionPrompt } from './permissionPrompt.js';
-import { mountChatReferences } from './chatReferences.js';
+import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli'];
@@ -46,6 +46,8 @@ export async function mountSessionChat(host, options = {}) {
   const messages = transcript?.messages || el('div', { class: 'side-messages session-chat-messages', role: 'log', 'aria-label': label });
   const input = el('textarea', { class: 'side-chat-input', rows: '1', placeholder: options.placeholder || 'Message Kairos', 'aria-label': options.placeholder || 'Message Kairos' });
   const inputTop = el('div', { class: 'side-chat-input-top' }, [input]);
+  // Forge's continuous transcript owns its composer and deliberately has no
+  // reference chips. Other embedded sessions use the full shared picker.
   const references = transcript ? { getSelected: () => [], clear() {}, dispose() {} } : mountChatReferences(input, inputTop, () => sessionId);
   const send = el('button', { type: 'button', class: 'side-chat-send btn', text: 'Send' });
   const queueButton = el('button', { type: 'button', class: 'btn quiet', text: 'Queue', hidden: true });
@@ -64,7 +66,7 @@ export async function mountSessionChat(host, options = {}) {
     if (agent) return agent;
     const body = el('div', { class: 'msg-body' });
     renderMessageBody(body, text, sessionId, role === 'assistant');
-    return el('div', { class: `msg ${role}` }, [body]);
+    return el('div', { class: `msg ${role}` }, [body, ...(role === 'user' && message?.references?.length ? [renderReferenceChips(message.references)] : [])]);
   };
   const busy = () => !!sessionId && chatStream.getInFlight(sessionId)?.status === 'processing';
   const syncSend = () => {
@@ -228,7 +230,7 @@ export async function mountSessionChat(host, options = {}) {
 
   const runTurn = (text, selected = []) => {
     messages.querySelector('.agent-chat-empty')?.remove();
-    messages.append(card('user', text));
+    messages.append(card('user', text, { references: selected }));
     const reply = card('assistant', ''); messages.append(reply);
     try { chatStream.startTurn(sessionId, session?.title || label, text, [], selected); }
     catch (error) { toast(error.message, 'error'); reply.remove(); pausedQueues.add(sessionId); return; }

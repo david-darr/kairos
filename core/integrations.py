@@ -179,6 +179,13 @@ def record_check(item_id: Optional[str] = None, tools: Optional[list[dict]] = No
     else:
         current = {t["name"]: {"fingerprint": tool_fingerprint(t), "description": (t.get("description") or "")[:500]}
                    for t in tools}
+        # A read-only catalog for composer references. Never cache runtime config.
+        marker = "\n[Tool description truncated.]"
+        item["discovered_tools"] = {
+            t["name"]: {"fingerprint": current[t["name"]]["fingerprint"],
+                        "description": (t.get("description") or "") if len(t.get("description") or "") <= 8000
+                        else t["description"][:8000 - len(marker)] + marker}
+            for t in tools}
         if "pinned_tools" not in item:
             item["pinned_tools"] = {n: c["fingerprint"] for n, c in current.items()}
         pinned = item["pinned_tools"]
@@ -188,6 +195,37 @@ def record_check(item_id: Optional[str] = None, tools: Optional[list[dict]] = No
                           "error": None}
     write_json_atomic(INTEGRATIONS_FILE, data)
     return _masked(item)
+
+
+def reference_tools(only_ids=None, user=None, is_admin=False, surface="claude") -> list[dict]:
+    """Previously checked, pinned tools of connected servers, without config.
+
+    Checks already run when connecting and periodically. Opening the picker
+    must not launch a server, refresh credentials or change a pin.
+    """
+    found = []
+    for item in _load().values():
+        if (item.get("kind") != "mcp_server" or not item.get("enabled", True)
+                or (only_ids is not None and item["id"] not in only_ids)
+                or (item.get("admin_only") and not is_admin)
+                or (item.get("owner") and item["owner"] != user and not is_admin)
+                or (item.get("status") or {}).get("state") != "working"
+                or (item.get("auth") == "oauth" and not (item.get("oauth") or {}).get("tokens"))):
+            continue
+        for name, tool in (item.get("discovered_tools") or {}).items():
+            if (name in (item.get("held_tools") or {})
+                    or (item.get("pinned_tools") or {}).get(name) != tool.get("fingerprint")):
+                continue
+            if surface == "openai":
+                from core import mcp_client
+                tool_name = mcp_client.function_name(item["name"], name, {t["name"] for t in found})
+            else:
+                tool_name = claude_tool_name(item["name"], name)
+            if len(tool_name) > 200 or len(f"mcp:{item['id']}:{name}") > 500:
+                continue
+            found.append({"id": f"mcp:{item['id']}:{name}", "name": tool_name,
+                          "description": tool.get("description") or ""})
+    return found
 
 
 def held_tools(only_ids: Optional[list[str]] = None) -> dict[str, set]:

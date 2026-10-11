@@ -52,6 +52,15 @@ ALL = frozenset({CLAUDE, OPENAI, CODEX})
 READ, WRITE, EXEC, EXTERNAL = "read", "write", "exec", "external"
 SMALL_WINDOW = 32768
 
+# Claude Code's native tools, shared with Settings > Agent Tools and the
+# composer catalog. The SDK supplies these tools, not our dispatch table.
+CLAUDE_NATIVE_TOOLS = {
+    "Bash": "Run shell commands.", "Read": "Read a file.", "Write": "Write a file.",
+    "Edit": "Edit a file.", "Glob": "Find files by pattern.", "Grep": "Search file contents.",
+    "WebFetch": "Read a web page.", "WebSearch": "Search the web.", "Task": "Delegate a task.",
+    "TodoWrite": "Track task progress.", "NotebookEdit": "Edit a notebook.",
+}
+
 
 @dataclass(frozen=True)
 class ToolContext:

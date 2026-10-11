@@ -11,7 +11,7 @@ import { api, el, toast } from './api.js';
 import * as chatStream from './chatStream.js';
 import { renderMessageBody } from './chatContent.js';
 import { showPermissionPrompt } from './permissionPrompt.js';
-import { mountChatReferences } from './chatReferences.js';
+import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
 
 export const SESSION_MIME = 'application/x-jarvis-session';
@@ -40,7 +40,7 @@ function card(role, text, message = null) {
   if (agent) return agent;
   const body = el('div', { class: 'msg-body' });
   renderMessageBody(body, text, sessionId, role === 'assistant');
-  return el('div', { class: `msg ${role}` }, [body]);
+  return el('div', { class: `msg ${role}` }, [body, ...(role === 'user' && message?.references?.length ? [renderReferenceChips(message.references)] : [])]);
 }
 
 // Mount into a freshly rendered chat layout (chat.js's render runs on every
@@ -193,7 +193,7 @@ function build(session) {
     const selected = references.getSelected();
     references.clear();
     input.value = ''; input.style.height = 'auto';
-    messages.append(card('user', text));
+    messages.append(card('user', text, { references: selected }));
     const reply = card('assistant', '');
     messages.append(reply);
     try { chatStream.startTurn(sessionId, session.title, text, [], selected); }
@@ -204,7 +204,7 @@ function build(session) {
   };
   send.addEventListener('click', () => submit());
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit({ fromKeyboard: true }); }
+    if (event.key === 'Enter' && !event.shiftKey && !event.defaultPrevented) { event.preventDefault(); submit({ fromKeyboard: true }); }
   });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 }

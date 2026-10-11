@@ -36,7 +36,7 @@ export function shortcutGroups(quickEntry = null) {
       shortcut('Shift + Enter', 'Start a new line'),
       shortcut('/', 'See slash commands as you type'),
       shortcut('/help', 'Read command help', 'Use /help command for more detail, for example /help compact.'),
-      shortcut('@', 'Choose a file, note, chat or agent to mention'),
+      shortcut('@', 'Mention an agent, skill, tool, automation, document, file, note or chat'),
       shortcut('↑ / ↓, Enter / Tab, Escape', 'Move through suggestions, insert a choice, or close the list'),
       shortcut('↑ / ↓', 'Recall earlier messages when the composer is empty'),
     ] },

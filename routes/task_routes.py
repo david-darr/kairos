@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from core import model_endpoints, outbox, task_scheduler
 from core.builtin_tasks import BUILTIN_TASKS, list_builtin_tasks
 from core.middleware import require_user
+from core.auth import auth_manager
 from services.task_service import task_service
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -48,7 +49,7 @@ def _check_endpoint(endpoint_id: Optional[str]) -> None:
 
 @router.get("")
 async def list_tasks(user: str = Depends(require_user)) -> list[dict]:
-    return task_service.list_tasks()
+    return [task for task in task_service.list_tasks() if task_service.visible_to(task, user, auth_manager.is_admin(user))]
 
 
 # Built-in premade tasks (David's ask 2026-08-31, matching Odysseus's
@@ -56,7 +57,8 @@ async def list_tasks(user: str = Depends(require_user)) -> list[dict]:
 # isn't swallowed by the dynamic task_id route.
 @router.get("/builtin")
 async def get_builtin_tasks(user: str = Depends(require_user)) -> list[dict]:
-    by_action = {t["builtin_action"]: t for t in task_service.list_tasks() if t.get("builtin_action")}
+    by_action = {t["builtin_action"]: t for t in task_service.list_tasks()
+                 if t.get("builtin_action") and task_service.visible_to(t, user, auth_manager.is_admin(user))}
     return [
         {**b, "enabled": bool(by_action.get(b["action_id"], {}).get("enabled")),
          "task_id": by_action.get(b["action_id"], {}).get("id"),
@@ -103,7 +105,7 @@ async def enable_builtin_task(action_id: str, body: Optional[EnableBuiltinReques
 @router.get("/{task_id}")
 async def get_task(task_id: str, user: str = Depends(require_user)) -> dict:
     task = task_service.get_task(task_id)
-    if task is None:
+    if task is None or not task_service.visible_to(task, user, auth_manager.is_admin(user)):
         raise HTTPException(status_code=404, detail="task not found")
     return task
 
@@ -201,4 +203,7 @@ async def retry_delivery(delivery_id: str, user: str = Depends(require_user)) ->
 
 @router.get("/{task_id}/runs")
 async def list_task_runs(task_id: str, user: str = Depends(require_user)) -> list[dict]:
+    task = task_service.get_task(task_id)
+    if task is None or not task_service.visible_to(task, user, auth_manager.is_admin(user)):
+        raise HTTPException(status_code=404, detail="task not found")
     return task_service.list_runs(task_id)

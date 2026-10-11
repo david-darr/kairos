@@ -5,8 +5,26 @@ import { agentAvatar } from './agentHandoff.js';
 import { bindReviewComposer, reviewsChanged, reviewKey, openReview } from './artifactReview.js';
 
 const MAX_REFERENCES = 5;
-const KINDS = { file: 'File', note: 'Vault note', chat: 'Chat', agent: 'Agent', artifact_comment: 'Comment' };
+const KINDS = { file: 'File', note: 'Vault note', chat: 'Chat', agent: 'Agent', skill: 'Skill', tool: 'Tool', automation: 'Automation', document: 'Document', artifact_comment: 'Comment' };
+const GROUPS = { agent: 'Agents', skill: 'Skills', tool: 'Tools', automation: 'Automations', document: 'Documents', file: 'Files', note: 'Notes', chat: 'Chats' };
 let pickerNumber = 0;
+
+export function renderReferenceChips(references = []) {
+  const chips = document.createElement('div');
+  chips.className = 'chat-reference-chips';
+  chips.setAttribute('aria-label', 'Message references');
+  for (const item of references) {
+    if (!KINDS[item.kind] || item.kind === 'artifact_comment') continue;
+    const chip = document.createElement('span');
+    chip.className = 'chat-reference-chip';
+    if (item.kind === 'agent') chip.append(agentAvatar(item.label, item.color));
+    const label = document.createElement('span');
+    label.textContent = `${KINDS[item.kind]} · ${item.label}`;
+    chip.append(label);
+    chips.append(chip);
+  }
+  return chips;
+}
 
 export function mountChatReferences(input, inputTop, getSessionId) {
   const list = document.createElement('div');
@@ -29,6 +47,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
   let range = null;
   let timer = null;
   let requestNumber = 0;
+  let filterKind = null;
 
   const key = item => item.kind === 'artifact_comment' ? reviewKey(item) : `${item.kind}:${item.session_id || ''}:${item.id}`;
   const getSelected = () => selected.map(item => item.kind === 'artifact_comment'
@@ -42,6 +61,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     list.replaceChildren();
     results = [];
     range = null;
+    filterKind = null;
     if (input.getAttribute('aria-activedescendant')?.startsWith(list.id)) input.removeAttribute('aria-activedescendant');
     if (wasOpen) input.setAttribute('aria-expanded', 'false');
   };
@@ -103,10 +123,23 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     if (!results.length) {
       const empty = document.createElement('div');
       empty.className = 'chat-reference-empty';
-      empty.textContent = 'No matching files, vault notes, or chats';
+      empty.textContent = filterKind === 'skill' ? 'No matching skills. Add skills in Tool Store.' : 'No matching references';
       list.append(empty);
     }
+    let group = null, previousKind = null;
     results.forEach((item, index) => {
+      if (item.kind !== previousKind) {
+        group = document.createElement('div');
+        group.setAttribute('role', 'group');
+        group.setAttribute('aria-label', GROUPS[item.kind]);
+        const heading = document.createElement('div');
+        heading.className = 'chat-reference-heading';
+        heading.setAttribute('aria-hidden', 'true');
+        heading.textContent = GROUPS[item.kind];
+        group.append(heading);
+        list.append(group);
+        previousKind = item.kind;
+      }
       const button = document.createElement('button');
       button.type = 'button';
       button.id = `${list.id}-option-${index}`;
@@ -126,7 +159,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
       button.append(kind, name, detail);
       button.addEventListener('mousedown', event => event.preventDefault());
       button.addEventListener('click', () => choose(item));
-      list.append(button);
+      group.append(button);
     });
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
@@ -147,9 +180,9 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     const thisRequest = ++requestNumber;
     timer = setTimeout(async () => {
       try {
-        const matches = await api(`/api/chat/references?q=${encodeURIComponent(query)}&session_id=${encodeURIComponent(getSessionId() || '')}`);
+        const matches = await api(`/api/chat/references?q=${encodeURIComponent(query)}&session_id=${encodeURIComponent(getSessionId() || '')}${filterKind ? `&kind=${encodeURIComponent(filterKind)}` : ''}`);
         if (thisRequest !== requestNumber) return;
-        results = matches.filter(item => !selected.some(ref => key(ref) === key(item))).slice(0, 12);
+        results = Object.keys(GROUPS).flatMap(kind => matches.filter(item => item.kind === kind && (!filterKind || kind === filterKind) && !selected.some(ref => key(ref) === key(item))).slice(0, 4));
         active = 0;
         paintResults();
       } catch {
@@ -173,6 +206,23 @@ export function mountChatReferences(input, inputTop, getSessionId) {
       choose(results[active]);
     }
   };
+  const openPicker = ({ kind = null } = {}) => {
+    if (input.disabled) return;
+    if (selected.filter(ref => ref.kind !== 'artifact_comment').length >= MAX_REFERENCES) {
+      toast('Select at most 5 references', 'error'); return;
+    }
+    hide();
+    filterKind = GROUPS[kind] ? kind : null;
+    const start = input.selectionStart, end = input.selectionEnd;
+    const before = input.value.slice(0, start);
+    if (!/(^|\s)@([^@\n]{0,80})$/.test(before) || start !== end) {
+      const token = (before && !/\s$/.test(before) ? ' ' : '') + '@';
+      input.setRangeText(token, start, end, 'end');
+      input.dispatchEvent(new Event('input'));
+    }
+    input.focus();
+    update();
+  };
   input.addEventListener('input', update);
   input.addEventListener('click', update);
   input.addEventListener('keydown', onKeydown, true);
@@ -182,7 +232,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
   // side/agent composer. Opening one must not steal the main review draft.
   const releaseReview = input.id === 'chat-input' ? bindReviewComposer({ add, getSelected, sessionId: getSessionId }) : () => {};
   return {
-    getSelected, add, clear, hide,
+    getSelected, add, clear, hide, openPicker,
     dispose() {
       releaseReview();
       clearTimeout(timer);

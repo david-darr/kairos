@@ -236,6 +236,15 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    await require('./chat-reference-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
+    if (process.argv.includes('--chat-references-only')) {
+      assert.deepEqual(errors, []);
+      console.log('PASS: grouped chat references, keyboard navigation, Use a skill, mobile, side and embedded composers.');
+      console.log('Screenshots: ' + output);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['chat references'], errors }, null, 2));
+      return;
+    }
+    await navigate('home');
     assert.ok(await js("document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-header')) && !document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-stats'))"), "Home keeps the header and introduction in one card above the summary strip");
     // Home's banner is the Kairos figure as halftone (static/js/dither.js): still, no status dot, no motion control.
     await waitFor("document.querySelector('.dashboard-core').classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
@@ -1664,7 +1673,7 @@ app.whenReady().then(async () => {
     assert.ok(await js(popupLook + "(document.querySelector('#overflow-menu'))"), "+ menu: shared popup look, above the composer");
     assert.ok(await js("[...document.querySelectorAll('.chat-input-bar button')].filter(b => !b.closest('#overflow-menu')).every(b => !b.classList.contains('chat-computer-toggle') && b.id !== 'chat-compact' && !['Capture screen', 'Computer', 'Compact'].includes(b.title) && !['Capture screen', 'Computer', 'Compact'].includes(b.textContent.trim()) && b.getAttribute('aria-label') !== 'Capture from this device')"), "Capture screen, Computer and Compact are absent from the composer bar outside the + menu");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].some(b => b.textContent.trim() === 'Capture screen' && !b.hidden)"), "+ menu always contains Capture screen");
-    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Prompt', 'Compact'], "+ menu keeps the requested item order");
+    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item[hidden]')].every(b => getComputedStyle(b).display === 'none')"), "Hidden + menu items leave no gaps");
     await capture("desktop-plus-menu");
     await js("document.body.click()");
