@@ -89,6 +89,21 @@ class SkillSeedTests(unittest.TestCase):
             self.assertEqual(skills_service.seed_default_skills(), ["other"])
         self.assertEqual(self.target.read_bytes(), b"\xff")
 
+    def test_motion_video_seeds_all_top_level_files_once(self):
+        templates = Path(__file__).resolve().parents[1] / "skill_templates"
+        with patch.object(skills_service, "SKILL_TEMPLATES_DIR", str(templates)):
+            self.assertIn("motion-video", skills_service.seed_default_skills())
+            target = self.skills / "motion-video"
+            for source in (templates / "motion-video").iterdir():
+                if source.is_file():
+                    with self.subTest(filename=source.name):
+                        self.assertEqual((target / source.name).read_bytes(), source.read_bytes())
+            # Supporting files are copied once, so users can adapt them safely.
+            starter = target / "motion-starter.html"
+            starter.write_text("My animation", encoding="utf-8")
+            self.assertEqual(skills_service.seed_default_skills(), [])
+            self.assertEqual(starter.read_text(encoding="utf-8"), "My animation")
+
 
 if __name__ == "__main__":
     unittest.main()
