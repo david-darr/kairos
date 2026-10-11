@@ -135,13 +135,31 @@ class CRMService:
         """Durably queue a source message before paid extraction. Never reopen it."""
         identity = message["external_id"]
         mid = hashlib.sha256(f"{source['owner']}:{source['id']}:{identity}".encode()).hexdigest()[:32]
+        queued = {**message, "id": mid, "source_id": source["id"],
+            "owner": source["owner"], "source_label": source["label"], "source_kind": source["kind"],
+            "url": safe_url(message.get("url")), "state": "pending", "attempts": 0,
+            "captured_at": time.time(), "error": None}
         with self.transaction():
             if mid not in self._data["messages"]:
-                self._data["messages"][mid] = {**message, "id": mid, "source_id": source["id"],
-                    "owner": source["owner"], "source_label": source["label"], "source_kind": source["kind"],
-                    "url": safe_url(message.get("url")), "state": "pending", "attempts": 0,
-                    "captured_at": time.time(), "error": None}
+                self._data["messages"][mid] = queued
+            elif self._data["messages"][mid]["state"] == "unreadable":
+                self._data["messages"][mid].update(queued)
         return self.message(source["owner"], mid)
+
+    def read_failure(self, source, identity):
+        """Persist UID failures separately from model validation attempts."""
+        mid = hashlib.sha256(f"{source['owner']}:{source['id']}:{identity}".encode()).hexdigest()[:32]
+        with self.transaction():
+            m = self._data["messages"].setdefault(mid, {"id": mid, "external_id": identity,
+                "owner": source["owner"], "source_id": source["id"], "state": "unreadable",
+                "attempts": 0, "read_attempts": 0, "body": "", "captured_at": time.time()})
+            if m["state"] != "unreadable":
+                return False
+            m["read_attempts"] = m.get("read_attempts", 0) + 1
+            if m["read_attempts"] >= 3:
+                m["state"] = "skipped"
+                return True
+        return False
 
     def message(self, owner, message_id):
         with self._lock:
@@ -153,19 +171,19 @@ class CRMService:
     def pending(self, owner, source_id):
         with self._lock:
             return copy.deepcopy(sorted((m for m in self._data["messages"].values()
-                if m["owner"] == owner and m["source_id"] == source_id and m["state"] != "processed"
-                and m["attempts"] < 3), key=lambda m: m.get("sent_at") or ""))
+                if m["owner"] == owner and m["source_id"] == source_id and m["state"] in ("pending", "failed")
+                and m["attempts"] < 3), key=lambda m: (bool(m["attempts"] or m.get("retry_pending")), m.get("sent_at") or "")))
 
     def known(self, owner, source_id):
         with self._lock:
             return {m["external_id"] for m in self._data["messages"].values()
-                    if m["owner"] == owner and m["source_id"] == source_id}
+                    if m["owner"] == owner and m["source_id"] == source_id and m["state"] != "unreadable"}
 
     def retry_failed(self, owner):
         with self.transaction():
             for m in self._data["messages"].values():
                 if m["owner"] == owner and m["state"] == "failed":
-                    m.update(state="pending", attempts=0, error=None)
+                    m.update(state="pending", attempts=0, call_attempts=0, error=None, retry_pending=True)
 
     def thread(self, owner, message):
         with self._lock:
@@ -294,6 +312,23 @@ class CRMService:
         with self.transaction():
             m = self._data["messages"][message_id]
             m.update(state="failed", attempts=m["attempts"] + 1, error=reason)
+
+    def keep_pending(self, owner, message_id, limit=3):
+        """A model-call failure keeps the message queued without spending its
+        validation attempts. A message that fails the call on `limit` separate
+        scans (e.g. a provider rejecting it as too long) is marked failed so it
+        cannot hold the head of the queue forever. Returns True when it failed."""
+        self.message(owner, message_id)
+        with self.transaction():
+            m = self._data["messages"][message_id]
+            m["call_attempts"] = m.get("call_attempts", 0) + 1
+            if m["call_attempts"] >= limit:
+                # Repeated scans proved it is not transient: only Retry failed reopens it.
+                m.update(state="failed", attempts=3, call_attempts=0,
+                         error="The extraction model could not process this message; retry the scan.")
+                return True
+            m.update(state="pending", error=None)
+            return False
 
     # Reply and chat bookkeeping. Kept out of update_task: these aren't the
     # person's edits, so they must not land in a task's overrides.

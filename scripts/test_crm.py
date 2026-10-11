@@ -228,9 +228,88 @@ class ExtractionTests(unittest.TestCase):
         self.assertIsNone(result["due_date"])
 
     def test_invalid_evidence_deadline_or_task_identity_fails_closed(self):
-        for fields in ({"evidence": "invented quote"}, {"deadline_text": "next month"}, {"match_task_id": "other-user-task"}, {"priority": "critical"}, {"deadline_kind": "certain"}):
+        for fields in ({"evidence": "invented quote"}, {"match_task_id": "other-user-task"}, {"priority": "critical"}, {"deadline_kind": "certain"}):
             with self.assertRaises(ValueError):
                 self.validate(item(**fields))
+
+    def test_multiline_quotes_match_crlf_newlines_and_spaces(self):
+        body = "Please send\r\nthe revised proposal by Friday at 3pm."
+        for quote in (body.replace("\r\n", "\n"), body.replace("\r\n", " ")):
+            with self.subTest(quote=quote):
+                task = self.validate(item(evidence=quote), msg=message(body=body), context=body)[0]
+                self.assertEqual(task["evidence"], quote)
+
+    def test_typographic_quotes_dashes_and_nfkc_match_without_casefold(self):
+        body = 'Please send “David’s proposal” — version １ – today.'
+        quote = 'Please send "David\'s proposal" - version 1 - today.'
+        task = self.validate(item(evidence=quote, deadline_text="", due_date=None),
+                             msg=message(body=body), context=body)[0]
+        self.assertEqual(task["evidence"], quote)
+        with self.assertRaises(ValueError):
+            self.validate(item(evidence=quote.lower()), msg=message(body=body), context=body)
+
+    def test_prose_and_code_fences_around_json_are_accepted(self):
+        value = item(title='Send proposal with {notes} and "quotes"')
+        raw = json.dumps({"tasks": [value]})
+        for output in ("Here are the follow-ups:\n" + raw + "\nFinished.",
+                       "```json\n" + raw + "\n```", "Before\n```json\n" + raw + "\n```\nAfter"):
+            with self.subTest(output=output):
+                tasks = crm_scanner.validate_output(output, message(), BODY, [], self.settings)
+                self.assertEqual(tasks[0]["title"], value["title"])
+
+    def test_unknown_task_fields_are_ignored_and_long_fields_truncated(self):
+        task = self.validate(item(extra_field="ignored", title="T" * 350,
+                                  priority_reason="R" * 550, project="P" * 200))[0]
+        self.assertNotIn("extra_field", task)
+        self.assertEqual(len(task["title"]), 300)
+        self.assertEqual(len(task["priority_reason"]), 500)
+        self.assertEqual(len(task["project"]), 150)
+
+    def test_only_first_eight_tasks_are_kept(self):
+        tasks = [item(title=f"Action {i}") for i in range(10)]
+        result = crm_scanner.validate_output(json.dumps({"tasks": tasks}), message(), BODY, [], self.settings)
+        self.assertEqual([t["title"] for t in result], [f"Action {i}" for i in range(8)])
+
+    def test_bad_items_do_not_discard_verified_items(self):
+        tasks = [item(evidence="invented"), item(), item(priority="invalid")]
+        result = crm_scanner.validate_output(json.dumps({"tasks": tasks}), message(), BODY, [], self.settings)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["evidence"], BODY)
+
+    def test_unverified_deadline_is_cleared_and_requires_review(self):
+        task = self.validate(item(deadline_text="next month"))[0]
+        self.assertIsNone(task["due_date"])
+        self.assertEqual(task["deadline_text"], "")
+        self.assertEqual(task["deadline_kind"], "unknown")
+        self.assertEqual(task["status"], "needs_review")
+        self.assertIn("could not be verified", task["review_reason"])
+
+    def test_bad_due_date_is_cleared_and_requires_review(self):
+        for due in ("not a date", "2026-02-30", "2026-10-09T15:00:00", 123, {}):
+            with self.subTest(due=due):
+                task = self.validate(item(due_date=due))[0]
+                self.assertIsNone(task["due_date"])
+                self.assertEqual(task["deadline_text"], "")
+                self.assertEqual(task["status"], "needs_review")
+                self.assertIn("invalid", task["review_reason"])
+        task = self.validate(item(due_date="not a date", deadline_text=""))[0]
+        self.assertEqual(task["status"], "needs_review")
+
+    def test_deadline_matching_uses_canonical_whitespace(self):
+        body = "Please send the proposal by Friday\r\nat\u00a03pm."
+        task = self.validate(item(evidence="Please send the proposal", deadline_text="Friday at 3pm"),
+                             msg=message(body=body), context=body)[0]
+        self.assertEqual(task["status"], "active")
+        self.assertEqual(task["due_date"], "2026-10-09T15:00:00-04:00")
+
+    def test_failure_logs_do_not_include_source_or_provider_text(self):
+        with self.assertLogs(crm_scanner.logger, level="WARNING") as logs:
+            with self.assertRaises(ValueError):
+                crm_scanner.validate_output("secret https://example.test", message(), BODY, [], self.settings)
+        self.assertIn("category=json", logs.output[0])
+        self.assertIn("JSONDecodeError", logs.output[0])
+        self.assertNotIn("secret", " ".join(logs.output))
+        self.assertNotIn("example.test", " ".join(logs.output))
 
     def test_ambiguous_or_truncated_tasks_are_review_candidates(self):
         for fields in ({"uncertain": True}, {"deadline_kind": "inferred"}):
@@ -332,6 +411,16 @@ class FakeMailbox:
 
 
 class MailTests(unittest.TestCase):
+    def read(self, box, known=None, max_messages=40):
+        account = {"id": "mail", "imap_host": "mail", "imap_port": 993,
+                   "email": "me@example.com", "password_encrypted": "opaque"}
+        with patch.object(tab_api, "email_accounts", return_value=[account]), \
+             patch("core.tab_api.imaplib.IMAP4_SSL", return_value=box), \
+             patch("services.email_service.email_service.get_account", return_value=account), \
+             patch("core.tab_api.secret_storage.decrypt", return_value="test"):
+            return read_mailbox({"connection_id": "mail", "folder": "INBOX"},
+                                {"lookback_days": 14, "max_messages": max_messages}, known or set())
+
     def test_read_and_unread_mail_use_uid_and_peek_with_bounded_progress(self):
         account = {"id": "mail", "imap_host": "mail", "imap_port": 993, "email": "me@example.com", "password_encrypted": "opaque"}
         with patch("core.tab_api.imaplib.IMAP4_SSL", FakeMailbox), patch("services.email_service.email_service.get_account", return_value=account), patch("core.tab_api.secret_storage.decrypt", return_value="test"), patch.object(tab_api, "email_accounts", return_value=[account]):
@@ -347,6 +436,113 @@ class MailTests(unittest.TestCase):
     def test_html_mail_is_text_and_attachments_are_not_executed(self):
         raw = email.message_from_string('Content-Type: text/html\n\n<p>Send proposal</p><script>steal()</script><style>body{}</style>')
         self.assertEqual(text_body(raw).strip(), "Send proposal")
+
+    def test_html_spaces_and_zero_width_characters_are_normalized(self):
+        raw = email.message_from_bytes(('Content-Type: text/html; charset=utf-8\r\n\r\n'
+            '<p>Please&nbsp;send\u200b\u200c\u200d\ufeff the\u2009proposal</p>').encode())
+        body = text_body(raw)
+        self.assertEqual(body, "Please send the proposal")
+        task = crm_scanner.validate_output(json.dumps({"tasks": [item(evidence=body, deadline_text="")]}),
+            message(body=body), body, [], crm_scanner.crm_service.settings("test"))[0]
+        self.assertEqual(task["evidence"], body)
+
+    def test_plain_text_body_normalizes_crlf_and_cr(self):
+        raw = email.message_from_bytes(b"Content-Type: text/plain\r\n\r\nPlease\r\nsend\rthe proposal")
+        self.assertEqual(text_body(raw), "Please\nsend\nthe proposal")
+
+    def test_large_message_is_partially_fetched_and_preserves_text(self):
+        box = FaultMailbox()
+        raw = ('MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="parts"\r\n\r\n'
+            '--parts\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n' + BODY +
+            '\r\n--parts\r\nContent-Type: application/octet-stream\r\n'
+            'Content-Disposition: attachment; filename="big.dat"\r\n\r\n' + 'X' * 1_010_000 +
+            '\r\n--parts--\r\n').encode()
+        box.sizes[b"23"] = len(raw)
+        box.raw_by_uid[b"23"] = raw
+        rows, coverage = self.read(box, max_messages=1)
+        self.assertTrue(any("(BODY.PEEK[]<0.1000000>)" in c for c in box.calls))
+        self.assertEqual(rows[0]["body"], BODY)
+        self.assertTrue(rows[0]["truncated"])
+        self.assertEqual(coverage["errors"], [])
+        self.assertEqual(coverage["found"], 2)
+        self.assertEqual(coverage["remaining"], 1)
+
+    def test_failed_reference_search_preserves_current_message(self):
+        box = FaultMailbox()
+        box.references = True
+        box.reference_error = TimeoutError("sensitive reference URL")
+        rows, coverage = self.read(box, max_messages=1)
+        self.assertEqual(rows[0]["body"], BODY)
+        self.assertTrue(rows[0]["context_incomplete"])
+        self.assertEqual(coverage["errors"], [])
+        self.assertEqual(coverage["failed_ids"], [])
+
+    def test_mid_read_connection_failure_returns_earlier_messages(self):
+        import imaplib
+        box = FaultMailbox(ids=b"23 24 25")
+        box.failures[b"24"] = imaplib.IMAP4.abort("secret connection URL")
+        rows, coverage = self.read(box)
+        self.assertEqual([row["external_id"] for row in rows], ["10:23"])
+        self.assertEqual(coverage["found"], 3)
+        self.assertEqual(coverage["remaining"], 2)
+        self.assertEqual(coverage["failed_ids"], ["10:24"])
+        self.assertEqual(len(coverage["errors"]), 1)
+        self.assertNotIn("secret", coverage["errors"][0])
+
+    def test_connection_errors_keep_plain_guidance_without_secrets(self):
+        import imaplib
+        class LoginFails(FaultMailbox):
+            def login(self, *args):
+                raise imaplib.IMAP4.error("AUTHENTICATIONFAILED secret-password")
+        rows, coverage = self.read(LoginFails())
+        self.assertEqual(rows, [])
+        self.assertIn("Check the email connection", coverage["errors"][0])
+        self.assertNotIn("secret", coverage["errors"][0])
+        class FolderMissing(FaultMailbox):
+            def select(self, folder, readonly=False):
+                return "NO", [b""]
+        rows, coverage = self.read(FolderMissing())
+        self.assertEqual(coverage["errors"], ["The mailbox folder could not be opened"])
+
+    def test_individual_read_failure_does_not_block_later_uid(self):
+        box = FaultMailbox()
+        box.failures[b"23"] = ValueError("size unavailable")
+        rows, coverage = self.read(box)
+        self.assertEqual(rows[0]["external_id"], "10:24")
+        self.assertEqual(coverage["remaining"], 1)
+        self.assertEqual(coverage["failed_ids"], ["10:23"])
+
+
+class FaultMailbox(FakeMailbox):
+    """Deterministic mailbox faults without a real connection or provider."""
+    def __init__(self, ids=b"23 24"):
+        self.calls = []
+        self.ids, self.sizes, self.failures = ids, {}, {}
+        self.raw_by_uid = {}
+        self.references, self.reference_error = False, None
+
+    def uid(self, command, *args):
+        self.calls.append((command, *args))
+        if command == "search":
+            if "HEADER" in args:
+                if self.reference_error:
+                    raise self.reference_error
+                return "OK", [b"99"]
+            return "OK", [self.ids]
+        uid, query = args
+        if uid in self.failures:
+            raise self.failures[uid]
+        if query == "(RFC822.SIZE)":
+            return "OK", [f"1 (RFC822.SIZE {self.sizes.get(uid, 250)})".encode()]
+        refs = "References: <parent@test>\r\n" if self.references and uid != b"99" else ""
+        raw = ("From: Customer <customer@example.com>\r\n"
+            "Date: Wed, 7 Oct 2026 09:00:00 -0400\r\n"
+            f"Message-ID: <{uid.decode()}@test>\r\n" + refs +
+            "Subject: Proposal\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + BODY).encode()
+        raw = self.raw_by_uid.get(uid, raw)
+        if "<0.1000000>" in query:
+            raw = raw[:1_000_000]
+        return "OK", [(b"1 (BODY[]", raw), b")"]
 
 
 class RouteTests(unittest.TestCase):
@@ -492,6 +688,209 @@ class RouteTests(unittest.TestCase):
 
 
 class ScanTests(unittest.IsolatedAsyncioTestCase):
+    def make_store(self, kind="connector", max_messages=40):
+        settings.update_settings(enabled_tab_templates=["crm"])
+        store = CRMService("regression-" + self.id().split(".")[-1] + ".json")
+        store.configure("local", {"endpoint_id": "test", "max_messages": max_messages})
+        source = store.add_source("local", kind, "mail", "Selected")
+        return store, source
+
+    async def test_new_messages_are_processed_before_failed_retries(self):
+        store, source = self.make_store(max_messages=1)
+        old = store.capture(source, message(sent_at="2020-01-01T00:00:00Z"))
+        store.fail_message("local", old["id"], "validation failed")
+        new = store.capture(source, message(external_id="10:24"))
+        self.assertEqual([m["id"] for m in store.pending("local", source["id"])], [new["id"], old["id"]])
+        extractor = AsyncMock(return_value='{"tasks": []}')
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(store.message("local", new["id"])["state"], "processed")
+        self.assertEqual(store.message("local", old["id"])["state"], "failed")
+        self.assertEqual(result["results"][0]["remaining"], 1)
+
+    async def test_three_consecutive_model_call_failures_preserve_attempts(self):
+        for error in (RuntimeError("secret provider URL"), TimeoutError("secret timeout")):
+            with self.subTest(error=type(error).__name__):
+                store, source = self.make_store()
+                # Use distinct ids for the second subtest's persisted store.
+                messages = [store.capture(source, message(external_id=f"{type(error).__name__}:{i}")) for i in range(5)]
+                extractor = AsyncMock(side_effect=error)
+                with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor), \
+                     self.assertLogs(crm_scanner.logger, level="WARNING") as logs:
+                    result = await crm_scanner.scan("local")
+                self.assertEqual(extractor.await_count, 3)
+                for msg in messages:
+                    current = store.message("local", msg["id"])
+                    self.assertEqual(current["state"], "pending")
+                    self.assertEqual(current["attempts"], 0)
+                self.assertEqual(result["results"][0]["remaining"], len(store.pending("local", source["id"])))
+                self.assertIn("Queued messages were kept", result["results"][0]["error"])
+                self.assertNotIn("secret", " ".join(logs.output))
+                self.assertIn("category=timeout" if isinstance(error, TimeoutError) else "category=model_call", " ".join(logs.output))
+
+    async def test_successful_model_call_resets_consecutive_failure_count(self):
+        store, source = self.make_store()
+        for i in range(6):
+            store.capture(source, message(external_id=f"10:{i}"))
+        extractor = AsyncMock(side_effect=[RuntimeError(), RuntimeError(), '{"tasks": []}',
+                                          RuntimeError(), RuntimeError(), '{"tasks": []}'])
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(extractor.await_count, 6)
+        self.assertEqual(result["results"][0]["scanned"], 2)
+        self.assertEqual(result["results"][0]["remaining"], 4)
+
+    async def test_model_call_failure_does_not_burn_existing_validation_attempt(self):
+        store, source = self.make_store()
+        msg = store.capture(source, message())
+        store.fail_message("local", msg["id"], "validation failed")
+        with patch.object(crm_scanner, "crm_service", store), \
+             patch.object(crm_scanner, "extract", AsyncMock(side_effect=RuntimeError())):
+            await crm_scanner.scan("local")
+        current = store.message("local", msg["id"])
+        self.assertEqual(current["attempts"], 1)
+        self.assertEqual(current["state"], "pending")
+
+    async def test_message_the_model_always_rejects_fails_after_three_scans(self):
+        store, source = self.make_store()
+        stuck = store.capture(source, message())
+        extractor = AsyncMock(side_effect=RuntimeError("400 context length exceeded"))
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor):
+            for _ in range(2):
+                result = await crm_scanner.scan("local")
+                self.assertEqual(store.message("local", stuck["id"])["state"], "pending")
+                self.assertIn("Queued messages were kept", result["results"][0]["error"])
+            result = await crm_scanner.scan("local")
+        current = store.message("local", stuck["id"])
+        self.assertEqual(current["state"], "failed")
+        self.assertIn("could not process this message", current["error"])
+        self.assertIn("Retry failed", result["results"][0]["error"])
+        self.assertEqual(store.pending("local", source["id"]), [])
+        store.retry_failed("local")
+        self.assertEqual(store.message("local", stuck["id"])["call_attempts"], 0)
+
+    async def test_all_bad_evidence_fails_message_but_mixed_batch_succeeds(self):
+        store, source = self.make_store()
+        bad = store.capture(source, message())
+        mixed = store.capture(source, message(external_id="10:24"))
+        extractor = AsyncMock(side_effect=[json.dumps({"tasks": [item(evidence="invented")]}),
+            json.dumps({"tasks": [item(evidence="invented"), item()]})])
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(store.message("local", bad["id"])["state"], "failed")
+        self.assertEqual(store.message("local", bad["id"])["attempts"], 1)
+        self.assertEqual(store.message("local", mixed["id"])["state"], "processed")
+        self.assertEqual(result["created"], 1)
+
+    async def test_mid_read_imap_failure_still_captures_and_extracts_earlier_mail(self):
+        import imaplib
+        store, source = self.make_store(kind="email")
+        box = FaultMailbox(ids=b"23 24 25")
+        box.failures[b"24"] = imaplib.IMAP4.abort("secret")
+        extractor = AsyncMock(return_value=json.dumps({"tasks": [item()]}))
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor), \
+             patch.object(tab_api, "open_mailbox", return_value=box), \
+             patch.object(tab_api, "email_accounts", return_value=[{"id": "mail", "email": "me@example.com"}]):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(result["created"], 1)
+        self.assertIn("10:23", store.known("local", source["id"]))
+        self.assertEqual(result["results"][0]["remaining"], 2)
+        self.assertEqual(result["results"][0]["found"], 3)
+        self.assertIn("Messages already read were kept", result["results"][0]["error"])
+
+    async def test_large_mail_is_extracted_and_marked_for_review(self):
+        store, source = self.make_store(kind="email")
+        box = FaultMailbox(ids=b"23")
+        box.sizes[b"23"] = 2_000_000
+        extractor = AsyncMock(return_value=json.dumps({"tasks": [item()]}))
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor), \
+             patch.object(tab_api, "open_mailbox", return_value=box), \
+             patch.object(tab_api, "email_accounts", return_value=[{"id": "mail", "email": "me@example.com"}]):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(store.tasks("local")[0]["status"], "needs_review")
+        self.assertIsNone(result["results"][0]["error"])
+        self.assertEqual(result["results"][0]["remaining"], 0)
+
+    async def test_unreadable_uid_is_skipped_after_three_reads_and_not_repeated(self):
+        store, source = self.make_store(kind="email", max_messages=1)
+        box = FaultMailbox(ids=b"23 24")
+        box.failures[b"23"] = ValueError("body fetch unavailable")
+        extractor = AsyncMock(return_value='{"tasks": []}')
+        with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor), \
+             patch.object(tab_api, "open_mailbox", return_value=box), \
+             patch.object(tab_api, "email_accounts", return_value=[{"id": "mail", "email": "me@example.com"}]):
+            results = [(await crm_scanner.scan("local"))["results"][0] for _ in range(4)]
+            calls = len(box.calls)
+            again = (await crm_scanner.scan("local"))["results"][0]
+        self.assertEqual([r["skipped"] for r in results], [0, 0, 1, 0])
+        self.assertEqual([r["remaining"] for r in results], [2, 2, 1, 0])
+        self.assertEqual([r["found"] for r in results], [2, 2, 2, 2])
+        self.assertTrue(all(r["error"] is None for r in results))
+        self.assertEqual(again["skipped"], 0)
+        self.assertEqual(again["remaining"], 0)
+        self.assertFalse(any(c[0] == "fetch" for c in box.calls[calls:]))
+        restored = CRMService(store.name)
+        self.assertEqual(restored.known("local", source["id"]), {"10:23", "10:24"})
+        self.assertEqual(restored.pending("local", source["id"]), [])
+        restored.retry_failed("local")
+        self.assertEqual(restored.known("local", source["id"]), {"10:23", "10:24"})
+
+    async def test_failed_read_recovers_into_extraction_queue(self):
+        store, source = self.make_store(kind="email")
+        self.assertFalse(store.read_failure(source, "10:23"))
+        self.assertNotIn("10:23", store.known("local", source["id"]))
+        captured = store.capture(source, message())
+        self.assertEqual(captured["state"], "pending")
+        self.assertEqual(captured["attempts"], 0)
+        self.assertEqual(len(store.pending("local", source["id"])), 1)
+        tasks = crm_scanner.validate_output(json.dumps({"tasks": [item()]}), captured, BODY, [], store.settings("local"))
+        self.assertEqual(store.apply("local", captured["id"], tasks), 1)
+        self.assertEqual(store.message("local", captured["id"])["state"], "processed")
+
+    async def test_manual_retry_keeps_new_messages_ahead_of_failed_messages(self):
+        store, source = self.make_store(max_messages=1)
+        old = store.capture(source, message(sent_at="2020-01-01T00:00:00Z"))
+        store.fail_message("local", old["id"], "failed")
+        new = store.capture(source, message(external_id="10:24"))
+        with patch.object(crm_scanner, "crm_service", store), \
+             patch.object(crm_scanner, "extract", AsyncMock(return_value='{"tasks": []}')):
+            await crm_scanner.scan("local", retry=True)
+        self.assertEqual(store.message("local", new["id"])["state"], "processed")
+        self.assertEqual(store.message("local", old["id"])["state"], "pending")
+
+    async def test_claude_cli_error_is_a_call_failure_and_keeps_message_pending(self):
+        from claude_agent_sdk import ResultMessage
+        store, source = self.make_store()
+        msg = store.capture(source, message())
+        async def query(**kwargs):
+            yield ResultMessage(subtype="error", duration_ms=1, duration_api_ms=1,
+                is_error=True, num_turns=1, session_id="test", result="secret provider URL")
+        with patch.object(crm_scanner, "crm_service", store), \
+             patch.object(model_endpoints, "get_endpoint", return_value={"kind": "claude_cli", "model": ""}), \
+             patch("claude_agent_sdk.query", query), patch("core.claude_cli.preferred_cli_path", return_value=None), \
+             patch("core.tab_api.tempfile.TemporaryDirectory", TemporaryDirectory):
+            result = await crm_scanner.scan("local")
+        self.assertEqual(store.message("local", msg["id"])["state"], "pending")
+        self.assertEqual(store.message("local", msg["id"])["attempts"], 0)
+        self.assertEqual(result["results"][0]["remaining"], 1)
+        self.assertNotIn("secret", result["results"][0]["error"])
+
+    async def test_documents_and_connectors_normalize_text_at_capture(self):
+        store, source = self.make_store(kind="document")
+        doc = {"id": "mail", "updated_at": 1, "title": "Document", "content": "Please\r\nsend\u00a0the\u200b proposal"}
+        with patch.object(crm_scanner, "crm_service", store), patch.object(tab_api, "document", return_value=doc), \
+             patch.object(crm_scanner, "extract", AsyncMock(side_effect=RuntimeError())):
+            await crm_scanner.scan("local")
+        self.assertEqual(store.pending("local", source["id"])[0]["body"], "Please\nsend the proposal")
+        source = store.add_source("local", "connector", "chat", "Chat")
+        with patch.object(crm_scanner, "crm_service", store):
+            crm_scanner.capture_connector("connector", "chat", {"message_id": "1", "text": doc["content"],
+                "source_context": "Prior\r\ntext\ufeff\u00a0here"})
+        captured = store.pending("local", source["id"])[0]
+        self.assertEqual(captured["body"], "Please\nsend the proposal")
+        self.assertEqual(captured["context"], "Prior\ntext here")
+
     async def test_connector_capture_requires_selected_scope_and_stops_when_paused(self):
         from core.connectors.base import Inbound
         settings.update_settings(enabled_tab_templates=["crm"])

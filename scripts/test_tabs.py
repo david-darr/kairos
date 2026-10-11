@@ -846,10 +846,16 @@ def calendar_items(user, start, end):
                 box.select.assert_called_once_with('"INBOX"', readonly=True)
                 mailbox.uid("search", None, "ALL")
                 mailbox.uid("fetch", b"1", "(RFC822.SIZE BODY.PEEK[])")
+                mailbox.uid("fetch", b"1", "(BODY.PEEK[]<0.1000000>)")
+                box.uid.assert_called_with("fetch", b"1", "(BODY.PEEK[]<0.1000000>)")
                 mailbox.response("UIDVALIDITY")
                 for command, args in (("store", (b"1", "+FLAGS", "\\Seen")),
                         ("fetch", (b"1", "(BODY[])")), ("fetch", (b"1", "(RFC822)")),
-                        ("fetch", (b"1", "(BODY.PEEK[] FLAGS)"))):
+                        ("fetch", (b"1", "(BODY.PEEK[] FLAGS)")),
+                        ("fetch", (b"1", "(BODY[]<0.1000000>)")),
+                        ("fetch", (b"1", "(BODY.PEEK[]<0.1000001>)")),
+                        ("fetch", (b"1", "(BODY.PEEK[]<0.0>)")),
+                        ("fetch", (b"1", "(BODY.PEEK[]<1.1000000>)"))):
                     with self.assertRaises(ValueError):
                         mailbox.uid(command, *args)
                 with self.assertRaises(ValueError):
