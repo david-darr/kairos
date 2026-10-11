@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motion study</title>
+<style>
+  html, body { margin: 0; background: #101826; color: #f5f7fc; font-family: system-ui, sans-serif; }
+  canvas { display: block; width: min(100vw, 1920px); height: auto; margin: auto; }
+  #controls { display: none; padding: 16px; gap: 12px; align-items: center; }
+  #scrub { flex: 1; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1920" height="1080" aria-label="Motion animation"></canvas>
+<div id="controls"><button id="toggle">Pause</button><input id="scrub" aria-label="Time" type="range" min="0" step="0.01"><output id="time"></output></div>
+<script>
+// Match BPM, TOTAL_BARS and cut bars in motion-soundtrack.mjs when adapting.
+const WIDTH = 1920, HEIGHT = 1080, BPM = 120, TOTAL_BARS = 6;
+const BEAT = 60 / BPM, BAR = 240 / BPM, DURATION = TOTAL_BARS * BAR;
+const GRAIN = false, VIGNETTE = true; // Optional finishing treatments.
+const canvas = document.getElementById("canvas");
+canvas.width = WIDTH; canvas.height = HEIGHT;
+const ctx = canvas.getContext("2d");
+const C = { bg: "#101826", ink: "#f5f7fc", dim: "#b8c5db", accent: "#5ce0cf", second: "#9e92ff" };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const easeOut = x => 1 - (1 - clamp(x)) ** 3;
+const easeInOut = x => { x = clamp(x); return x < 0.5 ? 4 * x ** 3 : 1 - (-2 * x + 2) ** 3 / 2; };
+// Fresh generators or precomputed values preserve independence from render order.
+function seededRandom(seed) {
+  return () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+}
+const random = seededRandom(42);
+const dots = Array.from({ length: 48 }, () => [random() * WIDTH, random() * HEIGHT, 1 + random() * 3]);
+
+function text(value, x, y, size = 90, color = C.ink) {
+  ctx.save(); ctx.font = `700 ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  // Fit long replacement copy within the horizontal 5% safe margin.
+  const measured = ctx.measureText(value).width;
+  if (measured > WIDTH * 0.9) ctx.font = `700 ${size * WIDTH * 0.9 / measured}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = color;
+  ctx.fillText(value, x, y); ctx.restore();
+}
+function shape(x, y, radius, morph, color) {
+  // Corresponding superellipse points smoothly morph a circle into a square.
+  ctx.beginPath(); const power = lerp(1, 0.25, morph);
+  for (let i = 0; i <= 96; i++) {
+    const a = i / 96 * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    const px = x + Math.sign(c) * Math.abs(c) ** power * radius;
+    const py = y + Math.sign(s) * Math.abs(s) ** power * radius;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+}
+function title(t, local) {
+  // Visible at the first frame, then kinetic word entrances on half-beats.
+  text("IDEAS", WIDTH / 2, HEIGHT * 0.34 + 60 * (1 - easeOut(local / BEAT)), 160);
+  text("IN MOTION", WIDTH / 2, HEIGHT * 0.52 + 60 * (1 - easeOut((local - BEAT / 2) / BEAT)), 140, C.accent);
+  text("A study in rhythm and form", WIDTH / 2, HEIGHT * 0.73, 40, C.dim);
+}
+function morphing(t, local) {
+  const morph = easeInOut((0.5 - 0.5 * Math.cos(local / BAR * Math.PI * 2)));
+  const pulse = 1 + 0.045 * Math.exp(-(t % BEAT) * 12);
+  for (let i = 0; i < 3; i++) {
+    ctx.save(); ctx.translate(WIDTH * (0.27 + i * 0.23), HEIGHT * 0.43);
+    ctx.rotate(easeInOut(clamp(local / (2 * BAR))) * Math.PI / 2 * (i % 2 ? -1 : 1));
+    shape(0, 0, 125 * pulse, morph, i === 1 ? C.second : C.accent); ctx.restore();
+  }
+  text("Find your rhythm", WIDTH / 2, HEIGHT * 0.75, 80);
+}
+function endCard(t, local) {
+  // Settle early, then hold a clean end card through the last frame.
+  const settle = easeOut(local / BEAT);
+  shape(WIDTH / 2, HEIGHT * 0.29, 65 + 10 * settle, 1, C.accent);
+  text("MAKE IT MOVE", WIDTH / 2, HEIGHT * 0.51 + 20 * (1 - settle), 120);
+  text("Your next idea starts here", WIDTH / 2, HEIGHT * 0.68, 48, C.dim);
+}
+const SCENES = [
+  { startBar: 0, lengthBars: 2, draw: title },
+  { startBar: 2, lengthBars: 2, draw: morphing },
+  { startBar: 4, lengthBars: 2, draw: endCard },
+];
+window.motionConfig = { width: WIDTH, height: HEIGHT, duration: DURATION, bpm: BPM,
+  scenes: SCENES.map(({ startBar, lengthBars }) => ({ startBar, lengthBars })) };
+
+window.drawFrame = function(t) {
+  t = clamp(t, 0, DURATION - 1e-6);
+  ctx.resetTransform(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillStyle = C.dim; ctx.globalAlpha = 0.15;
+  for (const [x, y, radius] of dots) { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  const scene = SCENES.find(s => t >= s.startBar * BAR && t < (s.startBar + s.lengthBars) * BAR);
+  if (!scene) throw new Error(`No scene at ${t}s; check bar coverage.`);
+  ctx.save(); scene.draw(t, t - scene.startBar * BAR); ctx.restore();
+  // A small pulse stays away from text; the end card holds still.
+  if (scene !== SCENES[SCENES.length - 1]) {
+    ctx.fillStyle = C.accent; ctx.fillRect(WIDTH * 0.05, HEIGHT * 0.9, WIDTH * 0.9 * (0.3 + 0.7 * Math.exp(-(t % BEAT) * 12)), 6);
+  }
+  if (GRAIN) {
+    const rng = seededRandom(100 + Math.floor(t * 30)); // Fixed time grid, independent of output fps.
+    ctx.globalAlpha = 0.035; ctx.fillStyle = C.ink;
+    for (let i = 0; i < 1800; i++) ctx.fillRect(rng() * WIDTH, rng() * HEIGHT, 2, 2);
+    ctx.globalAlpha = 1;
+  }
+  if (VIGNETTE) {
+    const g = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.3, WIDTH / 2, HEIGHT / 2, WIDTH * 0.65);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.3)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  }
+};
+window.motionReady = document.fonts.ready.then(() => window.drawFrame(0));
+if (new URLSearchParams(location.search).has("play")) window.motionReady.then(() => {
+  const scrub = document.getElementById("scrub"), time = document.getElementById("time"), toggle = document.getElementById("toggle");
+  document.getElementById("controls").style.display = "flex"; scrub.max = DURATION - 0.001;
+  let playing = true, position = 0, anchor = performance.now();
+  const current = now => playing ? (position + (now - anchor) / 1000) % DURATION : position;
+  toggle.onclick = () => { const now = performance.now(); position = current(now); anchor = now; playing = !playing; toggle.textContent = playing ? "Pause" : "Play"; };
+  scrub.oninput = () => { position = Number(scrub.value); anchor = performance.now(); playing = false; toggle.textContent = "Play"; };
+  function tick(now) { const t = current(now); window.drawFrame(t); scrub.value = t; time.textContent = `${t.toFixed(2)} / ${DURATION.toFixed(2)} s`; requestAnimationFrame(tick); }
+  requestAnimationFrame(tick);
+});
+</script>
+</body>
+</html>
