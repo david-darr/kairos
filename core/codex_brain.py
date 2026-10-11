@@ -552,4 +552,5 @@ class CodexBrain:
         yield runs.result(usage is not None, thread_id=self.thread_id)
 
     async def disconnect(self) -> None:
-        pass  # no persistent process to close
+        from core import rea_bridge
+        await rea_bridge.close(self.session_id)

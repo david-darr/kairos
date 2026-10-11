@@ -9,6 +9,7 @@ import { renderChannelsPanel } from "./settingsChannels.js";
 import { runSummary, surfaceLabel, toggleRunTimeline } from "../runTimeline.js";
 import { renderHooksPanel } from "./settingsHooks.js";
 import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor } from "../settingsKit.js";
+import { addReaIntegration } from "../reaSetup.js";
 
 // The side browser's page is a NATIVE view composited above the HTML in the
 // desktop app (see static/js/browserPane.js), so it would paint straight
@@ -976,6 +977,17 @@ async function mcpCatalogSection(rerender) {
     list.replaceChildren(...shown.map((server) => {
       let action;
       if (server.added) action = pill("Added", "ok");
+      else if (server.id === "rea") {
+        action = el("button", { class: "btn", text: "Add", onclick: async (event) => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          try {
+            const item = await addReaIntegration();
+            if (item) { toast("REA added", "success"); await rerender(); }
+            else button.disabled = false;
+          } catch (problem) { toast(errorText(problem), "error"); button.disabled = false; }
+        } });
+      }
       else if (server.auth === "none") {
         action = el("button", { class: "btn", text: "Add", onclick: async (event) => {
           const button = event.currentTarget;
@@ -1008,7 +1020,7 @@ async function mcpCatalogSection(rerender) {
   search.addEventListener("input", draw);
   details.append(
     el("summary", { text: `Browse the MCP catalog (${catalog.length} servers)` }),
-    note("Tools from these servers are available to every model: Claude directly, local and API models through Kairos, which asks you before each call. Signing in happens in a browser on this computer."),
+    note("Added tool servers are available in chats: Claude directly, and local and API models through Kairos. Codex can use REA through Kairos's bridge. Select REA in each chat or Forge session. Tool calls follow the chat's permission mode. Sign-in, when needed, happens in a browser on this computer."),
     el("div", { class: "set-toolbar" }, [search]), list,
   );
   draw();

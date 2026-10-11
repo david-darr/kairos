@@ -25,12 +25,15 @@ hive mind") — same reasoning, same shared engine (core/memory_tools.py).
 """
 import asyncio
 import contextlib
+import logging
 from typing import AsyncIterator
 
 from core import attachments, integrations, mcp_client, mcp_oauth, permissions, projects, runs, system_prompt, tool_registry, tool_search
 from core.providers import openai_compatible
 from core.session_manager import sent_text
 from core.turn_taint import TurnTaint
+
+logger = logging.getLogger(__name__)
 
 class ExternalBrain:
     def __init__(self, base_url: str, model: str, api_key: str | None, history: list[dict] | None = None,
@@ -72,10 +75,11 @@ class ExternalBrain:
             # A visible, revocable built-in grant, like Claude's Bash; see
             # the run_shell tool in core/tool_registry.py.
             permissions.ensure_seeded(["run_shell"])
-        # MCP servers enabled for this chat (None: every registered one, as
-        # for Claude), their tools found at connect() - see core/mcp_client.py.
+        # MCP servers enabled for this chat (None: ordinary servers, as for
+        # Claude), their tools found at connect() - see core/mcp_client.py.
         self.integration_ids = integration_ids
         self._mcp_tools: dict[str, dict] = {}
+        self._rea_client: mcp_client.PersistentClient | None = None
         # The "landing zone" (David's ask 2026-09-01, after live-testing
         # found chats couldn't answer real vault/memory questions) — a
         # real system message, not just tool descriptions, so a model
@@ -220,7 +224,12 @@ class ExternalBrain:
         if not self._same_mcp_endpoint(spec["config"], config):
             return "Not run: this integration is no longer enabled for the chat."
         try:
-            result = await mcp_client.call_tool(config, spec["name"], args)
+            if spec["server"] == "REA":
+                if self._rea_client is None:
+                    return "Tool error: REA's investigation session has closed. Reconnect this chat."
+                result = await self._rea_client.call_tool(spec["name"], args)
+            else:
+                result = await mcp_client.call_tool(config, spec["name"], args)
             self.turn_taint.mark(f"MCP result: {name}")
             return result
         except Exception as e:
@@ -243,7 +252,25 @@ class ExternalBrain:
         servers = integrations.list_mcp_servers_runtime(self.integration_ids)
         if not servers:
             return
+        rea_config = servers.pop("REA", None)
         self._mcp_tools = await mcp_client.discover(servers)
+        if rea_config:
+            self._rea_client = mcp_client.PersistentClient(rea_config)
+            try:
+                await self._rea_client.start()
+                tools = await self._rea_client.list_tools()
+                integrations.record_check(name="REA", tools=tools)
+                held = integrations.held_tools(self.integration_ids).get("REA", set())
+                for tool in tools:
+                    if tool["name"] in held:
+                        continue
+                    name = mcp_client.function_name("REA", tool["name"], set(self._mcp_tools))
+                    self._mcp_tools[name] = {"server": "REA", "config": rea_config, **tool}
+            except Exception as exc:
+                logger.warning("REA MCP connection unavailable: %s", exc)
+                integrations.record_check(name="REA", error=f"{type(exc).__name__}: {exc}")
+                await self._rea_client.close()
+                self._rea_client = None
         if self._mcp_tools and not self._deferred:
             self.tools = self.tools + tool_search.bridge_schemas()
 
@@ -318,4 +345,6 @@ class ExternalBrain:
         return runs.StopResult(True, "the request was closed; the provider may still bill a call it had started")
 
     async def disconnect(self) -> None:
-        pass
+        if self._rea_client is not None:
+            await self._rea_client.close()
+            self._rea_client = None

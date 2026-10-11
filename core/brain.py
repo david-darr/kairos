@@ -154,8 +154,7 @@ class Brain:
         self.cwd_override = cwd_override
         # Per-session integration/connector scoping (David's ask 2026-08-31,
         # matching Claude's own per-conversation connector toggle) — None
-        # (the default) keeps every registered MCP server available, same
-        # as the original global behavior.
+        # (the default) keeps ordinary MCP servers available; REA is opt-in.
         self.integration_ids = integration_ids
         # Shell execution (David's ask 2026-09-02, modeled on Odysseus's own
         # agent-tool gating — src/tool_security.py's owner_is_admin_or_

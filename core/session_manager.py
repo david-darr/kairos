@@ -79,9 +79,8 @@ class SessionManager:
             "project_id": None,
             # Which Settings > Integrations MCP Tool Servers this chat can
             # reference (David's ask 2026-08-31, matching Claude's per-
-            # conversation connector toggle) — None = all registered ones
-            # (matches pre-existing global behavior); a list restricts to
-            # just those ids.
+            # conversation connector toggle) — None = ordinary registered
+            # servers; REA is opt-in. A list restricts to just those ids.
             "enabled_integration_ids": None,
         }
         store.save_session(session)
@@ -591,9 +590,8 @@ class SessionManager:
 
     def set_integrations(self, session_id: str, enabled_integration_ids: Optional[list[str]]) -> dict:
         """Restrict which MCP Tool Server integrations this chat can
-        reference (David's ask 2026-08-31), or clear back to None for "all
-        registered ones" — same distinction Claude's own per-conversation
-        connector toggle makes."""
+        reference (David's ask 2026-08-31), or clear back to None for
+        ordinary registered servers. REA requires explicit selection."""
         session = self._require(session_id)
         session["enabled_integration_ids"] = enabled_integration_ids
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)

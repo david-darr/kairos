@@ -44,11 +44,14 @@ export async function mountForgeSession(panel, session, project, models, { initi
   const appTimer = setInterval(refreshApp, 3000);
   document.addEventListener('kairos:forge-apps', refreshApp); refreshApp();
   const terminal = el('button', { class: 'btn quiet forge-open-terminal', text: 'Terminal', disabled: !!session.forge.removed, onclick: () => onTerminal?.(id) });
-  const header = el('header', { class: 'forge-session-header' }, [el('strong', { text: project?.name || 'Forge project' }), agentLabel, run, terminal, end]);
+  const rea = el('button', { class: 'btn quiet', text: 'REA tools', hidden: true, disabled: !!session.forge.removed,
+    'aria-pressed': 'false', onclick: toggleRea });
+  const header = el('header', { class: 'forge-session-header' }, [el('strong', { text: project?.name || 'Forge project' }), agentLabel, run, terminal, rea, end]);
   const host = el('div', { class: 'forge-chat-host' });
   // filter(Boolean): replaceChildren would print a false condition as the text "false".
   panel.replaceChildren(...[header, explanation, session.forge.isolation === 'in_place' && el('p', { class: 'forge-warning', text: 'In place: changes affect your project folder directly.' }), status, host].filter(Boolean));
   explain(); sync();
+  refreshRea();
   // Teardown is installed before awaiting the chat mount.
   const cleanup = () => { disposed = true; appController.abort(); appDialogCleanup(); clearInterval(appTimer); document.removeEventListener('kairos:forge-apps', refreshApp); unsubscribe(); chatCleanup(); dialog?.close(); };
   panel._cleanup = cleanup;
@@ -64,6 +67,39 @@ export async function mountForgeSession(panel, session, project, models, { initi
     if (disposed) mounted(); else chatCleanup = mounted;
   } catch (error) { if (!disposed) status.textContent = error.message; }
   return cleanup;
+
+  async function refreshRea() {
+    try {
+      const integrations = await api('/api/integrations');
+      if (disposed) return;
+      const item = integrations.find(i => i.rea_managed);
+      rea.hidden = !item;
+      rea.disabled = !item || item.status?.state !== 'working' || !!session.forge.removed;
+      rea.title = item && item.status?.state !== 'working' ? 'Check REA in Tool Store first' : '';
+      const on = !!item && Array.isArray(session.enabled_integration_ids) && session.enabled_integration_ids.includes(item.id);
+      rea.textContent = on ? 'REA on' : 'REA tools';
+      rea.setAttribute('aria-pressed', String(on));
+    } catch { rea.hidden = true; }
+  }
+
+  async function toggleRea() {
+    if (rea.disabled || disposed || forgeRunning(id)) return;
+    rea.disabled = true;
+    try {
+      const integrations = await api('/api/integrations');
+      const item = integrations.find(i => i.rea_managed);
+      if (!item || item.status?.state !== 'working') throw new Error('Check REA in Tool Store first.');
+      const selected = session.enabled_integration_ids == null
+        ? integrations.filter(i => i.kind === 'mcp_server' && !i.rea_managed && i.enabled !== false).map(i => i.id)
+        : [...(session.enabled_integration_ids || [])];
+      const next = selected.includes(item.id) ? selected.filter(value => value !== item.id) : [...selected, item.id];
+      await api(`/api/sessions/${encodeURIComponent(id)}/integrations`, {
+        method: 'POST', body: JSON.stringify({ enabled_integration_ids: next }),
+      });
+      session.enabled_integration_ids = next;
+      await refreshRea();
+    } catch (error) { status.textContent = error.message; rea.disabled = false; }
+  }
 
   async function endSession(event) {
     const opener = event.currentTarget;

@@ -325,9 +325,9 @@ async def set_session_project(session_id: str, body: SetProjectRequest, user: st
 async def set_session_integrations(session_id: str, body: SetIntegrationsRequest, user: str = Depends(require_user)) -> dict:
     """Restricts which MCP Tool Server integrations this chat can reference
     (David's ask 2026-08-31, matching Claude's per-conversation connector
-    toggle) — None means "all registered ones," the pre-existing global
-    default. Closes any live Brain so the next message reconnects with the
-    new set, same pattern as /model and /workspace above."""
+    toggle) — None means ordinary registered servers; REA requires an
+    explicit selection. Closes any live Brain so the next message reconnects
+    with the new set, same pattern as /model and /workspace above."""
     try:
         session_manager.set_integrations(session_id, body.enabled_integration_ids)
     except KeyError:

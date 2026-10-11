@@ -2,6 +2,7 @@
 "Add Integration" panel). Admin-gated: API-service keys and MCP server
 config both widen what the agent can reach.
 """
+import asyncio
 import html
 from typing import Optional
 
@@ -9,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from core import contacts_store, dav_client, integrations, mcp_client, mcp_oauth, sync_engine
+from core import contacts_store, dav_client, integrations, mcp_client, mcp_oauth, rea_integration, sync_engine
 from core.middleware import local_api_base, require_admin
 from services.calendar_service import calendar_service
 
@@ -46,6 +47,32 @@ async def create_api_service(body: CreateApiServiceRequest, user: str = Depends(
 async def mcp_catalog(user: str = Depends(require_admin)) -> list[dict]:
     """Known MCP servers to add (core/mcp_catalog.json)."""
     return integrations.mcp_catalog()
+
+
+@router.get("/rea/status")
+async def rea_status(user: str = Depends(require_admin)) -> dict:
+    return rea_integration.status()
+
+
+@router.post("/rea")
+async def add_rea(user: str = Depends(require_admin)) -> dict:
+    """The UI reviews the download; this route rechecks before running npx."""
+    current = rea_integration.existing()
+    if current:
+        return current
+    if any(item["kind"] == "mcp_server" and item["name"] == rea_integration.REA_NAME
+           for item in integrations.list_integrations()):
+        raise HTTPException(status_code=409, detail="Another MCP server already uses the name REA.")
+    ready = rea_integration.status()
+    if not ready["ready"]:
+        raise HTTPException(status_code=400, detail=ready["reason"])
+    try:
+        await asyncio.to_thread(rea_integration.download)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    command, args = rea_integration.command()
+    item = integrations.create_mcp_server(rea_integration.REA_NAME, "stdio", command=command, args=args)
+    return await mcp_client.check(item["id"]) or item
 
 
 @router.post("/mcp-server")
