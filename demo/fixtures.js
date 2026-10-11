@@ -104,6 +104,7 @@
     { id: "e1", title: "Project check-in", start: future(3), end: future(4), source: "event" },
     { id: "e2", title: "Time to think", start: future(26), end: future(27), source: "event" },
     { id: "e3", title: "Weekly review", start: future(60), end: future(61), source: "event" },
+    { id: "e-completed", title: "Finished calendar task", start: future(24), end: future(25), source: "calendar", completed: true },
     { id: "tab-a1", title: "Review the course project", start: future(4), source: "tab", source_label: "School",
       toggle_url: "/api/tab-school/assignments/a1", completed: false },
   ];
@@ -991,7 +992,7 @@
     if (route.startsWith('/api/google/forms/')) return url.searchParams.get('responses') === 'true' ? { responses: [] }
       : { info: { title: 'Feedback form' }, items: [{ title: 'What would you improve?', questionItem: { question: { textQuestion: { paragraph: true } } } }] };
     if (route === "/api/calendar/events") return list([...calendarInstances(events), ...calendarInstances(googleEvents).filter(e => !state.googleCalendarMissing && (state.googleCalendarIds == null || state.googleCalendarIds.includes(e.calendar_id)))]);
-    if (route === "/api/calendar/events/archived") return [];
+    if (route === "/api/calendar/events/archived") return list(calendarInstances(events).filter(e => e.source === 'calendar' && e.completed));
     const localEventRead = route.match(/^\/api\/calendar\/events\/([^/]+)$/);
     if (localEventRead) {
       const [id, occurrence] = decodeURIComponent(localEventRead[1]).split('~');

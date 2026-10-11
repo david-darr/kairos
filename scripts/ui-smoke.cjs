@@ -18,7 +18,7 @@ let sessionDelay = 0;
 const writes = [];
 const reads = [];
 const now = Date.now() / 1000;
-const { fixture, mutate, media } = require("../demo/fixtures.js")({ now, state: demoState });
+const { fixture, mutate, media, data: calendarFixtures } = require("../demo/fixtures.js")({ now, state: demoState });
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
 demoState.computerImage = computerImage;
 const errors = [];
@@ -997,15 +997,73 @@ app.whenReady().then(async () => {
         }
         if (tab === "calendar" && !demoState.empty) {
           const calendarWrites = writes.length;
+          const card = title => `[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.querySelector('.title')?.textContent===${JSON.stringify(title)})`;
+          const completed = fixture(new URL('/api/calendar/events/e-completed', base));
+          const completedCard = card(completed.title);
+          const showDay = start => js(`document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
+          const showUpcoming = async () => {
+            await js("window._previousCalendarTitle=document.querySelector('.cal-day-panel-title'); [...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+            await waitFor("document.querySelector('.cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days'");
+          };
+          await showUpcoming();
+          assert.equal(await js(`!!(${completedCard})`), false, label + ' completed fixture is absent from Next 7 Days');
+          await showDay(completed.start);
+          await waitFor(`!!(${completedCard})`);
+          assert.ok(await js(`(${completedCard}).querySelector('input').checked && getComputedStyle((${completedCard}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed fixture stays checked and struck through in its day');
+          await capture(label + '-calendar-completed-day');
+          await js(`(${completedCard}).querySelector('input').click()`);
+          await waitFor(`!(${completedCard})?.classList.contains('cal-item-completed')`);
+          await showUpcoming();
+          await waitFor(`!!(${completedCard})`);
+          await js(`{ const c=(${completedCard}), animate=c.animate; window._calendarFadeDuration=null; c.animate=function(frames, options) { window._calendarFadeDuration=options.duration; return animate.call(this, frames, options); }; true; }`);
+          await js(`(${completedCard}).querySelector('input').click()`);
+          await waitFor(`!(${completedCard})`);
+          assert.equal(await js("window._calendarFadeDuration"), await js("matchMedia('(prefers-reduced-motion: reduce)').matches") ? null : 200, label + ' upcoming completion respects the motion preference');
+          assert.ok(writes.slice(calendarWrites).some(w => w.path === '/api/calendar/events/e-completed' && JSON.parse(w.body).completed === true), label + ' ticking an active local event removes it from Next 7 Days');
+          await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Archive').click()");
+          await waitFor(`document.querySelector('.modal-backdrop:not(.hidden) .modal-panel')?.textContent.includes(${JSON.stringify(completed.title)})`);
+          await js("document.querySelector('.modal-backdrop:not(.hidden) .modal-close-btn').click()");
           await waitFor("[...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
           assert.ok(await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).textContent.includes('School')"), label + " Calendar names the tab source");
-          // Toggle it either way (desktop leaves it ticked): each layout must send its own PATCH.
-          const wasChecked = await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).querySelector('input[type=checkbox]').checked");
           await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).querySelector('input[type=checkbox]').click()");
-          await waitFor(`[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project'))?.querySelector('input').checked === ${!wasChecked}`);
+          await waitFor(`!(${card('Review the course project')})`);
           // The PATCH goes out just after the box ticks; poll for it.
           for (let i = 0; i < 80 && !writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"); i++) await delay(50);
           assert.ok(writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"), label + " Calendar PATCHes the tab toggle URL");
+          const tabEvent = calendarFixtures.events.find(e => e.source === 'tab');
+          await showDay(tabEvent.start);
+          await waitFor(`(${card(tabEvent.title)})?.classList.contains('cal-item-completed')`);
+          assert.ok(await js(`getComputedStyle((${card(tabEvent.title)}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed tab item remains struck through in its day');
+          await js(`(${card(tabEvent.title)}).querySelector('input').click()`);
+          await waitFor(`!(${card(tabEvent.title)})?.classList.contains('cal-item-completed')`);
+          await showUpcoming();
+          await waitFor(`!!(${card(tabEvent.title)})`);
+
+          const googleEvent = calendarFixtures.googleEvents[0];
+          const previousCompleted = googleEvent.completed;
+          googleEvent.completed = true;
+          await showUpcoming();
+          assert.equal(await js(`!!(${card(googleEvent.title)})`), false, label + ' completed Google item is absent from Next 7 Days');
+          await showDay(googleEvent.start);
+          await waitFor(`(${card(googleEvent.title)})?.classList.contains('cal-item-completed')`);
+          assert.ok(await js(`getComputedStyle((${card(googleEvent.title)}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed Google item remains struck through in its day');
+          if (previousCompleted === undefined) delete googleEvent.completed;
+          else googleEvent.completed = previousCompleted;
+
+          const weekItems = [...calendarFixtures.events, ...calendarFixtures.googleEvents];
+          const completionStates = weekItems.map(item => item.completed);
+          weekItems.forEach(item => { item.completed = true; });
+          await showUpcoming();
+          assert.equal(await js("document.querySelector('.cal-day-panel .empty-state')?.textContent"), 'Nothing coming up.', label + ' a completed week uses the existing empty state');
+          assert.equal(await js("document.querySelectorAll('.cal-day-panel .card, .cal-upcoming-day-label').length"), 0);
+          await capture(label + '-calendar-completed-week');
+          weekItems.forEach((item, index) => {
+            if (completionStates[index] === undefined) delete item.completed;
+            else item.completed = completionStates[index];
+          });
+          await showUpcoming();
+          await waitFor(`!!(${card(tabEvent.title)})`);
+          await capture(label + '-calendar-upcoming-active');
           writes.splice(calendarWrites);
           await require('./google-workspace-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
           await require('./lifecycle-calendar-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
@@ -1615,6 +1673,15 @@ app.whenReady().then(async () => {
     await navigate("chat");
     assert.equal(await js("window.__viewTransitions"), transitionsBefore, "Reduced motion skips the Home and Chat transitions");
     await js("document.startViewTransition = window.__startViewTransition; true");
+    const reducedCalendarWrites = writes.length;
+    await navigate('calendar');
+    await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+    await waitFor("document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days' && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    await js("{ const c=[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
+    await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    assert.equal(await js("window._reducedCalendarFade"), false, 'Reduced motion removes completed upcoming items without animation');
+    mutate('/api/tab-school/assignments/a1', 'PATCH', { completed: false });
+    writes.splice(reducedCalendarWrites);
     // Home's "Your models" shows each subscription's limits as the overlay does
     // (quotaReadings.js), once per account, with signed-out and stale states.
     await navigate("home");
