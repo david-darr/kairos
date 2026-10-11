@@ -34,7 +34,6 @@ async function loadFiles(current) {
       if (!group.length) continue;
       body.append(el('div', { class: 'chat-files-group-heading' }, [el('h3', { class: 'chat-files-heading', text: heading }),
         el('button', { type: 'button', class: 'btn quiet', text: 'Open all', onclick: async () => {
-          closeChatFiles();
           for (const file of group.filter(file => file.exists)) await openArtifact(current.sessionId, file.url, file.name, null, { background: true });
         } })]));
       for (const file of group) {
@@ -44,12 +43,11 @@ async function loadFiles(current) {
           el('span', { class: 'meta', text: file.exists ? sizeLabel(file.size) : 'No longer available' }),
         ]);
         button.onclick = event => {
-          closeChatFiles();
           openArtifact(current.sessionId, file.url, file.name, button, { background: event.ctrlKey || event.metaKey });
         };
         button.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
         button.addEventListener('auxclick', event => {
-          if (event.button === 1 && file.exists) { event.preventDefault(); closeChatFiles(); openArtifact(current.sessionId, file.url, file.name, button, { background: true }); }
+          if (event.button === 1 && file.exists) { event.preventDefault(); openArtifact(current.sessionId, file.url, file.name, button, { background: true }); }
         });
         body.append(button);
       }
@@ -65,7 +63,7 @@ export function refreshChatFiles(sessionId) {
 
 export function openChatFiles(sessionId) {
   if (!sessionId) return;
-  closeChatFiles();
+  if (pane?.sessionId === sessionId) return;
   const host = document.querySelector('.chat-layout');
   if (!host) return;
   const body = el('div', { class: 'chat-files-body' });
@@ -76,9 +74,12 @@ export function openChatFiles(sessionId) {
     body,
   ]);
   const onKey = event => { if (event.key === 'Escape') { event.preventDefault(); closeChatFiles(); } };
-  pane = { panel, body, sessionId, onKey };
-  refresh.onclick = () => loadFiles(pane);
+  const nextPane = { panel, body, sessionId, onKey };
+  // Let the shared mount release the old registration before publishing this
+  // pane, so a replacement never clears the split between two paints.
+  nextPane.layout = mountChatPane(host, panel, closeChatFiles);
+  pane = nextPane;
+  refresh.onclick = () => loadFiles(nextPane);
   document.addEventListener('keydown', onKey);
-  pane.layout = mountChatPane(host, panel, closeChatFiles);
-  loadFiles(pane);
+  loadFiles(nextPane);
 }

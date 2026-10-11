@@ -261,6 +261,8 @@
 .artifact-panel { flex: 0 0 clamp(330px, 38vw, 660px); min-width: 0; display: flex; flex-direction: column; background: var(--bg-panel); border-left: 1px solid var(--border); animation: artifact-enter 220ms var(--ease-out, ease-out); }
 .artifact-viewer, .chat-files-panel { animation: none; } /* The shared pane mount animates retained documents too. */
 .chat-pane-resizer { display: none; }
+/* Clip content while its region grows from zero, including wide previews. */
+.chat-layout.pane-opening > .artifact-panel { overflow: hidden; }
 @media (min-width: 1101px) {
   .chat-layout.has-pane #chat-main {
     flex: 0 0 auto; width: clamp(380px, var(--chat-pane-width), 70%); /* matches MAX_SHARE in chatPaneLayout.js */
@@ -277,6 +279,7 @@
   .chat-pane-resizer:focus-visible { outline: 2px solid var(--accent); }
   .chat-layout.pane-dragging { cursor: col-resize; user-select: none; }
   .chat-layout.pane-dragging #chat-main { transition: none; }
+  .chat-layout.pane-opening #chat-main { transition: none; }
   /* Embedded previews cannot steal a captured drag. */
   .chat-layout.pane-dragging iframe { pointer-events: none; }
   .chat-layout.pane-maximized > #chat-main,

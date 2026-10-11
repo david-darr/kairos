@@ -17,6 +17,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
   // Capture the painted width before replacing a pane. An auto width cannot
   // transition to the fixed split width in CSS, so interpolate pixels once.
   const openingWidth = main?.getBoundingClientRect().width;
+  const replacingPane = current?.host === host && host.classList.contains('has-pane');
   current?.close();
   let preferred = null; // null: the default share of whatever room there is
   try {
@@ -29,7 +30,16 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
   let pointer = null, startX = 0, startWidth = 0;
   let maximized = false;
   let entrance = [];
-  const stopEntrance = () => { for (const animation of entrance) animation.cancel(); entrance = []; };
+  const stopEntrance = () => {
+    for (const animation of entrance) animation.cancel();
+    entrance = [];
+    if (host.classList.contains('pane-opening')) {
+      // Settle the underlying split while CSS transitions are disabled.
+      // Re-enabling them during cancellation would start a second animation.
+      main?.getBoundingClientRect();
+      host.classList.remove('pane-opening');
+    }
+  };
   const inertBefore = new Map();
   const maximum = () => Math.max(MIN_WIDTH, Math.floor(host.clientWidth * MAX_SHARE));
   const clamp = width => Math.max(MIN_WIDTH, Math.min(maximum(), width));
@@ -101,24 +111,44 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
     if (window.innerWidth <= 1100) { stopDrag(); setMaximized(false); }
     sync();
   };
+  const animateDocuments = !replacingPane && (panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel'))
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const split = window.innerWidth > 1100 && main && !host.classList.contains('forge-conversation');
+  // Disable the CSS resize transition before installing the split, including
+  // replacements and reduced motion. Only the shared entrance owns opening.
+  if (split) host.classList.add('pane-opening');
   host.classList.add('has-pane');
   host.append(handle);
   if (host.moveBefore && panel.isConnected) host.moveBefore(panel, null);
   else host.append(panel);
   sync();
-  if ((panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel'))
-      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const timing = { duration: 220, easing: 'cubic-bezier(.22, 1, .36, 1)' };
+  const targetWidth = main?.getBoundingClientRect().width;
+  if (animateDocuments) {
+    const timing = { duration: 300, easing: 'cubic-bezier(.22, 1, .36, 1)' };
     entrance.push(panel.animate([{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }], timing));
-    if (window.innerWidth > 1100 && main && !host.classList.contains('forge-conversation')) {
-      const targetWidth = main.getBoundingClientRect().width;
-      entrance.push(main.animate([{ width: `${openingWidth}px` }, { width: `${targetWidth}px` }], timing));
+    if (split) {
+      // Measure the settled CSS split, including its saved-width clamp.
+      const animation = main.animate([{ width: `${openingWidth}px` }, { width: `${targetWidth}px` }], timing);
+      entrance.push(animation);
+      animation.onfinish = () => {
+        if (!entrance.includes(animation)) return;
+        main.getBoundingClientRect();
+        host.classList.remove('pane-opening');
+      };
     }
   }
-  const observer = new ResizeObserver(sync);
+  if (!animateDocuments) host.classList.remove('pane-opening');
+  let hostWidth = host.clientWidth;
+  const observer = new ResizeObserver(() => {
+    if (host.clientWidth !== hostWidth) { stopEntrance(); hostWidth = host.clientWidth; }
+    sync();
+  });
   observer.observe(host);
   window.addEventListener('resize', onWindowResize);
-  const registration = current = { close };
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const onMotionChange = () => { if (motion.matches) stopEntrance(); };
+  motion.addEventListener('change', onMotionChange);
+  const registration = current = { close, host };
   return {
     isMaximized: () => maximized,
     setMaximized,
@@ -126,6 +156,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
       stopEntrance();
       stopDrag(); setMaximized(false);
       observer.disconnect(); window.removeEventListener('resize', onWindowResize);
+      motion.removeEventListener('change', onMotionChange);
       handle.remove();
       host.classList.remove('has-pane', 'pane-dragging');
       host.style.removeProperty('--chat-pane-width');
