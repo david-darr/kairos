@@ -3,6 +3,7 @@ import { ICONS } from "../icons.js";
 import { pill } from "../settingsKit.js";
 import { shareButton, githubStrip } from "../storePublish.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
+import { addReaIntegration } from "../reaSetup.js";
 
 // Browse what Kairos can use. Skill content and live MCP tool schemas stay
 // behind their own read/describe calls; this view only loads catalog metadata.
@@ -243,7 +244,7 @@ export async function render(container) {
       (!q || `${item.name} ${item.description || ""}`.toLowerCase().includes(q)) &&
       (!state.installed || item.added));
     const custom = !["all", "tools"].includes(state.kind) ? [] : state.integrations.filter((item) => item.kind === "mcp_server" &&
-      !state.servers.some((server) => server.url.replace(/\/$/, "") === (item.url || "").replace(/\/$/, "")) &&
+      !state.servers.some((server) => matchesCatalogServer(server, item)) &&
       (!q || `${item.name} ${item.url || ""}`.toLowerCase().includes(q)));
     const tabs = ["all", "tabs"].includes(state.kind) ? state.tabs.filter((item) =>
       (!q || `${item.slug} ${item.name} ${item.blurb || ""} ${item.description} ${item.detail || ""} ${item.reads || ""} ${item.status} ${item.reason || ""}`.toLowerCase().includes(q)) &&
@@ -670,7 +671,7 @@ export async function render(container) {
 
   function toolCard(server) {
     const integration = state.integrations.find((item) => item.kind === "mcp_server" &&
-      (item.url || "").replace(/\/$/, "") === server.url.replace(/\/$/, ""));
+      matchesCatalogServer(server, item));
     const connected = server.added && (server.auth !== "oauth" || !!integration?.signed_in);
     const actionHost = el("div", { class: "tool-store-action" });
     let action;
@@ -684,16 +685,17 @@ export async function render(container) {
       action.addEventListener("click", async () => {
         action.disabled = true;
         try {
-          const item = await api("/api/integrations/mcp-server", {
+          const item = server.id === "rea" ? await addReaIntegration() : await api("/api/integrations/mcp-server", {
             method: "POST",
             body: JSON.stringify({ name: server.name, mcp_type: "http", url: server.url,
               ...(server.auth === "oauth" ? { auth: "oauth" } : {}) }),
           });
+          if (!item) { action.disabled = false; return; }
           server.added = true;
           state.integrations.push(item);
           if (server.auth === "oauth") await signIn(item.id, server.name, actionHost);
           else { toast(`${server.name} added`, "success"); draw(); }
-        } catch { action.disabled = false; }
+        } catch (error) { toast(error.message, "error"); action.disabled = false; }
       });
     }
     actionHost.append(action);
@@ -713,6 +715,11 @@ export async function render(container) {
         state.admin && integration?.mcp_type === "http" ? shareButton("tool", integration.id) : null,
       ]),
     ]);
+  }
+
+  function matchesCatalogServer(server, item) {
+    if (server.id === "rea") return item.rea_managed === true;
+    return (server.url || "").replace(/\/$/, "") === (item.url || "").replace(/\/$/, "");
   }
 
   function customToolCard(item) {

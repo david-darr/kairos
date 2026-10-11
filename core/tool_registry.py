@@ -49,6 +49,7 @@ from core import image_gen, memory_tools
 CLAUDE, OPENAI, CODEX = "claude", "openai", "codex"
 BOTH = frozenset({CLAUDE, OPENAI})
 ALL = frozenset({CLAUDE, OPENAI, CODEX})
+CODEX_ONLY = frozenset({CODEX})
 READ, WRITE, EXEC, EXTERNAL = "read", "write", "exec", "external"
 SMALL_WINDOW = 32768
 
@@ -1209,3 +1210,51 @@ async def _agent_ask(args, ctx):
     item = agent_service.add_item(ctx.agent_id, "question", args["question"], args.get("context") or "")
     agent_service.notify(item)
     return "Your question is in the person's inbox. Finish what you can and stop; the answer comes with your next run."
+
+
+# Codex CLI does not consume Kairos's per-chat MCP configuration. These three
+# bridge tools keep REA's evidence session in Kairos and use the same pinning
+# and permission broker as the other model paths.
+@register(
+    "rea_search_tools",
+    "Search the REA reverse-engineering tools selected for this chat by task or target type. "
+    "Call this before rea_describe_tool and rea_call_tool.",
+    _object({"query": _str("What to analyze or do"), "limit": {"type": "integer"}}, ("query",)),
+    surfaces=CODEX_ONLY,
+)
+async def _rea_search_tools(args, ctx):
+    from core import rea_bridge
+    result = await rea_bridge.search(ctx.session_id, str(args.get("query") or ""), args.get("limit") or 8)
+    if ctx.turn_taint and result.startswith("["):
+        ctx.turn_taint.mark("REA tool descriptions")
+    return result
+
+
+@register(
+    "rea_describe_tool",
+    "Read the input schema and description of one REA tool before calling it.",
+    _object({"name": _str("Exact tool name from rea_search_tools")}, ("name",)),
+    surfaces=CODEX_ONLY,
+)
+async def _rea_describe_tool(args, ctx):
+    from core import rea_bridge
+    result = await rea_bridge.describe(ctx.session_id, str(args.get("name") or ""))
+    if ctx.turn_taint and result.startswith("{"):
+        ctx.turn_taint.mark("REA tool schema")
+    return result
+
+
+@register(
+    "rea_call_tool",
+    "Call one approved REA analysis tool in this chat's persistent REA session. "
+    "Uses Kairos's permission rules; inspect its schema first.",
+    _object({"name": _str("Exact REA tool name"), "arguments": {"type": "object"}}, ("name", "arguments")),
+    surfaces=CODEX_ONLY, effect=EXTERNAL,
+)
+async def _rea_call_tool(args, ctx):
+    from core import rea_bridge
+    result = await rea_bridge.call(ctx.session_id, str(args.get("name") or ""),
+                                   args.get("arguments") or {}, ctx.permission_surface, ctx.is_admin)
+    if ctx.turn_taint and not result.startswith(("Not run:", "Tool error:")):
+        ctx.turn_taint.mark("REA result")
+    return result

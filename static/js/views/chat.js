@@ -1394,7 +1394,7 @@ async function openIntegrationsModal() {
     activeSessionId ? api(`/api/sessions/${activeSessionId}`) : null,
   ]);
   const mcpIntegrations = allIntegrations.filter((i) => i.kind === "mcp_server");
-  const enabledIds = session ? session.enabled_integration_ids : null; // null = all enabled
+  const enabledIds = session ? session.enabled_integration_ids : null; // null = ordinary servers, not REA
 
   if (mcpIntegrations.length === 0) {
     modal.body.appendChild(el("div", { class: "workspace-empty", text: "No MCP Tool Server integrations added yet — add one in Settings > Integrations." }));
@@ -1406,7 +1406,7 @@ async function openIntegrationsModal() {
   const checks = {};
   for (const integ of mcpIntegrations) {
     const cb = el("input", { type: "checkbox" });
-    cb.checked = enabledIds === null || enabledIds.includes(integ.id);
+    cb.checked = enabledIds === null ? !integ.rea_managed : enabledIds.includes(integ.id);
     checks[integ.id] = cb;
     modal.body.appendChild(el("label", { class: "workspace-row", style: "cursor:pointer;" }, [
       cb,
@@ -1417,10 +1417,9 @@ async function openIntegrationsModal() {
   modal.saveBtn.onclick = async () => {
     if (!activeSessionId) { closeIntegrationsModal(); return; }
     const checkedIds = Object.entries(checks).filter(([, cb]) => cb.checked).map(([id]) => id);
-    // All checked -> store null ("every registered one," including future
-    // additions) rather than a literal id list that would silently exclude
-    // a newly added integration next time.
-    const allChecked = checkedIds.length === mcpIntegrations.length;
+    // A selected REA must stay explicit; null means only ordinary servers.
+    const allChecked = checkedIds.length === mcpIntegrations.length &&
+      !mcpIntegrations.some((item) => item.rea_managed);
     await api(`/api/sessions/${activeSessionId}/integrations`, {
       method: "POST",
       body: JSON.stringify({ enabled_integration_ids: allChecked ? null : checkedIds }),

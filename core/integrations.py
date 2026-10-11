@@ -72,6 +72,8 @@ def _masked(item: dict) -> dict:
         out["has_api_key"] = bool(item.get("api_key_encrypted"))
     elif item["kind"] == "mcp_server":
         out["mcp_type"] = item.get("mcp_type")
+        from core.rea_integration import is_rea
+        out["rea_managed"] = is_rea(item)
         if item.get("mcp_type") == "stdio":
             out["command"] = item.get("command", "")
             out["args"] = item.get("args", [])
@@ -107,8 +109,16 @@ def mcp_catalog() -> list[dict]:
     import json
     with open(CATALOG_FILE, encoding="utf-8") as f:
         servers = json.load(f)["servers"]
+    # REA is a local command rather than a hosted HTTP endpoint. Keep it
+    # separate from the Hermes-sourced JSON catalog and its regeneration rule.
+    from core.rea_integration import REA_PACKAGE, existing
+    servers.append({"id": "rea", "name": "REA", "description":
+                    "Inspect applications, websites, JavaScript, binaries and runtime behavior with evidence.",
+                    "transport": "stdio", "auth": "none", "package": REA_PACKAGE,
+                    "docs": "https://github.com/morluto/rea"})
     added = {(i.get("url") or "").rstrip("/") for i in _load().values() if i.get("kind") == "mcp_server"}
-    return [{**s, "added": (s.get("url") or "").rstrip("/") in added} for s in servers]
+    return [{**s, "added": bool(existing()) if s["id"] == "rea" else
+             (s.get("url") or "").rstrip("/") in added} for s in servers]
 
 
 def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, dict]:
@@ -117,13 +127,15 @@ def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, 
 
     `only_ids` restricts to specific integrations (David's ask 2026-08-31,
     Claude-style per-conversation connector toggle — see
-    core/session_manager.py's enabled_integration_ids); None (the default)
-    keeps every registered MCP server available, matching the original
-    global behavior."""
+    core/session_manager.py's enabled_integration_ids). None keeps ordinary
+    registered servers available; REA is opt-in per chat or agent."""
     servers = {}
+    from core.rea_integration import is_rea
     for item in _load().values():
         if item["kind"] != "mcp_server" or not item.get("enabled", True):
             continue
+        if only_ids is None and is_rea(item):
+            continue  # REA needs an explicit choice in this chat or agent.
         if only_ids is not None and item["id"] not in only_ids:
             continue
         api_key = decrypt(item["api_key_encrypted"]) if item.get("api_key_encrypted") else None
@@ -133,6 +145,8 @@ def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, 
                                    "args": ["-I", CLEAN_LAUNCHER, "--", item["command"], *(item.get("args") or [])]}
             if api_key:
                 cfg["env"] = {"MCP_API_KEY": api_key}
+            if is_rea(item):
+                cfg.setdefault("env", {})["REA_MCP_INPUT_SCHEMA_PROFILE"] = "compact"
         else:
             cfg = {"type": "http", "url": item["url"]}
             if item.get("auth") == "oauth":
@@ -204,8 +218,10 @@ def reference_tools(only_ids=None, user=None, is_admin=False, surface="claude") 
     must not launch a server, refresh credentials or change a pin.
     """
     found = []
+    from core.rea_integration import is_rea
     for item in _load().values():
         if (item.get("kind") != "mcp_server" or not item.get("enabled", True)
+                or (only_ids is None and is_rea(item))
                 or (only_ids is not None and item["id"] not in only_ids)
                 or (item.get("admin_only") and not is_admin)
                 or (item.get("owner") and item["owner"] != user and not is_admin)

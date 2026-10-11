@@ -2238,12 +2238,15 @@ class McpClientTests(unittest.TestCase):
         self.assertEqual(mcp_client.function_name("my server", "do.thing", taken), "mcp__my_server__do_thing_2")
         self.assertLessEqual(len(mcp_client.function_name("s" * 80, "t" * 80, set())), 64)
 
-    def test_the_catalog_lists_hermes_servers_and_marks_those_added(self):
+    def test_the_catalog_lists_hermes_servers_and_local_rea_and_marks_those_added(self):
         from core import integrations
         catalog = integrations.mcp_catalog()
-        self.assertEqual(len(catalog), 65)
-        self.assertEqual(sum(1 for s in catalog if s["auth"] == "none"), 10)
-        self.assertTrue(all(s["url"] and s["name"] and s["description"] for s in catalog))
+        self.assertEqual(len(catalog), 66)
+        self.assertEqual(sum(1 for s in catalog if s["auth"] == "none"), 11)
+        self.assertTrue(all(s["name"] and s["description"] and (s.get("url") or s.get("package")) for s in catalog))
+        rea = next(s for s in catalog if s["id"] == "rea")
+        self.assertEqual(rea["transport"], "stdio")
+        self.assertFalse(rea["added"])
         deepwiki = next(s for s in catalog if s["id"] == "deepwiki")
         self.assertFalse(deepwiki["added"])
         item = integrations.create_mcp_server("DeepWiki", "http", url=deepwiki["url"])

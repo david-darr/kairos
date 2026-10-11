@@ -5,12 +5,11 @@ registered ones). OpenAI-compatible models - local and API - had no way to
 use them at all; this gives them the same servers, through the official `mcp`
 package's client.
 
-Each listing and each call opens its own short connection rather than one
-held for the whole chat: a connection lives inside an async task scope, and a
-chat's turns run in different request tasks, so a long-lived one could not
-be closed where it was opened. Servers are the same runtime configs Claude
-gets (core/integrations.list_mcp_servers_runtime): http with an optional
-bearer key, or a stdio command.
+Ordinary listings and calls open short connections. REA uses PersistentClient:
+its event-loop thread owns a connection across chat turns so evidence IDs stay
+valid until disconnect. Servers use the same runtime configs Claude gets
+(core/integrations.list_mcp_servers_runtime): http with an optional bearer key,
+or a stdio command.
 
 Every listing is also a health check (roadmap phase 6, 2026-10-06): its
 result is kept on the integration (core/integrations.record_check), and a
@@ -19,6 +18,9 @@ out of what a chat is offered.
 """
 import logging
 import re
+import asyncio
+import concurrent.futures
+import threading
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -59,12 +61,82 @@ async def call_tool(config: dict, tool: str, arguments: dict) -> str:
     anything else named rather than dropped silently."""
     async with _client(config, CALL_TIMEOUT_SECONDS) as client:
         result = await client.call_tool(tool, arguments or {})
+    return _tool_text(result)
+
+
+def _tool_text(result) -> str:
     parts = []
     for block in result.content or []:
         text = getattr(block, "text", None)
         parts.append(text if text is not None else f"[{getattr(block, 'type', 'non-text')} content not shown]")
     text = "\n".join(parts) or "(the tool returned nothing)"
     return f"Tool error from the server: {text}" if getattr(result, "is_error", False) else text
+
+
+class PersistentClient:
+    """Keep one MCP process and its evidence in a dedicated event-loop thread.
+
+    A chat's turns run in separate request tasks, so an async context held in
+    connect() cannot safely cross those tasks. REA needs one process across
+    calls because retained Evidence IDs exist only in that process.
+    """
+
+    def __init__(self, config: dict):
+        self.config = config
+        self._ready: concurrent.futures.Future = concurrent.futures.Future()
+        self._loop = None
+        self._client = None
+        self._stop = None
+        self._close_requested = False
+        self._thread = threading.Thread(target=self._thread_main, name="rea-mcp", daemon=True)
+
+    def _thread_main(self):
+        async def serve():
+            async with _client(self.config, CALL_TIMEOUT_SECONDS) as client:
+                self._client = client
+                self._loop = asyncio.get_running_loop()
+                self._stop = asyncio.Event()
+                self._ready.set_result(True)
+                if self._close_requested:
+                    self._stop.set()
+                await self._stop.wait()
+        try:
+            asyncio.run(serve())
+        except BaseException as exc:
+            if not self._ready.done():
+                self._ready.set_exception(exc)
+            else:
+                logger.warning("persistent REA MCP connection closed: %s", exc)
+
+    async def start(self) -> None:
+        self._thread.start()
+        await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(self._ready)), timeout=60)
+
+    async def _submit(self, coroutine, timeout: float):
+        if not self._thread.is_alive() or self._loop is None:
+            coroutine.close()
+            raise RuntimeError("REA MCP connection closed")
+        result = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        return await asyncio.wait_for(asyncio.wrap_future(result), timeout=timeout)
+
+    async def list_tools(self) -> list[dict]:
+        async def get():
+            return await self._client.list_tools()
+        result = await self._submit(get(), LIST_TIMEOUT_SECONDS)
+        return [{"name": tool.name, "description": tool.description or "",
+                 "schema": tool.input_schema or {"type": "object", "properties": {}}}
+                for tool in result.tools]
+
+    async def call_tool(self, tool: str, arguments: dict) -> str:
+        async def call():
+            return await self._client.call_tool(tool, arguments or {})
+        return _tool_text(await self._submit(call(), CALL_TIMEOUT_SECONDS))
+
+    async def close(self) -> None:
+        self._close_requested = True
+        if self._loop is not None and self._stop is not None and self._thread.is_alive():
+            self._loop.call_soon_threadsafe(self._stop.set)
+            await asyncio.to_thread(self._thread.join, 10)
 
 
 def function_name(server: str, tool: str, taken: set[str]) -> str:
