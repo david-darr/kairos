@@ -973,15 +973,18 @@ def calendar_items(user, start, end):
         self.folder("beta")
         self.client.post("/api/system/tab-templates/alpha", json={"enabled": True}).raise_for_status()
         old = sys.modules["kairos_tabs.alpha.hooks"]
+        service = sys.modules["kairos_tabs.alpha.service"]
+        service.answer = 99
         self.assertEqual(old.events, ["start"])
         self.client.post("/api/system/tab-templates/alpha", json={"enabled": False}).raise_for_status()
         self.assertEqual(old.events, ["start", "stop"])
         self.assertEqual(self.client.get("/fixture/alpha").status_code, 409)
         self.client.post("/api/system/tab-templates/alpha", json={"enabled": True}).raise_for_status()
         current = sys.modules["kairos_tabs.alpha.hooks"]
-        self.assertIsNot(old, current)
-        self.assertEqual(current.events, ["start"])
-        self.assertEqual(self.client.get("/fixture/alpha").status_code, 200)
+        self.assertIs(old, current)
+        self.assertEqual(current.events, ["start", "stop", "start"])
+        self.assertIs(sys.modules["kairos_tabs.alpha.service"], service)
+        self.assertEqual(self.client.get("/fixture/alpha").json(), {"answer": 99})
         folder = self.users / "beta"
         (folder / "hooks.py").write_text((self.prebuilt / "alpha/hooks.py").read_text(), encoding="utf-8")
         meta = json.loads((folder / "tab.json").read_text())

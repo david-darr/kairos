@@ -68,6 +68,22 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   assert.equal(restored.deliver_to_channel, original.deliver_to_channel, label + ' reenable keeps delivery');
 
   await navigate('calendar');
+  assert.ok(await js("import('/static/js/googleCalendar.js').then(m=>{ const day=new Date(2031,0,31); return m.itemsOnDay([{start:day.toISOString(),end:day.toISOString(),source:'note'}],day).length===1; })"), label + ' midnight note deadlines remain visible');
+  // A legacy inclusive all-day end must load as the equivalent exclusive
+  // boundary, relative to the event's date instead of today's date.
+  for (const lastDate of ['2031-01-31', '2031-02-02']) {
+    await show({ id: 'legacy-editor-fixture', source: 'calendar', title: 'Legacy all-day event',
+      all_day: true, start: '2031-01-31', end: lastDate });
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-01-31');
+    assert.equal(await js("document.querySelector('[aria-label=End]').value"), lastDate === '2031-01-31' ? '2031-02-01' : '2031-02-03');
+    await js("document.querySelector('.cal-checkbox-label input').click()");
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-01-31T09:00');
+    await change('[aria-label="Start"]', '2031-03-10T10:00');
+    await js("document.querySelector('.cal-checkbox-label input').click()");
+    assert.equal(await js("document.querySelector('[aria-label=Start]').value"), '2031-03-10');
+    assert.equal(await js("document.querySelector('[aria-label=End]').value"), '2031-03-11');
+    await js("[...document.querySelectorAll('.cal-event-dialog button')].find(b=>b.textContent==='Cancel').click()");
+  }
   for (const google of [false, true]) {
     const name = `${label} ${google ? 'Google' : 'Kairos'} repeated event`;
     await show(null, google);
@@ -128,6 +144,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     await waitFor("!!document.querySelector('[aria-label=\"Delete recurring event\"]')");
     await change('[aria-label="Delete recurring event"]', 'series');
     await shot(label + (google ? '-google' : '-local') + '-repeat-delete-scope');
+    assert.ok(await js("[...document.querySelectorAll('.panel-dialog .modal-footer button')].every(b => b.getClientRects().length && getComputedStyle(b).opacity === '1' && getComputedStyle(b.parentElement).opacity === '1')"), label + ' delete dialog buttons are visible without hovering');
     before = writes.length;
     await js("document.querySelector('.panel-dialog .btn.danger').click()");
     const seriesDeletion = await requestAfter(writes, before, w => google ? w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'delete' : w.path.startsWith('/api/calendar/events/') && w.method === 'DELETE');

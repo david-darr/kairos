@@ -69,6 +69,81 @@ class LocalCalendarTests(unittest.TestCase):
         self.assertEqual([e["start"][:10] for e in before], ["2026-10-25", "2026-10-27", "2026-10-29"])
         self.assertEqual([e["id"] for e in before], [e["id"] for e in module.CalendarService().list_range("2026-10-01T00:00:00Z", "2026-12-01T00:00:00Z")])
 
+    def test_every_frequency_with_intervals_count_and_until_for_all_day(self):
+        for frequency, expected in (("daily", ["2026-01-31", "2026-02-02", "2026-02-04"]),
+                                    ("weekly", ["2026-01-31", "2026-02-14", "2026-02-28"]),
+                                    ("monthly", ["2026-01-31", "2026-03-31", "2026-05-31"])):
+            for ending in ({"count": 3}, {"until": expected[-1]}):
+                with self.subTest(frequency=frequency, ending=ending):
+                    self.calendar._events = {}
+                    self.create(start="2026-01-31", end="2026-02-02", all_day=True,
+                        recurrence={"frequency": frequency, "interval": 2, **ending})
+                    events = self.calendar.list_for_dates("2026-01-01", "2026-06-01")
+                    self.assertEqual([e["start"] for e in events], expected)
+                    self.assertTrue(all(e["end_exclusive"] for e in events))
+
+    def test_spring_dst_keeps_daily_start_and_end_wall_clock(self):
+        self.create(start="2026-03-07T09:00:00", end="2026-03-07T10:00:00",
+                    recurrence={"frequency": "daily", "count": 3})
+        events = self.listing("2026-03-07T00:00:00Z", "2026-03-10T00:00:00Z")
+        self.assertEqual([e["start"][11:] for e in events], ["09:00:00-05:00", "09:00:00-04:00", "09:00:00-04:00"])
+        self.assertEqual([e["end"][11:19] for e in events], ["10:00:00"] * 3)
+
+    def test_monthly_interval_is_anchored_even_after_skipping_a_missing_day(self):
+        self.create(start="2026-01-31T09:00:00", end="2026-01-31T10:00:00",
+                    recurrence={"frequency": "monthly", "interval": 3, "count": 3})
+        self.assertEqual([e["start"][:10] for e in self.listing("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z")],
+                         ["2026-01-31", "2026-07-31", "2026-10-31"])
+
+    def test_expansion_has_per_series_and_combined_limits_and_validates_ranges(self):
+        self.create(recurrence={"frequency": "daily"})
+        with patch.object(repeats, "MAX_OCCURRENCES", 3), self.assertRaisesRegex(ValueError, "shorter range"):
+            self.listing()
+        self.calendar._events = {}
+        for _ in range(2):
+            self.create(recurrence={"frequency": "weekly", "count": 2})
+        with patch.object(repeats, "MAX_OCCURRENCES", 3), self.assertRaisesRegex(ValueError, "shorter range"):
+            self.listing()
+        self.calendar._events = {}
+        for start, end in (("bad", "2026-10-01"), ("2026-10-02", "2026-10-01"), ("2026-10-01", "2026-10-01")):
+            with self.subTest(start=start, end=end), self.assertRaises(ValueError):
+                self.listing(start, end)
+        with self.assertRaises(ValueError):
+            self.calendar.list_for_dates("2026-10-02", "2026-10-01")
+
+    def test_old_monthly_series_seeks_to_the_requested_month(self):
+        self.create(start="0001-01-31", end="0001-02-01", all_day=True, recurrence={"frequency": "monthly"})
+        with patch.object(repeats.calendar, "monthrange", wraps=repeats.calendar.monthrange) as months:
+            events = self.calendar.list_for_dates("2026-10-01", "2026-11-01")
+        self.assertEqual([e["start"] for e in events], ["2026-10-31"])
+        self.assertLessEqual(months.call_count, 4)
+
+    def test_datetime_calendar_edges_do_not_overflow(self):
+        self.create(start="0001-01-01", end="0001-01-02", all_day=True, recurrence={"frequency": "daily"})
+        self.assertEqual(len(self.calendar.list_for_dates("0001-01-01", "0001-01-01")), 1)
+        self.calendar._events = {}
+        self.create(start="9999-12-30", end="9999-12-31", all_day=True, recurrence={"frequency": "daily"})
+        self.assertEqual(len(self.calendar.list_for_dates("9999-12-30", "9999-12-31")), 1)
+
+    def test_legacy_stored_data_and_note_due_dates_load_without_migration(self):
+        legacy = {"id": "old", "title": "Old event", "start": "2026-10-25", "end": "2026-10-25",
+                  "all_day": True, "location": "", "description": "", "completed": False, "created_at": 1, "updated_at": 1}
+        Path(module.EVENTS_FILE).write_text(json.dumps({"old": legacy}), encoding="utf-8")
+        loaded = module.CalendarService()
+        before = Path(module.EVENTS_FILE).read_bytes()
+        self.assertEqual(loaded._events, {"old": legacy})
+        note = {"id": "note", "text": "Due note", "due_date": "2026-10-25T12:00:00Z"}
+        with patch.object(module.notes_service, "list_due_between", return_value=[note]):
+            self.assertEqual({e["source"] for e in loaded.list_range("2026-10-25T00:00:00Z", "2026-10-26T00:00:00Z")}, {"calendar", "note"})
+        self.assertEqual(Path(module.EVENTS_FILE).read_bytes(), before)
+
+    def test_legacy_timed_point_is_visible_at_the_start_of_the_range(self):
+        legacy = {"id": "point", "title": "Deadline", "start": "2026-10-25T00:00:00Z", "end": "2026-10-25T00:00:00Z",
+                  "all_day": False, "location": "", "description": "", "created_at": 1, "updated_at": 1}
+        self.calendar._events = {"point": legacy}
+        self.assertEqual([e["id"] for e in self.listing("2026-10-25T00:00:00Z", "2026-10-26T00:00:00Z")], ["point"])
+        self.assertEqual(self.listing("2026-10-24T00:00:00Z", "2026-10-25T00:00:00Z"), [])
+
     def test_all_day_exclusive_end_and_legacy_feed_day_are_preserved(self):
         self.create(start="2026-10-25", end="2026-10-26", all_day=True,
                     recurrence={"frequency": "weekly", "count": 2})
@@ -113,6 +188,14 @@ class LocalCalendarTests(unittest.TestCase):
         self.assertEqual(moved[0]["start"], "2027-03-02T10:00:00-05:00")
         self.calendar.update_event(master["id"], title="Series renamed")
         self.assertEqual(self.listing()[0]["title"], "Series renamed")
+
+    def test_extended_all_day_occurrence_appears_beyond_its_original_span(self):
+        self.create(start="2026-10-25", end="2026-10-26", all_day=True,
+                    recurrence={"frequency": "weekly", "count": 1})
+        occurrence = self.listing()[0]
+        self.calendar.update_event(occurrence["id"], end="2026-11-05")
+        self.assertEqual([e["id"] for e in self.calendar.list_for_dates("2026-11-03", "2026-11-03")], [occurrence["id"]])
+        self.assertEqual([e["id"] for e in self.listing("2026-11-03T00:00:00Z", "2026-11-04T00:00:00Z")], [occurrence["id"]])
 
     def test_series_edit_and_repeat_removal_do_not_duplicate_masters(self):
         master = self.create()
@@ -187,6 +270,35 @@ class LocalCalendarTests(unittest.TestCase):
 
 
 class GoogleRepeatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_day_google_repeat_count_until_and_series_master(self):
+        fields = {"summary": "Trip", "start": {"date": "2026-01-31"}, "end": {"date": "2026-02-02"},
+                  "repeat": {"frequency": "monthly", "count": 3}}
+        calendar = {"id": "actual", "primary": True, "access_role": "owner"}
+        remote = {"id": "master", **{k: v for k, v in fields.items() if k != "repeat"},
+                  "recurrence": ["RRULE:FREQ=MONTHLY;INTERVAL=1;COUNT=3"]}
+        with patch.object(google, "_calendar_access"), patch.object(google, "request", AsyncMock(return_value=remote)) as request, \
+             patch.object(google, "calendar_list", AsyncMock(return_value=[calendar])):
+            await google.calendar_action("create", event=fields)
+            self.assertEqual(request.call_args.kwargs["body"]["recurrence"], remote["recurrence"])
+            fields["repeat"] = {"frequency": "weekly", "until": "2026-02-28"}
+            await google.calendar_action("update", event_id="master", event=fields)
+            self.assertEqual(request.call_args.kwargs["body"]["recurrence"], ["RRULE:FREQ=WEEKLY;INTERVAL=1;UNTIL=20260228"])
+            mapped = await google.calendar_event("primary", "master")
+            self.assertEqual(mapped["id"], "master")
+            self.assertEqual(mapped["recurrence"], {"frequency": "monthly", "interval": 1, "count": 3})
+            self.assertEqual(request.call_args.args[2], "/calendars/primary/events/master")
+
+    async def test_google_expansion_limit_does_not_cache_partial_results(self):
+        remote = {"id": "event", "start": {"date": "2026-10-01"}, "end": {"date": "2026-10-02"}}
+        google.invalidate_calendar()
+        with patch.object(google, "_calendar_access"), patch.object(repeats, "MAX_OCCURRENCES", 3), \
+             patch.object(google, "calendar_list", AsyncMock(return_value=[{"id": "fixture"}])), \
+             patch.object(google, "request", AsyncMock(return_value={"items": [remote] * 2, "nextPageToken": "next"})) as request:
+            with self.assertRaisesRegex(google.GoogleError, "shorter range"):
+                await google.calendar_events(["fixture"], "2026-10-01T00:00:00Z", "2026-11-01T00:00:00Z")
+            self.assertEqual(request.await_count, 2)
+            self.assertFalse(google._calendar_cache)
+
     async def test_repeat_writes_rrule_and_keeps_iana_zone(self):
         fields = {"summary": "Weekly", "start": {"dateTime": "2026-10-25T09:00:00", "timeZone": "America/New_York"},
                   "end": {"dateTime": "2026-10-25T09:30:00", "timeZone": "America/New_York"},

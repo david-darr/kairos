@@ -287,7 +287,7 @@ async function refresh(list) {
     const card = el("div", { class: "glass bracket card has-row-actions", "data-task": task.id, "data-enabled": String(Boolean(task.enabled)) }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
-          el("div", { class: "title", text: task.name + (task.builtin_action ? " · built-in" : "") + (task.enabled ? "" : "  (disabled)") }),
+          el("div", { class: "title", text: task.name + (task.builtin_action ? " · built-in" : "") }), // off ones sit under "Turned off"
           el("div", { class: "meta", text: schedText }),
         ]),
         el("div", { class: "card-row", style: "gap:6px;" }, [modelSelect, deliverySelect, toggleBtn, task.run_started_at ? stopBtn : runBtn,
