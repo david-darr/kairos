@@ -2,10 +2,10 @@
 // tabs show, and the order and visibility of Home's panels. Rows can be
 // dragged, or moved with their up and down buttons (keyboard and touch);
 // each change saves at once and the sidebar and Home follow (layout.js).
-import { el } from '../api.js';
+import { api, el } from '../api.js';
 import { group, toggle } from '../settingsKit.js';
 import { HOME_SECTIONS, ALWAYS_SHOWN, getLayout, saveLayout, knownTabs, sidebarLayout,
-  resetSidebarLayout, resetHomeLayout } from '../layout.js';
+  resetSidebarLayout, resetHomeLayout, setHomeCards, knownHomeCards } from '../layout.js';
 
 const GROUP_TITLES = { main: 'Top', workspace: 'Workspace', intelligence: 'Intelligence' };
 
@@ -24,9 +24,8 @@ export function renderLayoutPanel(body) {
     const layout = getLayout();
     for (const list of sidebarHost.querySelectorAll('.layout-list')) layout.groups[list.dataset.group] = [...list.children].map((li) => li.dataset.id);
     layout.hiddenTabs = [...sidebarHost.querySelectorAll('.layout-item.is-hidden')].map((li) => li.dataset.id);
-    const homeList = homeHost.querySelector('.layout-list');
-    layout.home = [...homeList.children].map((li) => li.dataset.id);
-    layout.hiddenHome = [...homeList.querySelectorAll('.layout-item.is-hidden')].map((li) => li.dataset.id);
+    layout.home = [...homeHost.querySelectorAll('.layout-item')].map((li) => li.dataset.id);
+    layout.hiddenHome = [...homeHost.querySelectorAll('.layout-item.is-hidden')].map((li) => li.dataset.id);
     saveLayout(layout);
     syncButtons();
   }
@@ -36,10 +35,25 @@ export function renderLayoutPanel(body) {
     const up = el('button', { type: 'button', class: 'layout-move', 'aria-label': `Move ${label} up`, text: '↑', onclick: () => move(li, -1) });
     const down = el('button', { type: 'button', class: 'layout-move', 'aria-label': `Move ${label} down`, text: '↓', onclick: () => move(li, 1) });
     const shown = toggle({ label: `Show ${label}`, checked: !hidden, disabled: lockShown,
-      onChange: (on) => { li.classList.toggle('is-hidden', !on); save(); } });
+      onChange: (on) => {
+        li.classList.toggle('is-hidden', !on);
+        // A tab card joins Home's order when shown and returns to "From
+        // your tabs" when hidden, so the arrows place it among the sections.
+        if (id.startsWith('tab:')) homeHost.querySelector(`.layout-list[data-group="${on ? 'home' : 'home-tabs'}"]`)?.append(li);
+        save();
+      } });
     li.append(el('span', { class: 'layout-handle', 'aria-hidden': 'true', text: '⠿' }), el('span', { class: 'layout-label', text: label }), up, down, shown);
     li.addEventListener('dragstart', (e) => { li.classList.add('is-dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); });
-    li.addEventListener('dragend', () => { li.classList.remove('is-dragging'); save(); });
+    li.addEventListener('dragend', () => {
+      li.classList.remove('is-dragging');
+      // Dropping a tab card into a Home list shows or hides it, like its switch.
+      const group = li.parentElement?.dataset.group;
+      if (id.startsWith('tab:') && (group === 'home' || group === 'home-tabs')) {
+        li.classList.toggle('is-hidden', group === 'home-tabs');
+        shown.checked = group === 'home';
+      }
+      save();
+    });
     return li;
   }
 
@@ -48,6 +62,7 @@ export function renderLayoutPanel(body) {
     const list = li.parentElement;
     const sibling = step < 0 ? li.previousElementSibling : li.nextElementSibling;
     if (sibling) { step < 0 ? sibling.before(li) : sibling.after(li); }
+    else if (list.dataset.group.startsWith('home')) return; // Home's lists mean shown vs. not added
     else {
       const lists = [...li.closest('.layout-lists').querySelectorAll('.layout-list')];
       const next = lists[lists.indexOf(list) + step];
@@ -83,9 +98,20 @@ export function renderLayoutPanel(body) {
       return el('section', { class: 'layout-group' }, [el('h4', { text: GROUP_TITLES[g.id] || g.label }), ol]);
     }));
     const titles = new Map(HOME_SECTIONS.map((s) => [s.id, s.label]));
-    const ol = list('home');
-    ol.append(...layout.home.map((id) => item(id, titles.get(id), layout.hiddenHome.includes(id))));
-    homeHost.replaceChildren(ol);
+    for (const card of knownHomeCards()) titles.set(card.id, `${card.title} (${card.tab_name})`);
+    // Built-in sections and shown tab cards share Home's order; tab cards
+    // not added yet wait under "From your tabs".
+    const ol = list('home'), tabList = list('home-tabs');
+    tabList.dataset.empty = knownHomeCards().length ? 'Every tab card is on Home.' : 'No tab offers a Home card yet.';
+    for (const id of layout.home) {
+      const label = titles.get(id) || `${id.split(':')[2]} (${id.split(':')[1]}, currently unavailable)`;
+      const hidden = layout.hiddenHome.includes(id);
+      (id.startsWith('tab:') && hidden ? tabList : ol).append(item(id, label, hidden));
+    }
+    homeHost.replaceChildren(ol, el('section', { class: 'layout-group' }, [
+      el('h4', { text: 'From your tabs' }),
+      el('p', { class: 'meta', text: 'Turn a card on to add it to Home, then use the arrows to place it.' }), tabList,
+    ]));
     syncButtons();
   }
 
@@ -101,5 +127,12 @@ export function renderLayoutPanel(body) {
   }
 
   draw();
+  api('/api/home/tab-cards').then(result => {
+    if (!homeHost.isConnected || !Array.isArray(result?.cards)) return;
+    setHomeCards(result.cards);
+    draw();
+  }).catch(() => {
+    if (homeHost.isConnected) homeHost.append(el('p', { class: 'meta', text: "Couldn't check tab cards. Reopen Layout to try again." }));
+  });
 }
 

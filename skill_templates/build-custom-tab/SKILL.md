@@ -38,7 +38,7 @@ Complete example for `custom-tabs/tracker/tab.json`:
   "version": "1.0.0",
   "description": "Track work and deadlines.",
   "api": 1,
-  "hooks": ["start", "stop", "on_message", "calendar_items"],
+  "hooks": ["start", "stop", "on_message", "calendar_items", "home_cards"],
   "icon_svg": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 6h14M5 12h14M5 18h14\"/></svg>",
   "blurb": "Keep deadlines and follow-ups together.",
   "detail": "Review captured work and mark it complete.",
@@ -53,6 +53,7 @@ Declare only hooks you implement in `hooks.py`. Exact callable signatures
 - `stop()`: release background resources when removed, changed or shutting down; return nothing.
 - `on_message(source, message)`: passive consumer of copied inbound dictionaries; return ignored.
 - `calendar_items(user, start, end)`: return a list of calendar item dictionaries for this user and range.
+- `home_cards(user)`: return a list of at most two Home card dictionaries for this user.
 
 Each hook has a **2-second limit**; slow or failed hooks are skipped. Keep
 module imports quick too. Start background work and return; retain tasks and
@@ -70,6 +71,40 @@ strings. Filter by user and range (end exclusive). Each item needs `id`,
 own `/api/tab-tracker/...` prefix. Optional `location` and `description` are
 strings. Implement the toggle as an authenticated PATCH accepting
 `{"completed": true}` or `false`. Do not point it at another tab or app route.
+
+Home cards use cheap local reads only, scoped to the authenticated `user`.
+They run only while the tab is registered, enabled and approved, with the
+same two-second limit. Home draws all markup and links open your tab; do not
+provide HTML, custom markup or URLs. New cards start hidden. The person can
+show, hide and reorder them in Settings > Layout, under From your tabs.
+Saved positions survive turning a tab off and back on.
+
+Each card has a stable `id` matching `[a-z][a-z0-9_-]{0,63}` (unique within
+the tab), a nonempty `title` up to 40 characters, and a `kind`:
+
+- `stat`: `value` is a finite number or nonempty string up to 12 characters;
+  `label` is nonempty and up to 40; optional `detail` is up to 80.
+- `list`: `rows` is a list of 0 to 5 objects. Each needs nonempty `title`
+  up to 80, optional `meta` up to 80, `badge` up to 20, and `tone` of
+  `default`, `warn`, `danger` or `ok`. Optional `empty_text` is up to 80.
+- `progress`: nonempty `label` up to 40, finite non-negative `value` and
+  `total`, with `total > 0`; optional `detail` up to 80. Home caps the bar
+  at 100% while showing the actual values.
+
+Strings are plain text. Core strips HTML tags and control characters before
+checking lengths. Invalid cards and duplicate IDs are dropped individually;
+only the first two valid unique cards are kept. Unknown fields are discarded.
+Core attaches `slug`, `tab_name` and `tab_icon` from the manifest and namespaces
+the returned IDs as `tab:<slug>:<id>` in authenticated `GET /api/home/tab-cards`.
+
+```python
+def home_cards(user):
+    items = api.read_json("items.json", {}).get(user, [])
+    return [{"id": "next-steps", "title": "Next steps", "kind": "list",
+             "rows": [{"title": item["title"][:80], "meta": "Ready",
+                       "badge": "Review", "tone": "warn"} for item in items[:5]],
+             "empty_text": "No next steps yet."}]
+```
 
 ## Stable API v1
 
@@ -194,7 +229,8 @@ folder survives app updates; removing/replacing source keeps saved tab data.
 
 Before handing it over, run this checklist using the files you wrote:
 
-- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks.
+- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `calendar_items` and `home_cards`; check their signatures above.
+- If using `home_cards`, check shapes, text/number limits, unique stable IDs, at most two cards, owner filtering and cheap reads. Verify hidden-by-default cards, Layout controls and off/on placement.
 - Check `routes.py` exposes `router`, owns its API prefix and authenticates endpoints.
 - Check all Kairos imports use only `core.tab_api`; local imports are relative.
 - Confirm every written source file is inside `custom-tabs/<slug>/` and there are no links.

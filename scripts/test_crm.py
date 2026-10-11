@@ -54,6 +54,48 @@ class StoreTests(unittest.TestCase):
     def validated(self, **fields):
         return crm_scanner.validate_output(json.dumps({"tasks": [item(**fields)]}), self.msg, BODY, [], self.store.settings("alice"))
 
+    def test_home_cards_owner_order_badges_dates_and_limit(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from kairos_tabs.crm import hooks
+        for fields in (
+            {"title": "Future", "due_date": "2026-10-12", "contact": "Morgan"},
+            {"title": "Review", "status": "needs_review"},
+            {"title": "Today", "due_date": "2026-10-10"},
+            {"title": "Yesterday", "due_date": "2026-10-09"},
+            {"title": "Earlier today", "due_date": "2026-10-10T09:00:00-04:00"},
+            {"title": "Next", "due_date": "2026-10-11"},
+            {"title": "Done", "status": "done", "due_date": "2026-10-01"},
+            {"title": "Dismissed", "status": "dismissed"},
+        ):
+            self.store.create_task("alice", fields)
+        self.store.create_task("bob", {"title": "Other owner", "due_date": "2026-10-01"})
+        fixed = datetime(2026, 10, 10, 12, tzinfo=ZoneInfo("America/New_York"))
+        with patch.object(hooks, "crm_service", self.store), patch.object(hooks, "datetime", wraps=datetime) as clock:
+            clock.now.return_value = fixed
+            cards = hooks.home_cards("alice")
+        rows = cards[0]["rows"]
+        self.assertEqual([r["title"] for r in rows], ["Yesterday", "Earlier today", "Today", "Next", "Future"])
+        self.assertEqual([r["badge"] for r in rows[:3]], ["Overdue", "Overdue", "Today"])
+        self.assertEqual([r["tone"] for r in rows[:3]], ["danger", "danger", "warn"])
+        self.assertIn("Oct 12, 2026 · Morgan", rows[-1]["meta"])
+        self.assertEqual((cards[1]["value"], cards[1]["detail"]), (6, "2 overdue"))
+
+    def test_home_cards_empty_and_review_source(self):
+        from kairos_tabs.crm import hooks
+        with patch.object(hooks, "crm_service", self.store):
+            empty = hooks.home_cards("bob")
+            self.assertEqual(empty[0]["rows"], [])
+            self.assertEqual(empty[0]["empty_text"], "No open follow-ups.")
+            self.assertEqual(empty[1]["value"], 0)
+            self.store.apply("alice", self.msg["id"], self.validated())
+            task = self.store.tasks("alice")[0]
+            self.store.update_task("alice", task["id"], {"status": "needs_review", "due_date": None, "contact": ""})
+            cards = hooks.home_cards("alice")
+        self.assertEqual(cards[0]["rows"][0]["badge"], "Review")
+        self.assertIn("My inbox", cards[0]["rows"][0]["meta"])
+        self.assertEqual(cards[0]["rows"][0]["tone"], "warn")
+
     def test_tasks_and_processed_marker_survive_restart_without_duplicates(self):
         self.assertEqual(self.store.apply("alice", self.msg["id"], self.validated()), 1)
         restored = CRMService(self.path)

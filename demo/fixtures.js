@@ -104,6 +104,7 @@
     { id: "e1", title: "Project check-in", start: future(3), end: future(4), source: "event" },
     { id: "e2", title: "Time to think", start: future(26), end: future(27), source: "event" },
     { id: "e3", title: "Weekly review", start: future(60), end: future(61), source: "event" },
+    { id: "e-completed", title: "Finished calendar task", start: future(24), end: future(25), source: "calendar", completed: true },
     { id: "tab-a1", title: "Review the course project", start: future(4), source: "tab", source_label: "School",
       toggle_url: "/api/tab-school/assignments/a1", completed: false },
   ];
@@ -756,6 +757,16 @@
     ];
     const route = url.pathname;
     const list = (data) => state.empty ? [] : data;
+    if (route === '/api/home/tab-cards') return { cards: tabs.some(t => t.slug === 'crm' && t.status === 'on') ? [
+      { id: 'tab:crm:follow-ups', slug: 'crm', tab_name: 'CRM', tab_icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="7" r="4"/><path d="M2 21v-2a6 6 0 0 1 12 0v2M20 8v6m-3-3h6"/></svg>',
+        title: 'Follow-ups', kind: 'list', empty_text: 'No open follow-ups.', rows: list([
+          { title: 'Send the revised proposal', meta: 'Yesterday · Morgan', badge: 'Overdue', tone: 'danger' },
+          { title: 'Confirm the project check-in', meta: 'Today · Team inbox', badge: 'Today', tone: 'warn' },
+          { title: 'Review the next steps', meta: 'Tomorrow · Alex', badge: 'Review', tone: 'warn' },
+        ]) },
+      { id: 'tab:crm:open-count', slug: 'crm', tab_name: 'CRM', tab_icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="7" r="4"/><path d="M2 21v-2a6 6 0 0 1 12 0v2M20 8v6m-3-3h6"/></svg>', title: 'Open follow-ups', kind: 'stat',
+        value: state.empty ? 0 : 8, label: 'open', detail: state.empty ? '0 overdue' : '2 overdue' },
+    ] : [] };
     const setup = state.modelSetup ||= { claude: { available: true, source: 'bundled', signed_in: true },
       codex: { installed: false, version: null, path: null, signed_in: false }, node: { npm: true } };
     const allModels = () => [...list(models), ...(state.setupConnections || [])];
@@ -991,7 +1002,7 @@
     if (route.startsWith('/api/google/forms/')) return url.searchParams.get('responses') === 'true' ? { responses: [] }
       : { info: { title: 'Feedback form' }, items: [{ title: 'What would you improve?', questionItem: { question: { textQuestion: { paragraph: true } } } }] };
     if (route === "/api/calendar/events") return list([...calendarInstances(events), ...calendarInstances(googleEvents).filter(e => !state.googleCalendarMissing && (state.googleCalendarIds == null || state.googleCalendarIds.includes(e.calendar_id)))]);
-    if (route === "/api/calendar/events/archived") return [];
+    if (route === "/api/calendar/events/archived") return list(calendarInstances(events).filter(e => e.source === 'calendar' && e.completed));
     const localEventRead = route.match(/^\/api\/calendar\/events\/([^/]+)$/);
     if (localEventRead) {
       const [id, occurrence] = decodeURIComponent(localEventRead[1]).split('~');

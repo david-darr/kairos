@@ -22,6 +22,23 @@ Tasks have deadlines, priority explanations, contact/project fields, source evid
 
 Active, reviewed CRM deadlines appear through the `calendar_items` hook. Calendar PATCHes the returned `toggle_url` with `completed`, updating CRM status; completed work remains in CRM's Done view. Assignment creates a backlog card in the existing Work Board and requires a separate Ready/Run action.
 
+CRM also declares `home_cards(user)`. It supplies a list card, Follow-ups,
+with up to five open tasks ordered by overdue first and then soonest due.
+Dates use the owner's timezone; rows show a due date or Today and the contact
+or evidence source, plus Overdue, Today or Review badges where appropriate.
+The empty text is "No open follow-ups." A second stat card shows the open
+count with the overdue count in its detail. Done and dismissed tasks are
+excluded. Both cards use only the owner's in-memory records and make no
+model or network calls.
+
+Show these cards in Settings > Layout under From your tabs. New cards are
+hidden by default; their saved visibility and position survive CRM being
+turned off and back on. Home renders native dashboard sections and every
+card link opens CRM. Core keeps at most two valid unique cards per tab,
+strips HTML and control characters, and applies the two-second hook limit.
+The shared [Home card contract](../../skill_templates/build-custom-tab/SKILL.md)
+documents stat, list and progress fields, limits and an example.
+
 ## Validation performed locally
 
 - `python scripts/test_crm.py`: 28 isolated checks cover ownership, atomic rollback, deadlines, exact evidence, deduplication, proposals, bounded input, read-only UID collection, selected conversation scopes, failures/retries, asynchronous scan status, pause during extraction, shipped-tab visibility and tool-free model options.

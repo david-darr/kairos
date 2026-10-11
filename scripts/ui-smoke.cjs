@@ -18,7 +18,7 @@ let sessionDelay = 0;
 const writes = [];
 const reads = [];
 const now = Date.now() / 1000;
-const { fixture, mutate, media } = require("../demo/fixtures.js")({ now, state: demoState });
+const { fixture, mutate, media, data: calendarFixtures } = require("../demo/fixtures.js")({ now, state: demoState });
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
 demoState.computerImage = computerImage;
 const errors = [];
@@ -88,6 +88,7 @@ const server = http.createServer(async (req, res) => {
     if (file) { res.setHeader('Content-Type', file.type); res.end(file.base64 ? Buffer.from(file.base64, 'base64') : file.body); return; }
     res.setHeader("Content-Type", "application/json");
     if (unavailable && url.pathname === "/api/system/status") { res.writeHead(503); res.end('{"detail":"Unavailable"}'); return; }
+    if (demoState.homeCardsUnavailable && url.pathname === '/api/home/tab-cards') { res.writeHead(503); res.end('{"detail":"Unavailable"}'); return; }
     if (req.method !== "GET") {
       let body = ""; for await (const chunk of req) body += chunk;
       writes.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body });
@@ -188,18 +189,21 @@ app.whenReady().then(async () => {
   };
   const overflow = async () => js(`Array.from(document.querySelectorAll('#view-content, #view-content .view-constrained, .chat-input-bar, .settings-content, .cal-left, .panel-dialog, .panel-dialog .modal-body, .forge-project-sidebar, .forge-workspace, .forge-pane, .forge-composer')).filter(e => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2).map(e => ({class: e.className, width:e.clientWidth, scroll:e.scrollWidth}))`);
   const openPopup = async (opener, ready, label) => {
+    // The open dialog, not the first .modal-panel: hidden panels (the Calendar
+    // Archive) stay in the page after closing.
+    await js(`window.OPEN_PANEL = '.modal-panel[role="dialog"][aria-modal="true"]'`);
     await js(`window.__popupOpener = ${opener}; window.__popupOpener.focus(); window.__popupOpener.click()`);
     await waitFor(`!!document.querySelector('.modal-panel[role="dialog"][aria-modal="true"]') && (${ready})`);
     await delay(220);
     assert.equal(await js("window.__popupOpener.getAttribute('aria-haspopup')"), 'dialog', label + ' opener announces a dialog');
     assert.equal(await js("window.__popupOpener.hasAttribute('aria-expanded')"), false, label + ' has no inline expanded state');
     assert.equal(await js("document.querySelectorAll('.panel-dialog').length"), 1, label + ' opens one panel');
-    assert.ok(await js("document.querySelector('.modal-panel').contains(document.activeElement)"), label + ' moves focus inside');
-    assert.ok(await js("!!document.querySelector('.modal-panel button[aria-label=Close]')"), label + ' has a close button');
+    assert.ok(await js("document.querySelector(OPEN_PANEL).contains(document.activeElement)"), label + ' moves focus inside');
+    assert.ok(await js("!!document.querySelector(OPEN_PANEL + ' button[aria-label=Close]')"), label + ' has a close button');
     assert.ok(await js("getComputedStyle(document.getElementById('view-content')).overflowY === 'hidden'"), label + ' locks page scrolling');
-    assert.ok(await js("getComputedStyle(document.querySelector('.modal-panel .modal-body')).overflowY === 'auto'"), label + ' scrolls the panel body');
+    assert.ok(await js("getComputedStyle(document.querySelector(OPEN_PANEL + ' .modal-body')).overflowY === 'auto'"), label + ' scrolls the panel body');
     await js(`(() => {
-      const panel = document.querySelector('.modal-panel');
+      const panel = document.querySelector(OPEN_PANEL);
       const controls = [...panel.querySelectorAll('button, input, textarea, select, a[href], summary, [tabindex]')].filter(n => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
       controls.at(-1).focus();
       document.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', bubbles:true, cancelable:true}));
@@ -208,12 +212,12 @@ app.whenReady().then(async () => {
       window.__trapBackward = document.activeElement === controls.at(-1);
     })()`);
     assert.ok(await js("window.__trapForward && window.__trapBackward"), label + ' traps focus in both directions');
-    if (await js('innerWidth <= 768')) assert.ok(await js("(() => { const r = document.querySelector('.modal-panel').getBoundingClientRect(); return Math.abs(r.left)<1 && Math.abs(r.top)<1 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1; })()"), label + ' fills the phone viewport');
+    if (await js('innerWidth <= 768')) assert.ok(await js("(() => { const r = document.querySelector(OPEN_PANEL).getBoundingClientRect(); return Math.abs(r.left)<1 && Math.abs(r.top)<1 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1; })()"), label + ' fills the phone viewport');
     assert.deepEqual(await overflow(), [], label + ' popup overflow');
   };
   const closePopup = async (mode, label) => {
     await js(mode === 'backdrop' ? "document.querySelector('.panel-dialog').parentElement.click()" : mode === 'button'
-      ? "document.querySelector('.modal-panel button[aria-label=Close]').click()"
+      ? "document.querySelector(OPEN_PANEL + ' button[aria-label=Close]').click()"
       : "document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}))");
     await waitFor("!document.querySelector('.panel-dialog')");
     assert.ok(await js("document.activeElement === window.__popupOpener"), label + ' returns focus after ' + mode);
@@ -237,6 +241,72 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.dashboard-core').classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
     assert.ok(await js("!document.querySelector('.kairos-sky-image, .kairos-sky-point, .core-motion-toggle, .core-caption, .kairos-mark')"), "Home has no sky scene, dot or motion control");
     assert.ok(await js("Number(document.querySelector('.dashboard-core').dataset.drawMs) < 400"), "Home banner draws quickly");
+    // Tab summaries use the same Home and Layout paths in both demo and app.
+    // Run early so the feature's screenshots don't depend on unrelated checks.
+    const tabCardWrites = writes.length;
+    await js(`import('/static/js/layout.js').then(m => { const l=m.getLayout(); l.home=m.HOME_SECTIONS.map(s => s.id); l.hiddenHome=[]; m.saveLayout(l); })`);
+    await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:true})}))`);
+    await win.loadURL(base);
+    await waitFor("document.querySelector('.dashboard-customize') && document.querySelector('.dashboard-content.is-filled')");
+    await waitFor("import('/static/js/layout.js').then(m => m.knownHomeCards().length === 2)");
+    assert.equal(await js("document.querySelectorAll('.dashboard-grid > [data-home-section^=\"tab:\"]').length"), 0, 'Tab cards start hidden');
+    await js("document.querySelector('.dashboard-customize button').click()");
+    await waitFor("!!document.querySelector('.layout-item[data-id=\"tab:crm:follow-ups\"] .set-switch')");
+    assert.ok(await js("[...document.querySelectorAll('.layout-group h4')].some(n => n.textContent === 'From your tabs') && document.querySelector('.layout-item[data-id=\"tab:crm:follow-ups\"]').textContent.includes('CRM')"), 'Layout groups cards with the tab name');
+    await js("for (const id of ['tab:crm:follow-ups', 'tab:crm:open-count']) document.querySelector('.layout-item[data-id=\"' + id + '\"] .set-switch').click()");
+    await js("document.querySelector('.layout-item[data-id=\"tab:crm:follow-ups\"]').scrollIntoView({block:'center'})");
+    await capture('desktop-layout-tab-cards');
+    // Reuse the real arrows to move the list to the top of Home's order.
+    await js("for (let i=0;i<9;i++) document.querySelector('.layout-item[data-id=\"tab:crm:follow-ups\"] .layout-move').click()");
+    await js("for (let i=0;i<9;i++) document.querySelector('.layout-item[data-id=\"tab:crm:open-count\"] .layout-move').click()");
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
+    await navigate('home');
+    await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section^=\"tab:\"]').length === 2 && !!document.querySelector('[data-home-section=\"tab:crm:follow-ups\"] .tone-danger')");
+    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Tab card follows the order set with arrows');
+    assert.deepEqual(await js("[...document.querySelector('.dashboard-grid').children].slice(0,3).map(n => n.dataset.homeSection)"), ['tab:crm:follow-ups', 'tab:crm:open-count', 'stats'], 'Both tab cards can be ordered among built-ins');
+    assert.ok(await js("[...document.querySelectorAll('[data-home-section^=\"tab:\"]')].every(n => n.matches('section.dashboard-section') && !!n.querySelector('.dashboard-section-header h2 .dashboard-icon') && n.querySelector('.dashboard-section-header button').textContent === '↗' && n.querySelector('.dashboard-section-header button').getAttribute('aria-label').startsWith('Open ') && !!n.querySelector('.dashboard-section-body'))"), 'Tab cards use native dashboard sections');
+    assert.ok(await js("document.querySelector('[data-home-section=\"tab:crm:follow-ups\"] .dashboard-row .tone-danger').textContent === 'Overdue'"), 'Follow-ups show native rows and badges');
+    await win.loadURL(base);
+    await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section^=\"tab:\"]').length === 2");
+    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Tab placement and visibility survive reload');
+    await capture('desktop-home-tab-cards');
+    win.setContentSize(390, 844); await delay(200);
+    await js("document.querySelector('[data-home-section=\"tab:crm:follow-ups\"]').scrollIntoView({block:'start'})");
+    assert.deepEqual(await overflow(), [], 'Phone tab cards do not overflow');
+    assert.ok(await js("[...document.querySelectorAll('.dashboard-grid, [data-home-section^=\"tab:\"]')].every(n => n.scrollWidth <= n.clientWidth + 2)"), 'Phone card grid fits');
+    await capture('mobile-home-tab-cards');
+    win.setContentSize(1440, 900); await delay(100);
+    // A failed optional read leaves built-in sections available.
+    demoState.homeCardsUnavailable = true;
+    await navigate('home');
+    await waitFor("document.querySelector('[data-home-section=chats] .dashboard-row') && document.querySelector('.dashboard-quota')");
+    delete demoState.homeCardsUnavailable;
+    await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:false})}))`);
+    await win.loadURL(base);
+    await waitFor("document.querySelector('.dashboard-content.is-filled')");
+    assert.equal(await js("document.querySelectorAll('[data-home-section^=\"tab:\"]').length"), 0, 'Off tabs do not render');
+    await js("document.querySelector('.dashboard-customize button').click()");
+    await waitFor("!!document.querySelector('.layout-item[data-id=\"tab:crm:follow-ups\"]')");
+    // Editing another section while CRM is off cannot discard its placement.
+    await js("document.querySelector('.layout-item[data-id=projects] .set-switch').click()");
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
+    await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:true})}))`);
+    await win.loadURL(base);
+    await waitFor("document.querySelectorAll('[data-home-section^=\"tab:\"]').length === 2");
+    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Placement survives edits while the tab is off');
+    // Return the shared fixture and device layout to their initial state.
+    await js(`import('/static/js/layout.js').then(m => m.resetHomeLayout())`);
+    await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:false})}))`);
+    writes.splice(tabCardWrites);
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
+    console.log('PASS: Home tab cards hidden by default, Layout show/reorder, reload/off/on persistence, native sections, endpoint failure and phone overflow.');
+    if (process.argv.includes('--home-tab-cards-only')) {
+      assert.deepEqual(errors, [], 'No renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({passed:true, checks:['Home tab cards'], errors}, null, 2));
+      console.log('Screenshots: ' + output);
+      win.destroy(); server.close(); exitAfterFlush(0); return;
+    }
     await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
@@ -871,7 +941,7 @@ app.whenReady().then(async () => {
           assert.ok(await js("document.querySelector('.modal-panel .tool-store-skill-body').textContent.includes('Procedure')"), label + ' skill body is readable');
           await capture(label + '-tool-store-view-skill');
           // Switching from viewing to managing replaces the popup and focuses that skill.
-          await js("document.querySelector('.modal-panel .btn').focus(); document.querySelector('.modal-panel .btn').click()");
+          await js("document.querySelector(OPEN_PANEL + ' .btn').focus(); document.querySelector(OPEN_PANEL + ' .btn').click()");
           await waitFor("!!document.querySelector('.modal-panel .tool-store-manager #skills-list .card')");
           assert.equal(await js("document.querySelectorAll('.panel-dialog').length"), 1, label + ' Manage skill replaces View skill');
           assert.ok(await js("document.activeElement.closest('[data-skill]')?.dataset.skill === 'build-custom-tab'"), label + ' manager focuses the selected skill');
@@ -997,15 +1067,73 @@ app.whenReady().then(async () => {
         }
         if (tab === "calendar" && !demoState.empty) {
           const calendarWrites = writes.length;
+          const card = title => `[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.querySelector('.title')?.textContent===${JSON.stringify(title)})`;
+          const completed = fixture(new URL('/api/calendar/events/e-completed', base));
+          const completedCard = card(completed.title);
+          const showDay = start => js(`document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
+          const showUpcoming = async () => {
+            await js("window._previousCalendarTitle=document.querySelector('.cal-day-panel-title'); [...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+            await waitFor("document.querySelector('.cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days'");
+          };
+          await showUpcoming();
+          assert.equal(await js(`!!(${completedCard})`), false, label + ' completed fixture is absent from Next 7 Days');
+          await showDay(completed.start);
+          await waitFor(`!!(${completedCard})`);
+          assert.ok(await js(`(${completedCard}).querySelector('input').checked && getComputedStyle((${completedCard}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed fixture stays checked and struck through in its day');
+          await capture(label + '-calendar-completed-day');
+          await js(`(${completedCard}).querySelector('input').click()`);
+          await waitFor(`!(${completedCard})?.classList.contains('cal-item-completed')`);
+          await showUpcoming();
+          await waitFor(`!!(${completedCard})`);
+          await js(`{ const c=(${completedCard}), animate=c.animate; window._calendarFadeDuration=null; c.animate=function(frames, options) { window._calendarFadeDuration=options.duration; return animate.call(this, frames, options); }; true; }`);
+          await js(`(${completedCard}).querySelector('input').click()`);
+          await waitFor(`!(${completedCard})`);
+          assert.equal(await js("window._calendarFadeDuration"), await js("matchMedia('(prefers-reduced-motion: reduce)').matches") ? null : 200, label + ' upcoming completion respects the motion preference');
+          assert.ok(writes.slice(calendarWrites).some(w => w.path === '/api/calendar/events/e-completed' && JSON.parse(w.body).completed === true), label + ' ticking an active local event removes it from Next 7 Days');
+          await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Archive').click()");
+          await waitFor(`document.querySelector('.modal-backdrop:not(.hidden) .modal-panel')?.textContent.includes(${JSON.stringify(completed.title)})`);
+          await js("document.querySelector('.modal-backdrop:not(.hidden) .modal-close-btn').click()");
           await waitFor("[...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
           assert.ok(await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).textContent.includes('School')"), label + " Calendar names the tab source");
-          // Toggle it either way (desktop leaves it ticked): each layout must send its own PATCH.
-          const wasChecked = await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).querySelector('input[type=checkbox]').checked");
           await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).querySelector('input[type=checkbox]').click()");
-          await waitFor(`[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project'))?.querySelector('input').checked === ${!wasChecked}`);
+          await waitFor(`!(${card('Review the course project')})`);
           // The PATCH goes out just after the box ticks; poll for it.
           for (let i = 0; i < 80 && !writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"); i++) await delay(50);
           assert.ok(writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"), label + " Calendar PATCHes the tab toggle URL");
+          const tabEvent = calendarFixtures.events.find(e => e.source === 'tab');
+          await showDay(tabEvent.start);
+          await waitFor(`(${card(tabEvent.title)})?.classList.contains('cal-item-completed')`);
+          assert.ok(await js(`getComputedStyle((${card(tabEvent.title)}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed tab item remains struck through in its day');
+          await js(`(${card(tabEvent.title)}).querySelector('input').click()`);
+          await waitFor(`!(${card(tabEvent.title)})?.classList.contains('cal-item-completed')`);
+          await showUpcoming();
+          await waitFor(`!!(${card(tabEvent.title)})`);
+
+          const googleEvent = calendarFixtures.googleEvents[0];
+          const previousCompleted = googleEvent.completed;
+          googleEvent.completed = true;
+          await showUpcoming();
+          assert.equal(await js(`!!(${card(googleEvent.title)})`), false, label + ' completed Google item is absent from Next 7 Days');
+          await showDay(googleEvent.start);
+          await waitFor(`(${card(googleEvent.title)})?.classList.contains('cal-item-completed')`);
+          assert.ok(await js(`getComputedStyle((${card(googleEvent.title)}).querySelector('.title')).textDecorationLine.includes('line-through')`), label + ' completed Google item remains struck through in its day');
+          if (previousCompleted === undefined) delete googleEvent.completed;
+          else googleEvent.completed = previousCompleted;
+
+          const weekItems = [...calendarFixtures.events, ...calendarFixtures.googleEvents];
+          const completionStates = weekItems.map(item => item.completed);
+          weekItems.forEach(item => { item.completed = true; });
+          await showUpcoming();
+          assert.equal(await js("document.querySelector('.cal-day-panel .empty-state')?.textContent"), 'Nothing coming up.', label + ' a completed week uses the existing empty state');
+          assert.equal(await js("document.querySelectorAll('.cal-day-panel .card, .cal-upcoming-day-label').length"), 0);
+          await capture(label + '-calendar-completed-week');
+          weekItems.forEach((item, index) => {
+            if (completionStates[index] === undefined) delete item.completed;
+            else item.completed = completionStates[index];
+          });
+          await showUpcoming();
+          await waitFor(`!!(${card(tabEvent.title)})`);
+          await capture(label + '-calendar-upcoming-active');
           writes.splice(calendarWrites);
           await require('./google-workspace-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
           await require('./lifecycle-calendar-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
@@ -1615,6 +1743,15 @@ app.whenReady().then(async () => {
     await navigate("chat");
     assert.equal(await js("window.__viewTransitions"), transitionsBefore, "Reduced motion skips the Home and Chat transitions");
     await js("document.startViewTransition = window.__startViewTransition; true");
+    const reducedCalendarWrites = writes.length;
+    await navigate('calendar');
+    await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+    await waitFor("document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days' && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    await js("{ const c=[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
+    await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    assert.equal(await js("window._reducedCalendarFade"), false, 'Reduced motion removes completed upcoming items without animation');
+    mutate('/api/tab-school/assignments/a1', 'PATCH', { completed: false });
+    writes.splice(reducedCalendarWrites);
     // Home's "Your models" shows each subscription's limits as the overlay does
     // (quotaReadings.js), once per account, with signed-out and stale states.
     await navigate("home");

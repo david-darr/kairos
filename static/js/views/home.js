@@ -3,7 +3,7 @@ import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
 import { mountDither } from "../dither.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
-import { homeLayout } from "../layout.js";
+import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
 
 const navigate = (tab, options = {}) => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab, ...options } }));
@@ -15,13 +15,19 @@ function icon(name) {
 function action(label, tab, primary = false, options = {}) {
   return el("button", { type: "button", class: primary ? "btn primary" : "btn quiet", text: label, onclick: () => navigate(tab, options) });
 }
-function section(title, link, tab) {
+function section(title, link, tab, tabIcon = null) {
   const body = el("div", { class: "dashboard-section-body" });
   const arrow = action("↗", tab);
   arrow.title = link;
   arrow.setAttribute("aria-label", link);
+  const heading = el("h2", { text: title });
+  if (tabIcon !== null) {
+    const mark = icon("library");
+    if (tabIcon) mark.innerHTML = tabIcon;
+    heading.prepend(mark);
+  }
   const panel = el("section", { class: "dashboard-section" }, [
-    el("div", { class: "dashboard-section-header" }, [el("h2", { text: title }), arrow]), body,
+    el("div", { class: "dashboard-section-header" }, [heading, arrow]), body,
   ]);
   return { panel, body };
 }
@@ -119,7 +125,7 @@ function countUp(node) {
 export function render(container, tabId, options = {}) {
   container.replaceChildren();
   container.classList.add("dashboard");
-  let disposed = false, refreshing = false, nextTask = null;
+  let disposed = false, refreshing = false, refreshQueued = false, nextTask = null;
   const statusLabel = el("span", { text: "Checking system" });
   const statusDot = el("span", { class: "status-dot" });
   // The banner: the Kairos figure as halftone (BRAND.md 6.8), still, with
@@ -156,15 +162,24 @@ export function render(container, tabId, options = {}) {
   // Order and visibility below the card: Settings > Layout (layout.js). The
   // numbers strip spans the grid; hidden parts still refresh, unseen.
   const parts = { stats, chats: chats.panel, schedule: schedule.panel, agents: agents.panel, store: store.panel, projects: projects.panel, models: models.panel, activity: activity.panel, system: system.panel };
+  // When returning from Layout, known enabled cards get the same loading
+  // lines as the built-in sections while their summaries refresh.
+  const enabledTabs = new Set(knownTabs().map(t => t.id));
+  for (const card of knownHomeCards().filter(c => enabledTabs.has(c.slug))) {
+    const { panel, body } = section(card.title, "Open " + card.tab_name, card.slug, card.tab_icon || "");
+    body.append(el("div", { class: "skeleton skeleton-line" }), el("div", { class: "skeleton skeleton-line" }));
+    parts[card.id] = panel;
+  }
   for (const [id, panel] of Object.entries(parts)) panel.dataset.homeSection = id;
   const grid = el("div", { class: "dashboard-grid" });
   const arrange = () => {
     const { order, hidden } = homeLayout();
-    grid.replaceChildren(...order.filter((id) => !hidden.includes(id)).map((id) => parts[id]));
+    grid.replaceChildren(...order.filter((id) => parts[id] && !hidden.includes(id)).map((id) => parts[id]));
   };
   arrange();
   document.addEventListener("kairos:layout", arrange);
-  content.append(hero, grid);
+  const customize = el("div", { class: "dashboard-customize" }, [action("Customize", "settings", false, { section: "layout" })]);
+  content.append(hero, customize, grid);
   container.appendChild(content);
   // Chat to Home (app.js switchTab) waits for the banner before animating
   // into it. It's drawn from the Home halftone slot (a custom picture, or
@@ -296,6 +311,43 @@ export function render(container, tabId, options = {}) {
 
   function draw(key, start) {
     const value = data[key];
+    if (key === "tabCards") {
+      // A failed optional endpoint cannot disturb Home's built-in sections.
+      if (!Array.isArray(value?.cards)) {
+        for (const [id, panel] of Object.entries(parts)) {
+          if (id.startsWith("tab:")) empty(panel.querySelector('.dashboard-section-body'), "", true);
+        }
+        return;
+      }
+      for (const id of Object.keys(parts)) if (id.startsWith("tab:")) delete parts[id];
+      for (const card of value.cards) {
+        const { panel, body } = section(card.title, "Open " + card.tab_name, card.slug, card.tab_icon || "");
+        panel.dataset.homeSection = card.id;
+        panel.dataset.tabName = card.tab_name;
+        if (card.kind === "list") {
+          if (!card.rows.length) empty(body, card.empty_text || "Nothing here yet.");
+          for (const entry of card.rows) {
+            const item = row(entry.title, entry.meta || "", () => navigate(card.slug));
+            if (entry.badge) item.append(el("span", { class: "dashboard-tab-badge tone-" + (entry.tone || "default"), text: entry.badge }));
+            body.append(item);
+          }
+        } else {
+          // The figure reads like Home's number chips: big value, short label.
+          body.append(el("button", { type: "button", class: "dashboard-tab-figure", onclick: () => navigate(card.slug) }, [
+            el("span", { class: "dashboard-stat-value", text: card.kind === "stat" ? String(card.value) : `${card.value} / ${card.total}` }),
+            el("span", { class: "dashboard-stat-label", text: card.label }),
+          ]));
+          if (card.kind === "progress") body.append(el("div", { class: "dashboard-quota-track", role: "progressbar", "aria-label": card.label,
+            "aria-valuemin": "0", "aria-valuemax": String(card.total), "aria-valuenow": String(Math.min(card.value, card.total)) }, [
+            el("span", { class: "dashboard-quota-fill tone-ample", style: `width:${Math.min(1, card.value / card.total) * 100}%` }),
+          ]));
+          if (card.detail) body.append(el("p", { class: "dashboard-quota-note", text: card.detail }));
+        }
+        parts[card.id] = panel;
+      }
+      setHomeCards(value.cards);
+      arrange();
+    }
     if (statValues.has(key)) {
       const n = value === null ? null : key === "tasks" ? value.filter((t) => t.enabled).length : value.length;
       const node = statValues.get(key);
@@ -368,7 +420,8 @@ export function render(container, tabId, options = {}) {
   }
 
   async function refresh() {
-    if (disposed || refreshing) return;
+    if (disposed) return;
+    if (refreshing) { refreshQueued = true; return; }
     refreshing = true;
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(start); end.setDate(end.getDate() + 7);
@@ -383,6 +436,7 @@ export function render(container, tabId, options = {}) {
       ["events", "/api/calendar/events?start=" + start.toISOString() + "&end=" + end.toISOString()],
       ["projects", "/api/projects"], ["endpoints", "/api/models"], ["usage", "/api/models/usage"],
       ["status", "/api/system/status"], ["feed", "/api/system/events?limit=5"], ["quotas", "/api/models/quotas"],
+      ["tabCards", "/api/home/tab-cards"],
     ].map(([key, path]) => request(key, path));
     const adminReads = (async () => {
       const auth = await api("/api/auth/status").catch(() => null);
@@ -402,10 +456,12 @@ export function render(container, tabId, options = {}) {
     })();
     await Promise.allSettled([...publicReads, adminReads]);
     refreshing = false;
+    if (refreshQueued) { refreshQueued = false; refresh(); }
   }
   refresh();
   document.addEventListener("kairos:models-changed", refresh);
+  document.addEventListener("jarvis:tabs-changed", refresh);
   const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
 }

@@ -33,9 +33,10 @@ const defaults = () => ({
   home: HOME_SECTIONS.map((s) => s.id), hiddenHome: [],
 });
 
-let layout = defaults(), storageKey = "", known = [];
+let layout = defaults(), storageKey = "", known = [], cards = [];
 
-const ids = (value) => Array.isArray(value) ? [...new Set(value.filter((v) => typeof v === "string" && v.length < 80))] : [];
+const ids = (value, maxLength = 80) => Array.isArray(value) ? [...new Set(value.filter((v) => typeof v === "string" && v.length < maxLength))] : [];
+const tabCardId = (id) => id.startsWith("tab:");
 function normalize(raw = {}) {
   const value = defaults();
   if (raw.groups && typeof raw.groups === "object") {
@@ -46,13 +47,14 @@ function normalize(raw = {}) {
   }
   value.hiddenTabs = ids(raw.hiddenTabs).filter((tab) => tab !== ALWAYS_SHOWN);
   const homeIds = HOME_SECTIONS.map((s) => s.id);
-  const order = ids(raw.home).filter((id) => homeIds.includes(id));
+  const order = ids(raw.home, Infinity).filter((id) => homeIds.includes(id) || tabCardId(id));
   value.home = [...order, ...homeIds.filter((id) => !order.includes(id))];
-  value.hiddenHome = ids(raw.hiddenHome).filter((id) => homeIds.includes(id));
+  value.hiddenHome = ids(raw.hiddenHome, Infinity).filter((id) => homeIds.includes(id) || tabCardId(id));
   return value;
 }
 
 export function initLayout(username) {
+  cards = [];
   storageKey = "kairos:layout:v1:" + String(username || "local");
   try { layout = normalize(JSON.parse(localStorage.getItem(storageKey) || "{}")); }
   catch { layout = defaults(); }
@@ -66,7 +68,19 @@ export function saveLayout(next) {
   document.dispatchEvent(new CustomEvent("kairos:layout"));
 }
 export function resetSidebarLayout() { const d = defaults(); saveLayout({ ...layout, groups: d.groups, hiddenTabs: [] }); }
-export function resetHomeLayout() { saveLayout({ ...layout, home: defaults().home, hiddenHome: [] }); }
+export function resetHomeLayout() {
+  const tabIds = layout.home.filter(tabCardId);
+  saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: tabIds });
+}
+
+// Remember placement even when a tab is off. Only newly discovered cards
+// default to hidden; a successful empty response changes availability alone.
+export function setHomeCards(next) {
+  cards = next.map(({ id, title, tab_name, slug, tab_icon }) => ({ id, title, tab_name, slug, tab_icon }));
+  const added = cards.map(c => c.id).filter(id => tabCardId(id) && !layout.home.includes(id));
+  if (added.length) saveLayout({ ...layout, home: [...layout.home, ...added], hiddenHome: [...layout.hiddenHome, ...added] });
+}
+export function knownHomeCards() { return cards.slice(); }
 
 // Every tab the sidebar can show ({id, label}), as app.js last built it,
 // custom tabs included, for the Layout page to list.
