@@ -517,6 +517,7 @@ export async function render(container) {
     if (data.runs.length) content.append(el("details", { class: "disclosure-panel" }, [el("summary", { text: "Scan history" }),
       ...data.runs.slice(0, 15).map((r) => el("div", { class: "crm-run" }, [el("strong", { text: r.source }),
         el("div", { class: "meta", text: `${new Date(r.at * 1000).toLocaleString()} · ${r.scanned} extracted · ${r.created} created · ${r.remaining} remaining` }),
+        r.skipped > 0 && el("p", { class: "meta", text: `${r.skipped} message${r.skipped === 1 ? " was" : "s were"} skipped after three unsuccessful read attempts.` }),
         r.error && el("p", { class: "crm-review", text: r.error })]))]));
   }
 

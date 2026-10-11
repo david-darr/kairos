@@ -167,8 +167,13 @@ class _ReadOnlyMailbox:
             items = args[1].upper().strip()
             if items.startswith("(") and items.endswith(")"):
                 items = items[1:-1].strip()
-            if not items.split() or any(i not in ("RFC822.SIZE", "BODY.PEEK[]") for i in items.split()):
-                raise ValueError("Only RFC822.SIZE and BODY.PEEK[] may be fetched")
+            def readable(item):
+                if item in ("RFC822.SIZE", "BODY.PEEK[]"):
+                    return True
+                partial = re.fullmatch(r"BODY\.PEEK\[\]<0\.([1-9]\d{0,6})>", item)
+                return bool(partial and int(partial[1]) <= 1_000_000)
+            if not items.split() or not all(readable(i) for i in items.split()):
+                raise ValueError("Only RFC822.SIZE and read-only BODY.PEEK[] fetches up to 1 MB are allowed")
         elif command != "search":
             raise ValueError("Only UID search and read-only fetch are allowed")
         return self.__box.uid(command, *args)
