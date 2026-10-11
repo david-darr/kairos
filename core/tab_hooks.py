@@ -77,7 +77,10 @@ async def _invoke(slug, name, fn, *args):
         except asyncio.CancelledError:
             raise
         except BaseException:
-            logger.exception("tab %s hook %s failed; skipped", slug, name)
+            if name == "home_cards":
+                logger.error("tab %s hook %s failed; skipped category=exception", slug, name)
+            else:
+                logger.exception("tab %s hook %s failed; skipped", slug, name)
             return None
     task = _track(asyncio.create_task(run()), report=False)
     try:
@@ -87,7 +90,7 @@ async def _invoke(slug, name, fn, *args):
         raise
     if not done:
         task.cancel()
-        logger.warning("tab %s hook %s exceeded %s seconds; abandoned", slug, name, TIMEOUT)
+        logger.warning("tab %s hook %s exceeded %s seconds; abandoned category=timeout", slug, name, TIMEOUT)
         return None
     try:
         return task.result()
@@ -204,3 +207,16 @@ async def calendar_items(user, start, end):
                         and item["toggle_url"].startswith("/api/") and not "\\" in item["toggle_url"]):
                     items.append(item)
     return items
+
+
+async def home_cards(user):
+    from core.home_cards import validate_cards
+    entries = list(tab_folders._registered.values())
+    results = await asyncio.gather(*(_declared(entry, "home_cards", user) for entry in entries))
+    cards = []
+    for entry, result in zip(entries, results):
+        # A tab may have been turned off while its hook was running.
+        if (tab_folders._registered.get(entry["slug"]) is entry
+                and await _invoke(entry["slug"], "policy", tab_folders._allowed, entry)):
+            cards.extend(validate_cards(result, entry, logger))
+    return cards

@@ -1906,6 +1906,21 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 .dashboard-section { min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); }
 .dashboard-section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .dashboard-section-header h2 { font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; margin: 0; color: var(--text-faint); }
+.dashboard-section-header h2 { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.dashboard-section-header h2 .dashboard-icon { padding: 0; }
+.dashboard-customize { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.dashboard-customize .btn { font-size: 12px; color: var(--text-faint); }
+.dashboard-tab-badge { flex: 0 1 auto; min-width: 0; max-width: 30%; overflow-wrap: anywhere; font-size: 10px; color: var(--text-faint); }
+.dashboard-tab-badge.tone-warn { color: var(--warn); }
+.dashboard-tab-badge.tone-danger { color: var(--danger); }
+.dashboard-tab-badge.tone-ok { color: var(--success); }
+.dashboard-section .dashboard-stat-value { overflow-wrap: anywhere; }
+.dashboard-tab-figure { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 6px 0 2px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dashboard-tab-figure .dashboard-stat-value { font-size: 32px; line-height: 1.1; }
+.dashboard-tab-figure .dashboard-stat-label { font-size: 12px; overflow-wrap: anywhere; }
+.dashboard-tab-figure:hover .dashboard-stat-label { color: var(--text); }
+.dashboard-tab-figure:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.layout-list[data-group="home-tabs"]:empty::after { content: attr(data-empty); display: block; padding: 10px 12px; font-size: 12px; color: var(--text-faint); }
 .dashboard-section-header .btn { font-size: 13px; padding: 0 0 0 8px; color: var(--text-faint); min-height: 20px; }
 /* Model provider logos (see modelMark in static/js/api.js). */
 .model-mark { display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: -0.14em; background: currentColor; -webkit-mask: var(--mark) center/contain no-repeat; mask: var(--mark) center/contain no-repeat; }

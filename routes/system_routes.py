@@ -25,6 +25,12 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 custom_views_router = APIRouter(tags=["custom-tabs"])
 
 
+@custom_views_router.get("/api/home/tab-cards")
+async def home_tab_cards(user: str = Depends(require_user)) -> dict:
+    from core import tab_hooks
+    return {"cards": await tab_hooks.home_cards(user)}
+
+
 @router.get("/status")
 async def status(user: str = Depends(require_user)) -> dict:
     """Live mission-control health strip (David's ask 2026-09-02) — cheap,

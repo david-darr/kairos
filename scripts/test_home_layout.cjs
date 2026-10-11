@@ -1,0 +1,53 @@
+// Public layout contract, without Electron: node scripts/test_home_layout.cjs
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+(async () => {
+  const saved = new Map();
+  global.localStorage = { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) };
+  global.document = new EventTarget();
+  global.CustomEvent = class extends Event { constructor(name) { super(name); } };
+  const source = fs.readFileSync(path.join(__dirname, '../static/js/layout.js'), 'utf8');
+  const layout = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const listId = 'tab:crm:follow-ups', statId = 'tab:crm:open-count';
+  const fixture = require('../demo/fixtures.js')({ state: { empty: false } });
+  const read = () => fixture.fixture(new URL('http://fixture/api/home/tab-cards')).cards;
+  assert.deepEqual(read(), [], 'Off tabs provide no cards');
+  fixture.mutate('/api/system/tab-templates/crm', 'POST', { enabled: true });
+  const cards = read();
+  assert.deepEqual(cards.map(c => c.kind), ['list', 'stat']);
+  assert.equal(cards[0].rows.length, 3);
+
+  layout.initLayout('alice');
+  layout.setHomeCards(cards);
+  assert.deepEqual(layout.homeLayout().hidden, [listId, statId], 'New cards are hidden');
+  const shown = layout.getLayout();
+  shown.home = [listId, 'stats', statId, ...shown.home.filter(id => ![listId, statId, 'stats'].includes(id))];
+  shown.hiddenHome = ['projects', statId, 'tab:unloaded:saved'];
+  shown.home.push('tab:unloaded:saved');
+  layout.saveLayout(shown);
+  layout.setHomeCards([]);
+  assert.deepEqual(layout.getLayout(), shown, 'Availability never discards saved cards');
+  const editWhileOff = layout.getLayout();
+  editWhileOff.hiddenHome.push('activity');
+  layout.saveLayout(editWhileOff);
+  layout.initLayout('alice');
+  assert.deepEqual(layout.getLayout(), editWhileOff, 'Reload retains off and unloaded card IDs');
+  layout.setHomeCards(cards);
+  assert.deepEqual(layout.getLayout(), editWhileOff, 'Existing visible cards stay visible after re-enable');
+  layout.setHomeCards([...cards, { id: 'tab:new:count', title: 'Count', tab_name: 'New' }]);
+  assert.ok(layout.homeLayout().hidden.includes('tab:new:count'), 'A later card defaults to hidden');
+  assert.equal(layout.homeLayout().order[0], listId, 'Discovery preserves relative placement');
+  layout.resetHomeLayout();
+  assert.equal(layout.homeLayout().order[0], 'stats');
+  assert.deepEqual(layout.homeLayout().hidden, [listId, statId, 'tab:unloaded:saved', 'tab:new:count']);
+  layout.initLayout('bob');
+  assert.ok(!layout.homeLayout().order.includes(listId), 'Layout is per user');
+  const unknownId = 'tab:' + 'a'.repeat(300) + ':saved';
+  layout.saveLayout({ ...layout.getLayout(), home: [unknownId], hiddenHome: [unknownId] });
+  layout.initLayout('bob');
+  assert.equal(layout.homeLayout().order[0], unknownId, 'Any saved tab ID is retained even without its manifest');
+  assert.deepEqual(layout.homeLayout().hidden, [unknownId]);
+  console.log('PASS: fixtures, default visibility, mixed order, off/unloaded IDs, reload, re-enable, new cards, reset and per-user layout.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

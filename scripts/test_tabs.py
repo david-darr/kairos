@@ -937,6 +937,67 @@ def calendar_items(user, start, end):
             await tab_hooks.stop_all()
         asyncio.run(run())
 
+    def test_home_cards_api_scopes_namespaces_and_retains_other_valid_cards(self):
+        source = '''def home_cards(user):
+    return [{"id": "bad", "title": "bad", "kind": "html"},
+            {"id": "count", "title": user, "kind": "stat", "value": 3, "label": "open",
+             "slug": "other", "tab_name": "other", "url": "https://example.test"}]
+'''
+        self.hook_folder(source=source, hooks=["home_cards"])
+        tabs.discover()
+        response = self.client.get("/api/home/tab-cards")
+        response.raise_for_status()
+        self.assertEqual(response.json(), {"cards": [{"id": "tab:alpha:count", "title": "reviewer",
+            "kind": "stat", "value": 3, "label": "open", "slug": "alpha", "tab_name": "Alpha", "tab_icon": "<svg/>"}]})
+        from fastapi import HTTPException
+        def denied(): raise HTTPException(401, "Sign in")
+        self.app.dependency_overrides[require_user] = denied
+        self.assertEqual(self.client.get("/api/home/tab-cards").status_code, 401)
+
+    def test_home_cards_skip_off_undeclared_unapproved_and_revoked_tabs(self):
+        source = 'def home_cards(user): return [{"id":"count", "title":user, "kind":"stat", "value":1, "label":"open"}]'
+        self.hook_folder(source=source, hooks=["home_cards"])
+        self.hook_folder("beta", user=False, source=source, hooks=["home_cards"])
+        self.hook_folder("gamma", source=source, hooks=["calendar_items"])
+        self.folder("pending", hooks=["home_cards"])
+        tabs.discover()
+        self.assertEqual(len(asyncio.run(tab_hooks.home_cards("owner"))), 1)
+        self.assertNotIn("kairos_tabs.pending.hooks", sys.modules)
+        self.assertNotIn("kairos_tabs.beta.hooks", sys.modules)
+        self.saved[tabs._FOLDER_APPROVALS_KEY].pop("alpha")
+        self.assertEqual(asyncio.run(tab_hooks.home_cards("owner")), [])
+        self.approve("alpha")
+        tabs.set_user_tab_enabled("alpha", False)
+        self.assertEqual(asyncio.run(tab_hooks.home_cards("owner")), [])
+        tabs.set_user_tab_enabled("alpha", True)
+        tabs.discover()
+        self.assertEqual(len(asyncio.run(tab_hooks.home_cards("owner"))), 1)
+
+    def test_home_cards_timeout_failure_and_logs_never_include_content(self):
+        self.hook_folder(source="import time\ndef home_cards(user): time.sleep(.4); return []", hooks=["home_cards"])
+        self.hook_folder("beta", source="def home_cards(user): raise ValueError('private follow-up')", hooks=["home_cards"])
+        self.hook_folder("gamma", source='def home_cards(user): return [{"id":"ok", "kind":"list", "title":"Good", "rows":[]}]', hooks=["home_cards"])
+        tabs.discover()
+        with patch.object(tab_hooks, "TIMEOUT", .1), self.assertLogs("core.tab_hooks", level="WARNING") as logs:
+            before = time.monotonic()
+            cards = asyncio.run(tab_hooks.home_cards("owner"))
+            self.assertLess(time.monotonic() - before, .3)
+        self.assertEqual([c["id"] for c in cards], ["tab:gamma:ok"])
+        self.assertIn("category=timeout", " ".join(logs.output))
+        self.assertIn("category=exception", " ".join(logs.output))
+        self.assertNotIn("private follow-up", " ".join(logs.output))
+
+    def test_home_cards_turned_off_during_hook_are_not_returned(self):
+        self.hook_folder(source='async def home_cards(user):\n    return [{"id":"ok", "kind":"list", "title":"Good", "rows":[]}]', hooks=["home_cards"])
+        tabs.discover()
+        original = tab_hooks._declared
+        async def turn_off(entry, name, *args):
+            result = await original(entry, name, *args)
+            tabs.set_user_tab_enabled("alpha", False)
+            return result
+        with patch.object(tab_hooks, "_declared", side_effect=turn_off):
+            self.assertEqual(asyncio.run(tab_hooks.home_cards("owner")), [])
+
     def test_hook_exception_and_timeout_isolation_without_reply_delay(self):
         source = """import asyncio, time
 async def on_message(source, message):
@@ -1077,6 +1138,68 @@ def calendar_items(user, start, end):
         self.assertIn("alpha/", memory_tools.list_repo_directory("custom-tabs"))
         for name in ("custom-tabs/alpha/../../settings.json", "custom-tabs/../settings.json", "custom-tabs/alpha/../beta/routes.py"):
             with self.assertRaises(ValueError): memory_tools._resolve_repo_path(name)
+
+
+class HomeCardValidationTests(unittest.TestCase):
+    def validate(self, cards):
+        from core.home_cards import validate_cards
+        entry = {"slug": "fixture", "_metadata": {"name": "Fixture", "icon_svg": "<svg/>"}}
+        return validate_cards(cards, entry, tab_hooks.logger)
+
+    def stat(self, **fields):
+        return {"id": "count", "title": "Count", "kind": "stat", "value": 1, "label": "Open", **fields}
+
+    def test_plain_text_and_unknown_fields(self):
+        card = self.validate([self.stat(title="<b>Count</b>\x00\n", label="Open\u202e", value="<i>3</i>", detail="A &amp; B", url="https://evil")])[0]
+        self.assertEqual((card["title"], card["label"], card["value"], card["detail"]), ("Count", "Open", "3", "A & B"))
+        self.assertNotIn("url", card)
+        rows = self.validate([{"id": "rows", "title": "Rows", "kind": "list", "rows": [{"title": "<b>Hi</b>", "meta": "A\x01B", "badge": "<i>Review</i>", "tone": "warn"}], "empty_text": "<p>Empty</p>"}])[0]
+        self.assertEqual(rows["rows"][0], {"title": "Hi", "meta": "AB", "badge": "Review", "tone": "warn"})
+        self.assertEqual(rows["empty_text"], "Empty")
+        malformed = self.validate([self.stat(title="<![broken]>Count")])[0]
+        self.assertEqual(malformed["title"], "Count")
+
+    def test_invalid_individual_cards_do_not_discard_good_cards_and_limit_is_two(self):
+        cards = self.validate([self.stat(kind="unknown"), self.stat(id="first"), self.stat(id="first"),
+                               self.stat(id="../escape"), self.stat(id="second"), self.stat(id="third")])
+        self.assertEqual([c["id"] for c in cards], ["tab:fixture:first", "tab:fixture:second"])
+        self.assertEqual(self.validate({"cards": []}), [])
+
+    def test_text_limits_types_and_empty_required_fields(self):
+        for field, limit in (("title", 40), ("label", 40), ("detail", 80), ("value", 12)):
+            with self.subTest(field=field):
+                self.assertEqual(len(self.validate([self.stat(**{field: "x" * limit})])), 1)
+                self.assertEqual(self.validate([self.stat(**{field: "x" * (limit + 1)})]), [])
+                self.assertEqual(self.validate([self.stat(**{field: []})]), [])
+        for field in ("title", "label", "value"):
+            self.assertEqual(self.validate([self.stat(**{field: "<b></b>"})]), [])
+
+    def test_list_limits_optional_fields_and_tones(self):
+        base = {"id": "rows", "title": "Rows", "kind": "list", "rows": []}
+        self.assertEqual(len(self.validate([base])), 1)
+        self.assertEqual(len(self.validate([{**base, "rows": [{"title": "Row"}] * 5}])), 1)
+        self.assertEqual(self.validate([{**base, "rows": [{"title": "Row"}] * 6}]), [])
+        for key, limit in (("title", 80), ("meta", 80), ("badge", 20)):
+            self.assertEqual(len(self.validate([{**base, "rows": [{"title": "Row", key: "x" * limit}]}])), 1)
+            self.assertEqual(self.validate([{**base, "rows": [{"title": "Row", key: "x" * (limit + 1)}]}]), [])
+        for tone in ("default", "warn", "danger", "ok"):
+            self.assertEqual(len(self.validate([{**base, "rows": [{"title": "Row", "tone": tone}]}])), 1)
+        for rows in (None, "rows", [None], [{"title": "Row", "tone": "bad"}]):
+            self.assertEqual(self.validate([{**base, "rows": rows}]), [])
+        self.assertEqual(self.validate([{**base, "empty_text": "x" * 81}]), [])
+
+    def test_stat_and_progress_invalid_numbers(self):
+        base = self.stat(kind="progress", value=1, total=2)
+        self.assertEqual(len(self.validate([base])), 1)
+        self.assertEqual(len(self.validate([{**base, "value": 0}])), 1)
+        self.assertEqual(len(self.validate([{**base, "value": 3}])), 1)
+        for number in (float("nan"), float("inf"), float("-inf"), True, None, {}, 10**1000):
+            self.assertEqual(self.validate([self.stat(value=number)]), [])
+            for key in ("value", "total"):
+                self.assertEqual(self.validate([{**base, key: number}]), [])
+        for fields in ({"total": 0}, {"total": -1}, {"value": -1}, {"value": "1"}):
+            self.assertEqual(self.validate([{**base, **fields}]), [])
+        self.assertEqual(len(self.validate([self.stat(value=-1)])), 1)
 
 
 class TabWorkTests(unittest.TestCase):

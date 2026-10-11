@@ -240,7 +240,8 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
   const weekEnd = new Date(today);
   weekEnd.setDate(weekEnd.getDate() + 7);
 
-  const items = await api(`/api/calendar/events?start=${encodeURIComponent(today.toISOString())}&end=${encodeURIComponent(weekEnd.toISOString())}`);
+  const items = (await api(`/api/calendar/events?start=${encodeURIComponent(today.toISOString())}&end=${encodeURIComponent(weekEnd.toISOString())}`))
+    .filter(item => !item.completed);
   if (!isCurrent()) return;
 
   dayPanel.innerHTML = "";
@@ -253,14 +254,13 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
 
   const cursor = new Date(today);
   for (let i = 0; i < 7; i++) {
-    const key = cursor.toDateString();
     const dayItems = itemsOnDay(items, cursor);
     if (dayItems && dayItems.length > 0) {
       dayPanel.appendChild(el("div", {
         class: "cal-upcoming-day-label",
         text: i === 0 ? "Today" : cursor.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
       }));
-      for (const item of dayItems) appendItemCard(dayPanel, item, () => renderUpcomingPanel(dayPanel, onChange), onChange);
+      for (const item of dayItems) appendItemCard(dayPanel, item, onChange, true);
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -276,18 +276,16 @@ function renderDayPanel(dayPanel, date, items, onChange) {
   }
 
   for (const item of items) {
-    appendItemCard(dayPanel, item, () => renderDayPanel(dayPanel, date, items, onChange), onChange);
+    appendItemCard(dayPanel, item, onChange);
   }
 }
 
 // Shared by both the day panel and the upcoming list — a checkbox to mark
 // an event/note complete (David's ask 2026-08-31), plus delete for
 // calendar-sourced items (note-backed ones are deleted from Notes, not
-// here). `rerenderSelf` redraws just this panel's own list after a toggle;
-// `refreshGrid` also re-fetches the month grid so its pills/dots stay in
-// sync (a completed note especially — it disappears from the merged view
-// entirely once checked, same as Notes tab's own default filtering).
-function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
+// here). Upcoming cards fade out after completion, then `refreshGrid`
+// re-fetches the grid and panel so their completion state stays in sync.
+function appendItemCard(dayPanel, item, refreshGrid, upcoming = false) {
   const edit = () => eventDialog(dayPanel._createBar?._calendars || [], refreshGrid, item,
     new Date(localDayKey(item)), dayPanel._createBar?._owner);
   if (item.source === 'google') {
@@ -296,7 +294,7 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
       el('button', { type: 'button', class: 'btn quiet', text: 'Edit', onclick: edit }),
       iconButton(ICONS.trash, 'Delete event', () => deleteCalendarEvent(item, refreshGrid, dayPanel._createBar?._owner), { danger: true }),
     );
-    dayPanel.append(eventColor(el('div', { class: 'glass card has-row-actions' }, [
+    dayPanel.append(eventColor(el('div', { class: 'glass card has-row-actions' + (item.completed ? ' cal-item-completed' : '') }, [
       el('div', { class: 'title', text: item.title }),
       el('div', { class: 'meta', text: `${item.calendar_name} · ${item.all_day ? 'All day' : new Date(item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` }), actions,
     ]), item));
@@ -305,14 +303,22 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
   const checkbox = el("input", { type: "checkbox" });
   checkbox.checked = !!item.completed;
   checkbox.addEventListener("change", async () => {
-    if (item.source === "calendar") {
-      await api(`/api/calendar/events/${item.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
-    } else if (item.source === "tab") {
-      await api(item.toggle_url, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
-    } else {
-      await api(`/api/notes/${item.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+    checkbox.disabled = true;
+    try {
+      if (item.source === "calendar") {
+        await api(`/api/calendar/events/${item.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+      } else if (item.source === "tab") {
+        await api(item.toggle_url, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+      } else {
+        await api(`/api/notes/${item.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+      }
+      if (upcoming && checkbox.checked && card.isConnected && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        await card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, fill: 'forwards' }).finished.catch(() => {});
+      }
+      await refreshGrid();
+    } finally {
+      checkbox.disabled = false;
     }
-    await refreshGrid();
   });
 
   const canDelete = item.source === "calendar";
@@ -323,7 +329,7 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
       ])
     : el("span", { class: "meta", text: item.source === "tab" ? item.source_label : "From Notes" });
 
-  dayPanel.appendChild(el("div", { class: "glass card has-row-actions" + (item.completed ? " cal-item-completed" : "") }, [
+  const card = el("div", { class: "glass card has-row-actions" + (item.completed ? " cal-item-completed" : "") }, [
     el("div", { class: "card-row" }, [
       checkbox,
       el("div", { style: "flex:1;" }, [
@@ -332,7 +338,8 @@ function appendItemCard(dayPanel, item, rerenderSelf, refreshGrid) {
       ]),
       trailing,
     ]),
-  ]));
+  ]);
+  dayPanel.appendChild(card);
 }
 
 // -- Archive (David's ask, 2026-08-31): a real modal listing every checked-

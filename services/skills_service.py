@@ -41,7 +41,8 @@ _LEGACY_SEED_HASHES = {
                          "e60c90b88115d35ce33364de4bc943dfdd2adf83ad80556a5fcd3a7065513319",
                          "c12313f03035060c100ceac976653c6c1ccbe8f759285a44925b700009141cb2",
                          "ce52b531d9813c5fa122cc2b35ae511d4c2525ec4d5639d97411a072eea9946d",
-                         "0cc72be9661ec969572f1798c43b4d5e2b23d0bcd8f2de90a19dea18f5f034d4"},
+                         "0cc72be9661ec969572f1798c43b4d5e2b23d0bcd8f2de90a19dea18f5f034d4",
+                         "fd9fec6a9f627cd3122677e93cadb37546ff61415c196cc8b3279a6b06af1d0a"},
 }
 
 
