@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core import discord_bots_store, permissions, settings as settings_store
+from core import discord_bots_store, permissions, tool_registry, settings as settings_store
 from core.channels import discord_channel
 from core.middleware import require_admin
 from core.session_manager import session_manager
@@ -54,7 +54,7 @@ class VaultSetupRequest(BaseModel):
 # Well-known Claude Agent SDK / Claude Code builtin tool names. The SDK
 # doesn't export a canonical enum of these, so this list is hand-maintained —
 # same trade-off Odysseus takes with its own builtin-tool-toggle list.
-AGENT_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "TodoWrite", "NotebookEdit"]
+AGENT_TOOLS = list(tool_registry.CLAUDE_NATIVE_TOOLS)
 
 
 class SetDisabledToolsRequest(BaseModel):

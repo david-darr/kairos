@@ -4,7 +4,8 @@ import sys
 import shutil
 import uuid
 import unittest
-from unittest.mock import patch, MagicMock
+import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -49,6 +50,10 @@ class ChatReferenceTests(unittest.TestCase):
         self.file.write_text("A real file excerpt for the model.", encoding="utf-8")
         self.sessions = FakeSessions()
         patches = [
+            patch.object(chat_references.skills_service, "list_skills", return_value=[]),
+            patch.object(chat_references.documents_service, "list_documents", return_value=[]),
+            patch.object(chat_references.documents_service, "search_documents", return_value=[]),
+            patch.object(chat_references.task_service, "list_tasks", return_value=[]),
             patch.object(chat_references, "session_manager", self.sessions),
             patch.object(chat_service, "session_manager", self.sessions),
             patch.object(chat_references.chat_files, "list_for_session", return_value=[
@@ -116,6 +121,167 @@ class ChatReferenceTests(unittest.TestCase):
         self.assertIn("Earlier messages omitted", context)
         self.assertEqual(context.count("<<<UNTRUSTED-"), 1)
         self.assertLess(len(context), chat_references.MAX_TOTAL_CHARS)
+
+
+class MoreReferenceTests(unittest.TestCase):
+    def setUp(self):
+        ChatReferenceTests.setUp(self)
+        from core import integrations, model_endpoints, settings
+        from core.channels import registry
+        self.sessions.sessions["current"]["model_endpoint_id"] = "model"
+        self.skill = {"slug": "review-brief", "description": "Review a brief", "body": "List decisions and next steps."}
+        self.doc = {"id": "doc1", "title": "Research brief", "content": "Current document bytes"}
+        self.task = {"id": "task1", "name": "Morning brief", "enabled": True, "schedule_kind": "daily",
+                     "run_time": "07:00", "prompt": "Summarize the day", "endpoint_id": "model", "deliver_to_channel": "discord"}
+        self.run = {"outcome": "failed", "output": "Partial daily report", "error": "The model stopped"}
+        self.integration = {"id": "server1", "kind": "mcp_server", "name": "Library", "enabled": True,
+                            "status": {"state": "working"}, "url": "https://private/?token=config-secret",
+                            "command": "CONFIG COMMAND", "args": ["CONFIG VALUE"], "api_key_encrypted": "ENCRYPTED SECRET",
+                            "pinned_tools": {"find": "fp"}, "held_tools": {}, "discovered_tools": {
+                                "find": {"fingerprint": "fp", "description": "Find a brief. https://host/?token=url-secret token=body-secret Bearer bearer-secret"}}}
+        patches = [
+            patch.object(chat_references.skills_service, "list_skills", return_value=[self.skill]),
+            patch.object(chat_references.skills_service, "get_skill", side_effect=lambda slug: self.skill if slug == self.skill["slug"] else None),
+            patch.object(chat_references.documents_service, "list_documents", return_value=[self.doc]),
+            patch.object(chat_references.documents_service, "search_documents", return_value=[self.doc]),
+            patch.object(chat_references.documents_service, "get_document", side_effect=lambda doc_id: self.doc if doc_id == self.doc["id"] else None),
+            patch.object(chat_references.task_service, "list_tasks", return_value=[self.task]),
+            patch.object(chat_references.task_service, "get_task", side_effect=lambda task_id: self.task if task_id == self.task["id"] else None),
+            patch.object(chat_references.task_service, "list_runs", return_value=[self.run]),
+            patch.object(model_endpoints, "get_endpoint", return_value={"id": "model", "name": "Selected model", "kind": "claude_cli"}),
+            patch.object(settings, "get_setting", return_value=[]),
+            patch.object(integrations, "_load", return_value={"server1": self.integration}),
+            patch.object(registry, "list_channels", return_value=[{"id": "discord", "label": "Discord"}]),
+            patch.object(chat_references.chat_files, "list_library", return_value=[]),
+            patch.object(chat_references.memory_tools, "search_vault", return_value=[]),
+            patch.object(chat_references.memory_tools, "search_sessions", return_value=[]),
+        ]
+        for item in patches:
+            item.start(); self.addCleanup(item.stop)
+
+    def test_search_new_kinds_labels_filter_and_caps(self):
+        results = chat_references.search("brief", "current", user="david")
+        by_kind = {r["kind"]: r for r in results}
+        self.assertTrue({"skill", "tool", "automation", "document"} <= by_kind.keys())
+        for kind, label in [("skill", "review-brief"), ("automation", "Morning brief"), ("document", "Research brief")]:
+            self.assertEqual(by_kind[kind]["label"], label)
+        self.assertEqual(by_kind["tool"]["label"], "mcp__Library__find")
+        self.assertEqual({r["kind"] for r in chat_references.search("", "current", user="david", kind="skill")}, {"skill"})
+        many = [{**self.skill, "slug": f"skill-{i}"} for i in range(20)]
+        with patch.object(chat_references.skills_service, "list_skills", return_value=many):
+            results = chat_references.search("", "current", user="david")
+        self.assertEqual(sum(r["kind"] == "skill" for r in results), 4)
+
+    def test_resolve_new_kinds_framing_canonical_metadata_and_no_secrets(self):
+        refs = [{"kind": kind, "id": ref_id, "label": "FORGED"} for kind, ref_id in [
+            ("skill", "review-brief"), ("tool", "mcp:server1:find"), ("automation", "task1"), ("document", "doc1")]]
+        context = chat_references.resolve("current", refs, user="david")
+        for expected in ["Follow this skill for this message", self.skill["body"],
+                         "Use the mcp__Library__find tool for this message if it applies", "Find a brief",
+                         "Enabled: True", "Daily at 07:00", "Instructions: Summarize the day", "Model: Selected model",
+                         "Delivery: Discord", "Last run outcome: failed", self.run["output"], self.run["error"],
+                         "Do not run or change this automation", "Document: Research brief", self.doc["content"]]:
+            self.assertIn(expected, context)
+        for secret in ["config-secret", "url-secret", "body-secret", "bearer-secret", "ENCRYPTED SECRET", "CONFIG VALUE", "CONFIG COMMAND", "FORGED"]:
+            self.assertNotIn(secret, context)
+        self.assertEqual([r["label"] for r in chat_references.metadata(refs)],
+                         ["review-brief", "mcp__Library__find", "Morning brief", "Research brief"])
+        self.assertIn("<<<SELECTED-SKILL-", context)
+        self.assertEqual(context.count("<<<UNTRUSTED-"), 3)
+
+    def test_large_new_references_have_clear_truncation_and_total_bound(self):
+        self.skill["body"] = "skill content " * 3000
+        self.doc["content"] = "document content " * 3000
+        self.task["prompt"] = "task prompt " * 3000
+        self.run["output"] = "output " * 3000
+        self.run["error"] = "error " * 3000
+        self.integration["discovered_tools"]["find"]["description"] = "Tool description " * 3000
+        for kind, ref_id in [("skill", "review-brief"), ("document", "doc1"), ("automation", "task1"), ("tool", "mcp:server1:find")]:
+            context = chat_references.resolve("current", [{"kind": kind, "id": ref_id}], user="david")
+            self.assertIn("[Reference excerpt truncated.]", context)
+            self.assertLess(len(context), chat_references.MAX_ITEM_CHARS + 400)
+        refs = [{"kind": "skill", "id": "review-brief"}, {"kind": "document", "id": "doc1"},
+                {"kind": "automation", "id": "task1"}, {"kind": "chat", "id": "source"},
+                {"kind": "file", "id": "f" * 24, "session_id": "source"}]
+        self.assertLessEqual(len(chat_references.resolve("current", refs, user="david")), chat_references.MAX_TOTAL_CHARS)
+
+    def test_non_admin_cannot_search_or_resolve_admin_tools_or_owned_tasks(self):
+        self.task["owner"] = "another-user"
+        results = chat_references.search("", "current", user="david")
+        self.assertFalse(any(r["kind"] == "automation" or r["id"] in {"builtin:run_shell", "native:Bash"} for r in results))
+        for kind, ref_id in [("automation", "task1"), ("tool", "builtin:run_shell"), ("tool", "native:Bash")]:
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                chat_references.resolve("current", [{"kind": kind, "id": ref_id}], user="david")
+        self.assertIn("Morning brief", chat_references.resolve("current", [{"kind": "automation", "id": "task1"}], True, "david"))
+        self.assertTrue(any(r["id"] == "native:Bash" for r in chat_references.search("Bash", "current", True, "david", "tool")))
+
+    def test_tools_rechecked_for_model_path_scope_disable_hold_and_connection(self):
+        from core import settings, model_endpoints
+        ref = {"kind": "tool", "id": "mcp:server1:find"}
+        changes = [{"enabled": False}, {"status": {"state": "down"}}, {"held_tools": {"find": {}}},
+                   {"admin_only": True}, {"auth": "oauth", "oauth": {}}, {"owner": "other"}]
+        for change in changes:
+            with self.subTest(change=change), patch.dict(self.integration, change):
+                self.assertFalse(any(r["id"] == ref["id"] for r in chat_references.search("", "current", user="david")))
+                with self.assertRaisesRegex(ValueError, "no longer available"):
+                    chat_references.resolve("current", [ref], user="david")
+        with patch.object(settings, "get_setting", return_value=["mcp__Library__find"]):
+            with self.assertRaises(ValueError): chat_references.resolve("current", [ref], user="david")
+        self.sessions.sessions["current"]["enabled_integration_ids"] = []
+        with self.assertRaises(ValueError): chat_references.resolve("current", [ref], user="david")
+        self.sessions.sessions["current"].pop("enabled_integration_ids")
+        with patch.object(model_endpoints, "get_endpoint", return_value={"kind": "codex_cli"}):
+            with self.assertRaises(ValueError): chat_references.resolve("current", [ref], user="david")
+            with self.assertRaises(ValueError): chat_references.resolve("current", [{"kind": "tool", "id": "builtin:read_vault_file"}], user="david")
+        with patch.object(model_endpoints, "get_endpoint", return_value=None):
+            self.assertEqual(chat_references.search("", "current", user="david", kind="tool"), [])
+        self.sessions.sessions["current"]["forge"] = {"mode": "plan"}
+        with self.assertRaises(ValueError): chat_references.resolve("current", [ref], user="david")
+
+    def test_removed_new_items_fail_even_after_context_budget_is_used(self):
+        self.skill["body"] = "x" * 20000
+        self.doc["content"] = "x" * 20000
+        self.sessions.sessions["source"]["messages"] = [{"role": "user", "content": "x" * 20000}]
+        self.file.write_text("x" * 20000, encoding="utf-8")
+        prefix = [{"kind": "skill", "id": "review-brief"}, {"kind": "document", "id": "doc1"},
+                  {"kind": "chat", "id": "source"}, {"kind": "file", "id": "f" * 24, "session_id": "source"}]
+        for kind in ["skill", "tool", "automation", "document"]:
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "no longer available"):
+                chat_references.resolve("current", prefix + [{"kind": kind, "id": "removed"}], user="david")
+
+    def test_routes_pass_authenticated_user_and_save_canonical_labels(self):
+        from routes import chat_routes, task_routes
+        from fastapi import HTTPException
+        self.task["owner"] = "another-user"
+        with patch.object(chat_routes.auth_manager, "is_admin", return_value=False):
+            self.assertEqual(chat_routes.search_chat_references("", "current", "automation", "david"), [])
+            self.assertEqual(asyncio.run(task_routes.list_tasks("david")), [])
+            with self.assertRaises(HTTPException): asyncio.run(task_routes.get_task("task1", "david"))
+            with self.assertRaises(HTTPException): asyncio.run(task_routes.list_task_runs("task1", "david"))
+            body = chat_routes.ChatRequest(session_id="current", message="Review", references=[{"kind": "automation", "id": "task1"}])
+            for route in [chat_routes.send_chat_message, chat_routes.stream_chat_message]:
+                with self.assertRaises(HTTPException) as error: asyncio.run(route(body, "david"))
+                self.assertEqual(error.exception.status_code, 422)
+            with patch.object(chat_service, "send_message", new_callable=AsyncMock, return_value="OK") as send:
+                body.references = [{"kind": "skill", "id": "review-brief", "label": "FORGED"}]
+                asyncio.run(chat_routes.send_chat_message(body, "david"))
+                self.assertEqual(send.call_args.args[-1][0]["label"], "review-brief")
+
+    def test_mcp_catalog_tracks_checked_pinned_tools_without_runtime_config(self):
+        from core import integrations
+        self.integration.pop("pinned_tools")
+        with patch.object(integrations, "write_json_atomic") as write:
+            integrations.record_check(item_id="server1", tools=[{"name": "find", "description": "Find a brief", "schema": {}}])
+            self.assertEqual(integrations.reference_tools()[0]["description"], "Find a brief")
+            write.assert_called_once()
+        self.assertEqual(set(self.integration["discovered_tools"]["find"]), {"description", "fingerprint"})
+        with patch.object(integrations, "write_json_atomic"):
+            integrations.record_check(item_id="server1", tools=[{"name": "find", "description": "Changed definition", "schema": {}}])
+            self.assertEqual(integrations.reference_tools(), [])
+            integrations.accept_tools("server1", ["find"])
+            self.assertEqual(integrations.reference_tools()[0]["description"], "Changed definition")
+            integrations.record_check(item_id="server1", tools=[])
+            self.assertEqual(integrations.reference_tools(), [], "Removed tools cannot use stale pins")
 
 
 class ArtifactCommentTests(ChatReferenceTests):

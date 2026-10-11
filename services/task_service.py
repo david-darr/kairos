@@ -112,6 +112,12 @@ class TaskService:
     def get_task(self, task_id: str) -> Optional[dict]:
         return self._tasks.get(task_id)
 
+    @staticmethod
+    def visible_to(task: dict, user: Optional[str], is_admin: bool = False) -> bool:
+        # Existing tasks are shared. Honor ownership on scoped/imported tasks.
+        owner = task.get("owner") or task.get("user_id") or task.get("created_by")
+        return bool(is_admin or (not task.get("admin_only") and (not owner or owner == user)))
+
     def create_task(
         self,
         name: str,

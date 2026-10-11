@@ -48,7 +48,10 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   await navigate('chat', { sessionId: 's2' });
   assert.equal(await count(), 2);
   assert.equal(await js("document.querySelector('.chat-layout').classList.contains('pane-maximized')"), true);
-  assert.ok(await js(`document.querySelector('${active} .artifact-document') === window.retainedArtifact && document.querySelector('${active} .artifact-preview').scrollTop === 180`));
+  const restored = await js(`({ retained: document.querySelector('${active} .artifact-document') === window.retainedArtifact,
+    scroll: document.querySelector('${active} .artifact-preview').scrollTop,
+    max: document.querySelector('${active} .artifact-preview').scrollHeight - document.querySelector('${active} .artifact-preview').clientHeight })`);
+  assert.ok(restored.retained && restored.scroll === 180, 'Maximized document keeps its DOM and scroll: ' + JSON.stringify(restored));
   await click('.artifact-maximize'); await delay(250);
   assert.ok(Math.abs(await js("document.querySelector('#chat-main').getBoundingClientRect().width") - width) < 2);
   await add('Make this plan clearer.');

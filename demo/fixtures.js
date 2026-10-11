@@ -569,7 +569,7 @@
     if (route === '/api/chat/stream' && method === 'POST' && body.references?.some(ref => ref.kind === 'agent')) {
       state.handoffSessions ||= {};
       const session = state.handoffSessions[body.session_id] ||= { ...fixture(new URL(`/api/sessions/${body.session_id}`, 'http://demo')) };
-      session.messages.push({ role: 'user', content: body.message, ts: now });
+      session.messages.push({ role: 'user', content: body.message, ts: now, references: body.references });
       const handed = [...new Set(body.references.filter(ref => ref.kind === 'agent').map(ref => ref.id))].map(id => {
         const agent = agentsFixture.find(a => a.id === id);
         return { role: 'assistant', content: `Handed to ${agent.name}`, ts: now, type: 'handoff',
@@ -578,6 +578,16 @@
       });
       session.messages.push(...handed);
       return { handoffs: handed };
+    }
+    // Only the composer kinds added for skills, tools, automations and
+    // documents; artifact comments keep their own streaming fixture.
+    if (route === '/api/chat/stream' && method === 'POST' && body.references?.length
+        && body.references.every(ref => ['skill', 'tool', 'automation', 'document'].includes(ref.kind))) {
+      state.handoffSessions ||= {};
+      const session = state.handoffSessions[body.session_id] ||= { ...fixture(new URL(`/api/sessions/${body.session_id}`, 'http://demo')) };
+      session.messages = [...session.messages, { role: 'user', content: body.message, ts: now, references: body.references },
+        { role: 'assistant', content: 'Selected references received for this message.', ts: now + 1 }];
+      return { ok: true };
     }
     if (/^\/api\/agents\/inbox\/hq-.*\/answer$/.test(route) && method === 'POST') {
       state.handoffAnswered = true;
@@ -946,8 +956,21 @@
     if (/^\/api\/sessions\/[^/]+$/.test(route) && forgeSessions[route.split('/')[3]]) return forgeSessions[route.split('/')[3]];
     if (route === '/api/chat/references') {
       const needle = (url.searchParams.get('q') || '').toLowerCase();
-      return list(agentsFixture.filter(a => `${a.name} ${a.role}`.toLowerCase().includes(needle))
-        .map(a => ({ kind: 'agent', id: a.id, label: a.name, detail: a.role, avatar: a.name[0], color: a.color })));
+      const kind = url.searchParams.get('kind');
+      const matches = [
+        ...agentsFixture.map(a => ({ kind: 'agent', id: a.id, label: a.name, detail: a.role, avatar: a.name[0], color: a.color })),
+        ...fixture(new URL('/api/skills', url)).filter(s => !s.error).map(s => ({ kind: 'skill', id: s.slug, label: s.slug, detail: s.description })),
+        { kind: 'tool', id: 'builtin:search_sessions', label: 'search_sessions', detail: 'Search past chats for relevant context.' },
+        { kind: 'tool', id: 'mcp:demo:find_document', label: 'mcp__Library__find_document', detail: 'Find a document in the connected Library.' },
+        ...tasks.filter(t => t.schedule_kind !== 'card').map(t => ({ kind: 'automation', id: t.id, label: t.name, detail: t.schedule_kind === 'daily' ? `Daily at ${t.run_time}` : `Every ${t.interval_seconds} seconds` })),
+        ...docs.map(d => ({ kind: 'document', id: d.id, label: d.title, detail: 'Library document' })),
+        { kind: 'file', id: 'demo-brief', session_id: 's1', label: 'brief.md', detail: 'Project planning' },
+        { kind: 'note', id: 'Design/Brief.md', label: 'Brief', detail: 'Design/Brief.md' },
+        { kind: 'chat', id: 's2', label: 'Earlier design chat', detail: 'Conversation' },
+      ];
+      const counts = {};
+      return list(matches.filter(r => (!kind || kind === r.kind) && `${r.label} ${r.detail}`.toLowerCase().includes(needle))
+        .filter(r => (counts[r.kind] = (counts[r.kind] || 0) + 1) <= 4));
     }
     if (/^\/api\/sessions\/[^/]+$/.test(route) && state.handoffSessions?.[route.split('/')[3]]) {
       const session = state.handoffSessions[route.split('/')[3]];

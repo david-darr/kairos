@@ -15,7 +15,7 @@ import { showPermissionPrompt, dismissPermissionPrompt } from '../permissionProm
 import { mountSideChat, openSideChat, closeSideChat, mainOpened, sideChatSessionId, canSplit, SESSION_MIME } from '../sideChat.js';
 import { mountChatFind } from '../chatFind.js';
 import { openWebCapture } from '../screenCapture.js';
-import { mountChatReferences } from '../chatReferences.js';
+import { mountChatReferences, renderReferenceChips } from '../chatReferences.js';
 import { mountChatTimeline } from '../chatTimeline.js';
 import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
@@ -27,14 +27,11 @@ import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
 // strip led by a "+" overflow menu, right side the send button, on the
 // bottom), attach-strip above the bar for staged files, real folder-scoped
 // "Workspace" via core/workspace.py (ported from Odysseus's
-// src/tool_execution.py's vet_workspace/browse), and "Prompt" backed by our
+// src/tool_execution.py's vet_workspace/browse), and "Use a skill" backed by our
 // existing Skills service rather than Odysseus's separate preset system.
 // "Documents" (David's ask 2026-09-01, Phase 7) now inserts a real library
-// document's content into the composer, same mechanism as "Prompt" below
-// (which does the same thing for Skills) — not Odysseus's own RAG-backed
-// approach (which sends a document reference the model retrieves at query
-// time), since Kairos doesn't have a RAG layer. Simpler and honest about
-// the difference: the whole document goes into the message up front.
+// document's content into the composer. The @ picker also offers documents
+// as bounded references, and selects skills without pasting their bodies.
 
 const ICON_ATTACH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
 const ICON_CAPTURE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="7" y="8" width="10" height="8" rx="1"/></svg>';
@@ -91,6 +88,7 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   const actions = el("div", { class: "msg-actions" }, [copyBtn, el("span", { class: "msg-time", text: time })]);
 
   const card = el("div", { class: `msg ${role}` }, [body, actions]);
+  if (role === 'user' && failure?.references?.length) card.insertBefore(renderReferenceChips(failure.references), actions);
   if (role === "user" && imageSources.length) {
     const images = el("div", { class: "msg-images" });
     for (const source of imageSources) {
@@ -717,7 +715,7 @@ export async function render(container, tabId, options = {}) {
   captureItem.setAttribute("aria-label", "Capture from this device");
   const docItem = menuItem(ICON_DOC, "Documents", () => { closeMenu(overflowMenu); openDocumentsMenu(docItem); });
   const workspaceItem = menuItem(ICON_WORKSPACE, "Workspace", () => { closeMenu(overflowMenu); openWorkspaceModal(); });
-  const promptItem = menuItem(ICON_PROMPT, "Prompt", () => { closeMenu(overflowMenu); openPromptMenu(promptItem); });
+  const skillItem = menuItem(ICON_PROMPT, "Use a skill", () => { closeMenu(overflowMenu); chatReferences?.openPicker({ kind: 'skill' }); });
   const integrationsItem = menuItem(ICON_PLUG, "Integrations", () => { closeMenu(overflowMenu); openIntegrationsModal(); });
   // Side browser (David's ask 2026-09-15) — an explicit user action, which
   // is the only way the pane ever opens. The other entry point is activating
@@ -738,7 +736,7 @@ export async function render(container, tabId, options = {}) {
   compactBtn.title = "Compact this chat";
   compactBtn.setAttribute("aria-label", "Compact this chat to free up context");
   compactBtn.hidden = true;
-  overflowMenu.append(attachItem, captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, promptItem, compactBtn);
+  overflowMenu.append(attachItem, captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, skillItem, compactBtn);
   const overflowWrap = el("div", { class: "overflow-wrapper" }, [overflowBtn, overflowMenu, fileInput]);
 
   const workspacePill = el("div", { id: "workspace-pill-slot" });
@@ -845,7 +843,7 @@ export async function render(container, tabId, options = {}) {
   const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer,
     el('div', { id: 'chat-permission-notice', class: 'chat-permission-notice', hidden: true,
       text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' }),
-    el("div", { class: "composer-hint", text: "/ for commands · @ to add a file, note, or chat · Enter to send · Shift + Enter for a new line" })]);
+    el("div", { class: "composer-hint", text: "/ for commands · @ to mention a skill, tool, file and more · Enter to send · Shift + Enter for a new line" })]);
   composerRefs = { messages, input, sendBtn, attachStrip, queueHost };
   main.append(messages, dock);
   const timeline = mountChatTimeline(main, messages, () => activeSessionId);
@@ -1198,32 +1196,6 @@ function renderAttachStrip(attachStrip) {
     chip.appendChild(removeBtn);
     attachStrip.appendChild(chip);
   }
-}
-
-// -- prompts (backed by Skills, not a separate preset system) -------------
-async function openPromptMenu(anchor) {
-  const skills = await api("/api/skills");
-  const menu = el("div", { class: "overflow-menu", style: "position:absolute; bottom:calc(100% + 8px); left:0; z-index:60;" });
-  if (skills.length === 0) {
-    menu.appendChild(el("div", { class: "overflow-menu-item", text: "No skills saved yet (see Tool Store)" }));
-  } else {
-    for (const s of skills) {
-      menu.appendChild(menuItem(ICON_PROMPT, s.slug, async () => {
-        const full = await api(`/api/skills/${s.slug}`);
-        const input = document.getElementById("chat-input");
-        input.value = (input.value ? input.value + "\n\n" : "") + full.body;
-        input.dispatchEvent(new Event("input"));
-        input.focus();
-        menu.remove();
-      }));
-    }
-  }
-  anchor.parentElement.style.position = "relative";
-  anchor.parentElement.appendChild(menu);
-  setTimeout(() => document.addEventListener("click", function close() {
-    menu.remove();
-    document.removeEventListener("click", close);
-  }), 0);
 }
 
 // -- documents (backed by the Library tab, Phase 7) ------------------------
@@ -2537,7 +2509,7 @@ async function sendMessage(messages, input, sendBtn, attachStrip) {
   chatReferences?.clear();
   input.style.height = "auto";
   messages.appendChild(entering(messageCard("user", text || (imageSources.length ? "" : "(attachment)"),
-    undefined, "complete", imageSources)));
+    undefined, "complete", imageSources, { references })));
   const replyCard = entering(messageCard("assistant", ""));
   const replyBody = replyCard.querySelector(".msg-body");
   messages.appendChild(replyCard);
