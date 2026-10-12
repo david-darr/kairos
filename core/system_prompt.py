@@ -179,6 +179,8 @@ def _codex_core(python_exe: str, cli_script: str, full_access: bool = False, is_
 To reach it, run this exact command through your shell tool, substituting one of the subcommands below for <command> and its flags. The leading `&` is required — PowerShell parses two adjacent quoted strings as an expression, not a command, without it:
 & "{python_exe}" "{cli_script}" <command> [flags...]
 
+Ask questions in your normal reply so they appear in Kairos. Do not use Codex's own input or approval UI to ask the user anything; Kairos cannot display those prompts.
+
 Available subcommands (a true|false flag alone means true; ID,ID is a comma-separated list; add --args_json with a JSON object for anything structured; --help after a subcommand shows its arguments):
 {_codex_commands(is_admin, agent, session_id)}
 

@@ -70,6 +70,9 @@ HIVE_MIND_CLI_PATH = os.path.join(BASE_DIR, "mcp_servers", "hive_mind_cli.py")
 # TURN_MESSAGE_TIMEOUT_SECONDS, so a hung/crashed codex process doesn't spin
 # the chat UI forever with no error.
 CODEX_MESSAGE_TIMEOUT_SECONDS = 180
+# A normal Codex command result can exceed asyncio's 64 KiB readline limit
+# once it is wrapped in one JSON event. Match Claude's bounded CLI buffer.
+CODEX_JSON_LINE_LIMIT_BYTES = 10 * 1024 * 1024
 
 
 def _writable_roots_override() -> str:
@@ -205,6 +208,10 @@ class CodexBrain:
         self.project_id = project_id
         self.last_usage: dict | None = None
         session = session_manager.get_session(session_id) if session_id else None
+        # Forge's resumed Codex turn was observed calling tools with the
+        # previous turn's revoked token. A fresh CLI thread each turn avoids
+        # that reuse; the saved conversation is replayed below.
+        self.forge = bool((session or {}).get("forge"))
         self.permission_mode = (session or {}).get("permission_mode", "base") if is_admin else "base"
         # An agent's own run (services/agent_service.py): agents always run in
         # Auto - nothing asks - but inside Codex's workspace sandbox (roadmap
@@ -219,7 +226,7 @@ class CodexBrain:
             self.permission_mode = "auto"
         # Present only once this session has completed at least one codex_cli
         # turn before — see set_codex_thread_id's caller below.
-        self.thread_id: str | None = (session or {}).get("codex_thread_id")
+        self.thread_id: str | None = None if self.forge else (session or {}).get("codex_thread_id")
         # The current or last turn's process, and whether stopping it is
         # confirmed (see cancel()).
         self._proc: asyncio.subprocess.Process | None = None
@@ -378,6 +385,13 @@ class CodexBrain:
         RESULT. Codex sends whole messages either way, so `stream` changes
         nothing here."""
         codex = self._codex_path()
+        if self.forge:
+            # The brain is cached across turns; never resume its last thread.
+            # Clear an older persisted ID as well, so a restarted Forge chat
+            # cannot accidentally reuse it.
+            self.thread_id = None
+            if self.session_id and (session_manager.get_session(self.session_id) or {}).get("codex_thread_id"):
+                session_manager.set_codex_thread_id(self.session_id, None)
         is_fresh_thread = self.thread_id is None
         args = self._build_args(codex)
 
@@ -431,6 +445,7 @@ class CodexBrain:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                limit=CODEX_JSON_LINE_LIMIT_BYTES,
             )
         except BaseException:
             tool_access.revoke(tool_token)
@@ -474,7 +489,7 @@ class CodexBrain:
             etype = event.get("type")
             if etype == "thread.started" and self.thread_id is None:
                 self.thread_id = event["thread_id"]
-                if self.session_id:
+                if self.session_id and not self.forge:
                     session_manager.set_codex_thread_id(self.session_id, self.thread_id)
             elif etype == "item.completed" and event.get("item", {}).get("type") == "agent_message":
                 if has_text:

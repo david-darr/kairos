@@ -89,6 +89,12 @@ def call(name: str, args: dict) -> str:
 
 
 def main() -> None:
+    # Windows pipes can give this child process a legacy code page even when
+    # Codex's PowerShell expects UTF-8. Tool results (including REA) and error
+    # messages may contain Unicode that cp1252 cannot print.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parsed = parser().parse_args()
     spec = next(s for s in tool_registry.specs(tool_registry.CODEX, is_admin=True, agent=True) if s.name == parsed.tool)
     try:

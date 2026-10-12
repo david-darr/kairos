@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import unittest
@@ -271,6 +272,29 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_unicode_output_survives_a_legacy_windows_code_page(self):
+        child = (
+            'import sys\n'
+            'from mcp_servers import hive_mind_cli as cli\n'
+            'assert sys.stdout.encoding.lower() == "cp1252"\n'
+            'cli.call = lambda *args: "\\u2713 \\u2192"\n'
+            'sys.argv = ["hive_mind_cli.py", "list_specs"]\n'
+            'cli.main()\n'
+        )
+        result = subprocess.run([sys.executable, "-c", child], cwd=CLI_PATH.parent.parent,
+                                env={**os.environ, "PYTHONIOENCODING": "cp1252"},
+                                capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+        self.assertEqual(result.stdout.decode("utf-8").replace("\r\n", "\n"), "\u2713 \u2192\n")
+
+        failure = child.replace('cli.call = lambda *args: "\\u2713 \\u2192"',
+                                'cli.call = lambda *args: (_ for _ in ()).throw(RuntimeError("\\u2715"))')
+        result = subprocess.run([sys.executable, "-c", failure], cwd=CLI_PATH.parent.parent,
+                                env={**os.environ, "PYTHONIOENCODING": "cp1252"},
+                                capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.decode("utf-8").replace("\r\n", "\n"), "Error: \u2715\n")
+
     def test_every_flag_shape(self):
         cli = load_cli()
         parsed = cli.parser().parse_args(["create_task", "--name", "n", "--prompt", "p", "--schedule_kind", "card",
