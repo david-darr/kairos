@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 TURN_MESSAGE_TIMEOUT_SECONDS = 180
 
+# The SDK transport's per-JSON-line cap, read by services/chat_service.py as
+# well so the failure message can tell a user which attachment was over it.
+MAX_CLI_LINE_BYTES = 32 * 1024 * 1024
+
 
 def _is_user_tab_source_path(path: str) -> bool:
     absolute = os.path.normcase(os.path.abspath(path))
@@ -341,11 +345,19 @@ class Brain:
             # core/attachments.py) easily produces one JSON message from the
             # CLI bigger than that, which is a fatal transport error, not a
             # per-turn one — see services/chat_service.py's brain-eviction
-            # comment for what that cascaded into. 10MB comfortably covers
-            # several normal images with real headroom left; not raised
-            # further than that so one truly runaway response still hits a
-            # real ceiling instead of growing memory unbounded.
-            max_buffer_size=10 * 1024 * 1024,
+            # comment for what that cascaded into.
+            #
+            # Raised from 10MB to 32MB on 2026-10-12, after a 4.6MB lecture
+            # PDF blew the 10MB line on its own: Read embeds a PDF whole as
+            # base64 and the CLI's line carries that content twice, measured
+            # at 2.67x the file's size (core/attachments.py's
+            # CLI_LINE_BYTES_PER_FILE_BYTE). 10MB therefore meant a real
+            # ceiling of under 4MB per file, which is an ordinary course
+            # deck. 32MB covers files up to ~12MB, which is past anything a
+            # chat attachment reaches now that oversized PDFs are split
+            # before Claude sees them; still a bounded ceiling, so one truly
+            # runaway response cannot grow memory without limit.
+            max_buffer_size=MAX_CLI_LINE_BYTES,
             permission_mode="plan" if self.read_only else "default",
             disallowed_tools=disabled,
             mcp_servers=mcp_servers,

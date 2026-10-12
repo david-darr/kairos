@@ -10,6 +10,7 @@ Copying into cwd (rather than leaving them in data/attachments/) is what
 makes them actually reachable by the Claude Agent SDK's cwd-scoped file
 tools, regardless of whether a workspace is set.
 """
+import contextlib
 import os
 import shutil
 import uuid
@@ -41,6 +42,104 @@ SCANNED_AVG_CHARS_PER_PAGE = 40
 MAX_SPLIT_PAGES = 40
 PAGE_RENDER_SCALE = 2.0  # ~144 DPI at PDFium's 72-DPI base — legible, not print-quality
 PAGE_JPEG_QUALITY = 78
+
+# Size, not scanned-ness, is what actually breaks the transport (found live
+# 2026-10-12, six CS-477 lecture decks: the scanned test above passed them
+# all through untouched and two of them killed the turn anyway). Claude's
+# Read tool embeds a PDF whole, as one base64 document block, and the CLI's
+# stdout line carries that content twice — measured at 2.67x the file's size
+# on disk (a 4,815,641-byte deck produced a 12,842,437-byte line against
+# core/brain.py's then-10MB max_buffer_size). A text-layer PDF therefore has
+# a hard ceiling no amount of text extraction gets around, and it is a
+# property of the bytes, not of what's in them.
+#
+# Splitting into page-range PDFs rather than the per-page JPEGs above keeps
+# the text layer intact, which is the whole reason a lecture deck is worth
+# reading: Claude gets real selectable text and the slide images, just a few
+# files instead of one oversized one.
+CLI_LINE_BYTES_PER_FILE_BYTE = 2.67
+# Budget per chunk, chosen against core/brain.py's max_buffer_size with room
+# for the rest of the JSON envelope and for the ratio moving against us.
+MAX_PDF_CHUNK_BYTES = 3 * 1024 * 1024
+MIN_CHUNK_PAGES = 1
+
+
+def oversized_for_read(size_bytes: int, buffer_bytes: int) -> bool:
+    """Would a Read of a file this size overflow a transport buffer this big?
+    Shared with services/chat_service.py so the failure message and the
+    splitting below cannot drift apart."""
+    return size_bytes * CLI_LINE_BYTES_PER_FILE_BYTE > buffer_bytes
+
+
+def _write_page_range(pdf, source_path: str, first: int, last: int) -> str:
+    """Write pages [first, last] (zero-based, inclusive) of an open document
+    to its own PDF beside the original, and return that path."""
+    stem = os.path.splitext(source_path)[0]
+    out_path = f"{stem}_pages{first + 1:02d}-{last + 1:02d}.pdf"
+    chunk = pdfium.PdfDocument.new()
+    try:
+        chunk.import_pages(pdf, list(range(first, last + 1)))
+        chunk.save(out_path)
+    finally:
+        chunk.close()
+    return out_path
+
+
+def _split_large_pdf(path: str) -> tuple[list[str], str | None]:
+    """If `path` is a PDF too big for one Read, splits it into page-range
+    PDFs under the per-chunk budget, deletes the original, and returns the
+    new filenames. Otherwise returns [its own basename] untouched.
+
+    Chunks are sized by halving: a page range that still writes too large is
+    split again, down to a single page. A single page that is still over
+    budget is kept as its own chunk — it is as small as this can get, and one
+    oversized page is a far better failure than one oversized deck."""
+    name = os.path.basename(path)
+    if pdfium is None or not name.lower().endswith(".pdf"):
+        return [name], None
+    try:
+        if os.path.getsize(path) <= MAX_PDF_CHUNK_BYTES:
+            return [name], None
+        pdf = pdfium.PdfDocument(path)
+    except Exception:
+        return [name], None  # not a real/parseable PDF — Claude's own tool will report the actual error
+
+    written: list[str] = []
+    try:
+        page_count = len(pdf)
+        if page_count == 0:
+            return [name], None
+        pending = [(0, page_count - 1)]
+        while pending:
+            first, last = pending.pop(0)
+            out_path = _write_page_range(pdf, path, first, last)
+            if os.path.getsize(out_path) <= MAX_PDF_CHUNK_BYTES or last - first + 1 <= MIN_CHUNK_PAGES:
+                written.append(out_path)
+                continue
+            os.remove(out_path)
+            middle = first + (last - first) // 2
+            # Front of the queue, so the finished list stays in page order.
+            pending[:0] = [(first, middle), (middle + 1, last)]
+    except Exception:
+        for out_path in written:
+            with contextlib.suppress(OSError):
+                os.remove(out_path)
+        return [name], None  # a split that half-worked is worse than the original file
+    finally:
+        pdf.close()
+
+    os.remove(path)
+    if len(written) == 1:
+        # Rewriting the document was enough on its own — pdfium often packs
+        # a deck down well below the original. Keep the original filename
+        # rather than handing back a pointless "_pages01-NN" rename.
+        os.replace(written[0], path)
+        return [name], f"{name} was rewritten smaller so it could be read in one piece"
+    # `written` is already in page order: each split puts its two halves at
+    # the front of the queue, so ranges are always finished left to right.
+    warning = (f"{name} was too large for one read ({page_count} pages) — it was split into "
+               f"{len(written)} parts by page range")
+    return [os.path.basename(p) for p in written], warning
 
 
 def _split_scanned_pdf(path: str) -> tuple[list[str], str | None]:
@@ -172,7 +271,16 @@ def resolve_for_turn(attachment_ids: list[str], session_id: str, cwd: str) -> tu
         dest = os.path.join(dest_dir, filename)
         shutil.copyfile(src, dest)
         split_names, warning = _split_scanned_pdf(dest)
-        names.extend(os.path.join(".attachments", session_id, n) for n in split_names)
         if warning:
             warnings.append(warning)
+        # A scan is already page images by here; anything still whole gets
+        # the size test as well, since a text-layer PDF breaks the transport
+        # on bytes alone (see _split_large_pdf).
+        resolved: list[str] = []
+        for split_name in split_names:
+            part_names, part_warning = _split_large_pdf(os.path.join(dest_dir, split_name))
+            resolved.extend(part_names)
+            if part_warning:
+                warnings.append(part_warning)
+        names.extend(os.path.join(".attachments", session_id, n) for n in resolved)
     return names, warnings
