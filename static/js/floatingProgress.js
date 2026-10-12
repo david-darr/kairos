@@ -3,8 +3,8 @@
 // 2026-09-12 — sending a prompt then switching to Notes to get other
 // things done used to give zero indication anything was still happening).
 // Mounted once from app.js at startup, independent of app.js's per-tab
-// view-swapping (see chatStream.js's module docstring for why the actual
-// state lives one level above any single view) — same lazily-created-host
+// view-swapping. chatStream.js mirrors the backend's live turns across
+// devices. This uses the same lazily-created-host
 // pattern api.js's toast() already uses for #toast-host, just a separate
 // corner and a different lifecycle (driven by chatStream's subscribeAll,
 // not a fixed timer).

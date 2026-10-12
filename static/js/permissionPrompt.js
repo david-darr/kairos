@@ -15,7 +15,9 @@ import { api, el } from "./api.js";
 
 let open = null;
 
-export function dismissPermissionPrompt() {
+export function dismissPermissionPrompt(requestId = null) {
+  if (requestId && open?.dataset.requestId !== requestId) return;
+  if (requestId && open) open.dataset.resolved = 'true';
   open?.close();
   open = null;
 }
@@ -47,6 +49,7 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
     ]),
     status, buttons,
   ]);
+  dialog.dataset.requestId = request.id;
 
   let answered = false;
   async function answer(choice) {
@@ -79,7 +82,7 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
   dialog.addEventListener("close", () => {
     if (open === dialog) open = null;
     dialog.remove();
-    if (!answered) {
+    if (!answered && dialog.dataset.resolved !== 'true') {
       // Closing is a rejection, not a shrug. Tell the server so the model is
       // refused immediately rather than waiting out the timeout.
       const reject = (request.choices || []).find(choice => choice.behavior === "deny");

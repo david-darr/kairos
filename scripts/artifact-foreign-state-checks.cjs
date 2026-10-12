@@ -28,15 +28,31 @@ async function main() {
     .replace("'./chatStream.js'", JSON.stringify(streamURL))
     .replace("'./artifactReview.js'", JSON.stringify(reviewURL))));
   const { el } = await import(apiURL);
-  const requests = [], controllers = [];
-  global.fetch = async (url, options) => {
-    assert.equal(url, '/api/chat/stream');
-    requests.push(JSON.parse(options.body));
-    return new Response(new ReadableStream({ start(controller) { controllers.push(controller); } }));
+  const requests = [], runs = {}, viewers = [];
+  const broadcast = packet => viewers.forEach(viewer => viewer.onmessage?.({ data: JSON.stringify(packet) }));
+  global.EventSource = class {
+    constructor(url) { assert.equal(url, '/api/chat/live/events'); viewers.push(this); }
   };
-  const emit = async (index, payload, close = false) => {
-    controllers[index].enqueue(new TextEncoder().encode('data: ' + JSON.stringify(payload) + '\n\n'));
-    if (close) controllers[index].close();
+  global.fetch = async (url, options) => {
+    if (url === '/api/chat/live/snapshot') {
+      return { ok: true, json: async () => ({ type: 'snapshot', runs: structuredClone(runs) }) };
+    }
+    assert.equal(url, '/api/chat/live');
+    const request = JSON.parse(options.body);
+    requests.push(request);
+    const run = runs[request.session_id] = { turnId: `test-${requests.length}`, sessionTitle: 'Origin',
+      prompt: request.message, text: '', startedAt: Date.now() / 1000, status: 'processing',
+      stopping: false, permission: null, toolEvents: [], toolSteps: [], handoffs: null,
+      runId: null, error: null, revision: 1 };
+    broadcast({ type: 'started', sessionId: request.session_id, run: structuredClone(run) });
+    return { ok: true, json: async () => ({ turn_id: run.turnId }) };
+  };
+  const emit = async (index, payload) => {
+    const id = requests[index].session_id, run = runs[id];
+    const changes = payload.permission ? { permission: payload.permission } : payload.error ?
+      { status: 'failed', error: payload.error, permission: null } : { status: 'done', permission: null };
+    Object.assign(run, changes); run.revision++;
+    broadcast({ type: 'update', sessionId: id, turnId: run.turnId, revision: run.revision, changes });
     await tick(); await tick();
   };
   let saved = 0, refreshed = 0, opened = 0, edited;

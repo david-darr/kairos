@@ -53,8 +53,8 @@ module.exports = async function checkArtifactReview({ js, win, waitFor, capture,
   await add('Adjust this region.');
   const start = writes.length;
   await js("(() => { const input = document.querySelector('#chat-input'); input.value = 'Apply these review comments.'; input.dispatchEvent(new Event('input')); document.querySelector('#chat-send').click(); })()");
-  for (let n = 0; n < 80 && !writes.slice(start).some(w => w.path === '/api/chat/stream'); n++) await delay(50);
-  const request = JSON.parse(writes.slice(start).find(w => w.path === '/api/chat/stream')?.body || '{}');
+  for (let n = 0; n < 80 && !writes.slice(start).some(w => w.path === '/api/chat/live'); n++) await delay(50);
+  const request = JSON.parse(writes.slice(start).find(w => w.path === '/api/chat/live')?.body || '{}');
   const refs = request.references?.filter(r => r.kind === 'artifact_comment');
   assert.equal(refs?.length, 4);
   assert.deepEqual(refs[0].picks, ['pptx:slide=2;shape=2', 'pptx:slide=2;shape=3']);

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core import permissions
 from core.middleware import require_admin, require_user
+from services import chat_live
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
 
@@ -34,6 +35,7 @@ async def answer(request_id: str, body: Answer, user: str = Depends(require_user
     # it, so a stale or invented id answers nothing.
     if not permissions.answer(request_id, body.choice, user):
         raise HTTPException(409, "That request is no longer waiting for an answer.")
+    chat_live.permission_answered(request_id)
     return {"status": "answered"}
 
 

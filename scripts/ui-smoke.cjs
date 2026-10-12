@@ -22,6 +22,27 @@ const { fixture, mutate, media, data: calendarFixtures } = require("../demo/fixt
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
 demoState.computerImage = computerImage;
 const errors = [];
+const liveRuns = {};
+const liveClients = new Set();
+let liveCounter = 0;
+const liveSnapshot = () => ({ type: 'snapshot', runs: structuredClone(liveRuns) });
+const liveBroadcast = packet => { for (const client of liveClients) client.write(`data: ${JSON.stringify(packet)}\n\n`); };
+function liveChange(id, changes) {
+  const run = liveRuns[id]; if (!run || run.status !== 'processing') return;
+  Object.assign(run, changes); run.revision++;
+  liveBroadcast({ type: 'update', sessionId: id, turnId: run.turnId, revision: run.revision, changes });
+}
+function liveChunk(id, chunk) {
+  const run = liveRuns[id]; if (!run || run.status !== 'processing') return;
+  run.text += chunk; run.revision++;
+  liveBroadcast({ type: 'chunk', sessionId: id, turnId: run.turnId, revision: run.revision, chunk });
+}
+function liveEvent(id, type, value) {
+  const run = liveRuns[id]; if (!run || run.status !== 'processing') return;
+  run[type === 'tool_event' ? 'toolEvents' : 'toolSteps'].push(value); run.revision++;
+  liveBroadcast({ type, sessionId: id, turnId: run.turnId, revision: run.revision, value });
+}
+function liveFinish(id, status = 'done') { liveChange(id, { status, stopping: false, permission: null, error: null }); }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   // The site (docs/) may read GitHub's public release data; nothing else leaves.
@@ -38,6 +59,14 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith("/api/")) {
     if (req.method === 'GET') reads.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    if (url.pathname === '/api/chat/live/snapshot') {
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
+    }
+    if (url.pathname === '/api/chat/live/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      liveClients.add(res); res.write(`data: ${JSON.stringify(liveSnapshot())}\n\n`);
+      res.on('close', () => liveClients.delete(res)); return;
+    }
     if (req.method === 'GET' && /\/terminals\/[^/]+\/output$/.test(url.pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
       let cursor = Number(url.searchParams.get('after') || 0);
@@ -48,25 +77,6 @@ const server = http.createServer(async (req, res) => {
         if (result.ended) { clearInterval(timer); res.end('event: closed\ndata: {}\n\n'); }
       };
       const timer = setInterval(send, 50); send(); res.on('close', () => clearInterval(timer)); return;
-    }
-    if (url.pathname === '/api/chat/stream' && req.method === 'POST' && demoState.computerTurn) {
-      let body = ''; for await (const chunk of req) body += chunk;
-      writes.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body });
-      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
-      const send = (kind, detail) => res.write(`data: ${JSON.stringify({ run_id: 'r-computer', tool_event: {
-        at: now, kind, name: 'computer', ok: true, detail: JSON.stringify(detail) } })}\n\n`);
-      send('tool_started', { action: 'open', url: 'https://example.com/' });
-      send('tool_finished', { action: 'open', url: 'https://example.com/', image: computerImage });
-      let extra = false;
-      const timer = setInterval(() => {
-        if (demoState.moreComputerActions && !extra) { extra = true; send('tool_started', { action: 'read', url: 'https://example.com/' }); }
-        if ((demoState.stoppedOwners || []).includes('chat:s1')) {
-          send('tool_finished', { action: 'done', url: 'https://example.com/' });
-          res.write('data: {"done":true}\n\n'); res.end(); clearInterval(timer);
-        }
-      }, 100);
-      res.on('close', () => clearInterval(timer));
-      return;
     }
     if (/^\/api\/computer\/[^/]+\/frames$/.test(url.pathname) && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -94,7 +104,13 @@ const server = http.createServer(async (req, res) => {
       writes.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body });
       if (url.pathname === '/api/settings/computer-use') demoState.computerUse = JSON.parse(body);
       let parsed = {}; try { parsed = JSON.parse(body); } catch {}
-      const updated = mutate(url.pathname, req.method, parsed, Object.fromEntries(url.searchParams));
+      if (url.pathname === '/api/chat/live/stop') {
+        const active = liveRuns[parsed.session_id]?.status === 'processing';
+        if (active) liveFinish(parsed.session_id, 'stopped');
+        res.end(JSON.stringify({ stopping: active })); return;
+      }
+      const updated = mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
+        req.method, parsed, Object.fromEntries(url.searchParams));
       if (updated?._appStart) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.write(`data: ${JSON.stringify(updated._appStart)}\n\n`);
@@ -112,21 +128,54 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (updated?._status) res.statusCode = updated._status;
-      if (url.pathname === "/api/chat/stream") {
-        res.setHeader("Content-Type", "text/event-stream");
-        for (const packet of updated?._forgePackets || []) {
-          res.write(`data: ${JSON.stringify(packet)}\n\n`);
-          await delay(150);
-        }
-        if (demoState.forgeHeldSession === parsed.session_id) {
-          res.write('data: {"chunk":"Checking the shell entry point."}\n\n');
-          const timer = setInterval(() => {
-            if (demoState.forgeRelease) { clearInterval(timer); res.end('data: {"done":true}\n\n'); }
-          }, 50);
-          res.on('close', () => clearInterval(timer)); return;
-        }
-        if (updated?.handoffs) { res.end(`data: ${JSON.stringify(updated)}\n\ndata: {"done":true}\n\n`); return; }
-        res.end('data: {"chunk":"Tab build request received."}\n\ndata: {"done":true}\n\n'); return;
+      if (url.pathname === "/api/chat/live") {
+        if (updated?._status) { res.end(JSON.stringify(updated)); return; }
+        const id = parsed.session_id;
+        const run = liveRuns[id] = { turnId: `demo-${++liveCounter}`, sessionTitle: 'Chat', prompt: parsed.message,
+          text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false,
+          permission: null, toolEvents: [], toolSteps: [], handoffs: null, runId: null, error: null, revision: 1 };
+        liveBroadcast({ type: 'started', sessionId: id, run: structuredClone(run) });
+        res.end(JSON.stringify({ turn_id: run.turnId }));
+        setTimeout(async () => {
+          if (id === 'patch-progress') return;
+          if (demoState.artifactHold && id === 's1') return;
+          if (demoState.computerTurn) {
+            liveChange(id, { runId: 'r-computer' });
+            const send = (kind, detail) => liveEvent(id, 'tool_event', {
+              at: now, kind, name: 'computer', ok: true, detail: JSON.stringify(detail) });
+            send('tool_started', { action: 'open', url: 'https://example.com/' });
+            send('tool_finished', { action: 'open', url: 'https://example.com/', image: computerImage });
+            let extra = false;
+            const timer = setInterval(() => {
+              if (liveRuns[id]?.status !== 'processing') { clearInterval(timer); return; }
+              if (demoState.moreComputerActions && !extra) { extra = true; send('tool_started', { action: 'read', url: 'https://example.com/' }); }
+              if ((demoState.stoppedOwners || []).includes('chat:s1')) {
+                send('tool_finished', { action: 'done', url: 'https://example.com/' });
+                liveFinish(id); clearInterval(timer);
+              }
+            }, 100);
+            return;
+          }
+          for (const packet of updated?._forgePackets || []) {
+            if (packet.run_id) liveChange(id, { runId: packet.run_id });
+            if (packet.tool_step) liveEvent(id, 'tool_step', packet.tool_step);
+            if (packet.tool_event) liveEvent(id, 'tool_event', packet.tool_event);
+            if (packet.chunk) liveChunk(id, packet.chunk);
+            await delay(150);
+          }
+          if (demoState.forgeHeldSession === id) {
+            liveChunk(id, 'Checking the shell entry point.');
+            const timer = setInterval(() => {
+              if (liveRuns[id]?.status !== 'processing') { clearInterval(timer); return; }
+              if (demoState.forgeRelease) { liveFinish(id); clearInterval(timer); }
+            }, 50);
+            return;
+          }
+          if (updated?.handoffs) liveChange(id, { handoffs: updated.handoffs });
+          else liveChunk(id, 'Tab build request received.');
+          liveFinish(id);
+        }, 0);
+        return;
       }
       res.end(JSON.stringify(updated || (url.pathname === "/api/sessions" ? { id: "s1" } : { ok: true }))); return;
     }
@@ -321,7 +370,13 @@ app.whenReady().then(async () => {
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./artifact-review-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
-    await require('./artifact-continuity-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads });
+    await require('./artifact-continuity-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads,
+      liveControls: { emit(id, packet) {
+        if (packet.chunk) liveChunk(id, packet.chunk);
+        if (packet.permission) liveChange(id, { permission: packet.permission });
+        if (packet.error) liveChange(id, { status: 'failed', error: packet.error, permission: null });
+        if (packet.done) liveFinish(id);
+      } } });
     await require('./settings-patch-checks.cjs')({ js, win, waitFor, delay, capture });
     await js("(async () => { const overlay=document.getElementById('onboarding-overlay'); overlay.classList.remove('hidden'); await import('/static/js/onboarding.js').then(m => m.run(overlay, () => {})); })()");
     assert.equal(await js("document.querySelector('.onboarding-card h2').textContent"), 'Not more time. The right time.');
@@ -435,10 +490,10 @@ app.whenReady().then(async () => {
       await waitFor("document.getElementById('view-content').dataset.view === 'forgeShell' && !!document.querySelector('.forge-transcript-layout')");
       await waitFor("document.querySelector('.forge-work-label')?.textContent.includes('Working for')");
       assert.ok(await js("document.querySelector('[aria-label=\"Session mode\"]').disabled"), label + ' mode chip disabled while running');
-      for (let i = 0; i < 80 && !writes.slice(handoffStart).some(w => w.path === '/api/chat/stream' && JSON.parse(w.body).message === 'Build the Forge fixture'); i++) await delay(50);
+      for (let i = 0; i < 80 && !writes.slice(handoffStart).some(w => w.path === '/api/chat/live' && JSON.parse(w.body).message === 'Build the Forge fixture'); i++) await delay(50);
       const handoffWrites = writes.slice(handoffStart);
       const createWrite = handoffWrites.find(w => w.path === '/api/forge/sessions' && w.method === 'POST');
-      const streamWrite = handoffWrites.findLast(w => w.path === '/api/chat/stream');
+      const streamWrite = handoffWrites.findLast(w => w.path === '/api/chat/live');
       assert.deepEqual(JSON.parse(createWrite.body), { project_id: 'fp1', task: 'Build the Forge fixture', model_endpoint_id: 'm2', model_override: 'workspace-fast', mode: 'build', isolation: 'new_worktree', branch: null }, label + ' creates the selected Forge session');
       assert.equal(JSON.parse(streamWrite.body).message, 'Build the Forge fixture', label + ' sends the first message');
       assert.ok(handoffWrites.indexOf(createWrite) < handoffWrites.indexOf(streamWrite), label + ' creates Forge before sending');
@@ -533,7 +588,7 @@ app.whenReady().then(async () => {
       await js("{const input=document.querySelector('.forge-transcript-input'); input.value='Restore composer changes'; input.dispatchEvent(new Event('input')); document.querySelector('.forge-send').click();}");
       await waitFor("document.querySelector('.forge-send')?.textContent === 'Stop'");
       await waitFor("document.querySelector('.forge-send')?.textContent === 'Send' && !!document.querySelector('.forge-turn-review:not([hidden])')");
-      assert.ok(writes.slice(resendStart).some(w => w.path === '/api/chat/stream' && JSON.parse(w.body).session_id === forgeSessionId), label + ' resend shares chatStream');
+      assert.ok(writes.slice(resendStart).some(w => w.path === '/api/chat/live' && JSON.parse(w.body).session_id === forgeSessionId), label + ' resend shares chatStream');
       for (const mode of ['plan', 'build']) {
         const modeStart = writes.length;
         await js(`(() => { const picker = document.querySelector('[aria-label="Session mode"]').parentElement; picker.value = ${JSON.stringify(mode)}; picker.dispatchEvent(new Event('change')); })()`);
@@ -652,7 +707,7 @@ app.whenReady().then(async () => {
       await waitFor(`!!document.querySelector('.forge-home .forge-session-row[data-session-id="${forgeSessionId}"]') && !!document.querySelector('[data-forge-project=fp1].busy')`);
       await js(`document.querySelector('.forge-home .forge-session-row[data-session-id="${forgeSessionId}"]').click()`);
       await waitFor("document.getElementById('view-content').dataset.view === 'forgeShell' && !!document.querySelector('.forge-transcript-layout') && !document.querySelector('.forge-project-sidebar').hidden");
-      assert.ok(writes.slice(workingStart).some(w => w.path === '/api/chat/stream' && JSON.parse(w.body).session_id === forgeSessionId), label + ' Working now uses this pass session');
+      assert.ok(writes.slice(workingStart).some(w => w.path === '/api/chat/live' && JSON.parse(w.body).session_id === forgeSessionId), label + ' Working now uses this pass session');
       await js("document.querySelector('[data-sidebar-tab=changes]').click()");
       await waitFor("!!document.querySelector('.forge-change-open')");
       await js("document.querySelector('.forge-change-open').click()");
@@ -1067,8 +1122,8 @@ app.whenReady().then(async () => {
             await waitFor("document.querySelector('.nav-item[data-tab=chat]').classList.contains('active')");
             await waitFor("!!document.querySelector('.chat-layout')");
             await waitFor("sessionStorage.getItem('jarvis:pendingChatHandoff') === null");
-            for (let i = 0; i < 80 && !writes.some(w => w.path === "/api/chat/stream" && w.body.includes('Research')); i++) await delay(50);
-            const handoff = writes.find(w => w.path === "/api/chat/stream" && w.body.includes('Research'));
+            for (let i = 0; i < 80 && !writes.some(w => w.path === "/api/chat/live" && w.body.includes('Research')); i++) await delay(50);
+            const handoff = writes.find(w => w.path === "/api/chat/live" && w.body.includes('Research'));
             assert.ok(handoff && JSON.parse(handoff.body).message.startsWith('First call read_skill with slug "build-custom-tab"'), "Build reads the tab skill first");
             await navigate("tool-store");
           }
@@ -1574,6 +1629,7 @@ app.whenReady().then(async () => {
       assert.ok(await js("document.querySelector('.nav-item[data-tab=tasks]').classList.contains('active')"), label + " and that tab is still highlighted");
     }
     win.setContentSize(1440, 900);
+    const navigationWriteBaseline = writes.length;
     await navigate("home");
     await waitFor("document.querySelectorAll('.dashboard-row').length > 0");
     // Forge sessions are listed too (newer here) and open the Forge screen; pick the plain chat.
@@ -1660,7 +1716,7 @@ app.whenReady().then(async () => {
     await capture('desktop-chat-history');
     await js("document.querySelector('#chat-history-toggle').click()");
     await delay(300);
-    assert.equal(writes.length, 0, "Navigation must not write data");
+    assert.equal(writes.length, navigationWriteBaseline, "Navigation must not write data");
     await js("document.querySelector('#model-picker-btn').click()");
     await capture("desktop-model-menu");
     const menuFits = await js("(() => {const r=document.querySelector('#model-picker-menu').getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()");
@@ -1823,6 +1879,7 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.dashboard-core')?.classList.contains('is-dithered')");
     await capture("desktop-reduced-motion");
     await win.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", { features: [] });
+    const landingWriteBaseline = writes.length;
     await navigate("chat");
     assert.ok(await js("document.querySelector('#chat-main').classList.contains('is-empty') && !document.querySelector('.chat-welcome')"));
     assert.ok(await js("(() => {const r=document.querySelector('.chat-input-bar').getBoundingClientRect(); return Math.abs((r.top+r.bottom)/2-innerHeight/2)<60})()"), 'New-chat composer is centered');
@@ -1834,7 +1891,7 @@ app.whenReady().then(async () => {
     await navigate('chat');
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History preference survives remount');
     await js("document.querySelector('#chat-history-toggle').click(); document.querySelector('.chat-header-new').click()");
-    assert.equal(writes.length, 0, 'New-chat landing and history navigation do not create sessions');
+    assert.equal(writes.length, landingWriteBaseline, 'New-chat landing and history navigation do not create sessions');
     win.setContentSize(390, 844);
     await delay(300);
     await js("document.querySelector('#chat-history-toggle').click()");
@@ -1919,8 +1976,8 @@ app.whenReady().then(async () => {
         await waitFor("document.querySelector('.nav-item[data-tab=chat]').classList.contains('active') && sessionStorage.getItem('jarvis:pendingChatHandoff') === null");
         assert.equal(await js("document.querySelector('.panel-dialog')"), null, label + ' build handoff closes its popup');
         const marker = `Builder ${kind} ${label} answer`;
-        for (let i = 0; i < 80 && !writes.slice(start).some(w => w.path === '/api/chat/stream' && w.body.includes(marker)); i++) await delay(50);
-        const handoff = writes.slice(start).find(w => w.path === '/api/chat/stream' && w.body.includes(marker));
+        for (let i = 0; i < 80 && !writes.slice(start).some(w => w.path === '/api/chat/live' && w.body.includes(marker)); i++) await delay(50);
+        const handoff = writes.slice(start).find(w => w.path === '/api/chat/live' && w.body.includes(marker));
         assert.ok(handoff && JSON.parse(handoff.body).message.startsWith(`First call read_skill with slug "${skill}"`), label + ' ' + kind + ' reads its skill first');
         assert.ok(writes.slice(start).some(w => /\/api\/sessions\/[^/]+\/model$/.test(w.path)), label + ' builder sets the selected model');
         writes.splice(start);
@@ -1946,7 +2003,7 @@ app.whenReady().then(async () => {
       assert.ok(await js(`!!document.querySelector(${JSON.stringify(scope + ' .chat-reference-chip .handoff-avatar')})`), 'Agent chip carries its avatar');
       const start = writes.length;
       await js(`(() => { const input = document.querySelector(${JSON.stringify(inputSelector)}); input.value = ${JSON.stringify(work)}; input.dispatchEvent(new Event('input')); document.querySelector(${JSON.stringify(sendSelector)}).click(); })()`);
-      await waitForWrite(start, '/api/chat/stream', body => body.session_id === id && body.message.includes(work) && body.references?.some(ref => ref.kind === 'agent' && ref.id === 'a1'));
+      await waitForWrite(start, '/api/chat/live', body => body.session_id === id && body.message.includes(work) && body.references?.some(ref => ref.kind === 'agent' && ref.id === 'a1'));
       await waitFor(`!!document.querySelector(${JSON.stringify(scope + ' .agent-handoff[data-status="queued"]')})`);
       demoState.handoffStatus = 'working';
       await waitFor(`!!document.querySelector(${JSON.stringify(scope + ' .agent-handoff[data-status="working"]')})`);

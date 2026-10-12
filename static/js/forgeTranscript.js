@@ -124,6 +124,10 @@ function createTranscript(options) {
     for (const state of states.values()) state.review.querySelectorAll('button').forEach(b => { if (b.dataset.undo) b.disabled = busy || state.reviewBusy || !!options.readOnly || !undoable(state.checkpoint); });
   }
   function labelWork(state) {
+    if (state.stopping) {
+      state.label.textContent = 'Stopping…'; state.glyph.textContent = '■';
+      return;
+    }
     const counts = { read: 0, edit: 0, command: 0 };
     state.events.filter(e => e.phase === 'started').forEach(e => { const kind = category(e.name); if (kind in counts) counts[kind]++; });
     const description = [counts.read && `read ${counts.read} file${counts.read === 1 ? '' : 's'}`, counts.edit && `edited ${counts.edit}`, counts.command && `ran ${counts.command} command${counts.command === 1 ? '' : 's'}`].filter(Boolean).join(', ');
@@ -192,7 +196,8 @@ function createTranscript(options) {
   function paint(body, entry) {
     const state = states.get(body); if (!state || disposed) return;
     const wasBusy = state.busy;
-    state.busy = entry.status === 'processing'; state.startedAt = entry.startedAt; state.endedAt = entry.endedAt;
+    state.busy = entry.status === 'processing'; state.stopping = state.busy && !!entry.stopping;
+    state.startedAt = entry.startedAt; state.endedAt = entry.endedAt;
     state.permissionStartedAt = entry.permissionStartedAt; state.pausedSeconds = entry.pausedSeconds;
     state.runId = entry.runId; state.events = entry.toolSteps || []; state.permission = state.busy ? entry.permission : null;
     state.turn.setAttribute('aria-busy', String(state.busy)); state.fold.hidden = false; labelWork(state);

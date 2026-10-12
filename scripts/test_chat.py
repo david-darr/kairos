@@ -279,6 +279,84 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(session_manager.get_session(self.sid)["messages"][0]["content"], "Keep this history")
         asyncio.run(run())
 
+    def test_codex_reads_a_json_line_larger_than_asyncio_default(self):
+        async def run():
+            script = (
+                'import json, sys\n'
+                'sys.stdin.read()\n'
+                'print(json.dumps({"type": "thread.started", "thread_id": "large-line"}))\n'
+                'print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "x" * 70000}}))\n'
+                'print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}))\n'
+            )
+            brain = CodexBrain(vault_dir=str(self.root))
+            with patch.object(CodexBrain, "_codex_path", return_value=sys.executable), \
+                 patch.object(CodexBrain, "_build_args", return_value=[sys.executable, "-c", script]):
+                chunks = [chunk async for chunk in brain.run_turn_stream("read a large result")]
+            self.assertEqual(chunks, ["x" * 70000])
+
+        asyncio.run(run())
+
+    def test_forge_codex_uses_a_new_thread_and_tool_token_each_turn(self):
+        from core import tool_access
+
+        async def run():
+            session_manager.set_forge(self.sid, {"mode": "build"})
+            session_manager.set_codex_thread_id(self.sid, "old-thread")
+            brain = CodexBrain(session_id=self.sid, vault_dir=str(self.root))
+            self.assertIsNone(brain.thread_id)
+            launches = []
+
+            class FakeInput:
+                def __init__(self): self.data = b""
+                def write(self, data): self.data += data
+                def write_eof(self): pass
+
+            class FakeProc:
+                def __init__(self, number):
+                    self.stdin = FakeInput()
+                    self.stdout = asyncio.StreamReader()
+                    lines = [{"type": "thread.started", "thread_id": f"fresh-{number}"},
+                             {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}]
+                    self.stdout.feed_data("".join(json.dumps(line) + "\n" for line in lines).encode())
+                    self.stdout.feed_eof()
+                    self.stderr = SimpleNamespace(read=AsyncMock(return_value=b""))
+                    self.returncode = 0
+                async def wait(self): return 0
+
+            async def launch(*args, **kwargs):
+                proc = FakeProc(len(launches) + 1)
+                launches.append((args, kwargs["env"], proc))
+                return proc
+
+            with patch.object(CodexBrain, "_codex_path", return_value="codex"), \
+                 patch("core.codex_brain.asyncio.create_subprocess_exec", side_effect=launch), \
+                 patch("core.codex_brain._kill_process_tree", new_callable=AsyncMock, return_value=True):
+                session_manager.append_message(self.sid, "user", "First request")
+                _ = [item async for item in brain.events("First request")]
+                session_manager.append_message(self.sid, "assistant", "First reply")
+                session_manager.append_message(self.sid, "user", "Second request")
+                _ = [item async for item in brain.events("Second request")]
+
+            self.assertEqual(len(launches), 2)
+            self.assertTrue(all("resume" not in args for args, _, _ in launches))
+            self.assertNotEqual(launches[0][1]["JARVIS_TOOL_TOKEN"], launches[1][1]["JARVIS_TOOL_TOKEN"])
+            self.assertTrue(all(tool_access.resolve(env["JARVIS_TOOL_TOKEN"]) is None for _, env, _ in launches))
+            self.assertIsNone(session_manager.get_session(self.sid)["codex_thread_id"])
+            second_prompt = launches[1][2].stdin.data.decode()
+            self.assertIn("First request", second_prompt)
+            self.assertIn("First reply", second_prompt)
+            self.assertIn("Ask questions in your normal reply", second_prompt)
+
+        asyncio.run(run())
+
+    def test_chat_status_reports_when_stopped_turn_is_no_longer_busy(self):
+        path = f"/api/chat/status?session_id={self.sid}"
+        self.assertEqual(client.get(path).json(), {"busy": False})
+        chat_service._busy.add(self.sid)
+        self.assertEqual(client.get(path).json(), {"busy": True})
+        chat_service._busy.discard(self.sid)
+        self.assertEqual(client.get("/api/chat/status?session_id=missing").status_code, 404)
+
     # -- reasoning effort + context indicator (David's ask 2026-09-15) -----
     # Every test below patches model_catalog.list_models. The real catalog
     # reads the machine's own Codex cache, which would make these results

@@ -141,7 +141,7 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
   }
   await closeDocuments();
   // Real progress subscription, held locally: no model or account is used.
-  await js("window.patchFetch = window.fetch; window.fetch = (url, options) => url === '/api/chat/stream' ? Promise.resolve(new Response(new ReadableStream({start(c) { window.patchProgressStream = c; }}), {headers:{'Content-Type':'text/event-stream'}})) : window.patchFetch(url, options); import('/static/js/chatStream.js').then(m => m.startTurn('patch-progress', 'Patch progress', 'Test', []))");
+  await js("import('/static/js/chatStream.js').then(m => { m.startTurn('patch-progress', 'Patch progress', 'Test', []); })");
   try {
     await waitFor("!!document.querySelector('.chat-progress-card')");
     await js("document.documentElement.classList.add('electron-shell')");
@@ -151,7 +151,7 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
       await capture(`patch-chat-progress-${width}`);
     }
   } finally {
-    await js("window.patchProgressStream.enqueue(new TextEncoder().encode('data: {\"done\":true}\\n\\n')); window.patchProgressStream.close(); window.fetch = window.patchFetch; delete window.patchFetch; document.documentElement.classList.remove('electron-shell')");
+    await js("import('/static/js/chatStream.js').then(m => m.stopTurn('patch-progress')); document.documentElement.classList.remove('electron-shell')");
   }
   win.setContentSize(1440, 900); await navigate('home');
   console.log('PASS: Forge composer picker bounds, collapsed empty/error rail, chat document opening/reopening/retained DOM/reduced motion, progress titlebar clearance.');

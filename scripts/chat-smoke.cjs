@@ -67,6 +67,35 @@ const chatFileRows = [
 let pending = null;
 const answers = [];
 let deferFirstChunk = false;
+const liveRuns = {};
+const liveClients = new Set();
+const liveSnapshot = () => ({ type: 'snapshot', runs: structuredClone(liveRuns) });
+const liveBroadcast = packet => { for (const client of liveClients) client.write(`data: ${JSON.stringify(packet)}\n\n`); };
+function liveStream(sid, text) {
+  const run = liveRuns[sid] = { turnId: 'turn-' + Date.now(), sessionTitle: chats[sid].title, prompt: text,
+    text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false, permission: null,
+    toolEvents: [], toolSteps: [], handoffs: null, runId: null, error: null, revision: 1 };
+  liveBroadcast({ type: 'started', sessionId: sid, run: structuredClone(run) });
+  let ended = false;
+  const finish = (status, error = null) => {
+    if (ended) return;
+    ended = true; run.status = status; run.error = error; run.revision++;
+    liveBroadcast({ type: 'update', sessionId: sid, turnId: run.turnId, revision: run.revision,
+      changes: { status, stopping: false, permission: null, error } });
+  };
+  const write = raw => {
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) continue;
+      const packet = JSON.parse(line.slice(5));
+      if (packet.chunk) { run.text += packet.chunk; run.revision++; liveBroadcast({ type: 'chunk', sessionId: sid,
+        turnId: run.turnId, revision: run.revision, chunk: packet.chunk }); }
+      if (packet.permission) { run.permission = packet.permission; run.revision++; liveBroadcast({ type: 'update',
+        sessionId: sid, turnId: run.turnId, revision: run.revision, changes: { permission: packet.permission } }); }
+      if (packet.done) finish('done');
+    }
+  };
+  return { write, end(raw = '') { if (raw) write(raw); if (!ended) finish('failed', 'Connection ended early.'); }, stop() { finish('stopped'); } };
+}
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/') {
@@ -82,6 +111,16 @@ const server = http.createServer(async (req, res) => {
     const data = body && req.headers['content-type']?.includes('application/json') ? JSON.parse(body) : {};
     requests.push({ path: url.pathname, method: req.method, data });
     const json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
+    if (url.pathname === '/api/chat/live/snapshot') return json(liveSnapshot());
+    if (url.pathname === '/api/chat/live/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      liveClients.add(res); res.write(`data: ${JSON.stringify(liveSnapshot())}\n\n`);
+      res.on('close', () => liveClients.delete(res)); return;
+    }
+    if (url.pathname === '/api/chat/live/stop') {
+      pending?.res.stop();
+      return json({ stopping: true });
+    }
     if (url.pathname === '/api/speech/status') return json(speechStatus);
     if (url.pathname === '/api/speech/transcribe') return json({ text: 'what is the weather' });
     if (url.pathname === '/api/models/catalog') return json(catalog);
@@ -174,17 +213,21 @@ const server = http.createServer(async (req, res) => {
       }
       return json({ ...file, size: file.text.length });
     }
-    if (url.pathname === '/api/chat/stream') {
+    if (url.pathname === '/api/chat/live') {
       chats[data.session_id].messages.push({ role: 'user', content: data.message });
-      res.setHeader('Content-Type', 'text/event-stream');
       const text = '## Working on your request\n\n' + 'A paragraph with enough detail to exercise the reading position.\n\n'.repeat(25);
-      res.flushHeaders();
-      if (!deferFirstChunk) res.write('data: ' + JSON.stringify({ chunk: text }) + '\r\n\r\n');
-      pending = { res, sid: data.session_id, text };
-      return;
+      pending = { res: liveStream(data.session_id, data.message), sid: data.session_id, text };
+      if (!deferFirstChunk) pending.res.write('data: ' + JSON.stringify({ chunk: text }) + '\r\n\r\n');
+      return json({ turn_id: liveRuns[data.session_id].turnId });
     }
     if (url.pathname.startsWith('/api/permissions')) {
-      if (url.pathname.endsWith('/answer')) { answers.push({ path: url.pathname, choice: data.choice }); return json({ status: 'answered' }); }
+      if (url.pathname.endsWith('/answer')) {
+        answers.push({ path: url.pathname, choice: data.choice });
+        const run = pending && liveRuns[pending.sid];
+        if (run) { run.permission = null; run.revision++; liveBroadcast({ type: 'update', sessionId: pending.sid,
+          turnId: run.turnId, revision: run.revision, changes: { permission: null } }); }
+        return json({ status: 'answered' });
+      }
       return json({ rules: [], audit: [] });
     }
     console.warn('chat-smoke: missing fixture ' + url.pathname);
@@ -734,8 +777,8 @@ app.whenReady().then(async () => {
     await stageDraft();
     await js("document.querySelector('#chat-send').click()");
     await waitFor("document.querySelectorAll('.chat-prose p').length > 20");
-    assert.deepEqual(requests.filter(r=>r.path==='/api/chat/stream').at(-1).data.attachment_ids, ['staged-test']);
-    assert.equal(requests.filter(r=>r.path==='/api/chat/stream').at(-1).data.message, 'Keep this draft');
+    assert.deepEqual(requests.filter(r=>r.path==='/api/chat/live').at(-1).data.attachment_ids, ['staged-test']);
+    assert.equal(requests.filter(r=>r.path==='/api/chat/live').at(-1).data.message, 'Keep this draft');
     // A tool asks for something it has not been granted, mid-reply. The prompt
     // must appear in the chat that asked, show the request as text, and refuse
     // by default if it is dismissed.
@@ -775,7 +818,7 @@ app.whenReady().then(async () => {
 
     // -- message queue (2026-09-25): Enter mid-reply queues; a finished reply
     // sends the next; a Stop pauses the queue until it is resumed.
-    const streams = () => requests.filter(r => r.path === '/api/chat/stream');
+    const streams = () => requests.filter(r => r.path === '/api/chat/live');
     const enter = (text) => js(`(() => { const i = document.querySelector('#chat-input'); i.value = ${JSON.stringify(text)};
       i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); })()`);
     await enter('First in line');

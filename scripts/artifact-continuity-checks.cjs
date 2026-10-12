@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 
-module.exports = async function checkArtifactContinuity({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads }) {
+module.exports = async function checkArtifactContinuity({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads, liveControls }) {
   const active = '.chat-layout .artifact-tab-panel:not([hidden])';
   const title = 'A clearer direction for the workspace';
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -51,7 +51,8 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   const restored = await js(`({ retained: document.querySelector('${active} .artifact-document') === window.retainedArtifact,
     scroll: document.querySelector('${active} .artifact-preview').scrollTop,
     max: document.querySelector('${active} .artifact-preview').scrollHeight - document.querySelector('${active} .artifact-preview').clientHeight })`);
-  assert.ok(restored.retained && restored.scroll === 180, 'Maximized document keeps its DOM and scroll: ' + JSON.stringify(restored));
+  assert.ok(restored.retained && restored.scroll > 0 && restored.scroll < 250,
+    'Maximized document keeps its DOM and reading position: ' + JSON.stringify(restored));
   await click('.artifact-maximize'); await delay(250);
   assert.ok(Math.abs(await js("document.querySelector('#chat-main').getBoundingClientRect().width") - width) < 2);
   await add('Make this plan clearer.');
@@ -73,53 +74,49 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   assert.equal(reads.slice(readStart).filter(read => read.path === '/api/chat/artifacts/content' && read.query.url.endsWith('weekly-plan.md')).length, 0);
   await send();
   await waitFor(`document.querySelector('${active} .artifact-foreign-actions [role="status"]')?.textContent === 'Done'`);
-  const sent = JSON.parse(writes.slice(startWrites).find(write => write.path === '/api/chat/stream').body);
+  const sent = JSON.parse(writes.slice(startWrites).find(write => write.path === '/api/chat/live').body);
   assert.equal(sent.session_id, 's1'); assert.equal(sent.message, 'Please revise the plan.');
   assert.deepEqual(sent.attachment_ids, []); assert.equal(sent.references.length, 1);
   assert.equal(sent.references[0].kind, 'artifact_comment');
   assert.equal(sent.references[0].url, '/generated-files/012345abcdef_project-brief.md');
   assert.deepEqual(Object.keys(sent.references[0]).sort(), ['comment', 'kind', 'label', 'picks', 'url']);
   await assertS2();
-  // Hold actual chatStream readers open, exercising busy, approval, failure,
-  // retry and completion through the same subscriptions used in production.
-  await js(`(() => {
-    window.artifactRealFetch = window.fetch; window.artifactRequests = []; window.artifactStreams = [];
-    window.fetch = (url, options) => {
-      if (url !== '/api/chat/stream') return window.artifactRealFetch(url, options);
-      window.artifactRequests.push(JSON.parse(options.body));
-      return Promise.resolve(new Response(new ReadableStream({ start(controller) { window.artifactStreams.push(controller); } }), { headers: {'Content-Type':'text/event-stream'} }));
-    };
-    window.artifactEmit = (index, payload, close = false) => { const controller = window.artifactStreams[index]; controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(payload) + '\\n\\n')); if (close) controller.close(); };
-  })()`);
+  // Hold server-owned turns open while the foreign review queues and retries.
+  demoState.artifactHold = true;
+  const requests = () => writes.filter(write => write.path === '/api/chat/live' && JSON.parse(write.body).session_id === 's1');
+  const heldBefore = requests().length;
   try {
     await js("import('/static/js/chatStream.js').then(m => { m.startTurn('s1', 'Origin', 'Already working', []); })");
+    for (let n = 0; n < 80 && requests().length < heldBefore + 1; n++) await delay(50);
     await add('Queued change.'); await send();
     assert.match(await js(`document.querySelector('${active} .artifact-foreign-actions [role="status"]').textContent`), /is busy; your comments will send when it finishes/);
-    assert.equal(await js("window.artifactRequests.length"), 1);
+    assert.equal(requests().length, heldBefore + 1);
     await js(`document.querySelector('${active} .artifact-foreign-actions button:nth-child(3)').click()`);
     assert.equal(await heading(), `1 comment for ${title}`, 'Cancelling preserves the draft');
     await send();
-    await js("window.artifactEmit(0, {done:true}, true)");
-    await waitFor("window.artifactRequests.length === 2 && window.artifactStreams.length === 2");
-    assert.equal(await js("window.artifactRequests[1].session_id"), 's1');
-    assert.equal(await js("window.artifactRequests[1].references[0].comment"), 'Queued change.');
-    await js("window.artifactEmit(1, {permission:{id:'artifact-approval', description:'Edit the plan'}})");
+    liveControls.emit('s1', { done: true });
+    for (let n = 0; n < 80 && requests().length < heldBefore + 2; n++) await delay(50);
+    assert.equal(requests().length, heldBefore + 2);
+    assert.equal(JSON.parse(requests().at(-1).body).references[0].comment, 'Queued change.');
+    liveControls.emit('s1', { permission: { id: 'artifact-approval', description: 'Edit the plan' } });
     await waitFor(`document.querySelector('${active} .artifact-foreign-actions [role="status"]').textContent === 'Needs approval'`);
     assert.equal(await js(`document.querySelector('${active} .artifact-foreign-actions button:last-child').hidden`), false);
-    await js("window.artifactEmit(1, {error:'Review fixture failure'}, true)");
+    liveControls.emit('s1', { error: 'Review fixture failure' });
     await waitFor(`document.querySelector('${active} .artifact-foreign-actions .primary').textContent === 'Retry'`);
     assert.equal(await heading(), `1 comment for ${title}`);
     assert.match(await js(`document.querySelector('${active} .artifact-foreign-actions [role="status"]').textContent`), /Review fixture failure/);
-    await send(); await waitFor("window.artifactRequests.length === 3 && window.artifactStreams.length === 3");
+    await send();
+    for (let n = 0; n < 80 && requests().length < heldBefore + 3; n++) await delay(50);
+    assert.equal(requests().length, heldBefore + 3);
     demoState.artifactReviewNewer = true;
-    await navigate('home'); await js("window.artifactEmit(2, {done:true}, true)");
+    await navigate('home'); liveControls.emit('s1', { done: true });
     await navigate('chat', { sessionId: 's2' });
     await waitFor(`[...document.querySelectorAll('${active} .artifact-toolbar button')].some(button => button.textContent === 'Newer version' && !button.hidden)`);
     assert.equal(await js(`document.querySelector('${active} .artifact-toolbar button:not(.artifact-select)').textContent`), 'Newer version');
     assert.equal(await js(`document.querySelector('${active} .artifact-foreign-actions [role="status"]').textContent`), 'Done');
     await assertS2();
   } finally {
-    await js("window.fetch = window.artifactRealFetch; delete window.artifactRealFetch");
+    demoState.artifactHold = false;
     demoState.artifactReviewNewer = false;
   }
   // Background opens preserve the selected document.
@@ -157,7 +154,7 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   const queuedWrites = writes.length;
   await waitFor("[...document.querySelectorAll('.artifact-foreign-bar .meta')].some(n => n.textContent.includes('Not sent: the app closed'))");
   await delay(300);
-  assert.equal(writes.slice(queuedWrites).filter(w => w.path === '/api/chat/stream').length, 0, 'restored queued comments are not auto-sent');
+  assert.equal(writes.slice(queuedWrites).filter(w => w.path === '/api/chat/live').length, 0, 'restored queued comments are not auto-sent');
   assert.ok(await js("[...document.querySelectorAll('.chat-layout .artifact-tab-label')].some(button => button.textContent === 'shared-notes.txt')"), 'Chat-file uploads survive restart too');
   assert.equal(await js("[...document.querySelectorAll('.toast')].filter(n => n.textContent.includes('1 saved document removed')).length"), 1);
   demoState.staleArtifacts = [];

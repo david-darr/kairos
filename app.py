@@ -174,6 +174,8 @@ async def lifespan(_app: FastAPI):
             await discord_channel.stop()
             await connector_hub.stop_all()
             await tab_hooks.stop_all()
+            from services import chat_live
+            await chat_live.shutdown()
             await chat_service.shutdown()
             # Do not leave the built-in model process orphaned at shutdown.
             llamacpp_engine.stop()

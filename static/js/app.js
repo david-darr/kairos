@@ -5,6 +5,7 @@ import * as onboarding from "./onboarding.js";
 import * as auth from "./auth.js";
 import * as commandPalette from "./commandPalette.js";
 import * as floatingProgress from "./floatingProgress.js";
+import * as chatStream from "./chatStream.js";
 import { setupSidebar, restoreSidebar } from "./sidebar.js";
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
@@ -508,6 +509,7 @@ async function startApp() {
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
   floatingProgress.init({ switchTab });
+  await chatStream.connect();
   // Activating an external link in a reply (David's ask 2026-09-15). Those
   // links carry target="_blank"; electron/main.js refuses to open a real
   // second window for them and routes the URL here instead, so a web page

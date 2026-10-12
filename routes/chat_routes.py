@@ -13,10 +13,17 @@ from pydantic import BaseModel
 from core import attachments, chat_artifacts, chat_files, chat_references, office_preview
 from core.auth import auth_manager
 from core.middleware import require_user
-from services import chat_service
+from services import chat_live, chat_service
 from services import chat_summary
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+@router.get("/status")
+async def chat_status(session_id: str, user: str = Depends(require_user)) -> dict:
+    if chat_service.session_manager.get_session(session_id) is None:
+        raise HTTPException(404, "session not found")
+    return {"busy": chat_service.is_busy(session_id)}
 
 
 @router.get("/files")
@@ -108,6 +115,10 @@ class ValidateAttachmentsRequest(BaseModel):
     attachment_ids: list[str]
 
 
+class StopLiveRequest(BaseModel):
+    session_id: str
+
+
 @router.post("/validate-attachments")
 async def validate_attachments(body: ValidateAttachmentsRequest, user: str = Depends(require_user)) -> dict:
     if chat_service.session_manager.get_session(body.session_id) is None:
@@ -169,6 +180,53 @@ async def stream_chat_message(body: ChatRequest, user: str = Depends(require_use
             yield f"data: {json.dumps({'error': message, 'error_kind': kind})}\n\n"
 
     return StreamingResponse(event_source(), media_type="text/event-stream")
+
+
+@router.get("/live/snapshot")
+async def live_chat_snapshot(user: str = Depends(require_user)) -> dict:
+    return chat_live.snapshot()
+
+
+@router.get("/live/events")
+async def live_chat_events(user: str = Depends(require_user)) -> StreamingResponse:
+    async def events():
+        queue, initial = chat_live.subscribe()
+        try:
+            yield f"data: {json.dumps(initial)}\n\n"
+            while True:
+                try:
+                    packet = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield f"data: {json.dumps(packet)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            chat_live.unsubscribe(queue)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.post("/live")
+async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) -> dict:
+    is_admin = auth_manager.is_admin(user)
+    if chat_service.session_manager.get_session(body.session_id) is None:
+        raise HTTPException(404, "session not found")
+    if chat_service.is_busy(body.session_id):
+        raise HTTPException(409, "This chat is busy. Wait for the current response to finish.")
+    try:
+        chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
+        context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+    return chat_live.start(body.session_id, body.message, body.attachment_ids, is_admin,
+                           context, chat_references.metadata(body.references))
+
+
+@router.post("/live/stop")
+async def stop_live_chat(body: StopLiveRequest, user: str = Depends(require_user)) -> dict:
+    if chat_service.session_manager.get_session(body.session_id) is None:
+        raise HTTPException(404, "session not found")
+    return {"stopping": chat_live.stop(body.session_id)}
 
 
 class CompactRequest(BaseModel):

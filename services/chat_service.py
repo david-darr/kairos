@@ -43,18 +43,27 @@ def is_busy(session_id: str) -> bool:
     return session_id in _busy
 
 
-@asynccontextmanager
-async def session_operation(session_id: str):
-    """Claim before the first await; never replace a running session brain."""
+def claim_session(session_id: str) -> None:
+    """Reserve a chat synchronously, including before a background task starts."""
     if session_manager.get_session(session_id) is None:
         raise HTTPException(404, "session not found")
     if session_id in _busy:
         raise HTTPException(409, "This chat is busy. Wait for the current response to finish.")
     _busy.add(session_id)
+
+
+def release_session(session_id: str) -> None:
+    _busy.discard(session_id)
+
+
+@asynccontextmanager
+async def session_operation(session_id: str):
+    """Claim before the first await; never replace a running session brain."""
+    claim_session(session_id)
     try:
         yield
     finally:
-        _busy.discard(session_id)
+        release_session(session_id)
 
 NO_MODEL_MESSAGE = (
     "You haven't added a model yet. Go to Settings → Add Models to connect "
@@ -513,13 +522,18 @@ def _reply_hook(session_id: str, endpoint: dict, message: str, reply: str) -> No
 
 async def stream_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                          is_admin: bool = False, reference_context: str = "",
-                         references: list[dict] | None = None) -> AsyncIterator[str]:
+                         references: list[dict] | None = None, *, claimed: bool = False) -> AsyncIterator[str]:
     tag = log_files.set_log_tag(session_id)  # see send_message
     try:
-        async with session_operation(session_id):
+        if claimed:
             async for chunk in _stream_message(session_id, text, attachment_ids, is_admin, reference_context,
                                                references):
                 yield chunk
+        else:
+            async with session_operation(session_id):
+                async for chunk in _stream_message(session_id, text, attachment_ids, is_admin, reference_context,
+                                                   references):
+                    yield chunk
     finally:
         log_files.reset_log_tag(tag)
 
@@ -568,7 +582,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         reply_parts.append(ATTACHMENT_TOO_LARGE_MESSAGE)
         yield ATTACHMENT_TOO_LARGE_MESSAGE
     except BaseException as exc:
-        # Includes client cancellation: preserve the visible partial answer.
+        # Includes explicit Stop and legacy stream cancellation: preserve the partial answer.
         # Tools that ran before the Stop really happened; keep them, or the
         # next turn would not know a note was already created.
         failed = isinstance(exc, Exception)
@@ -667,8 +681,8 @@ async def _stream_with_permission_prompts(session_id: str, brain, full_text: str
         next_computer.cancel()
         if not next_chunk.done():
             next_chunk.cancel()
-        # Closing denies anything still waiting: a window that went away
-        # cannot approve, and silence must never mean yes.
+        # When the turn ends, any unanswered request is denied. Browser
+        # departures no longer close this channel while the turn is running.
         permissions.close_channel(f"chat:{session_id}")
         await asyncio.gather(next_ask, next_chunk, next_computer, return_exceptions=True)
         await replies.aclose()

@@ -449,6 +449,9 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
       const request = entry.permission;
       shownPermission = request.id;
       showPermissionPrompt(request, () => chatStream.clearPermission(sessionId, request.id));
+    } else if (!entry.permission && shownPermission) {
+      dismissPermissionPrompt(shownPermission);
+      shownPermission = null;
     }
     const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
     const current = sessionId === activeSessionId && replyCard.isConnected;
@@ -459,6 +462,7 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
       if (entry.status === "processing") replyBody.appendChild(cursor);
     }
     if (entry.status === "done") {
+      replyCard.removeAttribute('data-live-turn');
       cursor.remove();
       if (entry.handoffs) replyCard.remove();
       else if (!entry.text) replyBody.textContent = 'No text response was returned.';
@@ -471,6 +475,7 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
       }
       unsubscribe();
     } else if (entry.status === "stopped") {
+      replyCard.removeAttribute('data-live-turn');
       // Deliberate stop, so it reads as an ended reply rather than a fault.
       // The backend already saved whatever had streamed, so the text on
       // screen is the text that was kept.
@@ -480,6 +485,7 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
       replyCard.append(el('div', { class: 'msg-stopped', role: 'status', text: 'Stopped · partial reply saved' }));
       unsubscribe();
     } else if (entry.status === "failed") {
+      replyCard.removeAttribute('data-live-turn');
       cursor.remove();
       renderMessageBody(replyBody, entry.text, sessionId);
       replyCard.append(el('div', { class: 'msg-interrupted', role: 'status',
@@ -662,6 +668,16 @@ export async function render(container, tabId, options = {}) {
 
   const main = el("div", { id: "chat-main", class: 'is-empty' }, [mobileHeader]);
   const messages = el("div", { id: "chat-messages" });
+  mountSubscriptions.push(chatStream.subscribeAll((sessionId, entry) => {
+    if (!entry || entry.status !== 'processing' || entry.local || sessionId !== activeSessionId ||
+        messages.dataset.sessionId !== sessionId || messages.querySelector('[data-live-turn]')) return;
+    messages.appendChild(messageCard('user', entry.prompt));
+    const replyCard = messageCard('assistant', '');
+    replyCard.dataset.liveTurn = 'true';
+    messages.appendChild(replyCard);
+    mountSubscriptions.push(attachToInFlight(sessionId, messages, replyCard, replyCard.querySelector('.msg-body'),
+      document.getElementById('chat-send')));
+  }));
   const handoffs = watchAgentHandoffs(messages, () => activeSessionId, () => syncChatLayout(messages));
   const attachStrip = el("div", { id: "attach-strip", class: "attach-strip" });
 
@@ -2360,7 +2376,13 @@ async function openSession(sessionId, sessionsList, messages) {
   // of the real history rather than something openSession would otherwise
   // know about.
   if (chatStream.getInFlight(sessionId)?.status === 'processing') {
+    const current = chatStream.getInFlight(sessionId);
+    if (current.prompt && !session.messages.some(message => message.role === 'user' &&
+        message.content === current.prompt && message.ts >= current.startedAt - 1)) {
+      messages.appendChild(messageCard('user', current.prompt));
+    }
     const replyCard = messageCard("assistant", "");
+    replyCard.dataset.liveTurn = 'true';
     const replyBody = replyCard.querySelector(".msg-body");
     messages.appendChild(replyCard);
     activeUnsubscribers.push(attachToInFlight(sessionId, messages, replyCard, replyBody, null));
@@ -2510,6 +2532,7 @@ async function sendMessage(messages, input, sendBtn, attachStrip) {
   messages.appendChild(entering(messageCard("user", text || (imageSources.length ? "" : "(attachment)"),
     undefined, "complete", imageSources, { references })));
   const replyCard = entering(messageCard("assistant", ""));
+  replyCard.dataset.liveTurn = 'true';
   const replyBody = replyCard.querySelector(".msg-body");
   messages.appendChild(replyCard);
   syncChatLayout(messages);

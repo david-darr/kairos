@@ -35,8 +35,8 @@ module.exports = async function checkArtifactViewers({ js, win, waitFor, capture
   await waitFor(`document.querySelector('${active} .artifact-frame')?.contentDocument?.body?.dataset.pick === 'html:path=body'`);
   assert.equal(await js(`document.querySelector('${active} .artifact-frame').getAttribute('sandbox')`), 'allow-same-origin');
   assert.equal(await js(`document.querySelector('${active} .artifact-frame').getAttribute('sandbox').includes('allow-scripts')`), false, 'Sandbox must never allow scripts');
-  await click('Tablet'); assert.equal(await js(`document.querySelector('${active} .artifact-frame').style.width`), '820px');
-  await click('Phone'); assert.equal(await js(`document.querySelector('${active} .artifact-frame').style.width`), '390px');
+  await click('Tablet'); await waitFor(`document.querySelector('${active} .artifact-frame').style.width === '820px'`);
+  await click('Phone'); await waitFor(`document.querySelector('${active} .artifact-frame').style.width === '390px'`);
   assert.equal(await js(`document.querySelector('${active} .artifact-frame').contentDocument.querySelector('p').dataset.pick`), 'html:path=body>p:nth-of-type(1)');
   await click('Source'); await click('Preview');
   await waitFor(`document.querySelector('${active} .artifact-frame')?.contentDocument?.body?.dataset.pick === 'html:path=body'`);

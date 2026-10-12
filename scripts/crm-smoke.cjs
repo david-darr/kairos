@@ -20,14 +20,22 @@ const state = { tasks: [structuredClone(original)], sources: [{ id: 'source1', l
   settings: { endpoint_id: 'model1', timezone: 'America/New_York', review_all: false, auto_scan: false, lookback_days: 14, interval_minutes: 30 },
   runs: [], failed_messages: 0, can_connect: true, scanning: false };
 const reply = { draft: '', last_reply: null };
+const liveRuns = {}, liveClients = new Set();
+const liveBroadcast = packet => { for (const client of liveClients) client.write(`data: ${JSON.stringify(packet)}\n\n`); };
 const replyState = () => ({ ...reply, can_send: true,
   target: { to: 'customer@example.com', subject: 'Re: Proposal', account: 'work@example.com' } });
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) {
+    if (url.pathname === '/api/chat/live/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      liveClients.add(res); res.write(`data: ${JSON.stringify({ type: 'snapshot', runs: structuredClone(liveRuns) })}\n\n`);
+      res.on('close', () => liveClients.delete(res)); return;
+    }
     res.setHeader('Content-Type', 'application/json');
     let value;
-    if (url.pathname === '/api/system/custom-tabs') value = [{ id: 'crm', label: 'CRM', icon_svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>', user_tab: false, format: 'folder', view_url: '/tab-files/crm/view.js', style_url: '/tab-files/crm/view.css' }];
+    if (url.pathname === '/api/chat/live/snapshot') value = { type: 'snapshot', runs: structuredClone(liveRuns) };
+    else if (url.pathname === '/api/system/custom-tabs') value = [{ id: 'crm', label: 'CRM', icon_svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>', user_tab: false, format: 'folder', view_url: '/tab-files/crm/view.js', style_url: '/tab-files/crm/view.css' }];
     else if (url.pathname === '/api/tab-crm/connections') value = { connections: [{ kind: 'email', id: 'email1', label: 'Work inbox' }], models: [{ id: 'model1', name: 'Claude', kind: 'claude_cli' }] };
     else if (url.pathname === '/api/tab-crm/models/model1') value = [{ id: 'claude-haiku-5-5', name: 'Haiku 5.5' }, { id: 'claude-sonnet-5', name: 'Sonnet 5' }];
     else if (url.pathname === '/api/agents') value = [];
@@ -37,12 +45,23 @@ const server = http.createServer(async (req, res) => {
     else if (url.pathname === '/api/tab-crm/tasks/task1/reply' && req.method === 'GET') value = replyState();
     else if (url.pathname === '/api/sessions/crm-session') value = { id: 'crm-session', title: 'CRM: Send revised proposal', model_endpoint_id: 'm1',
       messages: [{ role: 'user', content: 'Context for this chat, from my CRM task. Help me work on it.\n\nTask: Send revised proposal', ts: now }] };
-    else if (url.pathname === '/api/chat/stream' && req.method === 'POST') {
+    else if (url.pathname === '/api/chat/live' && req.method === 'POST') {
       let body = ''; for await (const chunk of req) body += chunk;
-      writes.push({ path: url.pathname, fields: JSON.parse(body) });
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.write(`data: ${JSON.stringify({ chunk: 'Here is a plan for the proposal.' })}\n\n`);
-      res.end(`data: ${JSON.stringify({ done: true })}\n\n`);
+      const fields = JSON.parse(body);
+      writes.push({ path: url.pathname, fields });
+      const id = fields.session_id;
+      const run = liveRuns[id] = { turnId: 'crm-turn', sessionTitle: 'CRM', prompt: fields.message,
+        text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false,
+        permission: null, toolEvents: [], toolSteps: [], handoffs: null, runId: null, error: null, revision: 1 };
+      liveBroadcast({ type: 'started', sessionId: id, run: structuredClone(run) });
+      res.end(JSON.stringify({ turn_id: run.turnId }));
+      setTimeout(() => {
+        run.text = 'Here is a plan for the proposal.'; run.revision++;
+        liveBroadcast({ type: 'chunk', sessionId: id, turnId: run.turnId, revision: run.revision, chunk: run.text });
+        run.status = 'done'; run.revision++;
+        liveBroadcast({ type: 'update', sessionId: id, turnId: run.turnId, revision: run.revision,
+          changes: { status: 'done', stopping: false, permission: null, error: null } });
+      }, 50);
       return;
     }
     else if (url.pathname.startsWith('/api/tab-crm/') && req.method !== 'GET') {
@@ -144,7 +163,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("!!document.querySelector('.crm-chat .session-chat-models .custom-select') && [...document.querySelectorAll('.crm-chat button')].some((b)=>b.textContent==='Open in Chats')"));
     await js("{ const t=document.querySelector('.crm-chat textarea'); t.value='Make me a plan'; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('.crm-chat .side-chat-send').click(); }");
     await wait("[...document.querySelectorAll('.crm-chat .msg.assistant')].some((m)=>m.textContent.includes('Here is a plan'))");
-    assert.equal(writes.filter((w) => w.path === '/api/chat/stream').pop()?.fields.session_id, 'crm-session');
+    assert.equal(writes.filter((w) => w.path === '/api/chat/live').pop()?.fields.session_id, 'crm-session');
     await js("document.querySelector('[data-work=draft]').scrollIntoView({block:'start'})");
     await capture('desktop-task-work');
     await click('Add task');

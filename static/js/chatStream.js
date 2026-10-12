@@ -1,43 +1,148 @@
-// Persistent (module-level, survives tab switches) registry of in-flight
-// chat turns. David's ask 2026-09-12: leaving a chat mid-reply to check
-// another tab, then coming back, showed nothing until the turn finished —
-// root cause was that the fetch+stream-reading loop lived entirely inside
-// views/chat.js's per-render closure, writing into DOM nodes app.js's
-// switchTab() had already wiped. The request itself was never actually
-// cancelled (fetch doesn't auto-abort just because its caller's DOM is
-// gone) — it just had nowhere left to write. Moving the network/streaming
-// logic here, one level above any single view, means any view (or the
-// floating overlay in floatingProgress.js) can attach to a session's
-// ongoing turn and see the same live text, regardless of which view
-// actually sent the message.
-
-const _inflight = new Map(); // sessionId -> { text, status, sessionTitle, listeners: Set<fn> }
-const _globalListeners = new Set(); // fn(sessionId, entry|null)
-
-// How long a finished entry stays visible/attachable after completing —
-// long enough for a floating card (or a chat view reattaching right as it
-// finishes) to show the done/failed state before it's gone, short enough
-// not to look stuck (David's ask: "~4 seconds then fade").
+// One live feed for Chats, Forge, and the progress overlay. The backend owns
+// each turn; this module only watches it. Closing this page never stops work.
+const _inflight = new Map();
+const _listeners = new Map();
+const _globalListeners = new Set();
 const FINISHED_RETENTION_MS = 4000;
+let source = null;
+let syncing = null;
+let connecting = null;
 
 function _notify(sessionId) {
   const entry = _inflight.get(sessionId) || null;
-  if (entry) for (const cb of entry.listeners) cb(entry);
-  for (const cb of _globalListeners) cb(sessionId, entry);
+  if (entry) for (const callback of _listeners.get(sessionId) || []) callback(entry);
+  for (const callback of _globalListeners) callback(sessionId, entry);
 }
 
-// Stops a running turn. Safe to call when nothing is running, so callers
-// (barge-in especially) never have to check first.
-export function stopTurn(sessionId) {
+function _finish(sessionId, entry, status, error = null) {
+  if (entry.status !== 'processing') return;
+  entry.status = status;
+  entry.stopping = false;
+  entry.permission = null;
+  entry.error = error;
+  entry.endedAt = Date.now() / 1000;
+  _notify(sessionId);
+  setTimeout(() => {
+    if (_inflight.get(sessionId) === entry) {
+      _inflight.delete(sessionId);
+      _notify(sessionId);
+    }
+  }, FINISHED_RETENTION_MS);
+}
+
+function _mergeRun(sessionId, run) {
+  const old = _inflight.get(sessionId);
+  // A fresh browser reads completed replies from saved session history. The
+  // recent terminal state is only for a viewer that was watching this turn.
+  if (!old && run.status !== 'processing') return;
+  const same = !old?.turnId || old.turnId === run.turnId;
+  if (old && same && (old.revision || 0) > (run.revision || 0)) return;
+  const entry = same ? old || {} : {};
+  const wasProcessing = entry.status === 'processing';
+  const wasLocal = entry.local && same;
+  Object.assign(entry, run, { connected: true, local: !!wasLocal });
+  if (run.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;
+  if (!run.permission) entry.permissionStartedAt = null;
+  _inflight.set(sessionId, entry);
+  if (run.status !== 'processing' && (wasProcessing || !old || !same)) {
+    entry.status = 'processing';
+    _finish(sessionId, entry, run.status, run.error);
+  } else {
+    _notify(sessionId);
+  }
+}
+
+async function _recoverMissing(sessionId, entry) {
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
+    if (!res.ok || _inflight.get(sessionId) !== entry || entry.status !== 'processing') return;
+    const session = await res.json();
+    const saved = [...(session.messages || [])].reverse().find(message => message.role === 'assistant' &&
+      (entry.runId ? message.run_id === entry.runId : message.ts >= entry.startedAt - 1));
+    if (saved) entry.text = saved.content || entry.text;
+    _finish(sessionId, entry, saved?.status === 'interrupted' ? 'stopped' :
+      saved?.status === 'failed' ? 'failed' : saved ? 'done' : 'failed',
+      saved ? null : 'The server restarted before this reply completed.');
+  } catch { /* The next reconnect will retry with a fresh snapshot. */ }
+}
+
+function _snapshot(packet) {
+  const incoming = packet.runs || {};
+  for (const [sessionId, run] of Object.entries(incoming)) _mergeRun(sessionId, run);
+  for (const [sessionId, entry] of _inflight) {
+    if (!(sessionId in incoming) && entry.status === 'processing' && entry.turnId) _recoverMissing(sessionId, entry);
+  }
+}
+
+function _packet(packet) {
+  if (packet.type === 'snapshot') { _snapshot(packet); return; }
+  const sessionId = packet.sessionId;
+  if (packet.type === 'started') { _mergeRun(sessionId, packet.run); return; }
   const entry = _inflight.get(sessionId);
-  if (!entry || entry.status !== 'processing') return false;
-  entry.stopped = true;
-  try { entry.controller.abort(); } catch { /* already finished */ }
-  return true;
+  if (!entry || entry.turnId !== packet.turnId) { sync().catch(() => {}); return; }
+  if (packet.revision && packet.revision <= (entry.revision || 0)) return;
+  if (packet.revision) entry.revision = packet.revision;
+  if (packet.type === 'chunk') entry.text += packet.chunk;
+  else if (packet.type === 'tool_event') (entry.toolEvents ||= []).push(packet.value);
+  else if (packet.type === 'tool_step') (entry.toolSteps ||= []).push(packet.value);
+  else if (packet.type === 'update') {
+    const changes = packet.changes;
+    if (changes.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;
+    if ('permission' in changes && !changes.permission) {
+      if (entry.permissionStartedAt) entry.pausedSeconds = (entry.pausedSeconds || 0) + Date.now() / 1000 - entry.permissionStartedAt;
+      entry.permissionStartedAt = null;
+    }
+    if (changes.status && changes.status !== 'processing') {
+      Object.assign(entry, { ...changes, status: 'processing' });
+      _finish(sessionId, entry, changes.status, changes.error);
+      return;
+    }
+    Object.assign(entry, changes);
+  }
+  _notify(sessionId);
 }
 
-export function getInFlight(sessionId) {
-  return _inflight.get(sessionId) || null;
+export function sync() {
+  if (syncing) return syncing;
+  syncing = fetch('/api/chat/live/snapshot', { cache: 'no-store' }).then(async res => {
+    if (!res.ok) throw new Error(`Live chat unavailable (${res.status})`);
+    _snapshot(await res.json());
+  }).finally(() => { syncing = null; });
+  return syncing;
+}
+
+export function connect() {
+  if (source) return Promise.resolve();
+  if (connecting) return connecting;
+  connecting = (async () => {
+    await sync().catch(() => {});
+    source = new EventSource('/api/chat/live/events');
+    source.onmessage = event => {
+      try { _packet(JSON.parse(event.data)); }
+      catch (error) { console.error('Live chat event failed', error); sync().catch(() => {}); }
+    };
+    source.onerror = () => {
+      for (const [sessionId, entry] of _inflight) {
+        if (entry.status === 'processing') { entry.connected = false; _notify(sessionId); }
+      }
+    };
+  })().finally(() => { connecting = null; });
+  return connecting;
+}
+
+export function getInFlight(sessionId) { return _inflight.get(sessionId) || null; }
+export function listInFlight() {
+  return [..._inflight.entries()].map(([sessionId, entry]) => ({ sessionId, ...entry }));
+}
+export function subscribe(sessionId, callback) {
+  let listeners = _listeners.get(sessionId);
+  if (!listeners) { listeners = new Set(); _listeners.set(sessionId, listeners); }
+  listeners.add(callback);
+  return () => { listeners.delete(callback); if (!listeners.size) _listeners.delete(sessionId); };
+}
+export function subscribeAll(callback) {
+  _globalListeners.add(callback);
+  return () => _globalListeners.delete(callback);
 }
 
 export function clearPermission(sessionId, requestId) {
@@ -49,127 +154,54 @@ export function clearPermission(sessionId, requestId) {
   _notify(sessionId);
 }
 
-export function listInFlight() {
-  return [..._inflight.entries()].map(([sessionId, entry]) => ({ sessionId, ...entry }));
-}
-
-// Returns an unsubscribe function. Silently a no-op to subscribe to a
-// session with no in-flight entry (nothing to attach to) — callers should
-// check getInFlight() first if they need to know whether it's worth it.
-export function subscribe(sessionId, callback) {
-  const entry = _inflight.get(sessionId);
-  if (!entry) return () => {};
-  entry.listeners.add(callback);
-  return () => entry.listeners.delete(callback);
-}
-
-export function subscribeAll(callback) {
-  _globalListeners.add(callback);
-  return () => _globalListeners.delete(callback);
-}
-
-// Synchronous: registers the in-flight entry immediately (so a caller can
-// subscribe() right after this returns and not race the first chunk),
-// then runs the actual request in the background.
 export function startTurn(sessionId, sessionTitle, text, attachmentIds, references = []) {
+  if (!source) connect().catch(() => {});
   if (_inflight.get(sessionId)?.status === 'processing') throw new Error('This chat already has a response in progress');
-  // The controller lives on the entry rather than in a closure so stopTurn()
-  // can reach it from anywhere - the composer's stop button, a tab switch, or
-  // Open Mic barge-in - without the caller having to hold a reference.
-  const controller = new AbortController();
-  const entry = { text: "", prompt: text, startedAt: Date.now() / 1000, status: "processing", connected: false, sessionTitle, error: null, controller, listeners: new Set() };
+  const entry = { text: '', prompt: text, startedAt: Date.now() / 1000, status: 'processing',
+    connected: false, sessionTitle, error: null, stopping: false, local: true,
+    toolEvents: [], toolSteps: [] };
   _inflight.set(sessionId, entry);
   _notify(sessionId);
-  _runTurn(sessionId, entry, text, attachmentIds, references);
+  const startPromise = fetch('/api/chat/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references }) })
+    .then(async res => {
+      if (!res.ok) {
+        let detail = `Couldn't start reply (${res.status})`;
+        try { detail = (await res.json()).detail || detail; } catch { /* Keep status text. */ }
+        throw new Error(detail);
+      }
+      const result = await res.json();
+      if (_inflight.get(sessionId) === entry) entry.turnId = result.turn_id;
+      await sync();
+    }).catch(async error => {
+      if (_inflight.get(sessionId) !== entry) return;
+      if (entry.turnId) {
+        try { await sync(); return; } catch { /* Keep the start error. */ }
+      }
+      _finish(sessionId, entry, 'failed', error.message);
+    });
+  Object.defineProperty(entry, 'startPromise', { value: startPromise, configurable: true });
   return entry;
 }
 
-async function _runTurn(sessionId, entry, text, attachmentIds, references) {
-  try {
-    const res = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references }),
-      signal: entry.controller.signal,
-    });
-    if (!res.ok || !res.body) {
-      let detail = `Stream failed (${res.status})`;
-      try { detail = (await res.json()).detail || detail; } catch (_) {}
-      throw new Error(detail);
-    }
-
-    entry.connected = true;
-    _notify(sessionId);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let completed = false;
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += done ? decoder.decode() + '\n\n' : decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n\r?\n/);
-      buffer = lines.pop();
-      for (const line of lines) {
-        const data = line.split(/\r?\n/).filter(row => row.startsWith('data:')).map(row => row.slice(5).trimStart()).join('\n');
-        if (!data) continue;
-        let payload;
-        try { payload = JSON.parse(data); } catch (_) { throw new Error('Invalid response stream'); }
-        if (payload.error) throw new Error(payload.error);
-        if (payload.done === true) completed = true;
-        if (payload.chunk) {
-          entry.text += payload.chunk;
-          _notify(sessionId);
-        }
-        if (payload.permission) {
-          // Held on the entry rather than shown from here: this module is
-          // transport only, and a request must survive the user switching
-          // tabs and coming back mid-turn.
-          entry.permission = payload.permission;
-          entry.permissionStartedAt = Date.now() / 1000;
-          _notify(sessionId);
-        }
-        if (payload.handoffs) {
-          entry.handoffs = payload.handoffs;
-          _notify(sessionId);
-        }
-        if (payload.tool_event) {
-          entry.runId = payload.run_id;
-          entry.toolEvents ||= [];
-          entry.toolEvents.push(payload.tool_event);
-          _notify(sessionId);
-        }
-        if (payload.tool_step) {
-          entry.runId = payload.run_id;
-          entry.toolSteps ||= [];
-          entry.toolSteps.push(payload.tool_step);
-          _notify(sessionId);
-        }
-      }
-      if (done) break;
-    }
-    if (!completed) throw new Error('Connection ended before the response finished. Reopen this chat to recover any saved reply.');
-    entry.status = "done";
-  } catch (e) {
-    // A deliberate stop is not a failure. Aborting the fetch drops the
-    // connection, which the backend already treats as client cancellation and
-    // handles by saving the partial reply with status "interrupted" (see
-    // services/chat_service.py's BaseException branch) - so the text already
-    // on screen is the text that was kept, and there is nothing to apologise
-    // for in the UI.
-    if (entry.stopped || e.name === 'AbortError') {
-      entry.status = "stopped";
-    } else {
-      entry.status = "failed";
-      entry.error = e.message;
-    }
-  }
-  entry.endedAt = Date.now() / 1000;
+export function stopTurn(sessionId) {
+  const entry = _inflight.get(sessionId);
+  if (!entry || entry.status !== 'processing' || entry.stopping) return false;
+  entry.stopping = true;
   _notify(sessionId);
-
-  setTimeout(() => {
-    if (_inflight.get(sessionId) === entry) {
-      _inflight.delete(sessionId);
-      _notify(sessionId);
-    }
-  }, FINISHED_RETENTION_MS);
+  Promise.resolve(entry.startPromise).then(() => {
+    if (entry.status !== 'processing') return null;
+    return fetch('/api/chat/live/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  }).then(async res => {
+    if (!res) return;
+    if (!res.ok) throw new Error(`Couldn't stop reply (${res.status})`);
+    const result = await res.json();
+    if (!result.stopping) await sync();
+  }).catch(error => {
+    if (entry.status === 'processing') { entry.stopping = false; entry.error = error.message; _notify(sessionId); }
+  });
+  return true;
 }
