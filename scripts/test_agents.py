@@ -222,6 +222,50 @@ class AutoModeTests(AgentTestCase):
         self.assertEqual(client.post("/api/agents", json={"name": "Rogue"}).status_code, 403)
         self.assertEqual(client.post(f"/api/agents/{self.agent['id']}/cards", json={"name": "x", "prompt": "y"}).status_code, 403)
 
+    def test_only_an_admin_can_direct_an_agents_work_through_tasks(self):
+        """Regression, 2026-10-13. /api/agents is admin-only because agents
+        run in Auto, so whoever directs them approves everything they do. The
+        generic /api/tasks routes took only require_user and never checked
+        admin, and an agent's goals and cards carry no owner or admin_only, so
+        a non-admin could run, stop, edit, re-status or delete an agent's work
+        through them and have it self-approve."""
+        from fastapi import HTTPException
+        from routes import task_routes
+        mine = task_service.create_task("Mine", "ordinary work", "card")
+        agents = task_service.create_task("Theirs", "agent work", "card", agent_id=self.agent["id"])
+        self.addCleanup(task_service.delete_task, mine["id"])
+        self.addCleanup(task_service.delete_task, agents["id"])
+
+        locked = FastAPI()
+        locked.include_router(task_routes.router)
+        locked.dependency_overrides[require_user] = lambda: "guest"
+        client = TestClient(locked)
+
+        def not_admin(request):
+            raise HTTPException(status_code=403, detail="admin privileges required")
+
+        # Patched at the guard's own boundary rather than through
+        # dependency_overrides: the guard calls require_admin directly (a
+        # FastAPI override only intercepts Depends), and this suite runs with
+        # no accounts configured, where require_admin passes for everyone.
+        # Who counts as an admin is covered by the auth tests; what is under
+        # test here is that agent-owned work consults that check at all.
+        with patch.object(task_routes, "require_admin", not_admin):
+            for method, path, body in (
+                ("post", f"/api/tasks/{agents['id']}/run", None),
+                ("post", f"/api/tasks/{agents['id']}/stop", None),
+                ("post", f"/api/tasks/{agents['id']}/status", {"status": "ready"}),
+                ("patch", f"/api/tasks/{agents['id']}", {"name": "hijacked"}),
+                ("delete", f"/api/tasks/{agents['id']}", None),
+            ):
+                response = getattr(client, method)(path, **({"json": body} if body else {}))
+                self.assertEqual(response.status_code, 403, f"{method} {path} -> {response.status_code}")
+        self.assertEqual(task_service.get_task(agents["id"])["name"], "Theirs", "nothing was changed")
+
+        # An ordinary task is untouched by this: a non-admin still owns it.
+        self.assertEqual(client.patch(f"/api/tasks/{mine['id']}", json={"name": "Renamed"}).status_code, 200)
+        self.assertEqual(task_service.get_task(mine["id"])["name"], "Renamed")
+
     def test_a_question_waits_and_its_answer_comes_back(self):
         card = self.card("Pick a board")
 

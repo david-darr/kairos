@@ -195,6 +195,53 @@ class HandoffTests(unittest.TestCase):
             reply = asyncio.run(tool_registry.call("hand_to_agent", {"agent": "Scout", "work": "Find roles"}, ctx, tool_registry.CLAUDE))
         self.assertIn("Handed to Scout", reply)
 
+    def test_tainted_handoff_is_not_answered_by_auto(self):
+        """Regression, 2026-10-13. hand_to_agent has always asked the broker
+        for a forced prompt once a turn has read untrusted content, so that
+        injected text cannot put an agent to work unseen. But core/
+        permissions.py honoured force_prompt for six named tools only, and
+        hand_to_agent was not one of them, so Auto answered first and the gate
+        never fired - on an admin's Auto chat and on an agent's own surface,
+        which are exactly the two surfaces it was written for.
+
+        This drives the REAL broker. The test above patches
+        permissions.decide, which is why a defect inside decide() survived
+        it."""
+        from core.turn_taint import TurnTaint
+        taint = TurnTaint()
+        taint.mark("browse result")
+        session_manager.set_permission_mode(self.source, "auto")
+        self.assertEqual((session_manager.get_session(self.source) or {}).get("permission_mode"), "auto")
+
+        # Auto chat: nobody is watching this surface in a test, so a forced
+        # prompt can only deny. Before the fix, Auto allowed it outright.
+        ctx = tool_registry.ToolContext(session_id=self.source, is_admin=True, turn_taint=taint)
+        reply = asyncio.run(tool_registry.call("hand_to_agent", {"agent": "Scout", "work": "Find roles"},
+                                               ctx, tool_registry.CLAUDE))
+        self.assertTrue(reply.startswith("Not run:"), reply)
+        self.assertEqual([m for m in self.messages() if m.get("type") == "handoff"], [], "nothing handed over")
+
+        # An agent's own chat is an admin chat that agent_service starts in
+        # Auto, so it is reachable and must not self-approve either. (A
+        # background agent run on an "agent:" surface is not reachable at
+        # all: hand_to_agent is admin_only, so it is never offered there.)
+        agent_chat = session_manager.create_session()["id"]
+        agent_service.make_agent_chat(agent_chat, self.agent)
+        self.assertEqual((session_manager.get_session(agent_chat) or {}).get("permission_mode"), "auto")
+        agent_ctx = tool_registry.ToolContext(session_id=agent_chat, agent_id=self.agent["id"],
+                                              is_admin=True, turn_taint=taint)
+        reply = asyncio.run(tool_registry.call("hand_to_agent", {"agent": "Scout", "work": "Find roles"},
+                                               agent_ctx, tool_registry.CLAUDE))
+        self.assertTrue(reply.startswith("Not run:"), reply)
+        self.assertEqual([m for m in self.messages() if m.get("type") == "handoff"], [], "nothing handed over")
+
+        # A clean turn still hands over with no prompt: the gate is for
+        # tainted turns, not a tax on every handoff.
+        clean = tool_registry.ToolContext(session_id=self.source, is_admin=True)
+        reply = asyncio.run(tool_registry.call("hand_to_agent", {"agent": "Scout", "work": "Find roles"},
+                                               clean, tool_registry.CLAUDE))
+        self.assertIn("Handed to Scout", reply)
+
     def test_tool_by_name_and_id_uses_same_card_and_is_audited(self):
         for identifier in ("scout", self.agent["id"]):
             with patch.object(tool_registry, "_audit") as audit:
