@@ -8,6 +8,10 @@ venv/
 # per-install secret key, chat history. Never committed, and also excluded
 # from the packaged build (see electron/package.json's extraResources).
 data/
+.kairos-mobile-runtime/
+# Isolated mobile and renderer fixtures, not release source.
+kairos-mobile-test-*/
+scripts/.test-runtime/
 
 # Secrets
 .env

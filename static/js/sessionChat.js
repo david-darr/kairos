@@ -8,6 +8,7 @@
 // Tabs import it as "/static/js/sessionChat.js"; mountSessionChat is part of
 // the tab view contract (skill_templates/build-custom-tab/SKILL.md).
 import { api, el, toast, customSelect } from './api.js';
+import { shouldSendOnEnter } from './composerKeyboard.js';
 import * as chatStream from './chatStream.js';
 import { renderMessageBody } from './chatContent.js';
 import { dismissPermissionPrompt, showPermissionPrompt } from './permissionPrompt.js';
@@ -274,7 +275,7 @@ export async function mountSessionChat(host, options = {}) {
   send.addEventListener('click', () => submit());
   queueButton.addEventListener('click', () => submit({ enqueue: true }));
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !event.defaultPrevented) { event.preventDefault(); submit({ fromKeyboard: true }); }
+    if (shouldSendOnEnter(event)) { event.preventDefault(); submit({ fromKeyboard: true }); }
   });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 

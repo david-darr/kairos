@@ -17,6 +17,9 @@ def idle_session(fn):
     """Keep transcript/connection mutations atomic relative to live turns."""
     @wraps(fn)
     async def wrapped(session_id: str, *args, **kwargs):
+        from services.chat_live import require_session
+        if kwargs.get("user"):
+            require_session(session_id, kwargs["user"])
         async with chat_service.session_operation(session_id):
             return await fn(session_id, *args, **kwargs)
     return wrapped
@@ -104,7 +107,8 @@ async def create_session(body: CreateSessionRequest, user: str = Depends(require
 
 @router.get("/{session_id}")
 async def get_session(session_id: str, user: str = Depends(require_user)) -> dict:
-    session = session_manager.get_session(session_id)
+    from services.chat_live import require_session
+    session = require_session(session_id, user)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     result = _for_client(session)

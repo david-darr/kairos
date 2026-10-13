@@ -10,6 +10,7 @@ import { runSummary, surfaceLabel, toggleRunTimeline } from "../runTimeline.js";
 import { renderHooksPanel } from "./settingsHooks.js";
 import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor } from "../settingsKit.js";
 import { addReaIntegration } from "../reaSetup.js";
+import { renderNotificationsPanel } from './settingsNotifications.js';
 
 // The side browser's page is a NATIVE view composited above the HTML in the
 // desktop app (see static/js/browserPane.js), so it would paint straight
@@ -56,6 +57,7 @@ const NAV_ICONS = {
   integrations: I('<path d="M9 2v5M15 2v5M12 17v5"/><path d="M6 7h12v4a6 6 0 01-6 6 6 6 0 01-6-6V7z"/>'),
   channels: I('<path d="M4 5h16v11H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/>'),
   remote: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>'),
+  notifications: I('<path d="M6 9a6 6 0 0112 0v6l2 3H4l2-3V9M10 21h4"/>'),
   vault: I('<path d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/>'),
   forge: I('<path d="M8 5l-6 7 6 7M16 5l6 7-6 7M14 3l-4 18"/>'),
   speech: I('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>'),
@@ -114,6 +116,9 @@ const SECTION_GROUPS = [
   },
   {
     id: "personal", label: "Personal", sections: [
+      { id: "notifications", label: "Notifications", render: renderNotificationsPanel,
+        description: "Alerts for replies, failures and permission requests on this device.",
+        keywords: ["phone", "mobile", "iphone", "push", "notification", "alert", "permission", "home screen"] },
       { id: "appearance", label: "Appearance", render: renderAppearancePanel,
         description: "A workspace that feels like yours. Saved for you on this device only.",
         keywords: ["theme", "background", "image", "color", "shader", "flow", "tint", "swirl", "grain", "motion"] },

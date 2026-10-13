@@ -1,4 +1,5 @@
 import { api, el, customSelect, openPanelDialog, toast } from '../api.js';
+import { shouldSendOnEnter } from '../composerKeyboard.js';
 import { mountDither } from '../dither.js';
 import { halftoneSource, halftoneFocus, halftonePalette, halftoneVersion } from '../appearance.js';
 import { bars, donut, heatmap, statCard, rankedTable } from '../forgeCharts.js';
@@ -247,7 +248,7 @@ export function render(container, tabId, options = {}) {
     variantField.replaceChildren(variantSelect);
     variantField.hidden = false;
   }
-  message.onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } };
+  message.onkeydown = event => { if (shouldSendOnEnter(event)) { event.preventDefault(); composer.requestSubmit(); } };
   load();
   document.addEventListener('kairos:forge-apps', refreshActivity);
   const timer = setInterval(() => { if (!document.hidden) { refreshActivity(); lifespan(); } }, 30000);

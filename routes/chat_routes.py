@@ -6,13 +6,13 @@ owns the actual turn logic.
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from core import attachments, chat_artifacts, chat_files, chat_references, office_preview
 from core.auth import auth_manager
-from core.middleware import require_user
+from core.middleware import require_user, get_current_user
 from services import chat_live, chat_service
 from services import chat_summary
 
@@ -104,6 +104,7 @@ class ChatRequest(BaseModel):
     message: str
     attachment_ids: list[str] = []
     references: list[dict] = []
+    request_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -137,6 +138,7 @@ async def send_chat_message(body: ChatRequest, user: str = Depends(require_user)
     # _options() and core/external_brain.py) is admin-only; this is the
     # single point that decides that for every turn.
     is_admin = auth_manager.is_admin(user)
+    chat_live.require_session(body.session_id, user)
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         reference_context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
@@ -150,6 +152,7 @@ async def send_chat_message(body: ChatRequest, user: str = Depends(require_user)
 @router.post("/stream")
 async def stream_chat_message(body: ChatRequest, user: str = Depends(require_user)) -> StreamingResponse:
     is_admin = auth_manager.is_admin(user)
+    chat_live.require_session(body.session_id, user)
     if chat_service.session_manager.get_session(body.session_id) is None:
         raise HTTPException(404, "session not found")
     if chat_service.is_busy(body.session_id):
@@ -184,19 +187,25 @@ async def stream_chat_message(body: ChatRequest, user: str = Depends(require_use
 
 @router.get("/live/snapshot")
 async def live_chat_snapshot(user: str = Depends(require_user)) -> dict:
-    return chat_live.snapshot()
+    return chat_live.visible_packet(chat_live.snapshot(), user)
 
 
 @router.get("/live/events")
-async def live_chat_events(user: str = Depends(require_user)) -> StreamingResponse:
+async def live_chat_events(request: Request = None, user: str = Depends(require_user)) -> StreamingResponse:
     async def events():
         queue, initial = chat_live.subscribe()
         try:
-            yield f"data: {json.dumps(initial)}\n\n"
+            yield f"data: {json.dumps(chat_live.visible_packet(initial, user))}\n\n"
             while True:
+                if request is not None and get_current_user(request) != user:
+                    return
                 try:
                     packet = await asyncio.wait_for(queue.get(), timeout=15)
-                    yield f"data: {json.dumps(packet)}\n\n"
+                    if request is not None and get_current_user(request) != user:
+                        return
+                    packet = chat_live.visible_packet(packet, user)
+                    if packet is not None:
+                        yield f"data: {json.dumps(packet)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
@@ -209,23 +218,19 @@ async def live_chat_events(user: str = Depends(require_user)) -> StreamingRespon
 @router.post("/live")
 async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) -> dict:
     is_admin = auth_manager.is_admin(user)
-    if chat_service.session_manager.get_session(body.session_id) is None:
-        raise HTTPException(404, "session not found")
-    if chat_service.is_busy(body.session_id):
-        raise HTTPException(409, "This chat is busy. Wait for the current response to finish.")
+    chat_live.require_session(body.session_id, user)
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
     except ValueError as error:
         raise HTTPException(422, str(error))
     return chat_live.start(body.session_id, body.message, body.attachment_ids, is_admin,
-                           context, chat_references.metadata(body.references))
+                           context, chat_references.metadata(body.references), user=user, request_id=body.request_id)
 
 
 @router.post("/live/stop")
 async def stop_live_chat(body: StopLiveRequest, user: str = Depends(require_user)) -> dict:
-    if chat_service.session_manager.get_session(body.session_id) is None:
-        raise HTTPException(404, "session not found")
+    chat_live.require_session(body.session_id, user)
     return {"stopping": chat_live.stop(body.session_id)}
 
 

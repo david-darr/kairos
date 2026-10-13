@@ -14,6 +14,11 @@
 import { api, el } from "./api.js";
 
 let open = null;
+document.addEventListener('kairos:permission-closed', event => {
+  if (open?.dataset.requestId !== event.detail.id) return;
+  open.dataset.resolved = 'true';
+  dismissPermissionPrompt();
+});
 
 export function dismissPermissionPrompt(requestId = null) {
   if (requestId && open?.dataset.requestId !== requestId) return;
@@ -52,6 +57,12 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
   dialog.dataset.requestId = request.id;
 
   let answered = false;
+  const expiry = request.expires_at ? setTimeout(() => {
+    answered = true;
+    status.textContent = 'This request has expired.';
+    for (const node of buttons.children) node.disabled = true;
+  }, Math.max(0, request.expires_at * 1000 - Date.now())) : null;
+  if (request.expires_at) status.textContent = `Answer before ${new Date(request.expires_at * 1000).toLocaleTimeString()}.`;
   async function answer(choice) {
     if (answered) return;
     answered = true;
@@ -80,6 +91,7 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
   }
 
   dialog.addEventListener("close", () => {
+    clearTimeout(expiry);
     if (open === dialog) open = null;
     dialog.remove();
     if (!answered && dialog.dataset.resolved !== 'true') {

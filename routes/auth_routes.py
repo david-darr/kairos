@@ -177,7 +177,9 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
 
 @router.post("/logout")
 async def logout(request: Request, response: Response) -> dict:
+    from core import mobile_activity
     token = request.cookies.get(SESSION_COOKIE_NAME)
+    mobile_activity.revoke(session_binding=mobile_activity.binding(token))
     if token:
         auth_manager.delete_session(token)
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -266,6 +268,8 @@ async def delete_user(username: str, user: str = Depends(require_admin)) -> dict
         raise HTTPException(status_code=400, detail="can't delete your own account while logged in as it")
     try:
         auth_manager.delete_user(username)
+        from core import mobile_activity
+        mobile_activity.revoke(owner=username)
     except KeyError:
         raise HTTPException(status_code=404, detail="user not found")
     except ValueError as e:

@@ -1,4 +1,5 @@
 import { api, confirmDialog } from './api.js';
+import { isComposingKey } from './composerKeyboard.js';
 import { getShortcutGroups, shortcutHelp } from './shortcuts.js';
 
 function navigate(tab, options = {}) {
@@ -270,7 +271,7 @@ export function mountSlashSuggestions(input, inputTop, ctx) {
     if (!results.length) { hide(); return; } paint();
   };
   const onKey = event => {
-    if (list.hidden || event.isComposing) return;
+    if (list.hidden || isComposingKey(event)) return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); hide(); }
     else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault(); event.stopImmediatePropagation();

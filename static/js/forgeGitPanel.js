@@ -9,7 +9,7 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
   const status = el('p', { class: 'meta', role: 'status' });
   const content = el('div', { class: 'forge-git-content' });
   panel.replaceChildren(status, content);
-  const button = (text, action, extra = {}) => el('button', { class: 'forge-small-button', text, disabled: busy || forgeRunning(id), onclick: () => run(action, extra) });
+  const button = (text, action, extra = {}) => el('button', { class: 'forge-small-button', text, disabled: busy || forgeRunning(id), onclick: () => typeof action === 'function' ? action() : run(action, typeof extra === 'function' ? extra() : extra) });
   async function run(action, extra) {
     if (busy || disposed || forgeRunning(id)) return;
     busy = true; content.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -37,22 +37,20 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
         ]))]);
       const message = el('textarea', { placeholder: 'Commit message', 'aria-label': 'Commit message', rows: '3' });
       message.value = commitDraft;
-      const commit = button(state.files.some(f => f.staged) ? 'Commit staged files' : 'Commit all changes', 'commit');
+      const commit = button(state.files.some(f => f.staged) ? 'Commit staged files' : 'Commit all changes', 'commit', () => ({ message: message.value }));
       commit.disabled = !commitDraft.trim() || !state.files.length || busy || forgeRunning(id);
       message.oninput = () => { commitDraft = message.value; commit.disabled = !message.value.trim() || !state.files.length || busy || forgeRunning(id); };
-      commit.onclick = () => run('commit', { message: message.value });
       const branches = customSelect({}, state.branches.map(name => el('option', { value: name, text: name })));
       branches.value = state.branch; branches.querySelector('button').setAttribute('aria-label', 'Git branch');
       branches.addEventListener('change', () => run('switch', { branch: branches.value }));
       const branch = el('input', { placeholder: 'New branch name', 'aria-label': 'New branch name' });
       branch.value = branchDraft; branch.oninput = () => { branchDraft = branch.value; };
-      const create = button('Create branch', 'create-branch'); create.onclick = () => run('create-branch', { branch: branch.value });
+      const create = button('Create branch', 'create-branch', () => ({ branch: branch.value }));
       content.replaceChildren(el('p', { class: 'forge-branch', text: `${state.branch} · ${state.ahead} ahead, ${state.behind} behind${state.upstream ? ` · ${state.upstream}` : ' · No upstream'}` }),
-        el('div', { class: 'forge-git-actions' }, [button('Refresh', 'refresh'), button('Stage all', 'stage'), button('Unstage all', 'unstage')]),
+        el('div', { class: 'forge-git-actions' }, [button('Refresh', refresh), button('Stage all', 'stage'), button('Unstage all', 'unstage')]),
         files('Staged'), files('Unstaged'), message, commit,
         el('div', { class: 'forge-git-actions' }, [button('Push', 'push'), button('Pull', 'pull'), button('Merge back', 'merge')]),
         branches, branch, create);
-      content.querySelector('button').onclick = refresh;
     } catch (error) { if (!disposed && current === version) status.textContent = error.message; }
   }
   document.addEventListener('kairos:forge-review', refresh);

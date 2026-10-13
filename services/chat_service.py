@@ -559,6 +559,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     tally = runs.Tally()
     brain = None
     provider_started = False
+    provider_failed = False
     context = _run_context(session_id, endpoint, is_admin)
     runs.enter(context)  # what the turn starts names it (core/helpers.py)
     try:
@@ -577,7 +578,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
                         reply_parts.append(item)
                     yield item
     except CLIJSONDecodeError:
-        runs.record(context, tally, "failed", detail="the reply was too large for Claude Code's buffer")
+        provider_failed = True
         await close_session_brain(session_id)
         reply_parts.append(ATTACHMENT_TOO_LARGE_MESSAGE)
         yield ATTACHMENT_TOO_LARGE_MESSAGE
@@ -610,12 +611,17 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         raise
 
     runs.leave(context)
-    runs.record(context, tally, "finished")
+    runs.record(context, tally, "failed" if provider_failed else "finished",
+                detail="the reply was too large for Claude Code's buffer" if provider_failed else "")
     _record_turn_telemetry(session_id, endpoint, brain, tally.usage)
     session_manager.append_message(session_id, "assistant", "".join(reply_parts),
-                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id})
+                                   status="failed" if provider_failed else None,
+                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id,
+                                          **({"failure_kind": "model_error", "failure_model_endpoint_id": endpoint["id"],
+                                              "failure_model_name": endpoint["name"]} if provider_failed else {})})
     _remember_claude_session(session_id, brain)
-    _reply_hook(session_id, endpoint, text, "".join(reply_parts))
+    if not provider_failed:
+        _reply_hook(session_id, endpoint, text, "".join(reply_parts))
 
 
 async def _stream_with_permission_prompts(session_id: str, brain, full_text: str, tally: runs.Tally):
@@ -646,7 +652,8 @@ async def _stream_with_permission_prompts(session_id: str, brain, full_text: str
                 yield {"tool_event": next_computer.result(), "run_id": context.run_id if context else None}
                 next_computer = asyncio.ensure_future(computer_queue.get())
             if next_ask in done:
-                yield {"permission": next_ask.result()}
+                ask = next_ask.result()
+                yield ask if "permission_closed" in ask else {"permission": ask}
                 next_ask = asyncio.ensure_future(queue.get())
             if next_chunk in done:
                 try:

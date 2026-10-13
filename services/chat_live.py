@@ -5,6 +5,8 @@ can leave, reconnect, or join from another device without stopping the turn.
 """
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -12,7 +14,8 @@ from copy import deepcopy
 
 from fastapi import HTTPException
 
-from core import runs
+from core import runs, mobile_activity
+from core.auth import SINGLE_USER, auth_manager
 from services import chat_service
 
 logger = logging.getLogger(__name__)
@@ -20,6 +23,39 @@ _runs: dict[str, dict] = {}
 _tasks: dict[str, asyncio.Task] = {}
 _subscribers: set[asyncio.Queue] = set()
 _FINISHED_SECONDS = 300
+
+
+def require_session(session_id: str, user: str) -> dict:
+    session = chat_service.session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "session not found")
+    if session.get("owner_user") != user and not auth_manager.is_admin(user):
+        if session.get("owner_user") is not None or user != SINGLE_USER:
+            raise HTTPException(404, "session not found")
+    if session.get("forge") and not auth_manager.is_admin(user):
+        raise HTTPException(404, "session not found")
+    return session
+
+
+def visible_packet(packet: dict, user: str) -> dict | None:
+    def allowed(session_id):
+        try:
+            require_session(session_id, user)
+            return True
+        except HTTPException:
+            return False
+    if packet["type"] == "snapshot":
+        return {**packet, "runs": {sid: run for sid, run in packet["runs"].items() if allowed(sid)}}
+    return packet if allowed(packet["sessionId"]) else None
+
+
+def _mobile_packet(packet: dict) -> None:
+    # A durable notification projection of the live feed, never a second
+    # executor or subscriber protocol. Failures cannot stop a model turn.
+    try:
+        mobile_activity.project_live(packet)
+    except Exception:
+        logger.error("Could not update mobile chat activity")
 
 
 def _visible(run: dict) -> dict:
@@ -51,6 +87,7 @@ def unsubscribe(queue: asyncio.Queue) -> None:
 
 
 def _broadcast(packet: dict) -> None:
+    _mobile_packet(packet)
     for queue in tuple(_subscribers):
         if queue.full():
             while not queue.empty():
@@ -84,16 +121,24 @@ def _client_error(error: Exception) -> str:
 
 
 def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
-          reference_context: str, references: list[dict]) -> dict:
+          reference_context: str, references: list[dict], *, user: str = SINGLE_USER,
+          request_id: str | None = None) -> dict:
     _prune()
+    session = require_session(session_id, user)
+    fingerprint = hashlib.sha256(json.dumps([text, attachment_ids, references], sort_keys=True).encode()).hexdigest()
+    existing = mobile_activity.find_request(user, session_id, request_id) if request_id else None
+    if existing:
+        if existing["fingerprint"] != fingerprint:
+            raise HTTPException(409, "This request ID was already used for a different message")
+        return {"turn_id": existing["id"]}
     chat_service.claim_session(session_id)
-    session = chat_service.session_manager.get_session(session_id) or {}
     run = {"turnId": uuid.uuid4().hex, "sessionTitle": session.get("title") or "Chat",
            "prompt": text, "text": "", "startedAt": time.time(), "status": "processing",
            "stopping": False, "permission": None, "toolEvents": [], "toolSteps": [],
            "handoffs": None, "runId": None, "error": None, "revision": 1}
     _runs[session_id] = run
     try:
+        mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint)
         task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references))
     except Exception:
         chat_service.release_session(session_id)
@@ -143,6 +188,8 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                     for key, value in item.items():
                         if key == "permission":
                             _update(session_id, run, permission=value)
+                        elif key == "permission_closed":
+                            permission_answered(value)
                         elif key == "handoffs":
                             _update(session_id, run, handoffs=value)
                         elif key == "tool_event":
@@ -155,7 +202,9 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                             run["revision"] += 1
                             _broadcast({"type": "tool_step", "sessionId": session_id,
                                         "turnId": run["turnId"], "revision": run["revision"], "value": value})
-        _finish(session_id, run, "done")
+        from core import session_manager_store
+        failed = (session_manager_store.get_run(run["runId"]) or {}).get("outcome") == "failed" if run["runId"] else False
+        _finish(session_id, run, "failed" if failed else "done")
     except asyncio.CancelledError:
         _finish(session_id, run, "stopped")
         raise

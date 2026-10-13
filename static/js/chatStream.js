@@ -89,6 +89,7 @@ function _packet(packet) {
     const changes = packet.changes;
     if (changes.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;
     if ('permission' in changes && !changes.permission) {
+      if (entry.permission) document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: entry.permission.id } }));
       if (entry.permissionStartedAt) entry.pausedSeconds = (entry.pausedSeconds || 0) + Date.now() / 1000 - entry.permissionStartedAt;
       entry.permissionStartedAt = null;
     }
@@ -162,8 +163,12 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
     toolEvents: [], toolSteps: [] };
   _inflight.set(sessionId, entry);
   _notify(sessionId);
-  const startPromise = fetch('/api/chat/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references }) })
+  const requestId = crypto.randomUUID();
+  const start = () => fetch('/api/chat/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references, request_id: requestId }) });
+  // A phone can lose the acceptance response. Retry the same request once;
+  // the live backend deduplicates it without repeating work.
+  const startPromise = start().catch(() => start())
     .then(async res => {
       if (!res.ok) {
         let detail = `Couldn't start reply (${res.status})`;
@@ -205,3 +210,8 @@ export function stopTurn(sessionId) {
   });
   return true;
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') sync().catch(() => {});
+});
+window.addEventListener('online', () => sync().catch(() => {}));

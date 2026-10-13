@@ -1,7 +1,10 @@
 import { api, el, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
+import { ICON as KAIROS_MARK } from '../brand.js';
 import { runSlashCommand, mountSlashSuggestions } from "../slashCommands.js";
+import { isComposingKey, shouldSendOnEnter } from '../composerKeyboard.js';
+import { registerMobileDrawer, isMainDrawerZone } from '../mobileDrawers.js';
 import * as chatStream from "../chatStream.js";
 import { renderMessageBody, copyText, hideArtifact, mountArtifactPane, setArtifactContext, showArtifactPane } from "../chatContent.js";
 import { openBrowser, closeBrowser, suppressBrowser, releaseBrowser } from "../browserPane.js";
@@ -88,6 +91,11 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   const actions = el("div", { class: "msg-actions" }, [copyBtn, el("span", { class: "msg-time", text: time })]);
 
   const card = el("div", { class: `msg ${role}` }, [body, actions]);
+  if (role === 'assistant') {
+    const mark = el('span', { class: 'chat-author-mark', 'aria-hidden': 'true' });
+    mark.innerHTML = KAIROS_MARK;
+    card.prepend(el('div', { class: 'chat-author' }, [mark, el('span', { text: 'Kairos' })]));
+  }
   if (role === 'user' && failure?.references?.length) card.insertBefore(renderReferenceChips(failure.references), actions);
   if (role === "user" && imageSources.length) {
     const images = el("div", { class: "msg-images" });
@@ -625,16 +633,24 @@ export async function render(container, tabId, options = {}) {
   // History has its own preference, independent of the global icon rail.
   const sessionsBackdrop = el("div", { class: "chat-sessions-backdrop hidden" });
   const openSessionsBtn = el("button", { type: "button", id: "chat-history-toggle", class: "input-icon-btn chat-mobile-menu-btn", "aria-controls": "chat-sessions" });
-  openSessionsBtn.insertAdjacentHTML("beforeend", ICON_CHATS);
+  const conversationMark = el('span', { class: 'conversation-mark', 'aria-hidden': 'true' });
+  conversationMark.innerHTML = KAIROS_MARK;
+  openSessionsBtn.dataset.drawerSwipe = 'true';
+  openSessionsBtn.append(conversationMark, el('span', { class: 'conversation-copy' }, [
+    el('span', { class: 'chat-title', text: 'New chat' }),
+    el('span', { class: 'conversation-caption', text: 'Kairos · Conversations' }),
+  ]));
+  openSessionsBtn.insertAdjacentHTML('beforeend', ICON_CHEVRON);
   const headerNewBtn = el('button', { type: 'button', class: 'input-icon-btn chat-header-new', title: 'New chat', 'aria-label': 'New chat', onclick: startNewChat });
   headerNewBtn.insertAdjacentHTML('beforeend', ICON_PLUS);
-  const mobileHeader = el("div", { class: "chat-mobile-header" }, [openSessionsBtn, el("span", { class: 'chat-title', text: "New chat" }), headerNewBtn]);
+  const mobileHeader = el("div", { class: "chat-mobile-header" }, [openSessionsBtn, headerNewBtn]);
   const desktopChat = matchMedia('(min-width: 769px)');
   let historyCollapsed = true;
   try { historyCollapsed = localStorage.getItem('jarvis:chat-history-collapsed') !== 'false'; } catch { /* Storage is optional. */ }
   function syncHistory() {
     container.classList.toggle('chat-history-collapsed', historyCollapsed);
     const visible = desktopChat.matches ? !historyCollapsed : sessionsPanel.classList.contains('open');
+    document.documentElement.classList.toggle('chat-history-open', !desktopChat.matches && visible);
     sessionsPanel.inert = !visible;
     sessionsPanel.setAttribute('aria-hidden', String(!visible));
     openSessionsBtn.setAttribute('aria-expanded', String(visible));
@@ -645,24 +661,51 @@ export async function render(container, tabId, options = {}) {
     const wasOpen = sessionsPanel.classList.contains('open');
     sessionsPanel.classList.remove('open');
     sessionsBackdrop.classList.add('hidden');
+    if (wasOpen && (restoreFocus || sessionsPanel.contains(document.activeElement))) openSessionsBtn.focus({ preventScroll: true });
     syncHistory();
-    if (restoreFocus && wasOpen) openSessionsBtn.focus();
+  }
+  function openSessionsDrawer() {
+    if (desktopChat.matches) return;
+    document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'chat-sessions' } }));
+    sessionsPanel.classList.add('open');
+    sessionsBackdrop.classList.remove('hidden');
+    syncHistory();
+    newBtn.focus({ preventScroll: true });
   }
   openSessionsBtn.addEventListener('click', () => {
     if (desktopChat.matches) {
       historyCollapsed = !historyCollapsed;
       try { localStorage.setItem('jarvis:chat-history-collapsed', String(historyCollapsed)); } catch { /* Storage is optional. */ }
     } else {
-      const open = sessionsPanel.classList.toggle('open');
-      sessionsBackdrop.classList.toggle('hidden', !open);
+      if (sessionsPanel.classList.contains('open')) closeSessionsDrawer(true);
+      else openSessionsDrawer();
     }
     syncHistory();
     if (!desktopChat.matches && sessionsPanel.classList.contains('open')) newBtn.focus();
   });
-  const historyCloseBtn = el('button', { type: 'button', class: 'input-icon-btn chat-history-close', text: 'Close', 'aria-label': 'Close chat history', onclick: () => closeSessionsDrawer(true) });
-  sessionsPanel.prepend(historyCloseBtn);
+  const historyCloseBtn = el('button', { type: 'button', class: 'input-icon-btn chat-history-close', 'aria-label': 'Close conversations', title: 'Close conversations', onclick: () => closeSessionsDrawer(true) });
+  historyCloseBtn.innerHTML = ICONS.close;
+  const historyHeading = el('div', { class: 'mobile-drawer-heading' }, [
+    el('span', { class: 'mobile-drawer-eyebrow', text: 'Your workspace' }),
+    el('h2', { text: 'Conversations' }),
+  ]);
+  historyHeading.append(historyCloseBtn);
+  sessionsPanel.insertBefore(historyHeading, projectPickerWrap);
+  mobileHeader.title = 'Swipe right across this header or the right half of the conversation to open chat history';
+  const releaseDrawer = registerMobileDrawer({ panel: sessionsPanel, backdrop: sessionsBackdrop,
+    isOpen: () => sessionsPanel.classList.contains('open'),
+    canOpen: (target, touch) => touch.clientX >= 16 && (mobileHeader.contains(target) ||
+      (!isMainDrawerZone(touch) && !!target.closest('#chat-messages'))),
+    open: openSessionsDrawer, close: () => closeSessionsDrawer(true),
+  });
   sessionsBackdrop.addEventListener('click', () => closeSessionsDrawer(true));
-  const onChatBreakpoint = () => closeSessionsDrawer();
+  const onChatBreakpoint = () => {
+    const hadFocus = sessionsPanel.contains(document.activeElement);
+    closeSessionsDrawer();
+    if (hadFocus && sessionsPanel.inert) openSessionsBtn.focus({ preventScroll: true });
+  };
+  const onDrawerOpening = event => { if (event.detail?.id !== 'chat-sessions') closeSessionsDrawer(); };
+  document.addEventListener('kairos:mobile-drawer-opening', onDrawerOpening);
   desktopChat.addEventListener('change', onChatBreakpoint);
   syncHistory();
 
@@ -683,33 +726,46 @@ export async function render(container, tabId, options = {}) {
 
   // -- composer: top row (textarea + model picker) --------------------
   const input = el("textarea", { id: "chat-input", rows: "1", placeholder: "Where should we start?", "aria-label": "Message Kairos" });
-  const modelBtn = el("button", { type: "button", class: "model-picker-btn", id: "model-picker-btn" }, [
+  const modelBtn = el("button", { type: "button", class: "model-picker-btn", id: "model-picker-btn", 'aria-controls': 'model-picker-menu', 'aria-expanded': 'false' }, [
     el("span", { class: "model-pill-mark", id: "model-picker-mark" }),
-    el("span", { id: "model-picker-label", text: "Set up a model" }),
+    el('span', { class: 'header-model-copy' }, [
+      el("span", { id: "model-picker-label", text: "Set up a model" }),
+      el('span', { class: 'header-model-detail', id: 'header-model-detail' }),
+    ]),
   ]);
   modelBtn.insertAdjacentHTML("beforeend", ICON_CHEVRON);
   const modelMenu = el("div", { class: "model-picker-menu hidden", id: "model-picker-menu" });
   const modelWrap = el("div", { class: "model-picker-wrap" }, [modelBtn, modelMenu]);
-  modelBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(modelMenu); });
-  const versionBtn = el('button', { type: 'button', class: 'model-picker-btn', id: 'model-version-btn', text: 'Model version', hidden: true });
+  modelBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(modelMenu, modelBtn); });
+  const versionBtn = el('button', { type: 'button', class: 'model-picker-btn', id: 'model-version-btn', text: 'Model version', hidden: true, 'aria-controls': 'model-version-menu', 'aria-expanded': 'false' });
   const versionMenu = el('div', { class: 'model-picker-menu hidden version-menu', id: 'model-version-menu' });
   versionBtn.addEventListener('click', async e => {
     e.stopPropagation();
-    if (!versionMenu.classList.contains('hidden')) { toggleMenu(versionMenu); return; }
-    const sessionId = activeSessionId;
-    if (!sessionId) return;
+    if (!versionMenu.classList.contains('hidden')) { closeMenu(versionMenu); return; }
     versionBtn.disabled = true;
     try {
+      if (!activeSessionId) await createSession({ preserveAttachments: true });
+      const sessionId = activeSessionId;
+      if (!sessionId || !versionMenu.isConnected) return;
       const session = await api(`/api/sessions/${sessionId}`);
       if (activeSessionId !== sessionId) return;
       await refreshModelPicker(session.model_endpoint_id, session.model_override ?? null, session.model_effort ?? null);
-      if (activeSessionId === sessionId) toggleMenu(versionMenu);
+      if (activeSessionId === sessionId) toggleMenu(versionMenu, modelBtn);
+    } catch (error) {
+      toast(`Couldn't open model settings: ${error.message}`, 'error');
     } finally {
       versionBtn.disabled = false;
     }
   });
   versionMenu.addEventListener('click', e => e.stopPropagation());
   const versionWrap = el('div', { class: 'model-picker-wrap' }, [versionBtn, versionMenu]);
+  const syncModelDetail = () => {
+    const detail = modelBtn.querySelector('.header-model-detail');
+    detail.textContent = versionBtn.hidden ? '' : versionBtn.textContent;
+    detail.title = detail.textContent;
+  };
+  const modelDetailObserver = new MutationObserver(syncModelDetail);
+  modelDetailObserver.observe(versionBtn, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
 
   const inputTop = el("div", { class: "chat-input-top" }, [input]);
   chatReferences = mountChatReferences(input, inputTop, () => activeSessionId);
@@ -717,13 +773,17 @@ export async function render(container, tabId, options = {}) {
   const slashSuggestions = mountSlashSuggestions(input, inputTop, { isAdmin: () => slashAdmin });
 
   // -- composer: bottom row (overflow "+" menu, workspace pill, send) --
-  const overflowBtn = el("button", { type: "button", class: "input-icon-btn", id: "overflow-plus-btn", title: "More" });
+  const overflowBtn = el("button", { type: "button", class: "input-icon-btn", id: "overflow-plus-btn", title: "More", 'aria-label': 'Composer options', 'aria-controls': 'overflow-menu', 'aria-expanded': 'false' });
   overflowBtn.insertAdjacentHTML("beforeend", ICON_PLUS);
   const overflowMenu = el("div", { class: "overflow-menu hidden", id: "overflow-menu" });
   overflowBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(overflowMenu); });
 
   const fileInput = el("input", { type: "file", multiple: true, style: "display:none;" });
   fileInput.addEventListener("change", () => handleFilePicked(fileInput, attachStrip));
+  const cameraInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, id: 'chat-camera-input' });
+  cameraInput.addEventListener('change', () => handleFilePicked(cameraInput, attachStrip));
+  const cameraItem = menuItem(ICONS.camera, 'Take a photo', () => { closeMenu(overflowMenu); cameraInput.click(); });
+  cameraItem.classList.add('chat-camera-action');
 
   const attachItem = menuItem(ICON_ATTACH, "Attach files", () => { closeMenu(overflowMenu); fileInput.click(); });
   const captureItem = menuItem(ICON_CAPTURE, "Capture screen", () => { closeMenu(overflowMenu); captureScreenshot(attachStrip); });
@@ -752,8 +812,12 @@ export async function render(container, tabId, options = {}) {
   compactBtn.title = "Compact this chat";
   compactBtn.setAttribute("aria-label", "Compact this chat to free up context");
   compactBtn.hidden = true;
-  overflowMenu.append(attachItem, captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, skillItem, compactBtn);
-  const overflowWrap = el("div", { class: "overflow-wrapper" }, [overflowBtn, overflowMenu, fileInput]);
+  const extraTools = el('details', { class: 'composer-extra-tools' }, [
+    el('summary', { text: 'More tools' }),
+    captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, compactBtn,
+  ]);
+  overflowMenu.append(attachItem, cameraItem, skillItem);
+  const overflowWrap = el("div", { class: "overflow-wrapper" }, [overflowBtn, overflowMenu, fileInput, cameraInput]);
 
   const workspacePill = el("div", { id: "workspace-pill-slot" });
   const filesBtn = el("button", { type: "button", class: "input-icon-btn chat-files-toggle",
@@ -763,6 +827,34 @@ export async function render(container, tabId, options = {}) {
   filesBtn.insertAdjacentHTML("beforeend", ICON_DOC);
   mobileHeader.insertBefore(filesBtn, headerNewBtn);
   mobileHeader.insertBefore(documentsBtn, headerNewBtn);
+  const phoneToolsBtn = el('button', { type: 'button', class: 'input-icon-btn',
+    'aria-label': 'Chat tools', 'aria-expanded': 'false' });
+  phoneToolsBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+  const phoneToolsMenu = el('div', { class: 'overflow-menu below hidden' });
+  const phoneSummary = menuItem(ICONS.chats, 'Chat summary', () => {
+    closeMenu(phoneToolsMenu); main.querySelector('.chat-summary-trigger')?.click();
+  });
+  const phoneModel = menuItem(ICONS.settings, 'Model and reasoning', () => {
+    closeMenu(phoneToolsMenu); versionBtn.click();
+  });
+  phoneToolsMenu.append(
+    menuItem(ICON_PLUS, 'New chat', () => { closeMenu(phoneToolsMenu); startNewChat(); }),
+    phoneModel,
+    menuItem(ICON_DOC, 'Files in this chat', () => { closeMenu(phoneToolsMenu); filesBtn.click(); }),
+    menuItem(ICON_DOC, 'Generated documents', () => { closeMenu(phoneToolsMenu); showArtifactPane(phoneToolsBtn); }),
+    phoneSummary,
+  );
+  phoneToolsBtn.addEventListener('click', event => {
+    event.stopPropagation();
+    phoneModel.hidden = versionBtn.hidden;
+    phoneModel.disabled = versionBtn.disabled;
+    phoneSummary.hidden = !main.querySelector('.chat-summary-trigger:not([hidden])');
+    toggleMenu(phoneToolsMenu);
+    phoneToolsBtn.setAttribute('aria-expanded', String(!phoneToolsMenu.classList.contains('hidden')));
+  });
+  const toolsObserver = new MutationObserver(() => phoneToolsBtn.setAttribute('aria-expanded', String(!phoneToolsMenu.classList.contains('hidden'))));
+  toolsObserver.observe(phoneToolsMenu, { attributes: true, attributeFilter: ['class'] });
+  mobileHeader.insertBefore(el('div', { class: 'overflow-wrapper chat-phone-tools' }, [phoneToolsBtn, phoneToolsMenu]), headerNewBtn);
   let computerInfo = null;
   const dismissComputer = () => {
     const entry = chatStream.getInFlight(activeSessionId);
@@ -834,7 +926,8 @@ export async function render(container, tabId, options = {}) {
   // currently is, which is a different question from the Home tab's
   // cumulative token spend. Hidden until a turn actually reports usable
   // usage, so it never occupies the composer with a placeholder.
-  const contextPill = el("div", { id: "context-pill", class: "context-pill", hidden: true, role: "status" });
+  const contextPill = el("button", { type: 'button', id: "context-pill", class: "context-pill", hidden: true,
+    'aria-label': 'Conversation capacity', onclick: () => toast(contextPill.title) });
 
   const sendBtn = el("button", { class: "btn", id: "chat-send", title: "Send" });
   sendBtn.insertAdjacentHTML("beforeend", ICON_SEND);
@@ -851,15 +944,41 @@ export async function render(container, tabId, options = {}) {
   openMicBtn.hidden = !isRecordingSupported();
   openMicBtn.addEventListener("click", () => setOpenMic(!isOpenMicActive(), openMicBtn));
   const modelPill = el("div", { class: "model-pill", role: "group", "aria-label": "Model for this chat" }, [modelWrap, versionWrap]);
-  const inputRight = el("div", { class: "chat-input-right" }, [modelPill, micBtn, openMicBtn, sendBtn]);
+  modelPill.classList.add('chat-header-model');
+  mobileHeader.insertBefore(modelPill, filesBtn);
+  // The same controls keep their listeners, draft and permissions. Secondary
+  // composer actions live in More so the phone input stays one usable row.
+  const composerOptions = el('div', { class: 'composer-menu-options' }, [permissionControl, openMicBtn]);
+  openMicBtn.append(el('span', { text: 'Open Mic' }));
+  overflowMenu.append(el('div', { class: 'overflow-menu-divider' }), composerOptions);
+  inputLeft.replaceChildren(overflowWrap, workspacePill);
+  extraTools.append(computerWatch);
+  mobileHeader.insertBefore(contextPill, mobileHeader.querySelector('.chat-phone-tools'));
+  const inputRight = el("div", { class: "chat-input-right" }, [micBtn, sendBtn]);
   const inputBottom = el("div", { class: "chat-input-bottom" }, [inputLeft, inputRight]);
 
   const composer = el("div", { class: "glass chat-input-bar border-beam" }, [inputTop, inputBottom]);
+  const menuStateObserver = new MutationObserver(() => {
+    for (const [button, menu] of [[modelBtn, modelMenu], [versionBtn, versionMenu], [overflowBtn, overflowMenu]]) {
+      button.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
+    }
+  });
+  for (const menu of [modelMenu, versionMenu, overflowMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
-  const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer,
-    el('div', { id: 'chat-permission-notice', class: 'chat-permission-notice', hidden: true,
-      text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' }),
-    el("div", { class: "composer-hint", text: "/ for commands · @ to mention a skill, tool, file and more · Enter to send · Shift + Enter for a new line" })]);
+  const composerHint = el('div', { class: 'composer-hint' });
+  const syncComposerHint = () => {
+    composerHint.textContent = desktopChat.matches
+      ? '/ for commands · @ to mention a skill, tool, file and more · Enter to send · Shift + Enter for a new line'
+      : '/ for commands · @ to mention · Return for a new line · Tap Send to send';
+  };
+  syncComposerHint();
+  desktopChat.addEventListener('change', syncComposerHint);
+  const permissionNotice = el('div', { id: 'chat-permission-notice', class: 'chat-permission-notice', hidden: true,
+    text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
+  composerOptions.append(permissionNotice);
+  extraTools.append(el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]));
+  overflowMenu.append(extraTools);
+  const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer]);
   composerRefs = { messages, input, sendBtn, attachStrip, queueHost };
   main.append(messages, dock);
   const timeline = mountChatTimeline(main, messages, () => activeSessionId);
@@ -927,7 +1046,8 @@ export async function render(container, tabId, options = {}) {
     input.setSelectionRange(text.length, text.length);
   };
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.defaultPrevented || isComposingKey(e)) return;
+    if (shouldSendOnEnter(e)) {
       e.preventDefault();
       historyIndex = -1;
       sendMessage(messages, input, sendBtn, attachStrip);
@@ -960,8 +1080,15 @@ export async function render(container, tabId, options = {}) {
     await stageFiles(images, attachStrip);
   });
 
-  const dismissMenus = () => { closeMenu(overflowMenu); closeMenu(modelMenu); closeMenu(versionMenu); closeMenu(projectPickerMenu); };
+  const dismissMenus = (event) => {
+    // Selecting a mode, starting Open Mic, searching models or expanding a
+    // disclosure must keep its menu open. Only outside clicks dismiss it.
+    for (const menu of [overflowMenu, modelMenu, versionMenu, projectPickerMenu, phoneToolsMenu]) {
+      if (!event?.target || !menu.contains(event.target)) closeMenu(menu);
+    }
+  };
   const escapeMenus = (event) => {
+    if (event.defaultPrevented || document.activeElement?.closest('dialog[open], [aria-modal="true"]')) return;
     if (event.key === "Escape") { dismissMenus(); closeSessionsDrawer(true); }
     if (event.key === 'Tab' && !desktopChat.matches && sessionsPanel.classList.contains('open')) {
       const controls = [...sessionsPanel.querySelectorAll('button, input, [tabindex="0"]')].filter(node => node.getClientRects().length && !node.disabled);
@@ -1015,6 +1142,13 @@ export async function render(container, tabId, options = {}) {
     document.removeEventListener("keydown", escapeMenus);
     document.removeEventListener("visibilitychange", syncBeam);
     desktopChat.removeEventListener('change', onChatBreakpoint);
+    desktopChat.removeEventListener('change', syncComposerHint);
+    document.removeEventListener('kairos:mobile-drawer-opening', onDrawerOpening);
+    releaseDrawer();
+    document.documentElement.classList.remove('chat-history-open');
+    toolsObserver.disconnect();
+    modelDetailObserver.disconnect();
+    menuStateObserver.disconnect();
     dockObserver.disconnect();
     dock.getAnimations().forEach(animation => animation.cancel());
     closeSessionMenu();
@@ -1081,7 +1215,7 @@ function menuItem(iconSvg, label, onclick) {
   return btn;
 }
 
-function toggleMenu(menu) {
+function toggleMenu(menu, headerAnchor = null) {
   const wasHidden = menu.classList.contains("hidden");
   document.querySelectorAll(".overflow-menu, .model-picker-menu").forEach((m) => m.classList.add("hidden"));
   if (!wasHidden) return;
@@ -1089,6 +1223,19 @@ function toggleMenu(menu) {
   // on a short phone viewport. Clamp horizontally without clipping controls.
   menu.style.transform = '';
   menu.classList.remove('hidden');
+  if (headerAnchor) {
+    // The version button is visually hidden on phones. Anchor both menus to
+    // the visible model pill, using viewport coordinates for fixed menus.
+    const anchor = (headerAnchor.closest('.chat-header-model') || headerAnchor).getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${anchor.bottom + 8}px`;
+    menu.style.bottom = 'auto';
+    menu.style.right = 'auto';
+    menu.style.maxWidth = 'calc(100vw - 24px)';
+    menu.style.maxHeight = `${Math.max(0, Math.min(420, innerHeight - anchor.bottom - 20))}px`;
+    menu.style.left = `${Math.max(12, Math.min(anchor.right - menu.getBoundingClientRect().width, innerWidth - menu.getBoundingClientRect().width - 12))}px`;
+    return;
+  }
   const anchor = menu.parentElement.getBoundingClientRect();
   const above = anchor.top - 12;
   const below = innerHeight - anchor.bottom - 12;
@@ -1736,6 +1883,7 @@ async function refreshContextMeter(sessionId) {
     pill.title = `Context: ${used.toLocaleString()} tokens in this conversation.`
       + `\nNo context capacity is published for this model, so no percentage is shown.`;
   }
+  pill.setAttribute('aria-label', pill.title);
   pill.hidden = false;
 }
 
@@ -1865,7 +2013,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     if (activeMark) markSlot.append(activeMark);
   }
   label.textContent = active ? active.name : options.length ? 'Choose model' : NO_MODEL_LABEL;
-  label.parentElement.title = label.textContent;
+  label.closest('button').title = label.textContent;
   const ep = endpoints.find(e => e.id === currentEndpointId);
   const versionBtn = document.getElementById('model-version-btn');
   const versionMenu = document.getElementById('model-version-menu');

@@ -1,5 +1,5 @@
 import { dateOnly, eventColor, itemsOnDay, googleCalendars, eventDialog, weekGrid, deleteCalendarEvent } from '../googleCalendar.js';
-import { api, el, iconButton } from "../api.js";
+import { api, el, iconButton, openPanelDialog } from "../api.js";
 import { ICONS } from "../icons.js";
 
 // Real visual monthly grid, resized to leave room for a day-detail panel
@@ -62,6 +62,15 @@ export async function render(container) {
 
   const createBar = buildCreateBar();
   const calendarList = el('div', { class: 'cal-calendar-list' });
+  const calendarStore = el('div', { hidden: true }, [calendarList]);
+  const calendarsBtn = el('button', { type: 'button', class: 'btn cal-calendars-trigger', text: 'Google calendars', 'aria-haspopup': 'dialog' });
+  calendarsBtn.insertAdjacentHTML('afterbegin', ICONS.calendar);
+  calendarsBtn.addEventListener('click', () => {
+    openPanelDialog({ title: 'Google calendars', body: calendarList, opener: calendarsBtn,
+      owner: container, group: 'calendar-selection', className: 'cal-calendars-dialog',
+      onClose: () => calendarStore.append(calendarList) });
+  });
+  header.append(calendarsBtn);
 
   const nav = el("div", { class: "cal-nav" });
   const monthLabel = el("div", { class: "cal-month-label" });
@@ -75,7 +84,7 @@ export async function render(container) {
 
   const grid = el("div", { class: "cal-grid glass" });
 
-  left.append(header, createBar, calendarList, nav, grid);
+  left.append(header, createBar, calendarStore, nav, grid);
 
   const dayPanel = el("div", { class: "glass bracket cal-day-panel" });
 
