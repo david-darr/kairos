@@ -57,6 +57,43 @@ def enqueue(key: str, channel: str, text: str, label: str = "") -> str:
     return delivery_id
 
 
+AGENT_BATCH_MAX_HOLD_SECONDS = 60
+
+def enqueue_agent_batch(agent_id: str, channel: str, text: str, label: str, quiet_seconds: float) -> str:
+    """Durably hold an agent's channel message until the quiet window ends."""
+    now = time.time()
+    due = now + quiet_seconds
+    with store.transaction() as conn:
+        # Only a still-held row may grow. Once due or sending, the next
+        # notification starts a new batch (Agents 2.0 phase 2-iii, 2026-10-13).
+        row = conn.execute("SELECT id, text, created_at FROM deliveries WHERE channel = ? AND key LIKE ? "
+                           "AND status = 'pending' AND next_try_at > ? ORDER BY created_at DESC LIMIT 1",
+                           (channel, f"agent-batch:{agent_id}:%", now)).fetchone()
+        if row:
+            delivery_id = row["id"]
+            # Each new item pushes the quiet window out, so a steady stream
+            # would hold a batch open indefinitely and the agent would fall
+            # silent exactly when it had most to report. Never hold a batch
+            # longer than this from its first item (2026-10-13).
+            capped = max(now, min(due, row["created_at"] + AGENT_BATCH_MAX_HOLD_SECONDS))
+            conn.execute("UPDATE deliveries SET text = ?, next_try_at = ? WHERE id = ?",
+                         (row["text"] + "\n\n" + text, capped, delivery_id))
+        else:
+            delivery_id = uuid.uuid4().hex[:12]
+            conn.execute("INSERT INTO deliveries (id, key, channel, text, label, status, attempts, next_try_at, created_at) "
+                         "VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)",
+                         (delivery_id, f"agent-batch:{agent_id}:{uuid.uuid4().hex}", channel, text, label, due, now))
+    # The scheduler also polls the durable row. A timer gives a short window
+    # without making delivery depend on this process surviving it.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        loop.call_later(quiet_seconds, kick)
+    return delivery_id
+
+
 def get(delivery_id: str) -> Optional[dict]:
     with store.transaction() as conn:
         return _row(conn.execute("SELECT * FROM deliveries WHERE id = ?", (delivery_id,)).fetchone())
@@ -97,9 +134,14 @@ async def send_due(now: Optional[float] = None) -> int:
             with store.transaction() as conn:
                 # Marked before the send: a crash from here on leaves it
                 # "sending", which the next start reads as unknown.
-                conn.execute("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 WHERE id = ?",
-                             (row["id"],))
-            attempts = row["attempts"] + 1
+                claimed = conn.execute("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 "
+                                       "WHERE id = ? AND status = 'pending' AND next_try_at <= ?",
+                                       (row["id"], now)).rowcount
+                if claimed:
+                    row = dict(conn.execute("SELECT * FROM deliveries WHERE id = ?", (row["id"],)).fetchone())
+            if not claimed:
+                continue
+            attempts = row["attempts"]
             try:
                 ok = await registry.send_to_channel(row["channel"], row["text"])
                 error = None if ok else "the channel did not accept it (is it connected and set up?)"

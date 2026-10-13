@@ -100,6 +100,15 @@ def answer_reply(notification_text: str, reply: str) -> Optional[str]:
             from core import task_scheduler
             task_scheduler.start_in_background(run, "trigger")
         return f"{pending['trigger_name']}: {outcome}."
+    # A batch can name several review items. Require the chosen code in the
+    # reply so an approval never lands on the first by accident (2026-10-13).
+    codes = [m.group(0) for m in CODE_RE.finditer(notification_text or "")]
+    if len(codes) > 1:
+        chosen = CODE_RE.search(reply or "")
+        if chosen is None or chosen.group(0) not in codes:
+            return "This report has several items. Include the item's reply code with your answer."
+        notification_text = chosen.group(0)
+        reply = (reply[:chosen.start()] + reply[chosen.end():]).strip()
     found = agent_service.resolve_code(notification_text)
     if found is None:
         return None if not CODE_RE.search(notification_text or "") else \

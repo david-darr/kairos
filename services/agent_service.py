@@ -57,6 +57,9 @@ REPLIES_IN_PROMPT = 5
 # Discord answers it (core/channels/agent_routing.py).
 CODE_RE = re.compile(r"\[([A-Z0-9])-([0-9a-f]{6})\]")
 APPROVALS = {"approve", "approved", "lgtm", "ok", "okay", "yes", "looks good", "ship it", "done"}
+# Ten quiet seconds joins a burst without making a lone result wait through
+# a minute of silence (Agents 2.0 phase 2-iii, 2026-10-13).
+AGENT_BATCH_QUIET_SECONDS = 10
 
 
 class AdmissionDenied(ValueError):
@@ -371,7 +374,8 @@ class AgentService:
                             # Missed receipts did no work and must not spend
                             # tomorrow's cap on startup (phase 2-i, 2026-10-13).
                             and not r.get("missed_reason")
-                            and (r.get("started_at") or r["ran_at"]) >= midnight)
+                            and not (r["task_id"] == claimed_work_id and r["outcome"] in ("queued", "running"))
+                            and (r.get("admitted_at") or r.get("started_at") or r["ran_at"]) >= midnight)
             # Durable starts bridge a restart until lost-work recovery runs.
             # This matters for cards still waiting for their lease to expire:
             # dropping the process-local hold must not open an extra slot.
@@ -379,7 +383,9 @@ class AgentService:
             # yet, so admission excludes that claim's own slot (2026-10-13).
             unfinished = {t["id"] for t in work
                           if t["id"] != claimed_work_id and (t.get("run_started_at") or 0) >= midnight
-                          and not any(r["task_id"] == t["id"] and r.get("started_at") == t["run_started_at"]
+                          and not any(r["task_id"] == t["id"] and
+                                      (r["id"] == t.get("active_run_id") or
+                                       r.get("started_at") == t["run_started_at"])
                                       for r in history)}
             # A result is saved before disconnect/cleanup finishes. Its
             # reservation still lives, but must not count that same run
@@ -387,7 +393,8 @@ class AgentService:
             reserved = sum(1 for hold in self._reservations.values()
                            if hold["agent_id"] == agent_id and hold["started_at"] >= midnight
                            and hold["work_id"] not in unfinished
-                           and not any(r["task_id"] == hold["work_id"] and r["ran_at"] >= hold["started_at"]
+                           and not any(r["task_id"] == hold["work_id"] and
+                                       (r.get("admitted_at") or r.get("started_at") or r["ran_at"]) >= hold["started_at"]
                                        for r in history))
             return completed + len(unfinished) + reserved
 
@@ -451,10 +458,9 @@ class AgentService:
             from core import outbox
             text = (f"**{agent['name']}** {verb}: {title}" + (f"\n{body[:1500]}" if body else "")
                     + (f"\n_{footer}_" if footer else ""))
-            # Through the outbox (2026-10-06): retried when the send fails,
-            # where it used to be one try with the result thrown away. Each
-            # notification is its own message, so the key is fresh.
-            outbox.enqueue(f"agent:{event}:{uuid.uuid4().hex}:{channel}", channel, text, label=agent["name"])
+            # The durable pending row is the hold: a crash during the quiet
+            # window leaves it for the next sender (2026-10-13).
+            outbox.enqueue_agent_batch(agent_id, channel, text, agent["name"], AGENT_BATCH_QUIET_SECONDS)
 
 
     # -- answering (the app's inbox and channel replies share these) ----------

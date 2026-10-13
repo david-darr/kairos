@@ -134,6 +134,65 @@ class Base(unittest.TestCase):
 
 
 class AtMostOnceTests(Base):
+    def test_a_claim_is_visible_then_finishes_in_the_same_record(self):
+        task = self.task("visible work")
+        task_service.claim_occurrence(task["id"])
+        queued = task_service.list_runs(task["id"])
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["outcome"], "queued")
+        self.assertNotEqual(queued[0]["outcome"], "succeeded")
+        task_service.mark_running(task["id"])
+        running = task_service.list_runs(task["id"])
+        self.assertEqual((len(running), running[0]["id"], running[0]["outcome"]),
+                         (1, queued[0]["id"], "running"))
+        task_service.record_run(task["id"], "finished")
+        finished = task_service.list_runs(task["id"])
+        self.assertEqual((len(finished), finished[0]["id"], finished[0]["outcome"]),
+                         (1, queued[0]["id"], "succeeded"))
+
+    def test_a_previous_processes_inflight_card_is_lost_on_load(self):
+        card = self.card("interrupted card")
+        task_service.claim_next_card(card_id=card["id"])
+        task_service.mark_running(card["id"])
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.list_runs(card["id"])[0]["outcome"], "running")
+        restarted.recover_interrupted_runs()
+        self.assertEqual([r["outcome"] for r in restarted.list_runs(card["id"])], ["lost"])
+        self.assertEqual(restarted.get_task(card["id"])["status"], "ready")
+
+    def test_a_saved_finish_is_not_reclassified_when_its_task_stamp_survives(self):
+        task = self.task("saved finish", due_seconds_ago=None)
+        task_service.mark_started(task["id"])
+        run_id = task_service.list_runs(task["id"])[0]["id"]
+        task_service._runs[-1].update(outcome="succeeded", output="done", ran_at=time.time())
+        task_service._save_runs()
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.recover_interrupted_runs(), [])
+        self.assertEqual(restarted.list_runs(task["id"])[0]["id"], run_id)
+        self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
+        self.assertNotIn("run_started_at", restarted.get_task(task["id"]))
+
+    def test_old_history_keeps_its_terminal_outcome_without_a_rewrite(self):
+        task = self.task("old history", due_seconds_ago=None)
+        task_service.record_run(task["id"], "old result")
+        before = (Path(task_module.TASK_RUNS_FILE)).read_bytes()
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
+        self.assertEqual((Path(task_module.TASK_RUNS_FILE)).read_bytes(), before)
+
+    def test_a_live_record_survives_the_history_cap_and_finishes_once(self):
+        task = self.task("capped history", due_seconds_ago=None)
+        task_service.mark_started(task["id"])
+        live_id = task_service.list_runs(task["id"])[0]["id"]
+        for n in range(task_module.MAX_RUNS_PER_TASK + 2):
+            task_service._record_missed(task, [ago(n + 1)], "offline")
+        self.assertIn(live_id, [r["id"] for r in task_service.list_runs(task["id"])])
+        self.assertLessEqual(len(task_service.list_runs(task["id"])), task_module.MAX_RUNS_PER_TASK)
+        task_service.record_run(task["id"], "done")
+        self.assertLessEqual(len(task_service.list_runs(task["id"])), task_module.MAX_RUNS_PER_TASK)
+        self.assertEqual(sum(r["id"] == live_id for r in task_service.list_runs(task["id"])), 1)
+        self.assertEqual(task_service.list_runs(task["id"])[0]["outcome"], "succeeded")
+
     def test_a_run_cut_off_by_a_crash_is_recorded_lost_and_not_run_again(self):
         task = self.task("brief", deliver_to_channel="discord")
         claimed = task_service.claim_occurrence(task["id"])  # the run starts, then JARVIS dies

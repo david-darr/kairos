@@ -222,7 +222,7 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
                                 task_id=None if card else task["id"])
               if task.get("agent_id") else nullcontext([])) as raised:
             if card and task.get("status") != "running":
-                task = task_service.claim_next_card(card_id=task["id"])
+                task = task_service.claim_next_card(card_id=task["id"], source=source)
                 if task is None:
                     return False
             elif source == "schedule" and not card:
@@ -231,6 +231,8 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
                 if task_service.claim_occurrence(task["id"]) is None:
                     return False
             try:
+                if card:
+                    task_service.mark_running(task["id"])
                 await _run_task_tagged(task, source)
             except asyncio.CancelledError:
                 helpers.stop_parent(f"task:{task['id']}")
@@ -342,6 +344,7 @@ async def _run_task_tagged(task: dict, source: str) -> None:
         return
     if source != "schedule":  # a scheduled run's start was stamped by its claim
         task_service.mark_started(task["id"], source)
+    task_service.mark_running(task["id"])
     agent = agent_service.get(task.get("agent_id"))
     if agent:
         await _run_goal(task, agent)

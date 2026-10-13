@@ -91,6 +91,123 @@ class AgentTestCase(unittest.TestCase):
         asyncio.run(task_scheduler._run_task(task_service.get_task(goal["id"])))
 
 
+class AnnouncementBatchTests(unittest.TestCase):
+    def setUp(self):
+        from core import outbox, session_manager_store as store
+        self.outbox, self.store = outbox, store
+        self.clock = [1000.0]
+        self.sent = []
+        self.events = []
+        self.agent = agent_service.create("Batch Scout", deliver_to_channel="discord")
+        self.addCleanup(agent_service.delete, self.agent["id"])
+        self.addCleanup(self._clear_deliveries)
+        p = patch.object(outbox.time, "time", side_effect=lambda: self.clock[0])
+        p.start(); self.addCleanup(p.stop)
+        p = patch("core.events.emit", side_effect=lambda *a, **k: self.events.append((a, k)))
+        p.start(); self.addCleanup(p.stop)
+
+        async def send(channel, text):
+            self.sent.append((channel, text))
+            return True
+
+        p = patch("core.channels.registry.send_to_channel", side_effect=send)
+        p.start(); self.addCleanup(p.stop)
+
+    def _clear_deliveries(self):
+        with self.store.transaction() as conn:
+            conn.execute("DELETE FROM deliveries")
+
+    def announce(self, agent, title, footer=""):
+        agent_service._announce(agent["id"], "agent.review", "has a result ready for review", title,
+                                f"Result for {title}", footer)
+
+    def send_due(self):
+        asyncio.run(self.outbox.send_due(now=self.clock[0]))
+
+    def test_six_results_make_one_channel_message_and_six_live_events(self):
+        for n in range(6):
+            self.announce(self.agent, f"Card {n}")
+            self.clock[0] += 1
+        self.send_due()
+        self.assertEqual(self.sent, [])
+        self.clock[0] += 10
+        self.send_due()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0][0], "discord")
+        for n in range(6):
+            self.assertIn(f"Card {n}", self.sent[0][1])
+        self.assertEqual(len(self.events), 6)
+
+    def test_one_result_keeps_the_old_message_exactly(self):
+        self.announce(self.agent, "One card", "Reply 'approve'. [B-abcdef]")
+        self.clock[0] += 10
+        self.send_due()
+        self.assertEqual(self.sent, [("discord", "**Batch Scout** has a result ready for review: One card\n"
+                                                "Result for One card\n_Reply 'approve'. [B-abcdef]_")])
+
+    def test_agents_have_separate_batches(self):
+        other = agent_service.create("Second Scout", deliver_to_channel="discord")
+        self.addCleanup(agent_service.delete, other["id"])
+        self.announce(self.agent, "First")
+        self.announce(other, "Second")
+        self.clock[0] += 10
+        self.send_due()
+        self.assertEqual(len(self.sent), 2)
+        self.assertFalse(any("First" in text and "Second" in text for _, text in self.sent))
+
+    def test_one_agent_uses_separate_batches_for_two_channels(self):
+        self.announce(self.agent, "Discord card")
+        agent_service.update(self.agent["id"], deliver_to_channel="conn:other")
+        self.announce(self.agent, "Other card")
+        self.clock[0] += 10
+        self.send_due()
+        self.assertEqual({channel for channel, _ in self.sent}, {"discord", "conn:other"})
+
+    def test_review_codes_survive_a_batch_and_select_the_right_item(self):
+        from core.channels.agent_routing import answer_reply
+        from services.agent_service import code_for
+        cards = [task_service.create_task(f"Review {n}", "work", "card", status="ready",
+                                          agent_id=self.agent["id"]) for n in range(2)]
+        for card in cards:
+            self.addCleanup(task_service.delete_task, card["id"])
+            task_service.claim_next_card(card_id=card["id"])
+            task_service.finish_card(card["id"], "result")
+            agent_service.notify_review(self.agent["id"], card)
+        self.clock[0] += 10
+        self.send_due()
+        text = self.sent[0][1]
+        codes = [code_for(self.agent, card["id"]) for card in cards]
+        self.assertTrue(all(code in text for code in codes))
+        self.assertIn("Include the item's reply code", answer_reply(text, "approve"))
+        self.assertIn("approved", answer_reply(text, f"approve {codes[1]}"))
+        self.assertEqual(task_service.get_task(cards[1]["id"])["status"], "done")
+        self.assertEqual(task_service.get_task(cards[0]["id"])["status"], "review")
+
+    def test_held_batch_survives_a_process_exit(self):
+        self.announce(self.agent, "Still held")
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.store.connection().execute(
+            "SELECT COUNT(*) FROM deliveries WHERE status = 'pending'").fetchone()[0], 1)
+        # A new process has no memory of _announce; the outbox row is enough.
+        self.clock[0] += 10
+        self.outbox.recover()
+        self.send_due()
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("Still held", self.sent[0][1])
+
+
+    def test_a_steady_stream_does_not_hold_a_batch_open_for_ever(self):
+        """Every new item pushed the quiet window out, so an agent working
+        steadily through a board fell silent exactly when it had most to
+        report: 40 results over five minutes sent nothing at all."""
+        for n in range(40):
+            self.announce(self.agent, f"Card {n}")
+            self.clock[0] += 8  # inside the quiet window, so each one extends it
+            self.send_due()
+        self.assertTrue(self.sent, "a steady stream was never delivered")
+        held = max(text.count("has a result ready for review") for _, text in self.sent)
+        self.assertLessEqual(held, 9, "a batch grew past the maximum hold")
+
 class RunTests(AgentTestCase):
     def test_the_daily_run_cap_holds_under_concurrent_card_and_goal_starts(self):
         agent_service.update(self.agent["id"], daily_run_cap=1)

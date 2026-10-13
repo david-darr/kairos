@@ -49,7 +49,7 @@ Work - Phase 4 (Build Spec)"):
 """
 import time
 import uuid
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -102,11 +102,16 @@ class TaskService:
     def _save_runs(self) -> None:
         counts: dict = {}
         kept = []
+        # A missed receipt can arrive while a run is live. Keep that run's
+        # record until its terminal update (Agents 2.0 phase 2-ii, 2026-10-13).
+        active = {r["id"] for r in self._runs if r.get("outcome") in ("queued", "running")}
+        active_counts = Counter(r["task_id"] for r in self._runs if r["id"] in active)
         for run in reversed(self._runs):
             seen = counts.get(run["task_id"], 0)
-            if seen < MAX_RUNS_PER_TASK:
+            if run["id"] in active or seen < MAX_RUNS_PER_TASK - active_counts[run["task_id"]]:
                 kept.append(run)
-                counts[run["task_id"]] = seen + 1
+                if run["id"] not in active:
+                    counts[run["task_id"]] = seen + 1
         self._runs = kept[::-1]
         write_json_atomic(TASK_RUNS_FILE, self._runs)
 
@@ -336,7 +341,7 @@ class TaskService:
         return card
 
     def claim_next_card(self, now: Optional[float] = None, card_id: Optional[str] = None,
-                        eligible=None) -> Optional[dict]:
+                        eligible=None, source: Optional[str] = None) -> Optional[dict]:
         """The oldest Ready card whose dependencies are all Done, marked
         Running with a lease. One at a time keeps spend predictable.
         card_id claims that card only ("Run now"), from Backlog too.
@@ -350,6 +355,9 @@ class TaskService:
         card["attempts"] += 1
         card["claimed_until"] = now + CARD_LEASE_SECONDS
         card["run_started_at"] = now
+        if source is not None:
+            card["run_source"] = source
+        self._start_run_record(card, "queued")
         self._save_tasks()
         self._sync_handoff(card)
         return card
@@ -434,12 +442,17 @@ class TaskService:
     def _append_run(self, task: dict, output: str, error: Optional[str], outcome: str,
                     delivered: Optional[bool] = None, delivery_id: Optional[str] = None,
                     missed_reason: Optional[str] = None, save: bool = True) -> None:
-        """One run record. outcome is "succeeded", "failed", "lost" (a run
-        that never reported back, including a missed scheduled check) or
-        "stopped". The start time is the one a claim or
-        mark_started() left on the task; the caller saves the task."""
+        """Finish the claimed record, or append a legacy/missed receipt."""
         now = time.time()
-        started = task.pop("run_started_at", None)
+        active_id = task.pop("active_run_id", None)
+        active = next((r for r in self._runs if r["id"] == active_id), None) if active_id else None
+        claimed_at = task.pop("run_started_at", None)
+        # A record claimed but cut off before mark_running() has no execution
+        # start of its own; the claim time is the best known one. Without this
+        # a lost run reports no start at all (Agents 2.0 phase 2-ii, 2026-10-13).
+        started = active.get("started_at") if active is not None else None
+        if started is None:
+            started = claimed_at
         due_at = task.pop("run_for", None)
         source = task.pop("run_source", None)
         run_id = task.pop("run_id", None)
@@ -450,13 +463,13 @@ class TaskService:
                 late = round(behind) if behind > LATE_SECONDS else None
             except ValueError:
                 pass  # an unreadable stored time: lateness unknown, not guessed
-        self._runs.append({
-            "id": uuid.uuid4().hex[:12],
+        record = {
+            "id": active_id or uuid.uuid4().hex[:12],
             "task_id": task["id"],
             "task_name": task["name"],
             "started_at": started,
             "ran_at": now,  # when it finished; the name predates started_at
-            "duration_seconds": round(now - started, 1) if started else None,
+            "duration_seconds": round(now - started, 1) if started is not None else None,
             "outcome": outcome,
             "output": output,
             "error": error,
@@ -482,11 +495,48 @@ class TaskService:
             "endpoint_id": task.get("endpoint_id"),
             "model": _model_label(task.get("endpoint_id")),
             "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None,
-        })
+        }
+        if active is not None:
+            active.update(record)
+            # A long run may have accumulated missed receipts while it was
+            # live. Its finish is newest, so move it to the tail before the
+            # cap can evict it (Agents 2.0 phase 2-ii, 2026-10-13).
+            self._runs.remove(active)
+            self._runs.append(active)
+        else:
+            self._runs.append(record)
         if missed_reason:
-            self._runs[-1]["missed_reason"] = missed_reason
+            record["missed_reason"] = missed_reason
         task["last_run_at"] = now
         if save:
+            self._save_runs()
+
+    def _start_run_record(self, task: dict, outcome: str) -> None:
+        # In-flight values live in outcome, so old equality checks for the
+        # four terminal values cannot count this as success (2026-10-13).
+        run_id = uuid.uuid4().hex[:12]
+        task["active_run_id"] = run_id
+        # Admission spends the daily slot even while queued; started_at stays
+        # empty until execution actually begins (2026-10-13).
+        self._runs.append({"id": run_id, "task_id": task["id"], "task_name": task["name"],
+                           "started_at": task.get("run_started_at") if outcome == "running" else None,
+                           "admitted_at": task["run_started_at"],
+                           "ran_at": task["run_started_at"], "duration_seconds": None,
+                           "outcome": outcome, "output": "", "error": None, "delivered": None,
+                           "delivery_id": None, "run_id": task.get("run_id"),
+                           "source": task.get("run_source"), "scheduled_for": task.get("run_for"),
+                           "late_seconds": None, "endpoint_id": task.get("endpoint_id"),
+                           "model": _model_label(task.get("endpoint_id")),
+                           "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None})
+        self._save_runs()
+
+    def mark_running(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        run = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+        if run is not None and run["outcome"] == "queued":
+            run.update(outcome="running", started_at=time.time())
             self._save_runs()
 
     def claim_occurrence(self, task_id: str) -> Optional[dict]:
@@ -503,6 +553,8 @@ class TaskService:
         skipped = self._advance(task)
         self._save_tasks()
         self._record_missed(task, skipped, "the app was not running or the scheduler was busy")
+        self._start_run_record(task, "queued")
+        self._save_tasks()
         return task
 
     def note_run(self, task_id: Optional[str], run_id: str) -> None:
@@ -512,6 +564,10 @@ class TaskService:
         task = self._tasks.get(task_id) if task_id else None
         if task is not None:
             task["run_id"] = run_id
+            active = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+            if active is not None:
+                active["run_id"] = run_id
+                self._save_runs()
 
     def mark_started(self, task_id: str, source: str = "manual") -> None:
         """A run outside the schedule begins (Run now, a trigger, an answer).
@@ -520,6 +576,7 @@ class TaskService:
         task = self._tasks.get(task_id)
         if task is not None:
             task.update(run_started_at=time.time(), run_for=None, run_source=source)
+            self._start_run_record(task, "queued")
             self._save_tasks()
 
     def is_due(self, task_id: str) -> bool:
@@ -532,15 +589,55 @@ class TaskService:
         as started was cut off: record it as lost, once. It is not run again:
         its occurrence was claimed before it started. A stamp left by a build
         from before claims (no run_source) moves its schedule on here
-        instead, or the same occurrence would run again. Cards are left to
-        their lease (reclaim_stale_cards), which already covers this."""
-        lost = [t for t in self._tasks.values() if t["schedule_kind"] != "card" and t.get("run_started_at")]
-        for task in lost:
+        instead, or the same occurrence would run again. At startup there
+        are no live card workers either, so their claims can be failed now;
+        leases still cover abandoned cards during a live process."""
+        stamped = [t for t in self._tasks.values() if t["schedule_kind"] != "card" and t.get("run_started_at")]
+        lost = []
+        for task in stamped:
+            active = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+            if active is not None and active.get("outcome") not in ("queued", "running"):
+                # The run may have saved its finish before the task stamps
+                # were cleared. Do not turn that result into a loss (2026-10-13).
+                for key in ("run_started_at", "run_for", "run_source", "run_id", "active_run_id"):
+                    task.pop(key, None)
+                continue
             if "run_source" not in task and self.is_due(task["id"]):
                 skipped = self._advance(task)
                 self._record_missed(task, skipped, "the app was not running or the scheduler was busy")
             self._append_run(task, "", "The run did not finish (Kairos closed while it ran).", "lost")
-        if lost:
+            lost.append(task)
+        restored_cards = False
+        for card in [t for t in self._tasks.values() if t["schedule_kind"] == "card"
+                     and t.get("status") == "running"]:
+            active = next((r for r in self._runs if r["id"] == card.get("active_run_id")), None)
+            if active is not None and active.get("outcome") not in ("queued", "running"):
+                # Finish saved before the card: restore its board position
+                # from that terminal record (2026-10-13).
+                if active["outcome"] == "succeeded":
+                    card["status"] = "review"
+                    self._comment(card, "result", active.get("output") or "", "jarvis")
+                elif active["outcome"] == "stopped" or card["attempts"] >= CARD_MAX_ATTEMPTS:
+                    card["status"] = "blocked"
+                else:
+                    card["status"] = "ready"
+                card["claimed_until"] = None
+                for key in ("run_started_at", "run_for", "run_source", "run_id", "active_run_id"):
+                    card.pop(key, None)
+                restored_cards = True
+                continue
+            self.fail_card(card["id"], "The run did not finish (Kairos closed while it ran).", lost=True)
+        # A write interrupted between the record and the task stamp is also
+        # terminalized. Do not rewrite older, already terminal history.
+        orphaned = False
+        for run in self._runs:
+            if run.get("outcome") in ("queued", "running"):
+                run.update(outcome="lost", ran_at=time.time(),
+                           error="The run did not finish (Kairos closed while it ran).")
+                orphaned = True
+        if orphaned:
+            self._save_runs()
+        if stamped or restored_cards:
             self._save_tasks()
         return lost
 
@@ -607,7 +704,7 @@ class TaskService:
                 f"Missed {missed} scheduled runs from {occurrences[0][:16].replace('T', ' ')} "
                 f"to {occurrences[-1][:16].replace('T', ' ')}: {reason}.")
         receipt = {**task, "run_started_at": None, "run_for": occurrences[-1],
-                   "run_source": "schedule", "run_id": None}
+                   "run_source": "schedule", "run_id": None, "active_run_id": None}
         self._append_run(receipt, "", note, "lost", missed_reason=reason, save=False)
         # The occurrences themselves stay on the one receipt, bounded, so
         # nothing is lost by folding them together: which slots were skipped
