@@ -89,7 +89,7 @@ function _packet(packet) {
     const changes = packet.changes;
     if (changes.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;
     if ('permission' in changes && !changes.permission) {
-      if (entry.permission) document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: entry.permission.id } }));
+      if (entry.permission && typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: entry.permission.id } }));
       if (entry.permissionStartedAt) entry.pausedSeconds = (entry.pausedSeconds || 0) + Date.now() / 1000 - entry.permissionStartedAt;
       entry.permissionStartedAt = null;
     }
@@ -211,7 +211,16 @@ export function stopTurn(sessionId) {
   return true;
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') sync().catch(() => {});
-});
-window.addEventListener('online', () => sync().catch(() => {}));
+// Mobile resume. Guarded because this module is also imported outside a
+// browser: scripts/test_chat_stream_stop.cjs loads it in bare Node to check
+// that one viewer leaving never stops a server-owned turn, and touching
+// document at module scope made the module unimportable there. Resuming on
+// focus is browser-only, so outside a browser it simply does not apply.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sync().catch(() => {});
+  });
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => sync().catch(() => {}));
+}

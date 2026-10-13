@@ -38,9 +38,19 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       assert.equal(await js("document.getElementById('chat-input').value"), '/computer ', label + ' Up wraps and Tab inserts');
       await draft('/mo'); await js(`${picker}.querySelector('button').click()`);
       assert.equal(await js("document.getElementById('chat-input').value"), '/model ', label + ' mouse inserts');
+      // Return sends on desktop only. The mobile redesign made Return insert
+      // a newline below 768px (composerKeyboard.shouldSendOnEnter), so the
+      // phone pass asserts that policy and then sends the command the way a
+      // phone actually does, through Send.
       await draft('/demo'); await key('Enter');
-      await waitFor(`(${lastReply} || '').includes('A quick tour of Kairos')`);
-      assert.ok(await js(`${picker}.hidden`), label + ' a fully typed command runs on the first Enter');
+      if (label === 'desktop') {
+        await waitFor(`(${lastReply} || '').includes('A quick tour of Kairos')`);
+        assert.ok(await js(`${picker}.hidden`), label + ' a fully typed command runs on the first Enter');
+      } else {
+        assert.equal(await js("document.getElementById('chat-input').value"), '/demo', label + ' Return never sends');
+        await send('/demo', 'A quick tour of Kairos');
+        assert.ok(await js(`${picker}.hidden`), label + ' a fully typed command runs from Send');
+      }
       await delay(150);
       await draft('/'); await key('Escape');
       assert.ok(await js(`${picker}.hidden && !document.getElementById('chat-input').hasAttribute('aria-activedescendant')`), label + ' Escape clears active option');

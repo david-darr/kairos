@@ -1,4 +1,4 @@
-// Stacking top-right overlay showing every chat session currently
+// Compact top-right overlay showing every chat session currently
 // generating a reply, regardless of which tab is active (David's ask
 // 2026-09-12 — sending a prompt then switching to Notes to get other
 // things done used to give zero indication anything was still happening).
@@ -13,13 +13,61 @@ import * as chatStream from "./chatStream.js";
 let host = null;
 let _switchTab = null; // injected by init(), same dependency-passing convention commandPalette.js uses
 const cards = new Map(); // sessionId -> HTMLElement
+const working = new Set();
+let summary = null;
+let list = null;
+let expanded = false;
 
 function ensureHost() {
   if (host) return host;
   host = document.createElement("div");
   host.id = "chat-progress-host";
+  summary = document.createElement('button');
+  summary.type = 'button';
+  summary.className = 'chat-progress-card chat-progress-summary';
+  summary.hidden = true;
+  summary.setAttribute('aria-controls', 'chat-progress-list');
+  summary.appendChild(Object.assign(document.createElement('span'), { className: 'chat-progress-dot' }));
+  summary.appendChild(Object.assign(document.createElement('span'), { className: 'chat-progress-label' }));
+  summary.addEventListener('click', () => { expanded = !expanded; updatePresentation(); });
+  list = document.createElement('div');
+  list.id = 'chat-progress-list';
+  host.append(summary, list);
   document.body.appendChild(host);
+  document.addEventListener('click', event => {
+    if (expanded && !host.contains(event.target)) { expanded = false; updatePresentation(); }
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (expanded && event.key === 'Escape') {
+      expanded = false;
+      updatePresentation();
+      summary.focus();
+    }
+  });
   return host;
+}
+
+function updatePresentation() {
+  const grouped = working.size >= 2;
+  if (!grouped) expanded = false;
+  // Completion cards retain chatStream's existing four-second lifetime.
+  // Only live turns contribute to the "working" count.
+  const focusedCard = list.contains(document.activeElement);
+  const focusedSummary = document.activeElement === summary;
+  summary.hidden = !grouped;
+  summary.querySelector('.chat-progress-label').textContent = `${working.size} chats working`;
+  summary.setAttribute('aria-label', `${working.size} chats working`);
+  summary.setAttribute('aria-expanded', String(expanded));
+  list.hidden = grouped && !expanded;
+  if (grouped && !expanded && focusedCard) summary.focus();
+  if (!grouped && focusedSummary) {
+    const active = [...working].map(id => cards.get(id))[0] || cards.values().next().value;
+    active?.focus();
+  }
+  if (grouped && !summary.classList.contains('show')) {
+    summary.getBoundingClientRect();
+    summary.classList.add('show');
+  }
 }
 
 async function jumpToSession(sessionId) {
@@ -33,6 +81,8 @@ function render(sessionId, entry) {
   let card = cards.get(sessionId);
   if (!entry) {
     if (card) { card.remove(); cards.delete(sessionId); }
+    working.delete(sessionId);
+    updatePresentation();
     return;
   }
   if (!card) {
@@ -40,7 +90,7 @@ function render(sessionId, entry) {
     card.type = 'button';
     card.className = "chat-progress-card";
     card.addEventListener("click", () => jumpToSession(sessionId));
-    host.appendChild(card);
+    list.appendChild(card);
     cards.set(sessionId, card);
     // Force layout before the "show" transition so it actually animates in.
     card.getBoundingClientRect();
@@ -58,6 +108,9 @@ function render(sessionId, entry) {
   const label = card.querySelector('.chat-progress-label');
   const next = `${entry.sessionTitle} · ${statusText}`;
   if (label.textContent !== next) label.textContent = next;
+  if (entry.status === 'processing') working.add(sessionId);
+  else working.delete(sessionId);
+  updatePresentation();
 }
 
 export function init({ switchTab }) {

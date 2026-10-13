@@ -1595,19 +1595,24 @@ input[type="checkbox"]:checked::after {
    between the chat view itself and this overlay. */
 #chat-progress-host {
   position: fixed; top: calc(var(--titlebar-h) + 20px); right: 20px; z-index: 3000;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
   max-width: calc(100vw - 40px); max-height: calc(100dvh - var(--titlebar-h) - 40px); overflow-y: auto;
   pointer-events: none;
 }
+#chat-progress-list {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  max-width: 100%; max-height: 164px; overflow-y: auto;
+}
+#chat-progress-list[hidden], .chat-progress-card[hidden] { display: none; }
 .chat-progress-card {
   flex-shrink: 0;
   pointer-events: auto; cursor: pointer;
-  display: flex; align-items: center; gap: 8px;
-  max-width: 280px; padding: 9px 13px; font-size: 12.5px; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+  max-width: min(200px, 100%); padding: 5px 10px; font-size: 11px; line-height: 16px; color: var(--text);
   background: var(--bg-panel-solid);
   backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6);
   border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-elevated);
-  border-left: 3px solid var(--accent);
+  border-left: 2px solid var(--accent);
   opacity: 0; transform: translateY(-10px);
   transition: opacity 0.22s ease, transform 0.22s ease;
 }
@@ -1616,7 +1621,7 @@ input[type="checkbox"]:checked::after {
 .chat-progress-card.failed { border-left-color: var(--danger); }
 .chat-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-progress-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
   animation: thinking-pulse 1.8s ease-in-out infinite;
 }
 .chat-progress-card.done .chat-progress-dot,

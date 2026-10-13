@@ -18,7 +18,7 @@
 .chat-activity-steps li[data-state='done'] { opacity: 1; color: var(--text-dim); }
 .chat-activity-steps li[data-state='active'] { opacity: 1; color: var(--accent); }
 .chat-activity-steps li[data-state='active'] .chat-step-marker { animation: thinking-pulse 1.8s ease-in-out infinite; }
-.chat-progress-card { font: inherit; text-align: left; }
+.chat-progress-card { font-family: inherit; text-align: left; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 @keyframes activity-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes activity-complete { from { opacity: .2; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
@@ -324,7 +324,11 @@
   .artifact-foreign-bar { padding: 8px; }
 }
 .artifact-header-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-@media (max-width: 1100px) { .artifact-maximize { display: none; } }
+/* Matched on both classes deliberately: interface.css loads after this file
+   and carries a base `.btn { display: inline-flex }`, which beats a
+   single-class rule here on source order alone and brought this button back
+   at 900px (caught by scripts/artifact-pane-checks.cjs). */
+@media (max-width: 1100px) { .artifact-maximize.btn { display: none; } }
 @media (max-width: 680px) {
   .artifact-tab-label, .artifact-tab-close { min-height: 44px; }
   .artifact-tab-close { flex-basis: 44px; }

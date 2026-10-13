@@ -504,7 +504,15 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
     padding-top: var(--mobile-safe-top); padding-bottom: var(--mobile-safe-bottom);
     padding-left: var(--mobile-safe-left); padding-right: var(--mobile-safe-right);
   }
-  #chat-progress-host { top: calc(var(--titlebar-h) + 76px + var(--mobile-safe-top)); }
+  #chat-progress-host {
+    top: calc(var(--titlebar-h) + 76px + var(--mobile-safe-top));
+    right: max(12px, var(--mobile-safe-right));
+    max-width: calc(100vw - 24px - var(--mobile-safe-left) - var(--mobile-safe-right));
+    max-height: calc(100dvh - var(--titlebar-h) - 88px - var(--mobile-safe-top) - var(--mobile-safe-bottom));
+  }
+  /* Drawers own the phone surface while open, including their backdrops. */
+  :root.mobile-menu-open #chat-progress-host,
+  :root.chat-history-open #chat-progress-host { visibility: hidden; }
   .chat-summary-backdrop {
     padding-top: calc(20px + var(--mobile-safe-top)); padding-bottom: calc(20px + var(--mobile-safe-bottom));
   }
