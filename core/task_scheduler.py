@@ -21,6 +21,7 @@ Work - Phase 4 (Build Spec)"):
 """
 import asyncio
 import logging
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Optional
 
@@ -202,25 +203,28 @@ async def _run_card(card: dict) -> None:
     back to Ready for a retry, or to Blocked when out of attempts."""
     brain = None
     agent = agent_service.get(card.get("agent_id"))
-    if agent:
-        agent_service.begin_run(agent["id"], card_id=card["id"])
+    # Bound before the try: the finally below reads it, so anything that threw
+    # while entering the run context would otherwise surface here as a
+    # NameError and hide the real failure.
+    raised: list = []
     try:
-        brain = _task_brain(card)
-        await brain.connect()
-        if card.get("context") and hasattr(brain, "pending_reference_taint"):
-            brain.pending_reference_taint = "context from another conversation"
-        prompt = task_service.card_prompt(card)
-        if agent:
-            prompt = agent_service.run_prompt(agent, prompt)
-        async with file_checkpoints.around_turn(f"card:{card['id']}"):
-            output = await complete(brain, prompt, card, "card")
-        task_service.finish_card(card["id"], output)
-        events.emit("card.review", f"{card['name']} is ready for review", task_id=card["id"])
-        if agent:
-            agent_service.notify_review(agent["id"], card)
-        from services.agent_handoff import finished
-        finished(card, output)
-        logger.info("card '%s' (%s) finished; waiting for review", card["name"], card["id"])
+        with (agent_service.run(agent["id"], card_id=card["id"]) if agent else nullcontext([])) as raised:
+            brain = _task_brain(card)
+            await brain.connect()
+            if card.get("context") and hasattr(brain, "pending_reference_taint"):
+                brain.pending_reference_taint = "context from another conversation"
+            prompt = task_service.card_prompt(card)
+            if agent:
+                prompt = agent_service.run_prompt(agent, prompt)
+            async with file_checkpoints.around_turn(f"card:{card['id']}"):
+                output = await complete(brain, prompt, card, "card")
+            task_service.finish_card(card["id"], output)
+            events.emit("card.review", f"{card['name']} is ready for review", task_id=card["id"])
+            if agent:
+                agent_service.notify_review(agent["id"], card)
+            from services.agent_handoff import finished
+            finished(card, output)
+            logger.info("card '%s' (%s) finished; waiting for review", card["name"], card["id"])
     except Exception as e:
         failed = task_service.fail_card(card["id"], str(e) or type(e).__name__)
         blocked = failed["status"] == "blocked"
@@ -230,7 +234,6 @@ async def _run_card(card: dict) -> None:
         logger.exception("card '%s' (%s) failed (attempt %s)", card["name"], card["id"], card["attempts"])
     finally:
         if agent:
-            raised = agent_service.end_run(agent["id"])
             # An answer can arrive through the source chat before this run
             # ends. It still belongs to the next run, as an inbox answer does.
             if (card.get("reply_to") and card.get("status") == "review"
@@ -265,25 +268,24 @@ async def _run_goal(task: dict, agent: dict) -> None:
     """One check of an agent's standing goal. The reply is its report unless
     it is [SILENT] (nothing worth the person's attention); either way the run
     is in the history."""
-    agent_service.begin_run(agent["id"], task_id=task["id"])
     brain = None
     try:
-        brain = _task_brain(task)
-        await brain.connect()
-        async with file_checkpoints.around_turn(f"task:{task['id']}"):
-            output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
-        task_service.record_run(task["id"], output=output)
-        if task.get("report_when") == "always" or not is_silent(output):
-            item = agent_service.add_item(agent["id"], "report", task["name"], output)
-            agent_service.notify(item)
-        events.emit("task.run", f"{agent['name']} checked \"{task['name']}\"", task_id=task["id"])
+        with agent_service.run(agent["id"], task_id=task["id"]):
+            brain = _task_brain(task)
+            await brain.connect()
+            async with file_checkpoints.around_turn(f"task:{task['id']}"):
+                output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
+            task_service.record_run(task["id"], output=output)
+            if task.get("report_when") == "always" or not is_silent(output):
+                item = agent_service.add_item(agent["id"], "report", task["name"], output)
+                agent_service.notify(item)
+            events.emit("task.run", f"{agent['name']} checked \"{task['name']}\"", task_id=task["id"])
     except Exception as e:
         task_service.record_run(task["id"], output="", error=str(e))
         events.emit("task.failed", f"{agent['name']}'s goal \"{task['name']}\" failed: {e}", level="error",
                     task_id=task["id"])
         logger.exception("agent goal '%s' (%s) failed", task["name"], task["id"])
     finally:
-        agent_service.end_run(agent["id"])
         if brain is not None:
             await brain.disconnect()
 

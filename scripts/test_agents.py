@@ -88,6 +88,194 @@ class AgentTestCase(unittest.TestCase):
 
 
 class RunTests(AgentTestCase):
+    def test_overlapping_card_and_goal_keep_their_own_questions(self):
+        card, goal = self.card(), self.goal()
+
+        async def overlap():
+            card_started, goal_started, card_ended = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+            async def run_card():
+                with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+                    card_started.set()
+                    await goal_started.wait()
+                    question = agent_service.add_item(self.agent["id"], "question", "Card question")
+                card_ended.set()
+                return question, raised
+
+            async def run_goal():
+                await card_started.wait()
+                with agent_service.run(self.agent["id"], task_id=goal["id"]) as raised:
+                    goal_started.set()
+                    question = agent_service.add_item(self.agent["id"], "question", "Goal question")
+                    await card_ended.wait()
+                return question, raised
+
+            return await asyncio.wait_for(asyncio.gather(run_card(), run_goal()), timeout=5)
+
+        (card_question, card_raised), (goal_question, goal_raised) = asyncio.run(overlap())
+        for label, question, work, raised in (
+            ("card", card_question, (card["id"], None), card_raised),
+            ("goal", goal_question, (None, goal["id"]), goal_raised),
+        ):
+            with self.subTest(run=label, check="attribution"):
+                self.assertEqual((question["card_id"], question["task_id"]), work)
+            with self.subTest(run=label, check="own questions only"):
+                self.assertEqual([item["id"] for item in raised], [question["id"]])
+
+    def test_single_run_keeps_its_card_and_returns_only_questions(self):
+        card = self.card()
+        with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+            question = agent_service.add_item(self.agent["id"], "question", "Which board?")
+            report = agent_service.add_item(self.agent["id"], "report", "Found a board")
+            team_question = agent_service.add_item(self.agent["id"], "question", "Team question", team_id="team")
+        self.assertEqual(raised, [question])
+        for item in (question, report):
+            self.assertEqual((item["card_id"], item["task_id"]), (card["id"], None))
+        self.assertEqual((team_question["card_id"], team_question["task_id"]), (None, None))
+        self.assertIsNone(agent_service._current.get())
+
+    def test_empty_and_failed_runs_clean_up(self):
+        card = self.card()
+        with agent_service.run(self.agent["id"], card_id=card["id"]) as empty:
+            pass
+        self.assertEqual(empty, [])
+        self.assertIsNone(agent_service._current.get())
+        with self.assertRaisesRegex(ValueError, "run failed"):
+            with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+                question = agent_service.add_item(self.agent["id"], "question", "Before failure")
+                raise ValueError("run failed")
+        self.assertEqual(raised, [question])
+        self.assertIsNone(agent_service._current.get())
+        outside = agent_service.add_item(self.agent["id"], "question", "After failure")
+        self.assertEqual((outside["card_id"], outside["task_id"]), (None, None))
+
+    def test_cancellation_cleans_up_the_run_context(self):
+        card = self.card()
+
+        async def cancel():
+            started = asyncio.Event()
+            questions = []
+
+            async def work():
+                try:
+                    with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+                        questions.append(agent_service.add_item(self.agent["id"], "question", "Before stop"))
+                        started.set()
+                        await asyncio.Event().wait()
+                finally:
+                    self.assertIsNone(agent_service._current.get())
+                    self.assertEqual(raised, questions)
+
+            task = asyncio.create_task(work())
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(cancel())
+
+    def test_nested_run_restores_the_outer_work_after_failure(self):
+        card, goal = self.card(), self.goal()
+        with agent_service.run(self.agent["id"], card_id=card["id"]) as card_raised:
+            with self.assertRaisesRegex(ValueError, "inner failed"):
+                with agent_service.run(self.agent["id"], task_id=goal["id"]) as goal_raised:
+                    inner = agent_service.add_item(self.agent["id"], "question", "Inner")
+                    raise ValueError("inner failed")
+            outer = agent_service.add_item(self.agent["id"], "question", "Outer")
+        self.assertEqual((inner["card_id"], inner["task_id"]), (None, goal["id"]))
+        self.assertEqual((outer["card_id"], outer["task_id"]), (card["id"], None))
+        self.assertEqual((card_raised, goal_raised), ([outer], [inner]))
+        self.assertIsNone(agent_service._current.get())
+
+    def test_unscoped_chat_and_other_agents_do_not_borrow_a_run(self):
+        card = self.card()
+        other = agent_service.create("Archivist")
+        self.addCleanup(self._remove, other["id"])
+
+        async def overlap():
+            started, finish = asyncio.Event(), asyncio.Event()
+
+            async def work():
+                with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+                    stranger = agent_service.add_item(other["id"], "question", "Other agent")
+                    started.set()
+                    await finish.wait()
+                return stranger, raised
+
+            task = asyncio.create_task(work())
+            await started.wait()
+            chat_question = agent_service.add_item(self.agent["id"], "question", "Direct chat")
+            chat_report = agent_service.add_item(self.agent["id"], "report", "Outside tool")
+            finish.set()
+            stranger, raised = await task
+            self.assertEqual(raised, [])
+            for item in (stranger, chat_question, chat_report):
+                self.assertEqual((item["card_id"], item["task_id"]), (None, None))
+
+        asyncio.run(overlap())
+
+    def test_inherited_child_context_expires_with_its_run(self):
+        card = self.card()
+
+        async def run():
+            finish = asyncio.Event()
+
+            async def child():
+                before = agent_service.add_item(self.agent["id"], "question", "During run")
+                finish.set()
+                await resume.wait()
+                after = agent_service.add_item(self.agent["id"], "question", "After run")
+                return before, after
+
+            resume = asyncio.Event()
+            with agent_service.run(self.agent["id"], card_id=card["id"]) as raised:
+                task = asyncio.create_task(child())
+                await finish.wait()
+            resume.set()
+            before, after = await task
+            self.assertEqual(raised, [before])
+            self.assertEqual((before["card_id"], before["task_id"]), (card["id"], None))
+            self.assertEqual((after["card_id"], after["task_id"]), (None, None))
+
+        asyncio.run(run())
+
+    def test_scheduler_overlap_keeps_questions_and_goal_report_on_their_work(self):
+        card, goal = self.card(), self.goal()
+
+        async def overlap():
+            card_started, goal_started, finish_card = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+            async def card_step():
+                card_started.set()
+                await goal_started.wait()
+                await tool_registry.call("agent_ask", {"question": "Card question"},
+                                         tool_registry.ToolContext(agent_id=self.agent["id"]), tool_registry.OPENAI)
+                await finish_card.wait()
+                return "Card result"
+
+            async def goal_step():
+                goal_started.set()
+                await tool_registry.call("agent_ask", {"question": "Goal question"},
+                                         tool_registry.ToolContext(agent_id=self.agent["id"]), tool_registry.OPENAI)
+                return "Goal report"
+
+            FakeBrain.script = [card_step, goal_step]
+            task = asyncio.create_task(task_scheduler.dispatch_cards())
+            await card_started.wait()
+            try:
+                await task_scheduler._run_task(goal)
+            finally:
+                finish_card.set()
+                await task
+
+        asyncio.run(overlap())
+        items = {i["title"]: i for i in agent_service.inbox(self.agent["id"])}
+        self.assertEqual((items["Card question"]["card_id"], items["Card question"]["task_id"]), (card["id"], None))
+        for title in ("Goal question", goal["name"]):
+            self.assertEqual((items[title]["card_id"], items[title]["task_id"]), (None, goal["id"]))
+        self.assertEqual(task_service.get_task(card["id"])["status"], "review")
+        self.assertEqual(len(task_service.list_runs(goal["id"])), 1)
+
     def test_a_run_carries_the_agents_identity_and_memory(self):
         agent_service.remember(self.agent["id"], "Preferences", "remote roles only")
         self.card()
@@ -515,9 +703,8 @@ class DiscordAgentTests(AgentTestCase):
     def test_replying_to_a_question_answers_it(self):
         from services.agent_service import code_for
         card = self.reviewed("Pick a board")
-        agent_service.begin_run(self.agent["id"], card_id=card["id"])
-        item = agent_service.add_item(self.agent["id"], "question", "LinkedIn or Indeed?")
-        agent_service.end_run(self.agent["id"])
+        with agent_service.run(self.agent["id"], card_id=card["id"]):
+            item = agent_service.add_item(self.agent["id"], "question", "LinkedIn or Indeed?")
         client = self.client()
         ours = self.ns(author=client.user, content=f"**Scout** has a question: LinkedIn or Indeed?\n_Reply to this message to answer. {code_for(self.agent, item['id'])}_")
         self.say(client, "Indeed", replying_to=ours)

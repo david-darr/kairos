@@ -23,9 +23,11 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
@@ -61,9 +63,10 @@ class AgentService:
                 agent["color"] = LEGACY_COLORS.get(agent.get("color"), agent.get("color"))
             self._save()
         self._inbox: list = read_json(INBOX_FILE, [])
-        # agent id -> the card or task its run is working on right now, so a
-        # question raised mid-run knows what it belongs to.
-        self._current: dict[str, dict] = {}
+        # Each asyncio task carries its own work (Agents 2.0, 2026-10-13):
+        # an agent's card and goal can overlap, so its identity cannot be a
+        # shared slot. No run context means an ordinary, unattached chat item.
+        self._current: ContextVar[Optional[dict]] = ContextVar("agent_work", default=None)
 
     # -- identities -------------------------------------------------------------
 
@@ -228,7 +231,9 @@ class AgentService:
         if kind not in INBOX_KINDS:
             raise ValueError(f"kind must be one of {INBOX_KINDS}")
         self._require(agent_id)
-        current = {} if team_id else (self._current.get(agent_id) or {})
+        current = self._current.get() or {}
+        if team_id or current.get("agent_id") != agent_id or not current.get("active"):
+            current = {}
         item = {"id": uuid.uuid4().hex[:12], "agent_id": agent_id, "kind": kind, "created_at": time.time(),
                 "status": "open", "title": title[:200], "body": body, "card_id": current.get("card_id"),
                 "task_id": current.get("task_id"), "answer": None}
@@ -260,13 +265,23 @@ class AgentService:
 
     # -- runs -------------------------------------------------------------------
 
-    def begin_run(self, agent_id: str, card_id: Optional[str] = None, task_id: Optional[str] = None) -> None:
-        self._current[agent_id] = {"card_id": card_id, "task_id": task_id, "raised": []}
-
-    def end_run(self, agent_id: str) -> list[dict]:
-        """The questions this run raised."""
-        current = self._current.pop(agent_id, None) or {}
-        return [i for i in (self.get_item(x) for x in current.get("raised", [])) if i and i["kind"] != "report"]
+    @contextmanager
+    def run(self, agent_id: str, card_id: Optional[str] = None,
+            task_id: Optional[str] = None) -> Iterator[list[dict]]:
+        """Attribute inbox items during this run; on exit, fill its questions list."""
+        current = {"agent_id": agent_id, "card_id": card_id, "task_id": task_id, "raised": [], "active": True}
+        questions: list[dict] = []
+        token = self._current.set(current)
+        try:
+            yield questions
+        finally:
+            # Reset even on cancellation; restore an outer run if nested.
+            # Child tasks inherit context, so a finished run must also stop
+            # attributing items from a child that outlives it.
+            current["active"] = False
+            self._current.reset(token)
+            questions.extend(i for i in (self.get_item(x) for x in current["raised"])
+                             if i and i["kind"] != "report")
 
     def runs_today(self, agent_id: str) -> int:
         from services.task_service import task_service
