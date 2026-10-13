@@ -42,7 +42,8 @@ for (let bar = 0; bar < TOTAL_BARS; bar++) {
   const chord = chords[Math.floor(bar / 2) % chords.length];
   for (let beat = 0; beat < 4; beat++) {
     const t = bar * BAR + beat * BEAT;
-    kick(t, CUT_BARS.includes(bar) && beat === 0 ? 0.85 : 0.65);
+    // No hit on the very first sample: AAC turns a hard onset at 0 s into a true-peak over.
+    if (t > 0) kick(t, CUT_BARS.includes(bar) && beat === 0 ? 0.85 : 0.65);
     hat(t + BEAT / 2, beat % 2 ? 0.6 : -0.6);
     const f = mtof(chord[0] - 12);
     voice(t, BEAT * 0.85, k => Math.sin(2 * Math.PI * f * k) * Math.min(1, k / 0.008) * Math.exp(-k * 6) * 0.25);
@@ -67,7 +68,7 @@ if (!(rawPeak > 0) || !Number.isFinite(rawPeak)) throw new Error("Synthesized mi
 const preGain = 1.1 / rawPeak;
 let peak = 0;
 for (let i = 0; i < N; i++) {
-  const t = i / SR, fade = Math.min(1, t / 0.005) * Math.min(1, (DURATION - t) / 0.4);
+  const t = i / SR, fade = Math.min(1, t / 0.03) * Math.min(1, (DURATION - t) / 0.4);
   L[i] = Math.tanh(L[i] * preGain) * fade; R[i] = Math.tanh(R[i] * preGain) * fade;
   peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
 }

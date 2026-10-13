@@ -33,6 +33,14 @@ function runFFmpeg(args) {
   if (result.status !== 0) throw new Error(`FFmpeg exited ${result.status}: ${result.stderr || result.stdout}`);
   return result;
 }
+const LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11";
+function measureLoudness(input) {
+  // loudnorm's analysis pass prints one JSON object at the end of stderr.
+  const text = runFFmpeg(["-hide_banner", "-nostats", "-i", input, "-vn", "-af", `${LOUDNORM}:print_format=json`, "-f", "null", "-"]).stderr;
+  const json = text.slice(text.lastIndexOf("{"), text.lastIndexOf("}") + 1);
+  try { return JSON.parse(json); }
+  catch { throw new Error(`Could not read loudness measurement for ${input}.`); }
+}
 function cachedChromium(chromium) {
   if (process.env.MOTION_CHROMIUM) {
     if (!existsSync(process.env.MOTION_CHROMIUM)) throw new Error("MOTION_CHROMIUM points to a missing executable.");
@@ -136,9 +144,14 @@ async function main() {
     }
     const audioDuration = audio.readUInt32LE(40) / audio.readUInt32LE(28);
     if (Math.abs(audioDuration - config.duration) > 1 / 48000) throw new Error(`Audio is ${audioDuration}s but animation is ${config.duration}s. Match BPM and total bars, then regenerate WAV.`);
+    // Two-pass loudnorm: measure the WAV, then apply one linear gain. Single-pass (dynamic)
+    // mode can leave true-peak overs after AAC encoding.
+    const m = measureLoudness(wav);
+    const loudnorm = `${LOUDNORM}:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}` +
+      `:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
     encoder = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-c:v", "png", "-i", "pipe:0",
       "-i", wav, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-      "-pix_fmt", "yuv420p", "-fps_mode", "cfr", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000",
+      "-pix_fmt", "yuv420p", "-fps_mode", "cfr", "-af", loudnorm, "-ar", "48000",
       "-c:a", "aac", "-b:a", "192k", "-t", String(config.duration), "-movflags", "+faststart", video],
       { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
     let encoderError = null, stderr = "";
@@ -164,7 +177,11 @@ async function main() {
     const filter = `select='${indices.map(n => `eq(n,${n})`).join("+")}',scale=400:-1,tile=${columns}x${rows}:nb_frames=${count}:padding=4:margin=4:color=black`;
     const sheet = path.join(out, "contact-sheet.png");
     runFFmpeg(["-y", "-loglevel", "error", "-i", video, "-vf", filter, "-frames:v", "1", "-fps_mode", "vfr", sheet]);
-    console.log(`Rendered ${video}\nContact sheet: ${sheet}\nTile frames (row-major, ${fps} fps): ${indices.join(", ")}\nInspect images, watch and measure audio before calling the video done.`);
+    const final = measureLoudness(video), tp = Number(final.input_tp);
+    console.log(`Rendered ${video}\nContact sheet: ${sheet}\nTile frames (row-major, ${fps} fps): ${indices.join(", ")}`);
+    console.log(`Encoded audio: ${final.input_i} LUFS integrated, ${final.input_tp} dBTP true peak (aim about -16 LUFS, peak under -1 dBTP).`);
+    if (!(tp <= -1)) console.log("WARNING: true peak is above -1 dBTP. Look for a hard transient at 0 s or a clipped hit, fix the soundtrack and render again.");
+    console.log("Inspect images and watch with sound before calling the video done.");
   } finally {
     if (encoder && encoder.exitCode === null && encoder.signalCode === null) encoder.kill();
     if (browser) await browser.close();
