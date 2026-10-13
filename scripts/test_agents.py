@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -471,7 +472,166 @@ class AutoModeTests(AgentTestCase):
         self.assertIn("Indeed", FakeBrain.prompts[-1])
 
 
+class MemoryTests(AgentTestCase):
+    def archive(self):
+        return Path(agent_service._memory_path(self.agent["id"])).with_name("memory-archive.md")
+
+    def fill(self, prefix):
+        from services.agent_service import MEMORY_LIMIT
+        memory = prefix + "Person's padding: "
+        memory += "p" * (MEMORY_LIMIT - len(memory) - 1) + "\n"
+        agent_service.write_memory(self.agent["id"], memory)
+        return memory
+
+    def test_full_memory_keeps_a_new_review_correction_and_archives_old_memory(self):
+        from services.agent_service import MEMORY_LIMIT
+        old = "- 2020-01-01: " + "x" * (MEMORY_LIMIT - len("## Notes\n- 2020-01-01: \n"))
+        agent_service.write_memory(self.agent["id"], "## Notes\n" + old + "\n")
+        card = self.card("Draft summary")
+        task_service.set_card_status(card["id"], "review")
+        task_service.set_card_status(card["id"], "ready", note="drop closed postings")
+        memory = agent_service.read_memory(self.agent["id"])
+        self.assertTrue('On "Draft summary": drop closed postings' in memory,
+                        "review feedback was silently discarded from full memory")
+        self.assertLessEqual(len(memory), MEMORY_LIMIT)
+        archive = Path(agent_service._memory_path(self.agent["id"])).with_name("memory-archive.md").read_text(
+            encoding="utf-8")
+        self.assertIn(old, archive)
+
+    def test_undated_person_text_and_headings_survive_pressure(self):
+        personal = "My standing instructions\n\n## My own section\n- A note I typed myself\n"
+        self.fill(personal + "## Notes\n- 2020-01-01: " + "x" * 150 + "\n")
+        memory = agent_service.remember(self.agent["id"], "Corrections", "keep remote roles")
+        self.assertTrue(memory.startswith(personal))
+        self.assertIn("Person's padding: " + "p" * 100, memory)
+        self.assertNotIn("My standing instructions", self.archive().read_text(encoding="utf-8"))
+
+    def test_expired_entry_is_skipped_in_prompts_and_archived_before_live_older_entry(self):
+        live = "- 2000-01-01: permanent older note"
+        expired = "- 2020-01-01 (until 2021-01-01): expired contract rate " + "x" * 150
+        original = self.fill("## Notes\n" + live + "\n" + expired + "\n")
+        self.assertNotIn("expired contract rate", agent_service.run_prompt(self.agent, "work"))
+        from services.agent_service import identity_block
+        for surface in ({"chat": True}, {"team": True}):
+            self.assertNotIn("expired contract rate", identity_block(self.agent, original, **surface))
+        self.assertEqual(agent_service.read_memory(self.agent["id"]), original, "prompt filtering does not edit memory")
+        memory = agent_service.remember(self.agent["id"], "Notes", "new correction")
+        self.assertIn(live, memory)
+        self.assertNotIn(expired, memory)
+        archived = self.archive().read_text(encoding="utf-8")
+        self.assertIn(expired, archived)
+        self.assertNotIn(live, archived)
+
+    def test_same_section_exact_repeat_is_archived_before_expired_or_old_entries(self):
+        repeat = "the person prefers remote roles " + "r" * 100
+        other = "- 2000-01-01: " + repeat
+        expired = "- 2001-01-01 (until 2002-01-01): expired"
+        repeated = "- 2020-01-01: " + repeat
+        self.fill("## Notes\n" + other + "\n" + expired + "\n## Preferences\n" + repeated + "\n")
+        memory = agent_service.remember(self.agent["id"], "Preferences", repeat)
+        self.assertIn(other, memory, "a repeat in another section is not superseded")
+        self.assertIn(expired, memory)
+        self.assertNotIn(repeated, memory)
+        self.assertIn(repeated, self.archive().read_text(encoding="utf-8"))
+
+    def test_oldest_by_date_and_added_entry_survives_multiple_archivings(self):
+        recent = "- 2020-01-01: recent " + "r" * 130
+        oldest = "- 2000-01-01: oldest " + "o" * 130
+        middle = "- 2010-01-01: middle " + "m" * 130
+        self.fill("## Notes\n" + recent + "\n" + oldest + "\n" + middle + "\n")
+        new = "- 1990-01-01: text that looks older " + "n" * 190
+        memory = agent_service.remember(self.agent["id"], "Notes", new)
+        self.assertIn(new, memory)
+        self.assertIn(recent, memory)
+        self.assertNotIn(oldest, memory)
+        self.assertNotIn(middle, memory)
+        archived = self.archive().read_text(encoding="utf-8")
+        self.assertLess(archived.index(oldest), archived.index(middle))
+        self.assertNotIn(new, archived)
+        self.assertIn("## Archived " + datetime.now().strftime("%Y-%m-%d"), archived)
+        agent_service.remember(self.agent["id"], "Notes", "second addition " + "s" * 130)
+        self.assertTrue(self.archive().read_text(encoding="utf-8").startswith(archived), "archives are appended")
+
+    def test_legacy_memory_reads_unchanged_and_appends_in_place(self):
+        legacy = "# Scout's memory\n\n## Preferences\n- 2026-10-01: remote roles\n\n## Notes\nHandwritten note\n\n"
+        agent_service.write_memory(self.agent["id"], legacy)
+        self.assertEqual(agent_service.read_memory(self.agent["id"]), legacy)
+        memory = agent_service.remember(self.agent["id"], "Preferences", "brief summaries")
+        entry = f"- {datetime.now().strftime('%Y-%m-%d')}: brief summaries\n"
+        self.assertEqual(memory, legacy.replace("\n\n## Notes", "\n" + entry + "\n## Notes"))
+        self.assertFalse(self.archive().exists())
+
+    def test_optional_expiry_and_malformed_expiry_stays_permanent(self):
+        malformed = "## Notes\n- 2020-01-01 (until 2021-99-99): typo expiry\n" \
+                    "- 2020-01-01 (until nonsense: broken expiry\n- not-a-date: person's note\n"
+        agent_service.write_memory(self.agent["id"], malformed)
+        ctx = tool_registry.ToolContext(agent_id=self.agent["id"])
+        result = asyncio.run(tool_registry.call("agent_remember", {"section": "Notes", "text": "temporary note",
+                                                                  "until": "2999-11-01"}, ctx, tool_registry.OPENAI))
+        self.assertTrue(result.startswith("Noted"), result)
+        self.assertIn("(until 2999-11-01): temporary note", agent_service.read_memory(self.agent["id"]))
+        agent_service.remember(self.agent["id"], "Notes", "ends today", until=datetime.now().strftime("%Y-%m-%d"))
+        prompt = agent_service.run_prompt(self.agent, "work")
+        for text in ("typo expiry", "broken expiry", "person's note", "temporary note"):
+            self.assertIn(text, prompt)
+        self.assertNotIn("ends today", prompt)
+
+    def test_impossible_additions_leave_files_untouched_and_card_records_failure(self):
+        from services.agent_service import MEMORY_LIMIT
+        original = self.fill("## Notes\n- 2020-01-01: small removable note\n")
+        for text, error in (("x" * MEMORY_LIMIT, "exceeds"), ("x" * 100, "hand-written")):
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    agent_service.remember(self.agent["id"], "Notes", text)
+                self.assertEqual(agent_service.read_memory(self.agent["id"]), original)
+                self.assertFalse(self.archive().exists())
+                card = self.card("Oversized correction")
+                task_service.set_card_status(card["id"], "review")
+                task_service.set_card_status(card["id"], "ready", note=text)
+                saved = task_service.get_task(card["id"])
+                self.assertTrue(any(c["kind"] == "note" and "could not be saved to agent memory" in c["text"]
+                                    for c in saved["comments"]))
+                self.assertEqual([c["text"] for c in saved["comments"] if c["kind"] == "feedback"], [text])
+
+    def test_archive_write_failure_does_not_remove_active_entries(self):
+        original = self.fill("## Notes\n- 2020-01-01: " + "x" * 150 + "\n")
+        self.archive().mkdir()  # Opening an archive directory must fail before active memory is replaced.
+        with self.assertRaises(OSError):
+            agent_service.remember(self.agent["id"], "Notes", "new correction")
+        self.assertEqual(agent_service.read_memory(self.agent["id"]), original)
+
+    def test_team_correction_failure_is_visible_on_the_task(self):
+        import json
+        from contextlib import closing
+        from core.swarm.budget import BudgetLimit
+        from core.swarm.store import SwarmStore
+        from services.swarm_service import SwarmService
+        from services.agent_service import MEMORY_LIMIT
+        with tempfile.TemporaryDirectory(prefix="jarvis-memory-team-") as root, \
+             closing(SwarmStore(Path(root) / "swarm.sqlite3")) as store:
+            service = SwarmService(root)
+            service.store = store
+            limit = BudgetLimit(20000, 80, 0)
+            pool = store.create_pool("test", limit)
+            system, lead = store.create_system("david", "Team", "work", pool_id=pool,
+                                                system_limit=limit, lead_limit=limit)
+            with store.transaction() as db:
+                db.execute("INSERT INTO agent_settings(agent_id,jarvis_agent_id) VALUES(?,?)", (lead, self.agent["id"]))
+            run = store.create_run(system, "work", limit)
+            task_id = store.create_task(system, run, lead, "work", command_id="task")
+            with store.transaction() as db:
+                db.execute("UPDATE tasks SET checkpoint=? WHERE id=?", (json.dumps({"kept": "original"}), task_id))
+                store._event(db, system, "task.revision_requested", task_id, {"note": "x" * MEMORY_LIMIT})
+            service.sync_agents(system)
+            checkpoint = json.loads(store.get_task(task_id)["checkpoint"])
+            self.assertEqual(checkpoint["kept"], "original")
+            self.assertIn("could not be saved to agent memory", checkpoint["memory_save_failures"][0])
+            service.sync_agents(system)
+            self.assertEqual(json.loads(store.get_task(task_id)["checkpoint"]), checkpoint, "recorded once")
+
+
 class ToolTests(AgentTestCase):
+
     def test_agent_tools_exist_only_for_agents(self):
         from core.external_brain import ExternalBrain
         plain = {s.name for s in tool_registry.specs(tool_registry.OPENAI)}

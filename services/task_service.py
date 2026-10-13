@@ -288,8 +288,11 @@ class TaskService:
                 if agent_service.get(card["agent_id"]):
                     try:
                         agent_service.remember(card["agent_id"], "Corrections", f"On \"{card['name']}\": {note}")
-                    except ValueError:
-                        pass  # memory full: the note still reaches this card's re-run
+                    except ValueError as exc:
+                        # Feedback still reaches this run, but the person must
+                        # see why it will not carry forward (2026-10-13).
+                        self._comment(card, "note", f"Correction could not be saved to agent memory: {exc}. "
+                                      "Your feedback is kept on this card for its next run.", "jarvis")
         if status == "ready" and card["status"] == "blocked":
             card["attempts"] = 0
         card["status"] = status

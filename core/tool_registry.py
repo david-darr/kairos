@@ -1186,14 +1186,15 @@ async def _hand_to_agent(args, ctx):
 @register(
     "agent_remember",
     "Write a note to your own memory so later runs have it. section is one of 'About this work', "
-    "'Preferences', 'Corrections', 'Notes'. Keep each note to one short line.",
+    "'Preferences', 'Corrections', 'Notes'. Keep each note to one short line. "
+    "Optionally set until (YYYY-MM-DD) to the date the note stops being true.",
     _object({"section": _str("About this work, Preferences, Corrections or Notes"),
-             "text": _str("The note, one line")}, ("section", "text")),
+             "text": _str("The note, one line"), "until": _str("Optional expiry date, YYYY-MM-DD")}, ("section", "text")),
     agent_only=True, effect=WRITE,
 )
 async def _agent_remember(args, ctx):
     from services.agent_service import agent_service
-    agent_service.remember(ctx.agent_id, args["section"], args["text"])
+    agent_service.remember(ctx.agent_id, args["section"], args["text"], until=args.get("until"))
     return f"Noted under {args['section']}."
 
 
