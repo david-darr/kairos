@@ -816,7 +816,6 @@ export async function render(container, tabId, options = {}) {
     el('summary', { text: 'More tools' }),
     captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, compactBtn,
   ]);
-  overflowMenu.append(attachItem, cameraItem, skillItem);
   const overflowWrap = el("div", { class: "overflow-wrapper" }, [overflowBtn, overflowMenu, fileInput, cameraInput]);
 
   const workspacePill = el("div", { id: "workspace-pill-slot" });
@@ -950,9 +949,8 @@ export async function render(container, tabId, options = {}) {
   // composer actions live in More so the phone input stays one usable row.
   const composerOptions = el('div', { class: 'composer-menu-options' }, [permissionControl, openMicBtn]);
   openMicBtn.append(el('span', { text: 'Open Mic' }));
-  overflowMenu.append(el('div', { class: 'overflow-menu-divider' }), composerOptions);
+  const composerDivider = el('div', { class: 'overflow-menu-divider' });
   inputLeft.replaceChildren(overflowWrap, workspacePill);
-  extraTools.append(computerWatch);
   mobileHeader.insertBefore(contextPill, mobileHeader.querySelector('.chat-phone-tools'));
   const inputRight = el("div", { class: "chat-input-right" }, [micBtn, sendBtn]);
   const inputBottom = el("div", { class: "chat-input-bottom" }, [inputLeft, inputRight]);
@@ -976,9 +974,24 @@ export async function render(container, tabId, options = {}) {
   const permissionNotice = el('div', { id: 'chat-permission-notice', class: 'chat-permission-notice', hidden: true,
     text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
   composerOptions.append(permissionNotice);
-  extraTools.append(el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]));
-  overflowMenu.append(extraTools);
+  const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
   const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer]);
+  const phoneComposer = matchMedia('(max-width: 768px)');
+  const syncComposerMenu = () => {
+    // Re-parent the same controls so state and handlers survive live resizing.
+    // Desktop keeps David's flat + menu order from 1aaf1a8; only phones group tools.
+    if (phoneComposer.matches) {
+      inputHelp.append(composerHint);
+      extraTools.append(captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, compactBtn, computerWatch, inputHelp);
+      overflowMenu.replaceChildren(attachItem, cameraItem, skillItem, composerDivider, composerOptions, extraTools);
+    } else {
+      overflowMenu.replaceChildren(attachItem, captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, skillItem, compactBtn, composerDivider, composerOptions);
+      inputLeft.insertBefore(computerWatch, workspacePill);
+      dock.append(composerHint);
+    }
+  };
+  syncComposerMenu();
+  phoneComposer.addEventListener('change', syncComposerMenu);
   composerRefs = { messages, input, sendBtn, attachStrip, queueHost };
   main.append(messages, dock);
   const timeline = mountChatTimeline(main, messages, () => activeSessionId);
@@ -1143,6 +1156,7 @@ export async function render(container, tabId, options = {}) {
     document.removeEventListener("visibilitychange", syncBeam);
     desktopChat.removeEventListener('change', onChatBreakpoint);
     desktopChat.removeEventListener('change', syncComposerHint);
+    phoneComposer.removeEventListener('change', syncComposerMenu);
     document.removeEventListener('kairos:mobile-drawer-opening', onDrawerOpening);
     releaseDrawer();
     document.documentElement.classList.remove('chat-history-open');

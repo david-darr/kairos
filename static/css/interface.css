@@ -340,8 +340,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 .composer-menu-options .composer-hint { text-align: left; font-size: 12px; padding: 8px 10px; }
 .composer-menu-options .chat-permission-notice { padding: 8px 10px; text-align: left; }
 .composer-menu-options .computer-watch { width: 100%; justify-content: flex-start; }
-#chat-main.is-empty #chat-messages { flex: 1; }
-#chat-main.is-empty .chat-composer-dock { margin-block: 0; margin-inline: auto; }
 .chat-composer-dock { padding-bottom: 12px; }
 .view-header h2, .set-title { letter-spacing: -.025em; }
 .card, .dashboard-section, .library-section, .automation-card, .agent-tile, .set-group { border-radius: 20px; }
@@ -357,6 +355,13 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   .btn:not(.primary):not(.danger):hover, .input-icon-btn:hover { background-color: var(--ui-wash); }
 }
 @media (max-width: 768px) {
+  /* Phones dock the composer at the bottom, where the keyboard rises to meet
+     it. Scoped to this breakpoint deliberately: unscoped, these two beat
+     style.css's `#chat-main.is-empty` rules on source order alone and left
+     the desktop new-chat composer pinned to the bottom instead of centred
+     (caught by ui-smoke's "New-chat composer is centered"). */
+  #chat-main.is-empty #chat-messages { flex: 1; }
+  #chat-main.is-empty .chat-composer-dock { margin-block: 0; margin-inline: auto; }
   .mobile-view-context { display: none !important; }
   .view:not(.chat-layout):not(.settings-mobile-page):not(.forge-shell-view) { padding-top: calc(20px + var(--mobile-safe-top)); }
   .view:not(.chat-layout) .view-header:first-child > div > h2 { padding-left: 54px; min-height: 44px; }
