@@ -6,7 +6,12 @@ module.exports = async ({ js, waitFor, capture, writes, demoState, label }) => {
   await js("document.querySelector('[aria-label=\"Repository for lifespan\"]').parentElement.dispatchEvent(new Event('change'))");
   await waitFor("document.querySelector('.forge-lifespan .forge-widget-body').textContent.includes('No commits yet.')");
   const start = writes.length;
-  await js("document.querySelector('#forge-message').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))");
+  // Return submits on desktop only: the mobile redesign made it insert a
+  // newline below 768px (composerKeyboard.shouldSendOnEnter), so the phone
+  // pass starts the session the way a phone does, through Send.
+  await js(String(label).includes('mobile')
+    ? "document.querySelector('.forge-composer-send').click()"
+    : "document.querySelector('#forge-message').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))");
   await waitFor("!!document.querySelector('.forge-first-commit:not([hidden]) button:not(:disabled)')");
   assert.equal(await js("document.querySelector('.forge-first-commit p').textContent"),
     'Kairos garden has no commits yet. Make a first commit to start a session.', label + ' plain inline message');

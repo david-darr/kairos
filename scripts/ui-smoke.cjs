@@ -262,7 +262,16 @@ app.whenReady().then(async () => {
       window.__trapBackward = document.activeElement === controls.at(-1);
     })()`);
     assert.ok(await js("window.__trapForward && window.__trapBackward"), label + ' traps focus in both directions');
-    if (await js('innerWidth <= 768')) assert.ok(await js("(() => { const r = document.querySelector(OPEN_PANEL).getBoundingClientRect(); return Math.abs(r.left)<1 && Math.abs(r.top)<1 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1; })()"), label + ' fills the phone viewport');
+    if (await js('innerWidth <= 768')) {
+      // Measure the settled panel. Dialogs rise into place over 200ms from
+      // transform: translateY(6px) scale(.985) (@starting-style, style.css),
+      // so reading the rect immediately measures the animation, not the
+      // layout: a 390px panel reports 384.15px mid-flight. This raced on
+      // dev too and only started losing once the merged mobile stylesheet
+      // made the page heavier.
+      await waitFor("getComputedStyle(document.querySelector(OPEN_PANEL)).transform === 'none'");
+      assert.ok(await js("(() => { const r = document.querySelector(OPEN_PANEL).getBoundingClientRect(); return Math.abs(r.left)<1 && Math.abs(r.top)<1 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1; })()"), label + ' fills the phone viewport');
+    }
     assert.deepEqual(await overflow(), [], label + ' popup overflow');
   };
   const closePopup = async (mode, label) => {
@@ -892,8 +901,14 @@ app.whenReady().then(async () => {
           const centreClick = w => w.path === '/api/computer/chat%3As1/input' && JSON.parse(w.body).kind === 'click';
           for (let i = 0; i < 40 && !writes.some(centreClick); i++) await delay(50);
           const sent = JSON.parse((writes.find(centreClick) || { body: '{}' }).body);
-          assert.ok(Math.abs(sent.x - 640) <= 3 && Math.abs(sent.y - 400) <= 3,
-            `${label} computer click maps to page coordinates (sent ${sent.x},${sent.y})`);
+          // Tolerance is one CSS pixel of the panel, measured rather than
+          // assumed: Chromium truncates the synthetic click to a whole CSS
+          // pixel, and each one covers 1/scale page pixels. Hard-coding ±3
+          // silently encoded a ~516px panel; the merged mobile stylesheet
+          // narrows it to ~319px, where one CSS pixel is ~4 page pixels.
+          const slack = Math.ceil(1 / await js("(() => { const r = document.querySelector('.computer-frame').getBoundingClientRect(); return Math.min(r.width / 1280, r.height / 800); })()"));
+          assert.ok(Math.abs(sent.x - 640) <= slack && Math.abs(sent.y - 400) <= slack,
+            `${label} computer click maps to page coordinates (sent ${sent.x},${sent.y}, slack ${slack})`);
           await js("for (const key of 'kairos') document.querySelector('.computer-stage').dispatchEvent(new KeyboardEvent('keydown', {key, bubbles:true, cancelable:true}))");
           for (let i = 0; i < 40 && !writes.some(w => w.path.endsWith('/input') && JSON.parse(w.body).text === 's'); i++) await delay(50);
           await js("document.querySelector('.computer-record').click()");
@@ -1555,7 +1570,7 @@ app.whenReady().then(async () => {
       for (const id of await js("[...document.querySelectorAll('.settings-nav-item')].map(i => i.dataset.section)")) {
         await js(`document.querySelector('[data-section="${id}"]').click()`);
         await waitFor(`document.querySelector('.set-page')?.dataset.page === '${id}' && document.querySelector('#settings-content .set-title')?.textContent === document.querySelector('[data-section="${id}"]').textContent
-          && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item')`);
+          && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .set-note, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item')`);
         assert.deepEqual(await overflow(), [], `${label} ${id} overflow`);
         await capture(`${label}-settings-${id}`);
       }
@@ -1740,7 +1755,13 @@ app.whenReady().then(async () => {
     assert.ok(menuFits, "Model menu fits viewport");
     // Every popup shares one flat surface (no sheen), and the composer's
     // menus open fully above it rather than over its text box.
-    const popupLook = "(m => { const s = getComputedStyle(m); const r = m.getBoundingClientRect(); const c = document.querySelector('.chat-input-bar').getBoundingClientRect(); return s.backgroundImage === 'none' && s.borderRadius === '14px' && r.bottom <= c.top; })";
+    // The point is that every popup shares ONE surface, not that the radius
+    // is any particular number: the mobile redesign moved popups from 14px
+    // to 20px on purpose. Take the radius from the model menu and hold the
+    // others to it, so a future restyle moves them together or fails here.
+    const popupRadius = await js("getComputedStyle(document.querySelector('#model-picker-menu')).borderRadius");
+    assert.ok(/^\d+(\.\d+)?px$/.test(popupRadius) && parseFloat(popupRadius) > 0, `Popups are rounded (got ${popupRadius})`);
+    const popupLook = `(m => { const s = getComputedStyle(m); const r = m.getBoundingClientRect(); const c = document.querySelector('.chat-input-bar').getBoundingClientRect(); return s.backgroundImage === 'none' && s.borderRadius === ${JSON.stringify(popupRadius)} && r.bottom <= c.top; })`;
     assert.ok(await js(popupLook + "(document.querySelector('#model-picker-menu'))"), "Model menu: shared popup look, above the composer");
     await js("document.body.click(); document.querySelector('#overflow-plus-btn').click()");
     assert.ok(await js(popupLook + "(document.querySelector('#overflow-menu'))"), "+ menu: shared popup look, above the composer");
