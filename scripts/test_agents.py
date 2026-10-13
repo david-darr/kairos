@@ -1004,18 +1004,159 @@ class MemoryTests(AgentTestCase):
             self.assertEqual(json.loads(store.get_task(task_id)["checkpoint"]), checkpoint, "recorded once")
 
 
+class TopicAndRecallTests(AgentTestCase):
+    def topic_file(self, name):
+        return Path(agent_service._topic_path(self.agent["id"], name))
+
+    def chat(self, title, statements=()):
+        from core.session_manager import session_manager
+        session = session_manager.create_session(title)
+        session_manager.set_agent(session["id"], self.agent["id"], "agent")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        for stamp, statement in statements:
+            with patch("core.session_manager.time.time", return_value=stamp):
+                session_manager.append_message(session["id"], "assistant", statement)
+        return session
+
+    def test_topic_index_is_description_only_and_read_is_deliberate(self):
+        path = self.topic_file("hiring")
+        path.parent.mkdir(parents=True)
+        original = "Description: Interview process\n## Notes\nSecret interview detail\n"
+        path.write_text(original, encoding="utf-8")
+        from services.agent_service import identity_block
+        prompt = identity_block(self.agent, agent_service.read_memory(self.agent["id"]), chat=True)
+        self.assertIn("hiring: Interview process", prompt)
+        self.assertNotIn("Secret interview detail", prompt)
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+        ctx = tool_registry.ToolContext(agent_id=self.agent["id"])
+        opened = asyncio.run(tool_registry.call("agent_read_topic", {"topic": "hiring"}, ctx, tool_registry.OPENAI))
+        self.assertEqual(opened, original)
+        missing = asyncio.run(tool_registry.call("agent_read_topic", {"topic": "missing"}, ctx, tool_registry.OPENAI))
+        self.assertIn("hiring", missing)
+        self.assertIn("No memory topic", missing)
+
+    def test_hand_created_topic_without_description_and_topic_remember(self):
+        path = self.topic_file("clients")
+        path.parent.mkdir(parents=True)
+        original = "# Hand edited\nUnchanged note\n"
+        path.write_text(original, encoding="utf-8")
+        self.assertIn(("clients", "No description provided"), agent_service.topic_index(self.agent["id"]))
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+        ctx = tool_registry.ToolContext(agent_id=self.agent["id"])
+        result = asyncio.run(tool_registry.call("agent_remember", {
+            "section": "Notes", "text": "Client prefers email", "topic": "clients"}, ctx, tool_registry.OPENAI))
+        self.assertIn("clients", result)
+        self.assertIn("Client prefers email", agent_service.read_topic(self.agent["id"], "clients"))
+        self.assertNotIn("Client prefers email", agent_service.read_memory(self.agent["id"]))
+        self.assertTrue(agent_service.read_topic(self.agent["id"], "clients").startswith(original))
+
+    def test_new_topic_can_advertise_its_subject(self):
+        ctx = tool_registry.ToolContext(agent_id=self.agent["id"])
+        asyncio.run(tool_registry.call("agent_remember", {
+            "section": "Notes", "text": "Candidates need remote roles", "topic": "hiring",
+            "description": "Hiring criteria"}, ctx, tool_registry.OPENAI))
+        self.assertEqual(agent_service.topic_index(self.agent["id"]), [("hiring", "Hiring criteria")])
+        self.assertIn("Candidates need remote roles", agent_service.read_topic(self.agent["id"], "hiring"))
+
+    def test_topic_ceiling_archives_by_core_policy(self):
+        from services.agent_service import TOPIC_MEMORY_LIMIT
+        path = self.topic_file("hiring")
+        path.parent.mkdir(parents=True)
+        old = "- 2020-01-01: " + "x" * (TOPIC_MEMORY_LIMIT - len("## Notes\n- 2020-01-01: \n"))
+        path.write_text("## Notes\n" + old + "\n", encoding="utf-8")
+        memory = agent_service.remember(self.agent["id"], "Notes", "new detail", topic="hiring")
+        self.assertIn("new detail", memory)
+        self.assertLessEqual(len(memory), TOPIC_MEMORY_LIMIT)
+        archive = path.parent.parent / "memory-hiring-archive.md"
+        self.assertIn(old, archive.read_text(encoding="utf-8"))
+
+    def test_recent_work_window_order_count_size_and_current_thread(self):
+        from services.agent_service import RECENT_WORK_CHARS, identity_block
+        now = 2_000_000_000.0
+        current = self.chat("Current", [(now - 5, "current secret")])
+        self.chat("Older", [(now - 48 * 3600 - 1, "outside window")])
+        for i in range(12):
+            self.chat(f"Thread {i}", [(now - 100 + i, f"statement {i} " + "z" * 500)])
+        with patch("services.agent_service.time.time", return_value=now):
+            brief = agent_service.recent_work(self.agent["id"], current["id"])
+            prompt = identity_block(self.agent, agent_service.read_memory(self.agent["id"]),
+                                    chat=True, session_id=current["id"])
+        self.assertEqual(len(brief.splitlines()), 10)
+        self.assertLessEqual(len(brief), RECENT_WORK_CHARS)
+        self.assertLess(brief.index("statement 11"), brief.index("statement 10"))
+        self.assertNotIn("statement 0", brief)
+        self.assertNotIn("outside window", brief)
+        self.assertNotIn("current secret", brief)
+        self.assertIn(brief, prompt)
+
+    def test_empty_recent_work_has_no_heading(self):
+        from services.agent_service import identity_block
+        prompt = identity_block(self.agent, agent_service.read_memory(self.agent["id"]), chat=True)
+        self.assertNotIn("recent statements", prompt)
+
+    def test_only_chat_recalls_extras_all_surfaces_keep_core_memory(self):
+        from services.agent_service import identity_block
+        now = 2_000_000_000.0
+        path = self.topic_file("hiring")
+        path.parent.mkdir(parents=True)
+        path.write_text("Description: Hiring process\nprivate topic fact\n", encoding="utf-8")
+        agent_service.remember(self.agent["id"], "Notes", "core standing fact")
+        self.chat("Elsewhere", [(now - 10, "other thread statement")])
+        memory = agent_service.read_memory(self.agent["id"])
+        with patch("services.agent_service.time.time", return_value=now):
+            prompts = {
+                "scheduled": agent_service.run_prompt(self.agent, "scheduled work", goal={"name": "Daily", "report_when": "notable"}),
+                "webhook": agent_service.run_prompt(self.agent, "webhook work"),
+                "team": identity_block(self.agent, memory, team=True),
+                "undeclared": identity_block(self.agent, memory),
+                "chat": identity_block(self.agent, memory, chat=True),
+            }
+        for kind, prompt in prompts.items():
+            self.assertIn("core standing fact", prompt, kind)
+            self.assertNotIn("private topic fact", prompt, kind)
+            if kind == "chat":
+                self.assertIn("hiring: Hiring process", prompt)
+                self.assertIn("other thread statement", prompt)
+            else:
+                self.assertNotIn("hiring: Hiring process", prompt, kind)
+                self.assertNotIn("other thread statement", prompt, kind)
+
+    def test_linked_teammate_can_open_a_named_topic_without_automatic_recall(self):
+        from core.swarm.tools import ToolService
+        path = self.topic_file("hiring")
+        path.parent.mkdir(parents=True)
+        path.write_text("Description: Hiring\nTeam detail\n", encoding="utf-8")
+        team_tools = ToolService(None, is_lead=False, jarvis_agent_id=self.agent["id"])
+        self.assertIn("read_memory", team_tools.definitions)
+        self.assertIn("Team detail", team_tools.call("read_memory", {"topic": "hiring"}))
+        self.assertIn("hiring", team_tools.call("read_memory", {"topic": "unknown"}))
+        plain_tools = ToolService(None, is_lead=False)
+        self.assertNotIn("read_memory", plain_tools.definitions)
+
+    def test_agent_without_topic_directory_keeps_existing_prompt(self):
+        from services.agent_service import identity_block
+        self.assertFalse(self.topic_file("missing").parent.exists())
+        memory = agent_service.read_memory(self.agent["id"])
+        prompt = identity_block(self.agent, memory, chat=True)
+        self.assertIn(memory.strip(), prompt)
+        self.assertNotIn("Memory topics", prompt)
+
+
 class ToolTests(AgentTestCase):
 
     def test_agent_tools_exist_only_for_agents(self):
         from core.external_brain import ExternalBrain
         plain = {s.name for s in tool_registry.specs(tool_registry.OPENAI)}
         claude = {s.name for s in tool_registry.specs(tool_registry.CLAUDE)}
-        self.assertTrue({"agent_remember", "agent_ask"}.isdisjoint(plain | claude))
+        self.assertTrue({"agent_remember", "agent_read_topic", "agent_ask"}.isdisjoint(plain | claude))
         agent_tools = {s.name for s in tool_registry.specs(tool_registry.OPENAI, agent=True)}
-        self.assertTrue({"agent_remember", "agent_ask"} <= agent_tools)
+        self.assertTrue({"agent_remember", "agent_read_topic", "agent_ask"} <= agent_tools)
         refused = asyncio.run(tool_registry.call("agent_remember", {"section": "Notes", "text": "x"},
                                                  tool_registry.ToolContext(session_id="s"), tool_registry.OPENAI))
         self.assertTrue(refused.startswith("Unknown tool"))
+        refused_read = asyncio.run(tool_registry.call("agent_read_topic", {"topic": "hiring"},
+                                                    tool_registry.ToolContext(session_id="s"), tool_registry.OPENAI))
+        self.assertTrue(refused_read.startswith("Unknown tool"))
         names = {t["function"]["name"] for t in ExternalBrain("http://x", "m", None, agent_id=self.agent["id"]).tools}
         self.assertIn("agent_remember", names)
         self.assertNotIn("run_shell", names, "agents are never admin")
@@ -1025,7 +1166,8 @@ class ToolTests(AgentTestCase):
         inbox as an approval request instead of running it."""
         from core.brain import Brain
         agent_run = Brain(agent_id=self.agent["id"])._tool_config()[1]
-        self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_ask"} <= set(agent_run))
+        self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_read_topic",
+                         "mcp__hive_mind__agent_ask"} <= set(agent_run))
         self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_ask"}.isdisjoint(Brain()._tool_config()[1]))
         self.assertEqual(Brain(agent_id=self.agent["id"]).surface, f"agent:{self.agent['id']}")
 

@@ -1196,15 +1196,32 @@ async def _hand_to_agent(args, ctx):
     "agent_remember",
     "Write a note to your own memory so later runs have it. section is one of 'About this work', "
     "'Preferences', 'Corrections', 'Notes'. Keep each note to one short line. "
-    "Optionally set until (YYYY-MM-DD) to the date the note stops being true.",
+    "Optionally set until (YYYY-MM-DD) to the date the note stops being true. "
+    "Optionally set topic to file the note in memory/<topic>.md instead of core memory. "
+    "For a new topic, set description to a short subject line shown in your topic index.",
     _object({"section": _str("About this work, Preferences, Corrections or Notes"),
-             "text": _str("The note, one line"), "until": _str("Optional expiry date, YYYY-MM-DD")}, ("section", "text")),
+             "text": _str("The note, one line"), "until": _str("Optional expiry date, YYYY-MM-DD"),
+             "topic": _str("Optional memory topic file name"),
+             "description": _str("Optional one-line index description for a new topic")}, ("section", "text")),
     agent_only=True, effect=WRITE,
 )
 async def _agent_remember(args, ctx):
     from services.agent_service import agent_service
-    agent_service.remember(ctx.agent_id, args["section"], args["text"], until=args.get("until"))
-    return f"Noted under {args['section']}."
+    agent_service.remember(ctx.agent_id, args["section"], args["text"], until=args.get("until"),
+                           topic=args.get("topic"), description=args.get("description"))
+    return f"Noted under {args['section']}" + (f" in topic {args['topic']}." if args.get("topic") else ".")
+
+
+@register(
+    "agent_read_topic",
+    "Read one of your memory topic files by name when its subject is needed. "
+    "A missing topic returns available names.",
+    _object({"topic": _str("Topic name from your memory topic index")}, ("topic",)),
+    agent_only=True,
+)
+async def _agent_read_topic(args, ctx):
+    from services.agent_service import agent_service
+    return agent_service.read_topic(ctx.agent_id, args["topic"])
 
 
 @register(

@@ -250,7 +250,8 @@ class SwarmService:
             return build_worker(WorkerContext(
                 endpoint=endpoint, agent=agent, system=system,
                 tool_service=ToolService(self.store, is_lead=bool(agent["is_lead"]),
-                                         memory=memory, scheduled=scheduled),
+                                         memory=memory, scheduled=scheduled,
+                                         jarvis_agent_id=agent.get("jarvis_agent_id")),
                 scratch_dir=str(scratch), model=agent.get("model") or endpoint.get("model") or None,
                 effort=agent.get("effort") or None, env={}))
 

@@ -194,6 +194,12 @@ _MEMORY = {
     },
 }
 
+_LINKED_AGENT_READ = {
+    "description": "Read a Kairos memory reference from search_memory, or open your own agent memory topic by name when this assignment needs it.",
+    "parameters": {"type": "object", "properties": {"ref": {"type": "string"},
+                                               "topic": {"type": "string"}}},
+}
+
 _FINISH_SHIFT = {
     "finish_shift": {
         "description": "End this scheduled work shift because its useful work is complete or no actionable work remains. Preserve a concise handoff for the next shift without ending the continuing company mission.",
@@ -212,12 +218,14 @@ _FINISH_SHIFT = {
 class ToolService:
     """One instance per attempt. Holds no credential and no model state."""
 
-    def __init__(self, store, assignment=None, *, is_lead, memory=None, scheduled=False):
+    def __init__(self, store, assignment=None, *, is_lead, memory=None, scheduled=False,
+                 jarvis_agent_id=None):
         self.store = store
         self.assignment = assignment
         self.is_lead = is_lead
         self.memory = memory
         self.scheduled = scheduled
+        self.jarvis_agent_id = jarvis_agent_id
         self.terminal = None
         self.memory_refs = set()
 
@@ -239,6 +247,8 @@ class ToolService:
         definitions = dict(_LEAD if self.is_lead else _SPECIALIST)
         if self.memory and self.memory.enabled:
             definitions.update(_MEMORY)
+        if self.jarvis_agent_id:
+            definitions["read_memory"] = _LINKED_AGENT_READ
         if self.is_lead and self.scheduled:
             definitions.update(_FINISH_SHIFT)
         return definitions
@@ -384,6 +394,19 @@ class ToolService:
         return json.dumps(results, ensure_ascii=False)
 
     def _read_memory(self, arguments):
+        if arguments.get("topic") is not None:
+            if not self.jarvis_agent_id:
+                raise ToolRejected("Only a linked agent can open its own memory topic.")
+            from services.agent_service import agent_service
+
+            # This uses the team's existing read tool and a server-linked
+            # identity; no topic content is recalled automatically (2026-10-13).
+            topic = _text(arguments["topic"], "topic", 64)
+            text = agent_service.read_topic(self.jarvis_agent_id, topic)
+            if self.assignment is not None:
+                self.store.record_memory_access(self.assignment, "agent.topic.read",
+                                                {"topic": topic, "characters": len(text)})
+            return text
         if not self.memory or not self.memory.enabled:
             raise ToolRejected("Kairos memory is not enabled for this company.")
         reference = _text(arguments.get("ref"), "ref", 1000)
