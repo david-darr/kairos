@@ -213,6 +213,8 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
     card = task.get("schedule_kind") == "card"
     raised: list = []
     try:
+        if source == "schedule" and not card and task_service.skip_overdue_occurrence(task["id"]):
+            return False
         # Every background surface enters here, before claiming work or
         # connecting a model. The context owns admission through recording
         # failures/stops and disconnecting (Agents 2.0, 2026-10-13).
@@ -227,7 +229,7 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
                 # Claim before the first await: a crash loses this occurrence
                 # rather than repeating it on the next scheduler pass.
                 if task_service.claim_occurrence(task["id"]) is None:
-                    return None
+                    return False
             try:
                 await _run_task_tagged(task, source)
             except asyncio.CancelledError:
@@ -236,7 +238,7 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
                 raise
     except AdmissionDenied as exc:
         if source == "schedule" and not card:
-            task_service.skip_occurrence(task["id"])
+            task_service.skip_occurrence(task["id"], str(exc))
         events.emit("task.refused", f"Not run: {exc}.", level="warning", task_id=task["id"])
         logger.info("'%s' (%s): not run: %s", task["name"], task["id"], exc)
         raise
@@ -416,7 +418,7 @@ async def _run_due() -> None:
             continue
         if not started and task["id"] not in _scheduled and task_service.is_due(task["id"]):
             # Already running (a Run now, say): this occurrence is covered.
-            task_service.skip_occurrence(task["id"])
+            task_service.skip_occurrence(task["id"], "the task was already running")
             logger.info("task '%s' (%s) was due while already running; skipped to its next time",
                         task["name"], task["id"])
 

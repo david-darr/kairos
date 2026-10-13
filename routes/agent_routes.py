@@ -39,6 +39,8 @@ class GoalBody(BaseModel):
     run_time: Optional[str] = None
     interval_seconds: Optional[int] = None
     report_when: Optional[str] = None
+    time_zone: Optional[str] = None
+    weekdays: Optional[list[int]] = None
 
 
 class CardBody(BaseModel):
@@ -226,7 +228,8 @@ async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_ad
     try:
         return task_service.create_task(body.name, body.prompt, body.schedule_kind, run_time=body.run_time,
                                         interval_seconds=body.interval_seconds, agent_id=agent_id,
-                                        report_when=body.report_when)
+                                        report_when=body.report_when, time_zone=body.time_zone,
+                                        weekdays=body.weekdays)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

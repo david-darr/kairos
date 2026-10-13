@@ -41,6 +41,8 @@ class CreateTaskRequest(BaseModel):
     interval_seconds: Optional[int] = None
     deliver_to_channel: Optional[str] = None
     run_time: Optional[str] = None  # "HH:MM" local, for schedule_kind="daily"
+    time_zone: Optional[str] = None  # IANA name; omitted means machine-local
+    weekdays: Optional[list[int]] = None  # daily only, Monday=0 through Sunday=6
     # Cards (the work board): see services/task_service.py.
     depends_on: Optional[list[str]] = None
     status: Optional[str] = None  # a new card: "backlog" (default) or "ready"
@@ -54,6 +56,8 @@ class UpdateTaskRequest(BaseModel):
     deliver_to_channel: Optional[str] = None
     depends_on: Optional[list[str]] = None
     endpoint_id: Optional[str] = None
+    time_zone: Optional[str] = None
+    weekdays: Optional[list[int]] = None
 
 
 class CardStatusRequest(BaseModel):
@@ -137,6 +141,7 @@ async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)
             body.name, body.prompt, body.schedule_kind, body.run_at, body.interval_seconds,
             deliver_to_channel=body.deliver_to_channel, run_time=body.run_time,
             depends_on=body.depends_on, status=body.status, endpoint_id=body.endpoint_id,
+            time_zone=body.time_zone, weekdays=body.weekdays,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -145,6 +150,11 @@ async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)
 @router.patch("/{task_id}")
 async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Explicit null restores the machine zone / every day; an omitted field
+    # leaves a live schedule alone (Agents 2.0 phase 2-i, 2026-10-13).
+    for key in ("time_zone", "weekdays"):
+        if key in body.model_fields_set:
+            fields[key] = getattr(body, key)
     _check_endpoint(fields.get("endpoint_id"))
     try:
         return task_service.update_task(task_id, **fields)

@@ -529,6 +529,9 @@ async def _delete_note(args, ctx):
         "run_at": _str("ISO 8601 datetime, required for schedule_kind='once'"),
         "interval_seconds": {"type": "integer", "description": "Required for schedule_kind='interval'"},
         "run_time": _str("Local time of day as 'HH:MM' (24-hour), required for schedule_kind='daily'"),
+        "time_zone": _str("Optional IANA timezone, e.g. Europe/Dublin; omitted means the machine's zone"),
+        "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                     "minItems": 1, "description": "Daily only: Monday=0 through Sunday=6; omit for every day"},
         "deliver_to_channel": _str("Optional comms channel key to post the result to"),
     }, ("name", "prompt", "schedule_kind")),
     effect=WRITE,
@@ -541,6 +544,7 @@ async def _create_task(args, ctx):
         deliver_to_channel=args.get("deliver_to_channel"),
         run_time=args.get("run_time"), depends_on=args.get("depends_on"), status=args.get("status"),
         agent_id=ctx.agent_id,
+        time_zone=args.get("time_zone"), weekdays=args.get("weekdays"),
     )
     return f"Created task {task['id']}: {task['name']}"
 
@@ -551,12 +555,17 @@ async def _create_task(args, ctx):
     "Use enabled=false to pause it. Read the build-automation skill first for a new automation.",
     _object({"task_id": _str(), "name": _str(), "prompt": _str(), "enabled": {"type": "boolean"},
              "deliver_to_channel": _str(),
+             "time_zone": {"type": ["string", "null"], "description": "IANA timezone; null restores the machine's zone"},
+             "weekdays": {"type": ["array", "null"], "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                          "minItems": 1, "description": "Daily only: Monday=0 through Sunday=6; null restores every day"},
              "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Cards only: ids of cards it waits for"}},
             ("task_id",)),
     effect=WRITE,
 )
 async def _update_task(args, ctx):
+    schedule_fields = {key: args[key] for key in ("time_zone", "weekdays") if key in args}
     task_id, fields = _fields(args, "task_id")
+    fields.update(schedule_fields)  # explicit null clears a rule; omission keeps it
     return f"Updated task {memory_tools.update_task(task_id, **fields)['id']}"
 
 

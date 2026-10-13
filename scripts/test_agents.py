@@ -12,7 +12,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -95,7 +95,7 @@ class RunTests(AgentTestCase):
     def test_the_daily_run_cap_holds_under_concurrent_card_and_goal_starts(self):
         agent_service.update(self.agent["id"], daily_run_cap=1)
         card, goal = self.card(), self.goal()
-        goal["next_run_at"] = "2000-01-01T00:00:00+00:00"
+        goal["next_run_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
 
         async def overlap():
             started, finish = asyncio.Event(), asyncio.Event()
@@ -121,7 +121,16 @@ class RunTests(AgentTestCase):
                     await asyncio.gather(*workers)
 
         asyncio.run(overlap())
-        self.assertEqual(len(task_service.list_runs(card["id"])) + len(task_service.list_runs(goal["id"])), 1)
+        history = task_service.list_runs(card["id"]) + task_service.list_runs(goal["id"])
+        self.assertEqual(sum(r["outcome"] == "succeeded" for r in history), 1)
+        # A refused due goal now leaves a receipt; it still spends no slot
+        # (Agents 2.0 phase 2-i, 2026-10-13).
+        if task_service.get_task(card["id"])["status"] == "review":
+            self.assertEqual(len(history), 2)
+            self.assertIn("runs for today", task_service.list_runs(goal["id"])[0]["missed_reason"])
+        else:
+            self.assertEqual(len(history), 1)
+        self.assertEqual(agent_service.runs_today(self.agent["id"]), 1)
 
     def test_webhook_goal_respects_off_and_cap_and_reports_the_reason(self):
         import httpx
@@ -1180,6 +1189,46 @@ class DeleteTests(AgentTestCase):
 
 
 class RouteTests(AgentTestCase):
+    def test_goal_route_accepts_zone_and_weekday_rules(self):
+        made = web.post(f"/api/agents/{self.agent['id']}/goals", json={
+            "name": "Irish weekday morning", "prompt": "check", "schedule_kind": "daily",
+            "run_time": "06:00", "time_zone": "Europe/Dublin", "weekdays": [0, 1, 2, 3, 4],
+        })
+        self.assertEqual(made.status_code, 200)
+        self.assertEqual((made.json()["time_zone"], made.json()["weekdays"]), ("Europe/Dublin", [0, 1, 2, 3, 4]))
+
+    def test_off_and_capped_checks_leave_receipts_on_the_agent_page_without_spending_runs(self):
+        for reason in ("off", "capped"):
+            with self.subTest(reason=reason):
+                agent_service.update(self.agent["id"], enabled=True, daily_run_cap=100)
+                goal = self.goal()
+                goal["next_run_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+                count_before = agent_service.runs_today(self.agent["id"])
+                if reason == "off":
+                    agent_service.update(self.agent["id"], enabled=False)
+                    expected = "turned off"
+                else:
+                    # A real completed check exhausts the cap; a receipt
+                    # itself must never do that.
+                    task_service.record_run(self.goal()["id"], "used a slot")
+                    count_before = agent_service.runs_today(self.agent["id"])
+                    agent_service.update(self.agent["id"], daily_run_cap=count_before)
+                    expected = "runs for today"
+                asyncio.run(task_scheduler._run_due())
+                asyncio.run(task_scheduler._run_due())
+                history = task_service.list_runs(goal["id"])
+                self.assertEqual(len(history), 1)
+                receipt = history[0]
+                self.assertEqual(receipt["outcome"], "lost")
+                self.assertIn(expected, receipt["missed_reason"])
+                self.assertIn(expected, receipt["error"])
+                self.assertIsNone(receipt["started_at"])
+                self.assertIsNone(receipt["run_id"])
+                self.assertEqual(agent_service.runs_today(self.agent["id"]), count_before)
+                shown = web.get(f"/api/agents/{self.agent['id']}").json()["runs"]
+                self.assertIn(receipt["id"], [r["id"] for r in shown])
+                self.assertEqual(FakeBrain.prompts, [])
+
     def test_creating_and_listing(self):
         made = web.post("/api/agents", json={"name": "Archivist", "role": "Files things"}).json()
         self.addCleanup(self._remove, made["id"])

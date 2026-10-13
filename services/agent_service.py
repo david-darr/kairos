@@ -368,6 +368,9 @@ class AgentService:
             midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
             history = task_service.list_runs()
             completed = sum(1 for r in history if r["task_id"] in owned
+                            # Missed receipts did no work and must not spend
+                            # tomorrow's cap on startup (phase 2-i, 2026-10-13).
+                            and not r.get("missed_reason")
                             and (r.get("started_at") or r["ran_at"]) >= midnight)
             # Durable starts bridge a restart until lost-work recovery runs.
             # This matters for cards still waiting for their lease to expire:
