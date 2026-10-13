@@ -83,6 +83,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # looked like it worked (server confirmed via curl) but the running
         # window was still executing the old, broken app.js.
         path = request.url.path
+        if path.startswith(("/api/notifications", "/api/chat/runs", "/api/chat/stream")):
+            response.headers["Cache-Control"] = "no-store"
         if path == "/api/chat/artifacts/content":
             # Only the authenticated, session-checked viewer may be framed.
             response.headers["X-Frame-Options"] = "SAMEORIGIN"

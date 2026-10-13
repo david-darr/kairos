@@ -49,13 +49,15 @@ class Request:
     title: str
     description: str
     choices: list[dict]
+    expires_at: float = field(default_factory=lambda: time.time() + DEFAULT_TIMEOUT_SECONDS)
     answer: asyncio.Future = field(default_factory=asyncio.Future)
 
     def payload(self) -> dict:
         """What the surface shows. Text only - never markup, never executed."""
         return {"id": self.id, "tool": self.tool, "target": self.target,
                 "title": self.title, "description": self.description,
-                "arguments": _clip(self.arguments), "choices": self.choices}
+                "arguments": _clip(self.arguments), "choices": self.choices,
+                "expires_at": self.expires_at}
 
 
 @dataclass(frozen=True)
@@ -323,7 +325,7 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     request = Request(id=uuid.uuid4().hex, surface=surface, tool=tool, target=target,
                       arguments=arguments if isinstance(arguments, dict) else {},
                       title=title or tool, description=description,
-                      choices=choices or _default_choices(tool, target))
+                      choices=choices or _default_choices(tool, target), expires_at=time.time() + timeout)
     _pending[request.id] = request
     await queue.put(request.payload())
     try:
@@ -333,6 +335,17 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
                                 f"{int(timeout)} seconds, so it was not allowed.")
     finally:
         _pending.pop(request.id, None)
+        if _channels.get(surface) is queue:
+            queue.put_nowait({"permission_closed": request.id})
+
+
+def pending_request(request_id: str):
+    request = _pending.get(request_id)
+    return request if request and not request.answer.done() and request.expires_at > time.time() else None
+
+
+def pending_for(surface: str) -> list[dict]:
+    return [r.payload() for r in _pending.values() if r.surface == surface and pending_request(r.id)]
 
 
 def _default_choices(tool: str, target: str | None) -> list[dict]:
@@ -351,8 +364,8 @@ def _default_choices(tool: str, target: str | None) -> list[dict]:
 def answer(request_id: str, choice_id: str, user: str) -> bool:
     """Resolve a pending request. Request ids are server-made, so a model
     cannot answer its own question by guessing one."""
-    request = _pending.get(request_id)
-    if request is None or request.answer.done():
+    request = pending_request(request_id)
+    if request is None:
         return False
     choice = next((item for item in request.choices if item["id"] == choice_id), None)
     if choice is None:

@@ -1,5 +1,6 @@
 // Persistent (module-level, survives tab switches) registry of in-flight
-// chat turns. David's ask 2026-09-12: leaving a chat mid-reply to check
+// chat projections. Execution belongs to the host; these are subscribers.
+// David's ask 2026-09-12: leaving a chat mid-reply to check
 // another tab, then coming back, showed nothing until the turn finished —
 // root cause was that the fetch+stream-reading loop lived entirely inside
 // views/chat.js's per-render closure, writing into DOM nodes app.js's
@@ -31,8 +32,9 @@ function _notify(sessionId) {
 export function stopTurn(sessionId) {
   const entry = _inflight.get(sessionId);
   if (!entry || entry.status !== 'processing') return false;
-  entry.stopped = true;
-  try { entry.controller.abort(); } catch { /* already finished */ }
+  entry.stopRequested = true;
+  if (entry.managedId) _stopOnHost(sessionId, entry);
+  else if (entry.connected) { entry.stopped = true; entry.controller.abort(); }
   return true;
 }
 
@@ -45,7 +47,8 @@ export function clearPermission(sessionId, requestId) {
   if (entry?.permission?.id !== requestId) return;
   if (entry.permissionStartedAt) entry.pausedSeconds = (entry.pausedSeconds || 0) + Date.now() / 1000 - entry.permissionStartedAt;
   entry.permissionStartedAt = null;
-  entry.permission = null;
+  entry.permissions = (entry.permissions || []).filter(p => p.id !== requestId);
+  entry.permission = entry.permissions[0] || null;
   _notify(sessionId);
 }
 
@@ -77,7 +80,7 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
   // can reach it from anywhere - the composer's stop button, a tab switch, or
   // Open Mic barge-in - without the caller having to hold a reference.
   const controller = new AbortController();
-  const entry = { text: "", prompt: text, startedAt: Date.now() / 1000, status: "processing", connected: false, sessionTitle, error: null, controller, listeners: new Set() };
+  const entry = { text: "", prompt: text, requestId: crypto.randomUUID(), startedAt: Date.now() / 1000, status: "processing", connected: false, sessionTitle, error: null, controller, listeners: new Set() };
   _inflight.set(sessionId, entry);
   _notify(sessionId);
   _runTurn(sessionId, entry, text, attachmentIds, references);
@@ -85,17 +88,79 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
 }
 
 async function _runTurn(sessionId, entry, text, attachmentIds, references) {
+  let retries = 0;
+  while (entry.status === 'processing') {
+    try {
+      await _readTurn(sessionId, entry, text, attachmentIds, references);
+      break;
+    } catch (error) {
+      if (entry.stopped) { entry.status = 'stopped'; break; }
+      if (error.fatal || (!entry.managedId && entry.connected)) {
+        entry.status = 'failed'; entry.error = error.message; break;
+      }
+      // Phone sleep, network loss and reader cancellation detach only the
+      // subscriber. Retry the same start ID or attach to the accepted run.
+      entry.connected = false;
+      _notify(sessionId);
+      await new Promise(resolve => setTimeout(resolve, Math.min(30000, 1000 * 2 ** Math.min(retries++, 5))));
+      entry.controller = new AbortController();
+    }
+  }
+  entry.endedAt = Date.now() / 1000;
+  _notify(sessionId);
+  setTimeout(() => {
+    if (_inflight.get(sessionId) === entry) { _inflight.delete(sessionId); _notify(sessionId); }
+  }, FINISHED_RETENTION_MS);
+}
+
+function _applySnapshot(sessionId, entry, snapshot) {
+  for (const old of entry.permissions || []) if (!(snapshot.permissions || []).some(p => p.id === old.id))
+    document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: old.id } }));
+  entry.managedId = snapshot.id;
+  entry.runId = snapshot.id;
+  entry.text = snapshot.text;
+  entry.startedAt = snapshot.started_at;
+  entry.sessionTitle = snapshot.title;
+  entry.toolSteps = snapshot.tool_steps || [];
+  entry.toolEvents = snapshot.tool_events || [];
+  entry.permissions = snapshot.permissions || [];
+  entry.permission = entry.permissions[0] || null;
+  entry.error = snapshot.error || null;
+  entry.handoffs = snapshot.handoffs;
+  entry.status = ({ completed: 'done', failed: 'failed', stopped: 'stopped', interrupted: 'failed' })[snapshot.state] || 'processing';
+  _notify(sessionId);
+  if (entry.stopRequested && entry.status === 'processing') _stopOnHost(sessionId, entry);
+}
+
+async function _stopOnHost(sessionId, entry) {
+  if (entry.stopping) return;
+  entry.stopping = true;
   try {
-    const res = await fetch("/api/chat/stream", {
+    const res = await fetch(`/api/chat/runs/${entry.managedId}/stop`, { method: 'POST' });
+    if (!res.ok) throw new Error('Stop could not reach Kairos. Reconnect and try again.');
+    _applySnapshot(sessionId, entry, await res.json());
+    entry.stopped = entry.status === 'stopped';
+    entry.controller.abort();
+  } catch (error) { entry.error = error.message; entry.stopRequested = false; _notify(sessionId); }
+  finally { entry.stopping = false; }
+}
+
+async function _readTurn(sessionId, entry, text, attachmentIds, references) {
+  try {
+    const res = await fetch(entry.managedId ? `/api/chat/runs/${entry.managedId}/events` : "/api/chat/stream", entry.managedId ? {
+      signal: entry.controller.signal,
+    } : {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references }),
+      body: JSON.stringify({ session_id: sessionId, message: text, attachment_ids: attachmentIds, references, request_id: entry.requestId }),
       signal: entry.controller.signal,
     });
     if (!res.ok || !res.body) {
       let detail = `Stream failed (${res.status})`;
       try { detail = (await res.json()).detail || detail; } catch (_) {}
-      throw new Error(detail);
+      const error = new Error(detail);
+      error.fatal = res.status >= 400 && res.status < 500;
+      throw error;
     }
 
     entry.connected = true;
@@ -114,8 +179,20 @@ async function _runTurn(sessionId, entry, text, attachmentIds, references) {
         if (!data) continue;
         let payload;
         try { payload = JSON.parse(data); } catch (_) { throw new Error('Invalid response stream'); }
-        if (payload.error) throw new Error(payload.error);
-        if (payload.done === true) completed = true;
+        if (payload.snapshot) {
+          _applySnapshot(sessionId, entry, payload.snapshot);
+          completed = entry.status !== 'processing';
+        }
+        if (payload.error) {
+          entry.error = payload.error;
+          if (!entry.managedId) { const error = new Error(payload.error); error.fatal = true; throw error; }
+        }
+        if (payload.done === true) {
+          completed = true;
+          entry.status = ({ completed: 'done', stopped: 'stopped', failed: 'failed', interrupted: 'failed' })[payload.state] || 'done';
+          for (const request of entry.permissions || []) document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: request.id } }));
+          entry.permissions = []; entry.permission = null;
+        }
         if (payload.chunk) {
           entry.text += payload.chunk;
           _notify(sessionId);
@@ -124,8 +201,16 @@ async function _runTurn(sessionId, entry, text, attachmentIds, references) {
           // Held on the entry rather than shown from here: this module is
           // transport only, and a request must survive the user switching
           // tabs and coming back mid-turn.
-          entry.permission = payload.permission;
+          entry.permissions ||= [];
+          if (!entry.permissions.some(p => p.id === payload.permission.id)) entry.permissions.push(payload.permission);
+          entry.permission = entry.permissions[0];
           entry.permissionStartedAt = Date.now() / 1000;
+          _notify(sessionId);
+        }
+        if (payload.permission_closed) {
+          document.dispatchEvent(new CustomEvent('kairos:permission-closed', { detail: { id: payload.permission_closed } }));
+          entry.permissions = (entry.permissions || []).filter(p => p.id !== payload.permission_closed);
+          entry.permission = entry.permissions[0] || null;
           _notify(sessionId);
         }
         if (payload.handoffs) {
@@ -148,28 +233,32 @@ async function _runTurn(sessionId, entry, text, attachmentIds, references) {
       if (done) break;
     }
     if (!completed) throw new Error('Connection ended before the response finished. Reopen this chat to recover any saved reply.');
-    entry.status = "done";
+    if (entry.status === 'processing') entry.status = "done";
   } catch (e) {
-    // A deliberate stop is not a failure. Aborting the fetch drops the
-    // connection, which the backend already treats as client cancellation and
-    // handles by saving the partial reply with status "interrupted" (see
-    // services/chat_service.py's BaseException branch) - so the text already
-    // on screen is the text that was kept, and there is nothing to apologise
-    // for in the UI.
-    if (entry.stopped || e.name === 'AbortError') {
-      entry.status = "stopped";
-    } else {
-      entry.status = "failed";
-      entry.error = e.message;
-    }
+    throw e;
   }
-  entry.endedAt = Date.now() / 1000;
-  _notify(sessionId);
-
-  setTimeout(() => {
-    if (_inflight.get(sessionId) === entry) {
-      _inflight.delete(sessionId);
-      _notify(sessionId);
-    }
-  }, FINISHED_RETENTION_MS);
 }
+
+export async function restoreInFlight() {
+  try {
+    const res = await fetch('/api/chat/runs');
+    if (!res.ok) return;
+    const snapshots = await res.json();
+    if (!Array.isArray(snapshots)) return;
+    for (const snapshot of snapshots) {
+      const sessionId = snapshot.session_id;
+      if (_inflight.get(sessionId)?.status === 'processing') continue;
+      const entry = { text: '', status: 'processing', connected: false, controller: new AbortController(), listeners: new Set() };
+      _inflight.set(sessionId, entry);
+      _applySnapshot(sessionId, entry, snapshot);
+      _runTurn(sessionId, entry);
+    }
+  } catch (_) { /* Offline boot can still show saved UI; retry on return. */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  for (const entry of _inflight.values()) if (entry.status === 'processing' && entry.managedId) entry.controller.abort();
+  restoreInFlight();
+});
+window.addEventListener('online', restoreInFlight);

@@ -32,7 +32,7 @@ export function shortcutGroups(quickEntry = null) {
       shortcut('Escape', 'Close the current menu or panel'),
     ] },
     { title: 'Composer', items: [
-      shortcut('Enter', 'Send your message'),
+      shortcut('Enter', 'Send your message on desktop', 'On phones, Return starts a new line. Tap Send to send.'),
       shortcut('Shift + Enter', 'Start a new line'),
       shortcut('/', 'See slash commands as you type'),
       shortcut('/help', 'Read command help', 'Use /help command for more detail, for example /help compact.'),

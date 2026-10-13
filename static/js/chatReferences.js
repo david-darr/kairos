@@ -1,6 +1,7 @@
 // Composer @ picker. Selected IDs stay separate from the visible draft and
 // are resolved again by the server when the message is sent.
 import { api, toast } from './api.js';
+import { isComposingKey } from './composerKeyboard.js';
 import { agentAvatar } from './agentHandoff.js';
 import { bindReviewComposer, reviewsChanged, reviewKey, openReview } from './artifactReview.js';
 
@@ -191,7 +192,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     }, 180);
   };
   const onKeydown = event => {
-    if (list.hidden) return;
+    if (list.hidden || isComposingKey(event)) return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestNumber++; hide(); }
     else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();

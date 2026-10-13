@@ -24,6 +24,11 @@ demoState.computerImage = computerImage;
 const errors = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
+  // The durable-run client restores runs at startup. This isolated profile
+  // begins idle; it must never ask the live backend for a person's runs.
+  if (url.pathname === '/api/chat/runs' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json'); res.end('[]'); return;
+  }
   // The site (docs/) may read GitHub's public release data; nothing else leaves.
   const site = url.pathname.startsWith("/docs/") || url.pathname.startsWith("/kairos/");
   res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:" + (site ? "; connect-src 'self' https://api.github.com" : ""));
@@ -152,7 +157,8 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404); res.end(); }
 });
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
-app.setPath("userData", path.join(root, "data", "ui-smoke-profile"));
+// A crashed/parallel renderer must not lock another run's Chromium profile.
+app.setPath("userData", path.join(output, "profile"));
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 app.whenReady().then(async () => {
   fs.mkdirSync(output, { recursive: true });
@@ -236,6 +242,22 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    if (process.argv.includes('--interface-only') || process.argv.includes('--interface-details-only') || process.argv.includes('--mobile-chrome-only')) {
+      await require(process.argv.includes('--mobile-chrome-only') ? './mobile-chrome-checks.cjs' : process.argv.includes('--interface-details-only') ? './interface-detail-checks.cjs' : './interface-checks.cjs')({ js, win, waitFor, capture, delay, navigate, overflow });
+      assert.deepEqual(errors, []);
+      console.log('PASS: shared interface on desktop, phone and small phone; chat model, tools, composer, drawers and Settings.');
+      console.log('Screenshots: ' + output);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['shared interface'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--mobile-only')) {
+      await require('./mobile-ui-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow });
+      assert.deepEqual(errors, []);
+      console.log('PASS: mobile drawer focus, coordination and breakpoints; IME, Return/Send; touch targets and responsive layouts.');
+      console.log('Screenshots: ' + output);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['mobile UI'], errors }, null, 2));
+      return;
+    }
     await require('./chat-reference-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
     if (process.argv.includes('--chat-references-only')) {
       assert.deepEqual(errors, []);

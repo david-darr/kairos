@@ -15,6 +15,7 @@ export const ICONS = {
   search: `<svg viewBox="0 0 24 24" ${S}><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>`,
   chats: `<svg viewBox="0 0 24 24" ${S}><path d="M4 5h16v11H8l-4 4V5z"/></svg>`,
   computer: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>`,
+  camera: `<svg viewBox="0 0 24 24" ${S}><path d="M8 5l1.5-2h5L16 5h3a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="12.5" r="4"/></svg>`,
   notes: `<svg viewBox="0 0 24 24" ${S}><path d="M6 3h9l5 5v13H6V3z"/><path d="M9 12h6M9 16h6M9 8h3"/></svg>`,
   library: `<svg viewBox="0 0 24 24" ${S}><path d="M5 4v16M9 4v16M14 4l4 16"/></svg>`,
   calendar: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="5" width="18" height="16" rx="1.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,

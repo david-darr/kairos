@@ -4,17 +4,18 @@ services/chat_service.py — routes own request/response shape, the service
 owns the actual turn logic.
 """
 import asyncio
-import json
 
-from fastapi import APIRouter, Depends, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from core import attachments, chat_artifacts, chat_files, chat_references, office_preview
 from core.auth import auth_manager
-from core.middleware import require_user
+from core.middleware import require_user, get_current_user
 from services import chat_service
 from services import chat_summary
+from services import chat_runs
+from core import mobile_activity
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -97,6 +98,7 @@ class ChatRequest(BaseModel):
     message: str
     attachment_ids: list[str] = []
     references: list[dict] = []
+    request_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -126,6 +128,7 @@ async def send_chat_message(body: ChatRequest, user: str = Depends(require_user)
     # _options() and core/external_brain.py) is admin-only; this is the
     # single point that decides that for every turn.
     is_admin = auth_manager.is_admin(user)
+    chat_runs.require_session(body.session_id, user)
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         reference_context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
@@ -137,38 +140,58 @@ async def send_chat_message(body: ChatRequest, user: str = Depends(require_user)
 
 
 @router.post("/stream")
-async def stream_chat_message(body: ChatRequest, user: str = Depends(require_user)) -> StreamingResponse:
+async def stream_chat_message(body: ChatRequest, request: Request, user: str = Depends(require_user)) -> StreamingResponse:
+    snapshot = await start_chat_run(body, user)
+    return StreamingResponse(chat_runs.events(snapshot["id"], user, authorized=lambda: get_current_user(request) == user), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.post("/runs")
+async def start_chat_run(body: ChatRequest, user: str = Depends(require_user)) -> dict:
     is_admin = auth_manager.is_admin(user)
-    if chat_service.session_manager.get_session(body.session_id) is None:
-        raise HTTPException(404, "session not found")
-    if chat_service.is_busy(body.session_id):
-        raise HTTPException(409, "This chat is busy. Wait for the current response to finish.")
+    chat_runs.require_session(body.session_id, user)
+    if body.request_id is not None and (not body.request_id or len(body.request_id) > 100):
+        raise HTTPException(422, "Invalid request ID")
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         reference_context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
     except ValueError as error:
         raise HTTPException(422, str(error))
 
-    async def event_source():
-        try:
-            async for item in chat_service.stream_message(body.session_id, body.message, body.attachment_ids, is_admin,
-                                                          reference_context, chat_references.metadata(body.references)):
-                # A dict is a typed event - today, a permission request raised
-                # while the reply was being produced. Text stays exactly as it
-                # was, so nothing about the existing protocol changes.
-                payload = item if isinstance(item, dict) else {"chunk": item}
-                yield f"data: {json.dumps(payload)}\n\n"
-            yield "data: {\"done\": true}\n\n"
-        except Exception as error:
-            kind = chat_service.failure_kind(error)
-            message = ("The selected model is rate limited. Choose another model to retry."
-                       if kind == "rate_limited" else
-                       "The message could not be completed. Check its attachments and references before retrying."
-                       if kind == "request_error" else
-                       "The selected model failed. Check its connection or choose another model. Any partial reply has been saved.")
-            yield f"data: {json.dumps({'error': message, 'error_kind': kind})}\n\n"
+    return await chat_runs.start(body.session_id, user, body.message, body.attachment_ids,
+                                 chat_references.metadata(body.references), reference_context, body.request_id)
 
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+
+@router.get("/runs")
+async def list_chat_runs(session_id: str | None = None, active: bool = True, user: str = Depends(require_user)) -> list[dict]:
+    if session_id:
+        chat_runs.require_session(session_id, user)
+    rows = mobile_activity.list_runs(user, session_id=session_id, active=active)
+    visible = []
+    for row in rows:
+        try:
+            record = chat_runs.require_run(row["id"], user)
+            visible.append(chat_runs.snapshot_for_client(record))
+        except HTTPException:
+            continue
+    return visible
+
+
+@router.get("/runs/{run_id}")
+async def get_chat_run(run_id: str, user: str = Depends(require_user)) -> dict:
+    return chat_runs.snapshot_for_client(chat_runs.require_run(run_id, user))
+
+
+@router.get("/runs/{run_id}/events")
+async def chat_run_events(run_id: str, request: Request, after: int = 0, user: str = Depends(require_user)):
+    chat_runs.require_run(run_id, user)
+    return StreamingResponse(chat_runs.events(run_id, user, after, authorized=lambda: get_current_user(request) == user), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.post("/runs/{run_id}/stop")
+async def stop_chat_run(run_id: str, user: str = Depends(require_user)) -> dict:
+    return await chat_runs.stop(run_id, user)
 
 
 class CompactRequest(BaseModel):

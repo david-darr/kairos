@@ -9,6 +9,9 @@ import { setupSidebar, restoreSidebar } from "./sidebar.js";
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
+import { restoreInFlight } from './chatStream.js';
+import { registration as notificationRegistration } from './mobileNotifications.js';
+import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
 
 import { mountForgeRail } from './forgeRail.js';
 
@@ -160,6 +163,7 @@ async function performSwitch(tabId, options = {}) {
   if (activeUnmount) { activeUnmount(); activeUnmount = null; }
 
   activeTab = tabId;
+  document.documentElement.dataset.view = tabId;
   const titlebarTab = document.getElementById("titlebar-tab");
   if (titlebarTab) titlebarTab.textContent = tabId === 'forgeShell' ? 'Forge' : NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
   document.querySelectorAll(".nav-item").forEach((item) => {
@@ -199,27 +203,95 @@ async function performSwitch(tabId, options = {}) {
   closeMobileMenu();
 }
 
-// Mobile sidebar drawer (David's ask 2026-09-01, "similar UX/UI as Claude
-// and ChatGPT's mobile apps") — #sidebar becomes a slide-out overlay below
-// the responsive breakpoint (style.css's @media block); this just toggles
-// the class + backdrop. Inert above the breakpoint since the button/backdrop
-// are display:none there.
-function openMobileMenu() {
+const mobileMenuMedia = matchMedia('(max-width: 768px)');
+let mobileMenuOpener = null;
+const drawerControls = sidebar => [...sidebar.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')]
+  .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length && !node.closest('[inert]'));
+function syncMobileMenu() {
+  const sidebar = document.getElementById('sidebar');
+  const open = mobileMenuMedia.matches && sidebar.classList.contains('open');
+  document.documentElement.classList.toggle('mobile-menu-open', open);
+  sidebar.inert = mobileMenuMedia.matches && !open;
+  if (mobileMenuMedia.matches) sidebar.setAttribute('aria-hidden', String(!open));
+  else sidebar.removeAttribute('aria-hidden');
+  document.getElementById('mobile-menu-btn').setAttribute('aria-expanded', String(open));
+  document.getElementById('mobile-menu-btn').setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+}
+function openMobileMenu(opener = document.getElementById('mobile-menu-btn')) {
+  if (!mobileMenuMedia.matches) return;
+  mobileMenuOpener = opener;
+  document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'sidebar' } }));
   document.getElementById("sidebar").classList.add("open");
   document.getElementById("mobile-backdrop").classList.remove("hidden");
+  syncMobileMenu();
+  drawerControls(document.getElementById('sidebar'))[0]?.focus({ preventScroll: true });
 }
-function closeMobileMenu() {
+function closeMobileMenu(restoreFocus = true) {
+  const wasOpen = document.getElementById('sidebar').classList.contains('open');
   document.getElementById("sidebar").classList.remove("open");
   document.getElementById("mobile-backdrop").classList.add("hidden");
+  if (wasOpen && restoreFocus && mobileMenuMedia.matches) {
+    const target = mobileMenuOpener?.isConnected && mobileMenuOpener.getClientRects().length ? mobileMenuOpener : document.getElementById('mobile-menu-btn');
+    target.focus({ preventScroll: true });
+  }
+  syncMobileMenu();
 }
 function setupMobileMenu() {
   const btn = document.getElementById("mobile-menu-btn");
   const backdrop = document.getElementById("mobile-backdrop");
-  btn.innerHTML = ICONS.menu;
+  const sidebar = document.getElementById('sidebar');
+  btn.innerHTML = '<span class="menu-stroke"></span><span class="menu-stroke"></span><span class="menu-stroke"></span>';
+  btn.setAttribute('aria-controls', 'sidebar');
+  syncMobileMenu();
   btn.addEventListener("click", () => {
     document.getElementById("sidebar").classList.contains("open") ? closeMobileMenu() : openMobileMenu();
   });
-  backdrop.addEventListener("click", closeMobileMenu);
+  backdrop.addEventListener("click", () => closeMobileMenu());
+  registerMobileDrawer({ panel: sidebar, backdrop,
+    isOpen: () => sidebar.classList.contains('open'),
+    // Leave the outermost edge to Safari's system Back gesture.
+    canOpen: (target, touch) => isMainDrawerZone(touch) && !target.closest('.chat-mobile-header'),
+    open: openMobileMenu, close: () => closeMobileMenu(),
+    onDrag: (offset, width) => {
+      btn.classList.add('menu-dragging');
+      btn.style.setProperty('--menu-travel', `${Math.max(0, width + offset - 56 - parseFloat(getComputedStyle(btn).left))}px`);
+      btn.style.setProperty('--menu-progress', String(1 + offset / width));
+    },
+    onDragEnd: () => {
+      btn.classList.remove('menu-dragging');
+      btn.style.removeProperty('--menu-travel');
+      btn.style.removeProperty('--menu-progress');
+    },
+  });
+  // Close before navigation or an account/settings panel opens, so a panel
+  // outside the drawer can take focus without competing with its Tab trap.
+  sidebar.addEventListener('click', event => {
+    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row')) closeMobileMenu();
+  }, true);
+  document.addEventListener('kairos:mobile-drawer-opening', event => {
+    if (event.detail?.id !== 'sidebar') closeMobileMenu(false);
+  });
+  mobileMenuMedia.addEventListener('change', () => {
+    const hiddenFocus = mobileMenuMedia.matches && sidebar.contains(document.activeElement);
+    closeMobileMenu(false);
+    if (hiddenFocus) btn.focus({ preventScroll: true });
+  });
+  document.addEventListener('keydown', event => {
+    if (!mobileMenuMedia.matches || !sidebar.classList.contains('open') || event.defaultPrevented) return;
+    if (document.activeElement?.closest('dialog[open], [aria-modal="true"]')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMobileMenu();
+    } else if (event.key === 'Tab') {
+      const controls = drawerControls(sidebar);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !sidebar.contains(document.activeElement))) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !sidebar.contains(document.activeElement))) {
+        event.preventDefault(); first?.focus();
+      }
+    }
+  });
 }
 
 // How many agent inbox items and results wait on the person: a count on the
@@ -398,11 +470,13 @@ async function buildSidebarFooter() {
     } else {
       switchItem.addEventListener("click", async () => {
         await api("/api/auth/logout", { method: "POST" });
+        navigator.serviceWorker?.controller?.postMessage({ type: 'kairos:clear-notifications' });
         window.location.reload();
       });
     }
     logoutItem.addEventListener("click", async () => {
       await api("/api/auth/logout", { method: "POST" });
+      navigator.serviceWorker?.controller?.postMessage({ type: 'kairos:clear-notifications' });
       window.location.reload();
     });
   }
@@ -424,6 +498,13 @@ async function buildSidebarFooter() {
 
   row.append(cardWrap, settingsBtn);
   footer.appendChild(row);
+  if (navigator.userAgent.includes('KairosMobile/')) {
+    const nativeSettings = document.createElement('a');
+    nativeSettings.className = 'nav-item native-mobile-settings';
+    nativeSettings.href = 'kairos-mobile://controls';
+    nativeSettings.innerHTML = `${ICONS.settings}<span>iPhone & widgets</span>`;
+    footer.prepend(nativeSettings);
+  }
 }
 
 // Shared by the sidebar gear button and the command palette (Ctrl+K).
@@ -441,6 +522,7 @@ async function openSettings(options = {}) {
     ++navigationVersion;
     if (activeUnmount) { activeUnmount(); activeUnmount = null; }
     activeTab = null;
+    document.documentElement.dataset.view = 'settings';
     document.querySelectorAll(".nav-item").forEach((item) => { item.classList.remove("active"); item.removeAttribute("aria-current"); });
     const settingsView = document.createElement("div");
     settingsView.id = "view-content";
@@ -495,9 +577,6 @@ async function startApp() {
     const { tab, ...options } = event.detail;
     tab === "settings" ? openSettings(options) : switchTab(tab, options);
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeMobileMenu();
-  });
   // Adding/removing a tab in the Tool Store rebuilds the nav so it
   // appears immediately instead of after a reload.
   document.addEventListener("jarvis:tabs-changed", async () => {
@@ -508,6 +587,22 @@ async function startApp() {
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
   floatingProgress.init({ switchTab });
+  await restoreInFlight();
+  notificationRegistration().catch(() => {});
+  const openNotificationChat = async url => {
+    const link = new URL(url, location.origin);
+    const id = link.searchParams.get('chat');
+    if (link.origin !== location.origin || link.pathname !== '/' || !/^[a-f0-9]{12}$/.test(id || '')) return false;
+    try {
+      const session = await api(`/api/sessions/${id}`);
+      await switchTab(session.forge ? 'forgeShell' : 'chat', { sessionId: id });
+      history.replaceState(null, '', '/');
+      return true;
+    } catch (_) { return false; }
+  };
+  navigator.serviceWorker?.addEventListener('message', event => {
+    if (event.data?.type === 'kairos:open-chat') openNotificationChat(event.data.url);
+  });
   // Activating an external link in a reply (David's ask 2026-09-15). Those
   // links carry target="_blank"; electron/main.js refuses to open a real
   // second window for them and routes the URL here instead, so a web page
@@ -535,7 +630,13 @@ async function startApp() {
       window.jarvis.screenGrab.replyQuickDraft(draft.requestId, { ok: false, error: error.message });
     }
   });
-  await switchTab(appMode === 'forge' ? 'forgeHome' : 'home');
+  if (!await openNotificationChat(location.href)) {
+    const launch = new URL(location.href).searchParams;
+    const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');
+    await switchTab(['chat', 'home', 'library', 'notes', 'tasks', 'calendar'].includes(target)
+      ? target : appMode === 'forge' ? 'forgeHome' : 'home');
+    if (launch.has('newchat') || launch.has('view')) history.replaceState(null, '', '/');
+  }
 }
 
 useAppMenusForSelects();

@@ -528,7 +528,8 @@ class ChatTests(unittest.TestCase):
         with patch.object(chat_service, '_get_brain', AsyncMock(return_value=(FailingBrain(), False))), patch.object(chat_service, 'close_session_brain', AsyncMock()):
             res = client.post('/api/chat/stream', json={"session_id": self.sid, "message": "Hi"})
         self.assertIn('"error":', res.text)
-        self.assertNotIn('"done": true', res.text)
+        self.assertIn('"state": "failed"', res.text)
+        self.assertIn('"done": true', res.text)
         self.assertNotIn('private provider error', res.text)
         last = session_manager.get_session(self.sid)["messages"][-1]
         self.assertEqual(last["content"], "Partial **answer**")

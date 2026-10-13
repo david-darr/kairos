@@ -8,6 +8,7 @@
 // two when those are needed. Desktop widths only: under the breakpoint there
 // is no room for two readable columns.
 import { api, el, toast } from './api.js';
+import { shouldSendOnEnter } from './composerKeyboard.js';
 import * as chatStream from './chatStream.js';
 import { renderMessageBody } from './chatContent.js';
 import { showPermissionPrompt } from './permissionPrompt.js';
@@ -204,7 +205,7 @@ function build(session) {
   };
   send.addEventListener('click', () => submit());
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.defaultPrevented) { event.preventDefault(); submit({ fromKeyboard: true }); }
+    if (shouldSendOnEnter(event)) { event.preventDefault(); submit({ fromKeyboard: true }); }
   });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 }

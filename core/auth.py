@@ -16,6 +16,7 @@ process-wide internal token that once impersonated "internal-tool" was
 removed in roadmap phase 2 (2026-10-05).
 """
 import os
+import hashlib
 import secrets
 import time
 from typing import Optional
@@ -254,6 +255,13 @@ class AuthManager:
         if token in self._sessions:
             del self._sessions[token]
             write_json_atomic(SESSIONS_FILE, self._sessions)
+
+    def notification_session_valid(self, username: str, binding: str) -> bool:
+        """Validate device enrollment without persisting a bearer session token."""
+        return username in self._users["users"] and any(
+            row["username"] == username and row["expires_at"] > time.time()
+            and secrets.compare_digest(hashlib.sha256(token.encode()).hexdigest(), binding)
+            for token, row in self._sessions.items())
 
     # -- password reset (forgot password, David's ask 2026-09-10) ---------
     # Callers (routes/auth_routes.py) MUST return an identical response

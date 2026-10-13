@@ -56,9 +56,10 @@ from routes import (
     hook_routes,
     tool_routes,
     run_routes,
+    notification_routes,
 )
 from core import llamacpp_engine
-from services import chat_service, skills_service, swarm_service
+from services import chat_service, chat_runs, mobile_notifications, skills_service, swarm_service
 
 from core import logs as log_files  # installs the chat/task tag on every record
 
@@ -154,6 +155,9 @@ async def lifespan(_app: FastAPI):
     # the tailnet must still boot normally.
     await remote_access.start_if_enabled()
     await swarm_service.startup(_app)
+    from core import mobile_activity
+    mobile_activity.recover()
+    mobile_notifications.start()
     try:
         yield
     finally:
@@ -174,6 +178,8 @@ async def lifespan(_app: FastAPI):
             await discord_channel.stop()
             await connector_hub.stop_all()
             await tab_hooks.stop_all()
+            await chat_runs.shutdown()
+            await mobile_notifications.shutdown()
             await chat_service.shutdown()
             # Do not leave the built-in model process orphaned at shutdown.
             llamacpp_engine.stop()
@@ -218,6 +224,7 @@ app.include_router(trigger_routes.router)
 app.include_router(hook_routes.router)
 app.include_router(tool_routes.router)
 app.include_router(run_routes.router)
+app.include_router(notification_routes.router)
 
 # Developer Mode (David's ask 2026-09-01) — the only app.py edit a custom
 # tab ever needs. Eligible folder tabs and approved legacy routes get
@@ -247,6 +254,12 @@ app.mount(image_gen.GENERATED_FILES_URL_PREFIX, StaticFiles(directory=image_gen.
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(f"{STATIC_DIR}/index.html")
+
+
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    return FileResponse(f"{STATIC_DIR}/sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-store", "Service-Worker-Allowed": "/"})
 
 
 @app.get("/usage-overlay")

@@ -32,6 +32,14 @@ async def list_permissions(user: str = Depends(require_user)) -> dict:
 async def answer(request_id: str, body: Answer, user: str = Depends(require_user)) -> dict:
     # A request id is server-made and lives only while something is waiting on
     # it, so a stale or invented id answers nothing.
+    pending = permissions.pending_request(request_id)
+    if pending and pending.surface.startswith("chat:"):
+        from services.chat_runs import require_session
+        require_session(pending.surface.removeprefix("chat:"), user)
+    elif pending:
+        from core.auth import auth_manager
+        if not auth_manager.is_admin(user):
+            raise HTTPException(404, "request not found")
     if not permissions.answer(request_id, body.choice, user):
         raise HTTPException(409, "That request is no longer waiting for an answer.")
     return {"status": "answered"}

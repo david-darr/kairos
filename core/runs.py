@@ -138,6 +138,7 @@ class RunContext:
 # in-process tools do (found live 2026-10-06): for a chat, its run in
 # progress is also kept by chat id (enter/leave, current_for).
 CURRENT: contextvars.ContextVar[Optional[RunContext]] = contextvars.ContextVar("current_run", default=None)
+CHAT_RUN_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("chat_run_id", default=None)
 _BY_SESSION: dict[str, RunContext] = {}
 
 
