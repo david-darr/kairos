@@ -80,7 +80,8 @@ outputs from `out/` into the generated-files directory before handing them over.
    from a script argument array, exporting a PNG. An `fps=1` contact sheet can
    sample late; it does not prove that the exact cut or ending frame is clean.
 7. Listen for clicks, harsh peaks, silent sections, and timing drift. The renderer
-   applies `loudnorm=I=-16:TP=-1.5:LRA=11` before AAC encoding. Measure the final
+   measures the WAV, applies `loudnorm=I=-16:TP=-1.5:LRA=11` in two-pass linear mode
+   before AAC encoding, and prints the encoded MP4's loudness and true peak. Measure the final
    MP4 with FFmpeg, using arguments `-i out/video.mp4 -af
    loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json -f null -` and inspecting
    `input_i` and `input_tp`. Aim around -16 LUFS and peak under -1 dBFS, including
@@ -109,6 +110,9 @@ outputs from `out/` into the generated-files directory before handing them over.
 - Synthesize a WAV in code. Use no copyrighted music or samples. Normalize the
   floating-point mix before any soft clipping, then leave headroom for encoding.
   Keep transients on scene cuts and give the ending a short audio fade.
+- Never start the soundtrack with a hard hit on the very first sample (0 s). AAC
+  encoding overshoots it into a true-peak over well above -1 dBTP. Fade in over
+  about 30 ms and let the first hit land on a later beat.
 
 ## Capture gotchas
 
