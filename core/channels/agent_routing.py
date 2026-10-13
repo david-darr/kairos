@@ -61,6 +61,8 @@ async def direct(agent: dict, rest: str, channel_key: str, channel_label: str,
     agent_service.make_agent_chat(session_id, agent)
     # Admin: only the channel's trusted owner gets here, and agent chats run
     # in Auto, which applies to admin chats (core/permissions.py).
+    # Direct chat deliberately bypasses work admission; whether off/capped
+    # agents should answer is David's pending product call (2026-10-13).
     return await chat_service.send_message(session_id, rest, attachment_ids or [], is_admin=True)
 
 

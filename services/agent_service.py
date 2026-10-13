@@ -21,6 +21,7 @@ What this module owns:
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -58,6 +59,10 @@ CODE_RE = re.compile(r"\[([A-Z0-9])-([0-9a-f]{6})\]")
 APPROVALS = {"approve", "approved", "lgtm", "ok", "okay", "yes", "looks good", "ship it", "done"}
 
 
+class AdmissionDenied(ValueError):
+    """Background work was refused; its message is safe to show the caller."""
+
+
 class AgentService:
     def __init__(self) -> None:
         self._agents: dict = read_json(AGENTS_FILE, {})
@@ -70,6 +75,12 @@ class AgentService:
         # an agent's card and goal can overlap, so its identity cannot be a
         # shared slot. No run context means an ordinary, unattached chat item.
         self._current: ContextVar[Optional[dict]] = ContextVar("agent_work", default=None)
+        # The app runs one scheduler process (Agents 2.0, 2026-10-13).
+        # Holds are process-local so a crash cannot strand one forever;
+        # task_service's durable claims still recover interrupted work as
+        # lost history on restart (cards through their existing leases).
+        self._admission_lock = threading.RLock()
+        self._reservations: dict[str, dict] = {}
 
     # -- identities -------------------------------------------------------------
 
@@ -315,7 +326,19 @@ class AgentService:
     @contextmanager
     def run(self, agent_id: str, card_id: Optional[str] = None,
             task_id: Optional[str] = None) -> Iterator[list[dict]]:
-        """Attribute inbox items during this run; on exit, fill its questions list."""
+        """Admit background work and hold its slot through every exit.
+
+        AdmissionDenied carries the off/capped reason. This is the only
+        enforcing entry point; can_run is an informative snapshot.
+        Attribute inbox items during the run; on exit, fill its questions.
+        """
+        with self._admission_lock:
+            may_run, reason = self._can_run(agent_id, claimed_work_id=card_id or task_id)
+            if not may_run:
+                raise AdmissionDenied(reason)
+            reservation = uuid.uuid4().hex
+            self._reservations[reservation] = {"agent_id": agent_id, "work_id": card_id or task_id,
+                                               "started_at": time.time()}
         current = {"agent_id": agent_id, "card_id": card_id, "task_id": task_id, "raised": [], "active": True}
         questions: list[dict] = []
         token = self._current.set(current)
@@ -325,25 +348,57 @@ class AgentService:
             # Reset even on cancellation; restore an outer run if nested.
             # Child tasks inherit context, so a finished run must also stop
             # attributing items from a child that outlives it.
-            current["active"] = False
-            self._current.reset(token)
-            questions.extend(i for i in (self.get_item(x) for x in current["raised"])
-                             if i and i["kind"] != "report")
+            try:
+                current["active"] = False
+                self._current.reset(token)
+                questions.extend(i for i in (self.get_item(x) for x in current["raised"])
+                                 if i and i["kind"] != "report")
+            finally:
+                with self._admission_lock:
+                    self._reservations.pop(reservation, None)
 
     def runs_today(self, agent_id: str) -> int:
+        return self._runs_today(agent_id)
+
+    def _runs_today(self, agent_id: str, claimed_work_id: Optional[str] = None) -> int:
         from services.task_service import task_service
-        owned = {t["id"] for t in task_service.list_tasks() if t.get("agent_id") == agent_id}
-        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        return sum(1 for r in task_service.list_runs() if r["task_id"] in owned
-                   and (r.get("started_at") or r["ran_at"]) >= midnight)
+        with self._admission_lock:
+            work = [t for t in task_service.list_tasks() if t.get("agent_id") == agent_id]
+            owned = {t["id"] for t in work}
+            midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            history = task_service.list_runs()
+            completed = sum(1 for r in history if r["task_id"] in owned
+                            and (r.get("started_at") or r["ran_at"]) >= midnight)
+            # Durable starts bridge a restart until lost-work recovery runs.
+            # This matters for cards still waiting for their lease to expire:
+            # dropping the process-local hold must not open an extra slot.
+            # A caller handing us a preclaimed card has not started its model
+            # yet, so admission excludes that claim's own slot (2026-10-13).
+            unfinished = {t["id"] for t in work
+                          if t["id"] != claimed_work_id and (t.get("run_started_at") or 0) >= midnight
+                          and not any(r["task_id"] == t["id"] and r.get("started_at") == t["run_started_at"]
+                                      for r in history)}
+            # A result is saved before disconnect/cleanup finishes. Its
+            # reservation still lives, but must not count that same run
+            # twice (Agents 2.0, 2026-10-13).
+            reserved = sum(1 for hold in self._reservations.values()
+                           if hold["agent_id"] == agent_id and hold["started_at"] >= midnight
+                           and hold["work_id"] not in unfinished
+                           and not any(r["task_id"] == hold["work_id"] and r["ran_at"] >= hold["started_at"]
+                                       for r in history))
+            return completed + len(unfinished) + reserved
 
     def can_run(self, agent_id: str) -> tuple[bool, str]:
+        """Informative only; run() makes this decision while reserving a slot."""
+        return self._can_run(agent_id)
+
+    def _can_run(self, agent_id: str, claimed_work_id: Optional[str] = None) -> tuple[bool, str]:
         agent = self.get(agent_id)
         if agent is None:
             return False, "its agent was deleted"
         if not agent["enabled"]:
             return False, f"{agent['name']} is turned off"
-        if self.runs_today(agent_id) >= agent["daily_run_cap"]:
+        if self._runs_today(agent_id, claimed_work_id) >= agent["daily_run_cap"]:
             return False, f"{agent['name']} reached its {agent['daily_run_cap']} runs for today"
         return True, ""
 

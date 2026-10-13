@@ -28,7 +28,7 @@ from typing import Optional
 from core import events, file_checkpoints, helpers, logs as log_files, outbox, runs, token_usage
 from core.brain import Brain
 from core.builtin_tasks import BUILTIN_TASKS
-from services.agent_service import agent_service, is_silent
+from services.agent_service import AdmissionDenied, agent_service, is_silent
 from services.task_service import task_service
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,10 @@ _loop_task: asyncio.Task | None = None
 _locks: dict[str, tuple] = {}
 # The work of each run in progress, by task id, for stop_run().
 _running: dict[str, asyncio.Task] = {}
+# A scheduled starter may be awaiting its worker's admission before the
+# occurrence is claimed. A second tick must leave that claim to it rather
+# than skipping the occurrence out from under it (2026-10-13).
+_scheduled: set[str] = set()
 # The two lanes' current background run (_tick).
 _lanes: dict[str, Optional[asyncio.Task]] = {"schedule": None, "card": None}
 # The regular MCP server check (core/mcp_client.check_all, roadmap phase 6).
@@ -143,33 +147,39 @@ async def start_run(task: dict, source: str = "manual", wait: bool = False) -> b
     has finished (a trigger's event or an answer must not be lost). source:
     "schedule" (claims the occurrence: the schedule moves on first), or
     "manual", "trigger", "answer" (the schedule is left alone). Returns True
-    once this run has ended, however it ended."""
+    once this run has ended, however it ended. Agent admission refusals raise
+    AdmissionDenied with the reason; an unclaimable card returns False."""
     lock = _lock(task["id"])
     if lock.locked() and not wait:
         return False
     async with lock:
-        if source == "schedule" and task.get("schedule_kind") != "card":
-            # The occurrence is claimed here, before anything can await: the
-            # schedule moves on now, so neither a crash mid-run nor a second
-            # pass of the loop can run it again.
-            if task_service.claim_occurrence(task["id"]) is None:
-                return True  # gone, turned off, or no longer due
         work = asyncio.get_running_loop().create_task(_run_task(task, source))
         _running[task["id"]] = work
+        if source == "schedule":
+            _scheduled.add(task["id"])
         try:
             # wait() rather than awaiting the work: stopping it cancels the
             # work, not whoever started it (a Run now request, say).
             await asyncio.wait({work})
+        except asyncio.CancelledError:
+            # Cancelling the starter must not orphan its work or reservation
+            # (Agents 2.0, 2026-10-13).
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+            raise
         finally:
             _running.pop(task["id"], None)
+            _scheduled.discard(task["id"])
         if work.cancelled():
-            helpers.stop_parent(f"task:{task['id']}")  # its helpers stop with it (core/helpers.py)
-            task_service.record_stopped(task["id"])
             events.emit("task.stopped", f"{task['name']} was stopped", task_id=task["id"])
             logger.info("'%s' (%s) was stopped", task["name"], task["id"])
         elif work.exception() is not None:
+            if isinstance(work.exception(), AdmissionDenied):
+                raise work.exception()
             # Each run records its own failures; this is a bug in that path.
             logger.error("'%s' (%s): the run raised", task["name"], task["id"], exc_info=work.exception())
+        elif work.result() is False:
+            return False
     return True
 
 
@@ -182,19 +192,62 @@ def stop_run(task_id: str) -> bool:
     return True
 
 
-def start_in_background(task: dict, source: str) -> None:
+def start_in_background(task: dict, source: str) -> asyncio.Task:
     """A run started by an event (a trigger, an answer) rather than by a
     person waiting on it: in the background, after any run of the same task
     already going."""
-    asyncio.get_running_loop().create_task(start_run(task, source, wait=True))
+    async def start():
+        try:
+            return await start_run(task, source, wait=True)
+        except AdmissionDenied:
+            # The shared boundary already reports the reason in the feed;
+            # event callers have no waiting HTTP request to receive it.
+            return False
+
+    return asyncio.get_running_loop().create_task(start())
 
 
-async def _run_task(task: dict, source: str = "manual") -> None:
+async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
     # Lines logged while the task runs name it (core/logs.py).
     tag = log_files.set_log_tag(f"task:{task['id']}")
+    card = task.get("schedule_kind") == "card"
+    raised: list = []
     try:
-        await _run_task_tagged(task, source)
+        # Every background surface enters here, before claiming work or
+        # connecting a model. The context owns admission through recording
+        # failures/stops and disconnecting (Agents 2.0, 2026-10-13).
+        with (agent_service.run(task["agent_id"], card_id=task["id"] if card else None,
+                                task_id=None if card else task["id"])
+              if task.get("agent_id") else nullcontext([])) as raised:
+            if card and task.get("status") != "running":
+                task = task_service.claim_next_card(card_id=task["id"])
+                if task is None:
+                    return False
+            elif source == "schedule" and not card:
+                # Claim before the first await: a crash loses this occurrence
+                # rather than repeating it on the next scheduler pass.
+                if task_service.claim_occurrence(task["id"]) is None:
+                    return None
+            try:
+                await _run_task_tagged(task, source)
+            except asyncio.CancelledError:
+                helpers.stop_parent(f"task:{task['id']}")
+                task_service.record_stopped(task["id"])
+                raise
+    except AdmissionDenied as exc:
+        if source == "schedule" and not card:
+            task_service.skip_occurrence(task["id"])
+        events.emit("task.refused", f"Not run: {exc}.", level="warning", task_id=task["id"])
+        logger.info("'%s' (%s): not run: %s", task["name"], task["id"], exc)
+        raise
     finally:
+        if card and task and task.get("agent_id"):
+            # Answers raised during the run belong to the next run. The
+            # questions list is filled only when the context exits.
+            if (task.get("reply_to") and task.get("status") == "review"
+                    and any(i["kind"] == "question" and i["status"] == "answered" for i in raised)
+                    and not agent_service.open_items_for_card(task["id"])):
+                task_service.set_card_status(task["id"], "ready")
         log_files.reset_log_tag(tag)
 
 
@@ -203,28 +256,23 @@ async def _run_card(card: dict) -> None:
     back to Ready for a retry, or to Blocked when out of attempts."""
     brain = None
     agent = agent_service.get(card.get("agent_id"))
-    # Bound before the try: the finally below reads it, so anything that threw
-    # while entering the run context would otherwise surface here as a
-    # NameError and hide the real failure.
-    raised: list = []
     try:
-        with (agent_service.run(agent["id"], card_id=card["id"]) if agent else nullcontext([])) as raised:
-            brain = _task_brain(card)
-            await brain.connect()
-            if card.get("context") and hasattr(brain, "pending_reference_taint"):
-                brain.pending_reference_taint = "context from another conversation"
-            prompt = task_service.card_prompt(card)
-            if agent:
-                prompt = agent_service.run_prompt(agent, prompt)
-            async with file_checkpoints.around_turn(f"card:{card['id']}"):
-                output = await complete(brain, prompt, card, "card")
-            task_service.finish_card(card["id"], output)
-            events.emit("card.review", f"{card['name']} is ready for review", task_id=card["id"])
-            if agent:
-                agent_service.notify_review(agent["id"], card)
-            from services.agent_handoff import finished
-            finished(card, output)
-            logger.info("card '%s' (%s) finished; waiting for review", card["name"], card["id"])
+        brain = _task_brain(card)
+        await brain.connect()
+        if card.get("context") and hasattr(brain, "pending_reference_taint"):
+            brain.pending_reference_taint = "context from another conversation"
+        prompt = task_service.card_prompt(card)
+        if agent:
+            prompt = agent_service.run_prompt(agent, prompt)
+        async with file_checkpoints.around_turn(f"card:{card['id']}"):
+            output = await complete(brain, prompt, card, "card")
+        task_service.finish_card(card["id"], output)
+        events.emit("card.review", f"{card['name']} is ready for review", task_id=card["id"])
+        if agent:
+            agent_service.notify_review(agent["id"], card)
+        from services.agent_handoff import finished
+        finished(card, output)
+        logger.info("card '%s' (%s) finished; waiting for review", card["name"], card["id"])
     except Exception as e:
         failed = task_service.fail_card(card["id"], str(e) or type(e).__name__)
         blocked = failed["status"] == "blocked"
@@ -233,13 +281,6 @@ async def _run_card(card: dict) -> None:
                     level="error" if blocked else "warning", task_id=card["id"])
         logger.exception("card '%s' (%s) failed (attempt %s)", card["name"], card["id"], card["attempts"])
     finally:
-        if agent:
-            # An answer can arrive through the source chat before this run
-            # ends. It still belongs to the next run, as an inbox answer does.
-            if (card.get("reply_to") and card.get("status") == "review"
-                    and any(i["kind"] == "question" and i["status"] == "answered" for i in raised)
-                    and not agent_service.open_items_for_card(card["id"])):
-                task_service.set_card_status(card["id"], "ready")
         if brain is not None:
             await brain.disconnect()
 
@@ -252,15 +293,19 @@ async def dispatch_cards() -> Optional[dict]:
     for card in task_service.list_tasks():
         if card.get("reply_to") and card.get("status") == "ready":
             task_service._sync_handoff(card)
-    card = task_service.claim_next_card(eligible=agent_may_run)
+    card = task_service.next_card(eligible=agent_may_run)
     if card is not None:
-        await start_run(card, "schedule")
+        try:
+            if not await start_run(card, "schedule"):
+                return None
+        except AdmissionDenied:
+            return None
     return card
 
 
 def agent_may_run(task: dict) -> bool:
-    """Ordinary work always may; an agent's only while it is on and under
-    its daily run cap."""
+    """A board selection hint, not enforcement: run() reserves the slot
+    when this work actually starts (Agents 2.0, 2026-10-13)."""
     return not task.get("agent_id") or agent_service.can_run(task["agent_id"])[0]
 
 
@@ -270,16 +315,15 @@ async def _run_goal(task: dict, agent: dict) -> None:
     is in the history."""
     brain = None
     try:
-        with agent_service.run(agent["id"], task_id=task["id"]):
-            brain = _task_brain(task)
-            await brain.connect()
-            async with file_checkpoints.around_turn(f"task:{task['id']}"):
-                output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
-            task_service.record_run(task["id"], output=output)
-            if task.get("report_when") == "always" or not is_silent(output):
-                item = agent_service.add_item(agent["id"], "report", task["name"], output)
-                agent_service.notify(item)
-            events.emit("task.run", f"{agent['name']} checked \"{task['name']}\"", task_id=task["id"])
+        brain = _task_brain(task)
+        await brain.connect()
+        async with file_checkpoints.around_turn(f"task:{task['id']}"):
+            output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
+        task_service.record_run(task["id"], output=output)
+        if task.get("report_when") == "always" or not is_silent(output):
+            item = agent_service.add_item(agent["id"], "report", task["name"], output)
+            agent_service.notify(item)
+        events.emit("task.run", f"{agent['name']} checked \"{task['name']}\"", task_id=task["id"])
     except Exception as e:
         task_service.record_run(task["id"], output="", error=str(e))
         events.emit("task.failed", f"{agent['name']}'s goal \"{task['name']}\" failed: {e}", level="error",
@@ -364,12 +408,13 @@ async def _run_due() -> None:
     for task in task_service.due_tasks():
         if not task_service.is_due(task["id"]):
             continue  # claimed or changed since the list was read
-        if not agent_may_run(task):
-            # Off or out of runs today: this occurrence is skipped, not
-            # queued, so turning it back on never floods runs.
-            task_service.skip_occurrence(task["id"])
+        try:
+            started = await start_run(task, "schedule")
+        except AdmissionDenied:
+            # The boundary skips refused occurrences so enabling an agent
+            # again never floods it with missed checks.
             continue
-        if not await start_run(task, "schedule") and task_service.is_due(task["id"]):
+        if not started and task["id"] not in _scheduled and task_service.is_due(task["id"]):
             # Already running (a Run now, say): this occurrence is covered.
             task_service.skip_occurrence(task["id"])
             logger.info("task '%s' (%s) was due while already running; skipped to its next time",

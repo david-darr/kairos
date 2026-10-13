@@ -5,6 +5,9 @@ Runs against a throwaway data folder; models are stand-ins, so nothing is
 spent. Run: python scripts/test_agents.py
 """
 import asyncio
+import hashlib
+import hmac
+import json
 import os
 import sys
 import tempfile
@@ -89,6 +92,251 @@ class AgentTestCase(unittest.TestCase):
 
 
 class RunTests(AgentTestCase):
+    def test_the_daily_run_cap_holds_under_concurrent_card_and_goal_starts(self):
+        agent_service.update(self.agent["id"], daily_run_cap=1)
+        card, goal = self.card(), self.goal()
+        goal["next_run_at"] = "2000-01-01T00:00:00+00:00"
+
+        async def overlap():
+            started, finish = asyncio.Event(), asyncio.Event()
+
+            async def connect(brain):
+                started.set()
+                await finish.wait()
+
+            with patch.object(FakeBrain, "connect", connect):
+                workers = [asyncio.create_task(task_scheduler.dispatch_cards()),
+                           asyncio.create_task(task_scheduler._run_due())]
+                try:
+                    await asyncio.wait_for(started.wait(), timeout=5)
+                    # Hold before checkpoints/model output: both lanes reach
+                    # admission with no completed record to count.
+                    for _ in range(20):
+                        await asyncio.sleep(0)
+                    self.assertEqual(task_scheduler._task_brain.call_count, 1,
+                                     "a cap of one must admit only one lane")
+                    self.assertEqual(agent_service.runs_today(self.agent["id"]), 1)
+                finally:
+                    finish.set()
+                    await asyncio.gather(*workers)
+
+        asyncio.run(overlap())
+        self.assertEqual(len(task_service.list_runs(card["id"])) + len(task_service.list_runs(goal["id"])), 1)
+
+    def test_webhook_goal_respects_off_and_cap_and_reports_the_reason(self):
+        import httpx
+        from routes import trigger_routes
+        from services.trigger_service import trigger_service
+
+        goal = self.goal()
+        trigger, secret = trigger_service.create("Goal hook", preset="github", action="task",
+                                                  task_id=goal["id"], auto_run=True)
+        self.addCleanup(trigger_service.delete, trigger["id"])
+        hook_app = FastAPI()
+        hook_app.include_router(trigger_routes.router)
+        body = json.dumps({"ref": "refs/heads/main"}).encode()
+        signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        original_start = task_scheduler.start_in_background
+
+        async def post(delivery):
+            background = []
+
+            def start(task, source):
+                work = original_start(task, source)
+                background.append(work)
+                return work
+
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=hook_app), base_url="http://test") as client:
+                with patch.object(task_scheduler, "start_in_background", side_effect=start):
+                    response = await client.post(f"/api/triggers/{trigger['id']}", content=body, headers={
+                        "X-Hub-Signature-256": signature, "X-GitHub-Event": "push", "X-GitHub-Delivery": delivery})
+                self.assertEqual(response.status_code, 202, response.text)
+                self.assertEqual(len(background), 1, "the signed webhook reached the real background path")
+                return await asyncio.gather(*background)
+
+        for enabled, reason in ((False, "Scout is turned off"), (True, "Scout reached its 1 runs for today")):
+            with self.subTest(reason=reason):
+                agent_service.update(self.agent["id"], enabled=enabled, daily_run_cap=1)
+                if enabled:
+                    task_service.record_run(goal["id"], "already ran")
+                emitted = task_scheduler.events.emit
+                emitted.reset_mock()
+                self.assertEqual(asyncio.run(post(str(enabled))), [False])
+                self.assertEqual(FakeBrain.prompts, [])
+                self.assertEqual(emitted.call_args.args[:2], ("task.refused", f"Not run: {reason}."))
+                self.assertNotIn("run_started_at", goal, "refusal never claims the goal")
+                self.assertEqual(agent_service._reservations, {})
+
+    def _assert_run_releases_reservation(self, outcome):
+        agent_service.update(self.agent["id"], daily_run_cap=2)
+        goal = self.goal()
+
+        async def run():
+            started = asyncio.Event()
+
+            async def step():
+                self.assertEqual(agent_service.runs_today(self.agent["id"]), 1)
+                started.set()
+                if outcome == "cancelled":
+                    await asyncio.Event().wait()
+                if outcome == "failed":
+                    raise ValueError("model crashed")
+                return "done"
+
+            FakeBrain.script = [step]
+            work = asyncio.create_task(task_scheduler.start_run(goal))
+            await asyncio.wait_for(started.wait(), timeout=10)
+            if outcome == "cancelled":
+                self.assertTrue(task_scheduler.stop_run(goal["id"]))
+            await work
+            self.assertEqual(agent_service._reservations, {})
+            self.assertEqual(agent_service.runs_today(self.agent["id"]), 1, "history replaces the hold")
+            self.assertTrue(agent_service.can_run(self.agent["id"])[0], "one slot remains")
+            self.assertEqual(task_service.list_runs(goal["id"])[0]["outcome"],
+                             "stopped" if outcome == "cancelled" else outcome)
+            await task_scheduler.start_run(goal)
+            self.assertEqual(agent_service.runs_today(self.agent["id"]), 2)
+            self.assertEqual(agent_service._reservations, {})
+            self.assertFalse(agent_service.can_run(self.agent["id"])[0], "the cap keeps its meaning")
+
+        asyncio.run(run())
+        self.assertEqual(len(FakeBrain.prompts), 2)
+
+    def test_success_releases_the_reservation(self):
+        self._assert_run_releases_reservation("succeeded")
+
+    def test_failure_releases_the_reservation(self):
+        self._assert_run_releases_reservation("failed")
+
+    def test_cancellation_releases_the_reservation(self):
+        self._assert_run_releases_reservation("cancelled")
+
+    def test_context_releases_without_history_on_success_failure_and_cancellation(self):
+        agent_service.update(self.agent["id"], daily_run_cap=1)
+        from services.agent_service import AdmissionDenied
+
+        async def run():
+            for outcome in (None, ValueError("crashed"), asyncio.CancelledError()):
+                with self.subTest(outcome=type(outcome).__name__):
+                    try:
+                        with agent_service.run(self.agent["id"]):
+                            self.assertEqual(agent_service.runs_today(self.agent["id"]), 1)
+                            with self.assertRaisesRegex(AdmissionDenied, "Scout reached its 1 runs"):
+                                with agent_service.run(self.agent["id"]):
+                                    self.fail("a second run was admitted")
+                            if outcome:
+                                raise outcome
+                    except (ValueError, asyncio.CancelledError):
+                        pass
+                    self.assertEqual(agent_service._reservations, {})
+                    self.assertTrue(agent_service.can_run(self.agent["id"])[0])
+
+        asyncio.run(run())
+
+    def test_restart_drops_holds_and_recovers_lost_work_into_history(self):
+        from services.agent_service import AgentService
+        from services.task_service import TaskService
+
+        goal = self.goal()
+        agent_service.update(self.agent["id"], daily_run_cap=2)
+        with agent_service.run(self.agent["id"], task_id=goal["id"]):
+            task_service.mark_started(goal["id"])
+            restarted_agents, restarted_tasks = AgentService(), TaskService()
+            self.assertEqual(restarted_agents._reservations, {}, "holds cannot survive a process restart")
+            with patch("services.task_service.task_service", restarted_tasks):
+                self.assertEqual(restarted_agents.runs_today(self.agent["id"]), 1,
+                                 "the durable start covers the gap before recovery")
+            self.assertEqual([t["id"] for t in restarted_tasks.recover_interrupted_runs()], [goal["id"]])
+            with patch("services.task_service.task_service", restarted_tasks):
+                self.assertEqual(restarted_agents.runs_today(self.agent["id"]), 1)
+                self.assertTrue(restarted_agents.can_run(self.agent["id"])[0], "only the lost run counts")
+
+    def test_restart_counts_a_lost_card_once_before_and_after_lease_recovery(self):
+        from services.agent_service import AgentService
+        from services.task_service import TaskService
+
+        card = self.card()
+        agent_service.update(self.agent["id"], daily_run_cap=2)
+        with agent_service.run(self.agent["id"], card_id=card["id"]):
+            task_service.claim_next_card(card_id=card["id"])
+            restarted_agents, restarted_tasks = AgentService(), TaskService()
+            with patch("services.task_service.task_service", restarted_tasks):
+                self.assertEqual(restarted_agents.runs_today(self.agent["id"]), 1)
+                self.assertEqual([t["id"] for t in restarted_tasks.reclaim_stale_cards(now=card["claimed_until"] + 1)],
+                                 [card["id"]])
+                self.assertEqual(restarted_agents.runs_today(self.agent["id"]), 1, "the lost record replaces its claim")
+                self.assertTrue(restarted_agents.can_run(self.agent["id"])[0])
+
+    def test_job_still_queues_with_an_informative_off_or_capped_message(self):
+        from core.channels.agent_routing import _queue_job
+
+        for enabled, reason in ((False, "turned off"), (True, "reached its 1 runs for today")):
+            with self.subTest(enabled=enabled):
+                agent_service.update(self.agent["id"], enabled=enabled, daily_run_cap=1)
+                if enabled:
+                    task_service.record_run(self.goal()["id"], "already ran")
+                message = _queue_job(self.agent, "Find another board")
+                self.assertIn("Queued for Scout", message)
+                self.assertIn("It will start when it can", message)
+                self.assertIn(reason, message)
+                self.assertEqual(agent_service._reservations, {})
+        self.assertEqual(sum(t.get("status") == "ready" for t in task_service.list_tasks()
+                             if t.get("agent_id") == self.agent["id"]), 2)
+
+    def test_manual_card_and_goal_surface_refusal_without_claiming_work(self):
+        from fastapi import HTTPException
+        from routes.task_routes import run_task_now
+
+        card, goal = self.card(), self.goal()
+        for enabled, reason in ((False, "Scout is turned off"), (True, "Scout reached its 1 runs for today")):
+            agent_service.update(self.agent["id"], enabled=enabled, daily_run_cap=1)
+            if enabled:
+                task_service.record_run(goal["id"], "already ran")
+            for work in (card, goal):
+                with self.subTest(enabled=enabled, kind=work["schedule_kind"]):
+                    with self.assertRaises(HTTPException) as caught:
+                        asyncio.run(run_task_now(work["id"], user="david", _=None))
+                    self.assertEqual(caught.exception.status_code, 409)
+                    self.assertEqual(caught.exception.detail, f"Not run: {reason}.")
+                    self.assertNotIn("run_started_at", work)
+        self.assertEqual((card["status"], card["attempts"]), ("ready", 0))
+        self.assertEqual(FakeBrain.prompts, [])
+
+    def test_cancelling_the_starter_does_not_orphan_work_or_a_reservation(self):
+        goal = self.goal()
+
+        async def cancel():
+            started = asyncio.Event()
+
+            async def step():
+                started.set()
+                await asyncio.Event().wait()
+
+            FakeBrain.script = [step]
+            starter = asyncio.create_task(task_scheduler.start_run(goal))
+            await asyncio.wait_for(started.wait(), timeout=10)
+            starter.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await starter
+            self.assertEqual(agent_service._reservations, {})
+            self.assertFalse(task_scheduler.run_in_progress(goal["id"]))
+            self.assertEqual(task_service.list_runs(goal["id"])[0]["outcome"], "stopped")
+
+        asyncio.run(cancel())
+
+    def test_recorded_run_is_not_counted_twice_during_disconnect(self):
+        agent_service.update(self.agent["id"], daily_run_cap=2)
+        goal = self.goal()
+
+        async def disconnect(brain):
+            self.assertEqual(len(agent_service._reservations), 1, "hold lasts through disconnect")
+            self.assertEqual(agent_service.runs_today(self.agent["id"]), 1, "record replaces the live count")
+            self.assertTrue(agent_service.can_run(self.agent["id"])[0])
+
+        with patch.object(FakeBrain, "disconnect", disconnect):
+            asyncio.run(task_scheduler.start_run(goal))
+        self.assertEqual(agent_service._reservations, {})
+
     def test_overlapping_card_and_goal_keep_their_own_questions(self):
         card, goal = self.card(), self.goal()
 
@@ -859,6 +1107,20 @@ class DiscordAgentTests(AgentTestCase):
         self.assertIn("with salaries", card["prompt"])
         self.assertTrue(self.sent[0].startswith("Queued for Scout"))
         self.assertFalse(self.turn.called, "a job is not a chat turn")
+
+    def test_off_and_capped_agents_still_answer_direct_chat(self):
+        client = self.client()
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                agent_service.update(self.agent["id"], enabled=enabled, daily_run_cap=1)
+                if enabled:
+                    task_service.record_run(self.goal()["id"], "already ran")
+                self.turn.reset_mock()
+                with patch.object(agent_service, "chat_endpoint", return_value="claude"):
+                    self.say(client, "Scout, hello")
+                self.turn.assert_called_once()
+                self.assertEqual(self.sent[-1], "agent reply")
+                self.assertEqual(agent_service._reservations, {})
 
     def test_replying_to_a_question_answers_it(self):
         from services.agent_service import code_for

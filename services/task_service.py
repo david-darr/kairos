@@ -308,13 +308,9 @@ class TaskService:
         eligible(card) can hold a card back (an agent turned off or out of
         runs for today) without moving it."""
         now = time.time() if now is None else now
-        allowed = ("ready", "backlog") if card_id else ("ready",)
-        ready = [c for c in self._tasks.values()
-                 if c["schedule_kind"] == "card" and c["status"] in allowed and not self.waiting_on(c)
-                 and (card_id is None or c["id"] == card_id) and (eligible is None or eligible(c))]
-        if not ready:
+        card = self.next_card(card_id=card_id, eligible=eligible)
+        if card is None:
             return None
-        card = min(ready, key=lambda c: c["created_at"])
         card["status"] = "running"
         card["attempts"] += 1
         card["claimed_until"] = now + CARD_LEASE_SECONDS
@@ -322,6 +318,17 @@ class TaskService:
         self._save_tasks()
         self._sync_handoff(card)
         return card
+
+    def next_card(self, card_id: Optional[str] = None, eligible=None) -> Optional[dict]:
+        """Find work without claiming it: admission must hold a slot before
+        a card spends an attempt (Agents 2.0, 2026-10-13)."""
+        allowed = ("ready", "backlog") if card_id else ("ready",)
+        ready = [c for c in self._tasks.values()
+                 if c["schedule_kind"] == "card" and c["status"] in allowed and not self.waiting_on(c)
+                 and (card_id is None or c["id"] == card_id) and (eligible is None or eligible(c))]
+        if not ready:
+            return None
+        return min(ready, key=lambda c: c["created_at"])
 
     def finish_card(self, card_id: str, output: str) -> dict:
         card = self._tasks[card_id]

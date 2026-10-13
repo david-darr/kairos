@@ -177,19 +177,17 @@ async def run_task_now(task_id: str, user: str = Depends(require_user), _: None 
     task = task_service.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    if task.get("agent_id"):
-        from services.agent_service import agent_service
-        may_run, why_not = agent_service.can_run(task["agent_id"])
-        if not may_run:
-            raise HTTPException(status_code=409, detail=f"Not run: {why_not}.")
-    if task["schedule_kind"] == "card":
-        # A card runs through the board's claim, so it cannot run twice at once
-        # or ahead of the cards it waits on.
-        task = task_service.claim_next_card(card_id=task_id)
-        if task is None:
-            raise HTTPException(status_code=409, detail="this card is running, finished, or still waiting on other cards")
-    if not await task_scheduler.start_run(task, "manual"):
-        raise HTTPException(status_code=409, detail="this task is already running")
+    from services.agent_service import AdmissionDenied
+    if task["schedule_kind"] == "card" and task_service.next_card(card_id=task_id) is None:
+        raise HTTPException(status_code=409, detail="this card is running, finished, or still waiting on other cards")
+    try:
+        started = await task_scheduler.start_run(task, "manual")
+    except AdmissionDenied as exc:
+        raise HTTPException(status_code=409, detail=f"Not run: {exc}.")
+    if not started:
+        reason = ("this card is running, finished, or still waiting on other cards"
+                  if task["schedule_kind"] == "card" else "this task is already running")
+        raise HTTPException(status_code=409, detail=reason)
     # Its message, if any, goes out now, so the answer can say whether it landed.
     await outbox.send_due()
     runs = task_service.list_runs(task_id)
