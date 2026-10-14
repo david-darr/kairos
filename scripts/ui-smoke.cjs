@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, ".scratch-4i", "run-" + Date.now());
+const output = path.join(root, ".scratch-4ii", "run-" + Date.now());
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -295,6 +295,14 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    if (process.argv.includes('--sidebar-bots-only')) {
+      await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
+        sessions: calendarFixtures.sessions, win, errors });
+      assert.deepEqual(errors, [], 'Sidebar bots renderer errors');
+      console.log('PASS: sidebar bots (9 cases), no renderer errors.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Sidebar bots: 9 cases'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
       assert.deepEqual(errors, []);
@@ -794,7 +802,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item > span, #sidebar .sidebar-user-name')].every(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return (r.width===0||s.opacity==='0'||s.display==='none')&&r.right<=52})"), 'Labels are hidden in the slim rail');
     assert.equal(await js("document.querySelector('#sidebar-toggle').getAttribute('aria-expanded')"), "false");
     assert.equal(await js("localStorage.getItem('jarvis:sidebar-collapsed')"), "true");
-    assert.ok(await js("[...document.querySelectorAll('#nav button')].every(b => b.getAttribute('aria-label') && b.querySelector('svg'))"), "Every icon-only tab has an accessible name and an icon");
+    assert.ok(await js("[...document.querySelectorAll('#nav .nav-item')].every(b => b.getAttribute('aria-label') && b.querySelector('svg'))"), "Every icon-only tab has an accessible name and an icon");
     await capture("desktop-sidebar-collapsed");
     await win.loadURL(base);
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
@@ -2234,10 +2242,12 @@ app.whenReady().then(async () => {
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
     await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
+    await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
+      sessions: calendarFixtures.sessions, win, errors });
     assert.deepEqual(errors, [], 'Agents profile renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Sidebar bots: 9 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));

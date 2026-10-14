@@ -262,6 +262,17 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    // 2026-10-14: keep the sidebar's new-thread fixture on the same agent
+    // chat route the real app uses, so a click can reopen the created chat.
+    const botChat = route.match(/^\/api\/agents\/(a\d)\/chat$/);
+    if (botChat && method === 'POST' && state.sidebarBotSessions) {
+      const id = `bot-new-${Date.now()}`;
+      const thread = { id, title: 'New chat', agent_id: botChat[1], starred: false,
+        created_at: Date.now() / 1000, updated_at: Date.now() / 1000, message_count: 0 };
+      state.sidebarBotSessions[botChat[1]].unshift(thread);
+      (state.sidebarBotMessages ||= {})[id] = [];
+      return thread;
+    }
     // 2026-10-13: profile smoke checks need reads after writes, as the real
     // agent routes return them; keeping fixture state makes polls meaningful.
     const agentPatch = route.match(/^\/api\/agents\/(a\d)$/);
@@ -974,8 +985,10 @@
     if (route === "/api/system/events") return list([{ message: "Daily briefing completed", level: "info", ts: now - 800 }, { message: "Memory sync finished", level: "info", ts: now - 2000 }]);
     // An agent's chats are asked for by agent and never appear in the Chats list.
     if (route === "/api/sessions" && url.searchParams.get("agent_id")) {
-      return list([{ id: "as1", title: "Chat with Scout", starred: false, created_at: now - 600, updated_at: now - 300,
-        message_count: 2, model_endpoint_id: "m1", agent_id: url.searchParams.get("agent_id") }]);
+      const agentId = url.searchParams.get('agent_id');
+      return list(state.sidebarBotSessions?.[agentId] || [{ id: agentId === 'a1' ? 'as1' : 'as2',
+        title: agentId === 'a1' ? 'Chat with Scout' : 'Chat with Archivist', starred: false,
+        created_at: now - 600, updated_at: now - 300, message_count: 2, model_endpoint_id: 'm1', agent_id: agentId }]);
     }
     if (route === "/api/sessions") return list([...sessions, ...Object.values(forgeSessions).map(({ messages, ...header }) => ({ ...header, message_count: messages.length }))]);
     if (/^\/api\/sessions\/[^/]+$/.test(route) && forgeSessions[route.split('/')[3]]) return forgeSessions[route.split('/')[3]];
@@ -996,6 +1009,9 @@
       const counts = {};
       return list(matches.filter(r => (!kind || kind === r.kind) && `${r.label} ${r.detail}`.toLowerCase().includes(needle))
         .filter(r => (counts[r.kind] = (counts[r.kind] || 0) + 1) <= 4));
+    }
+    if (/^\/api\/sessions\/[^/]+$/.test(route) && state.sidebarBotMessages?.[route.split('/')[3]]) {
+      const id = route.split('/')[3]; return { id, messages: state.sidebarBotMessages[id] };
     }
     if (/^\/api\/sessions\/[^/]+$/.test(route) && state.handoffSessions?.[route.split('/')[3]]) {
       const session = state.handoffSessions[route.split('/')[3]];

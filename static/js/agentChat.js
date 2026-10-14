@@ -16,7 +16,7 @@ function remember(agentId, sessionId) {
   try { sessionId ? localStorage.setItem(LAST_KEY + agentId, sessionId) : localStorage.removeItem(LAST_KEY + agentId); } catch { /* private mode */ }
 }
 
-export async function mountAgentChat(host, agent) {
+export async function mountAgentChat(host, agent, requestedSessionId = null) {
   let sessionId = null;
   let closePane = () => {};
 
@@ -92,6 +92,9 @@ export async function mountAgentChat(host, agent) {
   });
 
   const chats = await refreshList();
+  // 2026-10-14: sidebar threads address the same session, including a new
+  // empty one, instead of falling back to this agent's remembered chat.
+  if (requestedSessionId && chats.some(c => c.id === requestedSessionId)) { await open(requestedSessionId); return () => closePane(); }
   const last = remembered(agent.id);
   if (last && chats.some((c) => c.id === last)) await open(last);
   else if (chats.length) await open(chats[0].id);

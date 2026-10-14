@@ -44,7 +44,7 @@ export async function render(container, tabId, options = {}) {
     const swarm = await import("./swarm.js");
     return swarm.render(container, tabId, { ...options, embedded: true, systemId: options.team });
   }
-  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile);
+  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile, options.sessionId);
   else await listPage(root, schedule);
   return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); releasePortraits(root); };
 }
@@ -319,7 +319,7 @@ function reviewItem(card, agent, refresh) {
 
 // -- one agent ----------------------------------------------------------------
 
-async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false) {
+async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false, sessionId = null) {
   let detail;
   try {
     detail = await api(`/api/agents/${agentId}`);
@@ -377,7 +377,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     }
     if (which === "chat" && !chatMounted) {
       chatMounted = true;
-      mountAgentChat(chatHost, detail.agent).then((cleanup) => cleanups.push(cleanup));
+      mountAgentChat(chatHost, detail.agent, sessionId).then((cleanup) => cleanups.push(cleanup));
     }
     if (which === 'work') syncComputer();
     else if (computerView) { computerView.dispose(); computerView = null; computerHost.replaceChildren(); }
