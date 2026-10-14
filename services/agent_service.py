@@ -647,7 +647,8 @@ class AgentService:
         verb = {"question": "has a question", "report": "has a report"}[item["kind"]]
         how = "Reply to this message to answer." if item["kind"] == "question" else "Reply to this message to answer it."
         self._announce(item["agent_id"], "agent.inbox", verb, item["title"], item.get("body") or "",
-                       f"{how} {code_for(self.get(item['agent_id']), item['id'])}", item_id=item["id"])
+                       f"{how} {code_for(self.get(item['agent_id']), item['id'])}", item_id=item["id"],
+                       item_kind=item["kind"])
         from services.hook_service import hook_service
         hook_service.emit("agent.inbox", {"source": "agent", "agent_id": item["agent_id"],
                                           "agent": (self.get(item["agent_id"]) or {}).get("name", ""),

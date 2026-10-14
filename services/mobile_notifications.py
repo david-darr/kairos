@@ -28,9 +28,16 @@ async def deliver_due(client):
         if not _authorized_device(item):
             store.revoke(session_binding=item["binding"])
             continue
-        run = store.read_run(item["run_id"])
-        session = session_manager.get_session(run["session_id"]) if run else None
-        if item["kind"] != "test" and (not session or (session.get("owner_user") not in (None, item["owner"])
+        # A bot push has no chat behind it; bots are admin-only (2026-10-14).
+        if item["kind"] in store.BOT_KINDS:
+            if not auth_manager.is_admin(item["owner"]):
+                store.delivery_result(item, 403)
+                continue
+            session = None
+        else:
+            run = store.read_run(item["run_id"])
+            session = session_manager.get_session(run["session_id"]) if run else None
+        if item["kind"] not in ("test", *store.BOT_KINDS) and (not session or (session.get("owner_user") not in (None, item["owner"])
                             and not auth_manager.is_admin(item["owner"]))):
             store.delivery_result(item, 403)
             continue

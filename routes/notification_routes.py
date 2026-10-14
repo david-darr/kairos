@@ -23,6 +23,8 @@ class Preferences(BaseModel):
     completed: bool = True
     failed: bool = True
     permission: bool = True
+    bot_needs_you: bool = True
+    bot_results: bool = True
 
 
 @router.get("")

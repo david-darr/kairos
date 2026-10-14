@@ -158,6 +158,8 @@ async def lifespan(_app: FastAPI):
     from core import mobile_activity
     mobile_activity.recover()
     mobile_notifications.start()
+    from services import bot_push
+    bot_push.start()
     try:
         yield
     finally:
@@ -266,6 +268,11 @@ async def service_worker() -> FileResponse:
 @app.get("/usage-overlay")
 async def usage_overlay_page() -> FileResponse:
     return FileResponse(f"{STATIC_DIR}/usage-overlay.html")
+
+
+@app.get("/bot-window")
+async def bot_window_page() -> FileResponse:
+    return FileResponse(f"{STATIC_DIR}/bot-window.html")
 
 
 @app.get("/api/health")

@@ -327,6 +327,69 @@ class MobileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snap["text"], "partial")
         self.assertNotIn(self.sid, chat_live._tasks)
 
+    # -- bot pushes (Agents 2.0, 2026-10-14) ---------------------------------
+    def bot_rows(self):
+        with store.database() as db:
+            return [dict(r) for r in db.execute("SELECT * FROM outbox WHERE kind LIKE 'bot_%'").fetchall()]
+
+    async def test_a_burst_of_bot_results_is_one_push_per_bot(self):
+        from services import bot_push
+        await self.enroll()
+        for _ in range(6):
+            bot_push.on_event({"type": "agent.review", "agent_id": "a1"})
+        bot_push.on_event({"type": "agent.review", "agent_id": "a2"})
+        rows = self.bot_rows()
+        self.assertEqual(sorted(json.loads(r["payload"])["url"] for r in rows), ["/?agent=a1", "/?agent=a2"])
+        self.assertTrue(all(r["next_attempt"] > time.time() + 5 for r in rows), "held for the burst to settle")
+
+    async def test_questions_and_results_map_to_their_own_kinds(self):
+        from services import bot_push
+        self.assertEqual(bot_push.kind_for({"type": "agent.inbox", "item_kind": "question"}), "bot_needs_you")
+        self.assertEqual(bot_push.kind_for({"type": "agent.inbox", "item_kind": "report"}), "bot_results")
+        self.assertEqual(bot_push.kind_for({"type": "agent.review"}), "bot_results")
+        self.assertIsNone(bot_push.kind_for({"type": "task.run"}))
+
+    async def test_bot_pushes_only_reach_admins(self):
+        from services import bot_push
+        self.user = "bob"  # not an admin under this fixture
+        await self.enroll()
+        bot_push.on_event({"type": "agent.inbox", "item_kind": "question", "agent_id": "a1"})
+        self.assertEqual(self.bot_rows(), [])
+
+    async def test_a_turned_off_bot_kind_is_respected(self):
+        from services import bot_push
+        device = await self.enroll()
+        response = await self.client.put(f"/api/notifications/devices/{device}", json={
+            "completed": True, "failed": True, "permission": True, "bot_needs_you": False, "bot_results": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        bot_push.on_event({"type": "agent.inbox", "item_kind": "question", "agent_id": "a1"})
+        self.assertEqual(self.bot_rows(), [])
+        bot_push.on_event({"type": "agent.inbox", "item_kind": "report", "agent_id": "a1"})
+        self.assertEqual([r["kind"] for r in self.bot_rows()], ["bot_results"])
+
+    async def test_a_bot_push_delivers_without_a_chat_and_says_nothing_private(self):
+        from services import bot_push
+        await self.enroll()
+        bot_push.on_event({"type": "agent.inbox", "item_kind": "question", "agent_id": "a1"})
+        with store.database() as db:
+            db.execute("UPDATE outbox SET next_attempt=0")
+        sent = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: sent.append(req) or httpx.Response(201))) as client:
+            await mobile_notifications.deliver_due(client)
+        self.assertEqual(len(sent), 1, "no chat session is needed for a bot push")
+        payload = json.loads(self.bot_rows()[0]["payload"])
+        self.assertEqual(set(payload), {"kind", "url", "tag", "expires_at"}, "no title or body leaves the server")
+    async def test_a_bot_push_is_dropped_if_its_owner_stops_being_an_admin(self):
+        from services import bot_push
+        await self.enroll()
+        bot_push.on_event({"type": "agent.review", "agent_id": "a1"})
+        with store.database() as db:
+            db.execute("UPDATE outbox SET next_attempt=0")
+        sent = []
+        with patch.object(auth_manager, "is_admin", return_value=False):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: sent.append(req) or httpx.Response(201))) as client:
+                await mobile_notifications.deliver_due(client)
+        self.assertEqual(sent, [], "queued while an admin, refused once they are not")
 
 if __name__ == "__main__":
     try:

@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, ".scratch-ui-b", "run-" + Date.now());
+const output = path.join(root, "data", "ui-review", "run-" + Date.now());
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -2293,6 +2293,36 @@ app.whenReady().then(async () => {
     assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
     await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
       win, liveChunk, liveEvent, liveFinish, capture });
+    // 2026-10-14: the floating bot window's own page, in a window of its own
+    // against the demo data: highest need first, quiet bots left out.
+    {
+      // Set the state this check depends on; earlier checks flip the second
+      // bot between idle and working to exercise the reconciler.
+      const [scout, archivist] = calendarFixtures.agentsFixture;
+      const saved = [scout, archivist].map(agent => ({ enabled: agent.enabled, status: agent.status }));
+      Object.assign(scout, { enabled: true, status: 'needs_you' });
+      Object.assign(archivist, { enabled: true, status: 'working' });
+      const bot = new BrowserWindow({ width: 300, height: 340, show: false, useContentSize: true,
+        webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false } });
+      const botErrors = [];
+      bot.webContents.on('console-message', (_e, level, message) => { if (level >= 3) botErrors.push(message); });
+      await bot.loadURL(base + '/static/bot-window.html');
+      const botJs = source => bot.webContents.executeJavaScript(source);
+      for (let i = 0; i < 100 && !(await botJs("document.querySelectorAll('.bot-window-list li').length")); i++) await delay(50);
+      assert.deepEqual(await botJs("[...document.querySelectorAll('.bot-window-list li')].map(li => [li.dataset.agentId, li.dataset.state])"),
+        [['a1', 'needs_you'], ['a2', 'working']], 'Bot window lists needs-you before working');
+      assert.equal(await botJs("document.querySelectorAll('.bot-window-list .agent-dot-avatar img').length"), 2, 'Bot window shows faces');
+      assert.equal(await botJs("document.querySelector('.bot-window-empty').hidden"), true);
+      assert.equal(await botJs("getComputedStyle(document.querySelector('.bot-window-bar')).webkitAppRegion"), 'drag', 'The bar drags the window');
+      fs.writeFileSync(path.join(output, 'bot-window.png'), (await bot.webContents.capturePage()).toPNG());
+      bot.destroy();
+      [scout, archivist].forEach((agent, i) => Object.assign(agent, saved[i]));
+      assert.deepEqual(botErrors, [], 'Bot window page renderer errors');
+    }
+    // The empty state reads quietly rather than hiding the window.
+    await js("(async () => { const host = document.createElement('div'); host.id = 'bw-smoke'; document.body.append(host); const m = await import('/static/js/botWindow.js'); m.render(host, [{ id: 'q1', name: 'Quiet', enabled: true, status: 'idle', needs_you: 0 }]); })()");
+    assert.equal(await js("document.querySelector('#bw-smoke .bot-window-empty').hidden"), false, 'Bot window says when nothing needs you');
+    await js("document.querySelector('#bw-smoke').remove()");
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);

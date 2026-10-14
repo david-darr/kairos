@@ -223,7 +223,8 @@ def enroll(owner, subscription, session_binding):
         if not row and db.execute("SELECT COUNT(*) FROM devices WHERE owner=?", (owner,)).fetchone()[0] >= 10:
             raise ValueError("Remove an old device before adding another (10 device limit)")
         device_id = row["id"] if row else uuid.uuid4().hex
-        prefs = row["preferences"] if row else json.dumps({"completed": True, "failed": True, "permission": True})
+        prefs = row["preferences"] if row else json.dumps({"completed": True, "failed": True, "permission": True,
+                                                          "bot_needs_you": True, "bot_results": True})
         db.execute("INSERT INTO devices(id,owner,endpoint,subscription,binding,preferences,created) VALUES(?,?,?,?,?,?,?) "
                    "ON CONFLICT(id) DO UPDATE SET subscription=excluded.subscription,binding=excluded.binding",
                    (device_id, owner, subscription["endpoint"], json.dumps(subscription), session_binding, prefs, time.time()))
@@ -276,6 +277,29 @@ def enqueue(run_id, kind, permission=None):
             event_id = hashlib.sha256(f"{device['id']}:{run_id}:{kind}:{(permission or {}).get('id', '')}".encode()).hexdigest()
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"), json.dumps(payload), expiry, now))
+
+
+BOT_KINDS = {"bot_needs_you", "bot_results"}
+
+
+def enqueue_bot(kind, agent_id, allowed_owner):
+    """A bot needs the person or has results (Agents 2.0, 2026-10-14). Bots
+    belong to admins, so only devices whose owner passes allowed_owner get it.
+    Pushes coalesce: one pending push per device, bot and kind per minute,
+    held ten seconds for the burst to settle, so six results are one push.
+    The text is generic, as for chats: nothing a lock screen should not show."""
+    if kind not in BOT_KINDS:
+        raise ValueError(kind)
+    now = time.time()
+    bucket = int(now // 60)
+    payload = {"kind": kind, "url": "/?agent=" + agent_id, "tag": "kairos-bot-" + agent_id, "expires_at": now + 3600}
+    with database() as db:
+        for device in db.execute("SELECT * FROM devices").fetchall():
+            if not allowed_owner(device["owner"]) or not json.loads(device["preferences"]).get(kind, True):
+                continue
+            event_id = hashlib.sha256(f"{device['id']}:bot:{agent_id}:{kind}:{bucket}".encode()).hexdigest()
+            db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                       (event_id, device["id"], "", kind, None, json.dumps(payload), now + 3600, now + 10))
 
 
 def due():

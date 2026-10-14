@@ -78,6 +78,23 @@ contextBridge.exposeInMainWorld("jarvis", {
     },
   },
 
+  // The floating bot window and desktop notifications (Agents 2.0, 2026-10-14).
+  botWindow: {
+    state: () => ipcRenderer.invoke("bot-window:state"),
+    setVisible: (visible) => ipcRenderer.invoke("bot-window:set-visible", !!visible),
+    onState: (handler) => {
+      const wrapped = (_event, state) => handler(state);
+      ipcRenderer.on("bot-window:state", wrapped);
+      return () => ipcRenderer.removeListener("bot-window:state", wrapped);
+    },
+    onOpenAgent: (handler) => {
+      const wrapped = (_event, agentId) => handler(agentId);
+      ipcRenderer.on("bot-window:open-agent", wrapped);
+      return () => ipcRenderer.removeListener("bot-window:open-agent", wrapped);
+    },
+  },
+  showWindow: () => ipcRenderer.send("app:show"),
+
   // Side browser (David's ask 2026-09-15). Controls only: nothing here can
   // read page content, and the main process re-validates every URL anyway
   // (electron/browser.js's safeUrl) rather than trusting this side.
