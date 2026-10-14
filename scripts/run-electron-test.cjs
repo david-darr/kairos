@@ -2,7 +2,8 @@
 // Node waits for Electron and propagates the actual suite result.
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
-const suite = process.argv[2];
+// 2026-10-13: accept the documented script path as well as its short name.
+const suite = path.basename(process.argv[2] || '').replace(/\.cjs$/, '');
 if (!['browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke'].includes(suite)) {
   throw new Error('Choose browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, or crm-smoke');
 }

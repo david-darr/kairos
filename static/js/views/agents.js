@@ -4,6 +4,7 @@ import { runHistory } from "../runHistory.js";
 import { mountAgentChat } from "../agentChat.js";
 import { mountComputerPanel } from "../computerPanel.js";
 import { toggle } from "../settingsKit.js";
+import { mountAgentProfile, portrait, profileColor } from "../agentProfile.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -17,6 +18,21 @@ const COLORS = ["#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9"
 const STATUS = { idle: "Idle", working: "Working", needs_you: "Needs you", off: "Off", capped: "Done for today" };
 const POLL_MS = 10000;
 
+// 2026-10-13: a changed response can replace a read-only card, but never a
+// card with focus or unsaved controls. Snapshot values when the card mounts;
+// this also covers form inputs that did not dispatch an input event yet.
+function markDrafts(node) {
+  for (const control of node.querySelectorAll('input, textarea, select')) control.dataset.draftBaseline = control.value;
+  return node;
+}
+function hasDraft(node) {
+  return node.contains(document.activeElement) || [...node.querySelectorAll('input, textarea, select')]
+    .some(control => control.value !== control.dataset.draftBaseline);
+}
+function releasePortraits(node) {
+  for (const face of [node, ...node.querySelectorAll('.agent-portrait')]) face.stopPortrait?.();
+}
+
 export async function render(container, tabId, options = {}) {
   let timer = null;
   const cleanups = [];
@@ -28,18 +44,24 @@ export async function render(container, tabId, options = {}) {
     const swarm = await import("./swarm.js");
     return swarm.render(container, tabId, { ...options, embedded: true, systemId: options.team });
   }
-  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover);
+  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile);
   else await listPage(root, schedule);
-  return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); };
+  return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); releasePortraits(root); };
 }
 
 export function avatar(agent, size = 28) {
-  return el("span", { class: "agent-avatar", "aria-hidden": "true", text: (agent.name || "?").slice(0, 1).toUpperCase(),
-    style: `background:${agent.color};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.45)}px;` });
+  const node = portrait(agent, size);
+  node.classList.add('agent-avatar');
+  return node;
 }
 
 function open(agentId) {
   document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab: "agents", agentId } }));
+}
+
+// Unit 4-ii can call this without reaching into the sheet's DOM (2026-10-13).
+export function openProfile(agentId) {
+  document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId, profile: true } }));
 }
 
 function openTeam(team) {
@@ -64,29 +86,67 @@ function channelOptions(channels, selected = "") {
 
 // -- the list ---------------------------------------------------------------
 
+const listStates = new WeakMap();
+// 2026-10-13: an older poll must not land after a later answer or save and
+// report stale server data as a new conflict.
+const listRequests = new WeakMap();
 async function listPage(root, schedule) {
+  const version = (listRequests.get(root) || 0) + 1;
+  listRequests.set(root, version);
   const [agents, inbox, models, channels, teams] = await Promise.all([
     api("/api/agents"), api("/api/agents/inbox"), api("/api/models").catch(() => []), api("/api/channels").catch(() => []),
     api("/api/swarm/systems").catch(() => null),
   ]);
-  if (!document.body.contains(root)) return;
-  root.innerHTML = "";
-  root.append(el("div", { class: "view-header" }, [el("div", {}, [
-    el("h2", { text: "Agents" }),
-    el("div", { class: "sub", text: "Named helpers that work in the background and come back when they need you." }),
-  ])]));
-  const byId = new Map(agents.map((a) => [a.id, a]));
-  if (inbox.count) root.append(inboxPanel("Waiting on you", inbox.items, inbox.reviews, byId, () => listPage(root, schedule)));
-  root.append(newAgentForm(models, channels, root, schedule));
-  if (!agents.length) {
-    root.append(emptyState({ icon: ICONS.agents, title: "No agents yet",
-      hint: "Create one above: give it a name, a role, and something to watch or do." }));
-    if (teams) root.append(teamsSection(teams));
-    return;
+  if (!document.body.contains(root) || version !== listRequests.get(root)) return;
+  let state = listStates.get(root);
+  if (!state) {
+    const inboxHost = el('div', { class: 'agent-inbox-host' });
+    const grid = el('div', { class: 'agent-grid' });
+    const teamHost = el('div');
+    root.append(el("div", { class: "view-header" }, [el("div", {}, [
+      el("h2", { text: "Agents" }),
+      el("div", { class: "sub", text: "Named helpers that work in the background and come back when they need you." }),
+    ])]), inboxHost, newAgentForm(models, channels, root, schedule), grid, teamHost);
+    state = { inboxHost, grid, teamHost, tiles: new Map(), inbox: new Map(), teamsSignature: '' };
+    listStates.set(root, state);
   }
-  const grid = el("div", { class: "agent-grid" });
-  for (const agent of agents) {
-    grid.append(el("button", { type: "button", class: "agent-tile", onclick: () => open(agent.id) }, [
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  // 2026-10-13: reconcile by inbox/card ID. A poll may update a status but
+  // must not replace a reply that is being composed in the same row.
+  const incoming = [...inbox.items.map(item => ({ key: `item:${item.id}`, value: item,
+    make: () => inboxItem(item, byId.get(item.agent_id), () => listPage(root, schedule)) })),
+  ...inbox.reviews.map(card => ({ key: `review:${card.id}`, value: card,
+    make: () => reviewItem(card, byId.get(card.agent_id), () => listPage(root, schedule)) }))];
+  if (!state.inboxPanel) {
+    state.inboxPanel = el('div', { class: 'glass card agent-inbox' }, [el('div', { class: 'title', text: 'Waiting on you' })]);
+    state.inboxHost.append(state.inboxPanel);
+  }
+  const keys = new Set(incoming.map(row => row.key));
+  for (const [key, row] of state.inbox) if (!keys.has(key)) {
+    if (hasDraft(row.node)) {
+      if (!row.notice) { row.notice = el('p', { class: 'agent-draft-notice', text: 'This item changed on the server. Your reply draft is kept here.' }); row.node.prepend(row.notice); }
+    } else { releasePortraits(row.node); row.node.remove(); state.inbox.delete(key); }
+  }
+  state.inboxHost.hidden = !inbox.count && !state.inbox.size;
+  for (const [index, row] of incoming.entries()) {
+    const signature = JSON.stringify(row.value);
+    let old = state.inbox.get(row.key);
+    if (!old) { old = { node: markDrafts(row.make()), signature }; state.inbox.set(row.key, old); }
+    else if (old.signature !== signature && !hasDraft(old.node)) { const next = markDrafts(row.make()); releasePortraits(old.node); old.node.replaceWith(next); old.node = next; old.signature = signature; }
+    if (state.inboxPanel.children[index + 1] !== old.node && !hasDraft(old.node))
+      state.inboxPanel.insertBefore(old.node, state.inboxPanel.children[index + 1] || null);
+  }
+  const agentKeys = new Set(agents.map(agent => agent.id));
+  for (const [id, tile] of state.tiles) if (!agentKeys.has(id)) { releasePortraits(tile.node); tile.node.remove(); state.tiles.delete(id); }
+  if (agents.length && state.emptyNode) { state.emptyNode.remove(); state.emptyNode = null; }
+  for (const [index, agent] of agents.entries()) {
+    const signature = JSON.stringify([agent.name, agent.role, agent.color, agent.status, agent.status_detail, agent.runs_today, agent.daily_run_cap]);
+    let tile = state.tiles.get(agent.id);
+    if (tile?.signature === signature) {
+      if (state.grid.children[index] !== tile.node) state.grid.insertBefore(tile.node, state.grid.children[index] || null);
+      continue;
+    }
+    const node = el("button", { type: "button", class: "agent-tile", onclick: () => open(agent.id) }, [
       el("div", { class: "agent-tile-head" }, [avatar(agent, 34), el("div", { class: "agent-tile-name" }, [
         el("div", { class: "title", text: agent.name }),
         el("div", { class: "meta", text: agent.role || "No role yet" }),
@@ -96,10 +156,15 @@ async function listPage(root, schedule) {
         el("span", { class: "meta", text: agent.status === "working" ? agent.status_detail
           : `${agent.runs_today} of ${agent.daily_run_cap} runs today` }),
       ]),
-    ]));
+    ]);
+    if (tile) { releasePortraits(tile.node); tile.node.replaceWith(node); }
+    tile = { node, signature }; state.tiles.set(agent.id, tile);
+    if (state.grid.children[index] !== node) state.grid.insertBefore(node, state.grid.children[index] || null);
   }
-  root.append(grid);
-  if (teams) root.append(teamsSection(teams));
+  if (!agents.length && !state.emptyNode) { state.emptyNode = emptyState({ icon: ICONS.agents, title: 'No agents yet',
+    hint: 'Create one above: give it a name, a role, and something to watch or do.' }); state.grid.append(state.emptyNode); }
+  const teamsSignature = JSON.stringify(teams);
+  if (teamsSignature !== state.teamsSignature) { state.teamHost.replaceChildren(teams ? teamsSection(teams) : null); state.teamsSignature = teamsSignature; }
   if (agents.some((a) => a.status === "working")) schedule(() => listPage(root, schedule));
 }
 
@@ -131,8 +196,8 @@ function teamsSection(teams) {
 
 function newAgentForm(models, channels, root, schedule) {
   const form = el("details", { class: "disclosure-panel" });
-  const name = el("input", { placeholder: "e.g. Scout" });
-  const role = el("input", { placeholder: "e.g. Watches my job applications and new postings" });
+  const name = el("input", { placeholder: "e.g. Scout", maxlength: '100' });
+  const role = el("input", { placeholder: "e.g. Watches my job applications and new postings", maxlength: '200' });
   const instructions = el("textarea", { rows: "3", placeholder: "How it should work: sources to use, what to leave out, how to report." });
   const model = customSelect({}, modelOptions(models));
   const channel = customSelect({}, channelOptions(channels));
@@ -191,7 +256,8 @@ function inboxItem(item, agent, refresh) {
   const button = (text, onclick, cls = "btn") => el("button", { class: cls, text, onclick });
   const send = (choice) => () => {
     if (choice === "reply" && !reply.value.trim()) { toast("Write a reply first", "error"); return; }
-    answer(item, choice, reply.value.trim(), refresh);
+    answer(item, choice, reply.value.trim(), () => { if (reply.closest('.agent-inbox-item')?.contains(document.activeElement)) document.activeElement.blur();
+      reply.dataset.draftBaseline = reply.value; return refresh(); });
   };
   const actions = el("div", { class: "agent-inbox-actions" });
   if (/^(Ready for you: press|Needs you: sign in|Needs you: embedded frame)/.test(item.title)) {
@@ -229,6 +295,8 @@ function reviewItem(card, agent, refresh) {
       await api(`/api/tasks/${card.id}/status`, { method: "POST", body: JSON.stringify({ status, note: text || null }) });
     } catch (problem) { toast(problem.message, "error"); }
     document.dispatchEvent(new CustomEvent("jarvis:agents-changed"));
+    if (note.closest('.agent-inbox-item')?.contains(document.activeElement)) document.activeElement.blur();
+    note.dataset.draftBaseline = note.value;
     await refresh();
   };
   return el("div", { class: "agent-inbox-item agent-inbox-review" }, [
@@ -251,7 +319,7 @@ function reviewItem(card, agent, refresh) {
 
 // -- one agent ----------------------------------------------------------------
 
-async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false) {
+async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false) {
   let detail;
   try {
     detail = await api(`/api/agents/${agentId}`);
@@ -268,6 +336,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   // the Work tab redraw while the agent is busy, so an open chat is never
   // rebuilt under the person typing in it.
   const header = el("div", { class: "agent-header" });
+  const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
+  cleanups.push(profile.dispose);
   const chatTab = el("button", { type: "button", role: "tab", class: "agent-tab", text: "Chat" });
   const workTab = el("button", { type: "button", role: "tab", class: "agent-tab" });
   const chatHost = el("div", { role: "tabpanel", class: "agent-tab-panel agent-chat-host" });
@@ -321,9 +391,15 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     chatHost, workHost,
   );
 
+  let headerSignature = '';
   const drawHeader = (agent) => {
+    const signature = JSON.stringify([agent.name, agent.role, agent.color, agent.enabled, agent.status,
+      agent.status_detail, agent.runs_today, agent.daily_run_cap, agent.needs_you]);
+    if (signature === headerSignature) return;
+    headerSignature = signature;
     const toggle = el("button", { class: agent.enabled ? "btn" : "btn primary", text: agent.enabled ? "Turn off" : "Turn on",
       onclick: async () => { await api(`/api/agents/${agentId}`, { method: "PATCH", body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } });
+    releasePortraits(header);
     header.replaceChildren(
       avatar(agent, 48),
       el("div", { class: "agent-header-text" }, [
@@ -335,39 +411,65 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
             .filter(Boolean).join(" · ") }),
         ]),
       ]),
-      el("div", { class: "agent-header-actions" }, [toggle]),
+      el("div", { class: "agent-header-actions" }, [
+        el('button', { class: 'btn agent-profile-open', text: 'Profile', onclick: () => profile.open() }), toggle]),
     );
     workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : "Work";
   };
 
+  const panels = new Map();
+  let refreshVersion = 0;
+  const reconcile = (key, value, make) => {
+    const signature = JSON.stringify(value);
+    let entry = panels.get(key);
+    if (!entry) { entry = { node: markDrafts(make()), signature }; panels.set(key, entry); }
+    else if (signature !== entry.signature) {
+      if (hasDraft(entry.node)) {
+        if (!entry.notice) { entry.notice = el('p', { class: 'agent-draft-notice', text: 'New server data is available. Your draft is kept; save or clear it to refresh this section.' }); entry.node.prepend(entry.notice); }
+      } else {
+        const next = markDrafts(make()); releasePortraits(entry.node); entry.node.replaceWith(next); entry.node = next; entry.signature = signature; entry.notice = null;
+      }
+    }
+    return entry.node;
+  };
   const drawWork = () => {
     const { agent } = detail;
     const reviews = detail.cards.filter((c) => c.status === "review");
     const byId = new Map([[agent.id, agent]]);
-    workHost.replaceChildren(
-      inboxPanel("Inbox", detail.inbox, reviews, byId, redraw),
+    const rows = [
+      reconcile('inbox', [detail.inbox, reviews], () => inboxPanel('Inbox', detail.inbox, reviews, byId, redraw)),
       computerHost,
-      goalsPanel(agentId, detail.goals, redraw),
-      workPanel(agentId, detail.cards, redraw),
-      memoryPanel(agentId, detail.memory),
-      el("div", { class: "glass card" }, [el("div", { class: "title", text: "History" }), runHistory(detail.runs)]),
-      teamsPanel(detail.teams || []),
-      (detail.triggers || []).length ? triggersPanel(detail.triggers) : null,
-      settingsPanel(agent, models, channels, redraw),
-    );
+      reconcile('goals', detail.goals, () => goalsPanel(agentId, detail.goals, redraw)),
+      reconcile('cards', detail.cards, () => workPanel(agentId, detail.cards, redraw)),
+      panels.has('memory') ? panels.get('memory').node : reconcile('memory', detail.memory, () => memoryPanel(agentId, detail.memory)),
+      reconcile('history', detail.runs, () => el('div', { class: 'glass card' }, [el('div', { class: 'title', text: 'History' }), runHistory(detail.runs)])),
+      reconcile('teams', detail.teams || [], () => teamsPanel(detail.teams || [])),
+    ];
+    if ((detail.triggers || []).length) rows.push(reconcile('triggers', detail.triggers, () => triggersPanel(detail.triggers)));
+    else { panels.get('triggers')?.node.remove(); panels.delete('triggers'); }
+    rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.deliver_to_channel,
+      agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, channels, redraw)));
+    for (const row of rows) if (row && row.parentNode !== workHost) workHost.append(row);
+    panels.get('memory').node.syncMemory(detail.memory);
   };
 
   async function redraw() {
-    try { detail = await api(`/api/agents/${agentId}`); } catch { return; }
+    const version = ++refreshVersion;
+    let next;
+    try { next = await api(`/api/agents/${agentId}`); } catch { return; }
+    if (version !== refreshVersion) return;
+    detail = next;
     if (!document.body.contains(root)) return;
     drawHeader(detail.agent);
     drawWork();
+    profile.update(detail);
     if (detail.agent.status === "working") schedule(redraw);
   }
 
   drawHeader(detail.agent);
   drawWork();
   show(tab);
+  if (profileOpen) profile.open();
   syncComputer();
   if (detail.agent.status === "working") schedule(redraw);
 }
@@ -487,19 +589,41 @@ function workPanel(agentId, cards, refresh) {
 function memoryPanel(agentId, memory) {
   const area = el("textarea", { class: "agent-memory", rows: "12", spellcheck: "false" });
   area.value = memory;
+  let baseline = memory, server = memory;
+  const conflict = el('div', { class: 'agent-profile-conflict', hidden: true });
+  const useServer = el('button', { class: 'btn quiet', type: 'button', text: 'Use server version' });
+  const serverText = el('pre', { class: 'agent-profile-file-text' });
+  conflict.append(el('span', { text: 'Memory changed on the server. Your draft is kept; save it or use the server version.' }), serverText, useServer);
   const count = el("span", { class: "meta" });
-  const update = () => { count.textContent = `${area.value.length} / 8000`; count.classList.toggle("is-error", area.value.length > 8000); };
+  const update = () => { count.textContent = `${area.value.length} / 8000`; count.classList.toggle("is-error", area.value.length > 8000);
+    conflict.hidden = area.value === baseline || server === baseline; };
   area.addEventListener("input", update);
+  useServer.onclick = () => { baseline = server; area.value = server; area.dataset.draftBaseline = server; update(); };
   update();
-  return el("div", { class: "glass card" }, [
+  const panel = el("div", { class: "glass card" }, [
     el("div", { class: "title", text: "Memory" }),
     el("div", { class: "meta", style: "margin:4px 0 10px;", text: "What it carries into every run. It adds to this itself; corrections land here too. Edit freely." }),
     area,
+    conflict,
     el("div", { class: "agent-row-actions", style: "margin-top:8px;" }, [count, el("button", { class: "btn", text: "Save memory", onclick: async () => {
-      try { await api(`/api/agents/${agentId}/memory`, { method: "PUT", body: JSON.stringify({ text: area.value }) }); toast("Memory saved", "success"); }
+      try {
+        // 2026-10-13: a bot can update memory between polls. Show that new
+        // version before the first Save; a second Save chooses the draft.
+        const fresh = await api(`/api/agents/${agentId}`);
+        const unseen = fresh.memory !== baseline && conflict.hidden;
+        panel.syncMemory(fresh.memory);
+        if (unseen) { toast('Memory changed on the server. Review it, then save again if you want your draft.', 'info'); return; }
+        await api(`/api/agents/${agentId}/memory`, { method: "PUT", body: JSON.stringify({ text: area.value }) });
+        baseline = server = area.value; area.dataset.draftBaseline = area.value; update(); toast("Memory saved", "success"); }
       catch (problem) { toast(problem.message, "error"); }
     } })]),
   ]);
+  panel.syncMemory = (value) => { server = value; serverText.textContent = value;
+    if (area.value === value) { baseline = value; area.dataset.draftBaseline = value; }
+    if (area.value === baseline && document.activeElement !== area) {
+    area.value = value; baseline = value; area.dataset.draftBaseline = value;
+  } update(); };
+  return panel;
 }
 
 function settingsPanel(agent, models, channels, refresh) {

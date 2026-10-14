@@ -526,3 +526,51 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 @media (prefers-reduced-transparency: reduce) and (max-width: 768px) {
   html::after { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
+/* Agent profile (2026-10-13): fixed sheet covers the work area so its drafts
+   remain mounted while the underlying agent changes state. */
+.agent-inbox-host:not([hidden]) { margin-top: 14px; }
+.agent-profile-backdrop:not([hidden]) { position: fixed; inset: 0; z-index: 1190; background: rgba(32, 29, 24, .28); }
+.agent-profile-sheet:not([hidden]) { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1191;
+  display: flex; flex-direction: column; width: min(420px, 42vw); box-sizing: border-box;
+  background: #F3EADB; color: var(--text); box-shadow: -16px 0 48px rgba(36, 30, 20, .2);
+  border-radius: 20px 0 0 20px; font-family: Jost, sans-serif; }
+.agent-profile-sheet[hidden], .agent-profile-backdrop[hidden] { display: none; }
+.agent-profile-top { padding: 20px 20px 0; }
+.agent-profile-titlebar { display: flex; align-items: center; gap: 14px; }
+.agent-profile-titlebar h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.agent-portrait { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  overflow: hidden; border-radius: 50%; color: #292720; }
+.agent-portrait .dither-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.agent-portrait-mark { width: 62%; height: 62%; }
+.agent-portrait.is-dithered .agent-portrait-mark { visibility: hidden; }
+.agent-profile-tabs { display: flex; gap: 6px; padding: 12px 20px 0; border-bottom: 1px solid var(--border); }
+.agent-profile-tab { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); padding: 8px 12px; cursor: pointer; }
+.agent-profile-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.agent-profile-body { overflow: auto; min-height: 0; padding: 18px 20px 30px; }
+.agent-profile-details, .agent-profile-all, .agent-profile-section-body { display: flex; flex-direction: column; gap: 14px; }
+.agent-profile-details[hidden], .agent-profile-library[hidden], .agent-profile-all[hidden], .agent-profile-tabs[hidden],
+.agent-profile-section[hidden], .agent-profile-top > .btn[hidden] { display: none; }
+/* The child selector above outranks interface.css's base .btn display rule. */
+.agent-profile-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.agent-profile-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.agent-profile-field input, .agent-profile-field textarea, .agent-profile-field select { width: 100%; box-sizing: border-box; }
+.agent-profile-field input[type="checkbox"] { width: auto; align-self: flex-start; }
+.agent-profile-counter { align-self: flex-end; font-variant-numeric: tabular-nums; }
+.agent-profile-counter[hidden], .agent-profile-conflict[hidden], .agent-profile-drift[hidden], .agent-profile-drift .is-error[hidden] { display: none; }
+.agent-profile-conflict, .agent-profile-drift { padding: 10px; border: 1px solid var(--warn); border-radius: 12px; background: rgba(217, 178, 96, .1); }
+.agent-profile-conflict .btn { margin-top: 7px; }
+.agent-profile-section { border: 1px solid var(--border); border-radius: 14px; padding: 0 12px; }
+.agent-profile-section > summary { padding: 12px 0; cursor: pointer; font-weight: 600; }
+.agent-profile-section-body { padding: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-profile-file-text { max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.agent-profile-file { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.agent-profile-file img { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; }
+.agent-profile-file-icon { width: 54px; text-align: center; font-size: 26px; }
+.agent-draft-notice { color: var(--warn); margin: 0 0 8px; font-size: 12px; }
+@media (max-width: 768px) {
+  .agent-profile-sheet:not([hidden]) { width: 100vw; max-width: none; border-radius: 0; }
+  .agent-profile-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-profile-sheet, .agent-profile-backdrop { transition: none; animation: none; }
+}
