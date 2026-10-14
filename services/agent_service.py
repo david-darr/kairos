@@ -59,7 +59,7 @@ COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
 # Fields a person may change; everything else is the service's.
 EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
-            "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep")
+            "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep", "peers")
 REPLIES_IN_PROMPT = 5
 # A reply code on a channel notification ("[S-7f3a2b]": the agent's initial
 # and the start of the item's or card's id). Replying to that message in
@@ -110,7 +110,7 @@ class AgentService:
                color: Optional[str] = None, daily_run_cap: int = DEFAULT_DAILY_RUN_CAP,
                deliver_to_channel: Optional[str] = None, integration_ids: Optional[list] = None,
                keep_signed_in: bool = False, memory_upkeep: bool = False,
-               blurb: str = "", soul: Optional[str] = None) -> dict:
+               blurb: str = "", soul: Optional[str] = None, peers: Optional[list[str]] = None) -> dict:
         name = _clean_name(name)
         self._check_unique(name, None)
         role = _profile_text("role", role, 200)
@@ -127,6 +127,7 @@ class AgentService:
             "integration_ids": list(integration_ids) if integration_ids is not None else None,
             "keep_signed_in": bool(keep_signed_in),
             "memory_upkeep": bool(memory_upkeep),
+            "peers": self._check_peers(peers or [], agent_id),
             "created_at": time.time(),
         }
         if soul is not None:
@@ -162,6 +163,8 @@ class AgentService:
                     raise ValueError("pick one of the offered colors")
                 elif key in ("enabled", "keep_signed_in", "memory_upkeep"):
                     value = bool(value)
+                elif key == "peers":
+                    value = self._check_peers(value, agent_id)
                 changes[key] = value
             # A normal profile edit must not erase a hand edit before the
             # person has resolved it (Agents 2.0 unit 4-0, 2026-10-13).
@@ -176,6 +179,15 @@ class AgentService:
                 agent["revision"] = agent.get("revision", 0) + 1
                 self._save()
             return agent
+
+    def _check_peers(self, peers, agent_id: str) -> list[str]:
+        if not isinstance(peers, list) or any(not isinstance(p, str) for p in peers):
+            raise ValueError("peers must be a list of bot ids")
+        if len(peers) != len(set(peers)) or agent_id in peers:
+            raise ValueError("peers must be distinct other bots")
+        if any(self.get(p) is None for p in peers):
+            raise ValueError("every peer must be an existing bot")
+        return list(peers)
 
     def _soul_path(self, agent_id: str) -> str:
         return os.path.join(os.path.dirname(self._memory_path(agent_id)), "SOUL.md")
@@ -520,6 +532,9 @@ class AgentService:
             finally:
                 with self._admission_lock:
                     self._reservations.pop(reservation, None)
+                if card_id:
+                    from services.agent_handoff import close_batch
+                    close_batch(agent_id, source_card_id=card_id)
 
     def runs_today(self, agent_id: str) -> int:
         return self._runs_today(agent_id)
@@ -557,7 +572,16 @@ class AgentService:
                            and not any(r["task_id"] == hold["work_id"] and
                                        (r.get("admitted_at") or r.get("started_at") or r["ran_at"]) >= hold["started_at"]
                                        for r in history))
-            return completed + len(unfinished) + reserved
+            # 2026-10-14: a coordinated follow-up spends the requester's
+            # daily run budget too. One stamp per batch, though each peer has
+            # its own card; the reservation covers the turn until stamped.
+            resumed = {t["requester"]["run_id"] for t in task_service.list_tasks()
+                       if (t.get("requester") or {}).get("agent_id") == agent_id
+                       and (t.get("batch_resumed_at") or 0) >= midnight}
+            questions = sum(1 for item in self._inbox if (item.get("bot_delivered_at") or 0) >= midnight
+                            and (card := task_service.get_task(item.get("card_id")))
+                            and (card.get("requester") or {}).get("agent_id") == agent_id)
+            return completed + len(unfinished) + reserved + len(resumed) + questions
 
     def can_run(self, agent_id: str) -> tuple[bool, str]:
         """Informative only; run() makes this decision while reserving a slot."""
@@ -646,6 +670,12 @@ class AgentService:
         if item.get("team_id") and item["kind"] == "question":
             return self._answer_team(item, text)
         self.resolve(item_id, "answered", text)
+        if item.get("escalates_item_id"):
+            from core.untrusted import wrap_untrusted
+            original = self.get_item(item["escalates_item_id"])
+            if original and original["status"] == "open":
+                self.answer_item(original["id"], "reply", wrap_untrusted("person's answer relayed by a bot", text))
+            return "the answer was sent to the peer bot"
         if item["kind"] == "report":
             return "it will see your reply on its next run"
         return self._continue(item)
@@ -741,7 +771,7 @@ class AgentService:
         from core import model_endpoints
         return next((e["id"] for e in model_endpoints.list_endpoints() if e["kind"] == "claude_cli"), None)
 
-    def make_agent_chat(self, session_id: str, agent: dict) -> dict:
+    def make_agent_chat(self, session_id: str, agent: dict, attended: bool = True) -> dict:
         """Turn a session into a chat with this agent, unless it already is
         one: Auto mode, and the agent's identity and notes frozen in."""
         from core.session_manager import session_manager
@@ -751,7 +781,7 @@ class AgentService:
         session_manager.set_permission_mode(session_id, "auto")
         return session_manager.set_agent(session_id, agent["id"],
                                          identity_block(agent, self.read_memory(agent["id"]),
-                                                        chat=True, session_id=session_id))
+                                                        chat=attended, session_id=session_id))
 
     def recent_work(self, agent_id: str, current_session_id: Optional[str] = None,
                     now: Optional[float] = None) -> str:

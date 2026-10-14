@@ -29,6 +29,7 @@ class AgentBody(BaseModel):
     integration_ids: Optional[list[str]] = None
     keep_signed_in: Optional[bool] = None
     memory_upkeep: Optional[bool] = None
+    peers: Optional[list[str]] = None
 
 
 class MemoryBody(BaseModel):
@@ -73,10 +74,11 @@ def _owned(agent_id: str) -> list[dict]:
 
 def _summary(agent: dict) -> dict:
     """The agent plus what its card on the Agents list shows."""
+    from services.agent_handoff import person_inbox
     owned = _owned(agent["id"])
     running = next((t for t in owned if t["schedule_kind"] == "card" and t.get("status") == "running"), None) \
         or next((t for t in owned if t["schedule_kind"] != "card" and t.get("run_started_at")), None)
-    needs_you = len(agent_service.inbox(agent["id"])) + sum(
+    needs_you = len(person_inbox(agent["id"])) + sum(
         1 for t in owned if t["schedule_kind"] == "card" and t.get("status") == "review")
     may_run, why_not = agent_service.can_run(agent["id"])
     status = ("off" if not agent["enabled"] else "working" if running else "needs_you" if needs_you
@@ -144,12 +146,14 @@ async def whole_inbox(user: str = Depends(require_admin)) -> dict:
     agents' results waiting for review (read from the cards, not copied)."""
     reviews = [t for t in task_service.list_tasks()
                if t.get("agent_id") and t["schedule_kind"] == "card" and t.get("status") == "review"]
-    return {"items": agent_service.inbox(), "reviews": reviews,
-            "count": len(agent_service.inbox()) + len(reviews)}
+    from services.agent_handoff import person_inbox
+    items = person_inbox()
+    return {"items": items, "reviews": reviews, "count": len(items) + len(reviews)}
 
 
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    from services.agent_handoff import person_inbox
     agent = _require(agent_id)
     owned = _owned(agent_id)
     owned_ids = {t["id"] for t in owned}
@@ -160,7 +164,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
         "memory_upkeep_journal": agent_service.memory_upkeep_journal(agent_id),
         "goals": [t for t in owned if t["schedule_kind"] != "card"],
         "cards": [t for t in owned if t["schedule_kind"] == "card"],
-        "inbox": agent_service.inbox(agent_id),
+        "inbox": person_inbox(agent_id),
         "answered": agent_service.inbox(agent_id, status=None)[:20],
         "runs": [r for r in task_service.list_runs() if r["task_id"] in owned_ids][:50],
         "teams": _teams(agent_id),

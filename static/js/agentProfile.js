@@ -144,6 +144,21 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     el('strong', { text: 'File text' }), fileText, apply, soulError);
   const memory = el('div', { class: 'agent-profile-memory' });
   const access = el('div', { class: 'agent-profile-access' });
+  const peersField = el('fieldset', { class: 'agent-profile-peers' });
+  const peersChoices = el('div', { class: 'agent-profile-peer-choices' });
+  peersField.append(el('legend', { text: 'Peers' }),
+    el('p', { class: 'meta', text: 'This bot may assign work only to selected bots.' }), peersChoices);
+  let peersBaseline = '[]', peersServer = '[]', peersDraft = null;
+  const peerIds = () => [...peersChoices.querySelectorAll('input:checked')].map(input => input.value).sort();
+  const loadPeers = async () => {
+    const bots = await api('/api/agents');
+    peersChoices.replaceChildren(...bots.filter(bot => bot.id !== detail.agent.id).map(bot => {
+      const input = el('input', { type: 'checkbox', value: bot.id, 'aria-label': `Peer ${bot.name}` });
+      input.checked = (peersDraft || JSON.parse(peersBaseline)).includes(bot.id);
+      input.addEventListener('change', () => { peersDraft = peerIds(); });
+      return el('label', { class: 'agent-profile-peer' }, [input, el('span', { text: bot.name })]);
+    }));
+  };
   const history = el('div', { class: 'agent-profile-history' });
   const routines = el('p', { class: 'meta' });
   const usage = el('p', { class: 'meta' });
@@ -165,7 +180,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   sections.get('Soul').content.append(soulDrift, soul, sectionSave());
   sections.get('Memory').content.append(memory, upkeep, sectionSave());
   sections.get('Routines').content.replaceChildren(routines, cap, sectionSave());
-  sections.get('Access').content.append(access, keep, sectionSave(), forget, remove);
+  sections.get('Access').content.append(access, peersField, keep, sectionSave(), forget, remove);
   sections.get('Voice & alerts').content.replaceChildren(channel, sectionSave());
   sections.get('Usage').content.replaceChildren(usage);
   sections.get('History').content.append(history);
@@ -197,6 +212,12 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     fileText.textContent = sf.file_text === null ? '(file is missing)' : sf.file_text;
     memory.textContent = next.memory ? `${next.memory.slice(0, 700)}${next.memory.length > 700 ? '…' : ''}` : 'No memory yet.';
     access.textContent = next.agent.keep_signed_in ? 'Browser sign in is kept between runs.' : 'Browser sign in is cleared between runs.';
+    peersServer = JSON.stringify([...(next.agent.peers || [])].sort());
+    if (peersDraft === null || JSON.stringify(peersDraft) === peersBaseline) {
+      peersBaseline = peersServer;
+      peersDraft = null;
+      for (const input of peersChoices.querySelectorAll('input')) input.checked = JSON.parse(peersBaseline).includes(input.value);
+    }
     history.textContent = `${(next.runs || []).length} recent runs.`;
     routines.textContent = `${(next.goals || []).length} standing goals.`;
     usage.textContent = `${next.agent.runs_today || 0} of ${next.agent.daily_run_cap || 0} runs today.`;
@@ -228,6 +249,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       changes[key] = key === 'daily_run_cap' ? Number(state.value()) : key === 'deliver_to_channel' ? state.value() || null : state.value();
     }
     if (model.value !== modelBaseline) changes.endpoint_id = model.value || null;
+    if (peersDraft !== null && JSON.stringify(peersDraft) !== peersBaseline) changes.peers = peersDraft;
     if (!Object.keys(changes).length) return;
     // 2026-10-13: read once before writing so a change between polls is
     // shown before the person's first Save. A second Save chooses the draft.
@@ -239,6 +261,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       || [...extraFields.values()].some(state => changes[state.key] !== undefined
         && (state.input.type === 'checkbox' ? !!fresh.agent[state.key] : String(fresh.agent[state.key] ?? '')) !== state.baseline && state.notice.hidden)
       || (changes.endpoint_id !== undefined && (fresh.agent.endpoint_id || '') !== modelBaseline && modelConflict.hidden);
+    if (changes.peers !== undefined && JSON.stringify([...(fresh.agent.peers || [])].sort()) !== peersBaseline) {
+      peersBaseline = JSON.stringify([...(fresh.agent.peers || [])].sort());
+      update(fresh); toast('Peers changed on the server. Review your selection, then save again.', 'info'); return;
+    }
     update(fresh);
     if (unseen) { toast('Server settings changed. Your draft is kept; review the changes, then save again if you want your version.', 'info'); return; }
     if (changes.soul !== undefined && detail.soul_file && !detail.soul_file.in_sync) {
@@ -252,6 +278,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       if (changes.soul !== undefined) detail.soul_file = { soul: agent.soul, file_text: agent.soul, in_sync: true, revision: agent.revision };
       else if (detail.soul_file) detail.soul_file.revision = agent.revision;
       if (changes.endpoint_id !== undefined) modelBaseline = model.value;
+      if (changes.peers !== undefined) { peersBaseline = JSON.stringify(changes.peers); peersDraft = null; }
       update(detail); toast('Profile saved', 'success'); onSaved();
     } catch (error) { soulError.textContent = error.message; soulError.hidden = false; toast(error.message, 'error'); }
   };
@@ -269,7 +296,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     for (const [name, section] of sections) section.item.hidden = !!q && !name.toLowerCase().includes(q); });
   const close = () => { if (!open) return; open = false; sheet.hidden = backdrop.hidden = true; opener?.focus(); };
   let opener = null;
-  const openSheet = () => { opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false; setTab('details'); setMode('simple'); closeButton.focus(); };
+  const openSheet = () => { opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false; setTab('details'); setMode('simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
   closeButton.onclick = close; backdrop.onclick = close; allButton.onclick = () => setMode('all'); simpleButton.onclick = () => setMode('simple');
   detailsButton.onclick = () => setTab('details'); libraryButton.onclick = () => setTab('library');
   const keydown = (event) => { if (open && event.key === 'Escape') { event.preventDefault(); close(); } };

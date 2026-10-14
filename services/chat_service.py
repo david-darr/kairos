@@ -448,14 +448,20 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
 
 async def send_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                        is_admin: bool = False, reference_context: str = "",
-                       references: list[dict] | None = None) -> str:
+                       references: list[dict] | None = None, *, claimed: bool = False) -> str:
     # Every line logged during the turn names this chat (core/logs.py), so the
     # Logs view can pull out one conversation's trail.
     tag = log_files.set_log_tag(session_id)
     try:
+        if claimed:
+            return await _send_message(session_id, text, attachment_ids, is_admin, reference_context, references)
         async with session_operation(session_id):
             return await _send_message(session_id, text, attachment_ids, is_admin, reference_context, references)
     finally:
+        session = session_manager.get_session(session_id) or {}
+        if session.get("agent_id"):
+            from services.agent_handoff import close_batch
+            close_batch(session["agent_id"], session_id=session_id)
         log_files.reset_log_tag(tag)
 
 
@@ -562,6 +568,10 @@ async def stream_message(session_id: str, text: str, attachment_ids: list[str] |
                                                    references):
                     yield chunk
     finally:
+        session = session_manager.get_session(session_id) or {}
+        if session.get("agent_id"):
+            from services.agent_handoff import close_batch
+            close_batch(session["agent_id"], session_id=session_id)
         log_files.reset_log_tag(tag)
 
 

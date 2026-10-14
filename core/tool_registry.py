@@ -79,6 +79,8 @@ class ToolContext:
     # A helper's own tool calls (core/helpers.py): read tools and browse only.
     helper: bool = False
     read_only: bool = False
+    assignment_run_id: Optional[str] = None
+    source_card_id: Optional[str] = None
 
     @property
     def permission_surface(self) -> str:
@@ -1188,8 +1190,39 @@ async def _hand_to_agent(args, ctx):
             is_admin=ctx.is_admin, force_prompt=True)
         if decision.behavior != "allow":
             return f"Not run: {decision.reason or 'handing work to the agent was not approved'}"
+    # 2026-10-14: a bot's own chat is admin-owned but its autonomous tool
+    # calls still obey Peers. The person can keep using @mentions here.
+    if ctx.agent_id:
+        return "Not run: bots assign through agent_assign, which checks their Peers list."
     event = hand_off(matches[0]["id"], args["work"], ctx.session_id, recent_context(ctx.session_id))
     return f"Handed to {event['agent_name']} (card {event['card_id']})." + (f" {event['note']}" if event['note'] else "")
+
+
+@register(
+    "agent_assign",
+    "Assign work to a bot on your Peers list. Its card, questions and result appear in your thread. "
+    "After assigning, finish this turn; you will continue once the assignments settle.",
+    _object({"agent": _str("Peer bot name or id"), "work": _str("Work to assign")}, ("agent", "work")),
+    agent_only=True, effect=WRITE, core=True,
+)
+async def _agent_assign(args, ctx):
+    from services.agent_handoff import assign
+    return assign(ctx.agent_id, str(args.get("agent") or ""), str(args.get("work") or ""), ctx.session_id,
+                  ctx.assignment_run_id, ctx.source_card_id)
+
+
+@register(
+    "agent_answer_assignment",
+    "Answer a peer's question on your assignment, or escalate it to the person. "
+    "Use the question id from your thread. Set escalate true when the person must decide.",
+    _object({"question_id": _str("Peer question id"), "answer": _str("Your answer when not escalating"),
+             "escalate": {"type": "boolean"}}, ("question_id",)),
+    agent_only=True, effect=WRITE, core=True,
+)
+async def _agent_answer_assignment(args, ctx):
+    from services.agent_handoff import answer_question
+    return answer_question(ctx.agent_id, str(args["question_id"]), str(args.get("answer") or ""),
+                           bool(args.get("escalate")))
 
 
 @register(
@@ -1234,9 +1267,14 @@ async def _agent_read_topic(args, ctx):
 )
 async def _agent_ask(args, ctx):
     from services.agent_service import agent_service
+    from services.agent_handoff import requester
+    from services.task_service import task_service
     item = agent_service.add_item(ctx.agent_id, "question", args["question"], args.get("context") or "")
-    agent_service.notify(item)
-    return "Your question is in the person's inbox. Finish what you can and stop; the answer comes with your next run."
+    card = task_service.get_task(item.get("card_id")) if item.get("card_id") else None
+    if not card or (requester(card) or {}).get("kind") != "bot":
+        agent_service.notify(item)
+        return "Your question is in the person's inbox. Finish what you can and stop; the answer comes with your next run."
+    return "Your question reached the requesting bot. Finish what you can and stop; its answer comes with your next run."
 
 
 # Codex CLI does not consume Kairos's per-chat MCP configuration. These three

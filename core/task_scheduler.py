@@ -295,8 +295,13 @@ async def dispatch_cards() -> Optional[dict]:
     for card in task_service.reclaim_stale_cards(running=set(_running)):
         logger.warning("card '%s' (%s): its run was lost; now %s", card["name"], card["id"], card["status"])
     for card in task_service.list_tasks():
-        if card.get("reply_to") and card.get("status") == "ready":
+        if (card.get("reply_to") or card.get("requester")) and card.get("status") == "ready":
             task_service._sync_handoff(card)
+    # 2026-10-14: reconciliation starts admitted follow-up turns separately;
+    # a long coordinator reply must not hold the board's next dispatch.
+    from services.agent_handoff import wake_batches, wake_questions
+    asyncio.get_running_loop().create_task(wake_questions())
+    asyncio.get_running_loop().create_task(wake_batches())
     card = task_service.next_card(eligible=agent_may_run)
     if card is not None:
         try:

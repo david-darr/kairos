@@ -27,6 +27,28 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
     [['a1', true, true], ['a2', true, true]]);
   assert.equal(await js("document.querySelector('[data-agent-id=a1] .sidebar-bot-preview').textContent"), 'Found two roles.');
 
+  // Coordination, 2026-10-14: bot assignments reuse the chat handoff
+  // portrait/status treatment and put the requester in teammate state.
+  const originalMessages = demoState.sidebarBotMessages['bot-scout-new'];
+  const oldNeeds = agents[0].needs_you, oldStatus = agents[0].status;
+  agents[0].needs_you = 0; agents[0].status = 'idle';
+  demoState.sidebarBotMessages['bot-scout-new'] = [...originalMessages,
+    { id: 'bb1', type: 'handoff', role: 'assistant', content: 'Handed to Archivist',
+      agent_id: 'a2', agent_name: 'Archivist', agent_color: agents[1].color,
+      card_id: 'bb-card', handoff_status: 'working', note: '', ts: timestamp + 1 }];
+  demoState.sidebarBotSessions.a1[0].updated_at = timestamp + 2;
+  await js("document.dispatchEvent(new Event('jarvis:agents-changed'))");
+  await waitFor("document.querySelector('[data-agent-id=a1]')?.dataset.status === 'teammate'");
+  await navigate('agents', { agentId: 'a1', sessionId: 'bot-scout-new' });
+  await waitFor("!!document.querySelector('.agent-chat-main .agent-handoff[data-status=working]')");
+  assert.ok(await js("!!document.querySelector('.agent-chat-main .agent-handoff .handoff-avatar') && document.querySelector('.agent-chat-main .agent-handoff').textContent.includes('Archivist')"),
+    'bot assignment has the assignee portrait and status in the requester thread');
+  demoState.sidebarBotMessages['bot-scout-new'] = originalMessages;
+  demoState.sidebarBotSessions.a1[0].updated_at = timestamp + 3;
+  agents[0].needs_you = oldNeeds; agents[0].status = oldStatus;
+  await navigate('home');
+  await js("document.dispatchEvent(new Event('jarvis:agents-changed'))");
+
   // 2. The aggregate needs-you count wins even when another run is working.
   agents[0].status = 'working';
   await js("document.dispatchEvent(new Event('jarvis:agents-changed'))");

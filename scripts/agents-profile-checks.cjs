@@ -41,6 +41,17 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
   assert.ok(await js("document.querySelector('.agent-profile-details:not([hidden])') && document.querySelector('.agent-profile-tab.active').textContent === 'Details'"));
   await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
+  // Coordination, 2026-10-14: Access persists the peer allow-list by id.
+  await js("document.querySelector('.agent-profile-section[data-section=access] summary').click()");
+  await waitFor("!!document.querySelector('[aria-label=\"Peer Scout\"]')");
+  const peerStart = writes.length;
+  await js("document.querySelector('[aria-label=\"Peer Scout\"]').click()");
+  await js("document.querySelector('.agent-profile-section[data-section=access] .btn.primary').click()");
+  for (let i = 0; i < 80 && !writes.slice(peerStart).some(w => w.path === '/api/agents/a2' &&
+    JSON.parse(w.body).peers?.includes('a1')); i++) await delay(50);
+  assert.ok(writes.slice(peerStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).peers?.includes('a1')),
+    'Access saves the selected peer');
+  assert.deepEqual(agents[1].peers, ['a1'], 'peer id persisted in the profile');
   await js("(() => { for (const [label, size] of [['Name', 101], ['Job', 201]]) { const field = document.querySelector(`[aria-label=\"${label}\"]`); field.value = 'x'.repeat(size); field.dispatchEvent(new Event('input')); } })()");
   assert.equal(await js("document.querySelector('[aria-label=Name]').value.length"), 100, 'name limit');
   assert.equal(await js("document.querySelector('[aria-label=Job]').value.length"), 200, 'job limit');
