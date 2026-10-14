@@ -628,10 +628,15 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 @media (prefers-reduced-motion: reduce) {
   .agent-turn-working, .agent-turn-working * { animation: none !important; transition: none !important; }
 }
-/* The surface that carries the conversation pill into the panel and back
-   (2026-10-14). Animated from chat.js; it never takes pointer events. */
-.chat-history-ghost { position: fixed; z-index: 30; pointer-events: none; box-sizing: border-box;
-  border: 1px solid var(--ui-line); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+/* The liquid morph between the conversation pill and the panel (2026-10-14).
+   Blobs are flat surface under chat.js's #kairos-goo filter, which supplies
+   the merged outline and its shadow; the title rides above, unfiltered. */
+.chat-history-goo-wrap { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
+.chat-history-goo { position: fixed; filter: url(#kairos-goo); }
+.chat-history-goo-blob { position: absolute; background: var(--ui-surface); }
+.chat-history-goo-title { position: fixed; display: flex; align-items: center; gap: 10px; box-sizing: border-box;
+  height: 58px; max-width: 320px; padding: 8px 14px 8px 8px; white-space: nowrap; overflow: hidden;
+  color: var(--text); text-align: left; background: none; border: 0; box-shadow: none; }
 
 /* Agents, 2026-10-14: the paper roster leads with faces and readable work.
    Scope buttons below to outrank interface.css's later base .btn display and

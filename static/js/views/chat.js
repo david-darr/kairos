@@ -673,42 +673,104 @@ export async function render(container, tabId, options = {}) {
     syncHistory();
     newBtn.focus({ preventScroll: true });
   }
-  // The conversation pill grows into the conversations panel and shrinks back
-  // into it (David, 2026-10-14). A ghost with the pill's surface is animated
-  // between the two boxes (FLIP) while the panel's own width transition runs
-  // underneath, and the panel's contents fade in as the ghost lands. The View
-  // Transitions API would snapshot the whole page and collide with the tab
-  // transition app.js already runs. Desktop only; reduced motion skips it.
-  let historyGhost = null;
+  // The conversation pill and the conversations panel separate like liquid
+  // (David, 2026-10-14: "morph with it in a kind of liquid animation as they
+  // separate"). Opening, the panel swells out of the pill and the pill then
+  // slides to where it now sits, pulling a neck of surface that thins and
+  // snaps; closing, the pill slides back, merges, and the panel drains into
+  // it. Both shapes sit in one layer under an SVG "goo" filter (blur, then a
+  // hard alpha threshold), which is what turns two nearby boxes into one fluid
+  // outline. The pill carries its title the whole way, so it never vanishes
+  // and fades back in. The layer covers only the area the morph uses, so the
+  // filter stays cheap. Desktop only; reduced motion skips it.
+  let historyMorph = null;
+  function ensureGooFilter() {
+    if (document.getElementById('kairos-goo')) return;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    svg.innerHTML = '<filter id="kairos-goo" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">'
+      + '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur"/>'
+      + '<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>'
+      + '<feComposite in="SourceGraphic" in2="goo" operator="atop" result="shape"/>'
+      + '<feDropShadow in="goo" dx="0" dy="6" stdDeviation="9" flood-color="#2b2116" flood-opacity="0.12" result="shadow"/>'
+      + '<feMerge><feMergeNode in="shadow"/><feMergeNode in="goo"/></feMerge></filter>';
+    document.body.append(svg);
+  }
+  function measureHistory(collapsed) {
+    const transition = sessionsPanel.style.transition;
+    const was = container.classList.contains('chat-history-collapsed');
+    sessionsPanel.style.transition = 'none';
+    container.classList.toggle('chat-history-collapsed', collapsed);
+    const rects = { pill: openSessionsBtn.getBoundingClientRect(), panel: sessionsPanel.getBoundingClientRect() };
+    container.classList.toggle('chat-history-collapsed', was);
+    void sessionsPanel.offsetWidth;
+    sessionsPanel.style.transition = transition;
+    return rects;
+  }
   function morphHistory(apply) {
     if (!desktopChat.matches || !sessionsPanel.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
-    historyGhost?.remove();
+    historyMorph?.finish();
     const opening = historyCollapsed;
-    const pill = openSessionsBtn.getBoundingClientRect();
-    let panel;
-    if (opening) {
-      // Measure where the panel will end up without waiting for its slide.
-      const transition = sessionsPanel.style.transition;
-      sessionsPanel.style.transition = 'none';
-      container.classList.remove('chat-history-collapsed');
-      panel = sessionsPanel.getBoundingClientRect();
-      container.classList.add('chat-history-collapsed');
-      void sessionsPanel.offsetWidth;
-      sessionsPanel.style.transition = transition;
-    } else panel = sessionsPanel.getBoundingClientRect();
+    const closedState = measureHistory(true);
+    const openState = measureHistory(false);
     apply();
-    if (!panel.width || !pill.width) return;
-    const ghost = historyGhost = el('div', { class: 'chat-history-ghost', 'aria-hidden': 'true' });
-    document.body.append(ghost);
-    const box = r => ({ left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-    const round = getComputedStyle(openSessionsBtn).borderTopLeftRadius;
-    const pillFrame = { ...box(pill), borderRadius: round };
-    const panelFrame = { ...box(panel), borderRadius: '0px' };
-    const [from, to] = opening ? [pillFrame, panelFrame] : [panelFrame, pillFrame];
-    const morph = ghost.animate([{ ...from, opacity: 1 }, { ...to, opacity: 0.9, offset: 0.72 }, { ...to, opacity: 0 }],
-      { duration: 300, easing: 'cubic-bezier(.2, .8, .2, 1)' });
-    if (opening) sessionsPanel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay: 170, fill: 'backwards', easing: 'ease-out' });
-    morph.finished.catch(() => {}).finally(() => { ghost.remove(); if (historyGhost === ghost) historyGhost = null; });
+    const shut = closedState.pill, out = openState.pill, panel = openState.panel;
+    if (!shut.width || !out.width || !panel.width) return;
+    ensureGooFilter();
+    // The layer covers the union of every box the morph passes through.
+    const pad = 40;
+    const left = Math.min(shut.left, out.left, panel.left) - pad, top = Math.min(shut.top, out.top, panel.top) - pad;
+    const right = Math.max(shut.right, out.right, panel.right) + pad, bottom = Math.max(shut.bottom, out.bottom, panel.bottom) + pad;
+    const layer = el('div', { class: 'chat-history-goo', 'aria-hidden': 'true' });
+    Object.assign(layer.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+    const panelBlob = el('div', { class: 'chat-history-goo-blob' });
+    const pillBlob = el('div', { class: 'chat-history-goo-blob' });
+    layer.append(panelBlob, pillBlob);
+    // The title rides above the filter so its text stays crisp. The copy keeps
+    // the pill's markup but none of its identity: no ids, no focus, no events.
+    const title = openSessionsBtn.cloneNode(true);
+    title.removeAttribute('id');
+    title.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+    title.removeAttribute('aria-controls');
+    title.className = 'chat-history-goo-title';
+    title.tabIndex = -1;
+    const wrap = el('div', { class: 'chat-history-goo-wrap', 'aria-hidden': 'true' }, [layer, title]);
+    wrap.inert = true;
+    document.body.append(wrap);
+    // A fully rounded pill reports a huge radius; animating that towards the
+    // panel's square corners keeps the shape an oval blob. Use the radius
+    // that is actually visible: half the pill's height.
+    const radius = `${Math.min(parseFloat(getComputedStyle(openSessionsBtn).borderTopLeftRadius) || 0, shut.height / 2)}px`;
+    const at = (r, rr, offset) => ({ left: `${r.left - left}px`, top: `${r.top - top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: rr, ...(offset === undefined ? {} : { offset }) });
+    const titleAt = (r, offset) => ({ left: `${r.left}px`, top: `${r.top}px`, ...(offset === undefined ? {} : { offset }) });
+    const timing = { duration: 640, easing: 'cubic-bezier(.45, 0, .2, 1)' };
+    let panelFrames, pillFrames, titleFrames;
+    if (opening) {
+      // The panel swells out of the pill; the pill holds on, then slides off.
+      panelFrames = [at(shut, radius), at(panel, '0px', 0.58), at(panel, '0px')];
+      pillFrames = [at(shut, radius), at(shut, radius, 0.32), at(out, radius, 0.86), at(out, radius)];
+      titleFrames = [titleAt(shut), titleAt(shut, 0.32), titleAt(out, 0.86), titleAt(out)];
+    } else {
+      // The pill slides back and merges; then the panel drains into it.
+      panelFrames = [at(panel, '0px'), at(panel, '0px', 0.38), at(shut, radius)];
+      pillFrames = [at(out, radius), at(shut, radius, 0.46), at(shut, radius)];
+      titleFrames = [titleAt(out), titleAt(shut, 0.46), titleAt(shut)];
+    }
+    const morph = panelBlob.animate(panelFrames, timing);
+    pillBlob.animate(pillFrames, timing);
+    title.animate(titleFrames, timing);
+    // Hand back to the real pill and panel at the end, at the same spot.
+    wrap.animate([{ opacity: 1 }, { opacity: 1, offset: 0.9 }, { opacity: 0 }], timing);
+    openSessionsBtn.animate([{ opacity: 0 }, { opacity: 0, offset: 0.88 }, { opacity: 1 }], timing);
+    if (opening) sessionsPanel.animate([{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], timing);
+    // Closing: the list goes first, or its rows show past the panel's edge
+    // while its width collapses underneath.
+    else sessionsPanel.animate([{ opacity: 1 }, { opacity: 0, offset: 0.2 }, { opacity: 0 }], timing);
+    historyMorph = morph;
+    morph.finished.catch(() => {}).finally(() => { wrap.remove(); if (historyMorph === morph) historyMorph = null; });
   }
   openSessionsBtn.addEventListener('click', () => {
     if (desktopChat.matches) {

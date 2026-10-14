@@ -1966,14 +1966,14 @@ app.whenReady().then(async () => {
     // 2026-10-14: the conversation pill morphs into the panel and back. The
     // ghost exists only while the morph runs; reduced motion skips it.
     await js("document.querySelector('#chat-history-toggle').click()");
-    assert.ok(await js("!!document.querySelector('.chat-history-ghost')"), 'Closing history morphs into the pill');
-    await waitFor("!document.querySelector('.chat-history-ghost')");
+    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Closing history morphs into the pill');
+    await waitFor("!document.querySelector('.chat-history-goo-wrap')");
     await js("document.querySelector('#chat-history-toggle').click()");
-    assert.ok(await js("!!document.querySelector('.chat-history-ghost')"), 'Opening history morphs out of the pill');
-    await waitFor("!document.querySelector('.chat-history-ghost') && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')==='true'");
+    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Opening history morphs out of the pill');
+    await waitFor("!document.querySelector('.chat-history-goo-wrap') && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')==='true'");
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await js("document.querySelector('#chat-history-toggle').click()");
-    assert.equal(await js("!!document.querySelector('.chat-history-ghost')"), false, 'Reduced motion: no morph');
+    assert.equal(await js("!!document.querySelector('.chat-history-goo-wrap')"), false, 'Reduced motion: no morph');
     await js("document.querySelector('#chat-history-toggle').click()");
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History is open again after the morph checks');
