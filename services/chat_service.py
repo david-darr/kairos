@@ -25,6 +25,7 @@ from fastapi import HTTPException
 from claude_agent_sdk import CLIJSONDecodeError
 
 from core import attachments, chat_files, file_checkpoints, helpers, logs as log_files, mcp_oauth, model_catalog, model_endpoints, model_marks, permissions, runs, token_usage
+from core import brain as brain_module
 from core.brain import Brain
 from core.codex_brain import CodexBrain
 from core.external_brain import ExternalBrain
@@ -87,11 +88,35 @@ NO_MODEL_MESSAGE = (
 # one gets an actionable reply pointing at the actual cause instead of the
 # generic fallback.
 ATTACHMENT_TOO_LARGE_MESSAGE = (
-    "One of the attachments in that message produced a response too large for "
-    "Claude Code to process in one go — enough images or large files in a "
-    "single message can still blow past the buffer, even with real headroom. "
-    "Try again with fewer or smaller files."
+    "Reading one of this chat's files produced a single response too large for "
+    "Claude Code's transport to carry, which drops the connection mid-turn. "
+    "It is one file doing this, not the number of them, so sending fewer will "
+    "not help — the file itself has to be smaller or split up."
 )
+
+
+def _oversized_file_note(session_id: str) -> str:
+    """Name the files in this chat's working folder that a single Read cannot
+    carry. Rewritten 2026-10-12: the old message blamed "enough images or
+    large files in a single message" and told the user to send fewer, which
+    sent David round in circles on a 4.6MB lecture PDF that failed on its own
+    (see core/attachments.py's CLI_LINE_BYTES_PER_FILE_BYTE for the measured
+    ratio). Reading the sizes back off disk is cheap and turns a guess into
+    the actual filename."""
+    session = session_manager.get_session(session_id) or {}
+    folder = os.path.join(session.get("workspace_dir") or resolve_vault_dir(), ".attachments", session_id)
+    culprits = []
+    try:
+        for name in sorted(os.listdir(folder)):
+            size = os.path.getsize(os.path.join(folder, name))
+            if attachments.oversized_for_read(size, brain_module.MAX_CLI_LINE_BYTES):
+                culprits.append(f"{name} ({size / (1024 * 1024):.1f}MB)")
+    except OSError:
+        return ""
+    if not culprits:
+        return ""
+    return ("\n\nToo large to read in one piece: " + ", ".join(culprits)
+            + ". Split or shrink those and attach them again.")
 
 
 def _resolve_endpoint(session_id: str) -> Optional[dict]:
@@ -497,8 +522,10 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
             outcome = await runs.complete(brain, full_text, context)
         reply, usage = outcome.text, outcome.usage
     except CLIJSONDecodeError:
+        logger.error("chat %s: a CLI response exceeded the %d-byte transport buffer%s", session_id,
+                     brain_module.MAX_CLI_LINE_BYTES, _oversized_file_note(session_id) or " (no oversized file found)")
         await close_session_brain(session_id)
-        reply = ATTACHMENT_TOO_LARGE_MESSAGE
+        reply = ATTACHMENT_TOO_LARGE_MESSAGE + _oversized_file_note(session_id)
     except Exception:
         _remember_claude_session(session_id, brain, succeeded=False)
         await close_session_brain(session_id)
@@ -560,6 +587,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     brain = None
     provider_started = False
     provider_failed = False
+    oversized_note = ""
     context = _run_context(session_id, endpoint, is_admin)
     runs.enter(context)  # what the turn starts names it (core/helpers.py)
     try:
@@ -579,9 +607,14 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
                     yield item
     except CLIJSONDecodeError:
         provider_failed = True
+        # Which attachment overflowed the transport, if one did; recorded once
+        # with the run at the end of the turn, as dev's flow does (2026-10-14).
+        oversized_note = note = _oversized_file_note(session_id)
+        logger.error("chat %s: a CLI response exceeded the %d-byte transport buffer%s", session_id,
+                     brain_module.MAX_CLI_LINE_BYTES, note or " (no oversized file found)")
         await close_session_brain(session_id)
-        reply_parts.append(ATTACHMENT_TOO_LARGE_MESSAGE)
-        yield ATTACHMENT_TOO_LARGE_MESSAGE
+        reply_parts.append(ATTACHMENT_TOO_LARGE_MESSAGE + note)
+        yield ATTACHMENT_TOO_LARGE_MESSAGE + note
     except BaseException as exc:
         # Includes explicit Stop and legacy stream cancellation: preserve the partial answer.
         # Tools that ran before the Stop really happened; keep them, or the
@@ -612,7 +645,8 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
 
     runs.leave(context)
     runs.record(context, tally, "failed" if provider_failed else "finished",
-                detail="the reply was too large for Claude Code's buffer" if provider_failed else "")
+                detail=("the reply was too large for Claude Code's buffer"
+                        + oversized_note.replace("\n\n", " ")) if provider_failed else "")
     _record_turn_telemetry(session_id, endpoint, brain, tally.usage)
     session_manager.append_message(session_id, "assistant", "".join(reply_parts),
                                    status="failed" if provider_failed else None,

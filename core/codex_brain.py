@@ -43,10 +43,13 @@ for why a command line and not an MCP server.
 """
 import asyncio
 import contextlib
+import glob
 import json
+import logging
 import os
 import shutil
 import sys
+import time
 import tomllib
 
 from core import image_gen, tool_access
@@ -66,13 +69,63 @@ from core import projects, runs, system_prompt
 HIVE_MIND_CLI_PATH = os.path.join(BASE_DIR, "mcp_servers", "hive_mind_cli.py")
 
 # Per-message timeout, not per-turn (a real tool-call chain can legitimately
-# take a while) — same posture and value as core/brain.py's
-# TURN_MESSAGE_TIMEOUT_SECONDS, so a hung/crashed codex process doesn't spin
-# the chat UI forever with no error.
-CODEX_MESSAGE_TIMEOUT_SECONDS = 180
+# take a while) — so a hung/crashed codex process doesn't spin the chat UI
+# forever with no error.
+#
+# Raised from 180s on 2026-10-12. Codex, unlike Claude, streams nothing
+# between items: reasoning, a context compaction and the model request
+# itself all happen with stdout completely silent. In David's PSA
+# Curriculums chat (~250K tokens of context per request) that silence
+# routinely ran past three minutes and Kairos killed four healthy turns in
+# a row, each one exactly 180s after the CLI's last stdout event, while
+# Codex's own rollout log showed it writing a reasoning item every 13-20
+# seconds throughout. One turn spent 110s on a context compaction alone.
+CODEX_MESSAGE_TIMEOUT_SECONDS = 600
+# ...and silence is no longer trusted on its own. Codex appends to a rollout
+# file for the whole turn, so a growing rollout is direct proof the process
+# is alive and working; the wait extends while it keeps growing. The hard
+# cap still applies, or a genuinely wedged process would never be reaped.
+CODEX_SILENT_HARD_LIMIT_SECONDS = 2700
+
 # A normal Codex command result can exceed asyncio's 64 KiB readline limit
 # once it is wrapped in one JSON event. Match Claude's bounded CLI buffer.
 CODEX_JSON_LINE_LIMIT_BYTES = 10 * 1024 * 1024
+# How much of the CLI's stderr to carry into a failure message. Enough for
+# the actual error line, short of pasting a whole stack trace into a chat.
+STDERR_TAIL_CHARS = 400
+STDERR_WAIT_SECONDS = 2
+
+logger = logging.getLogger(__name__)
+
+
+async def _stderr_tail(stderr_task) -> str:
+    """What the CLI printed to stderr. Called only once the process has
+    exited, so the read is already finished or about to be; bounded anyway,
+    and never turns a failure into a second failure of its own."""
+    if stderr_task is None:
+        return ""
+    if not stderr_task.done():
+        # asyncio.wait, not wait_for: a timeout here must not cancel the
+        # task, which events()' own finally block still gathers.
+        await asyncio.wait([stderr_task], timeout=STDERR_WAIT_SECONDS)
+    if not stderr_task.done():
+        return ""
+    try:
+        data = stderr_task.result()
+    except BaseException:
+        return ""
+    return (data or b"").decode("utf-8", "replace").strip()[-STDERR_TAIL_CHARS:]
+
+
+def _minutes(seconds: int) -> str:
+    count = max(1, round(seconds / 60))
+    return f"{count} minute{'s' if count != 1 else ''}"
+
+
+def _reported_suffix(failure: str | None, stderr_tail: str) -> str:
+    """Codex's own words, for the end of a RuntimeError the user will read."""
+    said = failure or stderr_tail
+    return f" Codex said: {said}" if said else ""
 
 
 def _writable_roots_override() -> str:
@@ -230,6 +283,9 @@ class CodexBrain:
         # The current or last turn's process, and whether stopping it is
         # confirmed (see cancel()).
         self._proc: asyncio.subprocess.Process | None = None
+        # Cached once found — see _rollout_progress(), the liveness check
+        # that keeps a silent-but-working Codex turn from being killed.
+        self._rollout_file: str | None = None
         self._stop_confirmed = True
 
     @staticmethod
@@ -469,16 +525,64 @@ class CodexBrain:
                 stderr_task.cancel()
             await asyncio.gather(stderr_task, return_exceptions=True)
 
+    def _rollout_progress(self) -> tuple[int, float] | None:
+        """(size, mtime) of this thread's Codex rollout file, or None if it
+        cannot be found. Codex appends to that file continuously — every
+        reasoning item, tool call and token count — while stdout can stay
+        silent for minutes at a time, so its growth is the honest answer to
+        "is this process still working?". A resumed thread keeps appending
+        to the rollout its first turn created, which is why this matches on
+        the thread id rather than on today's date.
+
+        None means "cannot tell", and the caller then falls back to the
+        plain timeout. CodexBrain never passes --ephemeral (the swarm worker
+        and chat_summary do, but neither comes through here), so in practice
+        a turn that has started always has a rollout."""
+        if not self.thread_id:
+            return None
+        if self._rollout_file is None:
+            home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+            found = glob.glob(os.path.join(home, "sessions", "*", "*", "*",
+                                           f"rollout-*-{self.thread_id}.jsonl"))
+            if not found:
+                return None
+            self._rollout_file = max(found, key=os.path.getmtime)
+        try:
+            stat = os.stat(self._rollout_file)
+        except OSError:
+            return None
+        return stat.st_size, stat.st_mtime
+
+    async def _next_line(self, proc):
+        """One stdout line, waiting longer while Codex is visibly still
+        working. Raises RuntimeError once it is genuinely silent."""
+        deadline = time.monotonic() + CODEX_SILENT_HARD_LIMIT_SECONDS
+        progress = self._rollout_progress()
+        while True:
+            try:
+                return await asyncio.wait_for(proc.stdout.readline(),
+                                              timeout=CODEX_MESSAGE_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                latest = self._rollout_progress()
+                if latest is None or latest == progress:
+                    raise RuntimeError(
+                        f"Codex produced no output for {_minutes(CODEX_MESSAGE_TIMEOUT_SECONDS)} "
+                        "and its session log stopped growing, so it was stopped.") from None
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"Codex ran over {_minutes(CODEX_SILENT_HARD_LIMIT_SECONDS)} without "
+                        "finishing a message, so it was stopped.") from None
+                logger.info("codex (chat %s) is silent but its rollout is still growing (%s bytes); waiting",
+                            self.session_id, latest[0])
+                progress = latest
+
     async def _consume_process(self, proc, stderr_task, is_fresh_thread, user_text):
         has_text = False
         completed = False
         failure = None
         open_tools: set[str] = set()
         while True:
-            try:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=CODEX_MESSAGE_TIMEOUT_SECONDS)
-            except asyncio.TimeoutError:
-                raise RuntimeError("Codex timed out waiting for a response")
+            line = await self._next_line(proc)
             if not line:
                 break
             try:
@@ -531,8 +635,18 @@ class CodexBrain:
                 }
             elif etype in ("error", "turn.failed"):
                 failure = event.get("message") or (event.get("error") or {}).get("message") or "Codex could not complete this turn"
+                logger.error("codex (chat %s) reported %s: %s", self.session_id, etype, failure)
 
         rc = await proc.wait()
+        stderr_tail = await _stderr_tail(stderr_task)
+        if failure or rc != 0 or not completed:
+            # Every one of these used to be reported as a fixed sentence with
+            # the CLI's own words thrown away, so a failing Codex chat left
+            # nothing in the logs to diagnose it with — found live
+            # 2026-10-12, when four failed turns produced zero log lines
+            # mentioning Codex at all.
+            logger.error("codex (chat %s) turn failed: exit %s, completed=%s, reported=%r, stderr=%r",
+                         self.session_id, rc, completed, failure, stderr_tail)
         if failure and any(term in failure.lower() for term in
                            ("429", "rate limit", "rate_limit", "too many requests")):
             # A fresh thread cannot repair an account limit. Surface it so
@@ -558,9 +672,12 @@ class CodexBrain:
                     async for item in retry:
                         yield item
                 return
-            raise RuntimeError(f"Codex exited with an error (code {rc}). Check the selected model and CLI connection.")
+            raise RuntimeError(f"Codex exited with an error (code {rc})."
+                               + _reported_suffix(failure, stderr_tail))
         if failure or not completed:
-            raise RuntimeError("Codex did not report a successful turn. Check the selected model and CLI connection.")
+            raise RuntimeError("Codex did not report a successful turn."
+                               + (_reported_suffix(failure, stderr_tail)
+                                  or " Check the selected model and CLI connection."))
         usage = runs.usage_event(self.last_usage)
         if usage:
             yield usage

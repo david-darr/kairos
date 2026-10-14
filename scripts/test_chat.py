@@ -31,6 +31,8 @@ from core.session_manager import session_manager, SessionManager
 from core import session_manager_store as session_store
 from core import memory_tools
 from core.atomic_io import read_json, write_json_atomic
+from core import brain as brain_module
+from core import codex_brain as codex_brain_module
 from core.codex_brain import CodexBrain
 from core.brain import Brain
 from claude_agent_sdk import AssistantMessage, TextBlock, ResultMessage
@@ -73,17 +75,24 @@ FAKE_CATALOG = {
 }
 
 
-def _make_text_pdf(path: Path, pages: int = 1) -> None:
+def _make_text_pdf(path: Path, pages: int = 1, lines_per_page: int = 1) -> None:
     """Minimal hand-built PDF with a real per-page text content stream (same
     technique as scripts/chat-smoke.cjs's samplePDF()) — a real text layer,
-    not a scan."""
+    not a scan. lines_per_page pads each page with more real text, for tests
+    that need a PDF big enough to be split (attachments._split_large_pdf);
+    padding with drawn text rather than filler bytes keeps it in the file
+    after pdfium rewrites each chunk."""
     objects, page_nums = [], []
     obj_num = 3
     font_num = obj_num
     objects.append((font_num, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
     obj_num += 1
     for i in range(pages):
-        stream = f"BT /F1 24 Tf 50 700 Td (This is real, extractable page {i + 1} body text, well over the scanned-page character threshold.) Tj ET"
+        body = "".join(
+            f" 0 -14 Td (Page {i + 1} line {n}: real, extractable body text for the splitter test.) Tj"
+            for n in range(lines_per_page))
+        stream = (f"BT /F1 24 Tf 50 700 Td (This is real, extractable page {i + 1} body text, "
+                  f"well over the scanned-page character threshold.) Tj{body} ET")
         content_num = obj_num
         objects.append((content_num, f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream"))
         obj_num += 1
@@ -293,6 +302,82 @@ class ChatTests(unittest.TestCase):
                  patch.object(CodexBrain, "_build_args", return_value=[sys.executable, "-c", script]):
                 chunks = [chunk async for chunk in brain.run_turn_stream("read a large result")]
             self.assertEqual(chunks, ["x" * 70000])
+
+        asyncio.run(run())
+
+    def test_codex_keeps_waiting_while_its_rollout_still_grows(self):
+        # Regression for 2026-10-12: Codex streams nothing between items, so
+        # a long reasoning stretch or a context compaction looks identical
+        # to a hung process on stdout. Four healthy turns in David's PSA
+        # Curriculums chat were killed exactly 180s after the CLI's last
+        # stdout event while its rollout log was still being written to.
+        async def run():
+            rollout = self.root / "rollout-fake.jsonl"
+            rollout.write_bytes(b"")
+            brain = CodexBrain(vault_dir=str(self.root))
+            brain.thread_id = "fake-thread"
+            brain._rollout_file = str(rollout)
+
+            stdout = asyncio.StreamReader()
+
+            async def work():
+                for _ in range(4):          # silent, but visibly alive
+                    with rollout.open("ab") as handle:
+                        handle.write(b"x" * 64)
+                    await asyncio.sleep(0.02)
+                stdout.feed_data(b'{"type": "turn.completed"}\n')
+
+            with patch.object(codex_brain_module, "CODEX_MESSAGE_TIMEOUT_SECONDS", 0.05), \
+                 patch.object(codex_brain_module, "CODEX_SILENT_HARD_LIMIT_SECONDS", 30):
+                task = asyncio.create_task(work())
+                line = await brain._next_line(SimpleNamespace(stdout=stdout))
+                await task
+            self.assertIn(b"turn.completed", line)
+
+        asyncio.run(run())
+
+    def test_codex_is_stopped_once_it_is_silent_and_its_rollout_is_static(self):
+        async def run():
+            rollout = self.root / "rollout-static.jsonl"
+            rollout.write_bytes(b"done")
+            brain = CodexBrain(vault_dir=str(self.root))
+            brain.thread_id = "fake-thread"
+            brain._rollout_file = str(rollout)
+
+            class NeverSpeaks:
+                async def readline(self):
+                    await asyncio.sleep(30)
+
+            with patch.object(codex_brain_module, "CODEX_MESSAGE_TIMEOUT_SECONDS", 0.02), \
+                 patch.object(codex_brain_module, "CODEX_SILENT_HARD_LIMIT_SECONDS", 30), \
+                 self.assertRaises(RuntimeError) as caught:
+                await brain._next_line(SimpleNamespace(stdout=NeverSpeaks()))
+            self.assertIn("session log stopped growing", str(caught.exception))
+
+        asyncio.run(run())
+
+    def test_codex_failure_carries_the_cli_s_own_words(self):
+        # The CLI's reported failure and its stderr used to be captured into
+        # locals and dropped, so a failing Codex chat left nothing in the
+        # logs: on 2026-10-12 four failed turns produced zero log lines
+        # mentioning Codex at all.
+        async def run():
+            script = (
+                'import json, sys\n'
+                'sys.stdin.read()\n'
+                'print(json.dumps({"type": "thread.started", "thread_id": "failing"}))\n'
+                'print(json.dumps({"type": "turn.failed", "message": "model stream disconnected"}))\n'
+                'sys.stderr.write("codex: stream error\\n")\n'
+            )
+            brain = CodexBrain(vault_dir=str(self.root))
+            with patch.object(CodexBrain, "_codex_path", return_value=sys.executable), \
+                 patch.object(CodexBrain, "_build_args", return_value=[sys.executable, "-c", script]), \
+                 self.assertLogs("core.codex_brain", level="ERROR") as logged, \
+                 self.assertRaises(RuntimeError) as caught:
+                _ = [chunk async for chunk in brain.run_turn_stream("do the thing")]
+            self.assertIn("model stream disconnected", str(caught.exception))
+            self.assertTrue(any("model stream disconnected" in line for line in logged.output), logged.output)
+            self.assertTrue(any("stream error" in line for line in logged.output), logged.output)
 
         asyncio.run(run())
 
@@ -688,6 +773,70 @@ class ChatTests(unittest.TestCase):
         # The scanned original was consumed by the split; the text PDF was not.
         self.assertTrue((self.root / text_names[0]).is_file())
         self.assertFalse(any(n.endswith('scan.pdf') for n in names))
+
+    def test_large_text_pdf_is_split_into_page_ranges(self):
+        # Regression for 2026-10-12: a 4.6MB lecture deck with a real text
+        # layer passed the scanned-PDF test above untouched and still killed
+        # the turn, because Read embeds a PDF whole and the CLI's stdout
+        # line carries it at ~2.67x the file's size. Size is the dimension
+        # that matters, not scanned-ness.
+        big_id = attachments.stage_file('lecture.pdf', b'placeholder')['id']
+        staged = Path(attachments._find_staged_path(big_id))
+        _make_text_pdf(staged, pages=8, lines_per_page=200)
+        # A real deck is megabytes against a 3MB budget; the ratio is what
+        # matters here, so shrink the budget instead of the fixture. Small
+        # enough that pdfium's own repacking cannot get the whole document
+        # under it, which is the case that actually has to split.
+        budget = 4000
+        self.assertGreater(staged.stat().st_size, budget)
+        with patch.object(attachments, 'MAX_PDF_CHUNK_BYTES', budget):
+            names, warnings = attachments.resolve_for_turn([big_id], self.sid, str(self.root))
+        self.assertGreater(len(names), 1, names)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('split into', warnings[0])
+        for name in names:
+            part = self.root / name
+            self.assertTrue(part.is_file())
+            self.assertTrue(name.endswith('.pdf'))
+            self.assertLessEqual(part.stat().st_size, budget)
+        # Every page survives, in order, with its text layer intact.
+        import pypdfium2 as pdfium
+        pages, first_range = 0, None
+        for name in names:
+            doc = pdfium.PdfDocument(str(self.root / name))
+            try:
+                pages += len(doc)
+                self.assertGreater(doc[0].get_textpage().count_chars(), 0)
+            finally:
+                doc.close()
+            if first_range is None:
+                first_range = name
+        self.assertEqual(pages, 8)
+        self.assertIn('pages01-', first_range)
+        self.assertFalse(any(n.endswith('/lecture.pdf') or n.endswith('\\lecture.pdf') for n in names))
+
+    def test_small_text_pdf_is_left_whole(self):
+        small_id = attachments.stage_file('notes.pdf', b'placeholder')['id']
+        _make_text_pdf(Path(attachments._find_staged_path(small_id)), pages=3)
+        names, warnings = attachments.resolve_for_turn([small_id], self.sid, str(self.root))
+        self.assertEqual(len(names), 1, names)
+        self.assertEqual(warnings, [])
+        self.assertTrue(names[0].endswith('notes.pdf'))
+
+    def test_buffer_failure_names_the_oversized_file(self):
+        # The old message blamed "enough images or large files in a single
+        # message" and told the user to send fewer, which is wrong: one file
+        # does this on its own.
+        folder = self.root / '.attachments' / self.sid
+        folder.mkdir(parents=True, exist_ok=True)
+        over = int(brain_module.MAX_CLI_LINE_BYTES / attachments.CLI_LINE_BYTES_PER_FILE_BYTE) + 1024
+        (folder / 'huge.pdf').write_bytes(b'\0' * over)
+        (folder / 'fine.pdf').write_bytes(b'\0' * 1024)
+
+        note = chat_service._oversized_file_note(self.sid)
+        self.assertIn('huge.pdf', note)
+        self.assertNotIn('fine.pdf', note)
+        self.assertEqual(chat_service._oversized_file_note('missing-session'), '')
 
     def test_scanned_pdf_truncates_with_warning_past_page_cap(self):
         big_id = attachments.stage_file('bigscan.pdf', b'placeholder')['id']
