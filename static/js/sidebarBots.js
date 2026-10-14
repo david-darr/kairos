@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { portrait, profileColor } from './agentProfile.js';
 import * as chatStream from './chatStream.js';
+import { openCreateAgent } from './agentCreation.js';
 
 const THREAD_LIMIT = 5;
 const STORAGE = 'kairos:sidebar-section:';
@@ -68,6 +69,9 @@ function threadRow(thread, agentId) {
 
 export function mountSidebarBots(nav) {
   const botsBody = section(nav, 'bots', 'Bots');
+  // 2026-10-14: the rail's global + starts the same draft as the Agents tab.
+  const createBot = button('sidebar-bot-create', 'New bot', openCreateAgent);
+  createBot.textContent = '+ New bot'; botsBody.append(createBot);
   const teamsBody = section(nav, 'teams', 'Teams');
   const pinnedBody = section(nav, 'pinned', 'Pinned');
   const rows = new Map(), details = new Map(), allThreadIds = new Set();

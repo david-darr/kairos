@@ -5,6 +5,7 @@ import { mountAgentChat } from "../agentChat.js";
 import { mountComputerPanel } from "../computerPanel.js";
 import { toggle } from "../settingsKit.js";
 import { mountAgentProfile, portrait, profileColor } from "../agentProfile.js";
+import { openCreateAgent } from "../agentCreation.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -13,8 +14,6 @@ import { mountAgentProfile, portrait, profileColor } from "../agentProfile.js";
 // Teams (phase 5, 2026-10-05) are Swarm companies, shown here through
 // views/swarm.js in its embedded mode; Swarm has no tab of its own any more.
 
-// The colors the backend accepts (services/agent_service.py COLORS).
-const COLORS = ["#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9"];
 const STATUS = { idle: "Idle", working: "Working", needs_you: "Needs you", off: "Off", capped: "Done for today" };
 const POLL_MS = 10000;
 
@@ -44,7 +43,7 @@ export async function render(container, tabId, options = {}) {
     const swarm = await import("./swarm.js");
     return swarm.render(container, tabId, { ...options, embedded: true, systemId: options.team });
   }
-  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile, options.sessionId);
+  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile, options.sessionId, options.creationNotice);
   else await listPage(root, schedule);
   return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); releasePortraits(root); };
 }
@@ -93,9 +92,8 @@ const listRequests = new WeakMap();
 async function listPage(root, schedule) {
   const version = (listRequests.get(root) || 0) + 1;
   listRequests.set(root, version);
-  const [agents, inbox, models, channels, teams] = await Promise.all([
-    api("/api/agents"), api("/api/agents/inbox"), api("/api/models").catch(() => []), api("/api/channels").catch(() => []),
-    api("/api/swarm/systems").catch(() => null),
+  const [agents, inbox, teams] = await Promise.all([
+    api("/api/agents"), api("/api/agents/inbox"), api("/api/swarm/systems").catch(() => null),
   ]);
   if (!document.body.contains(root) || version !== listRequests.get(root)) return;
   let state = listStates.get(root);
@@ -106,7 +104,7 @@ async function listPage(root, schedule) {
     root.append(el("div", { class: "view-header" }, [el("div", {}, [
       el("h2", { text: "Agents" }),
       el("div", { class: "sub", text: "Named helpers that work in the background and come back when they need you." }),
-    ])]), inboxHost, newAgentForm(models, channels, root, schedule), grid, teamHost);
+    ]), el("button", { type: "button", class: "btn primary", text: "+ New agent", onclick: openCreateAgent })]), inboxHost, grid, teamHost);
     state = { inboxHost, grid, teamHost, tiles: new Map(), inbox: new Map(), teamsSignature: '' };
     listStates.set(root, state);
   }
@@ -162,7 +160,7 @@ async function listPage(root, schedule) {
     if (state.grid.children[index] !== node) state.grid.insertBefore(node, state.grid.children[index] || null);
   }
   if (!agents.length && !state.emptyNode) { state.emptyNode = emptyState({ icon: ICONS.agents, title: 'No agents yet',
-    hint: 'Create one above: give it a name, a role, and something to watch or do.' }); state.grid.append(state.emptyNode); }
+    hint: 'Create one with a name and a job to do.' }); state.grid.append(state.emptyNode); }
   const teamsSignature = JSON.stringify(teams);
   if (teamsSignature !== state.teamsSignature) { state.teamHost.replaceChildren(teams ? teamsSection(teams) : null); state.teamsSignature = teamsSignature; }
   if (agents.some((a) => a.status === "working")) schedule(() => listPage(root, schedule));
@@ -192,43 +190,6 @@ function teamsSection(teams) {
     ]),
     teams.items.length ? grid : el("div", { class: "meta", text: "No teams yet." }),
   ]);
-}
-
-function newAgentForm(models, channels, root, schedule) {
-  const form = el("details", { class: "disclosure-panel" });
-  const name = el("input", { placeholder: "e.g. Scout", maxlength: '100' });
-  const role = el("input", { placeholder: "e.g. Watches my job applications and new postings", maxlength: '200' });
-  const instructions = el("textarea", { rows: "3", placeholder: "How it should work: sources to use, what to leave out, how to report." });
-  const model = customSelect({}, modelOptions(models));
-  const channel = customSelect({}, channelOptions(channels));
-  let color = COLORS[0];
-  const swatches = el("div", { class: "agent-swatches", role: "radiogroup", "aria-label": "Color" });
-  const paint = () => swatches.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.color === color)));
-  for (const c of COLORS) {
-    swatches.append(el("button", { type: "button", role: "radio", "data-color": c, "aria-label": c, style: `background:${c}`,
-      onclick: () => { color = c; paint(); } }));
-  }
-  paint();
-  const create = async () => {
-    if (!name.value.trim()) { toast("Give the agent a name", "error"); return; }
-    try {
-      const agent = await api("/api/agents", { method: "POST", body: JSON.stringify({
-        name: name.value.trim(), role: role.value.trim(), instructions: instructions.value.trim(),
-        endpoint_id: model.value || null, color, deliver_to_channel: channel.value || null }) });
-      toast(`${agent.name} is ready`, "success");
-      open(agent.id);
-    } catch (problem) { toast(problem.message, "error"); }
-  };
-  form.append(el("summary", { text: "+ New agent" }), el("div", { class: "form-grid" }, [
-    el("div", { class: "field" }, [el("label", { text: "Name" }), name]),
-    el("div", { class: "field field-grow" }, [el("label", { text: "Role" }), role]),
-    el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "How it should work" }), instructions]),
-    el("div", { class: "field" }, [el("label", { text: "Model" }), model]),
-    el("div", { class: "field" }, [el("label", { text: "Tell me on" }), channel]),
-    el("div", { class: "field" }, [el("label", { text: "Color" }), swatches]),
-    el("button", { class: "btn primary", text: "Create agent", onclick: create }),
-  ]));
-  return form;
 }
 
 // -- the inbox (shared by the list and the agent page) ----------------------
@@ -319,7 +280,7 @@ function reviewItem(card, agent, refresh) {
 
 // -- one agent ----------------------------------------------------------------
 
-async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false, sessionId = null) {
+async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false, sessionId = null, creationNotice = null) {
   let detail;
   try {
     detail = await api(`/api/agents/${agentId}`);
@@ -337,6 +298,10 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   // rebuilt under the person typing in it.
   const header = el("div", { class: "agent-header" });
   const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
+  // 2026-10-14: keep a failed first routine visible above the new profile's
+  // settings, since the sheet covers the page-level notice after creation.
+  if (creationNotice) root.querySelector('.agent-profile-body')?.prepend(
+    el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice }));
   cleanups.push(profile.dispose);
   const chatTab = el("button", { type: "button", role: "tab", class: "agent-tab", text: "Chat" });
   const workTab = el("button", { type: "button", role: "tab", class: "agent-tab" });
@@ -386,6 +351,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   workTab.addEventListener("click", () => show("work"));
   root.append(
     el("button", { class: "btn quiet agent-back", text: "← All agents", onclick: () => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab: "agents" } })) }),
+    ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
     header,
     el("div", { class: "agent-tabs", role: "tablist", "aria-label": "Agent" }, [chatTab, workTab]),
     chatHost, workHost,

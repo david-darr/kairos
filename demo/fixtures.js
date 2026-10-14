@@ -262,6 +262,17 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    // 2026-10-14: the birth smoke uses the same two writes as production and
+    // keeps their state separate so a failed first routine leaves its bot.
+    if (route === '/api/agents' && method === 'POST') {
+      const agent = { id: `a${agentsFixture.length + 1}`, ...body, revision: 1, enabled: true,
+        daily_run_cap: 12, runs_today: 0, needs_you: 0, status: 'idle', status_detail: '' };
+      agentsFixture.push(agent); return agent;
+    }
+    if (/^\/api\/agents\/a\d+\/goals$/.test(route) && method === 'POST') {
+      if (state.failFirstRoutine) return { _status: 500, detail: 'Routine service unavailable' };
+      return { id: `g${Date.now()}`, ...body };
+    }
     // 2026-10-14: keep the sidebar's new-thread fixture on the same agent
     // chat route the real app uses, so a click can reopen the created chat.
     const botChat = route.match(/^\/api\/agents\/(a\d)\/chat$/);

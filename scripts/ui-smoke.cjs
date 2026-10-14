@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, ".scratch-4ii", "run-" + Date.now());
+const output = path.join(root, ".scratch-4iii", "run-" + Date.now());
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -137,6 +137,7 @@ const server = http.createServer(async (req, res) => {
         liveBroadcast({ type: 'started', sessionId: id, run: structuredClone(run) });
         res.end(JSON.stringify({ turn_id: run.turnId }));
         setTimeout(async () => {
+          if ((demoState.liveHoldIds || []).includes(id)) return;
           if (id === 'patch-progress') return;
           if (demoState.artifactHold && id === 's1') return;
           if (demoState.computerTurn) {
@@ -295,6 +296,13 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    if (process.argv.includes('--agents-birth-only')) {
+      await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
+        win, liveChunk, liveEvent, liveFinish });
+      assert.deepEqual(errors, [], 'Agent birth renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--sidebar-bots-only')) {
       await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
         sessions: calendarFixtures.sessions, win, errors });
@@ -2244,10 +2252,12 @@ app.whenReady().then(async () => {
     await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
     await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
       sessions: calendarFixtures.sessions, win, errors });
-    assert.deepEqual(errors, [], 'Agents profile renderer errors');
+    await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
+      win, liveChunk, liveEvent, liveFinish });
+    assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Sidebar bots: 9 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Sidebar bots: 9 cases", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));
