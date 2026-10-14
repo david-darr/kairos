@@ -1,3 +1,8 @@
+// No SVG filters in these faces (2026-10-14). The first version blurred its
+// shadow and generated plush texture with feTurbulence; browsers rasterize
+// filtered SVG images per size and per instance, and a chat full of faces
+// made ui-smoke fail at random (3 of 5 runs, 0 of 3 with the filters removed).
+// A gradient shadow and a dot pattern draw the same look for almost nothing.
 // 2026-10-14: Agent faces are original, cached SVG data URLs. A static image
 // has no per-instance canvas or ResizeObserver, so rosters stay cheap to poll.
 export const AVATAR_FORMS = ['round', 'pill', 'triangle', 'ears', 'cloud', 'heart', 'sprout', 'scallop', 'hexagon', 'diamond', 'robot'];
@@ -76,12 +81,12 @@ export function avatarUrl(spec) {
   const ceramic = spec.finish === 'ceramic';
   const svg = `<svg xmlns="${svgNS}" viewBox="0 0 128 128" width="128" height="128"><defs>
     <radialGradient id="body" cx="34%" cy="24%" r="80%"><stop stop-color="#fff" stop-opacity="${ceramic ? '.65' : glossy ? '.48' : '.32'}"/><stop offset=".34" stop-color="${xml(color)}"/><stop offset=".77" stop-color="${xml(color)}"/><stop offset="1" stop-color="#3B2C46" stop-opacity=".75"/></radialGradient>
-    <filter id="shadow" x="-60%" y="-100%" width="220%" height="300%"><feGaussianBlur stdDeviation="4"/></filter>
-    <filter id="texture" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency=".34" numOctaves="2" seed="7" result="noise"/><feComposite in="noise" in2="SourceGraphic" operator="in"/></filter>
+    <radialGradient id="shadow"><stop stop-color="#5F493D" stop-opacity=".32"/><stop offset="1" stop-color="#5F493D" stop-opacity="0"/></radialGradient>
+    <pattern id="fuzz" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="1.2" cy="1.3" r=".8" fill="#fff"/><circle cx="3.7" cy="3.6" r=".6" fill="#fff"/><circle cx="4.1" cy="0.9" r=".4" fill="#fff"/></pattern>
     <clipPath id="shape">${shape(spec.form)}</clipPath></defs>
-    <ellipse cx="64" cy="115" rx="37" ry="6" fill="#5F493D" opacity=".2" filter="url(#shadow)"/>
+    <ellipse cx="64" cy="115" rx="44" ry="9" fill="url(#shadow)"/>
     <g fill="url(#body)" stroke="#47364B" stroke-opacity="${ceramic ? '.15' : '.08'}" stroke-width="1">${shape(spec.form)}</g>
-    ${plush ? '<g clip-path="url(#shape)" opacity=".17" filter="url(#texture)"><rect x="10" y="10" width="108" height="108" fill="#fff"/></g>' : ''}
+    ${plush ? '<g clip-path="url(#shape)" opacity=".22"><rect x="10" y="10" width="108" height="108" fill="url(#fuzz)"/></g>' : ''}
     <ellipse cx="48" cy="37" rx="19" ry="9" transform="rotate(-24 48 37)" fill="#fff" opacity="${glossy ? '.38' : ceramic ? '.3' : '.15'}" clip-path="url(#shape)"/>
     ${faceMarkup(spec.face, ink)}${accessoryMarkup(spec.accessory)}</svg>`;
   const url = `data:image/svg+xml,${encodeURIComponent(svg)}`;
