@@ -24,8 +24,11 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await pressEscape();
   await waitFor(`!document.querySelector('${modal}')`);
   assert.equal(writes.slice(before).filter(w => w.path === '/api/agents').length, 0);
-  await navigate('home');
-  await js("document.querySelector('#nav .sidebar-bot-create').click()");
+  // 2026-10-14: the sidebar's New bot button went with its bot sections;
+  // the Agents tab's own button opens the same modal.
+  await navigate('agents');
+  await waitFor("[...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+ New agent')");
+  await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '+ New agent').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   await fill('[aria-label="Bot name"]', 'Temporary');
   await pressEscape();

@@ -1004,7 +1004,6 @@ input[type="checkbox"]:checked::after {
 }
 .chat-mobile-menu-btn { color: var(--text-faint); }
 .chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.chat-header-new { margin-left: auto; flex-shrink: 0; }
 .chat-composer-dock { flex-shrink: 0; width: min(calc(100% - 48px), var(--chat-column)); margin: 0 auto; position: relative; z-index: 4; }
 #chat-main.is-empty #chat-messages { flex: 0; padding: 0; }
 #chat-main.is-empty .chat-composer-dock { margin-block: auto; }

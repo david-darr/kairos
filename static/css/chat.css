@@ -66,11 +66,10 @@
 .msg.msg-failed .msg-body { color: var(--text); }
 #chat-main { position: relative; min-width: 0; }
 .chat-jump { position: absolute; bottom: calc(var(--composer-height, 140px) + 12px); left: 50%; transform: translateX(-50%); z-index: 3; border-radius: 24px; box-shadow: var(--shadow-elevated); }
-.chat-jump[hidden], #model-version-btn[hidden] { display: none; }
+.chat-jump[hidden] { display: none; }
 .chat-summary-trigger { flex-shrink: 0; margin-left: auto; padding: 6px 11px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text-dim);
   font: inherit; font-size: 11px; cursor: pointer; }
-.chat-mobile-header:has(.chat-summary-trigger:not([hidden])) .chat-header-new { margin-left: 0; }
 .chat-summary-trigger:hover { color: var(--text); border-color: var(--border-strong); }
 .chat-summary-trigger[hidden], .chat-timeline[hidden] { display: none; }
 .chat-summary-trigger:focus-visible, .chat-timeline-point:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -206,7 +205,6 @@
 .model-version-form label { font-size: 12px; font-weight: 550; }
 .model-version-form input { width: 100%; min-width: 0; }
 .model-version-form p { font-size: 12px; line-height: 1.6; margin: 0; }
-.version-menu { width: 330px; max-height: 420px; }
 
 /* -- model catalog + reasoning level (David's ask 2026-09-15) ----------- */
 .model-version-search { padding: 8px 8px 4px; position: sticky; top: -4px; z-index: 1; background: var(--bg-panel-solid); }

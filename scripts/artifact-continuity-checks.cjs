@@ -141,7 +141,7 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   assert.equal(await count(), 2);
   await js("import('/static/js/views/chat.js').then(m => m.openSessionById('s2'))");
   // New-chat reset leaves the same documents; phones return with no overlay.
-  await click('.chat-header-new'); assert.equal(await count(), 2);
+  await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()"); assert.equal(await count(), 2);  // the header "..." menu: New chat (2026-10-14)
   win.setContentSize(390, 844); await delay(200); await navigate('home'); await navigate('chat', {sessionId:'s2'});
   assert.equal(await js("!!document.querySelector('.chat-layout .artifact-viewer')"), false);
   await click('.chat-documents-toggle'); assert.equal(await count(), 2);

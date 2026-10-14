@@ -303,14 +303,6 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
     }
-    if (process.argv.includes('--sidebar-bots-only')) {
-      await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        sessions: calendarFixtures.sessions, win, errors });
-      assert.deepEqual(errors, [], 'Sidebar bots renderer errors');
-      console.log('PASS: sidebar bots (9 cases), no renderer errors.');
-      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Sidebar bots: 9 cases'], errors }, null, 2));
-      return;
-    }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
       assert.deepEqual(errors, []);
@@ -1951,7 +1943,31 @@ app.whenReady().then(async () => {
     await navigate('notes');
     await navigate('chat');
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History preference survives remount');
-    await js("document.querySelector('#chat-history-toggle').click(); document.querySelector('.chat-header-new').click()");
+    // 2026-10-14: the conversation pill morphs into the panel and back. The
+    // ghost exists only while the morph runs; reduced motion skips it.
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.ok(await js("!!document.querySelector('.chat-history-ghost')"), 'Closing history morphs into the pill');
+    await waitFor("!document.querySelector('.chat-history-ghost')");
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.ok(await js("!!document.querySelector('.chat-history-ghost')"), 'Opening history morphs out of the pill');
+    await waitFor("!document.querySelector('.chat-history-ghost') && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')==='true'");
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.equal(await js("!!document.querySelector('.chat-history-ghost')"), false, 'Reduced motion: no morph');
+    await js("document.querySelector('#chat-history-toggle').click()");
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History is open again after the morph checks');
+    // One single-line model control, the same height as the tools button beside it.
+    assert.equal(await js("!!document.querySelector('#model-version-btn')"), false, 'Model and version are one control');
+    assert.equal(await js("Math.round(document.querySelector('.chat-header-model').getBoundingClientRect().height)"),
+      await js("Math.round(document.querySelector('.chat-phone-tools > button').getBoundingClientRect().height)"), 'Model pill matches the tools button height');
+    assert.equal(await js("getComputedStyle(document.querySelector('#model-picker-label')).whiteSpace"), 'nowrap', 'Model label is one line');
+    // Keyboard: ArrowDown opens with focus inside; Escape closes and returns focus.
+    await js("document.querySelector('#model-picker-btn').focus(); document.querySelector('#model-picker-btn').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))");
+    await waitFor("!document.querySelector('#model-picker-menu').classList.contains('hidden') && document.querySelector('#model-picker-menu').contains(document.activeElement)");
+    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await waitFor("document.querySelector('#model-picker-menu').classList.contains('hidden') && document.activeElement === document.querySelector('#model-picker-btn')");
+    await js("document.querySelector('#chat-history-toggle').click(); document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click();");
     assert.equal(writes.length, landingWriteBaseline, 'New-chat landing and history navigation do not create sessions');
     win.setContentSize(390, 844);
     await delay(300);
@@ -2250,8 +2266,11 @@ app.whenReady().then(async () => {
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
     await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
-    await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      sessions: calendarFixtures.sessions, win, errors });
+    // 2026-10-14: David removed the sidebar's Bots, Teams and Pinned sections. The
+    // precedence they showed is tested in scripts/test_bot_status.cjs.
+    assert.equal(await js("document.querySelectorAll('#nav [data-section], #nav .sidebar-bot, #nav .sidebar-bot-create').length"), 0,
+      'The sidebar has no bot, team or pinned sections');
+    assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
     await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
       win, liveChunk, liveEvent, liveFinish });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');

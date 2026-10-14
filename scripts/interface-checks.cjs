@@ -61,7 +61,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         return Math.abs((r.left+r.right-s.left-s.right)/2)<1 && Math.abs((r.top+r.bottom-s.top-s.bottom)/2)<1;});
     })()`), true, 'Action glyphs centered within controls');
     if (width <= 768) {
-      assert.equal(await js("document.querySelector('.chat-header-new').getClientRects().length===0 && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
+      assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
       const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
       assert.ok(bottomGap>=15.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
       await js("document.getElementById('mobile-menu-btn').click()"); await delay(300);
@@ -83,10 +83,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-chat-tools`);
     if (width <= 768) {
       await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Model and reasoning')).click()");
-      await waitFor("!document.getElementById('model-version-menu').classList.contains('hidden')");
-      assert.equal(await js("(() => { const r=document.getElementById('model-version-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.top>=document.getElementById('model-picker-btn').getBoundingClientRect().bottom && r.bottom<=innerHeight && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
-      await click('.model-version-search input');
-      assert.equal(await js("!document.getElementById('model-version-menu').classList.contains('hidden')"), true, 'Model search clicks keep the editor open');
+      await waitFor("!document.getElementById('model-picker-menu').classList.contains('hidden')");
+      assert.equal(await js("(() => { const r=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.top>=document.getElementById('model-picker-btn').getBoundingClientRect().bottom && r.bottom<=innerHeight && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
+      await click('#model-picker-menu .model-picker-heading');
+      assert.equal(await js("!document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Clicks inside the model menu keep it open');
       assert.equal(await js("!document.getElementById('chat-sessions').classList.contains('open') && !document.getElementById('sidebar').classList.contains('open')"), true, 'Model editor is not covered by a drawer');
       await capture(`interface-${label}-model-reasoning`);
     }

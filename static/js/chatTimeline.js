@@ -9,7 +9,9 @@ export function mountChatTimeline(main, messages, getSessionId) {
     text: 'Summary', title: 'Open chat summary', 'aria-label': 'Open chat summary', hidden: true });
   const track = el('div', { class: 'chat-timeline-track' });
   rail.append(track);
-  main.querySelector('.chat-header-new').before(summaryButton);
+  // At the end of the header, where the New chat "+" used to follow it
+  // (removed 2026-10-14); the timeline mounts after the other buttons.
+  main.querySelector('.chat-mobile-header').append(summaryButton);
   main.append(rail);
   let entries = [];
   let dialog = null;

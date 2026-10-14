@@ -54,7 +54,10 @@ const catalog = {
     { id: 'configured-model', display_name: 'Configured Model', description: 'Curated entry.', alias: null, default_effort: null, supported_efforts: effortList(['low', 'high']), context_window: 200000, effective_context_percent: null, source: 'curated', estimated: true },
   ],
 };
-const apiCatalog = [{ id: 'gpt-6-astra', display_name: 'GPT-6 Astra', description: '', alias: null, default_effort: null, supported_efforts: [], context_window: null, effective_context_percent: null, source: 'openai_api', estimated: false }];
+// 2026-10-14: ten entries, so the model menu's search box (shown only on a long
+// list) is exercised here; the two-entry CLI catalog checks that it stays hidden.
+const apiCatalog = [{ id: 'gpt-6-astra', display_name: 'GPT-6 Astra', description: '', alias: null, default_effort: null, supported_efforts: [], context_window: null, effective_context_percent: null, source: 'openai_api', estimated: false },
+  ...Array.from({ length: 9 }, (_, i) => ({ id: `gpt-6-mini-${i + 1}`, display_name: `GPT-6 Mini ${i + 1}`, description: '', alias: null, default_effort: null, supported_efforts: [], context_window: null, effective_context_percent: null, source: 'openai_api', estimated: false }))];
 const chats = {
   s1: { id: 's1', title: 'A focused workspace', model_endpoint_id: 'claude', messages: [{ role: 'user', content: 'Help me shape this into a clear plan.' }, { role: 'assistant', content: rich }] },
   s2: { id: 's2', title: 'Another conversation', model_endpoint_id: 'codex', messages: [] },
@@ -292,66 +295,70 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#library-smoke').remove()");
     await js("document.querySelector('#chat-messages').scrollTop=0");
     await capture('desktop-chat');
-    await js("document.querySelector('#model-version-btn').click()");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("!!document.querySelector('#chat-model-id')");
     await js("document.querySelector('#chat-model-id').value='exact-test-model'; document.querySelector('.model-version-form').requestSubmit()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='exact-test-model'");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='exact-test-model'");
     assert.equal(chats.s1.model_override, 'exact-test-model');
     assert.equal(models[0].model, 'configured-model');
     await win.loadURL(base); await mount();
-    assert.equal(await js("document.querySelector('#model-version-btn').textContent"), 'exact-test-model');
-    await js("document.querySelector('#model-picker-btn').click(); [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Local')).click()");
-    await waitFor("document.querySelector('#model-version-btn').hidden");
-    await js("document.querySelector('#model-picker-btn').click(); [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Codex')).click()");
-    await waitFor("!document.querySelector('#model-version-btn').hidden");
+    assert.equal(await js("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))"), 'exact-test-model');
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); } [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Local')).click()");
+    await waitFor("!document.querySelector('#model-picker-label').textContent.includes(' · ')");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); } [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Codex')).click()");
+    await waitFor("document.querySelector('#model-picker-label').textContent.includes(' · ')");
 
     // -- model catalog + reasoning level (David's ask 2026-09-15) --------
-    await js("document.querySelector('#model-version-btn').click()");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("document.querySelectorAll('.model-catalog-item').length===2");
     assert.ok(await js("[...document.querySelectorAll('.model-catalog-name')].map(n=>n.textContent).includes('Catalog Astra')"));
-    // Search filters the list rather than re-querying the server.
-    // Braces, not a bare `const`: each js() call is evaluated in the same
-    // global scope, so a repeated top-level declaration is a redeclaration
-    // error that surfaces only as "script failed to execute".
-    await js("{ const s=document.querySelector('#chat-model-search'); s.value='lite'; s.dispatchEvent(new Event('input')); }");
-    await waitFor("document.querySelectorAll('.model-catalog-item').length===1");
-    assert.equal(await js("document.querySelector('.model-catalog-name').textContent"), 'Catalog Lite');
-    await js("{ const s=document.querySelector('#chat-model-search'); s.value=''; s.dispatchEvent(new Event('input')); }");
-    await waitFor("document.querySelectorAll('.model-catalog-item').length===2");
+    // A two-model list needs no search box (2026-10-14); filtering is
+    // checked on the ten-model API catalog below.
+    assert.equal(await js("!!document.querySelector('#chat-model-search')"), false, 'No search box on a short list');
     await js("[...document.querySelectorAll('.model-catalog-item')].find(b=>b.textContent.includes('Catalog Astra')).click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='Catalog Astra'");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='Catalog Astra'");
     assert.equal(chats.s1.model_override, 'catalog-astra');
     // Picking a model must not carry an effort over with it.
     assert.equal(chats.s1.model_effort, null);
     // Astra advertises four levels; the row adds a "Default" option.
-    await js("document.querySelector('#model-version-btn').click()");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("document.querySelectorAll('.model-effort-btn').length===5");
     assert.deepEqual(await js("[...document.querySelectorAll('.model-effort-btn')].map(b=>b.textContent)"), ['Default', 'low', 'medium', 'high', 'ultra']);
     await capture('desktop-model-catalog');
     await js("[...document.querySelectorAll('.model-effort-btn')].find(b=>b.textContent==='ultra').click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='Catalog Astra · ultra'");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='Catalog Astra · ultra'");
     assert.equal(chats.s1.model_effort, 'ultra');
     assert.equal(requests.filter(r => r.path === '/api/sessions/s1/model' && r.data.effort === 'ultra').length, 1);
     // The smaller model genuinely advertises fewer levels — proving the row
     // is driven per-model, not by one shared provider-wide list.
-    await js("document.querySelector('#model-version-btn').click()");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("[...document.querySelectorAll('.model-catalog-item')].some(b=>b.textContent.includes('Catalog Lite'))");
     await js("[...document.querySelectorAll('.model-catalog-item')].find(b=>b.textContent.includes('Catalog Lite')).click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='Catalog Lite'");
-    await js("document.querySelector('#model-version-btn').click()");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='Catalog Lite'");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("document.querySelectorAll('.model-effort-btn').length===3");
 
     // API connections share the version picker and persist a chat-local ID.
-    await js("document.querySelector('#model-picker-btn').click(); [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('OpenAI')).click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='gpt-5.5'");
-    await js("document.querySelector('#model-version-btn').click()");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); } [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('OpenAI')).click()");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='gpt-5.5'");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("[...document.querySelectorAll('.model-catalog-name')].some(n=>n.textContent==='GPT-6 Astra')");
+    // Search filters the list rather than re-querying the server.
+    // Braces, not a bare `const`: each js() call is evaluated in the same
+    // global scope, so a repeated top-level declaration is a redeclaration
+    // error that surfaces only as "script failed to execute".
+    await waitFor("document.querySelectorAll('.model-catalog-item').length===10");
+    await js("{ const s=document.querySelector('#chat-model-search'); s.value='astra'; s.dispatchEvent(new Event('input')); }");
+    await waitFor("document.querySelectorAll('.model-catalog-item').length===1");
+    assert.equal(await js("document.querySelector('.model-catalog-name').textContent"), 'GPT-6 Astra');
+    await js("{ const s=document.querySelector('#chat-model-search'); s.value=''; s.dispatchEvent(new Event('input')); }");
+    await waitFor("document.querySelectorAll('.model-catalog-item').length===10");
     await js("[...document.querySelectorAll('.model-catalog-item')].find(b=>b.textContent.includes('GPT-6 Astra')).click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='GPT-6 Astra'");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='GPT-6 Astra'");
     assert.equal(chats.s1.model_override, 'gpt-6-astra');
     assert.equal(models.find(m=>m.id==='openai').model, 'gpt-5.5');
-    await js("document.querySelector('#model-picker-btn').click(); [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Codex')).click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='CLI default'");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); } [...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent.startsWith('Codex')).click()");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='CLI default'");
 
     // -- context meter --------------------------------------------------
     // Hidden entirely until the server reports a real measurement.
@@ -409,10 +416,10 @@ app.whenReady().then(async () => {
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
     await waitFor("document.querySelectorAll('.browser-panel').length===0");
 
-    await js("document.querySelector('#model-version-btn').click()");
-    await waitFor("[...document.querySelectorAll('#model-version-menu button')].some(b=>b.textContent==='Use CLI default')");
-    await js("[...document.querySelectorAll('#model-version-menu button')].find(b=>b.textContent==='Use CLI default').click()");
-    await waitFor("document.querySelector('#model-version-btn').textContent==='CLI default'");
+    await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
+    await waitFor("[...document.querySelectorAll('#model-picker-menu button')].some(b=>b.textContent==='Use CLI default')");
+    await js("[...document.querySelectorAll('#model-picker-menu button')].find(b=>b.textContent==='Use CLI default').click()");
+    await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='CLI default'");
     await waitFor("fetch('/api/sessions/s1').then(r=>r.json()).then(s=>s.model_override==='')");
     assert.equal(chats.s1.model_override, '');
     await js("document.querySelector('.artifact-card').click()");
@@ -505,7 +512,7 @@ app.whenReady().then(async () => {
     pending.res.write('data: ' + JSON.stringify({ chunk: pending.text }) + '\n\n');
     deferFirstChunk = false;
     await waitFor("document.querySelector('.msg-body').textContent==='Build a plan' && document.querySelectorAll('.chat-prose p').length > 20");
-    assert.equal(await js("document.querySelector('#model-version-btn').disabled"), true);
+    assert.equal(await js("document.querySelector('#model-picker-btn').disabled"), true);
     assert.ok(await js("!document.querySelector('#chat-main').classList.contains('is-empty') && document.querySelector('#chat-input')===window.originalComposer"), 'First turn moves the same composer');
     await delay(400);
     assert.ok(await js("document.querySelector('.chat-input-bar').getBoundingClientRect().bottom > innerHeight-70"), 'Conversation composer docks at bottom');
@@ -756,7 +763,7 @@ app.whenReady().then(async () => {
     // A fresh landing retains its draft/files through model selection and
     // first-send creation. No live uploads or providers are contacted.
     win.setContentSize(1440, 900);
-    await js("document.querySelector('.chat-header-new').click()");
+    await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()");
     await waitFor("document.querySelector('#model-picker-label').textContent==='Choose model'");
     const stageDraft = async () => {
       await js("{ document.querySelector('#chat-input').value='Keep this draft'; const transfer=new DataTransfer(); transfer.items.add(new File(['draft content'],'draft.txt',{type:'text/plain'})); const fileInput=document.querySelector('input[type=file]'); fileInput.files=transfer.files; fileInput.dispatchEvent(new Event('change')); }");
@@ -764,15 +771,17 @@ app.whenReady().then(async () => {
     };
     await stageDraft();
     await js("document.querySelector('#model-picker-btn').click(); document.querySelector('#model-picker-menu button').click()");
-    await waitFor("document.querySelector('#model-picker-label').textContent==='Claude Code'");
+    await waitFor("document.querySelector('#model-picker-label').textContent.startsWith('Claude Code')");
     assert.ok(await js("document.querySelector('.attach-chip')?.textContent.includes('draft.txt') && document.querySelector('#chat-input').value==='Keep this draft'"));
     win.setContentSize(320, 420);
     await delay(400);
-    await js("document.querySelector('#model-version-btn').click()");
-    assert.ok(await js("(() => {const r=document.querySelector('#model-version-menu').getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()"), 'Centered model-version menu fits short mobile viewport');
+    // Choosing a connection leaves the menu open (2026-10-14); close it so this
+    // measures a menu opened at the phone size, not one placed for the desktop.
+    await js("document.querySelector('#model-picker-menu').classList.add('hidden'); document.querySelector('#model-picker-btn').click()");
+    assert.ok(await js("(() => {const r=document.querySelector('#model-picker-menu').getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()"), 'Centered model menu fits short mobile viewport');
     win.setContentSize(1440, 900);
     await js("document.body.click()");
-    await js("document.querySelector('.chat-header-new').click()");
+    await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()");
     await waitFor("document.querySelector('#model-picker-label').textContent==='Choose model'");
     await stageDraft();
     await js("document.querySelector('#chat-send').click()");
@@ -887,7 +896,7 @@ app.whenReady().then(async () => {
 
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await waitFor("matchMedia('(prefers-reduced-motion: reduce)').matches");
-    await js("document.querySelector('.chat-header-new').click()");
+    await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()");
     // Chromium can report an inherited scrollbar-color transition here;
     // only a transform animation represents composer movement.
     const runningAnimations = await js("document.querySelector('.chat-composer-dock').getAnimations().filter(a=>a.playState==='running' && a.effect.getKeyframes().some(frame=>'transform' in frame)).map(a=>a.effect.getKeyframes())");
