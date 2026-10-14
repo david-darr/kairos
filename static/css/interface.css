@@ -14,11 +14,11 @@
   --ui-shadow: 0 2px 5px rgba(var(--shade-rgb), .035), 0 12px 30px rgba(var(--shade-rgb), .055);
 }
 
-/* App shell and navigation share the conversation's floating surfaces. */
+/* App shell: the sidebar and the content area sit edge to edge with hard
+   corners again, as before the 2026-10-12 mobile redesign floated them as
+   rounded cards (David, 2026-10-14). The buttons, pills and controls inside
+   keep their newer shapes; only these two containers went back. */
 @media (min-width: 769px) {
-  #app { padding: 10px; gap: 10px; }
-  #sidebar { border: 1px solid var(--ui-line); border-radius: var(--ui-round); }
-  #content { border: 1px solid var(--ui-line); border-radius: var(--ui-round); }
   .view { padding: 28px 32px 36px; }
   .view.chat-layout, .view.forge-shell-view { padding: 0; }
 }
