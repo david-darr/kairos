@@ -529,6 +529,9 @@ async def _delete_note(args, ctx):
         "run_at": _str("ISO 8601 datetime, required for schedule_kind='once'"),
         "interval_seconds": {"type": "integer", "description": "Required for schedule_kind='interval'"},
         "run_time": _str("Local time of day as 'HH:MM' (24-hour), required for schedule_kind='daily'"),
+        "time_zone": _str("Optional IANA timezone, e.g. Europe/Dublin; omitted means the machine's zone"),
+        "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                     "minItems": 1, "description": "Daily only: Monday=0 through Sunday=6; omit for every day"},
         "deliver_to_channel": _str("Optional comms channel key to post the result to"),
     }, ("name", "prompt", "schedule_kind")),
     effect=WRITE,
@@ -541,6 +544,7 @@ async def _create_task(args, ctx):
         deliver_to_channel=args.get("deliver_to_channel"),
         run_time=args.get("run_time"), depends_on=args.get("depends_on"), status=args.get("status"),
         agent_id=ctx.agent_id,
+        time_zone=args.get("time_zone"), weekdays=args.get("weekdays"),
     )
     return f"Created task {task['id']}: {task['name']}"
 
@@ -551,12 +555,17 @@ async def _create_task(args, ctx):
     "Use enabled=false to pause it. Read the build-automation skill first for a new automation.",
     _object({"task_id": _str(), "name": _str(), "prompt": _str(), "enabled": {"type": "boolean"},
              "deliver_to_channel": _str(),
+             "time_zone": {"type": ["string", "null"], "description": "IANA timezone; null restores the machine's zone"},
+             "weekdays": {"type": ["array", "null"], "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                          "minItems": 1, "description": "Daily only: Monday=0 through Sunday=6; null restores every day"},
              "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Cards only: ids of cards it waits for"}},
             ("task_id",)),
     effect=WRITE,
 )
 async def _update_task(args, ctx):
+    schedule_fields = {key: args[key] for key in ("time_zone", "weekdays") if key in args}
     task_id, fields = _fields(args, "task_id")
+    fields.update(schedule_fields)  # explicit null clears a rule; omission keeps it
     return f"Updated task {memory_tools.update_task(task_id, **fields)['id']}"
 
 
@@ -1186,15 +1195,33 @@ async def _hand_to_agent(args, ctx):
 @register(
     "agent_remember",
     "Write a note to your own memory so later runs have it. section is one of 'About this work', "
-    "'Preferences', 'Corrections', 'Notes'. Keep each note to one short line.",
+    "'Preferences', 'Corrections', 'Notes'. Keep each note to one short line. "
+    "Optionally set until (YYYY-MM-DD) to the date the note stops being true. "
+    "Optionally set topic to file the note in memory/<topic>.md instead of core memory. "
+    "For a new topic, set description to a short subject line shown in your topic index.",
     _object({"section": _str("About this work, Preferences, Corrections or Notes"),
-             "text": _str("The note, one line")}, ("section", "text")),
+             "text": _str("The note, one line"), "until": _str("Optional expiry date, YYYY-MM-DD"),
+             "topic": _str("Optional memory topic file name"),
+             "description": _str("Optional one-line index description for a new topic")}, ("section", "text")),
     agent_only=True, effect=WRITE,
 )
 async def _agent_remember(args, ctx):
     from services.agent_service import agent_service
-    agent_service.remember(ctx.agent_id, args["section"], args["text"])
-    return f"Noted under {args['section']}."
+    agent_service.remember(ctx.agent_id, args["section"], args["text"], until=args.get("until"),
+                           topic=args.get("topic"), description=args.get("description"))
+    return f"Noted under {args['section']}" + (f" in topic {args['topic']}." if args.get("topic") else ".")
+
+
+@register(
+    "agent_read_topic",
+    "Read one of your memory topic files by name when its subject is needed. "
+    "A missing topic returns available names.",
+    _object({"topic": _str("Topic name from your memory topic index")}, ("topic",)),
+    agent_only=True,
+)
+async def _agent_read_topic(args, ctx):
+    from services.agent_service import agent_service
+    return agent_service.read_topic(ctx.agent_id, args["topic"])
 
 
 @register(

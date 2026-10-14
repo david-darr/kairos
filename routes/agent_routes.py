@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 class AgentBody(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
+    blurb: Optional[str] = None
+    soul: Optional[str] = None
     instructions: Optional[str] = None
     endpoint_id: Optional[str] = None
     color: Optional[str] = None
@@ -26,10 +28,16 @@ class AgentBody(BaseModel):
     deliver_to_channel: Optional[str] = None
     integration_ids: Optional[list[str]] = None
     keep_signed_in: Optional[bool] = None
+    memory_upkeep: Optional[bool] = None
 
 
 class MemoryBody(BaseModel):
     text: str
+
+
+class SoulApplyBody(BaseModel):
+    expected_file_text: Optional[str]
+    expected_revision: int
 
 
 class GoalBody(BaseModel):
@@ -39,6 +47,8 @@ class GoalBody(BaseModel):
     run_time: Optional[str] = None
     interval_seconds: Optional[int] = None
     report_when: Optional[str] = None
+    time_zone: Optional[str] = None
+    weekdays: Optional[list[int]] = None
 
 
 class CardBody(BaseModel):
@@ -71,7 +81,9 @@ def _summary(agent: dict) -> dict:
     may_run, why_not = agent_service.can_run(agent["id"])
     status = ("off" if not agent["enabled"] else "working" if running else "needs_you" if needs_you
               else "capped" if not may_run else "idle")
-    return {**agent, "status": status, "status_detail": running["name"] if running else why_not,
+    return {**agent, "blurb": agent.get("blurb", ""), "soul": agent.get("soul"),
+            "revision": agent.get("revision", 0),
+            "status": status, "status_detail": running["name"] if running else why_not,
             "needs_you": needs_you, "runs_today": agent_service.runs_today(agent["id"])}
 
 
@@ -143,7 +155,9 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
     owned_ids = {t["id"] for t in owned}
     return {
         "agent": _summary(agent),
+        "soul_file": agent_service.read_soul(agent_id),
         "memory": agent_service.read_memory(agent_id),
+        "memory_upkeep_journal": agent_service.memory_upkeep_journal(agent_id),
         "goals": [t for t in owned if t["schedule_kind"] != "card"],
         "cards": [t for t in owned if t["schedule_kind"] == "card"],
         "inbox": agent_service.inbox(agent_id),
@@ -166,6 +180,21 @@ async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(requi
     if "name" in fields or "role" in fields:
         _team_change(agent)
     return _summary(agent)
+
+
+@router.get("/{agent_id}/soul")
+async def read_soul(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    return agent_service.read_soul(agent_id)
+
+
+@router.post("/{agent_id}/soul/apply")
+async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return agent_service.apply_soul_file(agent_id, body.expected_file_text, body.expected_revision)
+    except ValueError as e:
+        raise HTTPException(status_code=409 if "stale" in str(e) else 400, detail=str(e))
 
 
 @router.delete("/{agent_id}")
@@ -218,6 +247,21 @@ async def write_memory(agent_id: str, body: MemoryBody, user: str = Depends(requ
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/{agent_id}/memory/upkeep")
+async def memory_upkeep_journal(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    return {"entries": agent_service.memory_upkeep_journal(agent_id)}
+
+
+@router.post("/{agent_id}/memory/upkeep/{upkeep_id}/undo")
+async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return agent_service.undo_memory_upkeep(agent_id, upkeep_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.post("/{agent_id}/goals")
 async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_admin)) -> dict:
     _require(agent_id)
@@ -226,7 +270,8 @@ async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_ad
     try:
         return task_service.create_task(body.name, body.prompt, body.schedule_kind, run_time=body.run_time,
                                         interval_seconds=body.interval_seconds, agent_id=agent_id,
-                                        report_when=body.report_when)
+                                        report_when=body.report_when, time_zone=body.time_zone,
+                                        weekdays=body.weekdays)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

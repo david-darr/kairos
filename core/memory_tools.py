@@ -248,7 +248,8 @@ def delete_note(note_id: str) -> None:
 def create_task(name: str, prompt: str, schedule_kind: str, run_at: Optional[str] = None,
                  interval_seconds: Optional[int] = None, deliver_to_channel: Optional[str] = None,
                  run_time: Optional[str] = None, depends_on: Optional[list] = None,
-                 status: Optional[str] = None, agent_id: Optional[str] = None) -> dict:
+                 status: Optional[str] = None, agent_id: Optional[str] = None,
+                 time_zone: Optional[str] = None, weekdays: Optional[list[int]] = None) -> dict:
     """schedule_kind 'card' puts one-off work on the board (see
     services/task_service.py); status 'ready' lets the board run it.
     agent_id makes it that agent's work (an agent creating follow-ups)."""
@@ -256,11 +257,12 @@ def create_task(name: str, prompt: str, schedule_kind: str, run_at: Optional[str
         name, prompt, schedule_kind, run_at=run_at,
         interval_seconds=interval_seconds, deliver_to_channel=deliver_to_channel,
         run_time=run_time, depends_on=depends_on, status=status, agent_id=agent_id,
+        time_zone=time_zone, weekdays=weekdays,
     )
 
 
 def update_task(task_id: str, **fields) -> dict:
-    """fields: any of name, prompt, enabled, deliver_to_channel, depends_on."""
+    """Editable task fields, including time_zone and daily weekday rules."""
     return task_service.update_task(task_id, **fields)
 
 

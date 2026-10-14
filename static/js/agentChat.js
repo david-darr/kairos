@@ -16,16 +16,20 @@ function remember(agentId, sessionId) {
   try { sessionId ? localStorage.setItem(LAST_KEY + agentId, sessionId) : localStorage.removeItem(LAST_KEY + agentId); } catch { /* private mode */ }
 }
 
-export async function mountAgentChat(host, agent) {
+export async function mountAgentChat(host, agent, requestedSessionId = null) {
   let sessionId = null;
   let closePane = () => {};
 
   const list = el('div', { class: 'agent-chat-list', role: 'list', 'aria-label': `Chats with ${agent.name}` });
   const main = el('section', { class: 'agent-chat-main' });
   const newChat = el('button', { type: 'button', class: 'btn agent-chat-new', text: '+ New chat' });
+  // Decision 2026-10-13: off and capped bots still answer direct chats.
+  const scheduled = agent.enabled === false || agent.status === 'off' || agent.status === 'capped' ||
+    (Number.isFinite(agent.daily_run_cap) && agent.runs_today >= agent.daily_run_cap);
+  const honesty = scheduled ? el('p', { class: 'agent-chat-honesty', text: `${agent.name} will answer here, but will not pick up scheduled work while turned off or capped.` }) : null;
   host.replaceChildren(el('div', { class: 'agent-chat' }, [
     el('aside', { class: 'agent-chat-side' }, [newChat, list]),
-    main,
+    ...(honesty ? [honesty] : []), main,
   ]));
 
   const pane = async (id) => {
@@ -42,6 +46,7 @@ export async function mountAgentChat(host, agent) {
         return created.id;
       },
       title: `Chat with ${agent.name}`,
+      agent,
       placeholder: `Message ${agent.name}`,
       emptyTitle: `Talk with ${agent.name}`,
       emptyText: 'It knows its role, its notes and its tools. Anything it learns here it can keep in its memory.',
@@ -92,6 +97,9 @@ export async function mountAgentChat(host, agent) {
   });
 
   const chats = await refreshList();
+  // 2026-10-14: sidebar threads address the same session, including a new
+  // empty one, instead of falling back to this agent's remembered chat.
+  if (requestedSessionId && chats.some(c => c.id === requestedSessionId)) { await open(requestedSessionId); return () => closePane(); }
   const last = remembered(agent.id);
   if (last && chats.some((c) => c.id === last)) await open(last);
   else if (chats.length) await open(chats[0].id);

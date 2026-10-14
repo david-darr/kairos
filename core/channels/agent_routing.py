@@ -61,6 +61,12 @@ async def direct(agent: dict, rest: str, channel_key: str, channel_label: str,
     agent_service.make_agent_chat(session_id, agent)
     # Admin: only the channel's trusted owner gets here, and agent chats run
     # in Auto, which applies to admin chats (core/permissions.py).
+    # Direct chat deliberately bypasses work admission: off and the daily cap
+    # govern the work an agent does on its own, not whether it answers the
+    # person. Settled 2026-10-13 against both references - MausBot lets an
+    # addressed mention release a held member, and Monocode's pause applies
+    # to habits, never to the conversation. A cap that silenced a chat would
+    # also leave an agent mute mid-sentence.
     return await chat_service.send_message(session_id, rest, attachment_ids or [], is_admin=True)
 
 
@@ -94,6 +100,15 @@ def answer_reply(notification_text: str, reply: str) -> Optional[str]:
             from core import task_scheduler
             task_scheduler.start_in_background(run, "trigger")
         return f"{pending['trigger_name']}: {outcome}."
+    # A batch can name several review items. Require the chosen code in the
+    # reply so an approval never lands on the first by accident (2026-10-13).
+    codes = [m.group(0) for m in CODE_RE.finditer(notification_text or "")]
+    if len(codes) > 1:
+        chosen = CODE_RE.search(reply or "")
+        if chosen is None or chosen.group(0) not in codes:
+            return "This report has several items. Include the item's reply code with your answer."
+        notification_text = chosen.group(0)
+        reply = (reply[:chosen.start()] + reply[chosen.end():]).strip()
     found = agent_service.resolve_code(notification_text)
     if found is None:
         return None if not CODE_RE.search(notification_text or "") else \

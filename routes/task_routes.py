@@ -2,16 +2,35 @@
 the Tasks tab."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from core import model_endpoints, outbox, task_scheduler
 from core.builtin_tasks import BUILTIN_TASKS, list_builtin_tasks
-from core.middleware import require_user
+from core.middleware import require_admin, require_user
 from core.auth import auth_manager
 from services.task_service import task_service
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def agent_task_is_admins(task_id: str, request: Request) -> None:
+    """Directing an agent is admin-only, through every route that can do it.
+
+    routes/agent_routes.py states the rule and the reason: agents always run
+    in Auto (David, 2026-10-05), so whoever directs them is approving
+    everything they do. That file enforced it; these generic task routes did
+    not. An agent's goals and cards are ordinary tasks here, and they carry
+    no owner or admin_only, so visible_to treats them as shared - a non-admin
+    could run, stop, edit, re-status or delete an agent's work and have it
+    approve itself under Auto. Found 2026-10-13.
+
+    Only agent-owned tasks are affected; an ordinary user's own tasks keep
+    working as before. A missing task falls through, so the route itself
+    answers 404 rather than this telling a stranger which ids exist."""
+    task = task_service.get_task(task_id)
+    if task and task.get("agent_id"):
+        require_admin(request)
 
 
 class CreateTaskRequest(BaseModel):
@@ -22,6 +41,8 @@ class CreateTaskRequest(BaseModel):
     interval_seconds: Optional[int] = None
     deliver_to_channel: Optional[str] = None
     run_time: Optional[str] = None  # "HH:MM" local, for schedule_kind="daily"
+    time_zone: Optional[str] = None  # IANA name; omitted means machine-local
+    weekdays: Optional[list[int]] = None  # daily only, Monday=0 through Sunday=6
     # Cards (the work board): see services/task_service.py.
     depends_on: Optional[list[str]] = None
     status: Optional[str] = None  # a new card: "backlog" (default) or "ready"
@@ -35,6 +56,8 @@ class UpdateTaskRequest(BaseModel):
     deliver_to_channel: Optional[str] = None
     depends_on: Optional[list[str]] = None
     endpoint_id: Optional[str] = None
+    time_zone: Optional[str] = None
+    weekdays: Optional[list[int]] = None
 
 
 class CardStatusRequest(BaseModel):
@@ -118,14 +141,20 @@ async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)
             body.name, body.prompt, body.schedule_kind, body.run_at, body.interval_seconds,
             deliver_to_channel=body.deliver_to_channel, run_time=body.run_time,
             depends_on=body.depends_on, status=body.status, endpoint_id=body.endpoint_id,
+            time_zone=body.time_zone, weekdays=body.weekdays,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.patch("/{task_id}")
-async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends(require_user)) -> dict:
+async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Explicit null restores the machine zone / every day; an omitted field
+    # leaves a live schedule alone (Agents 2.0 phase 2-i, 2026-10-13).
+    for key in ("time_zone", "weekdays"):
+        if key in body.model_fields_set:
+            fields[key] = getattr(body, key)
     _check_endpoint(fields.get("endpoint_id"))
     try:
         return task_service.update_task(task_id, **fields)
@@ -136,7 +165,7 @@ async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends
 
 
 @router.post("/{task_id}/status")
-async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Depends(require_user)) -> dict:
+async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     """Move a card on the work board. Review -> Ready with a note is
     "request changes"; Review -> Done is approval; Blocked -> Ready retries."""
     try:
@@ -148,29 +177,27 @@ async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Dep
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str, user: str = Depends(require_user)) -> dict:
+async def delete_task(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     task_service.delete_task(task_id)
     return {"ok": True}
 
 
 @router.post("/{task_id}/run")
-async def run_task_now(task_id: str, user: str = Depends(require_user)) -> dict:
+async def run_task_now(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     task = task_service.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    if task.get("agent_id"):
-        from services.agent_service import agent_service
-        may_run, why_not = agent_service.can_run(task["agent_id"])
-        if not may_run:
-            raise HTTPException(status_code=409, detail=f"Not run: {why_not}.")
-    if task["schedule_kind"] == "card":
-        # A card runs through the board's claim, so it cannot run twice at once
-        # or ahead of the cards it waits on.
-        task = task_service.claim_next_card(card_id=task_id)
-        if task is None:
-            raise HTTPException(status_code=409, detail="this card is running, finished, or still waiting on other cards")
-    if not await task_scheduler.start_run(task, "manual"):
-        raise HTTPException(status_code=409, detail="this task is already running")
+    from services.agent_service import AdmissionDenied
+    if task["schedule_kind"] == "card" and task_service.next_card(card_id=task_id) is None:
+        raise HTTPException(status_code=409, detail="this card is running, finished, or still waiting on other cards")
+    try:
+        started = await task_scheduler.start_run(task, "manual")
+    except AdmissionDenied as exc:
+        raise HTTPException(status_code=409, detail=f"Not run: {exc}.")
+    if not started:
+        reason = ("this card is running, finished, or still waiting on other cards"
+                  if task["schedule_kind"] == "card" else "this task is already running")
+        raise HTTPException(status_code=409, detail=reason)
     # Its message, if any, goes out now, so the answer can say whether it landed.
     await outbox.send_due()
     runs = task_service.list_runs(task_id)
@@ -178,7 +205,7 @@ async def run_task_now(task_id: str, user: str = Depends(require_user)) -> dict:
 
 
 @router.post("/{task_id}/stop")
-async def stop_task(task_id: str, user: str = Depends(require_user)) -> dict:
+async def stop_task(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
     """Stop a running task, card or goal (roadmap phase 4). The run is
     recorded as stopped; a stopped card goes to Blocked."""
     if task_service.get_task(task_id) is None:

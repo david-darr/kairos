@@ -286,7 +286,17 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     target = target if target is not None else derive_target(tool, arguments)
     # Builder imports/connections and first-run app commands need explicit
     # review when requested, even on an Auto surface.
-    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge"}
+    #
+    # hand_to_agent joined this set on 2026-10-13. core/tool_registry.py has
+    # always asked for a forced prompt once a turn has read untrusted content,
+    # so that injected text cannot put an agent to work unseen - but without
+    # membership here, Auto answered first and the gate never fired. It was
+    # inert on exactly the two surfaces it was written for: an admin's Auto
+    # chat, and an agent's own surface, which always runs in Auto. A tainted
+    # handoff on a surface nobody is watching now falls through to the deny
+    # below, which is the honest answer: an agent should not hand work on
+    # after reading a web page when there is nobody to ask.
+    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent"}
     # Auto is an explicit, per-chat admin choice. It answers broker requests
     # for this chat only, including requests from a tainted turn; it does not
     # add a standing grant or change the policy for other chats/tasks.

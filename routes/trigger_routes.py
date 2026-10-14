@@ -45,6 +45,8 @@ def start_run(task: dict) -> None:
     """A task or goal run with the event attached, in the background, the
     same way the scheduler runs it."""
     from core import task_scheduler
+    # The shared run boundary owns admission and reports a refusal in the
+    # activity feed; webhook starts must use it too (2026-10-13).
     task_scheduler.start_in_background(task, "trigger")
 
 

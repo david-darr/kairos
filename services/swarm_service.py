@@ -250,7 +250,8 @@ class SwarmService:
             return build_worker(WorkerContext(
                 endpoint=endpoint, agent=agent, system=system,
                 tool_service=ToolService(self.store, is_lead=bool(agent["is_lead"]),
-                                         memory=memory, scheduled=scheduled),
+                                         memory=memory, scheduled=scheduled,
+                                         jarvis_agent_id=agent.get("jarvis_agent_id")),
                 scratch_dir=str(scratch), model=agent.get("model") or endpoint.get("model") or None,
                 effort=agent.get("effort") or None, env={}))
 
@@ -345,6 +346,10 @@ class SwarmService:
                 agent_service.remember(member["jarvis_agent_id"], "Corrections", note)
             except ValueError as exc:
                 logger.warning("swarm: %s's memory did not take a correction: %s", member["name"], exc)
+                # The task's existing checkpoint display makes this visible
+                # even after sync advances past the review (2026-10-13).
+                self.store.note_memory_failure(task["id"], f"Correction could not be saved to agent memory: {exc}. "
+                                               "The revision feedback is kept on this team task.")
             return
         reason, summary = data.get("reason"), (data.get("summary") or "").strip()
         if reason == "manual_pause":

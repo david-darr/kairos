@@ -262,6 +262,51 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    // 2026-10-14: the birth smoke uses the same two writes as production and
+    // keeps their state separate so a failed first routine leaves its bot.
+    if (route === '/api/agents' && method === 'POST') {
+      const agent = { id: `a${agentsFixture.length + 1}`, ...body, revision: 1, enabled: true,
+        daily_run_cap: 12, runs_today: 0, needs_you: 0, status: 'idle', status_detail: '' };
+      agentsFixture.push(agent); return agent;
+    }
+    if (/^\/api\/agents\/a\d+\/goals$/.test(route) && method === 'POST') {
+      if (state.failFirstRoutine) return { _status: 500, detail: 'Routine service unavailable' };
+      return { id: `g${Date.now()}`, ...body };
+    }
+    // 2026-10-14: keep the sidebar's new-thread fixture on the same agent
+    // chat route the real app uses, so a click can reopen the created chat.
+    const botChat = route.match(/^\/api\/agents\/(a\d)\/chat$/);
+    if (botChat && method === 'POST' && state.sidebarBotSessions) {
+      const id = `bot-new-${Date.now()}`;
+      const thread = { id, title: 'New chat', agent_id: botChat[1], starred: false,
+        created_at: Date.now() / 1000, updated_at: Date.now() / 1000, message_count: 0 };
+      state.sidebarBotSessions[botChat[1]].unshift(thread);
+      (state.sidebarBotMessages ||= {})[id] = [];
+      return thread;
+    }
+    // 2026-10-13: profile smoke checks need reads after writes, as the real
+    // agent routes return them; keeping fixture state makes polls meaningful.
+    const agentPatch = route.match(/^\/api\/agents\/(a\d)$/);
+    if (agentPatch && method === 'PATCH') {
+      const agent = agentsFixture.find(item => item.id === agentPatch[1]);
+      Object.assign(agent, body); agent.revision = (agent.revision || 0) + 1;
+      return agent;
+    }
+    const soulApply = route.match(/^\/api\/agents\/(a\d)\/soul\/apply$/);
+    if (soulApply && method === 'POST') {
+      const agent = agentsFixture.find(item => item.id === soulApply[1]);
+      if (agent.revision !== body.expected_revision || state.agentSoulFile !== body.expected_file_text)
+        return { _status: 409, detail: 'stale SOUL.md edit; read the file again' };
+      agent.soul = state.agentSoulFile; agent.revision++;
+      return { soul: agent.soul, file_text: agent.soul, in_sync: true, revision: agent.revision };
+    }
+    const memoryWrite = route.match(/^\/api\/agents\/(a\d)\/memory$/);
+    if (memoryWrite && method === 'PUT') { (state.agentMemories ||= {})[memoryWrite[1]] = body.text; return { memory: body.text }; }
+    if (/^\/api\/agents\/inbox\/i\d\/answer$/.test(route) && method === 'POST') {
+      agentInbox.splice(agentInbox.findIndex(item => route.endsWith(`/${item.id}/answer`)), 1);
+      return { next: 'done' };
+    }
+    if (route === '/api/tasks/c9/status' && method === 'POST') { state.agentReview = body.status === 'review'; return { ok: true }; }
     if (route === '/api/calendar/events' && method === 'POST') {
       const created = { ...body, id: 'local-created-' + now + '-' + events.length, source: 'calendar', completed: false,
         end_exclusive: Boolean(body.all_day && body.end > body.start) };
@@ -720,10 +765,10 @@
   };
   // Agents (views/agents.js): one waiting on the person, one at work.
   const agentsFixture = [
-    { id: "a1", name: "Scout", role: "Watches job postings and applications", instructions: "Be brief.", color: "#d9b260",
+    { id: "a1", name: "Scout", role: "Watches job postings and applications", instructions: "Be brief.", color: "#d9b260", blurb: '', soul: '', revision: 1,
       endpoint_id: null, enabled: true, daily_run_cap: 12, deliver_to_channel: null, status: "needs_you", status_detail: "",
       needs_you: 2, runs_today: 3, keep_signed_in: true },
-    { id: "a2", name: "Archivist", role: "Files and tidies notes", instructions: "", color: "#b9d2e3", endpoint_id: "m3",
+    { id: "a2", name: "Archivist", role: "Files and tidies notes", instructions: "", color: "#b9d2e3", blurb: '', soul: '', revision: 1, endpoint_id: "m3",
       enabled: true, daily_run_cap: 12, deliver_to_channel: null, status: "working", status_detail: "Sort inbox notes",
       needs_you: 0, runs_today: 1, keep_signed_in: false },
   ];
@@ -735,9 +780,11 @@
   ];
   function agentDetail(id) {
     const agent = agentsFixture.find((a) => a.id === id);
-    return { agent, memory: `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
+    return { agent, soul_file: { soul: agent.soul, file_text: state.agentSoulFile ?? agent.soul,
+        in_sync: (state.agentSoulFile ?? agent.soul) === agent.soul, revision: agent.revision },
+      memory: state.agentMemories?.[id] ?? `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
       goals: [{ id: "g1", name: "New postings", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
-      cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: "ready", agent_id: id, comments: [] }],
+      cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: state.agentReview ? 'review' : 'ready', agent_id: id, comments: [] }],
       inbox: agentInbox.filter((i) => i.agent_id === id), answered: [], runs: runs.c1,
       teams: [{ id: "s1", name: "Launch team", state: "active", member_id: "s1-m2", is_lead: 0 }],
       triggers: [{ id: "tr1", name: "GitHub pushes", enabled: true, auto_run: false }] };
@@ -949,8 +996,10 @@
     if (route === "/api/system/events") return list([{ message: "Daily briefing completed", level: "info", ts: now - 800 }, { message: "Memory sync finished", level: "info", ts: now - 2000 }]);
     // An agent's chats are asked for by agent and never appear in the Chats list.
     if (route === "/api/sessions" && url.searchParams.get("agent_id")) {
-      return list([{ id: "as1", title: "Chat with Scout", starred: false, created_at: now - 600, updated_at: now - 300,
-        message_count: 2, model_endpoint_id: "m1", agent_id: url.searchParams.get("agent_id") }]);
+      const agentId = url.searchParams.get('agent_id');
+      return list(state.sidebarBotSessions?.[agentId] || [{ id: agentId === 'a1' ? 'as1' : 'as2',
+        title: agentId === 'a1' ? 'Chat with Scout' : 'Chat with Archivist', starred: false,
+        created_at: now - 600, updated_at: now - 300, message_count: 2, model_endpoint_id: 'm1', agent_id: agentId }]);
     }
     if (route === "/api/sessions") return list([...sessions, ...Object.values(forgeSessions).map(({ messages, ...header }) => ({ ...header, message_count: messages.length }))]);
     if (/^\/api\/sessions\/[^/]+$/.test(route) && forgeSessions[route.split('/')[3]]) return forgeSessions[route.split('/')[3]];
@@ -971,6 +1020,9 @@
       const counts = {};
       return list(matches.filter(r => (!kind || kind === r.kind) && `${r.label} ${r.detail}`.toLowerCase().includes(needle))
         .filter(r => (counts[r.kind] = (counts[r.kind] || 0) + 1) <= 4));
+    }
+    if (/^\/api\/sessions\/[^/]+$/.test(route) && state.sidebarBotMessages?.[route.split('/')[3]]) {
+      const id = route.split('/')[3]; return { id, messages: state.sidebarBotMessages[id] };
     }
     if (/^\/api\/sessions\/[^/]+$/.test(route) && state.handoffSessions?.[route.split('/')[3]]) {
       const session = state.handoffSessions[route.split('/')[3]];
@@ -1048,7 +1100,8 @@
       pending: [{ id: "p1abcdef0000", trigger_id: "tr1", trigger_name: "GitHub pushes", kind: "card", event_type: "push",
         summary: "Push: Fix the thing", created_at: now - 120 }] };
     if (route === "/api/agents") return list(agentsFixture);
-    if (route === "/api/agents/inbox") return state.empty ? { items: [], reviews: [], count: 0 } : { items: agentInbox, reviews: [], count: 2 };
+    if (route === "/api/agents/inbox") return state.empty ? { items: [], reviews: [], count: 0 } :
+      { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };
     if (/^\/api\/agents\/a\d$/.test(route)) return agentDetail(route.split("/")[3]);
     // Teams (agents phase 5) are listed in the Agents tab from Swarm.
     if (route === "/api/swarm/systems") return { items: state.empty ? [] : [{ id: "s1", name: "Launch team", mission: "Launch the newsletter with two agents and a fact checker.",

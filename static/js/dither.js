@@ -153,7 +153,21 @@ export function mountDither(el, src, opts = {}) {
     el.dataset.drawMs = String(Math.round(ms));  // read by scripts/ui-smoke.cjs
   }
 
-  const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { try { draw(); } catch (_) { /* the plain image stays */ } settle(); }); };
+  // 2026-10-14: the observer fires on observe() and again after the first
+  // draw prepends its canvas. One banner absorbed that; a list of agent
+  // portraits drawing in the same frame turned it into a ResizeObserver
+  // loop warning, which ui-smoke counts as a renderer error. Skip the
+  // callback entirely when the box has not actually changed.
+  // -1 so the observer's first callback always runs: settle() lives inside
+  // the frame, and a hidden 0x0 element must still resolve onReady.
+  let seenW = -1, seenH = -1;
+  const schedule = () => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (w === seenW && h === seenH) return;
+    seenW = w; seenH = h;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => { try { draw(); } catch (_) { /* the plain image stays */ } settle(); });
+  };
   loadDitherImage(src, opts.version || 0).then((loaded) => {
     if (stopped) return;
     img = loaded;
@@ -161,6 +175,13 @@ export function mountDither(el, src, opts = {}) {
     // up, frames and resize observers wait for it, so a banner drawn there
     // would hold it up (found 2026-10-07: Chat to Home hit its 800 ms cap).
     if (el.clientWidth) { try { draw(); } catch (_) { /* the plain image stays */ } settle(); }
+    // opts.fixed: the element is sized in pixels and never reflows, so there
+    // is nothing to observe. Agent portraits mount many at once and each
+    // first draw prepends a canvas; observing them all made those mutations
+    // cascade into "ResizeObserver loop completed with undelivered
+    // notifications", which ui-smoke counts as a renderer error. One frame
+    // is enough for a portrait not yet in the document (2026-10-14).
+    if (opts.fixed) { if (!canvas.isConnected) raf = requestAnimationFrame(schedule); return; }
     observer = new ResizeObserver(schedule); observer.observe(el);
   }, settle);  // the plain image stays
   return () => { stopped = true; cancelAnimationFrame(raf); observer?.disconnect(); canvas.remove(); el.classList.remove("is-dithered"); };

@@ -14,8 +14,10 @@ import { registration as notificationRegistration } from './mobileNotifications.
 import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
 
 import { mountForgeRail } from './forgeRail.js';
+import { mountSidebarBots } from './sidebarBots.js';
 
 let forgeRailCleanup = () => {};
+let peopleRail = null;
 restoreSidebar();
 if (window.jarvis?.browser) document.documentElement.classList.add("electron-shell");
 if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")) document.documentElement.classList.add("platform-mac");
@@ -266,7 +268,7 @@ function setupMobileMenu() {
   // Close before navigation or an account/settings panel opens, so a panel
   // outside the drawer can take focus without competing with its Tab trap.
   sidebar.addEventListener('click', event => {
-    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row')) closeMobileMenu();
+    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row, .sidebar-bot-main, .sidebar-bot-add, .sidebar-thread, .sidebar-thread-all, .sidebar-team-row, .sidebar-pinned-row')) closeMobileMenu();
   }, true);
   document.addEventListener('kairos:mobile-drawer-opening', event => {
     if (event.detail?.id !== 'sidebar') closeMobileMenu(false);
@@ -295,12 +297,14 @@ function setupMobileMenu() {
 }
 
 // How many agent inbox items and results wait on the person: a count on the
-// Agents nav item, refreshed every 30 seconds while the page is visible.
+// Agents nav item. The same visible-page tick refreshes the bot rail once,
+// rather than starting a timer per bot (Agents 2.0, 2026-10-14).
 let agentBadgeTimer = null;
 async function refreshAgentBadge() {
   clearTimeout(agentBadgeTimer);
   agentBadgeTimer = setTimeout(refreshAgentBadge, 30000);
   if (document.hidden) return;
+  peopleRail?.refresh();
   const inbox = await api("/api/agents/inbox").catch(() => null);
   const item = document.querySelector('#nav .nav-item[data-tab="agents"]');
   if (!item || !inbox) return;
@@ -358,6 +362,7 @@ async function buildSidebar() {
   }).catch(() => {});
 
   forgeRailCleanup();
+  peopleRail?.dispose(); peopleRail = null;
   const nav = document.getElementById("nav");
   // Cleared before rebuilding — buildSidebar() now also runs whenever
   // Approved and enabled tabs supply their own sidebar manifests.
@@ -397,6 +402,7 @@ async function buildSidebar() {
     }
   }
   if (appMode === 'forge') forgeRailCleanup = mountForgeRail(nav);
+  else peopleRail = mountSidebarBots(nav);
   refreshAgentBadge();
 
   nav.querySelectorAll(".nav-item").forEach((item) => {

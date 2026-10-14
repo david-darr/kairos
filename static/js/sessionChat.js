@@ -14,6 +14,7 @@ import { renderMessageBody } from './chatContent.js';
 import { dismissPermissionPrompt, showPermissionPrompt } from './permissionPrompt.js';
 import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
+import { portrait } from './agentProfile.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli'];
 const queues = new Map();
@@ -40,6 +41,8 @@ export async function mountSessionChat(host, options = {}) {
   let shownPermission = null;
   let disposed = false, submitting = false;
   let modelSaving = false, modelControls = [];
+  let workingTimer = null;
+  let activePortrait = null;
   const label = options.title || 'Chat';
   // Forge supplies document rendering/chrome; transport, queues and model
   // changes remain the same controller used by the embedded chats.
@@ -102,12 +105,81 @@ export async function mountSessionChat(host, options = {}) {
 
   const attach = (replyBody) => {
     unsubscribe();
+    clearInterval(workingTimer); workingTimer = null;
+    activePortrait?.stopPortrait?.(); activePortrait = null;
     const id = sessionId;
     liveTurnId = chatStream.getInFlight(id)?.turnId || null;
     let finished = false;
+    const agentTurn = !!session?.agent_id;
+    const replyCard = replyBody.closest('.msg');
+    let working = null, heading = null, verb = null, elapsed = null, steps = null;
+    const openedSteps = new Set();
+    if (agentTurn && replyCard && !transcript) {
+      working = el('div', { class: 'agent-turn-working', role: 'status' });
+      const face = portrait(options.agent || { id: session.agent_id }, 38);
+      activePortrait = face;
+      verb = el('span', { class: 'agent-turn-verb', text: 'Writing' });
+      elapsed = el('time', { class: 'agent-turn-elapsed' });
+      steps = el('div', { class: 'agent-turn-steps' });
+      heading = el('div', { class: 'agent-turn-heading' }, [face, verb, elapsed]);
+      working.append(heading, steps);
+      replyCard.prepend(working);
+    }
+    const timeLabel = entry => {
+      const seconds = Math.max(0, Math.floor(Date.now() / 1000 - (entry.startedAt || Date.now() / 1000)));
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    };
+    const action = step => {
+      const name = String(step.name || step.kind || '').toLowerCase();
+      if (/search|grep|find|query/.test(name)) return 'Searching';
+      if (/read|open|fetch|browse|web/.test(name)) return 'Reading';
+      if (/command|shell|bash|exec|terminal/.test(name)) return 'Running a command';
+      if (/write|edit|patch|save/.test(name)) return 'Writing';
+      return name ? `Using ${step.name || step.kind}` : 'Writing';
+    };
+    const drawSteps = entry => {
+      if (!steps) return;
+      const events = [...(entry.toolSteps || []), ...(entry.toolEvents || [])];
+      const byId = new Map();
+      for (const [index, item] of events.entries()) {
+        // Computer events do not carry call IDs; pair each finish with its
+        // most recent start for the same tool (2026-10-14).
+        const terminal = item.phase === 'finished' || /finished|failed/.test(item.kind || '');
+        const pending = terminal && [...byId].reverse().find(([, step]) =>
+          step.name === item.name && (step.phase === 'started' || /started/.test(step.kind || '')));
+        const id = item.id || pending?.[0] || `${item.name || item.kind}-${index}`;
+        const previous = byId.get(id) || {};
+        byId.set(id, { ...previous, ...item });
+      }
+      steps.replaceChildren(...[...byId.entries()].map(([key, item]) => {
+        const failed = item.ok === false || item.phase === 'failed' || item.kind === 'tool_failed';
+        const complete = item.phase === 'finished' || /finished|failed/.test(item.kind || '');
+        const row = el('details', { class: `agent-turn-step${failed ? ' is-failed' : ''}`, open: failed || !complete || openedSteps.has(key) });
+        row.addEventListener('click', event => { if (event.target.closest('summary')) {
+          if (row.open) openedSteps.delete(key); else openedSteps.add(key);
+        } });
+        row.append(el('summary', { text: `${failed ? 'Failed' : complete ? 'Done' : 'Working'} · ${item.summary || action(item)}` }),
+          el('pre', { text: item.output || item.detail || item.summary || item.name || '' }));
+        return row;
+      }));
+      const active = [...byId.values()].reverse().find(item => item.phase === 'started' || /started/.test(item.kind || ''));
+      verb.textContent = entry.stopping ? 'Stopping' : active ? action(active) : 'Writing';
+    };
     const paint = (entry) => {
       if (!host.isConnected || sessionId !== id) return;
-      renderMessageBody(replyBody, entry.text || (entry.status === 'processing' ? '' : '(no reply)'), id, true);
+      // Decision 3, 2026-10-13: only a session with agent_id buffers its
+      // visible reply. The stream entry still retains all text for Stop/error.
+      if (agentTurn && entry.status === 'processing') replyBody.replaceChildren();
+      else renderMessageBody(replyBody, entry.text || (entry.status === 'processing' ? '' : '(no reply)'), id, true);
+      if (working) {
+        heading.hidden = entry.status !== 'processing';
+        if (entry.status === 'processing') {
+          elapsed.textContent = timeLabel(entry); drawSteps(entry);
+          if (!workingTimer) workingTimer = setInterval(() => { if (working.isConnected && !heading.hidden) elapsed.textContent = timeLabel(entry); }, 1000);
+        } else { clearInterval(workingTimer); workingTimer = null; drawSteps(entry); }
+        working.hidden = heading.hidden && !steps.children.length;
+        if (heading.hidden) working.querySelector('.agent-portrait')?.stopPortrait?.();
+      }
       transcript?.paint(replyBody, entry);
       if (entry.permission && entry.permission.id !== shownPermission) {
         shownPermission = entry.permission.id;
@@ -116,11 +188,14 @@ export async function mountSessionChat(host, options = {}) {
         dismissPermissionPrompt(shownPermission);
         shownPermission = null;
       }
-      const replyCard = replyBody.closest('.msg');
       if (entry.status === 'done' && entry.handoffs) { replyCard?.remove(); handoffs.refresh(); }
       if (entry.status === 'failed' && replyCard && !replyCard.classList.contains('msg-failed')) {
         replyCard.classList.add('msg-failed');
         replyCard.append(el('div', { class: 'msg-interrupted', text: entry.error || 'Response interrupted. Try again.' }));
+      }
+      if (agentTurn && entry.status === 'stopped' && replyCard && !replyCard.classList.contains('msg-stopped')) {
+        replyCard.classList.add('msg-stopped');
+        replyCard.append(el('div', { class: 'msg-interrupted', text: 'Stopped' }));
       }
       replyCard?.setAttribute('aria-busy', String(entry.status === 'processing'));
       syncSend();
@@ -261,7 +336,7 @@ export async function mountSessionChat(host, options = {}) {
     if (!text) return;
     if (!sessionId) {
       submitting = true;
-      try { sessionId = await options.createSession(); }
+      try { sessionId = await options.createSession(); if (options.agent) session = await api(`/api/sessions/${sessionId}`); }
       catch (problem) { toast(problem.message, 'error'); return; }
       finally { submitting = false; }
       if (disposed) return;
@@ -295,5 +370,5 @@ export async function mountSessionChat(host, options = {}) {
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposed = true; if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposed = true; clearInterval(workingTimer); activePortrait?.stopPortrait?.(); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }

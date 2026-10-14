@@ -5,15 +5,13 @@ real scheduler.
 
 Three schedule kinds:
 - "once": fires a single time at run_at (ISO datetime string), then disables itself.
-- "interval": fires every interval_seconds, computing the next run each time.
-- "daily": fires once a day at run_time ("HH:MM", the machine's LOCAL time).
+- "interval": fires every interval_seconds, anchored to its scheduled time.
+- "daily": fires at run_time ("HH:MM"), in time_zone or the machine's zone,
+  on weekdays (Monday = 0 through Sunday = 6), or every day when omitted.
 
 "daily" exists because "interval" cannot express it (David's ask 2026-09-04,
-"once everyday at 6:00 am"). An interval task computes its next run as
-now + interval_seconds at each run, so a 24h interval is anchored to whenever
-you happened to create it and drifts a little further every cycle — there is
-no way to pin it to a wall-clock time. Local time, not UTC, because "6:00 am"
-means six in the morning where the user is.
+"once everyday at 6:00 am"). A 24h interval measures elapsed time; daily
+keeps a wall-clock time even when daylight saving changes its UTC offset.
 
 Chained tasks, webhook triggers, and per-task personas (all real Odysseus
 features) are deliberately out of this pass — this is the execution-loop
@@ -51,8 +49,10 @@ Work - Phase 4 (Build Spec)"):
 """
 import time
 import uuid
-from datetime import datetime, timezone
+from collections import Counter, deque
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
@@ -80,6 +80,10 @@ CARD_MAX_ATTEMPTS = 3
 CARD_LEASE_SECONDS = 30 * 60
 # A scheduled run starting this long after its time is marked late.
 LATE_SECONDS = 5 * 60
+# Twelve hours tolerates overnight downtime and the existing late catch-up
+# behaviour, but yesterday's checks should be receipts, not stale model work
+# (Agents 2.0 phase 2-i, 2026-10-13).
+MISSED_GRACE_SECONDS = 12 * 60 * 60
 STOPPED_NOTE = "Stopped by you."
 CARD_RESULT_INSTRUCTION = (
     "[This is a card on Kairos's work board. Your reply is the result the user will review, so reply with the "
@@ -98,11 +102,16 @@ class TaskService:
     def _save_runs(self) -> None:
         counts: dict = {}
         kept = []
+        # A missed receipt can arrive while a run is live. Keep that run's
+        # record until its terminal update (Agents 2.0 phase 2-ii, 2026-10-13).
+        active = {r["id"] for r in self._runs if r.get("outcome") in ("queued", "running")}
+        active_counts = Counter(r["task_id"] for r in self._runs if r["id"] in active)
         for run in reversed(self._runs):
             seen = counts.get(run["task_id"], 0)
-            if seen < MAX_RUNS_PER_TASK:
+            if run["id"] in active or seen < MAX_RUNS_PER_TASK - active_counts[run["task_id"]]:
                 kept.append(run)
-                counts[run["task_id"]] = seen + 1
+                if run["id"] not in active:
+                    counts[run["task_id"]] = seen + 1
         self._runs = kept[::-1]
         write_json_atomic(TASK_RUNS_FILE, self._runs)
 
@@ -137,6 +146,8 @@ class TaskService:
         reply_to: Optional[str] = None,
         context: str = "",
         enabled: bool = True,
+        time_zone: Optional[str] = None,
+        weekdays: Optional[list[int]] = None,
     ) -> dict:
         if schedule_kind not in ("once", "interval", "daily", "card"):
             raise ValueError("schedule_kind must be 'once', 'interval', 'daily' or 'card'")
@@ -148,8 +159,14 @@ class TaskService:
             self._check_dependencies(None, depends_on or [])
         if schedule_kind == "once" and not run_at:
             raise ValueError("run_at is required for a one-shot task")
-        if schedule_kind == "interval" and not interval_seconds:
-            raise ValueError("interval_seconds is required for a recurring task")
+        if schedule_kind == "interval" and (not isinstance(interval_seconds, int) or interval_seconds <= 0):
+            raise ValueError("interval_seconds must be a positive integer for a recurring task")
+        _schedule_zone(time_zone)
+        weekdays = _schedule_weekdays(weekdays)
+        if weekdays is not None and schedule_kind != "daily":
+            raise ValueError("weekdays is for daily schedules")
+        if time_zone is not None and schedule_kind == "card":
+            raise ValueError("time_zone is for scheduled tasks")
         if schedule_kind == "daily":
             if not run_time:
                 raise ValueError("run_time (HH:MM) is required for a daily task")
@@ -168,7 +185,7 @@ class TaskService:
         elif schedule_kind == "once":
             next_run_at = run_at
         elif schedule_kind == "daily":
-            next_run_at = _next_daily(run_time)
+            next_run_at = _next_daily(run_time, time_zone, weekdays)
         else:
             next_run_at = _iso_in(interval_seconds)
         task = {
@@ -178,7 +195,7 @@ class TaskService:
             "schedule_kind": schedule_kind,
             "run_at": run_at,
             "interval_seconds": interval_seconds,
-            # "HH:MM" in local time, for schedule_kind == "daily".
+            # "HH:MM" in time_zone (or machine-local), for daily schedules.
             "run_time": run_time,
             "enabled": enabled,
             "next_run_at": next_run_at,
@@ -205,6 +222,13 @@ class TaskService:
             "reply_to": reply_to,
             "context": context,
         }
+        # Omitted fields stay omitted: old files need no migration or write
+        # on load, and a machine-local schedule still follows the machine
+        # (Agents 2.0 phase 2-i, 2026-10-13).
+        if time_zone is not None:
+            task["time_zone"] = time_zone
+        if weekdays is not None:
+            task["weekdays"] = weekdays
         if schedule_kind == "card":
             task.update({"status": status or "backlog", "depends_on": list(depends_on or []), "attempts": 0,
                          "claimed_until": None, "comments": []})
@@ -222,6 +246,13 @@ class TaskService:
             self._check_dependencies(task_id, fields["depends_on"] or [])
         if fields.get("report_when") not in (None, "always", "notable"):
             raise ValueError("report_when is 'always' or 'notable'")
+        schedule_changed = "time_zone" in fields or "weekdays" in fields
+        candidate = {**task, **fields}
+        if schedule_changed:
+            _schedule_zone(candidate.get("time_zone"))
+            candidate["weekdays"] = _schedule_weekdays(candidate.get("weekdays"))
+            if task["schedule_kind"] == "card" or (candidate["weekdays"] is not None and task["schedule_kind"] != "daily"):
+                raise ValueError("timezone and weekday changes require a schedule; weekdays requires daily")
         if fields.get("enabled") is True and not task.get("enabled"):
             kind = task["schedule_kind"]
             if kind == "once":
@@ -229,12 +260,21 @@ class TaskService:
                 if not stamp or datetime.fromisoformat(stamp).timestamp() <= time.time():
                     raise ValueError("This one-time schedule has ended. Use Run now or schedule a new task.")
             elif kind == "daily":
-                task["next_run_at"] = _next_daily(task["run_time"])
+                task["next_run_at"] = _next_daily(task["run_time"], candidate.get("time_zone"), candidate.get("weekdays"))
             elif kind == "interval":
                 task["next_run_at"] = _iso_in(task["interval_seconds"])
         for key in ("name", "prompt", "enabled", "deliver_to_channel", "endpoint_id", "depends_on", "report_when"):
             if key in fields:
                 task[key] = list(fields[key] or []) if key == "depends_on" else fields[key]
+        if schedule_changed:
+            for key in ("time_zone", "weekdays"):
+                if key in fields:
+                    if candidate.get(key) is None:
+                        task.pop(key, None)
+                    else:
+                        task[key] = candidate[key]
+            if task["schedule_kind"] == "daily":
+                task["next_run_at"] = _next_daily(task["run_time"], task.get("time_zone"), task.get("weekdays"))
         self._save_tasks()
         return task
 
@@ -288,8 +328,11 @@ class TaskService:
                 if agent_service.get(card["agent_id"]):
                     try:
                         agent_service.remember(card["agent_id"], "Corrections", f"On \"{card['name']}\": {note}")
-                    except ValueError:
-                        pass  # memory full: the note still reaches this card's re-run
+                    except ValueError as exc:
+                        # Feedback still reaches this run, but the person must
+                        # see why it will not carry forward (2026-10-13).
+                        self._comment(card, "note", f"Correction could not be saved to agent memory: {exc}. "
+                                      "Your feedback is kept on this card for its next run.", "jarvis")
         if status == "ready" and card["status"] == "blocked":
             card["attempts"] = 0
         card["status"] = status
@@ -298,27 +341,37 @@ class TaskService:
         return card
 
     def claim_next_card(self, now: Optional[float] = None, card_id: Optional[str] = None,
-                        eligible=None) -> Optional[dict]:
+                        eligible=None, source: Optional[str] = None) -> Optional[dict]:
         """The oldest Ready card whose dependencies are all Done, marked
         Running with a lease. One at a time keeps spend predictable.
         card_id claims that card only ("Run now"), from Backlog too.
         eligible(card) can hold a card back (an agent turned off or out of
         runs for today) without moving it."""
         now = time.time() if now is None else now
+        card = self.next_card(card_id=card_id, eligible=eligible)
+        if card is None:
+            return None
+        card["status"] = "running"
+        card["attempts"] += 1
+        card["claimed_until"] = now + CARD_LEASE_SECONDS
+        card["run_started_at"] = now
+        if source is not None:
+            card["run_source"] = source
+        self._start_run_record(card, "queued")
+        self._save_tasks()
+        self._sync_handoff(card)
+        return card
+
+    def next_card(self, card_id: Optional[str] = None, eligible=None) -> Optional[dict]:
+        """Find work without claiming it: admission must hold a slot before
+        a card spends an attempt (Agents 2.0, 2026-10-13)."""
         allowed = ("ready", "backlog") if card_id else ("ready",)
         ready = [c for c in self._tasks.values()
                  if c["schedule_kind"] == "card" and c["status"] in allowed and not self.waiting_on(c)
                  and (card_id is None or c["id"] == card_id) and (eligible is None or eligible(c))]
         if not ready:
             return None
-        card = min(ready, key=lambda c: c["created_at"])
-        card["status"] = "running"
-        card["attempts"] += 1
-        card["claimed_until"] = now + CARD_LEASE_SECONDS
-        card["run_started_at"] = now
-        self._save_tasks()
-        self._sync_handoff(card)
-        return card
+        return min(ready, key=lambda c: c["created_at"])
 
     def finish_card(self, card_id: str, output: str) -> dict:
         card = self._tasks[card_id]
@@ -387,30 +440,36 @@ class TaskService:
         return next((c for c in reversed(card.get("comments") or []) if c["kind"] == kind), None)
 
     def _append_run(self, task: dict, output: str, error: Optional[str], outcome: str,
-                    delivered: Optional[bool] = None, delivery_id: Optional[str] = None) -> None:
-        """One run record. outcome is "succeeded", "failed", "lost" (a run
-        that never reported back: the app closed mid-run, or a card's lease
-        ran out) or "stopped". The start time is the one a claim or
-        mark_started() left on the task; the caller saves the task."""
+                    delivered: Optional[bool] = None, delivery_id: Optional[str] = None,
+                    missed_reason: Optional[str] = None, save: bool = True) -> None:
+        """Finish the claimed record, or append a legacy/missed receipt."""
         now = time.time()
-        started = task.pop("run_started_at", None)
+        active_id = task.pop("active_run_id", None)
+        active = next((r for r in self._runs if r["id"] == active_id), None) if active_id else None
+        claimed_at = task.pop("run_started_at", None)
+        # A record claimed but cut off before mark_running() has no execution
+        # start of its own; the claim time is the best known one. Without this
+        # a lost run reports no start at all (Agents 2.0 phase 2-ii, 2026-10-13).
+        started = active.get("started_at") if active is not None else None
+        if started is None:
+            started = claimed_at
         due_at = task.pop("run_for", None)
         source = task.pop("run_source", None)
         run_id = task.pop("run_id", None)
         late = None
-        if due_at and started:
+        if due_at and (started is not None or missed_reason):
             try:
-                behind = started - datetime.fromisoformat(due_at).timestamp()
+                behind = (started if started is not None else now) - datetime.fromisoformat(due_at).timestamp()
                 late = round(behind) if behind > LATE_SECONDS else None
             except ValueError:
                 pass  # an unreadable stored time: lateness unknown, not guessed
-        self._runs.append({
-            "id": uuid.uuid4().hex[:12],
+        record = {
+            "id": active_id or uuid.uuid4().hex[:12],
             "task_id": task["id"],
             "task_name": task["name"],
             "started_at": started,
             "ran_at": now,  # when it finished; the name predates started_at
-            "duration_seconds": round(now - started, 1) if started else None,
+            "duration_seconds": round(now - started, 1) if started is not None else None,
             "outcome": outcome,
             "output": output,
             "error": error,
@@ -436,20 +495,65 @@ class TaskService:
             "endpoint_id": task.get("endpoint_id"),
             "model": _model_label(task.get("endpoint_id")),
             "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None,
-        })
+        }
+        if active is not None:
+            active.update(record)
+            # A long run may have accumulated missed receipts while it was
+            # live. Its finish is newest, so move it to the tail before the
+            # cap can evict it (Agents 2.0 phase 2-ii, 2026-10-13).
+            self._runs.remove(active)
+            self._runs.append(active)
+        else:
+            self._runs.append(record)
+        if missed_reason:
+            record["missed_reason"] = missed_reason
         task["last_run_at"] = now
+        if save:
+            self._save_runs()
+
+    def _start_run_record(self, task: dict, outcome: str) -> None:
+        # In-flight values live in outcome, so old equality checks for the
+        # four terminal values cannot count this as success (2026-10-13).
+        run_id = uuid.uuid4().hex[:12]
+        task["active_run_id"] = run_id
+        # Admission spends the daily slot even while queued; started_at stays
+        # empty until execution actually begins (2026-10-13).
+        self._runs.append({"id": run_id, "task_id": task["id"], "task_name": task["name"],
+                           "started_at": task.get("run_started_at") if outcome == "running" else None,
+                           "admitted_at": task["run_started_at"],
+                           "ran_at": task["run_started_at"], "duration_seconds": None,
+                           "outcome": outcome, "output": "", "error": None, "delivered": None,
+                           "delivery_id": None, "run_id": task.get("run_id"),
+                           "source": task.get("run_source"), "scheduled_for": task.get("run_for"),
+                           "late_seconds": None, "endpoint_id": task.get("endpoint_id"),
+                           "model": _model_label(task.get("endpoint_id")),
+                           "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None})
         self._save_runs()
+
+    def mark_running(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        run = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+        if run is not None and run["outcome"] == "queued":
+            run.update(outcome="running", started_at=time.time())
+            self._save_runs()
 
     def claim_occurrence(self, task_id: str) -> Optional[dict]:
         """A scheduled run begins: its next time moves on and the start is
         stamped, in one write, before any work happens. A crash from here on
         loses this occurrence rather than running it twice. None when the
-        task is gone or no longer due."""
+        task is gone, no longer due, or recorded as missed beyond grace."""
         task = self._tasks.get(task_id)
         if task is None or not self.is_due(task_id):
             return None
+        if self.skip_overdue_occurrence(task_id):
+            return None
         task.update(run_started_at=time.time(), run_for=task["next_run_at"], run_source="schedule")
-        self._advance(task)
+        skipped = self._advance(task)
+        self._save_tasks()
+        self._record_missed(task, skipped, "the app was not running or the scheduler was busy")
+        self._start_run_record(task, "queued")
         self._save_tasks()
         return task
 
@@ -460,6 +564,10 @@ class TaskService:
         task = self._tasks.get(task_id) if task_id else None
         if task is not None:
             task["run_id"] = run_id
+            active = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+            if active is not None:
+                active["run_id"] = run_id
+                self._save_runs()
 
     def mark_started(self, task_id: str, source: str = "manual") -> None:
         """A run outside the schedule begins (Run now, a trigger, an answer).
@@ -468,26 +576,68 @@ class TaskService:
         task = self._tasks.get(task_id)
         if task is not None:
             task.update(run_started_at=time.time(), run_for=None, run_source=source)
+            self._start_run_record(task, "queued")
             self._save_tasks()
 
     def is_due(self, task_id: str) -> bool:
         task = self._tasks.get(task_id)
         return bool(task and task["schedule_kind"] != "card" and task["enabled"] and task["next_run_at"]
-                    and task["next_run_at"] <= datetime.now(timezone.utc).isoformat())
+                    and datetime.fromisoformat(task["next_run_at"]).timestamp() <= time.time())
 
     def recover_interrupted_runs(self) -> list[dict]:
         """At startup nothing is running yet, so a scheduled task still marked
         as started was cut off: record it as lost, once. It is not run again:
         its occurrence was claimed before it started. A stamp left by a build
         from before claims (no run_source) moves its schedule on here
-        instead, or the same occurrence would run again. Cards are left to
-        their lease (reclaim_stale_cards), which already covers this."""
-        lost = [t for t in self._tasks.values() if t["schedule_kind"] != "card" and t.get("run_started_at")]
-        for task in lost:
+        instead, or the same occurrence would run again. At startup there
+        are no live card workers either, so their claims can be failed now;
+        leases still cover abandoned cards during a live process."""
+        stamped = [t for t in self._tasks.values() if t["schedule_kind"] != "card" and t.get("run_started_at")]
+        lost = []
+        for task in stamped:
+            active = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
+            if active is not None and active.get("outcome") not in ("queued", "running"):
+                # The run may have saved its finish before the task stamps
+                # were cleared. Do not turn that result into a loss (2026-10-13).
+                for key in ("run_started_at", "run_for", "run_source", "run_id", "active_run_id"):
+                    task.pop(key, None)
+                continue
             if "run_source" not in task and self.is_due(task["id"]):
-                self._advance(task)
+                skipped = self._advance(task)
+                self._record_missed(task, skipped, "the app was not running or the scheduler was busy")
             self._append_run(task, "", "The run did not finish (Kairos closed while it ran).", "lost")
-        if lost:
+            lost.append(task)
+        restored_cards = False
+        for card in [t for t in self._tasks.values() if t["schedule_kind"] == "card"
+                     and t.get("status") == "running"]:
+            active = next((r for r in self._runs if r["id"] == card.get("active_run_id")), None)
+            if active is not None and active.get("outcome") not in ("queued", "running"):
+                # Finish saved before the card: restore its board position
+                # from that terminal record (2026-10-13).
+                if active["outcome"] == "succeeded":
+                    card["status"] = "review"
+                    self._comment(card, "result", active.get("output") or "", "jarvis")
+                elif active["outcome"] == "stopped" or card["attempts"] >= CARD_MAX_ATTEMPTS:
+                    card["status"] = "blocked"
+                else:
+                    card["status"] = "ready"
+                card["claimed_until"] = None
+                for key in ("run_started_at", "run_for", "run_source", "run_id", "active_run_id"):
+                    card.pop(key, None)
+                restored_cards = True
+                continue
+            self.fail_card(card["id"], "The run did not finish (Kairos closed while it ran).", lost=True)
+        # A write interrupted between the record and the task stamp is also
+        # terminalized. Do not rewrite older, already terminal history.
+        orphaned = False
+        for run in self._runs:
+            if run.get("outcome") in ("queued", "running"):
+                run.update(outcome="lost", ran_at=time.time(),
+                           error="The run did not finish (Kairos closed while it ran).")
+                orphaned = True
+        if orphaned:
+            self._save_runs()
+        if stamped or restored_cards:
             self._save_tasks()
         return lost
 
@@ -511,27 +661,92 @@ class TaskService:
             self._sync_handoff(task)
         return task
 
-    def skip_occurrence(self, task_id: str) -> None:
-        """Move a due goal to its next time without running it (its agent is
-        off or out of runs today). Without this the loop would find it due
-        again every 15 seconds."""
+    def skip_overdue_occurrence(self, task_id: str) -> bool:
+        """Reject stale work before admission, so missed checks spend no slot."""
         task = self._tasks.get(task_id)
-        if task is None or task["schedule_kind"] == "card":
+        if not self.is_due(task_id):
+            return False
+        if time.time() - datetime.fromisoformat(task["next_run_at"]).timestamp() <= MISSED_GRACE_SECONDS:
+            return False
+        self.skip_occurrence(task_id, "the app was not running or could not start this check within twelve hours")
+        return True
+
+    def skip_occurrence(self, task_id: str, reason: Optional[str] = None) -> None:
+        """Leave a missed receipt and move on once, never build a backlog."""
+        task = self._tasks.get(task_id)
+        if task is None or not self.is_due(task_id):
             return
-        self._advance(task)
+        if reason is None and task.get("agent_id"):
+            from services.agent_service import agent_service
+            allowed, refusal = agent_service.can_run(task["agent_id"])
+            reason = refusal if not allowed else None
+        reason = reason or "the scheduled check could not run"
+        due_at = task["next_run_at"]
+        skipped = self._advance(task)
         self._save_tasks()
+        self._record_missed(task, [due_at, *skipped], reason)
+
+    def _record_missed(self, task: dict, occurrences: list[str], reason: str) -> None:
+        # A manual run may still own the task's start stamps. A receipt did
+        # no work: keep those stamps and last_run_at for the actual run,
+        # while using the ordinary history and its existing lost outcome
+        # (Agents 2.0 phase 2-i, 2026-10-13).
+        if not occurrences:
+            return
+        # One receipt per gap, not per occurrence. An agent left off over a
+        # weekend misses dozens of hourly slots, and a receipt each would
+        # push every real run out of a history capped at MAX_RUNS_PER_TASK:
+        # the checks that did not happen would erase the record of the ones
+        # that did. Both references coalesce here for the same reason
+        # (Agents 2.0 phase 2-i, 2026-10-13).
+        missed = len(occurrences)
+        note = (f"Missed scheduled run: {reason}." if missed == 1 else
+                f"Missed {missed} scheduled runs from {occurrences[0][:16].replace('T', ' ')} "
+                f"to {occurrences[-1][:16].replace('T', ' ')}: {reason}.")
+        receipt = {**task, "run_started_at": None, "run_for": occurrences[-1],
+                   "run_source": "schedule", "run_id": None, "active_run_id": None}
+        self._append_run(receipt, "", note, "lost", missed_reason=reason, save=False)
+        # The occurrences themselves stay on the one receipt, bounded, so
+        # nothing is lost by folding them together: which slots were skipped
+        # still answers "did it respect my weekday rule while I was away?".
+        self._runs[-1]["missed_occurrences"] = missed
+        self._runs[-1]["missed_at"] = occurrences[-MAX_RUNS_PER_TASK:]
+        self._save_runs()
 
     @staticmethod
-    def _advance(task: dict) -> None:
+    def _advance(task: dict) -> list[str]:
         """The schedule's next time: a one-shot is done, a daily one is
-        tomorrow's (or today's, if still ahead), an interval is from now."""
+        next eligible day's, an interval stays on its original cadence."""
+        skipped = []
+        now = time.time()
         if task["schedule_kind"] == "once":
             task["enabled"] = False
             task["next_run_at"] = None
         elif task["schedule_kind"] == "daily":
-            task["next_run_at"] = _next_daily(task["run_time"])
-        else:
-            task["next_run_at"] = _iso_in(task["interval_seconds"])
+            cursor = datetime.fromisoformat(task["next_run_at"])
+            kept = deque(maxlen=MAX_RUNS_PER_TASK)
+            while True:
+                stamp = _next_daily(task["run_time"], task.get("time_zone"), task.get("weekdays"), cursor)
+                cursor = datetime.fromisoformat(stamp)
+                if cursor.timestamp() > now:
+                    task["next_run_at"] = stamp
+                    break
+                kept.append(stamp)
+            skipped = list(kept)
+        elif task["schedule_kind"] == "interval":
+            # Advance from the scheduled instant, never the start/finish.
+            # Arithmetic jumps over downtime in one step instead of queuing
+            # paid catch-up runs (Agents 2.0 phase 2-i, 2026-10-13).
+            previous = datetime.fromisoformat(task["next_run_at"]).timestamp()
+            interval = task["interval_seconds"]
+            steps = max(1, int((now - previous) // interval) + 1)
+            task["next_run_at"] = datetime.fromtimestamp(previous + steps * interval, timezone.utc).isoformat()
+            # Receipts are history, not queued work. Keep the existing history
+            # cap even after years offline, without constructing a huge list
+            # (Agents 2.0 phase 2-i, 2026-10-13).
+            skipped = [datetime.fromtimestamp(previous + step * interval, timezone.utc).isoformat()
+                       for step in range(max(1, steps - MAX_RUNS_PER_TASK), steps)]
+        return skipped
 
     def delete_agent_work(self, agent_id: str) -> int:
         """An agent deleted: its goals and unfinished cards go; finished run
@@ -561,7 +776,7 @@ class TaskService:
         task["schedule_kind"] = "daily"
         task["run_time"] = run_time
         task["interval_seconds"] = None
-        task["next_run_at"] = _next_daily(run_time)
+        task["next_run_at"] = _next_daily(run_time, task.get("time_zone"), task.get("weekdays"))
         self._save_tasks()
         return task
 
@@ -579,11 +794,7 @@ class TaskService:
             self._save_tasks()
 
     def due_tasks(self) -> list[dict]:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        return [
-            t for t in self._tasks.values()
-            if t["enabled"] and t["next_run_at"] and t["next_run_at"] <= now_iso
-        ]
+        return [t for t in self._tasks.values() if self.is_due(t["id"])]
 
     def record_run(self, task_id: str, output: str, error: Optional[str] = None, delivered: Optional[bool] = None,
                    delivery_id: Optional[str] = None) -> None:
@@ -644,21 +855,52 @@ def _parse_hhmm(run_time: str) -> tuple[int, int]:
     return hour, minute
 
 
-def _next_daily(run_time: str) -> str:
-    """Next occurrence of a local wall-clock time, as a UTC ISO string.
+def _schedule_zone(name: Optional[str]):
+    if name is None:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise ValueError(f"time_zone must be an IANA name, got {name!r}") from exc
 
-    Stored in UTC because due_tasks() compares against a UTC "now" — but
-    computed from local time, since "6:00 am" means six in the morning here,
-    not in UTC. Uses astimezone() with no argument, which picks up the
-    machine's real local zone (and its current DST offset).
-    """
+
+def _schedule_weekdays(days) -> Optional[list[int]]:
+    if days is None:
+        return None
+    if not isinstance(days, (list, tuple, set)) or not days or any(type(d) is not int or not 0 <= d <= 6 for d in days):
+        raise ValueError("weekdays must be a nonempty set of integers, Monday=0 through Sunday=6")
+    return sorted(set(days))
+
+
+def _daily_instant(wall: datetime, zone) -> datetime:
+    candidates = [wall.replace(tzinfo=zone, fold=fold).astimezone(timezone.utc) for fold in (0, 1)]
+    local = [(stamp, stamp.astimezone(zone).replace(tzinfo=None)) for stamp in candidates]
+    valid = [stamp for stamp, roundtrip in local if roundtrip == wall]
+    # Fall back: use the first occurrence only, so a daily check never fires
+    # twice. Spring forward: shift forward by the gap (02:30 -> 03:30), so
+    # that day's check still happens. Round trips detect nonexistent times;
+    # attaching ZoneInfo alone does not (Agents 2.0 phase 2-i, 2026-10-13).
+    return min(valid) if valid else min(stamp for stamp, roundtrip in local if roundtrip > wall)
+
+
+def _next_daily(run_time: str, time_zone: Optional[str] = None,
+                weekdays: Optional[list[int]] = None, now: Optional[datetime] = None) -> str:
+    """Next eligible wall-clock occurrence, stored as a UTC ISO string."""
     hour, minute = _parse_hhmm(run_time)
-    now_local = datetime.now().astimezone()
-    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now_local:
-        from datetime import timedelta
-        target += timedelta(days=1)
-    return target.astimezone(timezone.utc).isoformat()
+    zone = _schedule_zone(time_zone)
+    days = _schedule_weekdays(weekdays)
+    now = now or datetime.fromtimestamp(time.time(), timezone.utc)
+    now_utc = now.astimezone(timezone.utc)
+    day = now_utc.astimezone(zone).date()
+    while True:
+        if days is None or day.weekday() in days:
+            wall = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
+            # For omitted zones, convert each date using the OS's local rules;
+            # astimezone().tzinfo alone would freeze today's DST offset.
+            target = _daily_instant(wall, zone)
+            if target > now_utc:
+                return target.isoformat()
+        day += timedelta(days=1)
 
 
 task_service = TaskService()

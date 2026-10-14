@@ -224,9 +224,18 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_answering_needs_a_user_and_revoking_needs_an_admin(self):
         self.assertEqual((await self.client.get("/api/permissions")).status_code, 401)
-        queue = permissions.open_channel("chat:1")
+        # A real session, owned by this user. Answering a chat's prompt has
+        # required ownership since the mobile merge (2026-10-13, services/
+        # chat_live.py's require_session): a surface like "chat:1" that no
+        # session backs now answers 404, which is correct. The fixture needed
+        # updating, not the rule.
+        from core.session_manager import session_manager
+        owned = session_manager.create_session(owner_user="bob")["id"]
+        self.addCleanup(session_manager.delete_session, owned)
+        surface = f"chat:{owned}"
+        queue = permissions.open_channel(surface)
         asking = asyncio.ensure_future(permissions.decide(
-            surface="chat:1", tool="Bash", arguments={"command": "npm test"}, timeout=30))
+            surface=surface, tool="Bash", arguments={"command": "npm test"}, timeout=30))
         request = await asyncio.wait_for(queue.get(), timeout=5)
 
         # A non-admin may answer their own prompt.

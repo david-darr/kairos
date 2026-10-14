@@ -21,6 +21,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 _DATA = tempfile.TemporaryDirectory(prefix="jarvis-durable-test-", ignore_cleanup_errors=True)
 os.environ["JARVIS_DATA_DIR"] = _DATA.name
@@ -133,6 +134,65 @@ class Base(unittest.TestCase):
 
 
 class AtMostOnceTests(Base):
+    def test_a_claim_is_visible_then_finishes_in_the_same_record(self):
+        task = self.task("visible work")
+        task_service.claim_occurrence(task["id"])
+        queued = task_service.list_runs(task["id"])
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["outcome"], "queued")
+        self.assertNotEqual(queued[0]["outcome"], "succeeded")
+        task_service.mark_running(task["id"])
+        running = task_service.list_runs(task["id"])
+        self.assertEqual((len(running), running[0]["id"], running[0]["outcome"]),
+                         (1, queued[0]["id"], "running"))
+        task_service.record_run(task["id"], "finished")
+        finished = task_service.list_runs(task["id"])
+        self.assertEqual((len(finished), finished[0]["id"], finished[0]["outcome"]),
+                         (1, queued[0]["id"], "succeeded"))
+
+    def test_a_previous_processes_inflight_card_is_lost_on_load(self):
+        card = self.card("interrupted card")
+        task_service.claim_next_card(card_id=card["id"])
+        task_service.mark_running(card["id"])
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.list_runs(card["id"])[0]["outcome"], "running")
+        restarted.recover_interrupted_runs()
+        self.assertEqual([r["outcome"] for r in restarted.list_runs(card["id"])], ["lost"])
+        self.assertEqual(restarted.get_task(card["id"])["status"], "ready")
+
+    def test_a_saved_finish_is_not_reclassified_when_its_task_stamp_survives(self):
+        task = self.task("saved finish", due_seconds_ago=None)
+        task_service.mark_started(task["id"])
+        run_id = task_service.list_runs(task["id"])[0]["id"]
+        task_service._runs[-1].update(outcome="succeeded", output="done", ran_at=time.time())
+        task_service._save_runs()
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.recover_interrupted_runs(), [])
+        self.assertEqual(restarted.list_runs(task["id"])[0]["id"], run_id)
+        self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
+        self.assertNotIn("run_started_at", restarted.get_task(task["id"]))
+
+    def test_old_history_keeps_its_terminal_outcome_without_a_rewrite(self):
+        task = self.task("old history", due_seconds_ago=None)
+        task_service.record_run(task["id"], "old result")
+        before = (Path(task_module.TASK_RUNS_FILE)).read_bytes()
+        restarted = task_module.TaskService()
+        self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
+        self.assertEqual((Path(task_module.TASK_RUNS_FILE)).read_bytes(), before)
+
+    def test_a_live_record_survives_the_history_cap_and_finishes_once(self):
+        task = self.task("capped history", due_seconds_ago=None)
+        task_service.mark_started(task["id"])
+        live_id = task_service.list_runs(task["id"])[0]["id"]
+        for n in range(task_module.MAX_RUNS_PER_TASK + 2):
+            task_service._record_missed(task, [ago(n + 1)], "offline")
+        self.assertIn(live_id, [r["id"] for r in task_service.list_runs(task["id"])])
+        self.assertLessEqual(len(task_service.list_runs(task["id"])), task_module.MAX_RUNS_PER_TASK)
+        task_service.record_run(task["id"], "done")
+        self.assertLessEqual(len(task_service.list_runs(task["id"])), task_module.MAX_RUNS_PER_TASK)
+        self.assertEqual(sum(r["id"] == live_id for r in task_service.list_runs(task["id"])), 1)
+        self.assertEqual(task_service.list_runs(task["id"])[0]["outcome"], "succeeded")
+
     def test_a_run_cut_off_by_a_crash_is_recorded_lost_and_not_run_again(self):
         task = self.task("brief", deliver_to_channel="discord")
         claimed = task_service.claim_occurrence(task["id"])  # the run starts, then JARVIS dies
@@ -219,9 +279,233 @@ class OneRunAtATimeTests(Base):
         asyncio.run(go())
         self.assertEqual(SlowBrain.started, 1)
         self.assertGreater(task_service.get_task(task["id"])["next_run_at"], ago(0), "this occurrence is covered")
+        history = task_service.list_runs(task["id"])
+        self.assertEqual(len(history), 2)
+        missed = next(r for r in history if r.get("missed_reason"))
+        completed = next(r for r in history if not r.get("missed_reason"))
+        self.assertIn("already running", missed["error"])
+        self.assertEqual((completed["source"], completed["outcome"]), ("manual", "succeeded"))
+        self.assertIsNotNone(completed["started_at"], "the skip did not consume the manual run's start")
 
 
 class ScheduleTests(Base):
+    def test_named_daily_times_keep_the_wall_clock_across_both_dst_boundaries(self):
+        for zone_name, before, after in (
+                ("America/New_York", "2026-03-07", "2026-03-08"),
+                ("America/New_York", "2026-10-31", "2026-11-01"),
+                ("Europe/Dublin", "2026-03-28", "2026-03-29"),
+                ("Europe/Dublin", "2026-10-24", "2026-10-25")):
+            with self.subTest(zone=zone_name, before=before):
+                zone = ZoneInfo(zone_name)
+                start = datetime.fromisoformat(before + "T05:00").replace(tzinfo=zone)
+                with patch.object(task_module.time, "time", return_value=start.timestamp()):
+                    task = self.task("zoned morning", kind="daily", due_seconds_ago=None, time_zone=zone_name)
+                first = datetime.fromisoformat(task["next_run_at"])
+                self.assertEqual(first.astimezone(zone).replace(tzinfo=None), datetime.fromisoformat(before + "T06:00"))
+                with patch.object(task_module.time, "time", return_value=first.timestamp()):
+                    self.assertTrue(task_service.is_due(task["id"]))
+                    task_service.claim_occurrence(task["id"])
+                    task_service.record_run(task["id"], "morning check")
+                second = datetime.fromisoformat(task["next_run_at"])
+                self.assertEqual(second.astimezone(zone).replace(tzinfo=None), datetime.fromisoformat(after + "T06:00"))
+                self.assertIn((second - first).total_seconds(), (23 * 3600, 25 * 3600))
+                with patch.object(task_module.time, "time", return_value=second.timestamp()):
+                    self.assertIsNotNone(task_service.claim_occurrence(task["id"]))
+                    task_service.record_run(task["id"], "check after the clock change")
+                self.assertEqual(len(task_service.list_runs(task["id"])), 2)
+
+    def test_task_routes_save_and_clear_optional_schedule_rules(self):
+        with TestClient(app) as client:
+            made = client.post("/api/tasks", json={
+                "name": "Dublin mornings", "prompt": "check", "schedule_kind": "daily",
+                "run_time": "06:00", "time_zone": "Europe/Dublin", "weekdays": [0, 1, 2, 3, 4],
+            })
+            self.assertEqual(made.status_code, 200)
+            task = made.json()
+            self.created.append(task["id"])
+            self.assertEqual((task["time_zone"], task["weekdays"]), ("Europe/Dublin", [0, 1, 2, 3, 4]))
+            changed = client.patch(f"/api/tasks/{task['id']}", json={"name": "Renamed"}).json()
+            self.assertEqual(changed["next_run_at"], task["next_run_at"], "a name edit leaves the clock alone")
+            cleared = client.patch(f"/api/tasks/{task['id']}", json={"time_zone": None, "weekdays": None})
+            self.assertEqual(cleared.status_code, 200)
+            self.assertNotIn("time_zone", cleared.json())
+            self.assertNotIn("weekdays", cleared.json())
+
+    def test_model_task_tools_create_update_and_clear_schedule_rules(self):
+        from core import tool_registry
+        from types import SimpleNamespace
+        context = SimpleNamespace(agent_id=None)
+        result = asyncio.run(tool_registry._create_task({
+            "name": "Model's weekday check", "prompt": "check", "schedule_kind": "daily",
+            "run_time": "06:00", "time_zone": "Europe/Dublin", "weekdays": [0, 1, 2, 3, 4],
+        }, context))
+        task_id = result.split()[2].rstrip(":")
+        self.created.append(task_id)
+        task = task_service.get_task(task_id)
+        self.assertEqual(task["time_zone"], "Europe/Dublin")
+        asyncio.run(tool_registry._update_task({"task_id": task_id, "time_zone": "America/New_York",
+                                               "weekdays": [6]}, context))
+        self.assertEqual((task["time_zone"], task["weekdays"]), ("America/New_York", [6]))
+        asyncio.run(tool_registry._update_task({"task_id": task_id, "time_zone": None, "weekdays": None}, context))
+        self.assertNotIn("time_zone", task)
+        self.assertNotIn("weekdays", task)
+
+    def test_a_spring_gap_shifts_forward_and_a_fall_fold_fires_only_once(self):
+        cases = (
+            ("America/New_York", "02:30", "2026-03-08T00:00:00+00:00", "2026-03-08T07:30:00+00:00"),
+            ("America/New_York", "01:30", "2026-11-01T00:00:00+00:00", "2026-11-01T05:30:00+00:00"),
+            ("Europe/Dublin", "01:30", "2026-03-29T00:00:00+00:00", "2026-03-29T01:30:00+00:00"),
+            ("Europe/Dublin", "01:30", "2026-10-25T00:00:00+00:00", "2026-10-25T00:30:00+00:00"),
+        )
+        for zone, wall, now, expected in cases:
+            with self.subTest(zone=zone, now=now):
+                self.assertEqual(task_module._next_daily(wall, zone, now=datetime.fromisoformat(now)), expected)
+        for zone, now in (("America/New_York", "2026-11-01T05:45:00+00:00"),
+                          ("Europe/Dublin", "2026-10-25T00:45:00+00:00")):
+            with self.subTest(zone=zone):
+                # Between the two 01:30s: today's check already happened.
+                next_time = task_module._next_daily("01:30", zone, now=datetime.fromisoformat(now))
+                self.assertEqual(datetime.fromisoformat(next_time).astimezone(ZoneInfo(zone)).day,
+                                 datetime.fromisoformat(now).day + 1)
+
+    def test_weekdays_are_checked_in_the_schedule_zone_and_can_be_cleared(self):
+        now = datetime.fromisoformat("2026-10-23T14:00:00+00:00")  # Friday after the check
+        self.assertEqual(task_module._next_daily("06:00", "America/New_York", [0, 1, 2, 3, 4], now),
+                         "2026-10-26T10:00:00+00:00")
+        task = self.task("weekdays", kind="daily", due_seconds_ago=None, time_zone="America/New_York", weekdays=[4, 0, 0])
+        self.assertEqual(task["weekdays"], [0, 4])
+        with patch.object(task_module.time, "time", return_value=now.timestamp()):
+            task_service.update_task(task["id"], weekdays=None)
+        self.assertNotIn("weekdays", task)
+        self.assertEqual(task["next_run_at"], "2026-10-24T10:00:00+00:00")
+
+    def test_invalid_rules_are_rejected_without_changing_a_live_schedule(self):
+        task = self.task("valid daily", kind="daily", due_seconds_ago=None)
+        original = dict(task)
+        for fields in ({"time_zone": "Mars/Olympus"}, {"time_zone": ""}, {"weekdays": []},
+                       {"weekdays": [7]}, {"weekdays": [True]}, {"weekdays": "weekdays"}):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                task_service.update_task(task["id"], **fields)
+            self.assertEqual(task, original)
+        with self.assertRaises(ValueError):
+            task_service.create_task("bad interval", "check", "interval", interval_seconds=-1)
+
+    def test_intervals_stay_anchored_after_a_delayed_start_and_long_run(self):
+        anchor = datetime.fromisoformat("2026-10-13T06:00:00+00:00")
+        task = self.task("six hourly", due_seconds_ago=None)
+        task.update(interval_seconds=6 * 3600, next_run_at=anchor.isoformat())
+        with patch.object(task_module.time, "time", return_value=anchor.timestamp() + 20 * 60):
+            task_service.claim_occurrence(task["id"])
+        self.assertEqual(task["next_run_at"], "2026-10-13T12:00:00+00:00")
+        with patch.object(task_module.time, "time", return_value=anchor.timestamp() + 2 * 3600):
+            task_service.record_run(task["id"], "a long check finished")
+        self.assertEqual(task["next_run_at"], "2026-10-13T12:00:00+00:00")
+
+    def test_many_overdue_intervals_catch_up_once_inside_grace(self):
+        anchor = datetime.fromisoformat("2026-10-13T00:00:00+00:00")
+        task = self.task("hourly after downtime", due_seconds_ago=None)
+        task["next_run_at"] = anchor.isoformat()
+        with patch.object(task_module.time, "time", return_value=anchor.timestamp() + 10 * 3600 + 60):
+            asyncio.run(task_scheduler._run_due())
+            asyncio.run(task_scheduler._run_due())
+        self.assertEqual(SlowBrain.started, 1)
+        self.assertEqual(task["next_run_at"], "2026-10-13T11:00:00+00:00")
+        history = task_service.list_runs(task["id"])
+        self.assertEqual(sum(r["outcome"] == "succeeded" for r in history), 1)
+        # One receipt per gap, not per slot: ten skipped occurrences fold into
+        # a single record that still names all ten, so a long outage cannot
+        # push the runs that did happen out of a capped history.
+        receipts = [r for r in history if r.get("missed_reason")]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]["missed_occurrences"], 10)
+        self.assertEqual(len(receipts[0]["missed_at"]), 10)
+        self.assertEqual(next(r for r in history if r["outcome"] == "succeeded")["scheduled_for"], anchor.isoformat())
+
+    def test_weekend_downtime_leaves_receipts_then_one_future_run(self):
+        task = self.task("closed weekend", due_seconds_ago=None)
+        anchor = datetime.fromisoformat("2026-10-09T06:00:00+00:00")
+        task["next_run_at"] = anchor.isoformat()
+        task_service._save_tasks()
+        restarted = task_module.TaskService()
+        monday = datetime.fromisoformat("2026-10-12T06:20:00+00:00")
+        with patch.object(task_scheduler, "task_service", restarted), \
+                patch.object(task_module.time, "time", return_value=monday.timestamp()):
+            asyncio.run(task_scheduler._run_due())
+            asyncio.run(task_scheduler._run_due())
+        history = restarted.list_runs(task["id"])
+        self.assertEqual(len(history), 1, "a weekend of skipped slots is one receipt, not a full history")
+        self.assertEqual(SlowBrain.started, 0)
+        self.assertEqual(history[0]["outcome"], "lost")
+        self.assertIn("app was not running", history[0]["missed_reason"])
+        self.assertIsNone(history[0]["started_at"])
+        self.assertEqual(history[0]["scheduled_for"], "2026-10-12T06:00:00+00:00")
+        self.assertEqual(max(history[0]["missed_at"]), "2026-10-12T06:00:00+00:00")
+        future = restarted.get_task(task["id"])["next_run_at"]
+        self.assertEqual(future, "2026-10-12T07:00:00+00:00")
+        with patch.object(task_scheduler, "task_service", restarted), \
+                patch.object(task_module.time, "time", return_value=datetime.fromisoformat(future).timestamp()):
+            asyncio.run(task_scheduler._run_due())
+            asyncio.run(task_scheduler._run_due())
+        self.assertEqual(SlowBrain.started, 1)
+        history = restarted.list_runs(task["id"])
+        # The one receipt for the outage, plus the run that followed it. The
+        # point of folding them is that this run is still here to see.
+        self.assertEqual(len(history), 2)
+        self.assertEqual(sum(r["outcome"] == "succeeded" for r in history), 1)
+
+    def test_grace_boundary_runs_but_anything_past_it_is_missed(self):
+        now = datetime.fromisoformat("2026-10-13T18:00:00+00:00").timestamp()
+        for behind, should_run in ((task_module.MISSED_GRACE_SECONDS, True),
+                                   (task_module.MISSED_GRACE_SECONDS + 1, False)):
+            with self.subTest(behind=behind):
+                task = self.task("grace boundary", kind="once", due_seconds_ago=None)
+                task["next_run_at"] = datetime.fromtimestamp(now - behind, timezone.utc).isoformat()
+                with patch.object(task_module.time, "time", return_value=now):
+                    claimed = task_service.claim_occurrence(task["id"])
+                    if claimed:
+                        task_service.record_run(task["id"], "ran")
+                self.assertEqual(claimed is not None, should_run)
+                self.assertFalse(task["enabled"])
+                self.assertIsNone(task["next_run_at"])
+                self.assertEqual(task_service.list_runs(task["id"])[0]["outcome"], "succeeded" if should_run else "lost")
+
+    def test_daily_downtime_receipts_follow_weekday_rules(self):
+        now = datetime.fromisoformat("2026-10-12T06:20:00+00:00").timestamp()
+        for days, expected_dates in ((None, ["09", "10", "11", "12"]),
+                                     ([0, 1, 2, 3, 4], ["09", "12"])):
+            with self.subTest(weekdays=days):
+                task = self.task("daily downtime", kind="daily", due_seconds_ago=None, time_zone="UTC", weekdays=days)
+                task["next_run_at"] = "2026-10-09T06:00:00+00:00"
+                with patch.object(task_module.time, "time", return_value=now):
+                    self.assertIsNone(task_service.claim_occurrence(task["id"]))
+                # The skipped days fold into one receipt but are all named on
+                # it, so a weekday rule is still verifiable after an outage.
+                receipts = [r for r in task_service.list_runs(task["id"]) if r.get("missed_reason")]
+                self.assertEqual(len(receipts), 1)
+                self.assertEqual(sorted(receipts[0]["missed_at"]),
+                                 [f"2026-10-{day}T06:00:00+00:00" for day in expected_dates])
+                self.assertEqual(task["next_run_at"], "2026-10-13T06:00:00+00:00")
+                self.assertEqual(SlowBrain.started, 0)
+
+    def test_legacy_daily_schedule_loads_without_a_rewrite_and_runs_as_before(self):
+        now_local = datetime.now().astimezone().replace(hour=4, minute=0, second=0, microsecond=0)
+        with patch.object(task_module.time, "time", return_value=now_local.timestamp()):
+            task = self.task("legacy daily", kind="daily", due_seconds_ago=None)
+        self.assertNotIn("time_zone", task)
+        self.assertNotIn("weekdays", task)
+        self.assertEqual(datetime.fromisoformat(task["next_run_at"]).astimezone().hour, 6)
+        stored = Path(task_module.TASKS_FILE).read_bytes()
+        restarted = task_module.TaskService()
+        self.assertEqual(Path(task_module.TASKS_FILE).read_bytes(), stored)
+        self.assertEqual(restarted.get_task(task["id"]), task)
+        due = datetime.fromisoformat(task["next_run_at"]).timestamp()
+        with patch.object(task_module.time, "time", return_value=due):
+            self.assertIsNotNone(restarted.claim_occurrence(task["id"]))
+            restarted.record_run(task["id"], "as before")
+        self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
+        next_local = datetime.fromisoformat(restarted.get_task(task["id"])["next_run_at"]).astimezone()
+        self.assertEqual((next_local.date(), next_local.hour), (now_local.date() + timedelta(days=1), 6))
+
     def test_run_now_leaves_the_schedule_alone(self):
         once = self.task("one-shot", kind="once", due_seconds_ago=None)
         interval = self.task("hourly", due_seconds_ago=-1800)

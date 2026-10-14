@@ -950,6 +950,15 @@ class SwarmStore:
                 self._event(db, system_id, "mission.reopened", system_id, {"note": (note or "")[:2000]})
             return len(rows)
 
+    def note_memory_failure(self, task_id, note):
+        """Keep an unsaved standing correction visible on its task (2026-10-13)."""
+        with self.transaction() as db:
+            task = self._one(db, "tasks", task_id)
+            checkpoint = json.loads(task["checkpoint"])
+            checkpoint.setdefault("memory_save_failures", []).append(note)
+            db.execute("UPDATE tasks SET checkpoint=? WHERE id=?", (_json(checkpoint), task_id))
+            self._event(db, task["system_id"], "task.memory_save_failed", task_id, {"note": note})
+
     def retry_task(self, task_id, note):
         """Send a step that ran out of room back to be attempted again.
 
