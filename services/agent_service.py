@@ -12,6 +12,7 @@ store per fact.
 What this module owns:
 - agents.json: the identities.
 - agents/<id>/memory.md: named sections (Letta's memory blocks), capped.
+- agents/<id>/SOUL.md: an editable mirror of the stored standing instructions.
 - agents/inbox.json: reports and questions waiting on the person. Results
   waiting for review stay on their cards and are not copied. There are no
   approval requests: agents always run in Auto (David, 2026-10-05).
@@ -38,6 +39,9 @@ AGENTS_DIR = os.path.join(DATA_DIR, "agents")
 INBOX_FILE = os.path.join(AGENTS_DIR, "inbox.json")
 
 MEMORY_LIMIT = 8000
+# Match the UTF-8 bytes written to SOUL.md, including every byte of a
+# multibyte character (Agents 2.0 unit 4-0, 2026-10-13).
+SOUL_LIMIT_BYTES = 24000
 # A topic may be opened into a model's context in one call; the same ceiling
 # as core memory keeps that deliberate read predictable (Agents 2.0, 2026-10-13).
 TOPIC_MEMORY_LIMIT = 8000
@@ -54,7 +58,7 @@ COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
 # of these gets the color in the same position.
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
 # Fields a person may change; everything else is the service's.
-EDITABLE = ("name", "role", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
+EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
             "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep")
 REPLIES_IN_PROMPT = 5
 # A reply code on a channel notification ("[S-7f3a2b]": the agent's initial
@@ -88,6 +92,7 @@ class AgentService:
         # task_service's durable claims still recover interrupted work as
         # lost history on restart (cards through their existing leases).
         self._admission_lock = threading.RLock()
+        self._profile_lock = threading.RLock()
         self._reservations: dict[str, dict] = {}
 
     # -- identities -------------------------------------------------------------
@@ -104,12 +109,18 @@ class AgentService:
     def create(self, name: str, role: str = "", instructions: str = "", endpoint_id: Optional[str] = None,
                color: Optional[str] = None, daily_run_cap: int = DEFAULT_DAILY_RUN_CAP,
                deliver_to_channel: Optional[str] = None, integration_ids: Optional[list] = None,
-               keep_signed_in: bool = False, memory_upkeep: bool = False) -> dict:
+               keep_signed_in: bool = False, memory_upkeep: bool = False,
+               blurb: str = "", soul: Optional[str] = None) -> dict:
         name = _clean_name(name)
         self._check_unique(name, None)
+        role = _profile_text("role", role, 200)
+        blurb = _profile_text("blurb", blurb, 4000)
+        if soul is not None:
+            _check_soul(soul)
         agent_id = uuid.uuid4().hex[:10]
         agent = {
-            "id": agent_id, "name": name, "role": (role or "").strip(), "instructions": (instructions or "").strip(),
+            "id": agent_id, "name": name, "role": role, "blurb": blurb,
+            "instructions": (instructions or "").strip(), "revision": 1,
             "endpoint_id": endpoint_id or None,
             "color": color if color in COLORS else COLORS[len(self._agents) % len(COLORS)],
             "enabled": True, "daily_run_cap": _cap(daily_run_cap), "deliver_to_channel": deliver_to_channel or None,
@@ -118,28 +129,96 @@ class AgentService:
             "memory_upkeep": bool(memory_upkeep),
             "created_at": time.time(),
         }
+        if soul is not None:
+            agent["soul"] = soul
         self._agents[agent_id] = agent
+        if soul is not None:
+            self._write_soul_file(agent_id, soul)
         self._save()
         self.write_memory(agent_id, _memory_template(agent))
         return agent
 
     def update(self, agent_id: str, **fields) -> dict:
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            changes = {}
+            for key, value in fields.items():
+                if key not in EDITABLE:
+                    raise ValueError(f"{key} cannot be changed")
+                if key == "name":
+                    value = _clean_name(value)
+                    self._check_unique(value, agent_id)
+                elif key == "role" and value == agent.get("role"):
+                    # Old roles had no ceiling; retaining the same value is
+                    # not a new overlong edit (Agents 2.0 unit 4-0, 2026-10-13).
+                    pass
+                elif key in ("role", "blurb"):
+                    value = _profile_text(key, value, 200 if key == "role" else 4000)
+                elif key == "soul":
+                    _check_soul(value)
+                elif key == "daily_run_cap":
+                    value = _cap(value)
+                elif key == "color" and value not in COLORS:
+                    raise ValueError("pick one of the offered colors")
+                elif key in ("enabled", "keep_signed_in", "memory_upkeep"):
+                    value = bool(value)
+                changes[key] = value
+            # A normal profile edit must not erase a hand edit before the
+            # person has resolved it (Agents 2.0 unit 4-0, 2026-10-13).
+            if "soul" in changes and not self.read_soul(agent_id)["in_sync"]:
+                raise ValueError("SOUL.md differs from the stored soul; read and apply the external edit first")
+            if any(agent.get(key) != value for key, value in changes.items()):
+                if "soul" in changes and agent.get("soul") != changes["soul"]:
+                    self._write_soul_file(agent_id, changes["soul"])
+                agent.update(changes)
+                # Missing means revision zero for pre-profile identities; no
+                # load-time migration is needed (Agents 2.0 unit 4-0, 2026-10-13).
+                agent["revision"] = agent.get("revision", 0) + 1
+                self._save()
+            return agent
+
+    def _soul_path(self, agent_id: str) -> str:
+        return os.path.join(os.path.dirname(self._memory_path(agent_id)), "SOUL.md")
+
+    def _file_soul(self, agent_id: str) -> Optional[str]:
+        try:
+            with open(self._soul_path(agent_id), "rb") as f:
+                return f.read().decode("utf-8")
+        except FileNotFoundError:
+            return None
+
+    def _write_soul_file(self, agent_id: str, soul: str) -> None:
+        path = self._soul_path(agent_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temporary = f"{path}.tmp"
+        with open(temporary, "wb") as f:
+            f.write(soul.encode("utf-8"))
+        os.replace(temporary, path)
+
+    def read_soul(self, agent_id: str) -> dict:
         agent = self._require(agent_id)
-        for key, value in fields.items():
-            if key not in EDITABLE:
-                raise ValueError(f"{key} cannot be changed")
-            if key == "name":
-                value = _clean_name(value)
-                self._check_unique(value, agent_id)
-            elif key == "daily_run_cap":
-                value = _cap(value)
-            elif key == "color" and value not in COLORS:
-                raise ValueError("pick one of the offered colors")
-            elif key in ("enabled", "keep_signed_in", "memory_upkeep"):
-                value = bool(value)
-            agent[key] = value
-        self._save()
-        return agent
+        file_text = self._file_soul(agent_id)
+        stored = agent.get("soul")
+        return {"soul": stored, "file_text": file_text, "in_sync": stored == file_text,
+                "revision": agent.get("revision", 0)}
+
+    def apply_soul_file(self, agent_id: str, expected_file_text: Optional[str], expected_revision: int) -> dict:
+        """Accept a hand edit only against the exact file and profile seen by its reader."""
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            if agent.get("revision", 0) != expected_revision:
+                raise ValueError("stale profile revision; reload this agent before applying SOUL.md")
+            file_text = self._file_soul(agent_id)
+            if file_text != expected_file_text:
+                raise ValueError("stale SOUL.md file text; reload the file before applying it")
+            if file_text is None:
+                raise ValueError("SOUL.md is missing; there is no external edit to apply")
+            _check_soul(file_text)
+            if agent.get("soul") != file_text:
+                agent["soul"] = file_text
+                agent["revision"] = agent.get("revision", 0) + 1
+                self._save()
+            return self.read_soul(agent_id)
 
     def delete(self, agent_id: str) -> None:
         """The identity, memory and open inbox items go; its pending work is
@@ -153,10 +232,13 @@ class AgentService:
         path = self._memory_path(agent_id)
         if os.path.exists(path):
             os.remove(path)
-            try:
-                os.rmdir(os.path.dirname(path))
-            except OSError:
-                pass
+        soul_path = self._soul_path(agent_id)
+        if os.path.exists(soul_path):
+            os.remove(soul_path)
+        try:
+            os.rmdir(os.path.dirname(path))
+        except OSError:
+            pass
 
     def forget_logins(self, agent_id: str) -> None:
         """Remove a kept browser profile only after its container has stopped."""
@@ -721,8 +803,11 @@ def identity_block(agent: dict, memory: str, chat: bool = False, team: bool = Fa
              + (" Here you are working as part of a team." if team else "")]
     if agent.get("role"):
         lines.append(f"Your role: {agent['role']}")
-    if agent.get("instructions"):
-        lines.append(f"How to work: {agent['instructions']}")
+    # Soul takes this one standing-instruction slot; old agents still see
+    # their original instructions (Agents 2.0 unit 4-0, 2026-10-13).
+    standing = agent.get("soul") or agent.get("instructions")
+    if standing:
+        lines.append(f"How to work: {standing}")
     if team:
         lines.append("On this team you have only the team's tools: you cannot save notes or contact the person "
                      "directly. Your reviewer's notes are kept for you, and report_blocker is how you ask for "
@@ -807,9 +892,24 @@ def is_silent(reply: Optional[str]) -> bool:
 
 def _clean_name(name: str) -> str:
     name = " ".join((name or "").split())
-    if not 1 <= len(name) <= 40:
-        raise ValueError("an agent's name is 1 to 40 characters")
+    if not 1 <= len(name) <= 100:
+        raise ValueError("an agent's name is 1 to 100 characters")
     return name
+
+
+def _profile_text(field: str, value: Optional[str], limit: int) -> str:
+    text = value or ""
+    if len(text) > limit:
+        raise ValueError(f"{field} is limited to {limit} characters; this is {len(text)}")
+    return text.strip() if field == "role" else text
+
+
+def _check_soul(soul: str) -> None:
+    if not isinstance(soul, str):
+        raise ValueError("soul must be text")
+    size = len(soul.encode("utf-8"))
+    if size > SOUL_LIMIT_BYTES:
+        raise ValueError(f"soul is limited to {SOUL_LIMIT_BYTES} UTF-8 bytes; this is {size}")
 
 
 def _cap(value) -> int:

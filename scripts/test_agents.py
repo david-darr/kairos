@@ -91,6 +91,119 @@ class AgentTestCase(unittest.TestCase):
         asyncio.run(task_scheduler._run_task(task_service.get_task(goal["id"])))
 
 
+class ProfileAndSoulTests(AgentTestCase):
+    def soul_path(self):
+        from services.agent_service import AGENTS_DIR
+        return Path(AGENTS_DIR) / self.agent["id"] / "SOUL.md"
+
+    def test_name_limit_and_existing_name(self):
+        self.assertEqual(agent_service.update(self.agent["id"], name="N" * 40)["name"], "N" * 40)
+        self.assertEqual(agent_service.update(self.agent["id"], name="  A   B  ")["name"], "A B")
+        self.assertEqual(len(agent_service.update(self.agent["id"], name="A" * 100)["name"]), 100)
+        with self.assertRaisesRegex(ValueError, "1 to 100 characters"):
+            agent_service.update(self.agent["id"], name="A" * 101)
+        self.assertEqual(self.agent["name"], "A" * 100)
+        response = web.post("/api/agents", json={"name": "C" * 100, "role": "Job",
+                                                 "blurb": "Description"})
+        self.assertEqual(response.status_code, 200, response.text)
+        created = response.json()
+        self.addCleanup(self._remove, created["id"])
+        self.assertEqual(created["blurb"], "Description")
+        self.assertEqual(created["role"], "Job")
+        self.assertEqual(web.post("/api/agents", json={"name": "C" * 100}).status_code, 400)
+
+    def test_role_and_blurb_limits_are_errors(self):
+        agent_service.update(self.agent["id"], role="R" * 200, blurb="B" * 4000)
+        self.assertEqual(len(self.agent["blurb"]), 4000)
+        for field, text, limit in (("role", "R" * 201, 200), ("blurb", "B" * 4001, 4000)):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, str(limit)):
+                agent_service.update(self.agent["id"], **{field: text})
+
+    def test_soul_is_optional_and_api_write_mirrors_it(self):
+        self.assertFalse(self.soul_path().exists())
+        self.assertTrue(agent_service.read_soul(self.agent["id"])["in_sync"])
+        before = self.agent["revision"]
+        response = web.patch(f"/api/agents/{self.agent['id']}", json={"soul": "# Work\nBe curious.\n"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.agent["soul"], "# Work\nBe curious.\n")
+        self.assertEqual(self.soul_path().read_bytes(), b"# Work\nBe curious.\n")
+        self.assertEqual(response.json()["revision"], before + 1)
+        self.assertEqual(web.get(f"/api/agents/{self.agent['id']}/soul").json()["file_text"], self.agent["soul"])
+        created = web.post("/api/agents", json={"name": "Soul on create", "soul": "Start here.\n"})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.addCleanup(self._remove, created.json()["id"])
+        self.assertEqual(created.json()["soul"], "Start here.\n")
+        from services.agent_service import AGENTS_DIR
+        self.assertEqual((Path(AGENTS_DIR) / created.json()["id"] / "SOUL.md").read_bytes(), b"Start here.\n")
+
+    def test_soul_limit_counts_complete_utf8_bytes(self):
+        text = "é" * 12000
+        agent_service.update(self.agent["id"], soul=text)
+        self.assertEqual(len(self.soul_path().read_bytes()), 24000)
+        with self.assertRaisesRegex(ValueError, "24001"):
+            agent_service.update(self.agent["id"], soul=text + "x")
+        self.assertEqual(self.agent["soul"], text)
+
+    def test_external_edit_reports_drift_and_preserves_spacing(self):
+        agent_service.update(self.agent["id"], soul="original\n")
+        edited = "#  Odd spacing\r\n\r\n  -  keep this  \r\n"
+        self.soul_path().write_bytes(edited.encode("utf-8"))
+        response = web.get(f"/api/agents/{self.agent['id']}/soul")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["file_text"], edited)
+        self.assertFalse(response.json()["in_sync"])
+        self.assertEqual(self.soul_path().read_bytes(), edited.encode("utf-8"))
+        self.assertEqual(self.agent["soul"], "original\n")
+        with self.assertRaisesRegex(ValueError, "SOUL.md differs"):
+            agent_service.update(self.agent["id"], soul="overwritten")
+
+    def test_apply_rejects_stale_file_text_and_stale_profile_revision(self):
+        agent_service.update(self.agent["id"], soul="original")
+        snapshot = agent_service.read_soul(self.agent["id"])
+        self.soul_path().write_bytes(b"editor edit")
+        url = f"/api/agents/{self.agent['id']}/soul/apply"
+        stale_file = web.post(url, json={"expected_file_text": snapshot["file_text"],
+                                         "expected_revision": snapshot["revision"]})
+        self.assertEqual(stale_file.status_code, 409, stale_file.text)
+        self.assertIn("stale SOUL.md file text", stale_file.json()["detail"])
+        current = agent_service.read_soul(self.agent["id"])
+        agent_service.update(self.agent["id"], blurb="new profile")
+        stale_profile = web.post(url, json={"expected_file_text": current["file_text"],
+                                            "expected_revision": current["revision"]})
+        self.assertEqual(stale_profile.status_code, 409, stale_profile.text)
+        self.assertIn("stale profile revision", stale_profile.json()["detail"])
+        self.assertEqual(self.agent["soul"], "original")
+        applied = web.post(url, json={"expected_file_text": current["file_text"],
+                                      "expected_revision": self.agent["revision"]})
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertTrue(applied.json()["in_sync"])
+        self.assertEqual(self.agent["soul"], "editor edit")
+
+    def test_legacy_agent_loads_without_rewrite_or_prompt_change(self):
+        from services.agent_service import AgentService, identity_block
+        old = {"id": "a" * 10, "name": "Legacy", "role": "R" * 201, "instructions": "Be brief.",
+               "created_at": 1, "enabled": True}
+        with patch("services.agent_service.read_json", side_effect=[{old["id"]: old.copy()}, []]), \
+             patch.object(AgentService, "_save") as save:
+            loaded = AgentService()
+        save.assert_not_called()
+        self.assertEqual(loaded.get(old["id"]), old)
+        self.assertEqual(loaded.read_soul(old["id"])["revision"], 0)
+        with patch.object(loaded, "_save"):
+            self.assertEqual(loaded.update(old["id"], role=old["role"], blurb="new")["role"], old["role"])
+        self.assertIn("How to work: Be brief.", identity_block(old, ""))
+        self.assertEqual(identity_block(old, "").count("How to work:"), 1)
+
+    def test_soul_supersedes_instructions_in_one_prompt_block(self):
+        from services.agent_service import identity_block
+        agent_service.update(self.agent["id"], soul="Think independently.")
+        for options in ({}, {"chat": True}, {"team": True}):
+            prompt = identity_block(self.agent, "", **options)
+            self.assertIn("How to work: Think independently.", prompt)
+            self.assertNotIn("Be brief.", prompt)
+            self.assertEqual(prompt.count("How to work:"), 1)
+
+
 class AnnouncementBatchTests(unittest.TestCase):
     def setUp(self):
         from core import outbox, session_manager_store as store
