@@ -81,6 +81,9 @@ LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8",
 # Fields a person may change; everything else is the service's.
 EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
             "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep", "peers", "avatar")
+# What /setup may change about a bot, and nothing else (Agents 2.0, 2026-10-14).
+SELF_CONFIGURABLE = ("role", "blurb", "soul", "deliver_to_channel")
+MAX_SETUP_RECEIPTS = 20
 REPLIES_IN_PROMPT = 5
 # A reply code on a channel notification ("[S-7f3a2b]": the agent's initial
 # and the start of the item's or card's id). Replying to that message in
@@ -205,6 +208,80 @@ class AgentService:
                 agent["revision"] = agent.get("revision", 0) + 1
                 self._save()
             return agent
+
+    # -- self-configuration (/setup in a bot's own chat; Agents 2.0, 2026-10-14)
+    # A bot may describe its own job, but never widen its own reach: peers,
+    # permissions, tool scope, model, daily cap and on/off stay with the person
+    # (the person drives the trust-and-access ramp). Every change returns a
+    # receipt whose Undo restores the exact previous values.
+
+    def configure_self(self, agent_id: str, changes: dict, routine: Optional[dict] = None) -> dict:
+        changes = dict(changes or {})
+        refused = sorted(key for key in changes if key not in SELF_CONFIGURABLE)
+        if refused:
+            raise ValueError(f"a bot cannot change its own {', '.join(refused)}; the person sets that")
+        if not changes and not routine:
+            raise ValueError("there is nothing to change")
+        agent = self._require(agent_id)
+        before = {key: agent.get(key) for key in changes}
+        updated = self.update(agent_id, **changes) if changes else agent
+        routine_id = None
+        if routine:
+            from services.task_service import task_service
+            kind = routine.get("schedule_kind")
+            if kind not in ("daily", "interval"):
+                raise ValueError("a routine runs daily or every so many hours")
+            task = task_service.create_task(routine["name"], routine["prompt"], kind, run_time=routine.get("run_time"),
+                                            interval_seconds=routine.get("interval_seconds"), agent_id=agent_id,
+                                            report_when=routine.get("report_when") or "notable")
+            routine_id = task["id"]
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            receipt = {"id": uuid.uuid4().hex[:10], "ts": time.time(), "before": before,
+                       "after": {key: agent.get(key) for key in changes}, "revision": agent.get("revision", 0),
+                       "routine_id": routine_id, "undone": False}
+            agent["setup_receipts"] = (agent.get("setup_receipts") or [])[-(MAX_SETUP_RECEIPTS - 1):] + [receipt]
+            self._save()
+        return receipt
+
+    def setup_receipts(self, agent_id: str) -> list[dict]:
+        return list(self._require(agent_id).get("setup_receipts") or [])
+
+    def undo_setup(self, agent_id: str, receipt_id: str) -> dict:
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            receipt = next((r for r in agent.get("setup_receipts") or [] if r["id"] == receipt_id), None)
+            if receipt is None:
+                raise KeyError(receipt_id)
+            if receipt["undone"]:
+                raise ValueError("this setup change was already undone")
+            # The revision says nothing changed since; restoring now cannot
+            # erase a later edit. A stale undo refuses instead of half-applying.
+            if agent.get("revision", 0) != receipt["revision"]:
+                raise ValueError("the profile changed after this setup; undo refused so the later change is not lost")
+            if "soul" in receipt["before"] and not self.read_soul(agent_id)["in_sync"]:
+                raise ValueError("SOUL.md was edited by hand after this setup; undo refused so the edit is not lost")
+            for key, value in receipt["before"].items():
+                if value is None:
+                    agent.pop(key, None)
+                    if key == "soul":
+                        try:
+                            os.remove(self._soul_path(agent_id))
+                        except FileNotFoundError:
+                            pass
+                else:
+                    if key == "soul":
+                        self._write_soul_file(agent_id, value)
+                    agent[key] = value
+            if receipt["before"]:
+                agent["revision"] = agent.get("revision", 0) + 1
+            receipt["undone"] = True
+            self._save()
+        if receipt.get("routine_id"):
+            from services.task_service import task_service
+            if task_service.get_task(receipt["routine_id"]):
+                task_service.delete_task(receipt["routine_id"])
+        return receipt
 
     def _check_peers(self, peers, agent_id: str) -> list[str]:
         if not isinstance(peers, list) or any(not isinstance(p, str) for p in peers):
@@ -808,7 +885,8 @@ class AgentService:
         session_manager.set_permission_mode(session_id, "auto")
         return session_manager.set_agent(session_id, agent["id"],
                                          identity_block(agent, self.read_memory(agent["id"]),
-                                                        chat=attended, session_id=session_id))
+                                                        chat=attended, session_id=session_id),
+                                         unattended=not attended)
 
     def recent_work(self, agent_id: str, current_session_id: Optional[str] = None,
                     now: Optional[float] = None) -> str:

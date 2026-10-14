@@ -308,6 +308,12 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--agents-phone-report')) {
+      const found = await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, report: true });
+      console.log('PHONE AUDIT ' + found.length + ' problem(s)');
+      for (const line of found) console.log('  ' + line);
+      exitAfterFlush(0); return;
+    }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
       assert.deepEqual(errors, []);
@@ -2323,6 +2329,29 @@ app.whenReady().then(async () => {
     await js("(async () => { const host = document.createElement('div'); host.id = 'bw-smoke'; document.body.append(host); const m = await import('/static/js/botWindow.js'); m.render(host, [{ id: 'q1', name: 'Quiet', enabled: true, status: 'idle', needs_you: 0 }]); })()");
     assert.equal(await js("document.querySelector('#bw-smoke .bot-window-empty').hidden"), false, 'Bot window says when nothing needs you');
     await js("document.querySelector('#bw-smoke').remove()");
+    // 2026-10-14 (unit 6-ii): routines, not goals, wherever a person looks;
+    // pause and edit go through the existing task route.
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    for (const view of [{ agentId: 'a1', agentTab: 'routines' }, { agentId: 'a1', agentTab: 'work' }, {}]) {
+      await navigate('agents', view);
+      await delay(300);
+      assert.equal(await js("/\\bgoals?\\b/i.test(document.querySelector('#content').innerText)"), false, 'No visible goal wording: ' + JSON.stringify(view));
+    }
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    const routineStart = writes.length;
+    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Pause').click()");
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path)); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false), 'Pause sends enabled false');
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Edit').click()");
+    await js("(() => { const row = document.querySelector('.routines-panel .routine-row'); const input = row.querySelector('.routine-editor input'); input.value = 'Morning postings'; input.dispatchEvent(new Event('input', { bubbles: true })); [...row.querySelectorAll('.routine-editor button')].find(b => b.textContent === 'Save').click(); })()");
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
+    // Every bot surface on a phone: no sideways scroll, 44px targets.
+    await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);

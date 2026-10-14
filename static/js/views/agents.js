@@ -8,6 +8,7 @@ import { mountAgentProfile } from "../agentProfile.js";
 import { agentAvatar } from "../agentAvatar.js";
 import { botStatusLine } from "../botStatus.js";
 import { openCreateAgent } from "../agentCreation.js";
+import { routinesPanel } from "../routinesPanel.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -434,7 +435,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.deliver_to_channel,
       agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, channels, redraw)));
     for (const row of rows) if (row && row.parentNode !== workHost) workHost.append(row);
-    const goals = reconcile('goals', detail.goals, () => goalsPanel(agentId, detail.goals, redraw));
+    const goals = reconcile('goals', detail.goals, () => routinesPanel(agentId, detail.goals, redraw));
     if (goals.parentNode !== routinesHost) routinesHost.append(goals);
     const memory = panels.has('memory') ? panels.get('memory').node : reconcile('memory', detail.memory, () => memoryPanel(agentId, detail.memory));
     if (memory.parentNode !== memoryHost) memoryHost.append(memory);
@@ -493,63 +494,6 @@ function triggersPanel(triggers) {
       el("button", { class: "btn quiet", text: "Open", onclick: () => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab: "tasks" } })) }),
     ]));
   }
-  return panel;
-}
-
-function cadence(goal) {
-  if (goal.schedule_kind === "daily") return `Every day at ${goal.run_time}`;
-  const minutes = Math.round((goal.interval_seconds || 0) / 60);
-  return minutes % 60 === 0 ? `Every ${minutes / 60 === 1 ? "hour" : `${minutes / 60} hours`}` : `Every ${minutes} minutes`;
-}
-
-function goalsPanel(agentId, goals, refresh) {
-  const panel = el("div", { class: "glass card" }, [
-    el("div", { class: "title", text: "Standing goals" }),
-    el("div", { class: "meta", style: "margin:4px 0 10px;", text: "Checked on a schedule. Quiet goals only report when something turned up." }),
-  ]);
-  for (const goal of goals) {
-    panel.append(el("div", { class: "agent-row" }, [
-      el("div", {}, [el("div", { text: goal.name }), el("div", { class: "meta", text:
-        `${cadence(goal)} · ${goal.report_when === "always" ? "always reports" : "reports when notable"}${goal.enabled ? "" : " · off"}` })]),
-      el("div", { class: "agent-row-actions" }, [
-        el("button", { class: "btn quiet", text: "Check now", onclick: async () => {
-          try { await api(`/api/tasks/${goal.id}/run`, { method: "POST" }); toast("Checked", "success"); }
-          catch (problem) { toast(problem.message, "error"); }
-          refresh();
-        } }),
-        el("button", { class: "btn danger", text: "Remove", onclick: async () => {
-          if (!await confirmDialog({ title: "Remove this goal?", message: `"${goal.name}" will stop being checked.`, confirmLabel: "Remove" })) return;
-          await api(`/api/tasks/${goal.id}`, { method: "DELETE" }); refresh();
-        } }),
-      ]),
-    ]));
-  }
-  const name = el("input", { placeholder: "e.g. New postings" });
-  const prompt = el("textarea", { rows: "2", placeholder: "What to check, and what counts as worth telling you" });
-  const kind = customSelect({}, [el("option", { value: "daily", text: "Every day at" }), el("option", { value: "interval", text: "Every N hours" })]);
-  const time = el("input", { type: "time", value: "08:00" });
-  const hours = el("input", { type: "number", min: "1", value: "6" });
-  const timeField = el("div", { class: "field field-sm" }, [el("label", { text: "At" }), time]);
-  const hoursField = el("div", { class: "field field-sm", style: "display:none;" }, [el("label", { text: "Hours" }), hours]);
-  kind.addEventListener("change", () => {
-    timeField.style.display = kind.value === "daily" ? "" : "none";
-    hoursField.style.display = kind.value === "interval" ? "" : "none";
-  });
-  const report = customSelect({}, [el("option", { value: "notable", text: "Only when notable" }), el("option", { value: "always", text: "Every time" })]);
-  const add = async () => {
-    if (!name.value.trim() || !prompt.value.trim()) { toast("A goal needs a name and what to check", "error"); return; }
-    const body = { name: name.value.trim(), prompt: prompt.value.trim(), schedule_kind: kind.value, report_when: report.value };
-    if (kind.value === "daily") body.run_time = time.value; else body.interval_seconds = Math.max(1, parseInt(hours.value, 10) || 1) * 3600;
-    try { await api(`/api/agents/${agentId}/goals`, { method: "POST", body: JSON.stringify(body) }); refresh(); }
-    catch (problem) { toast(problem.message, "error"); }
-  };
-  panel.append(el("details", { class: "disclosure-panel" }, [el("summary", { text: "+ Add a goal" }), el("div", { class: "form-grid" }, [
-    el("div", { class: "field field-grow" }, [el("label", { text: "Name" }), name]),
-    el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "What to check" }), prompt]),
-    el("div", { class: "field" }, [el("label", { text: "When" }), kind]), timeField, hoursField,
-    el("div", { class: "field" }, [el("label", { text: "Report" }), report]),
-    el("button", { class: "btn primary", text: "Add goal", onclick: add }),
-  ])]));
   return panel;
 }
 
@@ -654,7 +598,7 @@ function settingsPanel(agent, models, channels, refresh) {
   };
   const remove = async () => {
     const ok = await confirmDialog({ title: `Delete ${agent.name}?`,
-      message: "Its memory, goals, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.", confirmLabel: "Delete agent" });
+      message: "Its memory, routines, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.", confirmLabel: "Delete agent" });
     if (!ok) return;
     try {
       await api(`/api/agents/${agent.id}`, { method: "DELETE" });

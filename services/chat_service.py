@@ -428,6 +428,20 @@ def _apply_open_mic_discipline(session_id: str, full_text: str) -> str:
     return full_text + OPEN_MIC_DISCIPLINE
 
 
+BOT_SETUP_INSTRUCTIONS = (
+    "[The person ran /setup. Help them set you up, here in this conversation.\n"
+    "1. Ask at most four questions, and only the ones that matter: what your job is, when you should work, "
+    "which accounts or services you need, and which folder you work in. Skip any you can already answer.\n"
+    "2. Before changing anything, say exactly what you will change, and wait for the person to agree.\n"
+    "3. Then apply it with agent_configure_self. You may set only your job (role), blurb, standing "
+    "instructions (soul), delivery channel, and one routine. Each change returns a receipt the person can undo.\n"
+    "4. You cannot change your peers, permissions, tools, model, daily cap, or whether you are on. If any "
+    "of those is needed, say so plainly.\n"
+    "5. Finish with what the person must do by hand: sign-ins, connecting accounts, choosing a folder, "
+    "granting peers.]"
+)
+
+
 def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: list[str] | None,
                        reference_context: str = "") -> str:
     """The user message as the model receives it - the attachment note and
@@ -435,7 +449,13 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
     later replay sends the same text (see SessionManager.record_sent_text).
     Deliberately before _prime_with_history: that wrapper is a one-off for
     a fresh connection, not part of the message."""
-    sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, text, attachment_ids) + reference_context)
+    # /setup in a bot's own chat is self-configuration: the bot receives the
+    # instructions, the transcript keeps the command (Agents 2.0, 2026-10-14).
+    # Everywhere else /setup is handled in the browser and never arrives here.
+    model_text = text
+    if text.strip().lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
+        model_text = BOT_SETUP_INSTRUCTIONS
+    sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, model_text, attachment_ids) + reference_context)
     if (session_manager.get_session(session_id) or {}).get('forge'):
         from services.forge_sessions import forge_sessions
         sent += forge_sessions.repo_context(session_id)

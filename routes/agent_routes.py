@@ -163,6 +163,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
         "soul_file": agent_service.read_soul(agent_id),
         "memory": agent_service.read_memory(agent_id),
         "memory_upkeep_journal": agent_service.memory_upkeep_journal(agent_id),
+        "setup_receipts": agent_service.setup_receipts(agent_id),
         "goals": [t for t in owned if t["schedule_kind"] != "card"],
         "cards": [t for t in owned if t["schedule_kind"] == "card"],
         "inbox": person_inbox(agent_id),
@@ -263,6 +264,18 @@ async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(
     _require(agent_id)
     try:
         return agent_service.undo_memory_upkeep(agent_id, upkeep_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/{agent_id}/setup/{receipt_id}/undo")
+async def undo_setup(agent_id: str, receipt_id: str, user: str = Depends(require_admin)) -> dict:
+    """Undo one /setup change from the bot's profile (Agents 2.0, 2026-10-14)."""
+    _require(agent_id)
+    try:
+        return agent_service.undo_setup(agent_id, receipt_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no setup change with that receipt")
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

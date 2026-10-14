@@ -788,7 +788,7 @@
       memory: state.agentMemories?.[id] ?? `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
       memory_upkeep_journal: id === 'a1' ? [{ id: 'upkeep-demo', at: now - 1800, topic: null,
         status: state.agentUpkeepUndone ? 'undone' : 'committed', changes: [{ section: 'Notes', line: 'Old note', reason: 'expired' }] }] : [],
-      goals: [{ id: "g1", name: "New postings", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
+      goals: [{ id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
       cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: state.agentReview ? 'review' : 'ready', agent_id: id, comments: [] }],
       inbox: agentInbox.filter((i) => i.agent_id === id), answered: [], runs: runs.c1,
       teams: [{ id: "s1", name: "Launch team", state: "active", member_id: "s1-m2", is_lead: 0 }],

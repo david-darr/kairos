@@ -1800,5 +1800,98 @@ class MemoryUpkeepTests(AgentTestCase):
         self.assertEqual(self.memory_file().read_bytes(), original)
 
 
+class SelfSetupTests(AgentTestCase):
+    """/setup in a bot's own chat (Agents 2.0, 2026-10-14)."""
+
+    def setUp(self):
+        super().setUp()
+        from core.session_manager import session_manager
+        self.sessions = session_manager
+        self.chat = session_manager.create_session("Scout chat")
+        self.addCleanup(session_manager.delete_session, self.chat["id"])
+        agent_service.make_agent_chat(self.chat["id"], self.agent)
+
+    def call(self, name, args, session_id=None):
+        ctx = tool_registry.ToolContext(agent_id=self.agent["id"], session_id=session_id)
+        return asyncio.run(tool_registry.call(name, args, ctx, tool_registry.OPENAI))
+
+    def test_setup_changes_only_its_own_description(self):
+        receipt = agent_service.configure_self(self.agent["id"], {"role": "Finds remote roles", "blurb": "Scout"})
+        agent = agent_service.get(self.agent["id"])
+        self.assertEqual((agent["role"], agent["blurb"]), ("Finds remote roles", "Scout"))
+        self.assertEqual(receipt["before"], {"role": "Watches job postings", "blurb": ""}, "the exact previous values")
+
+    def test_a_bot_cannot_widen_its_own_reach(self):
+        other = agent_service.create("Archivist")
+        self.addCleanup(self._remove, other["id"])
+        before = dict(agent_service.get(self.agent["id"]))
+        for field, value in (("peers", [other["id"]]), ("endpoint_id", "m3"), ("daily_run_cap", 99),
+                             ("enabled", False), ("permissions", "all"), ("tool_scope", "*"), ("instructions", "x")):
+            with self.assertRaises(ValueError, msg=field):
+                agent_service.configure_self(self.agent["id"], {field: value})
+        after = agent_service.get(self.agent["id"])
+        for field in ("peers", "endpoint_id", "daily_run_cap", "enabled", "revision"):
+            self.assertEqual(after.get(field), before.get(field), field)
+
+    def test_undo_restores_the_exact_previous_values_and_routine(self):
+        from pathlib import Path
+        soul_file = Path(agent_service._memory_path(self.agent["id"])).with_name("SOUL.md")
+        self.assertFalse(soul_file.exists())
+        receipt = agent_service.configure_self(
+            self.agent["id"], {"soul": "Check postings at 8.", "role": "Finds remote roles"},
+            {"name": "Morning check", "prompt": "New postings", "schedule_kind": "daily", "run_time": "08:00"})
+        self.assertTrue(soul_file.exists())
+        self.assertIsNotNone(task_service.get_task(receipt["routine_id"]))
+        agent_service.undo_setup(self.agent["id"], receipt["id"])
+        agent = agent_service.get(self.agent["id"])
+        self.assertEqual(agent["role"], "Watches job postings")
+        self.assertNotIn("soul", agent)
+        self.assertFalse(soul_file.exists(), "no soul before means no SOUL.md after undo")
+        self.assertIsNone(task_service.get_task(receipt["routine_id"]))
+        with self.assertRaises(ValueError):
+            agent_service.undo_setup(self.agent["id"], receipt["id"])
+
+    def test_a_stale_undo_refuses_and_changes_nothing(self):
+        receipt = agent_service.configure_self(self.agent["id"], {"role": "Finds remote roles"})
+        agent_service.update(self.agent["id"], blurb="The person edited this")
+        with self.assertRaisesRegex(ValueError, "changed after this setup"):
+            agent_service.undo_setup(self.agent["id"], receipt["id"])
+        agent = agent_service.get(self.agent["id"])
+        self.assertEqual((agent["role"], agent["blurb"]), ("Finds remote roles", "The person edited this"))
+
+    def test_undo_refuses_over_a_hand_edited_soul(self):
+        from pathlib import Path
+        receipt = agent_service.configure_self(self.agent["id"], {"soul": "First draft"})
+        Path(agent_service._memory_path(self.agent["id"])).with_name("SOUL.md").write_bytes(b"Edited by hand")
+        with self.assertRaisesRegex(ValueError, "edited by hand"):
+            agent_service.undo_setup(self.agent["id"], receipt["id"])
+
+    def test_the_tool_works_only_in_the_bots_own_attended_chat(self):
+        self.assertIn("only works in your own chat", self.call("agent_configure_self", {"role": "x"}))
+        background = self.sessions.create_session("Work on a card")
+        self.addCleanup(self.sessions.delete_session, background["id"])
+        agent_service.make_agent_chat(background["id"], self.agent, attended=False)
+        self.assertIn("only works in your own chat", self.call("agent_configure_self", {"role": "x"}, background["id"]))
+        self.assertEqual(agent_service.get(self.agent["id"])["role"], "Watches job postings")
+        result = self.call("agent_configure_self", {"role": "Finds remote roles", "routine_name": "Morning",
+                                                     "routine_prompt": "Check", "routine_daily_time": "08:00"},
+                           self.chat["id"])
+        self.assertIn("Receipt", result)
+        receipt = agent_service.setup_receipts(self.agent["id"])[-1]
+        self.assertIn("Undone", self.call("agent_setup_undo", {"receipt_id": receipt["id"]}, self.chat["id"]))
+        self.assertEqual(agent_service.get(self.agent["id"])["role"], "Watches job postings")
+
+    def test_slash_setup_reaches_the_bot_as_instructions_and_stays_in_the_transcript(self):
+        from services import chat_service
+        self.sessions.append_message(self.chat["id"], "user", "/setup")
+        index = len(self.sessions.get_session(self.chat["id"])["messages"]) - 1
+        sent = chat_service._prepare_sent_text(self.chat["id"], index, "/setup", None)
+        self.assertIn("The person ran /setup", sent)
+        self.assertEqual(self.sessions.get_session(self.chat["id"])["messages"][index]["content"], "/setup")
+        plain = self.sessions.create_session("Ordinary chat")
+        self.addCleanup(self.sessions.delete_session, plain["id"])
+        self.sessions.append_message(plain["id"], "user", "/setup")
+        self.assertNotIn("The person ran /setup", chat_service._prepare_sent_text(plain["id"], 0, "/setup", None))
+
 if __name__ == "__main__":
     unittest.main()

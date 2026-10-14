@@ -1,5 +1,6 @@
 import { api, el, toast, confirmDialog } from './api.js';
 import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
+import { routinesPanel } from './routinesPanel.js';
 
 const SECTIONS = ['Overview', 'Identity', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice & alerts', 'History', 'Usage'];
 const bytes = (value) => new TextEncoder().encode(value).length;
@@ -139,14 +140,25 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     }));
   };
   const history = el('div', { class: 'agent-profile-history' });
-  const routines = el('p', { class: 'meta' });
+  // The real routines, shared with the bot page (2026-10-14). Redrawn only
+  // when they change, and never under someone editing or adding one.
+  const routines = el('div', { class: 'agent-profile-routines' });
+  let routinesKey = null;
+  const drawRoutines = goals => {
+    const key = JSON.stringify((goals || []).map(g => [g.id, g.name, g.prompt, g.enabled, g.schedule_kind, g.run_time, g.interval_seconds, g.report_when]));
+    if (key === routinesKey) return;
+    if (routines.contains(document.activeElement) || routines.querySelector('details[open], .routine-editor:not([hidden])')) return;
+    routinesKey = key;
+    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.()));
+  };
+  drawRoutines(detail.goals);
   const usage = el('p', { class: 'meta' });
   const forget = el('button', { class: 'btn quiet', type: 'button', text: 'Forget browser logins', onclick: async () => {
     try { await api(`/api/agents/${detail.agent.id}/forget-logins`, { method: 'POST' }); toast('Logins forgotten', 'success'); }
     catch (error) { toast(error.message, 'error'); }
   } });
   const remove = el('button', { class: 'btn danger', type: 'button', text: 'Delete bot', onclick: async () => {
-    if (!await confirmDialog({ title: `Delete ${detail.agent.name}?`, message: 'Its memory, goals, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.', confirmLabel: 'Delete agent' })) return;
+    if (!await confirmDialog({ title: `Delete ${detail.agent.name}?`, message: 'Its memory, routines, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.', confirmLabel: 'Delete agent' })) return;
     try { await api(`/api/agents/${detail.agent.id}`, { method: 'DELETE' }); close();
       document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } })); }
     catch (error) { toast(error.message, 'error'); }
@@ -162,7 +174,31 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   sections.get('Access').content.append(access, peersField, keep, sectionSave(), forget, remove);
   sections.get('Voice & alerts').content.replaceChildren(channel, sectionSave());
   sections.get('Usage').content.replaceChildren(usage);
-  sections.get('History').content.append(history);
+  // Changes the bot made to itself through /setup, each with its Undo
+  // (Agents 2.0, 2026-10-14). The server refuses a stale undo with a reason.
+  const setupChanges = el('div', { class: 'agent-profile-setup-changes' });
+  let setupKey = null;
+  const FIELD_NAMES = { role: 'job', blurb: 'blurb', soul: 'standing instructions', deliver_to_channel: 'delivery channel' };
+  const drawSetup = receipts => {
+    const key = JSON.stringify((receipts || []).map(r => [r.id, r.undone]));
+    if (key === setupKey) return;
+    setupKey = key;
+    const live = (receipts || []).slice().reverse();
+    setupChanges.replaceChildren(...(live.length ? [el('h4', { class: 'agent-profile-subhead', text: 'Setup changes' })] : []),
+      ...live.map(receipt => {
+        const what = [...Object.keys(receipt.after || {}).map(k => FIELD_NAMES[k] || k), ...(receipt.routine_id ? ['a routine'] : [])].join(', ');
+        const when = new Date(receipt.ts * 1000).toLocaleString();
+        const undo = el('button', { type: 'button', class: 'btn quiet', text: receipt.undone ? 'Undone' : 'Undo', disabled: receipt.undone,
+          onclick: async () => {
+            undo.disabled = true;
+            try { await api(`/api/agents/${detail.agent.id}/setup/${receipt.id}/undo`, { method: 'POST' }); toast('Setup change undone', 'success'); onSaved?.(); }
+            catch (error) { toast(error.message.replace(/^\d+: /, ''), 'error'); undo.disabled = false; }
+          } });
+        return el('div', { class: 'agent-profile-setup-change' }, [el('div', {}, [el('div', { text: `Set ${what || 'nothing'}` }), el('div', { class: 'meta', text: when })]), undo]);
+      }));
+  };
+  drawSetup(detail.setup_receipts);
+  sections.get('History').content.append(history, setupChanges);
   const identitySlot = sections.get('Identity').content;
   const modelSlot = sections.get('Model').content;
   identitySlot.append(sectionSave());
@@ -201,7 +237,8 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       for (const input of peersChoices.querySelectorAll('input')) input.checked = JSON.parse(peersBaseline).includes(input.value);
     }
     history.textContent = `${(next.runs || []).length} recent runs.`;
-    routines.textContent = `${(next.goals || []).length} standing goals.`;
+    drawSetup(next.setup_receipts);
+    drawRoutines(next.goals);
     usage.textContent = `${next.agent.runs_today || 0} of ${next.agent.daily_run_cap || 0} runs today.`;
     forget.disabled = next.agent.status === 'working';
   };

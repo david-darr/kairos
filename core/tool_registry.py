@@ -1245,6 +1245,82 @@ async def _agent_remember(args, ctx):
     return f"Noted under {args['section']}" + (f" in topic {args['topic']}." if args.get("topic") else ".")
 
 
+def _own_chat(ctx) -> Optional[str]:
+    """Why self-configuration is refused here, or None if it is allowed. Only
+    in the bot's own chat, with the person present: never from a scheduled,
+    webhook or coordinated run, where a page the bot read could talk it into
+    rewriting its own soul (Agents 2.0, 2026-10-14)."""
+    from core.session_manager import session_manager
+    session = session_manager.get_session(ctx.session_id) if ctx.session_id else None
+    if not session or session.get("agent_id") != ctx.agent_id or session.get("agent_unattended"):
+        return "Setup only works in your own chat, with the person there. Ask them to run /setup in your chat."
+    return None
+
+
+@register(
+    "agent_configure_self",
+    "Apply setup changes to yourself after the person agreed to them in this chat: your job (role), "
+    "blurb, standing instructions (soul), delivery channel, and optionally one new routine. Explain what "
+    "you will change before calling this. You cannot change your peers, permissions, tools, model, daily "
+    "cap or whether you are on: tell the person to do those by hand. Returns a receipt with an Undo id.",
+    _object({"role": _str("Your job, one line"), "blurb": _str("A short description of you"),
+             "soul": _str("Your standing instructions, in full"),
+             "deliver_to_channel": _str("Channel to deliver reports to"),
+             "routine_name": _str("Name of a new routine"), "routine_prompt": _str("What the routine checks"),
+             "routine_daily_time": _str("HH:MM, for a routine that runs daily"),
+             "routine_every_hours": _str("Hours between runs, for a routine that repeats"),
+             "routine_report": _str("'notable' or 'always'")}, ()),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_configure_self(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    changes = {key: args[key] for key in ("role", "blurb", "soul", "deliver_to_channel") if args.get(key) is not None}
+    routine = None
+    if args.get("routine_name"):
+        if not args.get("routine_prompt"):
+            return "A routine needs both a name and what it checks."
+        routine = {"name": args["routine_name"], "prompt": args["routine_prompt"], "report_when": args.get("routine_report")}
+        if args.get("routine_daily_time"):
+            routine.update(schedule_kind="daily", run_time=args["routine_daily_time"])
+        elif args.get("routine_every_hours"):
+            try:
+                routine.update(schedule_kind="interval", interval_seconds=max(1, int(float(args["routine_every_hours"]))) * 3600)
+            except ValueError:
+                return "routine_every_hours must be a number of hours."
+        else:
+            return "A routine needs routine_daily_time (HH:MM) or routine_every_hours."
+    try:
+        receipt = agent_service.configure_self(ctx.agent_id, changes, routine)
+    except (ValueError, KeyError) as error:
+        return f"Not applied: {error}"
+    applied = ", ".join(receipt["after"]) or "nothing on your profile"
+    extra = " and added the routine" if receipt["routine_id"] else ""
+    return (f"Applied: {applied}{extra}. Receipt {receipt['id']}. Tell the person they can undo it by asking you, "
+            f"or with Undo under History in your profile.")
+
+
+@register(
+    "agent_setup_undo",
+    "Undo one of your own setup changes by its receipt id, when the person asks. Refused if your profile "
+    "changed afterwards, so a later edit is never lost.",
+    _object({"receipt_id": _str("The receipt id from agent_configure_self")}, ("receipt_id",)),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_setup_undo(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    try:
+        agent_service.undo_setup(ctx.agent_id, args["receipt_id"])
+    except KeyError:
+        return "No setup change has that receipt id."
+    except ValueError as error:
+        return f"Not undone: {error}"
+    return "Undone: the previous values are back."
+
+
 @register(
     "agent_read_topic",
     "Read one of your memory topic files by name when its subject is needed. "

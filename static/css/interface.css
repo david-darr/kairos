@@ -729,3 +729,33 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   .agent-avatar-picker-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .agents-view .agent-tile { transition: none; } }
+
+/* Setup changes in a bot's profile History, each with its Undo (2026-10-14). */
+.agent-profile-subhead { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
+.agent-profile-setup-change { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border); }
+
+/* Bot surfaces on a phone (Agents 2.0 unit 6-ii, 2026-10-14). The audit in
+   scripts/agents-phone-checks.cjs found no sideways scroll but 74 controls
+   under 44px: form fields at 41px, dropdowns at 34, presets at 30, disclosure
+   rows at 35, two close buttons, the bot chat's input and a toggle switch.
+   Scoped to bot surfaces so the rest of the phone layout is untouched. */
+@media (max-width: 768px) {
+  :is(.agents-view, .agent-profile-sheet, .agent-create-dialog)
+    :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea, .custom-select-btn, .btn) {
+    min-height: 44px; box-sizing: border-box;
+  }
+  :is(.agents-view, .agent-profile-sheet, .agent-create-dialog) summary { min-height: 44px; box-sizing: border-box; padding-block: 11px; }
+  .agents-view .agent-tab { min-width: 44px; justify-content: center; }
+  .agents-view .chat-code-header button { min-height: 44px; padding-inline: 12px; }
+  .agent-profile-sheet .btn[aria-label="Close profile"] { min-width: 44px; }
+  .agent-create-dialog .modal-close-btn { width: 44px; height: 44px; }
+  /* The switch keeps its look; a transparent border makes it a 44px target,
+     with its visible edge drawn inside as a shadow. The knob is positioned
+     against the padding box, so it does not move. */
+  :is(.agents-view, .agent-profile-sheet, .agent-create-dialog) .set-switch {
+    box-sizing: border-box; width: 58px; height: 44px; border: 12px solid transparent;
+    background-clip: padding-box; box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  :is(.agents-view, .agent-profile-sheet, .agent-create-dialog) .set-switch[aria-checked="true"] { border-color: transparent; box-shadow: none; }
+}
