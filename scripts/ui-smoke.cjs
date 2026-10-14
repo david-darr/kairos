@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, ".scratch-p5", "run-" + Date.now());
+const output = path.join(root, ".scratch-ui-b", "run-" + Date.now());
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -218,7 +218,11 @@ app.whenReady().then(async () => {
     cb({ cancel: true });
   });
   const win = new BrowserWindow({ width: 1440, height: 900, show: false, useContentSize: true, webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false } });
-  win.webContents.on("console-message", (details) => { if (details.level === 'error') errors.push(details.message); });
+  let lastCapture = 'startup';
+  win.webContents.on("console-message", (details) => {
+    if (details.level === 'error' || /ResizeObserver/i.test(details.message))
+      errors.push(/ResizeObserver/i.test(details.message) ? `${details.message} after ${lastCapture} (${details.sourceId}:${details.lineNumber})` : details.message);
+  });
   const js = async (code) => {
     try { return await win.webContents.executeJavaScript(code); }
     catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
@@ -228,6 +232,7 @@ app.whenReady().then(async () => {
     throw new Error("Timed out: " + condition);
   };
   const capture = async (name) => {
+    lastCapture = name;
     await delay(250);
     const picture = await win.webContents.capturePage();
     fs.writeFileSync(path.join(output, name + ".png"), picture.toPNG());
@@ -298,13 +303,13 @@ app.whenReady().then(async () => {
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
     if (process.argv.includes('--agents-birth-only')) {
       await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        win, liveChunk, liveEvent, liveFinish });
+        win, liveChunk, liveEvent, liveFinish, capture });
       assert.deepEqual(errors, [], 'Agent birth renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
     }
     if (process.argv.includes('--agents-profile-only')) {
-      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
+      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
       assert.deepEqual(errors, []);
       console.log('PASS: Agents profile checks.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agents profile and draft retention'], errors }, null, 2));
@@ -982,14 +987,18 @@ app.whenReady().then(async () => {
           writes.splice(schoolWrites);
         }
         if (tab === "agents" && !demoState.empty) {
+          demoState.agentUpkeepUndone = false;
           // Agents: the list, the cross-agent inbox with its answers, the badge.
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 2");
+          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
+          assert.equal(await js("document.querySelectorAll('.agent-tile:not(.team-tile):not(.agent-new-card) .agent-dot-avatar').length"), 2, label + ' roster faces use the dot component');
+          assert.ok(await js("!!document.querySelector('.agent-new-card')"), label + ' creation card is in the roster');
           assert.ok(await js("document.querySelector('.agent-teams .team-tile')?.textContent.includes('Launch team')"), label + " teams listed under agents");
           assert.ok(await js("document.querySelector('.team-tile .agent-status').textContent === 'Working'"), label + " team state shown");
-          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Answer')"), label + " a question can be answered");
+          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Reply')"), label + " a question can be answered");
           assert.equal(await js("document.querySelectorAll('.agent-inbox-approval').length"), 0, label + " agents run in Auto: nothing to approve");
           assert.ok(await js("document.querySelector('.agent-inbox-report').textContent.includes('Backend Engineer')"), label + " report body shown");
-          assert.equal(await js("document.querySelector('.agent-status-working').textContent"), "Working");
+          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-item')].every(n => n.querySelector('.agent-dot-avatar') && n.querySelectorAll('.agent-inbox-actions .btn.primary').length === 1 && n.querySelector('.agent-inbox-compose[hidden]'))"), label + ' waiting rows have faces and one primary action');
+          assert.ok((await js("document.querySelector('.agent-status-line.agent-status-working').textContent")).startsWith('Working on'));
           await waitFor("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent === '2'");
           assert.deepEqual(await overflow(), [], label + " overflow in agents list");
           await navigate("agents", { agentId: "a1" });
@@ -998,6 +1007,7 @@ app.whenReady().then(async () => {
           // conversation and a composer; Work holds everything else.
           await waitFor("document.querySelectorAll('.agent-chat-item').length === 1");
           assert.equal(await js("document.querySelector('.agent-tab.active').textContent"), "Chat", label + " opens on Chat");
+          assert.ok(await js("!!document.querySelector('.agent-header .agent-dot-avatar') && !!document.querySelector('.agent-profile-open')"), label + ' bot hero has face and settings');
           assert.equal(await js("[...document.querySelectorAll('.agent-tab')][1].textContent"), "Work (2)", label + " work tab counts what waits");
           await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0");
           assert.ok(await js("document.querySelector('.agent-chat-item.active')?.textContent.includes('Chat with Scout')"), label + " last chat open");
@@ -1009,7 +1019,9 @@ app.whenReady().then(async () => {
           await waitFor("!document.querySelector('.agent-work-host').hidden");
           await waitFor("document.querySelector('.agent-computer-section .computer-frame')?.naturalWidth > 0");
           const titles = await js("[...document.querySelectorAll('.agent-work-host > .glass > .title')].map(n => n.textContent)");
-          assert.deepEqual(titles, ["Inbox", "Computer", "Standing goals", "Work", "Memory", "History", "Teams", "Triggers"], label + " agent work sections");
+          assert.deepEqual(titles, ["Inbox", "Computer", "Work", "History", "Teams", "Triggers"], label + " agent work sections");
+          assert.ok(await js("!!document.querySelector('.agent-assignment-card .agent-dot-avatar')"), label + ' assignment card has dot face');
+          assert.ok(await js("[...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Routines') && [...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Memory')"), label + ' routines and memory tabs');
           assert.equal(await js("document.querySelector('.agent-work-host [aria-label=\"Keep this agent signed in\"]').getAttribute('aria-checked')"), 'true');
           assert.ok(await js("document.querySelector('.agent-forget-logins').disabled"), label + ' logins cannot be forgotten while running');
           await capture(label + '-agent-computer');
@@ -1019,8 +1031,16 @@ app.whenReady().then(async () => {
           assert.ok(await js("document.querySelector('.agents-view').textContent.includes('Every day at 08:00')"), label + " goal cadence");
           assert.deepEqual(await overflow(), [], label + " overflow on agent page");
           await capture(label + "-agent-page");
+          await js("[...document.querySelectorAll('.agent-tab')].find(n => n.textContent === 'Memory').click()");
+          await waitFor("!document.querySelector('.agent-memory-host').hidden");
+          assert.ok(await js("document.querySelector('.agent-memory-journal')?.textContent.includes('1 changes')"), label + ' upkeep journal shown');
+          const undoStart = writes.length;
+          await js("[...document.querySelectorAll('.agent-memory-journal button')].find(n => n.textContent === 'Undo').click()");
+          await waitFor("document.querySelector('.agent-memory-journal')?.textContent.includes('undone')");
+          assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
+          await capture(label + '-agent-memory');
           await navigate("agents");
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 2");
+          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
           const agentComputerStart = writes.length;
           await js("[...document.querySelectorAll('.agent-inbox-question button')].find(b => b.textContent === 'Open computer').click()");
           await waitFor("document.querySelector('.agent-work-host:not([hidden]) .computer-state')?.textContent.includes('You have control')");
@@ -2265,18 +2285,18 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.dashboard-core')");
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
-    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
+    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
     // 2026-10-14: David removed the sidebar's Bots, Teams and Pinned sections. The
     // precedence they showed is tested in scripts/test_bot_status.cjs.
     assert.equal(await js("document.querySelectorAll('#nav [data-section], #nav .sidebar-bot, #nav .sidebar-bot-create').length"), 0,
       'The sidebar has no bot, team or pinned sections');
     assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
     await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      win, liveChunk, liveEvent, liveFinish });
+      win, liveChunk, liveEvent, liveFinish, capture });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Sidebar bots: 9 cases", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));

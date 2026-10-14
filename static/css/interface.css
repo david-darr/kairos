@@ -539,11 +539,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 .agent-profile-top { padding: 20px 20px 0; }
 .agent-profile-titlebar { display: flex; align-items: center; gap: 14px; }
 .agent-profile-titlebar h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.agent-portrait { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
-  overflow: hidden; border-radius: 50%; color: #292720; }
-.agent-portrait .dither-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.agent-portrait-mark { width: 62%; height: 62%; }
-.agent-portrait.is-dithered .agent-portrait-mark { visibility: hidden; }
 .agent-profile-tabs { display: flex; gap: 6px; padding: 12px 20px 0; border-bottom: 1px solid var(--border); }
 .agent-profile-tab { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); padding: 8px 12px; cursor: pointer; }
 .agent-profile-tab.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -633,8 +628,99 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 @media (prefers-reduced-motion: reduce) {
   .agent-turn-working, .agent-turn-working * { animation: none !important; transition: none !important; }
 }
-
 /* The surface that carries the conversation pill into the panel and back
    (2026-10-14). Animated from chat.js; it never takes pointer events. */
 .chat-history-ghost { position: fixed; z-index: 30; pointer-events: none; box-sizing: border-box;
   border: 1px solid var(--ui-line); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+
+/* Agents, 2026-10-14: the paper roster leads with faces and readable work.
+   Scope buttons below to outrank interface.css's later base .btn display and
+   dimensions; hidden picker and reply controls must stay hidden on phones. */
+.agent-dot-avatar { display: inline-flex; flex: none; align-items: center; justify-content: center; max-width: 100%; aspect-ratio: 1; }
+.agent-dot-avatar img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.agents-view { min-width: 0; }
+.agents-view > .view-header { margin-bottom: 24px; }
+.agents-view > .view-header h2 { font-size: clamp(32px, 4vw, 48px); }
+.agents-view .agent-roster-title { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+.agents-view .agent-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 275px), 1fr)); gap: 16px; margin: 0 0 28px; }
+.agents-view .agent-tile { min-width: 0; min-height: 210px; padding: 20px; border: 1px solid #dfd2bd; border-radius: 20px;
+  background: #fffaf2; box-shadow: 0 9px 24px rgba(73, 49, 27, .08); color: #342b24; transition: transform .18s ease, box-shadow .18s ease; }
+.agents-view .agent-tile:hover { transform: translateY(-2px); box-shadow: 0 13px 29px rgba(73, 49, 27, .12); }
+.agents-view .agent-tile:focus-visible, .agents-view .agent-tab:focus-visible,
+.agent-avatar-picker :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.agents-view .agent-tile-head { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.agents-view .agent-tile-name { width: 100%; }
+.agents-view .agent-tile-name .title { font-size: 19px; line-height: 1.25; }
+.agents-view .agent-tile-name .meta { min-height: 2.8em; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.4; font-size: 13px; }
+.agents-view .agent-tile-foot { margin-top: auto; }
+.agent-status-line { display: inline-block; padding: 3px 0 3px 12px; border-left: 4px solid var(--border-strong); color: var(--text-dim);
+  font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* Kairos tokens, per the spec: accent needs you, success green works, muted waits (2026-10-14). */
+.agent-status-line.agent-status-needs_you { border-color: var(--accent); color: var(--accent); }
+.agent-status-line.agent-status-working { border-color: var(--success); color: var(--success); }
+.agent-status-line.agent-status-teammate, .agent-status-line.agent-status-queued { border-color: var(--text-dim); color: var(--text-dim); }
+.agent-status-line.agent-status-off { border-color: var(--text-faint); color: var(--text-faint); }
+.agents-view .agent-new-card { display: flex; align-items: center; justify-content: center; border: 2px dashed #b9a487;
+  background: rgba(255, 250, 242, .5); color: #60472f; font-size: 17px; font-weight: 600; text-align: center; }
+.agents-view .agent-inbox-host:not([hidden]) { margin: 0 0 30px; }
+.agents-view .agent-inbox { padding: 18px 22px; border-radius: 20px; background: #fffaf2; }
+.agents-view .agent-inbox > .title { margin-bottom: 10px; font-size: 17px; }
+.agents-view .agent-inbox-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px;
+  padding: 12px 0; border: 0; border-top: 1px solid #e8ddcd; border-radius: 0; background: transparent; }
+.agents-view .agent-inbox-head { grid-column: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.agents-view .agent-inbox-title { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.agents-view .agent-inbox-kind { color: #69584b; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.agents-view .agent-inbox-time { margin-left: auto; white-space: nowrap; }
+.agents-view .agent-inbox-body { grid-column: 1; color: #62564a; line-height: 1.45; }
+.agents-view .agent-inbox-actions { grid-column: 2; grid-row: 1 / 3; display: flex; align-items: center; gap: 5px; }
+.agents-view .agent-inbox-compose { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+.agents-view .agent-inbox-compose[hidden], .agents-view .agent-tab-panel[hidden] { display: none; }
+.agents-view .agent-inbox-compose .agent-reply { flex: 1; min-width: 0; }
+.agents-view .agent-inbox-actions .btn, .agents-view .agent-inbox-compose .btn { min-height: 40px; padding: 8px 12px; }
+.agents-view .agent-inbox-actions .btn.quiet { text-decoration: underline; background: transparent; border-color: transparent; }
+.agents-view .agent-teams { margin-top: 8px; padding-top: 20px; border-top: 1px solid #ddcfbb; }
+.agents-view .team-tile { min-height: 145px; }
+.agents-view .agent-header { padding: 22px; align-items: center; border: 1px solid #dfd2bd; border-radius: 20px;
+  background: #fffaf2; box-shadow: 0 9px 24px rgba(73, 49, 27, .08); }
+.agents-view .agent-header-text h2 { font-size: clamp(30px, 3vw, 42px); line-height: 1.1; }
+.agents-view .agent-header-text .sub { margin-top: 4px; font-size: 16px; color: #55483d; }
+.agents-view .agent-header-blurb { max-width: 65ch; margin: 10px 0 8px; color: #605347; line-height: 1.5; }
+.agents-view .agent-header-actions { align-self: flex-end; }
+.agents-view .agent-header-actions .btn { min-height: 44px; }
+.agents-view .agent-tabs { gap: 22px; overflow-x: auto; overflow-y: hidden; margin-top: 20px; }
+.agents-view .agent-tab { flex: none; min-height: 44px; padding: 10px 3px; font: 600 14px Jost, sans-serif; }
+.agents-view .agent-tab.active { border-bottom-width: 3px; }
+.agents-view .agent-work-host, .agents-view .agent-routines-host, .agents-view .agent-memory-host { max-width: 880px; padding-top: 18px; }
+.agents-view .agent-work-host > .card, .agents-view .agent-routines-host > .card, .agents-view .agent-memory-host > .card { margin-bottom: 16px; border-radius: 20px; }
+.agents-view .agent-assignment-card { justify-content: flex-start; gap: 12px; }
+.agents-view .agent-assignment-card > div { flex: 1; }
+.agent-profile-sheet:not([hidden]) { width: min(560px, 50vw); }
+.agent-profile-sheet .agent-profile-titlebar .agent-dot-avatar { width: 80px !important; height: 80px !important; }
+.agent-avatar-picker { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 16px; padding: 16px;
+  border: 1px solid #dfd2bd; border-radius: 20px; background: #fffaf2; }
+.agent-avatar-picker-preview { display: flex; justify-content: center; align-items: flex-start; }
+.agent-avatar-picker-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.agent-avatar-picker-controls label { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: #55483d; font-size: 12px; }
+.agent-avatar-picker-controls select, .agent-avatar-picker-controls input { min-width: 0; min-height: 40px; width: 100%; box-sizing: border-box; }
+.agent-avatar-picker-controls .agent-avatar-shuffle.btn { min-height: 40px; align-self: end; }
+.agent-create-dialog .agent-create-identity-grid { grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr); }
+.agent-create-dialog .agent-avatar-picker { grid-template-columns: 1fr; }
+.agent-create-dialog .agent-avatar-picker-preview { justify-content: flex-start; }
+@media (max-width: 700px) {
+  .agents-view .agent-back { margin-left: 44px; }
+  .agents-view .agent-inbox-actions .btn, .agents-view .agent-inbox-compose .btn,
+  .agent-avatar-picker-controls select, .agent-avatar-picker-controls input,
+  .agent-avatar-picker-controls .agent-avatar-shuffle.btn,
+  .agent-create-dialog .agent-create-nav button { min-height: 44px; }
+  .agent-profile-sheet .agent-profile-tab { min-height: 44px; }
+  .agents-view .agent-header { align-items: flex-start; }
+  .agents-view .agent-header > .agent-dot-avatar { width: 88px !important; height: 88px !important; }
+  .agents-view .agent-header-actions { width: 100%; }
+  .agents-view .agent-inbox-item { grid-template-columns: minmax(0, 1fr); }
+  .agents-view .agent-inbox-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+  .agent-profile-sheet:not([hidden]) { width: 100vw; }
+  .agent-create-dialog .agent-create-identity-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-avatar-picker { grid-template-columns: minmax(0, 1fr); }
+  .agent-avatar-picker-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .agents-view .agent-tile { transition: none; } }

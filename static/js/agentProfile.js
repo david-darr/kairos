@@ -1,30 +1,8 @@
 import { api, el, toast, confirmDialog } from './api.js';
-import { mountDither } from './dither.js';
+import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
 
 const SECTIONS = ['Overview', 'Identity', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice & alerts', 'History', 'Usage'];
 const bytes = (value) => new TextEncoder().encode(value).length;
-
-// 2026-10-13: a missing color needs the same portrait on every machine and
-// reload; the ID hash picks one of the colors already accepted by the API.
-const COLORS = ['#d9b260', '#b9d2e3', '#e8c39e', '#d99a92', '#b5c7a5', '#cdbfd9'];
-export function profileColor(agent) {
-  if (agent.color) return agent.color;
-  let hash = 2166136261;
-  for (const ch of agent.id || '') hash = Math.imul(hash ^ ch.charCodeAt(0), 16777619);
-  return COLORS[(hash >>> 0) % COLORS.length];
-}
-
-export function portrait(agent, size = 72) {
-  const color = profileColor(agent);
-  const face = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" fill="${color}"/><circle cx="64" cy="55" r="31" fill="#F3EADB"/><path d="M13 128c4-30 23-44 51-44s47 14 51 44" fill="#F3EADB"/><circle cx="53" cy="55" r="3" fill="#282724"/><circle cx="75" cy="55" r="3" fill="#282724"/><path d="M54 68q10 8 20 0" fill="none" stroke="#282724" stroke-width="3" stroke-linecap="round"/></svg>`;
-  const node = el('span', { class: 'agent-portrait', 'aria-hidden': 'true', style: `width:${size}px;height:${size}px;background:${color}` });
-  node.dataset.color = color;
-  // The Kairos circle remains visible when canvas or image loading fails.
-  node.append(el('img', { class: 'agent-portrait-mark', src: '/static/img/kairos-icon.svg', alt: '' }));
-  const stop = mountDither(node, `data:image/svg+xml,${encodeURIComponent(face)}`, { cell: 3, fixed: true });
-  node.stopPortrait = stop;
-  return node;
-}
 
 export function mountAgentProfile(root, initial, models, channels, onSaved) {
   let detail = initial, open = false, mode = 'simple', tab = 'details';
@@ -32,7 +10,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const sheet = el('aside', { class: 'agent-profile-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Bot profile', hidden: true });
   const body = el('div', { class: 'agent-profile-body' });
   const heading = el('h2', { text: detail.agent.name });
-  let photo = portrait(detail.agent);
+  let photo = agentAvatar(detail.agent);
   const closeButton = el('button', { class: 'btn quiet', type: 'button', 'aria-label': 'Close profile', text: '×' });
   const titlebar = el('div', { class: 'agent-profile-titlebar' }, [photo, heading, closeButton]);
   const simpleButton = el('button', { class: 'btn quiet', type: 'button', text: 'Simple view' });
@@ -93,6 +71,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     fields.set(key, state); return wrap;
   };
   const identity = el('div', { class: 'agent-profile-pair' }, [field('name', 'Name', 100), field('role', 'Job', 200)]);
+  const picker = avatarPicker(avatarSpec(detail.agent));
   const instruction = field('instructions', 'Standing instructions', 24000, true);
   const blurb = field('blurb', 'Blurb', 4000, true, 3000);
   const soul = field('soul', 'Soul', 24000, true);
@@ -175,7 +154,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   // A field has one DOM node. Switching modes moves it, preserving its value.
   // Separate save buttons avoid moving the same button between sections.
   const sectionSave = () => el('button', { class: 'btn primary', type: 'button', text: 'Save profile', onclick: () => save.click() });
-  details.append(identity, instruction, modelField, allButton, save);
+  details.append(picker.root, identity, instruction, modelField, allButton, save);
   sections.get('Overview').content.append(blurb, enabled, sectionSave());
   sections.get('Soul').content.append(soulDrift, soul, sectionSave());
   sections.get('Memory').content.append(memory, upkeep, sectionSave());
@@ -190,8 +169,8 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   modelSlot.append(sectionSave());
   const setMode = (next) => {
     mode = next;
-    if (mode === 'all') { identitySlot.prepend(identity, instruction); modelSlot.prepend(modelField); }
-    else { details.prepend(identity, instruction, modelField); }
+    if (mode === 'all') { identitySlot.prepend(picker.root, identity, instruction); modelSlot.prepend(modelField); }
+    else { details.prepend(picker.root, identity, instruction, modelField); }
     simpleTabs.hidden = mode !== 'simple'; details.hidden = mode !== 'simple' || tab !== 'details';
     library.hidden = mode !== 'simple' || tab !== 'library'; all.hidden = mode !== 'all'; simpleButton.hidden = mode !== 'all';
   };
@@ -200,7 +179,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const update = (next) => {
     detail = next;
     heading.textContent = next.agent.name;
-    if (photo.dataset.color !== profileColor(next.agent)) { photo.stopPortrait?.(); const replacement = portrait(next.agent); replacement.dataset.color = profileColor(next.agent); photo.replaceWith(replacement); photo = replacement; }
+    if (photo.dataset.avatarSpec !== JSON.stringify(avatarSpec(next.agent))) {
+      const replacement = agentAvatar(next.agent); photo.replaceWith(replacement); photo = replacement;
+    }
+    picker.setSpec(avatarSpec(next.agent));
     for (const [key, state] of fields) state.sync(key === 'soul' ? next.soul_file?.soul : next.agent[key]);
     for (const [key, state] of extraFields) state.sync(next.agent[key]);
     modelServer = next.agent.endpoint_id || '';
@@ -250,6 +232,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     }
     if (model.value !== modelBaseline) changes.endpoint_id = model.value || null;
     if (peersDraft !== null && JSON.stringify(peersDraft) !== peersBaseline) changes.peers = peersDraft;
+    if (picker.isDirty()) {
+      const spec = picker.getSpec(), saved = avatarSpec(detail.agent);
+      if (Object.keys(spec).some(key => spec[key] !== saved[key])) changes.avatar = spec;
+    }
     if (!Object.keys(changes).length) return;
     // 2026-10-13: read once before writing so a change between polls is
     // shown before the person's first Save. A second Save chooses the draft.
@@ -279,6 +265,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       else if (detail.soul_file) detail.soul_file.revision = agent.revision;
       if (changes.endpoint_id !== undefined) modelBaseline = model.value;
       if (changes.peers !== undefined) { peersBaseline = JSON.stringify(changes.peers); peersDraft = null; }
+      if (changes.avatar !== undefined) picker.markSaved();
       update(detail); toast('Profile saved', 'success'); onSaved();
     } catch (error) { soulError.textContent = error.message; soulError.hidden = false; toast(error.message, 'error'); }
   };
@@ -304,5 +291,5 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   sheet.append(el('div', { class: 'agent-profile-top' }, [titlebar, simpleButton]), simpleTabs, body);
   body.append(details, library, all); root.append(backdrop, sheet);
   update(detail); setTab('details');
-  return { open: openSheet, update, close, dispose: () => { document.removeEventListener('keydown', keydown); photo.stopPortrait?.(); sheet.remove(); backdrop.remove(); } };
+  return { open: openSheet, update, close, dispose: () => { document.removeEventListener('keydown', keydown); sheet.remove(); backdrop.remove(); } };
 }

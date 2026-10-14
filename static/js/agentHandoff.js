@@ -3,13 +3,13 @@
 import { api, el, toast } from './api.js';
 import { renderMessageBody } from './chatContent.js';
 import * as chatStream from './chatStream.js';
+import { agentAvatar as dotAvatar } from './agentAvatar.js';
 
 const STATUS = { queued: 'Queued', working: 'Working', needs_you: 'Needs you', done: 'Done', failed: 'Failed' };
 
-export function agentAvatar(name, color) {
-  const avatar = el('span', { class: 'handoff-avatar', 'aria-hidden': 'true', text: (name || '?').slice(0, 1).toUpperCase() });
-  // Agent colors come from the backend's fixed identity palette.
-  if (color) avatar.style.backgroundColor = color;
+export function agentAvatar(name, color, id, spec, size = 28) {
+  const avatar = dotAvatar({ id: id || name, avatar: spec }, size);
+  avatar.classList.add('handoff-avatar');
   return avatar;
 }
 
@@ -19,7 +19,7 @@ export function renderAgentHandoff(message, sessionId) {
   const card = el('div', { class: 'msg assistant agent-message', 'data-handoff-key': key || '',
     'data-handoff-signature': JSON.stringify(message) });
   const name = message.agent_name || 'Agent';
-  const heading = el('div', { class: 'agent-message-heading' }, [agentAvatar(name, message.agent_color),
+  const heading = el('div', { class: 'agent-message-heading' }, [agentAvatar(name, message.agent_color, message.agent_id, message.agent_avatar),
     el('span', { text: message.type === 'handoff' ? `Handed to ${name}` : name })]);
   card.append(heading);
   if (message.type === 'handoff') {

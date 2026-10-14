@@ -29,7 +29,7 @@ def metadata(references: list[dict]) -> list[dict]:
         if ref["kind"] == "agent":
             agent = agent_service.get(ref["id"])
             if agent:
-                ref.update(label=agent["name"], avatar=agent["name"][:1].upper(), color=agent.get("color"))
+                ref.update(label=agent["name"], avatar=agent["name"][:1].upper(), avatar_spec=agent.get("avatar"), color=agent.get("color"))
     return saved
 
 
@@ -45,7 +45,7 @@ def search(query: str, current_session_id: str | None = None, is_admin: bool = F
             if not needle or needle in (agent['name'] + ' ' + agent.get('role', '')).casefold():
                 results.append({"kind": "agent", "id": agent["id"], "label": agent["name"],
                                 "detail": agent.get("role", ""), "avatar": agent["name"][:1].upper(),
-                                "color": agent.get("color")})
+                                "color": agent.get("color"), "avatar_spec": agent.get("avatar")})
     for skill in skills_service.list_skills():
         if not skill.get("error") and (not needle or needle in (skill["slug"] + " " + skill.get("description", "")).casefold()):
             results.append({"kind": "skill", "id": skill["slug"], "label": skill["slug"], "detail": skill.get("description", "")})

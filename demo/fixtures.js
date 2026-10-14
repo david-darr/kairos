@@ -302,6 +302,9 @@
     }
     const memoryWrite = route.match(/^\/api\/agents\/(a\d)\/memory$/);
     if (memoryWrite && method === 'PUT') { (state.agentMemories ||= {})[memoryWrite[1]] = body.text; return { memory: body.text }; }
+    if (route === '/api/agents/a1/memory/upkeep/upkeep-demo/undo' && method === 'POST') {
+      state.agentUpkeepUndone = true; return { id: 'upkeep-demo', undone: true };
+    }
     if (/^\/api\/agents\/inbox\/i\d\/answer$/.test(route) && method === 'POST') {
       agentInbox.splice(agentInbox.findIndex(item => route.endsWith(`/${item.id}/answer`)), 1);
       return { next: 'done' };
@@ -783,6 +786,8 @@
     return { agent, soul_file: { soul: agent.soul, file_text: state.agentSoulFile ?? agent.soul,
         in_sync: (state.agentSoulFile ?? agent.soul) === agent.soul, revision: agent.revision },
       memory: state.agentMemories?.[id] ?? `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
+      memory_upkeep_journal: id === 'a1' ? [{ id: 'upkeep-demo', at: now - 1800, topic: null,
+        status: state.agentUpkeepUndone ? 'undone' : 'committed', changes: [{ section: 'Notes', line: 'Old note', reason: 'expired' }] }] : [],
       goals: [{ id: "g1", name: "New postings", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
       cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: state.agentReview ? 'review' : 'ready', agent_id: id, comments: [] }],
       inbox: agentInbox.filter((i) => i.agent_id === id), answered: [], runs: runs.c1,
@@ -1007,7 +1012,7 @@
       const needle = (url.searchParams.get('q') || '').toLowerCase();
       const kind = url.searchParams.get('kind');
       const matches = [
-        ...agentsFixture.map(a => ({ kind: 'agent', id: a.id, label: a.name, detail: a.role, avatar: a.name[0], color: a.color })),
+        ...agentsFixture.map(a => ({ kind: 'agent', id: a.id, label: a.name, detail: a.role, avatar: a.name[0], avatar_spec: a.avatar, color: a.color })),
         ...fixture(new URL('/api/skills', url)).filter(s => !s.error).map(s => ({ kind: 'skill', id: s.slug, label: s.slug, detail: s.description })),
         { kind: 'tool', id: 'builtin:search_sessions', label: 'search_sessions', detail: 'Search past chats for relevant context.' },
         { kind: 'tool', id: 'mcp:demo:find_document', label: 'mcp__Library__find_document', detail: 'Find a document in the connected Library.' },

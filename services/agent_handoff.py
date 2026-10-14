@@ -37,7 +37,7 @@ def _thread(card: dict) -> str | None:
 
 def _event(card: dict, agent: dict) -> dict:
     return {"type": "handoff", "id": uuid.uuid4().hex[:12], "agent_id": agent["id"],
-            "agent_name": agent["name"], "agent_color": agent.get("color"), "card_id": card["id"],
+            "agent_name": agent["name"], "agent_color": agent.get("color"), "agent_avatar": agent.get("avatar"), "card_id": card["id"],
             "handoff_status": "queued", "note": queue_note(agent["id"])}
 
 
@@ -175,7 +175,7 @@ def _post(card: dict, text: str, key: str, **extra) -> None:
         return
     agent = agent_service.get(card["agent_id"]) or {"name": "Agent"}
     session_manager.append_message(session_id, "assistant", text, extra={
-        "agent_id": card["agent_id"], "agent_name": agent["name"], "agent_color": agent.get("color"),
+        "agent_id": card["agent_id"], "agent_name": agent["name"], "agent_color": agent.get("color"), "agent_avatar": agent.get("avatar"),
         "card_id": card["id"], "handoff_message_id": key, **extra})
     session_manager.set_untrusted_context(session_id, "agent reply from another conversation")
 

@@ -30,6 +30,20 @@ export function compareStatus(a, b) {
   return STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b);
 }
 
+// 2026-10-14: one readable status sentence is shared by roster and profile.
+export function botStatusLine(agent, messages = [], live = false) {
+  const state = botStatus(agent, messages, live);
+  if (!agent?.enabled || agent?.status === 'off') return { state: 'off', text: 'Off' };
+  if (state === 'needs_you') {
+    const count = Math.max(1, agent?.needs_you || 0);
+    return { state, text: `Needs you: ${count} ${count === 1 ? 'item' : 'items'}` };
+  }
+  if (state === 'working') return { state, text: agent?.status_detail ? `Working on ${agent.status_detail}` : 'Working' };
+  if (state === 'teammate') return { state, text: 'Waiting for a teammate' };
+  if (state === 'queued') return { state, text: 'Queued for work' };
+  return { state, text: agent?.status === 'capped' ? 'Done for today' : 'Ready for work' };
+}
+
 // The last thing a bot or person actually said, as one plain line: no
 // Markdown, no code blocks, no handoff cards or failed turns.
 export function readablePreview(messages = []) {

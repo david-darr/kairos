@@ -92,6 +92,24 @@ class AgentTestCase(unittest.TestCase):
 
 
 class ProfileAndSoulTests(AgentTestCase):
+    def test_avatar_spec_is_optional_and_closed(self):
+        self.assertNotIn('avatar', self.agent)
+        self.assertEqual(web.get(f'/api/agents/{self.agent["id"]}').json()['agent']['id'], self.agent['id'])
+        valid = {'form': 'cloud', 'color': '#FA70AB', 'finish': 'plush', 'face': 'smile', 'accessory': 'flower'}
+        created = web.post('/api/agents', json={'name': 'Avatar test', 'avatar': valid})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.addCleanup(self._remove, created.json()['id'])
+        self.assertEqual(created.json()['avatar'], valid)
+        custom = {**valid, 'color': '#123ABC'}
+        saved = web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': custom})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()['avatar'], custom)
+        for invalid in ({**valid, 'unknown': 'x'}, {**valid, 'form': 'octopus'},
+                        {**valid, 'face': 'angry'}, {**valid, 'color': 'red'},
+                        {**valid, 'finish': 'metal'}, {**valid, 'accessory': 'crown'}):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': invalid}).status_code, 400)
+
     def soul_path(self):
         from services.agent_service import AGENTS_DIR
         return Path(AGENTS_DIR) / self.agent["id"] / "SOUL.md"

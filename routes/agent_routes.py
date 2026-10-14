@@ -23,6 +23,7 @@ class AgentBody(BaseModel):
     instructions: Optional[str] = None
     endpoint_id: Optional[str] = None
     color: Optional[str] = None
+    avatar: Optional[dict] = None
     enabled: Optional[bool] = None
     daily_run_cap: Optional[int] = None
     deliver_to_channel: Optional[str] = None

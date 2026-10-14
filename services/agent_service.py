@@ -54,12 +54,33 @@ MEMORY_SECTIONS = ("About this work", "Preferences", "Corrections", "Notes")
 MEMORY_ENTRY = re.compile(r"^\s*-\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:]*))?\s*:\s*(.*)$")
 INBOX_KINDS = ("report", "question")
 COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
+# 2026-10-14: the renderer and API share a closed vocabulary; custom colors
+# are hex only, so a saved spec can never inject markup into the SVG.
+AVATAR_FORMS = ("round", "pill", "triangle", "ears", "cloud", "heart", "sprout", "scallop", "hexagon", "diamond", "robot")
+AVATAR_COLORS = ("#FA70AB", "#DD6ADC", "#A25BFF", "#4778FF", "#00B1FF", "#04BB9F", "#B6D80B", "#FFCC38", "#FF8066")
+AVATAR_FINISHES = ("matte", "plush", "glossy", "ceramic")
+AVATAR_FACES = ("smile", "content", "curious", "sleepy", "wink")
+AVATAR_ACCESSORIES = ("none", "bow", "glasses", "hat", "headphones", "flower")
+AVATAR_CATALOGUE = {"form": AVATAR_FORMS, "finish": AVATAR_FINISHES,
+                    "face": AVATAR_FACES, "accessory": AVATAR_ACCESSORIES}
+
+
+def validate_avatar(value: dict) -> dict:
+    if not isinstance(value, dict) or set(value) != {"form", "color", "finish", "face", "accessory"}:
+        raise ValueError("avatar needs exactly form, color, finish, face and accessory")
+    for key, choices in AVATAR_CATALOGUE.items():
+        if value[key] not in choices:
+            raise ValueError(f"unknown avatar {key}")
+    color = value["color"]
+    if not isinstance(color, str) or (color.upper() not in AVATAR_COLORS and not re.fullmatch(r"#[0-9A-Fa-f]{6}", color)):
+        raise ValueError("avatar color must be an offered or custom hex color")
+    return {**value, "color": color.upper()}
 # The palette before the Kairos rebrand (2026-10-06); an agent saved with one
 # of these gets the color in the same position.
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
 # Fields a person may change; everything else is the service's.
 EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
-            "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep", "peers")
+            "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep", "peers", "avatar")
 REPLIES_IN_PROMPT = 5
 # A reply code on a channel notification ("[S-7f3a2b]": the agent's initial
 # and the start of the item's or card's id). Replying to that message in
@@ -110,7 +131,8 @@ class AgentService:
                color: Optional[str] = None, daily_run_cap: int = DEFAULT_DAILY_RUN_CAP,
                deliver_to_channel: Optional[str] = None, integration_ids: Optional[list] = None,
                keep_signed_in: bool = False, memory_upkeep: bool = False,
-               blurb: str = "", soul: Optional[str] = None, peers: Optional[list[str]] = None) -> dict:
+               blurb: str = "", soul: Optional[str] = None, peers: Optional[list[str]] = None,
+               avatar: Optional[dict] = None) -> dict:
         name = _clean_name(name)
         self._check_unique(name, None)
         role = _profile_text("role", role, 200)
@@ -132,6 +154,8 @@ class AgentService:
         }
         if soul is not None:
             agent["soul"] = soul
+        if avatar is not None:
+            agent["avatar"] = validate_avatar(avatar)
         self._agents[agent_id] = agent
         if soul is not None:
             self._write_soul_file(agent_id, soul)
@@ -165,6 +189,8 @@ class AgentService:
                     value = bool(value)
                 elif key == "peers":
                     value = self._check_peers(value, agent_id)
+                elif key == "avatar":
+                    value = validate_avatar(value)
                 changes[key] = value
             # A normal profile edit must not erase a hand edit before the
             # person has resolved it (Agents 2.0 unit 4-0, 2026-10-13).
