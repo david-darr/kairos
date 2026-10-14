@@ -220,8 +220,13 @@ export function renderImage(content, actions, meta, contentURL, controller, onEr
   root.addEventListener('pointermove', event => { if (drag) { root.scrollLeft = drag.left - event.clientX + drag.x; root.scrollTop = drag.top - event.clientY + drag.y; } }, { signal: controller.signal });
   root.addEventListener('pointerup', () => { drag = null; }, { signal: controller.signal });
   root.addEventListener('pointercancel', () => { drag = null; }, { signal: controller.signal });
-  const observer = new ResizeObserver(paint); observer.observe(root);
-  controller.signal.addEventListener('abort', () => observer.disconnect(), { once: true });
+  // Paint on the next frame, not inside the observer: painting can change the
+  // size being observed, which Chromium reports as a ResizeObserver loop (and
+  // ui-smoke counts as a renderer error). artifactReview.js does the same.
+  let paintFrame = 0;
+  const observer = new ResizeObserver(() => { cancelAnimationFrame(paintFrame); paintFrame = requestAnimationFrame(paint); });
+  observer.observe(root);
+  controller.signal.addEventListener('abort', () => { observer.disconnect(); cancelAnimationFrame(paintFrame); }, { once: true });
   img.onload = () => { skeleton.remove(); img.hidden = false; paint(); };
   img.onerror = async () => {
     if (controller.signal.aborted) return;
@@ -324,8 +329,12 @@ export function renderHTML(content, actions, text, name, controller) {
     exposeRoot(content, body);
   };
   stage.append(frame); root.append(stage); content.replaceChildren(root); actions.append(controls);
-  const observer = new ResizeObserver(resize); observer.observe(root);
-  const dispose = () => { observer.disconnect(); controls.remove(); controller.signal.removeEventListener('abort', dispose); };
+  // Deferred for the same reason as above: resize() sets the frame's height,
+  // which can resize the box being observed (2026-10-14).
+  let resizeFrame = 0;
+  const observer = new ResizeObserver(() => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(resize); });
+  observer.observe(root);
+  const dispose = () => { observer.disconnect(); cancelAnimationFrame(resizeFrame); controls.remove(); controller.signal.removeEventListener('abort', dispose); };
   content._disposeRenderer = dispose;
   controller.signal.addEventListener('abort', dispose, { once: true });
   resize();
