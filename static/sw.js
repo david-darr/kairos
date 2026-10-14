@@ -5,7 +5,7 @@ self.addEventListener('activate', event => event.waitUntil(self.clients.claim())
 function chatUrl(value) {
   const url = new URL(value || '/', self.location.origin);
   if (url.origin !== self.location.origin || url.pathname !== '/' ||
-      (url.search && !/^\?chat=[a-f0-9]{12}$/.test(url.search))) return self.location.origin + '/';
+      (url.search && !/^\?(chat=[a-f0-9]{12}|agent=[A-Za-z0-9_-]{1,64})$/.test(url.search))) return self.location.origin + '/';
   url.hash = '';
   return url.href;
 }
@@ -19,7 +19,10 @@ self.addEventListener('push', event => {
     const body = expired ? 'A permission request expired. Tap to review the chat.' :
       ({ completed: 'Your reply is ready. Tap to open the chat.', failed: 'A chat could not finish. Tap to review.',
          permission: 'A chat needs your permission. Tap to review before the request expires.',
-         test: 'Notifications are enabled on this device.' }[data.kind] || 'There is an update in Kairos.');
+         test: 'Notifications are enabled on this device.',
+         // Bots (2026-10-14): as generic as chats; a lock screen shows no content.
+         bot_needs_you: 'A bot needs you. Tap to review.', bot_results: 'A bot has results. Tap to review.' }[data.kind]
+        || 'There is an update in Kairos.');
     await self.registration.showNotification('Kairos', { body, icon: '/static/img/app-192.png',
       tag: typeof data.tag === 'string' ? data.tag.slice(0, 100) : 'kairos', data: { url: chatUrl(data.url) } });
   })());

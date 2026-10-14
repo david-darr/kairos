@@ -281,6 +281,176 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.messages()[1]["handoff_status"], "queued")
 
 
+class CoordinationTests(unittest.TestCase):
+    """2026-10-14: keep the original handoff tests above unchanged."""
+
+    def setUp(self):
+        HandoffTests.setUp(self)
+        self.peer = agent_service.create("Peer", peers=[self.agent["id"]])
+        self.third = agent_service.create("Third")
+        self.addCleanup(agent_service.delete, self.peer["id"])
+        self.addCleanup(task_service.delete_agent_work, self.peer["id"])
+        self.addCleanup(agent_service.delete, self.third["id"])
+        self.addCleanup(task_service.delete_agent_work, self.third["id"])
+        agent_service.update(self.agent["id"], peers=[self.peer["id"], self.third["id"]])
+        agent_service.make_agent_chat(self.source, self.agent)
+
+    messages = HandoffTests.messages
+
+    def assignment(self, work="Check this", target="Peer", run="turn-1"):
+        ctx = tool_registry.ToolContext(session_id=self.source, agent_id=self.agent["id"],
+                                        assignment_run_id=run)
+        return asyncio.run(tool_registry.call("agent_assign", {"agent": target, "work": work},
+                                              ctx, tool_registry.CLAUDE))
+
+    def assigned_cards(self):
+        return [c for c in task_service.list_tasks() if (c.get("requester") or {}).get("kind") == "bot"
+                and (c.get("requester") or {}).get("session_id") == self.source]
+
+    def test_peer_assignment_result_and_one_admitted_resume(self):
+        self.assertIn("Assigned to Peer", self.assignment())
+        card = self.assigned_cards()[0]
+        self.assertEqual(card["requester"]["agent_id"], self.agent["id"])
+        self.assertIn("<<<UNTRUSTED-", card["prompt"])
+        agent_handoff.close_batch(self.agent["id"], session_id=self.source)
+        self.brain.agent_id = self.peer["id"]
+        with patch.object(agent_handoff, "_resume", new_callable=AsyncMock) as resume:
+            asyncio.run(task_scheduler.start_run(card))
+            asyncio.run(agent_handoff.wake_batches())
+            asyncio.run(agent_handoff.wake_batches())
+            resume.assert_awaited_once()
+        self.assertIn("<<<UNTRUSTED-", self.messages()[-1]["content"])
+        self.assertTrue(card["batch_resumed_at"])
+        self.assertEqual(self.messages()[0]["handoff_status"], "done")
+
+    def test_peer_update_uses_the_existing_profile_route(self):
+        from routes.agent_routes import AgentBody, update_agent
+        saved = asyncio.run(update_agent(self.agent["id"], AgentBody(peers=[self.peer["id"]]), "david"))
+        self.assertEqual(saved["peers"], [self.peer["id"]])
+        saved = asyncio.run(update_agent(self.agent["id"], AgentBody(peers=[]), "david"))
+        self.assertEqual(saved["peers"], [])
+        self.assertIn("not on your Peers", self.assignment())
+
+    def test_non_peers_empty_default_cycles_depth_and_cap(self):
+        self.assertIn("not on your Peers", agent_handoff.assign(self.third["id"], self.agent["id"], "No", self.source,
+                                                                  "empty"))
+        agent_service.update(self.peer["id"], peers=[])
+        self.assertIn("not on your Peers", agent_handoff.assign(self.peer["id"], self.agent["id"], "No", self.source,
+                                                                  "empty2"))
+        agent_service.update(self.peer["id"], peers=[self.agent["id"], self.third["id"]])
+        first = self.assignment()
+        self.assertIn("Assigned", first)
+        origin = self.assigned_cards()[0]
+        with agent_service.run(self.peer["id"], card_id=origin["id"]):
+            self.assertIn("cycle", agent_handoff.assign(self.peer["id"], self.agent["id"], "Loop"))
+            self.assertIn("Assigned", agent_handoff.assign(self.peer["id"], self.third["id"], "Continue"))
+        second = next(c for c in task_service.list_tasks() if c.get("assignment_chain") ==
+                      [self.agent["id"], self.peer["id"], self.third["id"]])
+        agent_service.update(self.third["id"], peers=[self.agent["id"], self.peer["id"]])
+        with agent_service.run(self.third["id"], card_id=second["id"]):
+            self.assertIn("cycle", agent_handoff.assign(self.third["id"], self.agent["id"], "Long loop"))
+        deep = dict(second, assignment_chain=[self.agent["id"], self.peer["id"], self.third["id"], "fourth"])
+        task_service._tasks[second["id"]] = deep
+        with agent_service.run(self.third["id"], card_id=second["id"]):
+            self.assertIn("at most 3 hops", agent_handoff.assign(self.third["id"], self.peer["id"], "Too deep"))
+        for i in range(agent_handoff.MAX_ASSIGNMENTS_PER_RUN - 1):
+            self.assertIn("Assigned", self.assignment(f"Work {i}"))
+        self.assertIn("at most 5", self.assignment("One too many"))
+
+    def test_off_peer_queues_and_three_results_batch_with_ceiling(self):
+        agent_service.update(self.peer["id"], enabled=False)
+        self.assertIn("turned off", self.assignment())
+        self.assertEqual(self.assigned_cards()[0]["status"], "ready")
+        self.assertIsNone(task_service.next_card(eligible=task_scheduler.agent_may_run))
+        agent_service.update(self.peer["id"], enabled=True)
+        with patch.object(agent_service, "can_run", return_value=(False, "Peer reached its 12 runs for today")):
+            self.assertIn("today's limit", self.assignment("Cap note"))
+        self.assignment("Third result")
+        cards = self.assigned_cards()
+        agent_handoff.close_batch(self.agent["id"], session_id=self.source)
+        for card in cards[:2]:
+            task_service.claim_next_card(card_id=card["id"])
+            task_service.finish_card(card["id"], card["name"] + " done")
+            agent_handoff.finished(card, card["name"] + " done")
+        with patch.object(agent_handoff, "_resume", new_callable=AsyncMock) as resume:
+            asyncio.run(agent_handoff.wake_batches(now=cards[0]["requester"]["created_at"] + 10))
+            resume.assert_not_awaited()
+            asyncio.run(agent_handoff.wake_batches(now=cards[0]["requester"]["created_at"] +
+                                                   agent_handoff.RESUME_CEILING_SECONDS + 1))
+            resume.assert_awaited_once()
+            self.assertIn("still outstanding", resume.call_args.args[1])
+            for card in cards:
+                self.assertIn(card["id"], resume.call_args.args[1])
+
+    def test_three_settled_assignments_resume_once_with_every_result(self):
+        for n in range(3):
+            self.assignment(f"Check part {n}")
+        cards = self.assigned_cards()
+        agent_handoff.close_batch(self.agent["id"], session_id=self.source)
+        with patch.object(agent_handoff, "_resume", new_callable=AsyncMock) as resume:
+            for n, card in enumerate(cards):
+                task_service.claim_next_card(card_id=card["id"])
+                task_service.finish_card(card["id"], f"Result {n}")
+                agent_handoff.finished(card, f"Result {n}")
+            asyncio.run(agent_handoff.wake_batches())
+            resume.assert_awaited_once()
+            for n in range(3):
+                self.assertIn(f"Result {n}", resume.call_args.args[1])
+
+    def test_question_routes_to_bot_then_person_and_old_card(self):
+        self.assignment()
+        card = self.assigned_cards()[0]
+        with agent_service.run(self.peer["id"], card_id=card["id"]):
+            item = agent_service.add_item(self.peer["id"], "question", "Which region?")
+        self.assertEqual(self.messages()[-1]["inbox_item_id"], item["id"])
+        self.assertNotIn(item, agent_handoff.person_inbox(), "the asking bot receives it first")
+        self.assertIn("<<<UNTRUSTED-", self.messages()[-1]["content"])
+        with patch.object(agent_handoff, "_resume", new_callable=AsyncMock) as resume:
+            asyncio.run(agent_handoff.wake_questions())
+            resume.assert_awaited_once()
+        self.assertIn("Escalated", agent_handoff.answer_question(self.agent["id"], item["id"], escalate=True))
+        upward = next(i for i in agent_service.inbox(self.agent["id"]) if i.get("escalates_item_id") == item["id"])
+        self.assertIn(upward, agent_handoff.person_inbox())
+        agent_service.answer_item(upward["id"], "reply", "Europe")
+        self.assertEqual(item["status"], "answered")
+        self.assertIn("<<<UNTRUSTED-", item["answer"])
+        with agent_service.run(self.peer["id"], card_id=card["id"]):
+            direct = agent_service.add_item(self.peer["id"], "question", "Which format?")
+        agent_handoff.answer_question(self.agent["id"], direct["id"], "PDF")
+        self.assertEqual(direct["status"], "answered")
+        self.assertIn("<<<UNTRUSTED-", direct["answer"])
+        old = agent_handoff.hand_off(self.peer["id"], "Old work", self.other, [])
+        legacy = task_service.get_task(old["card_id"])
+        legacy.pop("requester")
+        task_service._save_tasks()
+        task_service.claim_next_card(card_id=legacy["id"])
+        task_service.finish_card(legacy["id"], "Legacy result")
+        agent_handoff.finished(legacy, "Legacy result")
+        self.assertEqual(self.messages(self.other)[-1]["content"], "Legacy result")
+
+    def test_coordinated_resume_uses_core_memory_only(self):
+        self.assignment()
+        req = self.assigned_cards()[0]["requester"]
+        session_manager.set_model_endpoint(self.source, "configured")
+        with patch.object(chat_service, "send_message", new_callable=AsyncMock) as send:
+            async def inspect(*args, **kwargs):
+                prompt = session_manager.get_session(self.source)["agent_prompt"]
+                self.assertNotIn("Memory topics you may open", prompt)
+                self.assertNotIn("recent statements in other threads", prompt)
+            send.side_effect = inspect
+            asyncio.run(agent_handoff._resume(req, "Results"))
+        send.assert_awaited_once()
+
+    def test_default_model_continues_without_a_chat_endpoint(self):
+        self.assignment()
+        req = self.assigned_cards()[0]["requester"]
+        self.assertIsNone(session_manager.get_session(self.source)["model_endpoint_id"])
+        asyncio.run(agent_handoff._resume(req, "Peer result"))
+        self.assertEqual(self.messages()[-1]["content"], "Two remote roles found.")
+        self.assertIn("Peer result", self.brain.prompt)
+        self.assertNotIn("recent statements in other threads", self.brain.prompt)
+
+
 if __name__ == "__main__":
     try:
         unittest.main(verbosity=2)

@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, ".scratch-4iii", "run-" + Date.now());
+const output = path.join(root, "data", "ui-review", "run-" + Date.now());
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -218,7 +218,11 @@ app.whenReady().then(async () => {
     cb({ cancel: true });
   });
   const win = new BrowserWindow({ width: 1440, height: 900, show: false, useContentSize: true, webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false } });
-  win.webContents.on("console-message", (details) => { if (details.level === 'error') errors.push(details.message); });
+  let lastCapture = 'startup';
+  win.webContents.on("console-message", (details) => {
+    if (details.level === 'error' || /ResizeObserver/i.test(details.message))
+      errors.push(/ResizeObserver/i.test(details.message) ? `${details.message} after ${lastCapture} (${details.sourceId}:${details.lineNumber})` : details.message);
+  });
   const js = async (code) => {
     try { return await win.webContents.executeJavaScript(code); }
     catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
@@ -228,6 +232,7 @@ app.whenReady().then(async () => {
     throw new Error("Timed out: " + condition);
   };
   const capture = async (name) => {
+    lastCapture = name;
     await delay(250);
     const picture = await win.webContents.capturePage();
     fs.writeFileSync(path.join(output, name + ".png"), picture.toPNG());
@@ -298,21 +303,19 @@ app.whenReady().then(async () => {
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
     if (process.argv.includes('--agents-birth-only')) {
       await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        win, liveChunk, liveEvent, liveFinish });
+        win, liveChunk, liveEvent, liveFinish, capture });
       assert.deepEqual(errors, [], 'Agent birth renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
     }
-    if (process.argv.includes('--sidebar-bots-only')) {
-      await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        sessions: calendarFixtures.sessions, win, errors });
-      assert.deepEqual(errors, [], 'Sidebar bots renderer errors');
-      console.log('PASS: sidebar bots (9 cases), no renderer errors.');
-      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Sidebar bots: 9 cases'], errors }, null, 2));
-      return;
+    if (process.argv.includes('--agents-phone-report')) {
+      const found = await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, report: true });
+      console.log('PHONE AUDIT ' + found.length + ' problem(s)');
+      for (const line of found) console.log('  ' + line);
+      exitAfterFlush(0); return;
     }
     if (process.argv.includes('--agents-profile-only')) {
-      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
+      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
       assert.deepEqual(errors, []);
       console.log('PASS: Agents profile checks.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agents profile and draft retention'], errors }, null, 2));
@@ -990,14 +993,18 @@ app.whenReady().then(async () => {
           writes.splice(schoolWrites);
         }
         if (tab === "agents" && !demoState.empty) {
+          demoState.agentUpkeepUndone = false;
           // Agents: the list, the cross-agent inbox with its answers, the badge.
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 2");
+          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
+          assert.equal(await js("document.querySelectorAll('.agent-tile:not(.team-tile):not(.agent-new-card) .agent-dot-avatar').length"), 2, label + ' roster faces use the dot component');
+          assert.ok(await js("!!document.querySelector('.agent-new-card')"), label + ' creation card is in the roster');
           assert.ok(await js("document.querySelector('.agent-teams .team-tile')?.textContent.includes('Launch team')"), label + " teams listed under agents");
           assert.ok(await js("document.querySelector('.team-tile .agent-status').textContent === 'Working'"), label + " team state shown");
-          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Answer')"), label + " a question can be answered");
+          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Reply')"), label + " a question can be answered");
           assert.equal(await js("document.querySelectorAll('.agent-inbox-approval').length"), 0, label + " agents run in Auto: nothing to approve");
           assert.ok(await js("document.querySelector('.agent-inbox-report').textContent.includes('Backend Engineer')"), label + " report body shown");
-          assert.equal(await js("document.querySelector('.agent-status-working').textContent"), "Working");
+          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-item')].every(n => n.querySelector('.agent-dot-avatar') && n.querySelectorAll('.agent-inbox-actions .btn.primary').length === 1 && n.querySelector('.agent-inbox-compose[hidden]'))"), label + ' waiting rows have faces and one primary action');
+          assert.ok((await js("document.querySelector('.agent-status-line.agent-status-working').textContent")).startsWith('Working on'));
           await waitFor("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent === '2'");
           assert.deepEqual(await overflow(), [], label + " overflow in agents list");
           await navigate("agents", { agentId: "a1" });
@@ -1006,6 +1013,7 @@ app.whenReady().then(async () => {
           // conversation and a composer; Work holds everything else.
           await waitFor("document.querySelectorAll('.agent-chat-item').length === 1");
           assert.equal(await js("document.querySelector('.agent-tab.active').textContent"), "Chat", label + " opens on Chat");
+          assert.ok(await js("!!document.querySelector('.agent-header .agent-dot-avatar') && !!document.querySelector('.agent-profile-open')"), label + ' bot hero has face and settings');
           assert.equal(await js("[...document.querySelectorAll('.agent-tab')][1].textContent"), "Work (2)", label + " work tab counts what waits");
           await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0");
           assert.ok(await js("document.querySelector('.agent-chat-item.active')?.textContent.includes('Chat with Scout')"), label + " last chat open");
@@ -1017,7 +1025,9 @@ app.whenReady().then(async () => {
           await waitFor("!document.querySelector('.agent-work-host').hidden");
           await waitFor("document.querySelector('.agent-computer-section .computer-frame')?.naturalWidth > 0");
           const titles = await js("[...document.querySelectorAll('.agent-work-host > .glass > .title')].map(n => n.textContent)");
-          assert.deepEqual(titles, ["Inbox", "Computer", "Standing goals", "Work", "Memory", "History", "Teams", "Triggers"], label + " agent work sections");
+          assert.deepEqual(titles, ["Inbox", "Computer", "Work", "History", "Teams", "Triggers"], label + " agent work sections");
+          assert.ok(await js("!!document.querySelector('.agent-assignment-card .agent-dot-avatar')"), label + ' assignment card has dot face');
+          assert.ok(await js("[...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Routines') && [...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Memory')"), label + ' routines and memory tabs');
           assert.equal(await js("document.querySelector('.agent-work-host [aria-label=\"Keep this agent signed in\"]').getAttribute('aria-checked')"), 'true');
           assert.ok(await js("document.querySelector('.agent-forget-logins').disabled"), label + ' logins cannot be forgotten while running');
           await capture(label + '-agent-computer');
@@ -1027,8 +1037,16 @@ app.whenReady().then(async () => {
           assert.ok(await js("document.querySelector('.agents-view').textContent.includes('Every day at 08:00')"), label + " goal cadence");
           assert.deepEqual(await overflow(), [], label + " overflow on agent page");
           await capture(label + "-agent-page");
+          await js("[...document.querySelectorAll('.agent-tab')].find(n => n.textContent === 'Memory').click()");
+          await waitFor("!document.querySelector('.agent-memory-host').hidden");
+          assert.ok(await js("document.querySelector('.agent-memory-journal')?.textContent.includes('1 changes')"), label + ' upkeep journal shown');
+          const undoStart = writes.length;
+          await js("[...document.querySelectorAll('.agent-memory-journal button')].find(n => n.textContent === 'Undo').click()");
+          await waitFor("document.querySelector('.agent-memory-journal')?.textContent.includes('undone')");
+          assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
+          await capture(label + '-agent-memory');
           await navigate("agents");
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 2");
+          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
           const agentComputerStart = writes.length;
           await js("[...document.querySelectorAll('.agent-inbox-question button')].find(b => b.textContent === 'Open computer').click()");
           await waitFor("document.querySelector('.agent-work-host:not([hidden]) .computer-state')?.textContent.includes('You have control')");
@@ -1951,7 +1969,31 @@ app.whenReady().then(async () => {
     await navigate('notes');
     await navigate('chat');
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History preference survives remount');
-    await js("document.querySelector('#chat-history-toggle').click(); document.querySelector('.chat-header-new').click()");
+    // 2026-10-14: the conversation pill morphs into the panel and back. The
+    // ghost exists only while the morph runs; reduced motion skips it.
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Closing history morphs into the pill');
+    await waitFor("!document.querySelector('.chat-history-goo-wrap')");
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Opening history morphs out of the pill');
+    await waitFor("!document.querySelector('.chat-history-goo-wrap') && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')==='true'");
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await js("document.querySelector('#chat-history-toggle').click()");
+    assert.equal(await js("!!document.querySelector('.chat-history-goo-wrap')"), false, 'Reduced motion: no morph');
+    await js("document.querySelector('#chat-history-toggle').click()");
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History is open again after the morph checks');
+    // One single-line model control, the same height as the tools button beside it.
+    assert.equal(await js("!!document.querySelector('#model-version-btn')"), false, 'Model and version are one control');
+    assert.equal(await js("Math.round(document.querySelector('.chat-header-model').getBoundingClientRect().height)"),
+      await js("Math.round(document.querySelector('.chat-phone-tools > button').getBoundingClientRect().height)"), 'Model pill matches the tools button height');
+    assert.equal(await js("getComputedStyle(document.querySelector('#model-picker-label')).whiteSpace"), 'nowrap', 'Model label is one line');
+    // Keyboard: ArrowDown opens with focus inside; Escape closes and returns focus.
+    await js("document.querySelector('#model-picker-btn').focus(); document.querySelector('#model-picker-btn').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))");
+    await waitFor("!document.querySelector('#model-picker-menu').classList.contains('hidden') && document.querySelector('#model-picker-menu').contains(document.activeElement)");
+    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await waitFor("document.querySelector('#model-picker-menu').classList.contains('hidden') && document.activeElement === document.querySelector('#model-picker-btn')");
+    await js("document.querySelector('#chat-history-toggle').click(); document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click();");
     assert.equal(writes.length, landingWriteBaseline, 'New-chat landing and history navigation do not create sessions');
     win.setContentSize(390, 844);
     await delay(300);
@@ -2249,15 +2291,71 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.dashboard-core')");
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
-    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win });
-    await require('./sidebar-bots-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      sessions: calendarFixtures.sessions, win, errors });
+    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
+    // 2026-10-14: David removed the sidebar's Bots, Teams and Pinned sections. The
+    // precedence they showed is tested in scripts/test_bot_status.cjs.
+    assert.equal(await js("document.querySelectorAll('#nav [data-section], #nav .sidebar-bot, #nav .sidebar-bot-create').length"), 0,
+      'The sidebar has no bot, team or pinned sections');
+    assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
     await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      win, liveChunk, liveEvent, liveFinish });
+      win, liveChunk, liveEvent, liveFinish, capture });
+    // 2026-10-14: the floating bot window's own page, in a window of its own
+    // against the demo data: highest need first, quiet bots left out.
+    {
+      // Set the state this check depends on; earlier checks flip the second
+      // bot between idle and working to exercise the reconciler.
+      const [scout, archivist] = calendarFixtures.agentsFixture;
+      const saved = [scout, archivist].map(agent => ({ enabled: agent.enabled, status: agent.status }));
+      Object.assign(scout, { enabled: true, status: 'needs_you' });
+      Object.assign(archivist, { enabled: true, status: 'working' });
+      const bot = new BrowserWindow({ width: 300, height: 340, show: false, useContentSize: true,
+        webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false } });
+      const botErrors = [];
+      bot.webContents.on('console-message', (_e, level, message) => { if (level >= 3) botErrors.push(message); });
+      await bot.loadURL(base + '/static/bot-window.html');
+      const botJs = source => bot.webContents.executeJavaScript(source);
+      for (let i = 0; i < 100 && !(await botJs("document.querySelectorAll('.bot-window-list li').length")); i++) await delay(50);
+      assert.deepEqual(await botJs("[...document.querySelectorAll('.bot-window-list li')].map(li => [li.dataset.agentId, li.dataset.state])"),
+        [['a1', 'needs_you'], ['a2', 'working']], 'Bot window lists needs-you before working');
+      assert.equal(await botJs("document.querySelectorAll('.bot-window-list .agent-dot-avatar img').length"), 2, 'Bot window shows faces');
+      assert.equal(await botJs("document.querySelector('.bot-window-empty').hidden"), true);
+      assert.equal(await botJs("getComputedStyle(document.querySelector('.bot-window-bar')).webkitAppRegion"), 'drag', 'The bar drags the window');
+      fs.writeFileSync(path.join(output, 'bot-window.png'), (await bot.webContents.capturePage()).toPNG());
+      bot.destroy();
+      [scout, archivist].forEach((agent, i) => Object.assign(agent, saved[i]));
+      assert.deepEqual(botErrors, [], 'Bot window page renderer errors');
+    }
+    // The empty state reads quietly rather than hiding the window.
+    await js("(async () => { const host = document.createElement('div'); host.id = 'bw-smoke'; document.body.append(host); const m = await import('/static/js/botWindow.js'); m.render(host, [{ id: 'q1', name: 'Quiet', enabled: true, status: 'idle', needs_you: 0 }]); })()");
+    assert.equal(await js("document.querySelector('#bw-smoke .bot-window-empty').hidden"), false, 'Bot window says when nothing needs you');
+    await js("document.querySelector('#bw-smoke').remove()");
+    // 2026-10-14 (unit 6-ii): routines, not goals, wherever a person looks;
+    // pause and edit go through the existing task route.
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    for (const view of [{ agentId: 'a1', agentTab: 'routines' }, { agentId: 'a1', agentTab: 'work' }, {}]) {
+      await navigate('agents', view);
+      await delay(300);
+      assert.equal(await js("/\\bgoals?\\b/i.test(document.querySelector('#content').innerText)"), false, 'No visible goal wording: ' + JSON.stringify(view));
+    }
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    const routineStart = writes.length;
+    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Pause').click()");
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path)); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false), 'Pause sends enabled false');
+    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
+    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
+    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Edit').click()");
+    await js("(() => { const row = document.querySelector('.routines-panel .routine-row'); const input = row.querySelector('.routine-editor input'); input.value = 'Morning postings'; input.dispatchEvent(new Event('input', { bubbles: true })); [...row.querySelectorAll('.routine-editor button')].find(b => b.textContent === 'Save').click(); })()");
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
+    // Every bot surface on a phone: no sideways scroll, 44px targets.
+    await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Sidebar bots: 9 cases", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));

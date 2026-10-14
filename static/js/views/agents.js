@@ -4,8 +4,11 @@ import { runHistory } from "../runHistory.js";
 import { mountAgentChat } from "../agentChat.js";
 import { mountComputerPanel } from "../computerPanel.js";
 import { toggle } from "../settingsKit.js";
-import { mountAgentProfile, portrait, profileColor } from "../agentProfile.js";
+import { mountAgentProfile } from "../agentProfile.js";
+import { agentAvatar } from "../agentAvatar.js";
+import { botStatusLine } from "../botStatus.js";
 import { openCreateAgent } from "../agentCreation.js";
+import { routinesPanel } from "../routinesPanel.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -28,9 +31,6 @@ function hasDraft(node) {
   return node.contains(document.activeElement) || [...node.querySelectorAll('input, textarea, select')]
     .some(control => control.value !== control.dataset.draftBaseline);
 }
-function releasePortraits(node) {
-  for (const face of [node, ...node.querySelectorAll('.agent-portrait')]) face.stopPortrait?.();
-}
 
 export async function render(container, tabId, options = {}) {
   let timer = null;
@@ -45,13 +45,11 @@ export async function render(container, tabId, options = {}) {
   }
   if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile, options.sessionId, options.creationNotice);
   else await listPage(root, schedule);
-  return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); releasePortraits(root); };
+  return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); };
 }
 
 export function avatar(agent, size = 28) {
-  const node = portrait(agent, size);
-  node.classList.add('agent-avatar');
-  return node;
+  return agentAvatar(agent, size);
 }
 
 function open(agentId) {
@@ -104,7 +102,7 @@ async function listPage(root, schedule) {
     root.append(el("div", { class: "view-header" }, [el("div", {}, [
       el("h2", { text: "Agents" }),
       el("div", { class: "sub", text: "Named helpers that work in the background and come back when they need you." }),
-    ]), el("button", { type: "button", class: "btn primary", text: "+ New agent", onclick: openCreateAgent })]), inboxHost, grid, teamHost);
+    ])]), el('h3', { class: 'agent-roster-title', text: 'Your bots' }), grid, inboxHost, teamHost);
     state = { inboxHost, grid, teamHost, tiles: new Map(), inbox: new Map(), teamsSignature: '' };
     listStates.set(root, state);
   }
@@ -123,44 +121,46 @@ async function listPage(root, schedule) {
   for (const [key, row] of state.inbox) if (!keys.has(key)) {
     if (hasDraft(row.node)) {
       if (!row.notice) { row.notice = el('p', { class: 'agent-draft-notice', text: 'This item changed on the server. Your reply draft is kept here.' }); row.node.prepend(row.notice); }
-    } else { releasePortraits(row.node); row.node.remove(); state.inbox.delete(key); }
+    } else { row.node.remove(); state.inbox.delete(key); }
   }
   state.inboxHost.hidden = !inbox.count && !state.inbox.size;
   for (const [index, row] of incoming.entries()) {
-    const signature = JSON.stringify(row.value);
+    const signature = JSON.stringify([row.value, byId.get(row.value.agent_id)?.avatar]);
     let old = state.inbox.get(row.key);
     if (!old) { old = { node: markDrafts(row.make()), signature }; state.inbox.set(row.key, old); }
-    else if (old.signature !== signature && !hasDraft(old.node)) { const next = markDrafts(row.make()); releasePortraits(old.node); old.node.replaceWith(next); old.node = next; old.signature = signature; }
+    else if (old.signature !== signature && !hasDraft(old.node)) { const next = markDrafts(row.make()); old.node.replaceWith(next); old.node = next; old.signature = signature; }
     if (state.inboxPanel.children[index + 1] !== old.node && !hasDraft(old.node))
       state.inboxPanel.insertBefore(old.node, state.inboxPanel.children[index + 1] || null);
   }
   const agentKeys = new Set(agents.map(agent => agent.id));
-  for (const [id, tile] of state.tiles) if (!agentKeys.has(id)) { releasePortraits(tile.node); tile.node.remove(); state.tiles.delete(id); }
+  for (const [id, tile] of state.tiles) if (!agentKeys.has(id)) { tile.node.remove(); state.tiles.delete(id); }
   if (agents.length && state.emptyNode) { state.emptyNode.remove(); state.emptyNode = null; }
   for (const [index, agent] of agents.entries()) {
-    const signature = JSON.stringify([agent.name, agent.role, agent.color, agent.status, agent.status_detail, agent.runs_today, agent.daily_run_cap]);
+    const signature = JSON.stringify([agent.name, agent.role, agent.avatar, agent.status, agent.status_detail, agent.needs_you, agent.enabled]);
     let tile = state.tiles.get(agent.id);
     if (tile?.signature === signature) {
       if (state.grid.children[index] !== tile.node) state.grid.insertBefore(tile.node, state.grid.children[index] || null);
       continue;
     }
     const node = el("button", { type: "button", class: "agent-tile", onclick: () => open(agent.id) }, [
-      el("div", { class: "agent-tile-head" }, [avatar(agent, 34), el("div", { class: "agent-tile-name" }, [
+      el("div", { class: "agent-tile-head" }, [avatar(agent, 88), el("div", { class: "agent-tile-name" }, [
         el("div", { class: "title", text: agent.name }),
         el("div", { class: "meta", text: agent.role || "No role yet" }),
       ])]),
       el("div", { class: "agent-tile-foot" }, [
-        el("span", { class: `agent-status agent-status-${agent.status}`, text: STATUS[agent.status] || agent.status }),
-        el("span", { class: "meta", text: agent.status === "working" ? agent.status_detail
-          : `${agent.runs_today} of ${agent.daily_run_cap} runs today` }),
+        el("span", { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
       ]),
     ]);
-    if (tile) { releasePortraits(tile.node); tile.node.replaceWith(node); }
+    if (tile) { tile.node.replaceWith(node); }
     tile = { node, signature }; state.tiles.set(agent.id, tile);
     if (state.grid.children[index] !== node) state.grid.insertBefore(node, state.grid.children[index] || null);
   }
   if (!agents.length && !state.emptyNode) { state.emptyNode = emptyState({ icon: ICONS.agents, title: 'No agents yet',
     hint: 'Create one with a name and a job to do.' }); state.grid.append(state.emptyNode); }
+  // The creation action lives in the roster and remains the last card.
+  if (!state.newCard) state.newCard = el('button', { type: 'button', class: 'agent-tile agent-new-card',
+    text: '+ New agent', onclick: openCreateAgent });
+  state.grid.append(state.newCard);
   const teamsSignature = JSON.stringify(teams);
   if (teamsSignature !== state.teamsSignature) { state.teamHost.replaceChildren(teams ? teamsSection(teams) : null); state.teamsSignature = teamsSignature; }
   if (agents.some((a) => a.status === "working")) schedule(() => listPage(root, schedule));
@@ -211,9 +211,17 @@ async function answer(item, choice, text, refresh) {
   await refresh();
 }
 
+function relativeTime(seconds) {
+  const age = Math.max(0, Math.round(Date.now() / 1000 - seconds));
+  if (age < 60) return 'now';
+  if (age < 3600) return `${Math.floor(age / 60)}m ago`;
+  if (age < 86400) return `${Math.floor(age / 3600)}h ago`;
+  return `${Math.floor(age / 86400)}d ago`;
+}
+
 function inboxItem(item, agent, refresh) {
   const kind = { question: "Question", report: "Report" }[item.kind];
-  const reply = el("input", { class: "agent-reply", placeholder: item.kind === "question" ? "Your answer" : "Reply or guidance (optional)" });
+  const reply = el("input", { class: "agent-reply", placeholder: item.kind === "question" ? "Your answer" : "Reply or guidance" });
   const button = (text, onclick, cls = "btn") => el("button", { class: cls, text, onclick });
   const send = (choice) => () => {
     if (choice === "reply" && !reply.value.trim()) { toast("Write a reply first", "error"); return; }
@@ -221,6 +229,8 @@ function inboxItem(item, agent, refresh) {
       reply.dataset.draftBaseline = reply.value; return refresh(); });
   };
   const actions = el("div", { class: "agent-inbox-actions" });
+  const compose = el('div', { class: 'agent-inbox-compose', hidden: true }, [reply,
+    button('Send', send('reply'), 'btn primary'), button('Cancel', () => { compose.hidden = true; reply.value = ''; reply.dataset.draftBaseline = ''; }, 'btn quiet')]);
   if (/^(Ready for you: press|Needs you: sign in|Needs you: embedded frame)/.test(item.title)) {
     actions.append(button('Open computer', async () => {
       const running = await api('/api/computer').catch(() => []);
@@ -231,20 +241,23 @@ function inboxItem(item, agent, refresh) {
         { detail: { tab: 'agents', agentId: item.agent_id, agentTab: 'work', computerTakeover: true } }));
     }, 'btn primary'));
   }
-  if (item.kind === "question") {
-    actions.append(reply, button("Answer", send("reply"), "btn primary"), button("Dismiss", send("dismiss"), "btn quiet"));
-  } else {
-    actions.append(button("Dismiss", send("dismiss")), reply, button("Reply", send("reply"), "btn quiet"));
+  if (!actions.children.length) actions.append(button(item.kind === 'question' ? 'Reply' : 'Dismiss',
+    item.kind === 'question' ? () => { compose.hidden = false; reply.focus(); } : send('dismiss'), 'btn primary'));
+  if (item.kind === 'question') {
+    if (actions.querySelector('.btn.primary')?.textContent === 'Open computer')
+      actions.append(button('Reply', () => { compose.hidden = false; reply.focus(); }, 'btn quiet'));
+    actions.append(button('Dismiss', send('dismiss'), 'btn quiet'));
   }
+  else actions.append(button('Reply', () => { compose.hidden = false; reply.focus(); }, 'btn quiet'));
   return el("div", { class: `agent-inbox-item agent-inbox-${item.kind}` }, [
     el("div", { class: "agent-inbox-head" }, [
       agent ? avatar(agent, 22) : el("span"),
       el("span", { class: "agent-inbox-kind", text: kind }),
       el("span", { class: "agent-inbox-title", text: `${agent?.name || "Agent"}: ${item.title}` }),
-      el("span", { class: "meta", text: new Date(item.created_at * 1000).toLocaleString() }),
+      el("span", { class: "meta agent-inbox-time", text: relativeTime(item.created_at) }),
     ]),
     item.body ? el("div", { class: "agent-inbox-body", text: item.body }) : el("span"),
-    actions,
+    actions, compose,
   ]);
 }
 
@@ -260,21 +273,23 @@ function reviewItem(card, agent, refresh) {
     note.dataset.draftBaseline = note.value;
     await refresh();
   };
+  const compose = el('div', { class: 'agent-inbox-compose', hidden: true }, [note,
+    el('button', { class: 'btn primary', text: 'Send changes', onclick: () => {
+      if (!note.value.trim()) { toast('Say what should change', 'error'); return; }
+      move('ready', note.value.trim());
+    } }), el('button', { class: 'btn quiet', text: 'Cancel', onclick: () => { compose.hidden = true; note.value = ''; } })]);
   return el("div", { class: "agent-inbox-item agent-inbox-review" }, [
     el("div", { class: "agent-inbox-head" }, [
       agent ? avatar(agent, 22) : el("span"),
       el("span", { class: "agent-inbox-kind", text: "Result" }),
       el("span", { class: "agent-inbox-title", text: `${agent?.name || "Agent"}: ${card.name}` }),
+      el('span', { class: 'meta agent-inbox-time', text: relativeTime(card.updated_at || card.created_at || Date.now() / 1000) }),
     ]),
     el("div", { class: "agent-inbox-body", text: result ? result.text : "(no result text)" }),
     el("div", { class: "agent-inbox-actions" }, [
       el("button", { class: "btn primary", text: "Approve", onclick: () => move("done") }),
-      note,
-      el("button", { class: "btn quiet", text: "Request changes", onclick: () => {
-        if (!note.value.trim()) { toast("Say what should change", "error"); return; }
-        move("ready", note.value.trim());
-      } }),
-    ]),
+      el('button', { class: 'btn quiet', text: 'Request changes', onclick: () => { compose.hidden = false; note.focus(); } }),
+    ]), compose,
   ]);
 }
 
@@ -293,9 +308,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   if (!document.body.contains(root)) return;
   root.innerHTML = "";
 
-  // Built once: the header and the two tabs. Only the header's status and
-  // the Work tab redraw while the agent is busy, so an open chat is never
-  // rebuilt under the person typing in it.
+  // 2026-10-14: keep the hero and all tab hosts mounted; polls reconcile data
+  // panels without rebuilding a chat or replacing a half-typed field.
   const header = el("div", { class: "agent-header" });
   const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
   // 2026-10-14: keep a failed first routine visible above the new profile's
@@ -305,8 +319,12 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   cleanups.push(profile.dispose);
   const chatTab = el("button", { type: "button", role: "tab", class: "agent-tab", text: "Chat" });
   const workTab = el("button", { type: "button", role: "tab", class: "agent-tab" });
+  const routinesTab = el('button', { type: 'button', role: 'tab', class: 'agent-tab', text: 'Routines' });
+  const memoryTab = el('button', { type: 'button', role: 'tab', class: 'agent-tab', text: 'Memory' });
   const chatHost = el("div", { role: "tabpanel", class: "agent-tab-panel agent-chat-host" });
   const workHost = el("div", { role: "tabpanel", class: "agent-tab-panel agent-work-host" });
+  const routinesHost = el('div', { role: 'tabpanel', class: 'agent-tab-panel agent-routines-host' });
+  const memoryHost = el('div', { role: 'tabpanel', class: 'agent-tab-panel agent-memory-host' });
   const computerHost = el('div', { class: 'glass card agent-computer-section', hidden: true });
   let computerView = null;
   const syncComputer = async () => {
@@ -335,7 +353,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   cleanups.push(() => { clearInterval(computerTimer); computerView?.dispose(); });
   let chatMounted = false;
   const show = (which) => {
-    for (const [button, host, name] of [[chatTab, chatHost, "chat"], [workTab, workHost, "work"]]) {
+    for (const [button, host, name] of [[chatTab, chatHost, "chat"], [workTab, workHost, "work"],
+      [routinesTab, routinesHost, 'routines'], [memoryTab, memoryHost, 'memory']]) {
       button.setAttribute("aria-selected", String(which === name));
       button.classList.toggle("active", which === name);
       host.hidden = which !== name;
@@ -349,36 +368,38 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   };
   chatTab.addEventListener("click", () => show("chat"));
   workTab.addEventListener("click", () => show("work"));
+  routinesTab.addEventListener('click', () => show('routines'));
+  memoryTab.addEventListener('click', () => show('memory'));
   root.append(
     el("button", { class: "btn quiet agent-back", text: "← All agents", onclick: () => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab: "agents" } })) }),
     ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
     header,
-    el("div", { class: "agent-tabs", role: "tablist", "aria-label": "Agent" }, [chatTab, workTab]),
-    chatHost, workHost,
+    el("div", { class: "agent-tabs", role: "tablist", "aria-label": "Agent" }, [chatTab, workTab, routinesTab, memoryTab]),
+    chatHost, workHost, routinesHost, memoryHost,
   );
 
   let headerSignature = '';
   const drawHeader = (agent) => {
-    const signature = JSON.stringify([agent.name, agent.role, agent.color, agent.enabled, agent.status,
+    const signature = JSON.stringify([agent.name, agent.role, agent.blurb, agent.avatar, agent.enabled, agent.status,
       agent.status_detail, agent.runs_today, agent.daily_run_cap, agent.needs_you]);
     if (signature === headerSignature) return;
     headerSignature = signature;
     const toggle = el("button", { class: agent.enabled ? "btn" : "btn primary", text: agent.enabled ? "Turn off" : "Turn on",
       onclick: async () => { await api(`/api/agents/${agentId}`, { method: "PATCH", body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } });
-    releasePortraits(header);
     header.replaceChildren(
-      avatar(agent, 48),
+      avatar(agent, 120),
       el("div", { class: "agent-header-text" }, [
         el("h2", { text: agent.name }),
         el("div", { class: "sub", text: agent.role || "No role yet" }),
+        // No blurb means no line: invented copy would speak for the bot (2026-10-14).
+        ...(agent.blurb ? [el('p', { class: 'agent-header-blurb', text: agent.blurb })] : []),
         el("div", { class: "agent-header-meta" }, [
-          el("span", { class: `agent-status agent-status-${agent.status}`, text: STATUS[agent.status] || agent.status }),
-          el("span", { class: "meta", text: [agent.status_detail, `${agent.runs_today} of ${agent.daily_run_cap} runs today`]
-            .filter(Boolean).join(" · ") }),
+          el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
         ]),
       ]),
       el("div", { class: "agent-header-actions" }, [
-        el('button', { class: 'btn agent-profile-open', text: 'Profile', onclick: () => profile.open() }), toggle]),
+        el('button', { class: 'btn primary', text: 'Chat', onclick: () => show('chat') }), toggle,
+        el('button', { class: 'btn agent-profile-open', text: 'Settings', onclick: () => profile.open() })]),
     );
     workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : "Work";
   };
@@ -393,7 +414,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       if (hasDraft(entry.node)) {
         if (!entry.notice) { entry.notice = el('p', { class: 'agent-draft-notice', text: 'New server data is available. Your draft is kept; save or clear it to refresh this section.' }); entry.node.prepend(entry.notice); }
       } else {
-        const next = markDrafts(make()); releasePortraits(entry.node); entry.node.replaceWith(next); entry.node = next; entry.signature = signature; entry.notice = null;
+        const next = markDrafts(make()); entry.node.replaceWith(next); entry.node = next; entry.signature = signature; entry.notice = null;
       }
     }
     return entry.node;
@@ -403,11 +424,9 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     const reviews = detail.cards.filter((c) => c.status === "review");
     const byId = new Map([[agent.id, agent]]);
     const rows = [
-      reconcile('inbox', [detail.inbox, reviews], () => inboxPanel('Inbox', detail.inbox, reviews, byId, redraw)),
+      reconcile('inbox', [detail.inbox, reviews, agent.avatar], () => inboxPanel('Inbox', detail.inbox, reviews, byId, redraw)),
       computerHost,
-      reconcile('goals', detail.goals, () => goalsPanel(agentId, detail.goals, redraw)),
-      reconcile('cards', detail.cards, () => workPanel(agentId, detail.cards, redraw)),
-      panels.has('memory') ? panels.get('memory').node : reconcile('memory', detail.memory, () => memoryPanel(agentId, detail.memory)),
+      reconcile('cards', [detail.cards, agent.avatar], () => workPanel(agentId, detail.cards, redraw, agent)),
       reconcile('history', detail.runs, () => el('div', { class: 'glass card' }, [el('div', { class: 'title', text: 'History' }), runHistory(detail.runs)])),
       reconcile('teams', detail.teams || [], () => teamsPanel(detail.teams || [])),
     ];
@@ -416,7 +435,14 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.deliver_to_channel,
       agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, channels, redraw)));
     for (const row of rows) if (row && row.parentNode !== workHost) workHost.append(row);
+    const goals = reconcile('goals', detail.goals, () => routinesPanel(agentId, detail.goals, redraw));
+    if (goals.parentNode !== routinesHost) routinesHost.append(goals);
+    const memory = panels.has('memory') ? panels.get('memory').node : reconcile('memory', detail.memory, () => memoryPanel(agentId, detail.memory));
+    if (memory.parentNode !== memoryHost) memoryHost.append(memory);
     panels.get('memory').node.syncMemory(detail.memory);
+    const journal = reconcile('memory-journal', detail.memory_upkeep_journal || [],
+      () => memoryJournal(agentId, detail.memory_upkeep_journal || [], redraw));
+    if (journal.parentNode !== memoryHost) memoryHost.append(journal);
   };
 
   async function redraw() {
@@ -471,70 +497,14 @@ function triggersPanel(triggers) {
   return panel;
 }
 
-function cadence(goal) {
-  if (goal.schedule_kind === "daily") return `Every day at ${goal.run_time}`;
-  const minutes = Math.round((goal.interval_seconds || 0) / 60);
-  return minutes % 60 === 0 ? `Every ${minutes / 60 === 1 ? "hour" : `${minutes / 60} hours`}` : `Every ${minutes} minutes`;
-}
-
-function goalsPanel(agentId, goals, refresh) {
-  const panel = el("div", { class: "glass card" }, [
-    el("div", { class: "title", text: "Standing goals" }),
-    el("div", { class: "meta", style: "margin:4px 0 10px;", text: "Checked on a schedule. Quiet goals only report when something turned up." }),
-  ]);
-  for (const goal of goals) {
-    panel.append(el("div", { class: "agent-row" }, [
-      el("div", {}, [el("div", { text: goal.name }), el("div", { class: "meta", text:
-        `${cadence(goal)} · ${goal.report_when === "always" ? "always reports" : "reports when notable"}${goal.enabled ? "" : " · off"}` })]),
-      el("div", { class: "agent-row-actions" }, [
-        el("button", { class: "btn quiet", text: "Check now", onclick: async () => {
-          try { await api(`/api/tasks/${goal.id}/run`, { method: "POST" }); toast("Checked", "success"); }
-          catch (problem) { toast(problem.message, "error"); }
-          refresh();
-        } }),
-        el("button", { class: "btn danger", text: "Remove", onclick: async () => {
-          if (!await confirmDialog({ title: "Remove this goal?", message: `"${goal.name}" will stop being checked.`, confirmLabel: "Remove" })) return;
-          await api(`/api/tasks/${goal.id}`, { method: "DELETE" }); refresh();
-        } }),
-      ]),
-    ]));
-  }
-  const name = el("input", { placeholder: "e.g. New postings" });
-  const prompt = el("textarea", { rows: "2", placeholder: "What to check, and what counts as worth telling you" });
-  const kind = customSelect({}, [el("option", { value: "daily", text: "Every day at" }), el("option", { value: "interval", text: "Every N hours" })]);
-  const time = el("input", { type: "time", value: "08:00" });
-  const hours = el("input", { type: "number", min: "1", value: "6" });
-  const timeField = el("div", { class: "field field-sm" }, [el("label", { text: "At" }), time]);
-  const hoursField = el("div", { class: "field field-sm", style: "display:none;" }, [el("label", { text: "Hours" }), hours]);
-  kind.addEventListener("change", () => {
-    timeField.style.display = kind.value === "daily" ? "" : "none";
-    hoursField.style.display = kind.value === "interval" ? "" : "none";
-  });
-  const report = customSelect({}, [el("option", { value: "notable", text: "Only when notable" }), el("option", { value: "always", text: "Every time" })]);
-  const add = async () => {
-    if (!name.value.trim() || !prompt.value.trim()) { toast("A goal needs a name and what to check", "error"); return; }
-    const body = { name: name.value.trim(), prompt: prompt.value.trim(), schedule_kind: kind.value, report_when: report.value };
-    if (kind.value === "daily") body.run_time = time.value; else body.interval_seconds = Math.max(1, parseInt(hours.value, 10) || 1) * 3600;
-    try { await api(`/api/agents/${agentId}/goals`, { method: "POST", body: JSON.stringify(body) }); refresh(); }
-    catch (problem) { toast(problem.message, "error"); }
-  };
-  panel.append(el("details", { class: "disclosure-panel" }, [el("summary", { text: "+ Add a goal" }), el("div", { class: "form-grid" }, [
-    el("div", { class: "field field-grow" }, [el("label", { text: "Name" }), name]),
-    el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "What to check" }), prompt]),
-    el("div", { class: "field" }, [el("label", { text: "When" }), kind]), timeField, hoursField,
-    el("div", { class: "field" }, [el("label", { text: "Report" }), report]),
-    el("button", { class: "btn primary", text: "Add goal", onclick: add }),
-  ])]));
-  return panel;
-}
-
-function workPanel(agentId, cards, refresh) {
+function workPanel(agentId, cards, refresh, agent) {
   const panel = el("div", { class: "glass card" }, [el("div", { class: "title", text: "Work" })]);
   const open = cards.filter((c) => c.status !== "done");
   if (!open.length) panel.append(el("div", { class: "meta", style: "margin:6px 0;", text: "Nothing assigned right now." }));
   const label = { backlog: "Backlog", ready: "Up next", running: "Working on it", review: "Waiting for your review", blocked: "Blocked" };
   for (const card of open) {
-    panel.append(el("div", { class: "agent-row" }, [
+    panel.append(el("div", { class: "agent-row agent-assignment-card" }, [
+      avatar(agent, 36),
       el("div", {}, [el("div", { text: card.name }), el("div", { class: "meta", text: label[card.status] || card.status })]),
     ]));
   }
@@ -592,6 +562,24 @@ function memoryPanel(agentId, memory) {
   return panel;
 }
 
+function memoryJournal(agentId, entries, refresh) {
+  const panel = el('section', { class: 'glass card agent-memory-journal' }, [
+    el('div', { class: 'title', text: 'Upkeep journal' }),
+    el('p', { class: 'meta', text: 'A record of memory that was tidied. You can undo an upkeep pass.' }),
+  ]);
+  if (!entries.length) panel.append(el('p', { class: 'meta', text: 'No upkeep yet.' }));
+  for (const entry of entries) panel.append(el('div', { class: 'agent-row' }, [
+    el('div', {}, [el('strong', { text: entry.topic || 'Main memory' }),
+      el('div', { class: 'meta', text: `${(entry.changes || []).length} changes · ${relativeTime(entry.at)}` })]),
+    entry.status === 'committed' ? el('button', { class: 'btn quiet', text: 'Undo', onclick: async () => {
+      try { await api(`/api/agents/${agentId}/memory/upkeep/${entry.id}/undo`, { method: 'POST' });
+        toast('Memory upkeep undone', 'success'); refresh(); }
+      catch (problem) { toast(problem.message, 'error'); }
+    } }) : el('span', { class: 'meta', text: entry.status }),
+  ]));
+  return panel;
+}
+
 function settingsPanel(agent, models, channels, refresh) {
   const role = el("input", { value: agent.role || "" });
   const instructions = el("textarea", { rows: "3" });
@@ -610,7 +598,7 @@ function settingsPanel(agent, models, channels, refresh) {
   };
   const remove = async () => {
     const ok = await confirmDialog({ title: `Delete ${agent.name}?`,
-      message: "Its memory, goals, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.", confirmLabel: "Delete agent" });
+      message: "Its memory, routines, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.", confirmLabel: "Delete agent" });
     if (!ok) return;
     try {
       await api(`/api/agents/${agent.id}`, { method: "DELETE" });

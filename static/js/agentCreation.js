@@ -1,10 +1,9 @@
 import { api, el, customSelect, toast, confirmDialog, openPanelDialog } from './api.js';
-import { portrait } from './agentProfile.js';
+import { avatarPicker, defaultAvatar } from './agentAvatar.js';
 
 // 2026-10-14: keep the entire draft in this dialog until Create succeeds.
 // The optional goal is a second existing route, so its failure is reported
 // beside the new bot rather than pretending the bot was rolled back.
-const COLORS = ['#d9b260', '#b9d2e3', '#e8c39e', '#d99a92', '#b5c7a5', '#cdbfd9'];
 const PRESETS = [
   ['Researcher', 'Research questions and check sources', 'A curious researcher who brings back clear, sourced findings.', 'Ask what matters, compare reliable sources, and distinguish evidence from inference.'],
   ['Inbox triage', 'Sort incoming messages', 'A calm helper for deciding what needs attention.', 'Group messages by urgency, summarize decisions, and ask before sending anything.'],
@@ -44,14 +43,8 @@ export async function openCreateAgent() {
   const cadence = el('div', { class: 'agent-create-cadence' }, [kind, time, hours]);
   const syncCadence = () => { time.hidden = kind.value !== 'daily'; hours.hidden = kind.value !== 'interval'; };
   kind.addEventListener('change', syncCadence); syncCadence();
-  let color = COLORS[0], dirty = false, creating = false;
-  const preview = el('div', { class: 'agent-create-preview' });
-  const paintPreview = () => { preview.firstElementChild?.stopPortrait?.(); preview.replaceChildren(portrait({ color, name: name.value }, 80)); };
-  const swatches = el('div', { class: 'agent-swatches', role: 'radiogroup', 'aria-label': 'Colour' });
-  for (const shade of COLORS) swatches.append(el('button', { type: 'button', role: 'radio', 'aria-label': shade,
-    'data-color': shade, style: `background:${shade}`, onclick: () => { color = shade; dirty = true; paintPreview(); syncSwatches(); } }));
-  const syncSwatches = () => swatches.querySelectorAll('button').forEach(button => button.setAttribute('aria-checked', String(button.dataset.color === color)));
-  syncSwatches(); paintPreview();
+  let dirty = false, creating = false;
+  const picker = avatarPicker(defaultAvatar('new-agent'), () => { dirty = true; });
   const validity = el('p', { class: 'agent-create-validity', role: 'status' });
   const create = el('button', { type: 'button', class: 'btn primary', text: 'Create bot', disabled: true });
   const validate = () => {
@@ -67,7 +60,7 @@ export async function openCreateAgent() {
   const identity = el('section', { id: 'agent-create-identity', class: 'agent-create-section' }, [
     el('h3', { text: 'Identity' }), el('p', { class: 'meta', text: 'Start with a role, then change every word to make it yours.' }), presets,
     el('div', { class: 'agent-create-identity-grid' }, [
-      el('div', {}, [field('Name', name), field('Job / role', role), field('Blurb', blurb, blurbCount), field('Colour', swatches)]), preview,
+      el('div', {}, [field('Name', name), field('Job / role', role), field('Blurb', blurb, blurbCount)]), picker.root,
     ]),
   ]);
   const sections = [identity,
@@ -83,7 +76,7 @@ export async function openCreateAgent() {
   const cancel = el('button', { type: 'button', class: 'btn', text: 'Cancel' });
   const footer = el('div', { class: 'agent-create-footer' }, [validity, cancel, create]);
   const dialog = openPanelDialog({ title: 'New bot', body, footer, className: 'agent-create-dialog', initialFocus: name,
-    onClose: () => { preview.firstElementChild?.stopPortrait?.(); document.removeEventListener('keydown', escapeDraft, true); } });
+    onClose: () => { document.removeEventListener('keydown', escapeDraft, true); } });
   cancel.addEventListener('click', () => dialog.close());
   // 2026-10-14: the shared panel closes on Escape. Intercept only a typed
   // draft before it reaches that handler; the nested confirmation owns its Escape.
@@ -97,7 +90,7 @@ export async function openCreateAgent() {
   document.addEventListener('keydown', escapeDraft, true);
   for (const input of [name, role, blurb, soul, instructions, goalName, goalPrompt, time, hours]) {
     input.addEventListener('input', () => { dirty = true; if (input === blurb) limited(blurb, 4000, blurbCount);
-      if (input === soul) limited(soul, 24000, soulCount); if (input === name) paintPreview(); validate(); });
+      if (input === soul) limited(soul, 24000, soulCount); validate(); });
   }
   model.addEventListener('change', () => { dirty = true; }); channel.addEventListener('change', () => { dirty = true; });
   kind.addEventListener('change', () => { dirty = true; }); report.addEventListener('change', () => { dirty = true; });
@@ -108,7 +101,7 @@ export async function openCreateAgent() {
     let agent;
     try { agent = await api('/api/agents', { method: 'POST', body: JSON.stringify({ name: name.value.trim(), role: role.value.trim(),
       blurb: blurb.value.trim(), soul: soul.value, instructions: instructions.value.trim(), endpoint_id: model.value || null,
-      color, deliver_to_channel: channel.value || null }) }); }
+      avatar: picker.getSpec(), deliver_to_channel: channel.value || null }) }); }
     catch (error) { validity.textContent = error.message; creating = false; validate(); toast(error.message, 'error'); return; }
     let goalError = null;
     if (goalName.value.trim()) {

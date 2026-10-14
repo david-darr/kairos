@@ -1,30 +1,9 @@
 import { api, el, toast, confirmDialog } from './api.js';
-import { mountDither } from './dither.js';
+import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
+import { routinesPanel } from './routinesPanel.js';
 
 const SECTIONS = ['Overview', 'Identity', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice & alerts', 'History', 'Usage'];
 const bytes = (value) => new TextEncoder().encode(value).length;
-
-// 2026-10-13: a missing color needs the same portrait on every machine and
-// reload; the ID hash picks one of the colors already accepted by the API.
-const COLORS = ['#d9b260', '#b9d2e3', '#e8c39e', '#d99a92', '#b5c7a5', '#cdbfd9'];
-export function profileColor(agent) {
-  if (agent.color) return agent.color;
-  let hash = 2166136261;
-  for (const ch of agent.id || '') hash = Math.imul(hash ^ ch.charCodeAt(0), 16777619);
-  return COLORS[(hash >>> 0) % COLORS.length];
-}
-
-export function portrait(agent, size = 72) {
-  const color = profileColor(agent);
-  const face = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" fill="${color}"/><circle cx="64" cy="55" r="31" fill="#F3EADB"/><path d="M13 128c4-30 23-44 51-44s47 14 51 44" fill="#F3EADB"/><circle cx="53" cy="55" r="3" fill="#282724"/><circle cx="75" cy="55" r="3" fill="#282724"/><path d="M54 68q10 8 20 0" fill="none" stroke="#282724" stroke-width="3" stroke-linecap="round"/></svg>`;
-  const node = el('span', { class: 'agent-portrait', 'aria-hidden': 'true', style: `width:${size}px;height:${size}px;background:${color}` });
-  node.dataset.color = color;
-  // The Kairos circle remains visible when canvas or image loading fails.
-  node.append(el('img', { class: 'agent-portrait-mark', src: '/static/img/kairos-icon.svg', alt: '' }));
-  const stop = mountDither(node, `data:image/svg+xml,${encodeURIComponent(face)}`, { cell: 3, fixed: true });
-  node.stopPortrait = stop;
-  return node;
-}
 
 export function mountAgentProfile(root, initial, models, channels, onSaved) {
   let detail = initial, open = false, mode = 'simple', tab = 'details';
@@ -32,7 +11,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const sheet = el('aside', { class: 'agent-profile-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Bot profile', hidden: true });
   const body = el('div', { class: 'agent-profile-body' });
   const heading = el('h2', { text: detail.agent.name });
-  let photo = portrait(detail.agent);
+  let photo = agentAvatar(detail.agent);
   const closeButton = el('button', { class: 'btn quiet', type: 'button', 'aria-label': 'Close profile', text: '×' });
   const titlebar = el('div', { class: 'agent-profile-titlebar' }, [photo, heading, closeButton]);
   const simpleButton = el('button', { class: 'btn quiet', type: 'button', text: 'Simple view' });
@@ -93,6 +72,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     fields.set(key, state); return wrap;
   };
   const identity = el('div', { class: 'agent-profile-pair' }, [field('name', 'Name', 100), field('role', 'Job', 200)]);
+  const picker = avatarPicker(avatarSpec(detail.agent));
   const instruction = field('instructions', 'Standing instructions', 24000, true);
   const blurb = field('blurb', 'Blurb', 4000, true, 3000);
   const soul = field('soul', 'Soul', 24000, true);
@@ -144,15 +124,41 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     el('strong', { text: 'File text' }), fileText, apply, soulError);
   const memory = el('div', { class: 'agent-profile-memory' });
   const access = el('div', { class: 'agent-profile-access' });
+  const peersField = el('fieldset', { class: 'agent-profile-peers' });
+  const peersChoices = el('div', { class: 'agent-profile-peer-choices' });
+  peersField.append(el('legend', { text: 'Peers' }),
+    el('p', { class: 'meta', text: 'This bot may assign work only to selected bots.' }), peersChoices);
+  let peersBaseline = '[]', peersServer = '[]', peersDraft = null;
+  const peerIds = () => [...peersChoices.querySelectorAll('input:checked')].map(input => input.value).sort();
+  const loadPeers = async () => {
+    const bots = await api('/api/agents');
+    peersChoices.replaceChildren(...bots.filter(bot => bot.id !== detail.agent.id).map(bot => {
+      const input = el('input', { type: 'checkbox', value: bot.id, 'aria-label': `Peer ${bot.name}` });
+      input.checked = (peersDraft || JSON.parse(peersBaseline)).includes(bot.id);
+      input.addEventListener('change', () => { peersDraft = peerIds(); });
+      return el('label', { class: 'agent-profile-peer' }, [input, el('span', { text: bot.name })]);
+    }));
+  };
   const history = el('div', { class: 'agent-profile-history' });
-  const routines = el('p', { class: 'meta' });
+  // The real routines, shared with the bot page (2026-10-14). Redrawn only
+  // when they change, and never under someone editing or adding one.
+  const routines = el('div', { class: 'agent-profile-routines' });
+  let routinesKey = null;
+  const drawRoutines = goals => {
+    const key = JSON.stringify((goals || []).map(g => [g.id, g.name, g.prompt, g.enabled, g.schedule_kind, g.run_time, g.interval_seconds, g.report_when]));
+    if (key === routinesKey) return;
+    if (routines.contains(document.activeElement) || routines.querySelector('details[open], .routine-editor:not([hidden])')) return;
+    routinesKey = key;
+    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.()));
+  };
+  drawRoutines(detail.goals);
   const usage = el('p', { class: 'meta' });
   const forget = el('button', { class: 'btn quiet', type: 'button', text: 'Forget browser logins', onclick: async () => {
     try { await api(`/api/agents/${detail.agent.id}/forget-logins`, { method: 'POST' }); toast('Logins forgotten', 'success'); }
     catch (error) { toast(error.message, 'error'); }
   } });
   const remove = el('button', { class: 'btn danger', type: 'button', text: 'Delete bot', onclick: async () => {
-    if (!await confirmDialog({ title: `Delete ${detail.agent.name}?`, message: 'Its memory, goals, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.', confirmLabel: 'Delete agent' })) return;
+    if (!await confirmDialog({ title: `Delete ${detail.agent.name}?`, message: 'Its memory, routines, unfinished work and inbox go. Its chats move to Chats; finished results and run history stay.', confirmLabel: 'Delete agent' })) return;
     try { await api(`/api/agents/${detail.agent.id}`, { method: 'DELETE' }); close();
       document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } })); }
     catch (error) { toast(error.message, 'error'); }
@@ -160,23 +166,47 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   // A field has one DOM node. Switching modes moves it, preserving its value.
   // Separate save buttons avoid moving the same button between sections.
   const sectionSave = () => el('button', { class: 'btn primary', type: 'button', text: 'Save profile', onclick: () => save.click() });
-  details.append(identity, instruction, modelField, allButton, save);
+  details.append(picker.root, identity, instruction, modelField, allButton, save);
   sections.get('Overview').content.append(blurb, enabled, sectionSave());
   sections.get('Soul').content.append(soulDrift, soul, sectionSave());
   sections.get('Memory').content.append(memory, upkeep, sectionSave());
   sections.get('Routines').content.replaceChildren(routines, cap, sectionSave());
-  sections.get('Access').content.append(access, keep, sectionSave(), forget, remove);
+  sections.get('Access').content.append(access, peersField, keep, sectionSave(), forget, remove);
   sections.get('Voice & alerts').content.replaceChildren(channel, sectionSave());
   sections.get('Usage').content.replaceChildren(usage);
-  sections.get('History').content.append(history);
+  // Changes the bot made to itself through /setup, each with its Undo
+  // (Agents 2.0, 2026-10-14). The server refuses a stale undo with a reason.
+  const setupChanges = el('div', { class: 'agent-profile-setup-changes' });
+  let setupKey = null;
+  const FIELD_NAMES = { role: 'job', blurb: 'blurb', soul: 'standing instructions', deliver_to_channel: 'delivery channel' };
+  const drawSetup = receipts => {
+    const key = JSON.stringify((receipts || []).map(r => [r.id, r.undone]));
+    if (key === setupKey) return;
+    setupKey = key;
+    const live = (receipts || []).slice().reverse();
+    setupChanges.replaceChildren(...(live.length ? [el('h4', { class: 'agent-profile-subhead', text: 'Setup changes' })] : []),
+      ...live.map(receipt => {
+        const what = [...Object.keys(receipt.after || {}).map(k => FIELD_NAMES[k] || k), ...(receipt.routine_id ? ['a routine'] : [])].join(', ');
+        const when = new Date(receipt.ts * 1000).toLocaleString();
+        const undo = el('button', { type: 'button', class: 'btn quiet', text: receipt.undone ? 'Undone' : 'Undo', disabled: receipt.undone,
+          onclick: async () => {
+            undo.disabled = true;
+            try { await api(`/api/agents/${detail.agent.id}/setup/${receipt.id}/undo`, { method: 'POST' }); toast('Setup change undone', 'success'); onSaved?.(); }
+            catch (error) { toast(error.message.replace(/^\d+: /, ''), 'error'); undo.disabled = false; }
+          } });
+        return el('div', { class: 'agent-profile-setup-change' }, [el('div', {}, [el('div', { text: `Set ${what || 'nothing'}` }), el('div', { class: 'meta', text: when })]), undo]);
+      }));
+  };
+  drawSetup(detail.setup_receipts);
+  sections.get('History').content.append(history, setupChanges);
   const identitySlot = sections.get('Identity').content;
   const modelSlot = sections.get('Model').content;
   identitySlot.append(sectionSave());
   modelSlot.append(sectionSave());
   const setMode = (next) => {
     mode = next;
-    if (mode === 'all') { identitySlot.prepend(identity, instruction); modelSlot.prepend(modelField); }
-    else { details.prepend(identity, instruction, modelField); }
+    if (mode === 'all') { identitySlot.prepend(picker.root, identity, instruction); modelSlot.prepend(modelField); }
+    else { details.prepend(picker.root, identity, instruction, modelField); }
     simpleTabs.hidden = mode !== 'simple'; details.hidden = mode !== 'simple' || tab !== 'details';
     library.hidden = mode !== 'simple' || tab !== 'library'; all.hidden = mode !== 'all'; simpleButton.hidden = mode !== 'all';
   };
@@ -185,7 +215,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const update = (next) => {
     detail = next;
     heading.textContent = next.agent.name;
-    if (photo.dataset.color !== profileColor(next.agent)) { photo.stopPortrait?.(); const replacement = portrait(next.agent); replacement.dataset.color = profileColor(next.agent); photo.replaceWith(replacement); photo = replacement; }
+    if (photo.dataset.avatarSpec !== JSON.stringify(avatarSpec(next.agent))) {
+      const replacement = agentAvatar(next.agent); photo.replaceWith(replacement); photo = replacement;
+    }
+    picker.setSpec(avatarSpec(next.agent));
     for (const [key, state] of fields) state.sync(key === 'soul' ? next.soul_file?.soul : next.agent[key]);
     for (const [key, state] of extraFields) state.sync(next.agent[key]);
     modelServer = next.agent.endpoint_id || '';
@@ -197,8 +230,15 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     fileText.textContent = sf.file_text === null ? '(file is missing)' : sf.file_text;
     memory.textContent = next.memory ? `${next.memory.slice(0, 700)}${next.memory.length > 700 ? '…' : ''}` : 'No memory yet.';
     access.textContent = next.agent.keep_signed_in ? 'Browser sign in is kept between runs.' : 'Browser sign in is cleared between runs.';
+    peersServer = JSON.stringify([...(next.agent.peers || [])].sort());
+    if (peersDraft === null || JSON.stringify(peersDraft) === peersBaseline) {
+      peersBaseline = peersServer;
+      peersDraft = null;
+      for (const input of peersChoices.querySelectorAll('input')) input.checked = JSON.parse(peersBaseline).includes(input.value);
+    }
     history.textContent = `${(next.runs || []).length} recent runs.`;
-    routines.textContent = `${(next.goals || []).length} standing goals.`;
+    drawSetup(next.setup_receipts);
+    drawRoutines(next.goals);
     usage.textContent = `${next.agent.runs_today || 0} of ${next.agent.daily_run_cap || 0} runs today.`;
     forget.disabled = next.agent.status === 'working';
   };
@@ -228,6 +268,11 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       changes[key] = key === 'daily_run_cap' ? Number(state.value()) : key === 'deliver_to_channel' ? state.value() || null : state.value();
     }
     if (model.value !== modelBaseline) changes.endpoint_id = model.value || null;
+    if (peersDraft !== null && JSON.stringify(peersDraft) !== peersBaseline) changes.peers = peersDraft;
+    if (picker.isDirty()) {
+      const spec = picker.getSpec(), saved = avatarSpec(detail.agent);
+      if (Object.keys(spec).some(key => spec[key] !== saved[key])) changes.avatar = spec;
+    }
     if (!Object.keys(changes).length) return;
     // 2026-10-13: read once before writing so a change between polls is
     // shown before the person's first Save. A second Save chooses the draft.
@@ -239,6 +284,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       || [...extraFields.values()].some(state => changes[state.key] !== undefined
         && (state.input.type === 'checkbox' ? !!fresh.agent[state.key] : String(fresh.agent[state.key] ?? '')) !== state.baseline && state.notice.hidden)
       || (changes.endpoint_id !== undefined && (fresh.agent.endpoint_id || '') !== modelBaseline && modelConflict.hidden);
+    if (changes.peers !== undefined && JSON.stringify([...(fresh.agent.peers || [])].sort()) !== peersBaseline) {
+      peersBaseline = JSON.stringify([...(fresh.agent.peers || [])].sort());
+      update(fresh); toast('Peers changed on the server. Review your selection, then save again.', 'info'); return;
+    }
     update(fresh);
     if (unseen) { toast('Server settings changed. Your draft is kept; review the changes, then save again if you want your version.', 'info'); return; }
     if (changes.soul !== undefined && detail.soul_file && !detail.soul_file.in_sync) {
@@ -252,6 +301,8 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       if (changes.soul !== undefined) detail.soul_file = { soul: agent.soul, file_text: agent.soul, in_sync: true, revision: agent.revision };
       else if (detail.soul_file) detail.soul_file.revision = agent.revision;
       if (changes.endpoint_id !== undefined) modelBaseline = model.value;
+      if (changes.peers !== undefined) { peersBaseline = JSON.stringify(changes.peers); peersDraft = null; }
+      if (changes.avatar !== undefined) picker.markSaved();
       update(detail); toast('Profile saved', 'success'); onSaved();
     } catch (error) { soulError.textContent = error.message; soulError.hidden = false; toast(error.message, 'error'); }
   };
@@ -269,7 +320,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     for (const [name, section] of sections) section.item.hidden = !!q && !name.toLowerCase().includes(q); });
   const close = () => { if (!open) return; open = false; sheet.hidden = backdrop.hidden = true; opener?.focus(); };
   let opener = null;
-  const openSheet = () => { opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false; setTab('details'); setMode('simple'); closeButton.focus(); };
+  const openSheet = () => { opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false; setTab('details'); setMode('simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
   closeButton.onclick = close; backdrop.onclick = close; allButton.onclick = () => setMode('all'); simpleButton.onclick = () => setMode('simple');
   detailsButton.onclick = () => setTab('details'); libraryButton.onclick = () => setTab('library');
   const keydown = (event) => { if (open && event.key === 'Escape') { event.preventDefault(); close(); } };
@@ -277,5 +328,5 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   sheet.append(el('div', { class: 'agent-profile-top' }, [titlebar, simpleButton]), simpleTabs, body);
   body.append(details, library, all); root.append(backdrop, sheet);
   update(detail); setTab('details');
-  return { open: openSheet, update, close, dispose: () => { document.removeEventListener('keydown', keydown); photo.stopPortrait?.(); sheet.remove(); backdrop.remove(); } };
+  return { open: openSheet, update, close, dispose: () => { document.removeEventListener('keydown', keydown); sheet.remove(); backdrop.remove(); } };
 }

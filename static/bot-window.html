@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kairos bots</title>
+<link rel="stylesheet" href="/static/css/kairos-theme.css">
+<link rel="stylesheet" href="/static/css/bot-window.css">
+</head>
+<body>
+<header class="bot-window-bar">
+  <span class="bot-window-title">Bots</span>
+  <button type="button" id="bot-window-close" class="bot-window-close" aria-label="Hide bot window" title="Hide">
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+</header>
+<main id="bots"></main>
+<p class="bot-window-offline">Kairos is not reachable.</p>
+<script type="module" src="/static/js/botWindow.js"></script>
+</body>
+</html>

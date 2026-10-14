@@ -543,7 +543,7 @@ class SessionManager:
         session["project_id"] = project_id
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
-    def set_agent(self, session_id: str, agent_id: str, agent_prompt: str) -> dict:
+    def set_agent(self, session_id: str, agent_id: str, agent_prompt: str, *, unattended: bool = False) -> dict:
         """Make this a chat with one of the person's agents
         (services/agent_service.py). The agent's identity and notes are
         frozen into the session here, once, so the system prompt stays the
@@ -552,6 +552,11 @@ class SessionManager:
         session = self._require(session_id)
         session["agent_id"] = agent_id
         session["agent_prompt"] = agent_prompt
+        # A thread the bot works in alone (a coordination thread, Phase 5) is
+        # marked so attended-only tools such as self-setup refuse there
+        # (Agents 2.0, 2026-10-14).
+        if unattended:
+            session["agent_unattended"] = True
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
     def release_agent_chats(self, agent_id: str) -> int:

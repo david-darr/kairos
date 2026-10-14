@@ -18,7 +18,7 @@ export function renderReferenceChips(references = []) {
     if (!KINDS[item.kind] || item.kind === 'artifact_comment') continue;
     const chip = document.createElement('span');
     chip.className = 'chat-reference-chip';
-    if (item.kind === 'agent') chip.append(agentAvatar(item.label, item.color));
+    if (item.kind === 'agent') chip.append(agentAvatar(item.label, item.color, item.id, item.avatar_spec, 20));
     const label = document.createElement('span');
     label.textContent = `${KINDS[item.kind]} · ${item.label}`;
     chip.append(label);
@@ -53,7 +53,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
   const key = item => item.kind === 'artifact_comment' ? reviewKey(item) : `${item.kind}:${item.session_id || ''}:${item.id}`;
   const getSelected = () => selected.map(item => item.kind === 'artifact_comment'
     ? { kind: item.kind, url: item.url, comment: item.comment, picks: [...item.picks], label: item.label }
-    : { kind: item.kind, id: item.id, session_id: item.session_id, label: item.label, color: item.color });
+    : { kind: item.kind, id: item.id, session_id: item.session_id, label: item.label, color: item.color, avatar_spec: item.avatar_spec });
   const hide = () => {
     const wasOpen = !list.hidden;
     clearTimeout(timer);
@@ -71,7 +71,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     for (const item of selected) {
       const chip = document.createElement('span');
       chip.className = 'chat-reference-chip';
-      if (item.kind === 'agent') chip.append(agentAvatar(item.label, item.color));
+      if (item.kind === 'agent') chip.append(agentAvatar(item.label, item.color, item.id, item.avatar_spec, 20));
       const label = document.createElement(item.kind === 'artifact_comment' ? 'button' : 'span');
       if (item.kind === 'artifact_comment') {
         chip.classList.add('artifact-comment-chip'); label.type = 'button'; label.className = 'artifact-comment-open';
@@ -150,7 +150,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
       const kind = document.createElement('span');
       kind.className = 'chat-reference-kind';
       kind.textContent = KINDS[item.kind];
-      if (item.kind === 'agent') kind.prepend(agentAvatar(item.label, item.color));
+      if (item.kind === 'agent') kind.prepend(agentAvatar(item.label, item.color, item.id, item.avatar_spec, 20));
       const name = document.createElement('span');
       name.className = 'chat-reference-name';
       name.textContent = item.label;

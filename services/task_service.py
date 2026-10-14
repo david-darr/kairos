@@ -145,6 +145,7 @@ class TaskService:
         trigger: Optional[dict] = None,
         reply_to: Optional[str] = None,
         context: str = "",
+        requester: Optional[dict] = None,
         enabled: bool = True,
         time_zone: Optional[str] = None,
         weekdays: Optional[list[int]] = None,
@@ -222,6 +223,10 @@ class TaskService:
             "reply_to": reply_to,
             "context": context,
         }
+        # 2026-10-14: an assignment is still a board card. Older reply_to
+        # cards omit requester and are interpreted by agent_handoff on read.
+        if requester is not None:
+            task["requester"] = requester
         # Omitted fields stay omitted: old files need no migration or write
         # on load, and a machine-local schedule still follows the machine
         # (Agents 2.0 phase 2-i, 2026-10-13).
@@ -398,7 +403,7 @@ class TaskService:
 
     @staticmethod
     def _sync_handoff(card: dict) -> None:
-        if card.get("reply_to"):
+        if card.get("reply_to") or card.get("requester"):
             from services.agent_handoff import sync_card
             sync_card(card)
 

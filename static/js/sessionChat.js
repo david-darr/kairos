@@ -14,7 +14,7 @@ import { renderMessageBody } from './chatContent.js';
 import { dismissPermissionPrompt, showPermissionPrompt } from './permissionPrompt.js';
 import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
-import { portrait } from './agentProfile.js';
+import { agentAvatar } from './agentAvatar.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli'];
 const queues = new Map();
@@ -42,7 +42,6 @@ export async function mountSessionChat(host, options = {}) {
   let disposed = false, submitting = false;
   let modelSaving = false, modelControls = [];
   let workingTimer = null;
-  let activePortrait = null;
   const label = options.title || 'Chat';
   // Forge supplies document rendering/chrome; transport, queues and model
   // changes remain the same controller used by the embedded chats.
@@ -106,7 +105,6 @@ export async function mountSessionChat(host, options = {}) {
   const attach = (replyBody) => {
     unsubscribe();
     clearInterval(workingTimer); workingTimer = null;
-    activePortrait?.stopPortrait?.(); activePortrait = null;
     const id = sessionId;
     liveTurnId = chatStream.getInFlight(id)?.turnId || null;
     let finished = false;
@@ -116,8 +114,7 @@ export async function mountSessionChat(host, options = {}) {
     const openedSteps = new Set();
     if (agentTurn && replyCard && !transcript) {
       working = el('div', { class: 'agent-turn-working', role: 'status' });
-      const face = portrait(options.agent || { id: session.agent_id }, 38);
-      activePortrait = face;
+      const face = agentAvatar(options.agent || { id: session.agent_id }, 38);
       verb = el('span', { class: 'agent-turn-verb', text: 'Writing' });
       elapsed = el('time', { class: 'agent-turn-elapsed' });
       steps = el('div', { class: 'agent-turn-steps' });
@@ -178,7 +175,6 @@ export async function mountSessionChat(host, options = {}) {
           if (!workingTimer) workingTimer = setInterval(() => { if (working.isConnected && !heading.hidden) elapsed.textContent = timeLabel(entry); }, 1000);
         } else { clearInterval(workingTimer); workingTimer = null; drawSteps(entry); }
         working.hidden = heading.hidden && !steps.children.length;
-        if (heading.hidden) working.querySelector('.agent-portrait')?.stopPortrait?.();
       }
       transcript?.paint(replyBody, entry);
       if (entry.permission && entry.permission.id !== shownPermission) {
@@ -370,5 +366,5 @@ export async function mountSessionChat(host, options = {}) {
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposed = true; clearInterval(workingTimer); activePortrait?.stopPortrait?.(); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposed = true; clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }

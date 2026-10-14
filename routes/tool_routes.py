@@ -22,7 +22,8 @@ def _context(request: Request) -> tool_registry.ToolContext:
     if grant is None:
         raise HTTPException(403, "This tool access has expired; it lasts one turn")
     return tool_registry.ToolContext(session_id=grant.session_id, is_admin=grant.is_admin,
-                                     turn_taint=grant.turn_taint, agent_id=grant.agent_id, model=grant.model)
+                                     turn_taint=grant.turn_taint, agent_id=grant.agent_id, model=grant.model,
+                                     assignment_run_id=grant.assignment_run_id, source_card_id=grant.source_card_id)
 
 
 @router.post("/{name}")

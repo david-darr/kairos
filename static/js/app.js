@@ -14,10 +14,9 @@ import { registration as notificationRegistration } from './mobileNotifications.
 import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
 
 import { mountForgeRail } from './forgeRail.js';
-import { mountSidebarBots } from './sidebarBots.js';
+import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
 
 let forgeRailCleanup = () => {};
-let peopleRail = null;
 restoreSidebar();
 if (window.jarvis?.browser) document.documentElement.classList.add("electron-shell");
 if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")) document.documentElement.classList.add("platform-mac");
@@ -103,6 +102,7 @@ async function loadModule(tabId) {
 }
 
 let activeTab = null;
+let activeAgentId = null;  // the bot page open now, if any (bot notifications skip it)
 let activeUnmount = null; // set by a view's render() if it needs teardown (e.g. home.js's WebGL scene)
 
 // Each navigation owns a fresh root. A late response from a previous view
@@ -165,6 +165,7 @@ async function performSwitch(tabId, options = {}) {
   if (activeUnmount) { activeUnmount(); activeUnmount = null; }
 
   activeTab = tabId;
+  activeAgentId = tabId === 'agents' ? (options.agentId || null) : null;
   document.documentElement.dataset.view = tabId;
   const titlebarTab = document.getElementById("titlebar-tab");
   if (titlebarTab) titlebarTab.textContent = tabId === 'forgeShell' ? 'Forge' : NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
@@ -268,7 +269,7 @@ function setupMobileMenu() {
   // Close before navigation or an account/settings panel opens, so a panel
   // outside the drawer can take focus without competing with its Tab trap.
   sidebar.addEventListener('click', event => {
-    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row, .sidebar-bot-main, .sidebar-bot-add, .sidebar-thread, .sidebar-thread-all, .sidebar-team-row, .sidebar-pinned-row')) closeMobileMenu();
+    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row')) closeMobileMenu();
   }, true);
   document.addEventListener('kairos:mobile-drawer-opening', event => {
     if (event.detail?.id !== 'sidebar') closeMobileMenu(false);
@@ -297,15 +298,40 @@ function setupMobileMenu() {
 }
 
 // How many agent inbox items and results wait on the person: a count on the
-// Agents nav item. The same visible-page tick refreshes the bot rail once,
-// rather than starting a timer per bot (Agents 2.0, 2026-10-14).
+// Agents nav item, refreshed every 30 seconds while the page is visible.
 let agentBadgeTimer = null;
+// Native notifications for new bot items, one per bot per poll (botNotifications.js).
+// Electron and browsers both support the Notification API; in Electron no
+// permission prompt appears, and a click brings the app window forward.
+const botInboxWatcher = watchBotInbox({
+  names: async () => Object.fromEntries((await api('/api/agents').catch(() => [])).map(agent => [agent.id, agent.name])),
+  focusedAgentId: () => (document.hasFocus() ? activeAgentId : null),
+  show: ({ agentId, title, body }) => {
+    if (!('Notification' in window) || Notification.permission === 'denied') return;
+    const notify = () => {
+      const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false });
+      note.onclick = () => {
+        window.jarvis?.showWindow?.(); window.focus();
+        document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } }));
+        note.close();
+      };
+    };
+    if (Notification.permission === 'granted') notify();
+    else Notification.requestPermission().then(result => { if (result === 'granted') notify(); });
+  },
+});
+// The floating bot window asks the app to open a bot (electron/bot-window.js).
+window.jarvis?.botWindow?.onOpenAgent(agentId =>
+  document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } })));
+
 async function refreshAgentBadge() {
   clearTimeout(agentBadgeTimer);
   agentBadgeTimer = setTimeout(refreshAgentBadge, 30000);
-  if (document.hidden) return;
-  peopleRail?.refresh();
+  // Bot notifications need this poll most when the window is hidden, so it
+  // keeps running then unless they are turned off (2026-10-14).
+  if (document.hidden && !botNotifyPrefs().enabled) return;
   const inbox = await api("/api/agents/inbox").catch(() => null);
+  if (inbox) botInboxWatcher(inbox).catch(() => {});
   const item = document.querySelector('#nav .nav-item[data-tab="agents"]');
   if (!item || !inbox) return;
   let badge = item.querySelector(".nav-badge");
@@ -362,7 +388,6 @@ async function buildSidebar() {
   }).catch(() => {});
 
   forgeRailCleanup();
-  peopleRail?.dispose(); peopleRail = null;
   const nav = document.getElementById("nav");
   // Cleared before rebuilding — buildSidebar() now also runs whenever
   // Approved and enabled tabs supply their own sidebar manifests.
@@ -402,7 +427,6 @@ async function buildSidebar() {
     }
   }
   if (appMode === 'forge') forgeRailCleanup = mountForgeRail(nav);
-  else peopleRail = mountSidebarBots(nav);
   refreshAgentBadge();
 
   nav.querySelectorAll(".nav-item").forEach((item) => {
@@ -597,8 +621,16 @@ async function startApp() {
   notificationRegistration().catch(() => {});
   const openNotificationChat = async url => {
     const link = new URL(url, location.origin);
+    if (link.origin !== location.origin || link.pathname !== '/') return false;
+    // A bot notification opens that bot (2026-10-14).
+    const agentId = link.searchParams.get('agent');
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(agentId || '')) {
+      await switchTab('agents', { agentId });
+      history.replaceState(null, '', '/');
+      return true;
+    }
     const id = link.searchParams.get('chat');
-    if (link.origin !== location.origin || link.pathname !== '/' || !/^[a-f0-9]{12}$/.test(id || '')) return false;
+    if (!/^[a-f0-9]{12}$/.test(id || '')) return false;
     try {
       const session = await api(`/api/sessions/${id}`);
       await switchTab(session.forge ? 'forgeShell' : 'chat', { sessionId: id });

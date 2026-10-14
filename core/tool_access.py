@@ -39,6 +39,8 @@ class Grant:
     # later sensitive tools ask, as in the other brains (core/turn_taint.py).
     turn_taint: TurnTaint
     screenshot_dir: str | None = None
+    assignment_run_id: str | None = None
+    source_card_id: str | None = None
 
 
 _grants: dict[str, Grant] = {}
@@ -46,13 +48,17 @@ _grants: dict[str, Grant] = {}
 
 def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = None,
           model: Optional[str] = None) -> str:
+    from core import runs
+    from services.agent_service import agent_service
+    context = runs.current_for(session_id)
+    active = agent_service._current.get() or {}
     now = time.time()
     for stale in [t for t, g in _grants.items() if g.expires_at < now]:
         revoke(stale)
     token = secrets.token_urlsafe(32)
     folder = str(SCREEN_ROOT / secrets.token_hex(8))
     _grants[token] = Grant(session_id, bool(is_admin), agent_id, model, now + TOKEN_LIFETIME_SECONDS,
-                           TurnTaint(), folder)
+                           TurnTaint(), folder, context.run_id if context else None, active.get("card_id"))
     return token
 
 

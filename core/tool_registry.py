@@ -79,6 +79,8 @@ class ToolContext:
     # A helper's own tool calls (core/helpers.py): read tools and browse only.
     helper: bool = False
     read_only: bool = False
+    assignment_run_id: Optional[str] = None
+    source_card_id: Optional[str] = None
 
     @property
     def permission_surface(self) -> str:
@@ -1188,8 +1190,39 @@ async def _hand_to_agent(args, ctx):
             is_admin=ctx.is_admin, force_prompt=True)
         if decision.behavior != "allow":
             return f"Not run: {decision.reason or 'handing work to the agent was not approved'}"
+    # 2026-10-14: a bot's own chat is admin-owned but its autonomous tool
+    # calls still obey Peers. The person can keep using @mentions here.
+    if ctx.agent_id:
+        return "Not run: bots assign through agent_assign, which checks their Peers list."
     event = hand_off(matches[0]["id"], args["work"], ctx.session_id, recent_context(ctx.session_id))
     return f"Handed to {event['agent_name']} (card {event['card_id']})." + (f" {event['note']}" if event['note'] else "")
+
+
+@register(
+    "agent_assign",
+    "Assign work to a bot on your Peers list. Its card, questions and result appear in your thread. "
+    "After assigning, finish this turn; you will continue once the assignments settle.",
+    _object({"agent": _str("Peer bot name or id"), "work": _str("Work to assign")}, ("agent", "work")),
+    agent_only=True, effect=WRITE, core=True,
+)
+async def _agent_assign(args, ctx):
+    from services.agent_handoff import assign
+    return assign(ctx.agent_id, str(args.get("agent") or ""), str(args.get("work") or ""), ctx.session_id,
+                  ctx.assignment_run_id, ctx.source_card_id)
+
+
+@register(
+    "agent_answer_assignment",
+    "Answer a peer's question on your assignment, or escalate it to the person. "
+    "Use the question id from your thread. Set escalate true when the person must decide.",
+    _object({"question_id": _str("Peer question id"), "answer": _str("Your answer when not escalating"),
+             "escalate": {"type": "boolean"}}, ("question_id",)),
+    agent_only=True, effect=WRITE, core=True,
+)
+async def _agent_answer_assignment(args, ctx):
+    from services.agent_handoff import answer_question
+    return answer_question(ctx.agent_id, str(args["question_id"]), str(args.get("answer") or ""),
+                           bool(args.get("escalate")))
 
 
 @register(
@@ -1210,6 +1243,82 @@ async def _agent_remember(args, ctx):
     agent_service.remember(ctx.agent_id, args["section"], args["text"], until=args.get("until"),
                            topic=args.get("topic"), description=args.get("description"))
     return f"Noted under {args['section']}" + (f" in topic {args['topic']}." if args.get("topic") else ".")
+
+
+def _own_chat(ctx) -> Optional[str]:
+    """Why self-configuration is refused here, or None if it is allowed. Only
+    in the bot's own chat, with the person present: never from a scheduled,
+    webhook or coordinated run, where a page the bot read could talk it into
+    rewriting its own soul (Agents 2.0, 2026-10-14)."""
+    from core.session_manager import session_manager
+    session = session_manager.get_session(ctx.session_id) if ctx.session_id else None
+    if not session or session.get("agent_id") != ctx.agent_id or session.get("agent_unattended"):
+        return "Setup only works in your own chat, with the person there. Ask them to run /setup in your chat."
+    return None
+
+
+@register(
+    "agent_configure_self",
+    "Apply setup changes to yourself after the person agreed to them in this chat: your job (role), "
+    "blurb, standing instructions (soul), delivery channel, and optionally one new routine. Explain what "
+    "you will change before calling this. You cannot change your peers, permissions, tools, model, daily "
+    "cap or whether you are on: tell the person to do those by hand. Returns a receipt with an Undo id.",
+    _object({"role": _str("Your job, one line"), "blurb": _str("A short description of you"),
+             "soul": _str("Your standing instructions, in full"),
+             "deliver_to_channel": _str("Channel to deliver reports to"),
+             "routine_name": _str("Name of a new routine"), "routine_prompt": _str("What the routine checks"),
+             "routine_daily_time": _str("HH:MM, for a routine that runs daily"),
+             "routine_every_hours": _str("Hours between runs, for a routine that repeats"),
+             "routine_report": _str("'notable' or 'always'")}, ()),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_configure_self(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    changes = {key: args[key] for key in ("role", "blurb", "soul", "deliver_to_channel") if args.get(key) is not None}
+    routine = None
+    if args.get("routine_name"):
+        if not args.get("routine_prompt"):
+            return "A routine needs both a name and what it checks."
+        routine = {"name": args["routine_name"], "prompt": args["routine_prompt"], "report_when": args.get("routine_report")}
+        if args.get("routine_daily_time"):
+            routine.update(schedule_kind="daily", run_time=args["routine_daily_time"])
+        elif args.get("routine_every_hours"):
+            try:
+                routine.update(schedule_kind="interval", interval_seconds=max(1, int(float(args["routine_every_hours"]))) * 3600)
+            except ValueError:
+                return "routine_every_hours must be a number of hours."
+        else:
+            return "A routine needs routine_daily_time (HH:MM) or routine_every_hours."
+    try:
+        receipt = agent_service.configure_self(ctx.agent_id, changes, routine)
+    except (ValueError, KeyError) as error:
+        return f"Not applied: {error}"
+    applied = ", ".join(receipt["after"]) or "nothing on your profile"
+    extra = " and added the routine" if receipt["routine_id"] else ""
+    return (f"Applied: {applied}{extra}. Receipt {receipt['id']}. Tell the person they can undo it by asking you, "
+            f"or with Undo under History in your profile.")
+
+
+@register(
+    "agent_setup_undo",
+    "Undo one of your own setup changes by its receipt id, when the person asks. Refused if your profile "
+    "changed afterwards, so a later edit is never lost.",
+    _object({"receipt_id": _str("The receipt id from agent_configure_self")}, ("receipt_id",)),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_setup_undo(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    try:
+        agent_service.undo_setup(ctx.agent_id, args["receipt_id"])
+    except KeyError:
+        return "No setup change has that receipt id."
+    except ValueError as error:
+        return f"Not undone: {error}"
+    return "Undone: the previous values are back."
 
 
 @register(
@@ -1234,9 +1343,14 @@ async def _agent_read_topic(args, ctx):
 )
 async def _agent_ask(args, ctx):
     from services.agent_service import agent_service
+    from services.agent_handoff import requester
+    from services.task_service import task_service
     item = agent_service.add_item(ctx.agent_id, "question", args["question"], args.get("context") or "")
-    agent_service.notify(item)
-    return "Your question is in the person's inbox. Finish what you can and stop; the answer comes with your next run."
+    card = task_service.get_task(item.get("card_id")) if item.get("card_id") else None
+    if not card or (requester(card) or {}).get("kind") != "bot":
+        agent_service.notify(item)
+        return "Your question is in the person's inbox. Finish what you can and stop; the answer comes with your next run."
+    return "Your question reached the requesting bot. Finish what you can and stop; its answer comes with your next run."
 
 
 # Codex CLI does not consume Kairos's per-chat MCP configuration. These three

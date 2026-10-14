@@ -641,9 +641,10 @@ export async function render(container, tabId, options = {}) {
     el('span', { class: 'conversation-caption', text: 'Kairos · Conversations' }),
   ]));
   openSessionsBtn.insertAdjacentHTML('beforeend', ICON_CHEVRON);
-  const headerNewBtn = el('button', { type: 'button', class: 'input-icon-btn chat-header-new', title: 'New chat', 'aria-label': 'New chat', onclick: startNewChat });
-  headerNewBtn.insertAdjacentHTML('beforeend', ICON_PLUS);
-  const mobileHeader = el("div", { class: "chat-mobile-header" }, [openSessionsBtn, headerNewBtn]);
+  // 2026-10-14: no separate New chat "+" here. The header's "..." menu starts
+  // a new chat as its first item, and two controls for one action was one
+  // too many (David). The buttons below are appended in their old order.
+  const mobileHeader = el("div", { class: "chat-mobile-header" }, [openSessionsBtn]);
   const desktopChat = matchMedia('(min-width: 769px)');
   let historyCollapsed = true;
   try { historyCollapsed = localStorage.getItem('jarvis:chat-history-collapsed') !== 'false'; } catch { /* Storage is optional. */ }
@@ -672,10 +673,112 @@ export async function render(container, tabId, options = {}) {
     syncHistory();
     newBtn.focus({ preventScroll: true });
   }
+  // The conversation pill and the conversations panel separate like liquid
+  // (David, 2026-10-14: "morph with it in a kind of liquid animation as they
+  // separate"). Opening, the panel swells out of the pill and the pill then
+  // slides to where it now sits, pulling a neck of surface that thins and
+  // snaps; closing, the pill slides back, merges, and the panel drains into
+  // it. Both shapes sit in one layer under an SVG "goo" filter (blur, then a
+  // hard alpha threshold), which is what turns two nearby boxes into one fluid
+  // outline. The pill carries its title the whole way, so it never vanishes
+  // and fades back in. The layer covers only the area the morph uses, so the
+  // filter stays cheap. Desktop only; reduced motion skips it.
+  let historyMorph = null;
+  function ensureGooFilter() {
+    if (document.getElementById('kairos-goo')) return;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    svg.innerHTML = '<filter id="kairos-goo" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">'
+      + '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur"/>'
+      + '<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>'
+      + '<feComposite in="SourceGraphic" in2="goo" operator="atop" result="shape"/>'
+      + '<feDropShadow in="goo" dx="0" dy="6" stdDeviation="9" flood-color="#2b2116" flood-opacity="0.12" result="shadow"/>'
+      + '<feMerge><feMergeNode in="shadow"/><feMergeNode in="goo"/></feMerge></filter>';
+    document.body.append(svg);
+  }
+  function measureHistory(collapsed) {
+    const transition = sessionsPanel.style.transition;
+    const was = container.classList.contains('chat-history-collapsed');
+    sessionsPanel.style.transition = 'none';
+    container.classList.toggle('chat-history-collapsed', collapsed);
+    const rects = { pill: openSessionsBtn.getBoundingClientRect(), panel: sessionsPanel.getBoundingClientRect() };
+    container.classList.toggle('chat-history-collapsed', was);
+    void sessionsPanel.offsetWidth;
+    sessionsPanel.style.transition = transition;
+    return rects;
+  }
+  function morphHistory(apply) {
+    if (!desktopChat.matches || !sessionsPanel.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
+    historyMorph?.finish();
+    const opening = historyCollapsed;
+    const closedState = measureHistory(true);
+    const openState = measureHistory(false);
+    apply();
+    const shut = closedState.pill, out = openState.pill, panel = openState.panel;
+    if (!shut.width || !out.width || !panel.width) return;
+    ensureGooFilter();
+    // The layer covers the union of every box the morph passes through.
+    const pad = 40;
+    const left = Math.min(shut.left, out.left, panel.left) - pad, top = Math.min(shut.top, out.top, panel.top) - pad;
+    const right = Math.max(shut.right, out.right, panel.right) + pad, bottom = Math.max(shut.bottom, out.bottom, panel.bottom) + pad;
+    const layer = el('div', { class: 'chat-history-goo', 'aria-hidden': 'true' });
+    Object.assign(layer.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+    const panelBlob = el('div', { class: 'chat-history-goo-blob' });
+    const pillBlob = el('div', { class: 'chat-history-goo-blob' });
+    layer.append(panelBlob, pillBlob);
+    // The title rides above the filter so its text stays crisp. The copy keeps
+    // the pill's markup but none of its identity: no ids, no focus, no events.
+    const title = openSessionsBtn.cloneNode(true);
+    title.removeAttribute('id');
+    title.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+    title.removeAttribute('aria-controls');
+    title.className = 'chat-history-goo-title';
+    title.tabIndex = -1;
+    const wrap = el('div', { class: 'chat-history-goo-wrap', 'aria-hidden': 'true' }, [layer, title]);
+    wrap.inert = true;
+    document.body.append(wrap);
+    // A fully rounded pill reports a huge radius; animating that towards the
+    // panel's square corners keeps the shape an oval blob. Use the radius
+    // that is actually visible: half the pill's height.
+    const radius = `${Math.min(parseFloat(getComputedStyle(openSessionsBtn).borderTopLeftRadius) || 0, shut.height / 2)}px`;
+    const at = (r, rr, offset) => ({ left: `${r.left - left}px`, top: `${r.top - top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: rr, ...(offset === undefined ? {} : { offset }) });
+    const titleAt = (r, offset) => ({ left: `${r.left}px`, top: `${r.top}px`, ...(offset === undefined ? {} : { offset }) });
+    const timing = { duration: 640, easing: 'cubic-bezier(.45, 0, .2, 1)' };
+    let panelFrames, pillFrames, titleFrames;
+    if (opening) {
+      // The panel swells out of the pill; the pill holds on, then slides off.
+      panelFrames = [at(shut, radius), at(panel, '0px', 0.58), at(panel, '0px')];
+      pillFrames = [at(shut, radius), at(shut, radius, 0.32), at(out, radius, 0.86), at(out, radius)];
+      titleFrames = [titleAt(shut), titleAt(shut, 0.32), titleAt(out, 0.86), titleAt(out)];
+    } else {
+      // The pill slides back and merges; then the panel drains into it.
+      panelFrames = [at(panel, '0px'), at(panel, '0px', 0.38), at(shut, radius)];
+      pillFrames = [at(out, radius), at(shut, radius, 0.46), at(shut, radius)];
+      titleFrames = [titleAt(out), titleAt(shut, 0.46), titleAt(shut)];
+    }
+    const morph = panelBlob.animate(panelFrames, timing);
+    pillBlob.animate(pillFrames, timing);
+    title.animate(titleFrames, timing);
+    // Hand back to the real pill and panel at the end, at the same spot.
+    wrap.animate([{ opacity: 1 }, { opacity: 1, offset: 0.9 }, { opacity: 0 }], timing);
+    openSessionsBtn.animate([{ opacity: 0 }, { opacity: 0, offset: 0.88 }, { opacity: 1 }], timing);
+    if (opening) sessionsPanel.animate([{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], timing);
+    // Closing: the list goes first, or its rows show past the panel's edge
+    // while its width collapses underneath.
+    else sessionsPanel.animate([{ opacity: 1 }, { opacity: 0, offset: 0.2 }, { opacity: 0 }], timing);
+    historyMorph = morph;
+    morph.finished.catch(() => {}).finally(() => { wrap.remove(); if (historyMorph === morph) historyMorph = null; });
+  }
   openSessionsBtn.addEventListener('click', () => {
     if (desktopChat.matches) {
-      historyCollapsed = !historyCollapsed;
-      try { localStorage.setItem('jarvis:chat-history-collapsed', String(historyCollapsed)); } catch { /* Storage is optional. */ }
+      morphHistory(() => {
+        historyCollapsed = !historyCollapsed;
+        try { localStorage.setItem('jarvis:chat-history-collapsed', String(historyCollapsed)); } catch { /* Storage is optional. */ }
+        syncHistory();
+      });
     } else {
       if (sessionsPanel.classList.contains('open')) closeSessionsDrawer(true);
       else openSessionsDrawer();
@@ -726,46 +829,45 @@ export async function render(container, tabId, options = {}) {
 
   // -- composer: top row (textarea + model picker) --------------------
   const input = el("textarea", { id: "chat-input", rows: "1", placeholder: "Where should we start?", "aria-label": "Message Kairos" });
-  const modelBtn = el("button", { type: "button", class: "model-picker-btn", id: "model-picker-btn", 'aria-controls': 'model-picker-menu', 'aria-expanded': 'false' }, [
+  // One model control (David, 2026-10-14: "a little off visually and UX"). It
+  // used to be two buttons stacked in one pill, connection above and version
+  // below, each opening its own menu, with nothing telling them apart. Now one
+  // single-line button opens one menu: connections, then that connection's
+  // versions, reasoning and the escape hatches. Same endpoints, same per-chat
+  // persistence, same lock while a turn runs.
+  const modelBtn = el("button", { type: "button", class: "model-picker-btn", id: "model-picker-btn", 'aria-controls': 'model-picker-menu', 'aria-expanded': 'false', 'aria-haspopup': 'dialog' }, [
     el("span", { class: "model-pill-mark", id: "model-picker-mark" }),
-    el('span', { class: 'header-model-copy' }, [
-      el("span", { id: "model-picker-label", text: "Set up a model" }),
-      el('span', { class: 'header-model-detail', id: 'header-model-detail' }),
-    ]),
+    el("span", { id: "model-picker-label", text: "Set up a model" }),
   ]);
   modelBtn.insertAdjacentHTML("beforeend", ICON_CHEVRON);
-  const modelMenu = el("div", { class: "model-picker-menu hidden", id: "model-picker-menu" });
+  const modelMenu = el("div", { class: "model-picker-menu model-picker-unified hidden", id: "model-picker-menu", role: 'dialog', 'aria-label': 'Model for this chat' });
   const modelWrap = el("div", { class: "model-picker-wrap" }, [modelBtn, modelMenu]);
+  const openModelMenu = (focusFirst = false) => {
+    if (modelMenu.classList.contains('hidden')) toggleMenu(modelMenu, modelBtn);
+    if (focusFirst) (modelMenu.querySelector('.model-picker-item.active') || modelMenu.querySelector('.model-picker-item'))?.focus();
+  };
   modelBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(modelMenu, modelBtn); });
-  const versionBtn = el('button', { type: 'button', class: 'model-picker-btn', id: 'model-version-btn', text: 'Model version', hidden: true, 'aria-controls': 'model-version-menu', 'aria-expanded': 'false' });
-  const versionMenu = el('div', { class: 'model-picker-menu hidden version-menu', id: 'model-version-menu' });
-  versionBtn.addEventListener('click', async e => {
-    e.stopPropagation();
-    if (!versionMenu.classList.contains('hidden')) { closeMenu(versionMenu); return; }
-    versionBtn.disabled = true;
-    try {
-      if (!activeSessionId) await createSession({ preserveAttachments: true });
-      const sessionId = activeSessionId;
-      if (!sessionId || !versionMenu.isConnected) return;
-      const session = await api(`/api/sessions/${sessionId}`);
-      if (activeSessionId !== sessionId) return;
-      await refreshModelPicker(session.model_endpoint_id, session.model_override ?? null, session.model_effort ?? null);
-      if (activeSessionId === sessionId) toggleMenu(versionMenu, modelBtn);
-    } catch (error) {
-      toast(`Couldn't open model settings: ${error.message}`, 'error');
-    } finally {
-      versionBtn.disabled = false;
+  modelBtn.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' && !modelBtn.disabled) { e.preventDefault(); openModelMenu(true); }
+  });
+  // Choosing a connection keeps the menu open so its versions can be picked
+  // next; a click inside must not reach the document handler that closes menus.
+  modelMenu.addEventListener('click', e => e.stopPropagation());
+  modelMenu.addEventListener('keydown', e => {
+    const items = [...modelMenu.querySelectorAll('.model-picker-item, .model-effort-btn, #chat-model-search, .model-custom-details > summary')]
+      .filter(node => !node.disabled && node.getClientRects().length);
+    const at = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); closeMenu(modelMenu); modelBtn.focus(); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (document.activeElement?.id === 'chat-model-id') return;  // typing a custom ID
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(at + step + items.length) % items.length]?.focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      if (document.activeElement?.tagName === 'INPUT') return;
+      e.preventDefault(); (e.key === 'Home' ? items[0] : items[items.length - 1])?.focus();
     }
   });
-  versionMenu.addEventListener('click', e => e.stopPropagation());
-  const versionWrap = el('div', { class: 'model-picker-wrap' }, [versionBtn, versionMenu]);
-  const syncModelDetail = () => {
-    const detail = modelBtn.querySelector('.header-model-detail');
-    detail.textContent = versionBtn.hidden ? '' : versionBtn.textContent;
-    detail.title = detail.textContent;
-  };
-  const modelDetailObserver = new MutationObserver(syncModelDetail);
-  modelDetailObserver.observe(versionBtn, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
 
   const inputTop = el("div", { class: "chat-input-top" }, [input]);
   chatReferences = mountChatReferences(input, inputTop, () => activeSessionId);
@@ -824,8 +926,8 @@ export async function render(container, tabId, options = {}) {
     onclick: () => activeSessionId ? openChatFiles(activeSessionId) : toast("Open a chat to see its files", "error") });
   const documentsBtn = el("button", { type: "button", class: "btn quiet chat-documents-toggle", text: "Documents", "aria-label": "Documents", onclick: () => showArtifactPane(documentsBtn) });
   filesBtn.insertAdjacentHTML("beforeend", ICON_DOC);
-  mobileHeader.insertBefore(filesBtn, headerNewBtn);
-  mobileHeader.insertBefore(documentsBtn, headerNewBtn);
+  mobileHeader.append(filesBtn);
+  mobileHeader.append(documentsBtn);
   const phoneToolsBtn = el('button', { type: 'button', class: 'input-icon-btn',
     'aria-label': 'Chat tools', 'aria-expanded': 'false' });
   phoneToolsBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
@@ -834,7 +936,7 @@ export async function render(container, tabId, options = {}) {
     closeMenu(phoneToolsMenu); main.querySelector('.chat-summary-trigger')?.click();
   });
   const phoneModel = menuItem(ICONS.settings, 'Model and reasoning', () => {
-    closeMenu(phoneToolsMenu); versionBtn.click();
+    closeMenu(phoneToolsMenu); openModelMenu(true);
   });
   phoneToolsMenu.append(
     menuItem(ICON_PLUS, 'New chat', () => { closeMenu(phoneToolsMenu); startNewChat(); }),
@@ -845,15 +947,14 @@ export async function render(container, tabId, options = {}) {
   );
   phoneToolsBtn.addEventListener('click', event => {
     event.stopPropagation();
-    phoneModel.hidden = versionBtn.hidden;
-    phoneModel.disabled = versionBtn.disabled;
+    phoneModel.disabled = modelBtn.disabled;
     phoneSummary.hidden = !main.querySelector('.chat-summary-trigger:not([hidden])');
     toggleMenu(phoneToolsMenu);
     phoneToolsBtn.setAttribute('aria-expanded', String(!phoneToolsMenu.classList.contains('hidden')));
   });
   const toolsObserver = new MutationObserver(() => phoneToolsBtn.setAttribute('aria-expanded', String(!phoneToolsMenu.classList.contains('hidden'))));
   toolsObserver.observe(phoneToolsMenu, { attributes: true, attributeFilter: ['class'] });
-  mobileHeader.insertBefore(el('div', { class: 'overflow-wrapper chat-phone-tools' }, [phoneToolsBtn, phoneToolsMenu]), headerNewBtn);
+  mobileHeader.append(el('div', { class: 'overflow-wrapper chat-phone-tools' }, [phoneToolsBtn, phoneToolsMenu]));
   let computerInfo = null;
   const dismissComputer = () => {
     const entry = chatStream.getInFlight(activeSessionId);
@@ -942,7 +1043,7 @@ export async function render(container, tabId, options = {}) {
   openMicBtn.insertAdjacentHTML("beforeend", ICON_OPENMIC);
   openMicBtn.hidden = !isRecordingSupported();
   openMicBtn.addEventListener("click", () => setOpenMic(!isOpenMicActive(), openMicBtn));
-  const modelPill = el("div", { class: "model-pill", role: "group", "aria-label": "Model for this chat" }, [modelWrap, versionWrap]);
+  const modelPill = el("div", { class: "model-pill", role: "group", "aria-label": "Model for this chat" }, [modelWrap]);
   modelPill.classList.add('chat-header-model');
   mobileHeader.insertBefore(modelPill, filesBtn);
   // The same controls keep their listeners, draft and permissions. Secondary
@@ -957,11 +1058,11 @@ export async function render(container, tabId, options = {}) {
 
   const composer = el("div", { class: "glass chat-input-bar border-beam" }, [inputTop, inputBottom]);
   const menuStateObserver = new MutationObserver(() => {
-    for (const [button, menu] of [[modelBtn, modelMenu], [versionBtn, versionMenu], [overflowBtn, overflowMenu]]) {
+    for (const [button, menu] of [[modelBtn, modelMenu], [overflowBtn, overflowMenu]]) {
       button.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
     }
   });
-  for (const menu of [modelMenu, versionMenu, overflowMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
+  for (const menu of [modelMenu, overflowMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
   const composerHint = el('div', { class: 'composer-hint' });
   const syncComposerHint = () => {
@@ -1096,7 +1197,7 @@ export async function render(container, tabId, options = {}) {
   const dismissMenus = (event) => {
     // Selecting a mode, starting Open Mic, searching models or expanding a
     // disclosure must keep its menu open. Only outside clicks dismiss it.
-    for (const menu of [overflowMenu, modelMenu, versionMenu, projectPickerMenu, phoneToolsMenu]) {
+    for (const menu of [overflowMenu, modelMenu, projectPickerMenu, phoneToolsMenu]) {
       if (!event?.target || !menu.contains(event.target)) closeMenu(menu);
     }
   };
@@ -1161,7 +1262,6 @@ export async function render(container, tabId, options = {}) {
     releaseDrawer();
     document.documentElement.classList.remove('chat-history-open');
     toolsObserver.disconnect();
-    modelDetailObserver.disconnect();
     menuStateObserver.disconnect();
     dockObserver.disconnect();
     dock.getAnimations().forEach(animation => animation.cancel());
@@ -1937,7 +2037,7 @@ async function runCompact(button) {
 function syncChatBusy(busy) {
   // Model controls still lock during a turn: switching provider mid-reply
   // would reconnect the brain underneath a running stream.
-  for (const id of ['model-picker-btn', 'model-version-btn']) {
+  for (const id of ['model-picker-btn']) {
     const control = document.getElementById(id);
     if (control) control.disabled = busy;
   }
@@ -1973,7 +2073,10 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   const sessionId = activeSessionId;
   const endpoints = await api("/api/models/choices").catch(() => []);
   if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
-  menu.innerHTML = "";
+  // Focus is restored after a rebuild, so choosing a connection with the
+  // keyboard lands on its versions rather than dropping focus to the page.
+  const hadFocus = menu.contains(document.activeElement);
+  menu.replaceChildren();
   const main = document.getElementById("chat-main");
   main?.querySelector(":scope > .model-setup-empty")?.remove();
   if (!endpoints.length && main) main.prepend(el("div", { class: "model-setup-empty" }, [
@@ -1981,21 +2084,17 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     el("button", { class: "btn", text: "Set up a model", onclick: setupChatModel }),
   ]));
 
-  const options = endpoints.map((ep) => ({
-    id: ep.id,
-    mark: ep.mark,
-    name: ep.kind === "claude_cli" || ep.kind === "codex_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`,
-  }));
-  menu.appendChild(el("div", { class: "model-picker-heading", text: options.length ? "Model for this chat" : "No models yet. Set up a model." }));
-  for (const opt of options) {
-    const ep = endpoints.find((e) => e.id === opt.id);
+  // -- connections
+  menu.appendChild(el("div", { class: "model-picker-heading", text: endpoints.length ? "Connection" : "No models yet. Set up a model." }));
+  for (const ep of endpoints) {
+    const optName = ep.kind === "claude_cli" || ep.kind === "codex_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
+    const isCurrent = ep.id === (currentEndpointId || "");
     const item = el("button", {
       type: 'button',
-      'data-endpoint-id': opt.id,
-      class: "model-picker-item model-connection-item" + (opt.id === (currentEndpointId || "") ? " active" : ""),
+      'data-endpoint-id': ep.id,
+      class: "model-picker-item model-connection-item" + (isCurrent ? " active" : ""),
       onclick: async () => {
         if (chatStream.getInFlight(activeSessionId)?.status === 'processing') return;
-        closeMenu(menu);
         // Landing on Chats without opening a chat leaves activeSessionId null,
         // and this used to `return` — so the dropdown listed every model and
         // silently ignored every click (David, 2026-09-04). Create the session
@@ -2004,139 +2103,149 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
         if (!activeSessionId) return; // creation genuinely failed
         const target = activeSessionId;
         try {
-          await api(`/api/sessions/${target}/model`, { method: "POST", body: JSON.stringify({ model_endpoint_id: opt.id }) });
-          if (activeSessionId === target) await refreshModelPicker(opt.id);
+          await api(`/api/sessions/${target}/model`, { method: "POST", body: JSON.stringify({ model_endpoint_id: ep.id }) });
+          // The menu stays open on the chosen connection's versions.
+          if (activeSessionId === target) await refreshModelPicker(ep.id);
         } catch (_) { /* api() displays the mutation error */ }
       },
     }, [el("span", { class: "model-connection-text" }, [
       el("span", { class: "model-connection-name", text: ep.name }),
       el("span", { class: "model-connection-sub", text: ep.model || "Default model" }),
     ])]);
-    const itemMark = modelMark(opt.mark, opt.name);
+    if (isCurrent) item.setAttribute('aria-current', 'true');
+    const itemMark = modelMark(ep.mark, optName);
     if (itemMark) item.prepend(itemMark);
     menu.appendChild(item);
   }
-  menu.appendChild(el("button", { type: "button", class: "model-picker-item model-add-item", text: "Set up a model",
-    onclick: () => { closeMenu(menu); setupChatModel(); } }));
-  const active = options.find((o) => o.id === currentEndpointId);
-  // The connection's own mark leads the pill.
+
+  const ep = endpoints.find(e => e.id === currentEndpointId);
   const markSlot = document.getElementById("model-picker-mark");
   if (markSlot) {
     markSlot.replaceChildren();
-    const activeMark = active && modelMark(active.mark, active.name);
+    const activeMark = ep && modelMark(ep.mark, ep.name);
     if (activeMark) markSlot.append(activeMark);
   }
-  label.textContent = active ? active.name : options.length ? 'Choose model' : NO_MODEL_LABEL;
-  label.closest('button').title = label.textContent;
-  const ep = endpoints.find(e => e.id === currentEndpointId);
-  const versionBtn = document.getElementById('model-version-btn');
-  const versionMenu = document.getElementById('model-version-menu');
-  if (!versionBtn || !versionMenu) return;
+  // Name and version as separate spans: one line on desktop, stacked on a
+  // phone where one truncated line would hide the version (2026-10-14).
+  // The " · " stays in the text for screen readers.
+  const setLabel = (name, version = '') => {
+    label.replaceChildren(el('span', { class: 'model-label-name', text: name }));
+    if (version) label.append(el('span', { class: 'model-label-sep', text: ' · ' }), el('span', { class: 'model-label-version', text: version }));
+    label.closest('button').title = label.textContent;
+  };
+  setLabel(ep ? ep.name : endpoints.length ? 'Choose model' : NO_MODEL_LABEL);
+  const setupItem = () => el("button", { type: "button", class: "model-picker-item model-add-item", text: "Set up a model",
+    onclick: () => { closeMenu(menu); setupChatModel(); } });
+
   const selectable = ep && ['claude_cli', 'codex_cli', 'api'].includes(ep.kind);
-  versionBtn.hidden = !selectable;
-  versionMenu.replaceChildren();
-  if (selectable) {
-    label.textContent = ep.name;
-    // The model this chat will actually use: the session's own override
-    // when set, otherwise whatever the endpoint is configured with.
-    const effectiveModel = (modelOverride === null ? ep.model : modelOverride) || '';
-    const catalog = await loadModelCatalog(ep);
-    if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !versionMenu.isConnected) return;
-    const known = catalog.find(m => m.id === effectiveModel || m.alias === effectiveModel) || null;
-    versionBtn.textContent = (known ? known.display_name : effectiveModel) || 'CLI default';
-    if (modelEffort) versionBtn.textContent += ` · ${modelEffort}`;
-    versionBtn.title = 'Model and reasoning level for this chat';
+  if (!selectable) {
+    menu.appendChild(setupItem());
+    if (hadFocus) (menu.querySelector('.model-picker-item.active') || menu.querySelector('.model-picker-item'))?.focus();
+    syncChatBusy(chatStream.getInFlight(activeSessionId)?.status === 'processing');
+    return;
+  }
 
-    const save = async (value, effort = null) => {
-      if (activeSessionId !== sessionId || chatStream.getInFlight(sessionId)?.status === 'processing') return;
-      try {
-        const result = await api(`/api/sessions/${sessionId}/model`, {
-          method: 'POST',
-          body: JSON.stringify({ model_endpoint_id: ep.id, model_override: value, effort }),
-        });
-        if (activeSessionId === sessionId) {
-          closeMenu(versionMenu);
-          await refreshModelPicker(ep.id, result.model_override, result.effort ?? null);
-          toast('Model updated for this chat', 'success');
-        }
-      } catch (_) { /* keep the editor open on error — api() shows the reason */ }
-    };
+  // -- this connection's versions. The model this chat will actually use:
+  // the session's own override when set, otherwise the endpoint's setting.
+  const effectiveModel = (modelOverride === null ? ep.model : modelOverride) || '';
+  const catalog = await loadModelCatalog(ep);
+  if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
+  const known = catalog.find(m => m.id === effectiveModel || m.alias === effectiveModel) || null;
+  const versionText = ((known ? known.display_name : effectiveModel) || 'CLI default') + (modelEffort ? ` · ${modelEffort}` : '');
+  setLabel(ep.name, versionText);
 
-    // -- reasoning level. Only rendered for a model whose supported levels
-    // are actually known; a custom/unlisted ID gets no effort row rather
-    // than a guessed one, since the server would reject an unadvertised
-    // value anyway (core/model_catalog.py's validate_effort).
-    const effortRow = el('div', { class: 'model-effort-row' });
-    if (known && known.supported_efforts.length) {
-      effortRow.append(el('span', { class: 'model-effort-label', text: 'Reasoning' }));
-      const levels = [{ effort: null, description: known.default_effort
-        ? `Provider default (${known.default_effort})` : 'Provider default' }, ...known.supported_efforts];
-      for (const level of levels) {
-        effortRow.appendChild(el('button', {
-          type: 'button',
-          class: 'model-effort-btn' + ((modelEffort ?? null) === level.effort ? ' active' : ''),
-          text: level.effort || 'Default',
-          title: level.description || '',
-          onclick: () => save(modelOverride, level.effort),
-        }));
+  const save = async (value, effort = null) => {
+    if (activeSessionId !== sessionId || chatStream.getInFlight(sessionId)?.status === 'processing') return;
+    try {
+      const result = await api(`/api/sessions/${sessionId}/model`, {
+        method: 'POST',
+        body: JSON.stringify({ model_endpoint_id: ep.id, model_override: value, effort }),
+      });
+      if (activeSessionId === sessionId) {
+        closeMenu(menu);
+        await refreshModelPicker(ep.id, result.model_override, result.effort ?? null);
+        toast('Model updated for this chat', 'success');
       }
+    } catch (_) { /* keep the menu open on error — api() shows the reason */ }
+  };
+
+  const section = el('div', { class: 'model-version-section' });
+  section.appendChild(el('div', { class: 'model-picker-heading', text: `${ep.name} model` }));
+  const listWrap = el('div', { class: 'model-catalog-list' });
+  const renderList = (query) => {
+    listWrap.replaceChildren();
+    const q = query.trim().toLowerCase();
+    const matches = catalog.filter(m => !q
+      || m.display_name.toLowerCase().includes(q)
+      || m.id.toLowerCase().includes(q)
+      || (m.description || '').toLowerCase().includes(q));
+    if (!matches.length) {
+      listWrap.appendChild(el('p', { class: 'muted', text: catalog.length ? 'No models match that search.' : 'No model list available for this connection — enter an exact ID under More options.' }));
+      return;
     }
-
-    // -- searchable model list, filtered live. Falls back silently to the
-    // custom-ID field below when the provider offers no catalog on this
-    // machine, which is the exact behaviour this picker had before.
-    const listWrap = el('div', { class: 'model-catalog-list' });
-    const renderList = (query) => {
-      listWrap.replaceChildren();
-      const q = query.trim().toLowerCase();
-      const matches = catalog.filter(m => !q
-        || m.display_name.toLowerCase().includes(q)
-        || m.id.toLowerCase().includes(q)
-        || (m.description || '').toLowerCase().includes(q));
-      if (!matches.length) {
-        listWrap.appendChild(el('p', { class: 'muted', text: catalog.length ? 'No models match that search.' : 'No model list available for this connection — enter an exact ID below.' }));
-        return;
-      }
-      for (const m of matches) {
-        const row = el('button', {
-          type: 'button',
-          class: 'model-picker-item model-catalog-item' + (known && m.id === known.id ? ' active' : ''),
-          // Switching model drops the effort: levels are per-model (verified
-          // against Codex's own catalog — GPT-5.5 advertises no "ultra"
-          // while Astra does), so carrying one across would send a value the
-          // new model may not support.
-          onclick: () => save(m.id, null),
-        }, [
-          el('span', { class: 'model-catalog-name', text: m.display_name }),
-          el('span', { class: 'model-catalog-desc', text: m.description || m.id }),
-        ]);
-        listWrap.appendChild(row);
-      }
-    };
-    const search = el('input', {
+    for (const m of matches) {
+      const current = known && m.id === known.id;
+      const row = el('button', {
+        type: 'button',
+        class: 'model-picker-item model-catalog-item' + (current ? ' active' : ''),
+        // Switching model drops the effort: levels are per-model (verified
+        // against Codex's own catalog — GPT-5.5 advertises no "ultra"
+        // while Astra does), so carrying one across would send a value the
+        // new model may not support.
+        onclick: () => save(m.id, null),
+      }, [
+        el('span', { class: 'model-catalog-name', text: m.display_name }),
+        el('span', { class: 'model-catalog-desc', text: m.description || m.id }),
+      ]);
+      if (current) row.setAttribute('aria-current', 'true');
+      listWrap.appendChild(row);
+    }
+  };
+  // A search box only earns its place on a long list.
+  if (catalog.length > 8) {
+    section.appendChild(el('div', { class: 'model-version-search' }, [el('input', {
       id: 'chat-model-search', type: 'search', placeholder: 'Search models',
       autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Search models',
       oninput: e => renderList(e.target.value),
-    });
-    renderList('');
-
-    // -- custom ID, kept as a secondary escape hatch exactly as before: the
-    // Discovery can be unavailable or incomplete; keep the exact-ID path.
-    const input = el('input', { id: 'chat-model-id', type: 'text', maxlength: '160', value: modelOverride ?? ep.model ?? '', placeholder: 'Exact model ID', autocomplete: 'off', spellcheck: 'false' });
-    const form = el('form', { class: 'model-version-form', onsubmit: e => { e.preventDefault(); save(input.value.trim()); } }, [
-      el('label', { for: 'chat-model-id', text: 'Custom model ID' }), input,
-      el('p', { class: 'muted', text: 'For a model this connection can reach that is not listed above. Applies to this chat only.' }),
-      el('button', { type: 'submit', class: 'btn', text: 'Apply model' }),
-    ]);
-
-    versionMenu.append(
-      el('div', { class: 'model-version-search' }, [search]),
-      listWrap,
-      ...(effortRow.childElementCount ? [effortRow] : []),
-      el('details', { class: 'model-custom-details' }, [el('summary', { text: 'Custom model ID' }), form]),
-      ...(ep.kind === 'api' ? [] : [el('button', { type: 'button', class: 'model-picker-item', text: 'Use CLI default', onclick: () => save('') })]),
-      el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) }));
+    })]));
   }
+  renderList('');
+  section.appendChild(listWrap);
+
+  // -- reasoning level. Only rendered for a model whose supported levels
+  // are actually known; a custom/unlisted ID gets no effort row rather
+  // than a guessed one, since the server would reject an unadvertised
+  // value anyway (core/model_catalog.py's validate_effort).
+  if (known && known.supported_efforts.length) {
+    const effortRow = el('div', { class: 'model-effort-row', role: 'group', 'aria-label': 'Reasoning' },
+      [el('span', { class: 'model-effort-label', text: 'Reasoning' })]);
+    const levels = [{ effort: null, description: known.default_effort
+      ? `Provider default (${known.default_effort})` : 'Provider default' }, ...known.supported_efforts];
+    for (const level of levels) {
+      const on = (modelEffort ?? null) === level.effort;
+      effortRow.appendChild(el('button', {
+        type: 'button', class: 'model-effort-btn' + (on ? ' active' : ''), 'aria-pressed': String(on),
+        text: level.effort || 'Default', title: level.description || '',
+        onclick: () => save(modelOverride, level.effort),
+      }));
+    }
+    section.appendChild(effortRow);
+  }
+
+  // -- the escape hatches, unchanged but folded away: discovery can be
+  // unavailable or incomplete, so the exact-ID path stays.
+  const input = el('input', { id: 'chat-model-id', type: 'text', maxlength: '160', value: modelOverride ?? ep.model ?? '', placeholder: 'Exact model ID', autocomplete: 'off', spellcheck: 'false' });
+  const form = el('form', { class: 'model-version-form', onsubmit: e => { e.preventDefault(); save(input.value.trim()); } }, [
+    el('label', { for: 'chat-model-id', text: 'Custom model ID' }), input,
+    el('p', { class: 'muted', text: 'For a model this connection can reach that is not listed above. Applies to this chat only.' }),
+    el('button', { type: 'submit', class: 'btn', text: 'Apply model' }),
+  ]);
+  section.append(el('details', { class: 'model-custom-details' }, [el('summary', { text: 'More options' }),
+    form,
+    ...(ep.kind === 'api' ? [] : [el('button', { type: 'button', class: 'model-picker-item', text: 'Use CLI default', onclick: () => save('') })]),
+    el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) })]));
+  menu.append(section, setupItem());
+  if (hadFocus) (section.querySelector('.model-catalog-item.active') || section.querySelector('#chat-model-search, .model-catalog-item'))?.focus();
   syncChatBusy(chatStream.getInFlight(activeSessionId)?.status === 'processing');
 }
 
