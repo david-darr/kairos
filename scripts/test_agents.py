@@ -1502,5 +1502,172 @@ class RouteTests(AgentTestCase):
         self.assertEqual(web.get("/api/agents/inbox").json()["count"], 0)
 
 
+class MemoryUpkeepTests(AgentTestCase):
+    def setUp(self):
+        super().setUp()
+        from core.session_manager import session_manager
+        self.session_manager = session_manager
+        self.now = datetime.now().timestamp() + 1000
+        session = session_manager.create_session("Quiet agent chat")
+        session_manager.set_agent(session["id"], self.agent["id"], "agent")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        self.session = session["id"]
+        with patch("core.session_manager.time.time", return_value=self.now - 1000):
+            session_manager.append_message(self.session, "user", "remember this")
+        agent_service.update(self.agent["id"], memory_upkeep=True)
+
+    def memory_file(self):
+        return Path(agent_service._memory_path(self.agent["id"]))
+
+    def put(self, text):
+        self.memory_file().write_bytes(text.encode("utf-8"))
+
+    def pass_once(self, topic=None):
+        return agent_service.upkeep_memory(self.agent["id"], now=self.now, topic=topic)
+
+    def test_quiet_window_and_active_chat(self):
+        from services.agent_memory_upkeep import QUIET_SECONDS
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        self.assertIsNone(agent_service.upkeep_memory(self.agent["id"], now=self.now - 1000 + QUIET_SECONDS - 1))
+        from services import chat_service
+        with patch.object(chat_service, "is_busy", return_value=True):
+            self.assertIsNone(self.pass_once())
+        self.assertIsNotNone(agent_service.upkeep_memory(self.agent["id"], now=self.now - 1000 + QUIET_SECONDS))
+
+    def test_admission_reservation_prevents_upkeep(self):
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        with agent_service.run(self.agent["id"]):
+            self.assertIsNone(self.pass_once())
+            self.assertIn("expired", agent_service.read_memory(self.agent["id"]))
+        self.assertIsNotNone(self.pass_once())
+
+    def test_noop_is_byte_identical_and_cached(self):
+        original = b"## Notes\r\n  Person's note  \r\n- 2022-01-01: stable\r\n"
+        self.memory_file().write_bytes(original)
+        self.assertIsNone(self.pass_once())
+        journal = Path(agent_service._memory_path(self.agent["id"])).with_name("memory-upkeep.json")
+        first = journal.read_bytes()
+        self.assertIsNone(self.pass_once())
+        self.assertEqual(journal.read_bytes(), first)
+        self.assertEqual(self.memory_file().read_bytes(), original)
+
+    def test_merge_keeps_new_wording_and_earlier_date(self):
+        self.put("## Notes\n- 2020-01-01: Likes remote roles.\n"
+                 "- 2021-01-01: Remote roles preferred\n- 2022-01-01: newest fact\n")
+        result = self.pass_once()
+        self.assertEqual(result["changes"][0]["reason"], "near-duplicate")
+        self.assertIn("- 2020-01-01: Remote roles preferred\n", self.memory_file().read_text())
+        self.assertIn("- 2020-01-01: Likes remote roles.", self.memory_file().with_name("memory-archive.md").read_text())
+
+    def test_correction_supersedes_earlier_note(self):
+        self.put("## Preferences\n- 2020-01-01: onsite roles\n- 2020-02-01: concise replies\n"
+                 "## Corrections\n- 2021-01-01: Use remote roles instead of onsite roles\n"
+                 "## Notes\n- 2022-01-01: newest fact\n")
+        self.assertIsNotNone(self.pass_once())
+        self.assertNotIn("- 2020-01-01: onsite roles", self.memory_file().read_text())
+        self.assertIn("Use remote roles instead of onsite roles", self.memory_file().read_text())
+
+    def test_person_lines_sections_and_newest_are_protected(self):
+        original = ("## Preferences\nPerson wrote this.\n- not-a-date: personal\n"
+                    "## Notes\n- 2020-01-01 (until 2021-01-01): only entry\n"
+                    "## Corrections\n- 2022-01-01 (until 2023-01-01): newest\n")
+        self.put(original)
+        self.assertIsNone(self.pass_once())
+        self.assertEqual(self.memory_file().read_text(), original)
+
+    def test_bounded_pass_and_all_removed_are_archived(self):
+        lines = [f"- 2020-01-{i:02d} (until 2021-01-01): expired {i}\n" for i in range(1, 10)]
+        self.put("## Notes\n" + "".join(lines) + "- 2022-01-01: newest\n")
+        result = self.pass_once()
+        self.assertLessEqual(len(result["changes"]), 2)
+        archive = self.memory_file().with_name("memory-archive.md").read_text()
+        for change in result["changes"]:
+            self.assertIn(change["line"], archive)
+        self.assertIn("newest", self.memory_file().read_text())
+
+    def test_finished_project_is_archived_after_thirty_days(self):
+        self.put("## Notes\n- 2020-01-01: Project Atlas uses an old board\n"
+                 "- 2021-01-01: Project Atlas completed\n- 2022-01-01: newest fact\n")
+        result = self.pass_once()
+        self.assertEqual(result["changes"][0]["reason"], "finished project")
+        self.assertIn("Project Atlas uses an old board", self.memory_file().with_name("memory-archive.md").read_text())
+        self.assertIn("Project Atlas completed", self.memory_file().read_text())
+
+    def test_journal_limit_blocks_new_pass_without_dropping_undo(self):
+        from services import agent_memory_upkeep as upkeep
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        journal_path = upkeep._journal_path(agent_service, self.agent["id"])
+        fake = {"id": "older", "status": "committed", "files": [], "changes": []}
+        upkeep._save(journal_path, {"entries": [fake], "checked": {}})
+        with patch.object(upkeep, "MAX_UNDOABLE", 1):
+            self.assertIsNone(self.pass_once())
+        self.assertEqual(upkeep.journal_entries(agent_service, self.agent["id"])[0]["id"], "older")
+        self.assertIn("expired", self.memory_file().read_text())
+
+    def test_undo_restores_hand_edited_bytes(self):
+        original = (b"## Notes\r\nPerson's spacing    \r\n"
+                    b"- 2020-01-01 (until 2021-01-01): expired  \r\n"
+                    b"- 2022-01-01: newest\r\n")
+        self.memory_file().write_bytes(original)
+        result = self.pass_once()
+        self.assertIsNotNone(result)
+        self.assertTrue(agent_service.undo_memory_upkeep(self.agent["id"], result["id"])["undone"])
+        self.assertEqual(self.memory_file().read_bytes(), original)
+        self.assertFalse(self.memory_file().with_name("memory-archive.md").exists())
+
+    def test_older_unrelated_topic_pass_can_be_undone(self):
+        first = Path(agent_service._topic_path(self.agent["id"], "first"))
+        second = Path(agent_service._topic_path(self.agent["id"], "second"))
+        first.parent.mkdir(exist_ok=True)
+        body = b"## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n"
+        first.write_bytes(body); second.write_bytes(body)
+        one = self.pass_once("first")
+        two = self.pass_once("second")
+        agent_service.undo_memory_upkeep(self.agent["id"], one["id"])
+        self.assertEqual(first.read_bytes(), body)
+        self.assertNotEqual(second.read_bytes(), body)
+        self.assertEqual([e["id"] for e in agent_service.memory_upkeep_journal(self.agent["id"])
+                          if e["status"] == "committed"], [two["id"]])
+
+    def test_interrupted_pass_recovers_both_files(self):
+        from services import agent_memory_upkeep as upkeep
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        original = self.memory_file().read_bytes()
+        real_atomic = upkeep._atomic
+        calls = []
+
+        def cut_after_archive(path, data):
+            calls.append(path.name)
+            if path.name == "memory.md":
+                raise RuntimeError("process exited")
+            return real_atomic(path, data)
+
+        with patch.object(upkeep, "_atomic", side_effect=cut_after_archive):
+            with self.assertRaisesRegex(RuntimeError, "process exited"):
+                self.pass_once()
+        self.assertIn("memory-archive.md", calls)
+        upkeep.recover(agent_service, self.agent["id"])
+        self.assertEqual(self.memory_file().read_bytes(), original)
+        self.assertFalse(self.memory_file().with_name("memory-archive.md").exists())
+
+    def test_unsafe_undo_refuses_without_partial_change(self):
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        result = self.pass_once()
+        self.memory_file().write_bytes(self.memory_file().read_bytes() + b"Personal addition\n")
+        before = self.memory_file().read_bytes()
+        archive = self.memory_file().with_name("memory-archive.md").read_bytes()
+        with self.assertRaisesRegex(ValueError, "changed"):
+            agent_service.undo_memory_upkeep(self.agent["id"], result["id"])
+        self.assertEqual(self.memory_file().read_bytes(), before)
+        self.assertEqual(self.memory_file().with_name("memory-archive.md").read_bytes(), archive)
+
+    def test_opt_out(self):
+        agent_service.update(self.agent["id"], memory_upkeep=False)
+        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
+        original = self.memory_file().read_bytes()
+        self.assertIsNone(self.pass_once())
+        self.assertEqual(self.memory_file().read_bytes(), original)
+
+
 if __name__ == "__main__":
     unittest.main()

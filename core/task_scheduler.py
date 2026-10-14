@@ -441,6 +441,16 @@ async def _tick() -> None:
         # One card per pass (see dispatch_cards).
         _lanes["card"] = loop.create_task(dispatch_cards())
     await outbox.send_due()
+    # A quiet chat may be tidied on the next poll, including after laptop
+    # sleep. The service checks admission's existing holds (2026-10-13).
+    for agent in agent_service.list_agents():
+        if agent.get("memory_upkeep"):
+            try:
+                agent_service.upkeep_memory(agent["id"])
+                for topic, _ in agent_service.topic_index(agent["id"]):
+                    agent_service.upkeep_memory(agent["id"], topic=topic)
+            except Exception:
+                logger.exception("memory upkeep failed for agent %s", agent["id"])
     _check_mcp_servers(loop)
 
 

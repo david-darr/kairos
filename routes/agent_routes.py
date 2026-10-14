@@ -26,6 +26,7 @@ class AgentBody(BaseModel):
     deliver_to_channel: Optional[str] = None
     integration_ids: Optional[list[str]] = None
     keep_signed_in: Optional[bool] = None
+    memory_upkeep: Optional[bool] = None
 
 
 class MemoryBody(BaseModel):
@@ -146,6 +147,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
     return {
         "agent": _summary(agent),
         "memory": agent_service.read_memory(agent_id),
+        "memory_upkeep_journal": agent_service.memory_upkeep_journal(agent_id),
         "goals": [t for t in owned if t["schedule_kind"] != "card"],
         "cards": [t for t in owned if t["schedule_kind"] == "card"],
         "inbox": agent_service.inbox(agent_id),
@@ -218,6 +220,21 @@ async def write_memory(agent_id: str, body: MemoryBody, user: str = Depends(requ
         return {"memory": agent_service.write_memory(agent_id, body.text)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{agent_id}/memory/upkeep")
+async def memory_upkeep_journal(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    return {"entries": agent_service.memory_upkeep_journal(agent_id)}
+
+
+@router.post("/{agent_id}/memory/upkeep/{upkeep_id}/undo")
+async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return agent_service.undo_memory_upkeep(agent_id, upkeep_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/{agent_id}/goals")

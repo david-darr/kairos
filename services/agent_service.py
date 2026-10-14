@@ -55,7 +55,7 @@ COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
 # Fields a person may change; everything else is the service's.
 EDITABLE = ("name", "role", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
-            "deliver_to_channel", "integration_ids", "keep_signed_in")
+            "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep")
 REPLIES_IN_PROMPT = 5
 # A reply code on a channel notification ("[S-7f3a2b]": the agent's initial
 # and the start of the item's or card's id). Replying to that message in
@@ -104,7 +104,7 @@ class AgentService:
     def create(self, name: str, role: str = "", instructions: str = "", endpoint_id: Optional[str] = None,
                color: Optional[str] = None, daily_run_cap: int = DEFAULT_DAILY_RUN_CAP,
                deliver_to_channel: Optional[str] = None, integration_ids: Optional[list] = None,
-               keep_signed_in: bool = False) -> dict:
+               keep_signed_in: bool = False, memory_upkeep: bool = False) -> dict:
         name = _clean_name(name)
         self._check_unique(name, None)
         agent_id = uuid.uuid4().hex[:10]
@@ -115,6 +115,7 @@ class AgentService:
             "enabled": True, "daily_run_cap": _cap(daily_run_cap), "deliver_to_channel": deliver_to_channel or None,
             "integration_ids": list(integration_ids) if integration_ids is not None else None,
             "keep_signed_in": bool(keep_signed_in),
+            "memory_upkeep": bool(memory_upkeep),
             "created_at": time.time(),
         }
         self._agents[agent_id] = agent
@@ -134,7 +135,7 @@ class AgentService:
                 value = _cap(value)
             elif key == "color" and value not in COLORS:
                 raise ValueError("pick one of the offered colors")
-            elif key in ("enabled", "keep_signed_in"):
+            elif key in ("enabled", "keep_signed_in", "memory_upkeep"):
                 value = bool(value)
             agent[key] = value
         self._save()
@@ -225,6 +226,8 @@ class AgentService:
         return topics
 
     def read_memory(self, agent_id: str) -> str:
+        from services.agent_memory_upkeep import recover
+        recover(self, agent_id)
         try:
             with open(self._memory_path(agent_id), encoding="utf-8") as f:
                 return f.read()
@@ -233,6 +236,8 @@ class AgentService:
 
     def write_memory(self, agent_id: str, text: str) -> str:
         self._require(agent_id)
+        from services.agent_memory_upkeep import recover
+        recover(self, agent_id)
         if len(text) > MEMORY_LIMIT:
             raise ValueError(f"memory is limited to {MEMORY_LIMIT} characters; this is {len(text)}")
         path = self._memory_path(agent_id)
@@ -248,6 +253,8 @@ class AgentService:
         """Add a dated line, archiving accumulated notes when room is needed.
         until is an optional ISO date on which the note stops being true."""
         self._require(agent_id)
+        from services.agent_memory_upkeep import recover
+        recover(self, agent_id)
         path = self._topic_path(agent_id, topic) if topic is not None else self._memory_path(agent_id)
         limit = TOPIC_MEMORY_LIMIT if topic is not None else MEMORY_LIMIT
         section = next((s for s in MEMORY_SECTIONS if s.lower() == (section or "").strip().lower()), None)
@@ -331,6 +338,19 @@ class AgentService:
             f.write(memory)
         os.replace(temporary, path)
         return memory
+
+    def upkeep_memory(self, agent_id: str, *, now: Optional[float] = None,
+                      topic: Optional[str] = None) -> Optional[dict]:
+        from services.agent_memory_upkeep import upkeep
+        return upkeep(self, agent_id, now=now, topic=topic)
+
+    def memory_upkeep_journal(self, agent_id: str) -> list[dict]:
+        from services.agent_memory_upkeep import journal_entries
+        return journal_entries(self, agent_id)
+
+    def undo_memory_upkeep(self, agent_id: str, upkeep_id: str) -> dict:
+        from services.agent_memory_upkeep import undo
+        return undo(self, agent_id, upkeep_id)
 
     # -- inbox ------------------------------------------------------------------
 
