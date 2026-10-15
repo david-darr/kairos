@@ -5,3 +5,25 @@ h1{min-height:164px;line-height:1.12;padding-bottom:8px;font-size:68px}
 #uiZoomCanvas{min-width:0;margin:0 auto}
 .ui-image-button .ui-shot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
 .ui-caption{padding:10px 25px}
+#viewport{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+#animationPanel{position:absolute;inset:0;pointer-events:none}
+@media(max-width:900px){
+ body{background:#f3eadb}
+ #viewport{position:relative;inset:auto;display:block;overflow:visible;min-height:100vh;min-height:100svh}
+ #stage{width:100%;height:auto;min-height:100vh;min-height:100svh;transform:none!important;display:grid;grid-template-areas:"header" "copy" "choices" "visual";grid-template-columns:minmax(0,1fr);gap:22px;padding:22px 16px calc(140px + env(safe-area-inset-bottom,0px));}
+ header{grid-area:header;position:static;display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:13px;letter-spacing:1px;min-width:0}
+ header a{display:flex;min-height:44px;align-items:center}header img{width:122px;max-height:36px}header .edition{width:100%;margin-left:0;font-size:11px;letter-spacing:1px}
+ .copy{grid-area:copy;position:static;width:auto;min-width:0}#location{font-size:16px;line-height:1.4;min-height:0;overflow-wrap:anywhere}
+ h1{font-size:42px;line-height:1.08;min-height:0;margin:10px 0 22px;padding:0;display:block;overflow-wrap:break-word}
+ ol{gap:10px}li button{min-height:64px;padding:12px;gap:12px;font-size:18px;line-height:1.3}li button .num{width:32px;height:32px;font-size:17px}li button span:last-child{min-width:0;overflow-wrap:anywhere}
+ .exercise{margin-top:22px;padding-left:15px}.exercise span{font-size:12px;letter-spacing:1.3px}.exercise p{font-size:17px;line-height:1.45;max-width:none;margin:8px 0 0}
+ .demo-label{grid-area:choices;position:static;width:auto;height:auto;min-height:44px;gap:10px;flex-wrap:wrap;min-width:0}.view-choice{flex:1;display:grid;grid-template-columns:1fr 1fr;min-width:250px;gap:8px}.view-choice button{min-height:44px;font-size:15px;padding:10px 12px}#demoState{font-size:14px;margin-left:auto}
+ #animationPanel{grid-area:visual;position:relative;inset:auto;width:100%;aspect-ratio:960/660;overflow:hidden;border:1px solid #d8c9b3;border-radius:14px;background:#f3eadb}
+ #animationPanel.mobile-hidden{display:none}#art{position:absolute;width:200%;height:auto;max-width:none;left:-88.541667%;top:-37.878788%}
+ #realUiPanel{grid-area:visual;position:relative;left:auto;top:auto;width:100%;height:auto;min-width:0;border-radius:14px;box-shadow:0 8px 22px #3a2a2010}
+ .ui-image-button{height:auto;aspect-ratio:1.6}.ui-focus{border-width:2px;box-shadow:0 0 0 1px #fffdf8dd}.enlarge-hint{font-size:14px;padding:7px 12px;right:10px;bottom:10px}.ui-caption{padding:14px}.ui-caption strong{font-size:18px;line-height:1.3}.ui-caption p{font-size:16px;line-height:1.4;margin:7px 0}.ui-caption small{font-size:12px;line-height:1.4;display:block;margin-top:9px}
+ footer{position:fixed;z-index:20;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:0;padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));background:#fbf6ee;border-top:1px solid #d8c9b3;box-shadow:0 -4px 20px #3a2a200d}
+ footer button{min-height:44px;min-width:0;width:100%;font-size:14px;padding:8px 4px}#prev{order:1}#next{order:2}#count{order:3;min-width:0;font-size:15px;align-self:center}#contents{order:4}#replay{order:5}#pause{order:6}#notes{order:7}#full{order:8}footer .keys{display:none}footer button[hidden]{display:none}
+ dialog{max-height:90vh;max-height:90svh;padding:18px;width:calc(100vw - 24px);overflow:auto}.dialog-head h2{font-size:23px;margin-bottom:12px}.dialog-head button{min-height:44px;padding:10px 16px}#noteBody{font-size:18px;line-height:1.5}#lessonList{grid-template-columns:1fr}#lessonList button{font-size:16px;min-height:48px;padding:12px}.small{font-size:14px}
+ #realUiDialog{width:calc(100vw - 16px);max-height:96vh;max-height:96svh;padding:12px}#realUiDialog .dialog-head{align-items:flex-start;flex-direction:column;gap:5px}#realUiDialog .dialog-head h2{font-size:21px}#realUiDialogCaption{font-size:15px;margin-bottom:5px}.zoom-controls{gap:8px;flex-wrap:wrap}.zoom-controls button{min-width:44px;min-height:44px;margin-bottom:8px;padding:8px 14px}#uiZoomViewport{max-height:55vh;max-height:55svh}#realUiDialog .small{font-size:12px;line-height:1.35}
+}
