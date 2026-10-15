@@ -843,10 +843,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 .agent-conversation-page .agent-routine-preview { display: flex; flex-direction: column; gap: 5px; text-align: left; width: 100%; min-height: 64px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--ui-line); background: transparent; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
 .agent-routine-preview span { font-size: 12px; }
 .agent-conversation-page .agent-chat { display: flex; flex-direction: column; margin: 0; height: max(520px, calc(100dvh - 180px)); gap: 10px; }
-.agent-conversation-page .agent-chat-side { flex: none; display: block; align-self: flex-start; width: min(100%, 420px); position: relative; }
-.agent-conversation-page .agent-chat-side > summary { cursor: pointer; color: var(--text); min-height: 44px; padding: 10px 14px; border-radius: 22px; border: 1px solid var(--ui-line); background: var(--ui-surface); box-sizing: border-box; }
-.agent-conversation-page .agent-chat-side[open] { padding: 12px; border-radius: 20px; border: 1px solid var(--ui-line); background: var(--ui-surface); }
-.agent-conversation-page .agent-chat-side[open] .agent-chat-list { max-height: 160px; }
 .agent-search-scope { font-size: 12px; color: var(--text); margin: 8px 0; }
 .agent-conversation-page .agent-chat-item[hidden] { display: none; }
 .agent-conversation-page .agent-chat-main { flex: 1; min-height: 0; height: auto; border: 0; background: transparent; }
@@ -902,11 +898,9 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   .agent-conversation-page .agent-profile-face h2 { font-size: 13px; }
   .agent-conversation-page .agent-profile-open { display: block; grid-column: 3; grid-row: 1; min-height: 44px; padding: 8px 10px; border-radius: 24px; }
   .agent-conversation-page .agent-tabs { grid-column: 1 / -1; grid-row: 2; width: 100%; box-sizing: border-box; overflow-x: auto; margin-top: 6px; }
-  .agent-conversation-page .agent-thread-search { grid-column: 1 / -1; grid-row: 3; margin-top: 4px; }
   .agent-conversation-page .agent-live-panels { display: none; }
   .agent-conversation-layout { display: block; }
   .agent-conversation-page .agent-chat { height: max(480px, calc(100dvh - 270px)); }
-  .agent-conversation-page .agent-chat-side { width: 100%; }
   .agent-conversation-page .agent-chat-main { min-height: 320px; }
   .agent-conversation-page .agent-chat-delete { opacity: 1; width: 44px; height: 44px; }
   .agent-conversation-page .agent-chat-open { min-height: 44px; }
@@ -925,7 +919,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 /* 2026-10-14: balance the centre segment independently of the right tools. */
 .agent-conversation-topbar { grid-template-columns: minmax(44px, 1fr) auto minmax(44px, 1fr); }
 .agent-topbar-tools { display: flex; align-items: center; justify-self: end; gap: 14px; min-width: 0; }
-.agent-conversation-page .agent-topbar-tools .agent-thread-search { width: min(14vw, 180px); }
 .agent-conversation-page .routine-details-open { min-width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 @media (max-width: 1100px) and (min-width: 769px) {
   .agent-conversation-page .agent-profile-face h2 { display: none; }
@@ -933,11 +926,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 }
 @media (max-width: 768px) {
   .agent-conversation-page .agent-topbar-tools { display: contents; }
-  .agent-conversation-page .agent-topbar-tools .agent-thread-search { width: 100%; }
-  /* The search only filters the Conversations list, so on a phone it shows
-     while that list is open; otherwise it cost a full row above the chat
-     (2026-10-14). */
-  .agent-conversation-page:not(:has(.agent-chat-side[open])) .agent-thread-search { display: none; }
 }
 /* The app-wide reply-progress pill is pinned top-right, exactly where the bot
    page puts its search and face; drop it below the bot's top bar there
@@ -957,4 +945,124 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
    transition. Reduced motion covers the root as well as cards and controls. */
 @media (prefers-reduced-motion: reduce) {
   .agent-conversation-page { animation: none !important; transition: none !important; }
+}
+
+/* Profile sheet placement (2026-10-15, David: "the right sidebar is too tall
+   with the name and character going off screen"). Measured: the sheet began
+   at the window's top edge, so the desktop title bar (36px, z-index 10100)
+   covered the face, and on a phone the status bar did the same. In a short
+   window the flex column also squeezed the Details/Library tabs to a sliver
+   (20px on a 390x844 phone). Start below the title bar, keep the safe area,
+   hold the header rows at their natural height, and fold the face, name,
+   "All settings" and close into one compact row. */
+.agent-profile-sheet:not([hidden]) { top: var(--titlebar-h); padding-top: var(--mobile-safe-top); }
+.agent-profile-sheet > .agent-profile-top, .agent-profile-sheet > .agent-profile-tabs { flex: none; }
+.agent-profile-sheet > .agent-profile-top { flex-direction: row; align-items: center; gap: 12px; padding: 16px 16px 0 20px; }
+.agent-profile-sheet .agent-profile-titlebar { display: contents; }
+.agent-profile-sheet .agent-profile-titlebar .agent-dot-avatar { order: 0; flex: none; width: 52px !important; height: 52px !important; }
+.agent-profile-sheet .agent-profile-titlebar h2 { order: 1; flex: 1; min-width: 0; font-size: 20px; line-height: 1.2; }
+.agent-profile-sheet > .agent-profile-top > .btn { order: 2; align-self: center; margin: 0; white-space: nowrap; }
+.agent-profile-sheet .agent-profile-titlebar > .btn { order: 3; flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; }
+.agent-profile-sheet > .agent-profile-tabs { margin-top: 14px; }
+
+/* Conversations (2026-10-15, David wanted the dropdown "somewhere else").
+   On a desktop it heads the left column as a panel with its own search; the
+   Hark reference keeps navigation in that column too. */
+.agent-conversation-page .agent-chat-side { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--ui-line);
+  border-radius: 20px; background: var(--ui-surface); color: var(--text); }
+.agent-chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-chat-side-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.agent-conversation-page .agent-chat-side-head .agent-chat-new { min-height: 36px; padding: 6px 14px; border-radius: 999px; }
+.agent-conversation-page .agent-chat-side .agent-thread-search { display: block; width: 100%; box-sizing: border-box; min-height: 40px; padding: 8px 14px; }
+.agent-conversation-page .agent-chat-side .agent-search-scope { margin: 0; color: var(--text-dim); }
+.agent-conversation-page .agent-chat-side .agent-chat-list { max-height: 228px; }
+.agent-conversation-page .agent-chat-item { border-radius: 12px; }
+.agent-conversation-page .agent-chat-item.active { background: var(--ui-wash); }
+.agent-conversation-page .agent-chat-title { font-size: 13px; }
+.agent-conversation-page .agent-conversations-close, .agent-conversation-page .agent-more, .agent-more-menu[hidden] { display: none; }
+/* The face pill's name sat on its right edge; give it the pill's padding. */
+@media (min-width: 1101px) { .agent-conversation-page .agent-profile-face { padding-right: 16px; } }
+
+/* A phone reads like Messages (2026-10-15, David): the app menu on the left,
+   the bot's face and name centred, Settings and More on the right; More holds
+   Chat and conversations, Work, Routines and Memory. Bubbles follow Messages:
+   the person's on the right in an accent tint, the bot's on the left in a
+   soft wash, tight runs, a pill composer with a round send arrow. */
+@media (max-width: 768px) {
+  .agent-conversation-page .agent-conversation-topbar { position: relative; grid-template-columns: 44px 44px minmax(0, 1fr) 44px 44px;
+    gap: 6px; margin: 0 0 6px; padding-bottom: 8px; border-bottom: 1px solid var(--ui-line); }
+  .agent-conversation-page .agent-tabs { display: none; }
+  .agent-conversation-page .agent-profile-face { grid-column: 3; }
+  .agent-conversation-page .agent-profile-face .agent-dot-avatar { width: 40px !important; height: 40px !important; }
+  .agent-conversation-page .agent-profile-face h2 { font-size: 12px; font-weight: 600; }
+  /* Scoped past interface.css's base .btn, which otherwise wins by load order. */
+  .agent-conversation-page .agent-header .agent-profile-open, .agent-conversation-page .agent-topbar-tools .agent-more {
+    grid-row: 1; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0;
+    border: 1px solid var(--ui-line); border-radius: 50%; background: var(--ui-surface); color: var(--text); cursor: pointer; }
+  .agent-conversation-page .agent-header .agent-profile-open { grid-column: 4; }
+  .agent-conversation-page .agent-topbar-tools .agent-more { grid-column: 5; }
+  .agent-conversation-page .agent-more[aria-expanded="true"] { background: var(--ui-wash); }
+  .agent-profile-open .agent-icon { display: flex; width: 20px; height: 20px; }
+  .agent-profile-open .agent-icon svg { width: 20px; height: 20px; }
+  .agent-conversation-page .agent-profile-open-label { display: none; }
+  .agent-more-menu:not([hidden]) { position: absolute; z-index: 40; top: calc(100% - 2px); right: 0; display: flex; flex-direction: column;
+    min-width: 230px; padding: 6px; border: 1px solid var(--ui-line); border-radius: 16px; background: var(--ui-surface);
+    box-shadow: var(--ui-shadow); animation: agent-menu-in 160ms cubic-bezier(.22, 1, .36, 1) both; transform-origin: top right; }
+  .agent-more-menu .agent-more-item { display: flex; align-items: center; justify-content: space-between; min-height: 46px; padding: 10px 14px;
+    border: 0; border-radius: 11px; background: transparent; color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+  .agent-more-menu .agent-more-item:hover, .agent-more-menu .agent-more-item:focus-visible { background: var(--ui-wash); outline: none; }
+  .agent-more-menu .agent-more-item[aria-checked="true"]::after { content: '\2713'; color: var(--accent); font-weight: 700; }
+
+  /* Conversations open as a full sheet from More, over the thread. */
+  .agent-conversation-page .agent-live-panels { display: contents; }
+  .agent-conversation-page .agent-live-panels > :not(.agent-conversations-home) { display: none; }
+  .agent-conversation-page .agent-conversations-home { display: none; }
+  .agent-conversation-page .agent-conversations-home.is-open { position: fixed; z-index: 1100; inset: var(--titlebar-h) 0 0; display: flex;
+    flex-direction: column; gap: 10px; box-sizing: border-box; padding: calc(14px + var(--mobile-safe-top)) max(16px, var(--mobile-safe-right))
+    calc(16px + var(--mobile-safe-bottom)) max(16px, var(--mobile-safe-left)); background: var(--bg); animation: agent-sheet-rise 240ms cubic-bezier(.22, 1, .36, 1) both; }
+  .agent-conversation-page .agent-conversations-home.is-open .agent-conversations-close { display: block; align-self: flex-end; min-height: 44px; font-weight: 600; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-side { flex: 1; min-height: 0; padding: 0; border: 0; background: transparent; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-side-head h3 { font-size: 28px; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-list { flex: 1; max-height: none; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-item { border-bottom: 1px solid var(--ui-line); border-radius: 0; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-open { min-height: 60px; padding: 10px 4px; }
+  .agent-conversation-page .agent-conversations-home .agent-chat-title { font-size: 15px; font-weight: 600; }
+  :root:has(.agent-conversations-open) #mobile-menu-btn { visibility: hidden; }
+
+  /* The thread fills the screen under the top bar. */
+  .agent-conversation-page .agent-chat { height: calc(100dvh - var(--titlebar-h) - var(--mobile-safe-top) - var(--mobile-safe-bottom) - 120px); min-height: 380px; gap: 6px; }
+  .agent-conversation-page .agent-chat-main { min-height: 0; }
+  .agent-conversation-page .session-chat-messages { gap: 4px; padding: 10px 0; }
+  .agent-conversation-page .msg + .msg:not(.user) , .agent-conversation-page .msg.user + .msg:not(.user) { margin-top: 10px; }
+  .agent-conversation-page .msg.assistant > .msg-body, .agent-conversation-page .msg.user > .msg-body {
+    max-width: 78%; padding: 9px 14px; border: 0; border-radius: 20px; line-height: 1.45; font-size: 15px; }
+  .agent-conversation-page .msg.assistant > .msg-body { background: var(--ui-wash); color: var(--text); border-bottom-left-radius: 6px; }
+  .agent-conversation-page .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+  /* An accent tint, not the ink fill: it stays a dark surface on a dark
+     appearance, as the appearance checks require (2026-10-15). */
+  .agent-conversation-page .msg.user > .msg-body { background: color-mix(in srgb, var(--accent) 24%, var(--ui-surface)); color: var(--text); border-bottom-right-radius: 6px; }
+  .agent-conversation-page .agent-composer-row { padding-top: 6px; }
+  .agent-conversation-page .agent-composer-orb { display: none; }
+  .agent-conversation-page .side-chat-composer { padding: 3px 3px 3px 4px; border-radius: 22px; }
+  /* 44px targets for the phone audit; the visible circles are drawn inside.
+     The :not() chain outranks interface.css's base .btn background rule. */
+  .agent-conversation-page .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send):not(.primary):not(.danger) {
+    position: relative; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; box-shadow: none; }
+  .agent-conversation-page .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)::before {
+    content: ''; position: absolute; inset: 4px; z-index: -1; border-radius: 50%; }
+  .agent-conversation-page .side-chat-composer { isolation: isolate; }
+  .agent-conversation-page .side-chat-composer .agent-composer-add { color: var(--text); font-size: 22px; }
+  .agent-conversation-page .side-chat-composer .agent-composer-add::before { background: var(--ui-wash); }
+  /* The send arrow keeps the button's text for screen readers and tests. */
+  .agent-conversation-page .side-chat-composer .side-chat-send { overflow: hidden; color: transparent; font-size: 0; }
+  .agent-conversation-page .side-chat-composer .side-chat-send::before { background: var(--text); }
+  .agent-conversation-page .side-chat-composer .side-chat-send::after { content: ''; position: absolute; inset: 0; margin: auto; width: 16px; height: 16px;
+    background: var(--bg-panel-solid); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 14V3M3.5 7.5 8 3l4.5 4.5' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 14V3M3.5 7.5 8 3l4.5 4.5' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+  .agent-conversation-page .side-chat-composer .side-chat-send[data-mode="stop"]::after { width: 12px; height: 12px; border-radius: 2px; -webkit-mask: none; mask: none; }
+  .agent-conversation-page .side-chat-composer .side-chat-send:disabled { opacity: .45; }
+}
+@keyframes agent-menu-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-more-menu, .agent-conversations-home { animation: none !important; transition: none !important; }
 }
