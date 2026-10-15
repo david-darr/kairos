@@ -15,6 +15,7 @@ import { dismissPermissionPrompt, showPermissionPrompt } from './permissionPromp
 import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
 import { agentAvatar } from './agentAvatar.js';
+import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported } from './voiceInput.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli'];
 const queues = new Map();
@@ -58,9 +59,36 @@ export async function mountSessionChat(host, options = {}) {
   const queueList = el('div', { class: 'session-chat-queue', 'aria-label': 'Queued messages', hidden: true });
   const tools = el('div', { class: 'session-chat-tools' });
   const status = el('span', { class: 'meta session-chat-status', role: 'status' });
+  const scrollHost = options.agent ? el('div', { class: 'agent-conversation-stream' }, [messages]) : messages;
+  const composer = el('div', { class: 'side-chat-composer glass' }, [inputTop, queueButton, send]);
+  let recorder = null;
+  if (options.agent) {
+    const add = el('button', { type: 'button', class: 'btn quiet agent-composer-add', text: '+', 'aria-label': 'Add a reference', onclick: () => references.openPicker() });
+    const mic = el('button', { type: 'button', class: 'btn quiet agent-composer-mic', 'aria-label': 'Dictate a message', hidden: !isRecordingSupported(), onclick: async () => {
+      mic.disabled = true;
+      try {
+        if (recorder) {
+          const active = recorder; recorder = null;
+          const blob = await active.stop();
+          const text = blob ? await transcribeBlob(blob) : '';
+          if (!disposed && text) { input.value = `${input.value}${input.value ? ' ' : ''}${text}`; input.dispatchEvent(new Event('input')); input.focus(); }
+          mic.setAttribute('aria-label', 'Dictate a message');
+        } else {
+          const speech = await getSpeechStatus();
+          if (!speech?.engine_available || !speech.active_model) throw new Error('Set up speech recognition in Settings > Speech.');
+          const active = createRecorder(); await active.start();
+          if (disposed) { active.cancel(); return; }
+          recorder = active; mic.setAttribute('aria-label', 'Stop recording and transcribe');
+        }
+      } catch (problem) { toast(problem.message, 'error'); }
+      finally { mic.disabled = false; }
+    } });
+    mic.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3M8 21h8"/></svg>';
+    composer.prepend(add); composer.insertBefore(mic, send);
+  }
   if (transcript) transcript.mount(host, { input, inputTop, send, queueButton, queueList, tools, status });
-  else host.replaceChildren(el('div', { class: 'session-chat' }, [
-    tools, messages, queueList, el('div', { class: 'side-chat-composer glass' }, [inputTop, queueButton, send]),
+  else host.replaceChildren(el('div', { class: 'session-chat' }, [tools, scrollHost, queueList,
+    ...(options.agent ? [el('div', { class: 'agent-composer-row' }, [el('div', { class: 'agent-composer-orb', 'aria-label': options.agent.name }, [agentAvatar(options.agent, 38)]), composer])] : [composer]),
   ]));
   tools.hidden = !options.modelPicker && !options.openInChats;
 
@@ -179,7 +207,7 @@ export async function mountSessionChat(host, options = {}) {
       transcript?.paint(replyBody, entry);
       if (entry.permission && entry.permission.id !== shownPermission) {
         shownPermission = entry.permission.id;
-        if (!transcript) showPermissionPrompt(entry.permission, () => { entry.permission = null; });
+        if (!transcript) showPermissionPrompt(entry.permission, () => { entry.permission = null; }, options.agent ? { mount: replyCard, inline: true } : {});
       } else if (!entry.permission && shownPermission) {
         dismissPermissionPrompt(shownPermission);
         shownPermission = null;
@@ -195,7 +223,7 @@ export async function mountSessionChat(host, options = {}) {
       }
       replyCard?.setAttribute('aria-busy', String(entry.status === 'processing'));
       syncSend();
-      if (transcript) transcript.follow(); else messages.scrollTop = messages.scrollHeight;
+      if (transcript) transcript.follow(); else scrollHost.scrollTop = scrollHost.scrollHeight;
       if (entry.status !== 'processing' && !finished) {
         finished = true;
         if (entry.status !== 'done') pausedQueues.add(id);
@@ -248,7 +276,7 @@ export async function mountSessionChat(host, options = {}) {
       attach(reply.querySelector('.msg-body, .forge-prose'));
     }
     if (!shown.length && !busy() && !current) showEmpty();
-    messages.scrollTop = messages.scrollHeight;
+    scrollHost.scrollTop = scrollHost.scrollHeight;
   };
 
   // Connection and model for this chat, the same choices as the chat
@@ -314,7 +342,7 @@ export async function mountSessionChat(host, options = {}) {
     const reply = card('assistant', ''); messages.append(reply);
     try { chatStream.startTurn(sessionId, session?.title || label, text, [], selected); }
     catch (error) { toast(error.message, 'error'); reply.remove(); pausedQueues.add(sessionId); return; }
-    attach(reply.querySelector('.msg-body, .forge-prose')); syncSend(); messages.scrollTop = messages.scrollHeight;
+    attach(reply.querySelector('.msg-body, .forge-prose')); syncSend(); scrollHost.scrollTop = scrollHost.scrollHeight;
   };
   const submit = async ({ fromKeyboard = false, enqueue = false } = {}) => {
     if (options.readOnly || submitting || disposed) return;
@@ -366,5 +394,5 @@ export async function mountSessionChat(host, options = {}) {
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposed = true; clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposed = true; recorder?.cancel(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }

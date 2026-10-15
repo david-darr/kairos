@@ -16,9 +16,24 @@ function remember(agentId, sessionId) {
   try { sessionId ? localStorage.setItem(LAST_KEY + agentId, sessionId) : localStorage.removeItem(LAST_KEY + agentId); } catch { /* private mode */ }
 }
 
-export async function mountAgentChat(host, agent, requestedSessionId = null) {
+export async function mountAgentChat(host, agent, requestedSessionId = null, options = {}) {
   let sessionId = null;
   let closePane = () => {};
+  const media = matchMedia('(max-width: 768px)');
+  const activityHome = options.activity?.parentNode;
+  const placeActivity = () => {
+    const target = media.matches ? main.querySelector('.agent-conversation-stream') : activityHome;
+    if (target && options.activity && options.activity.parentNode !== target) target.append(options.activity);
+  };
+  media.addEventListener('change', placeActivity);
+  const filter = () => {
+    const query = (options.search?.value || '').trim().toLocaleLowerCase();
+    list.querySelectorAll('.agent-chat-item').forEach(item => { item.hidden = !item.querySelector('.agent-chat-title').textContent.toLocaleLowerCase().includes(query); });
+    scope.textContent = query ? 'Matching loaded titles only' : 'Search covers loaded conversation titles';
+    side.open = !!query;
+  };
+  options.search?.addEventListener('input', filter);
+  const dispose = () => { closePane(); media.removeEventListener('change', placeActivity); options.search?.removeEventListener('input', filter); };
 
   const list = el('div', { class: 'agent-chat-list', role: 'list', 'aria-label': `Chats with ${agent.name}` });
   const main = el('section', { class: 'agent-chat-main' });
@@ -27,8 +42,10 @@ export async function mountAgentChat(host, agent, requestedSessionId = null) {
   const scheduled = agent.enabled === false || agent.status === 'off' || agent.status === 'capped' ||
     (Number.isFinite(agent.daily_run_cap) && agent.runs_today >= agent.daily_run_cap);
   const honesty = scheduled ? el('p', { class: 'agent-chat-honesty', text: `${agent.name} will answer here, but will not pick up scheduled work while turned off or capped.` }) : null;
+  const scope = el('p', { class: 'agent-search-scope', text: 'Search covers loaded conversation titles' });
+  const side = el('details', { class: 'agent-chat-side' }, [el('summary', { text: 'Conversations' }), newChat, scope, list]);
   host.replaceChildren(el('div', { class: 'agent-chat' }, [
-    el('aside', { class: 'agent-chat-side' }, [newChat, list]),
+    side,
     ...(honesty ? [honesty] : []), main,
   ]));
 
@@ -52,6 +69,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null) {
       emptyText: 'It knows its role, its notes and its tools. Anything it learns here it can keep in its memory.',
       onTurnEnd: () => refreshList(),
     });
+    placeActivity();
     markActive();
   };
 
@@ -84,6 +102,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null) {
     ])));
     if (!chats.length) list.append(el('div', { class: 'meta agent-chat-none', text: 'No chats yet.' }));
     markActive();
+    filter();
     return chats;
   };
 
@@ -99,10 +118,10 @@ export async function mountAgentChat(host, agent, requestedSessionId = null) {
   const chats = await refreshList();
   // 2026-10-14: sidebar threads address the same session, including a new
   // empty one, instead of falling back to this agent's remembered chat.
-  if (requestedSessionId && chats.some(c => c.id === requestedSessionId)) { await open(requestedSessionId); return () => closePane(); }
+  if (requestedSessionId && chats.some(c => c.id === requestedSessionId)) { await open(requestedSessionId); return dispose; }
   const last = remembered(agent.id);
   if (last && chats.some((c) => c.id === last)) await open(last);
   else if (chats.length) await open(chats[0].id);
   else await pane(null);
-  return () => closePane();
+  return dispose;
 }

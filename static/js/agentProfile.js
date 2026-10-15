@@ -171,7 +171,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     if (key === routinesKey) return;
     if (routines.contains(document.activeElement) || routines.querySelector('details[open], .routine-editor:not([hidden])')) return;
     routinesKey = key;
-    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.()));
+    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.(), detail.agent));
   };
   drawRoutines(detail.goals);
   const usage = el('p', { class: 'meta' });

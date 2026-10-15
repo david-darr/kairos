@@ -8,7 +8,8 @@ import { mountAgentProfile } from "../agentProfile.js";
 import { agentAvatar } from "../agentAvatar.js";
 import { botStatusLine } from "../botStatus.js";
 import { openCreateAgent } from "../agentCreation.js";
-import { routinesPanel } from "../routinesPanel.js";
+import { openAgentItemSheet } from '../agentItemSheet.js';
+import { cadence, routinesPanel } from "../routinesPanel.js";
 import { agentModelSummary } from "../agentModelPicker.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
@@ -304,15 +305,22 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   if (!document.body.contains(root)) return;
   root.innerHTML = "";
 
-  // 2026-10-14: keep the hero and all tab hosts mounted; polls reconcile data
+  // 2026-10-14: keep the top bar and all tab hosts mounted; polls reconcile data
   // panels without rebuilding a chat or replacing a half-typed field.
-  const header = el("div", { class: "agent-header" });
+  root.classList.add('agent-conversation-page');
+  const header = el('div', { class: 'agent-header' });
+  const live = el('section', { class: 'agent-live-panel glass card', 'aria-label': 'Live state' });
+  const upcoming = el('section', { class: 'agent-next-panel glass card', 'aria-label': 'Next routines' });
+  const activity = el('div', { class: 'agent-inline-activity', 'aria-label': 'Waiting on you' });
+  const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [live, activity, upcoming]);
+  const search = el('input', { type: 'search', class: 'agent-thread-search', placeholder: 'Search chats',
+    'aria-label': 'Search this bot’s loaded conversation titles', title: 'Filters loaded conversation titles' });
   const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
   // 2026-10-14: keep a failed first routine visible above the new profile's
   // settings, since the sheet covers the page-level notice after creation.
   if (creationNotice) root.querySelector('.agent-profile-body')?.prepend(
     el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice }));
-  cleanups.push(profile.dispose);
+  cleanups.push(profile.dispose, () => document.querySelector('.agent-item-sheet')?.close());
   const chatTab = el("button", { type: "button", role: "tab", class: "agent-tab", text: "Chat" });
   const workTab = el("button", { type: "button", role: "tab", class: "agent-tab" });
   const routinesTab = el('button', { type: 'button', role: 'tab', class: 'agent-tab', text: 'Routines' });
@@ -327,10 +335,13 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     const running = (await api('/api/computer').catch(() => []))
       .find(item => item.owner === `agent:${agentId}`);
     if (!document.body.contains(root)) return;
-    if (workHost.hidden) {
+    if (!['chat', 'work'].includes(root.dataset.agentTab)) {
       if (computerView) { computerView.dispose(); computerView = null; computerHost.replaceChildren(); }
       return;
     }
+    const stream = chatHost.querySelector('.agent-conversation-stream');
+    if (root.dataset.agentTab === 'chat' && stream && computerHost.parentNode !== stream) stream.append(computerHost);
+    else if (root.dataset.agentTab === 'work' && computerHost.parentNode !== workHost) workHost.insertBefore(computerHost, workHost.children[1] || null);
     computerHost.hidden = !running;
     if (running && !computerView) {
       computerHost.append(el('div', { class: 'title', text: 'Computer' }));
@@ -352,54 +363,74 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     for (const [button, host, name] of [[chatTab, chatHost, "chat"], [workTab, workHost, "work"],
       [routinesTab, routinesHost, 'routines'], [memoryTab, memoryHost, 'memory']]) {
       button.setAttribute("aria-selected", String(which === name));
+      button.tabIndex = which === name ? 0 : -1;
       button.classList.toggle("active", which === name);
       host.hidden = which !== name;
     }
+    root.dataset.agentTab = which;
+    side.hidden = which !== 'chat';
+    search.hidden = which !== 'chat';
+    const active = [chatTab, workTab, routinesTab, memoryTab].findIndex(button => button.classList.contains('active'));
+    segments.style.setProperty('--segment', active);
     if (which === "chat" && !chatMounted) {
       chatMounted = true;
-      mountAgentChat(chatHost, detail.agent, sessionId).then((cleanup) => cleanups.push(cleanup));
+      mountAgentChat(chatHost, detail.agent, sessionId, { search, activity }).then((cleanup) => cleanups.push(cleanup));
     }
-    if (which === 'work') syncComputer();
+    if (which === 'work' || which === 'chat') syncComputer();
     else if (computerView) { computerView.dispose(); computerView = null; computerHost.replaceChildren(); }
   };
   chatTab.addEventListener("click", () => show("chat"));
   workTab.addEventListener("click", () => show("work"));
   routinesTab.addEventListener('click', () => show('routines'));
   memoryTab.addEventListener('click', () => show('memory'));
-  root.append(
-    el("button", { class: "btn quiet agent-back", text: "← All agents", onclick: () => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab: "agents" } })) }),
+  const segments = el('div', { class: 'agent-tabs', role: 'tablist', 'aria-label': 'Agent' }, [chatTab, workTab, routinesTab, memoryTab]);
+  const tabs = [chatTab, workTab, routinesTab, memoryTab];
+  tabs.forEach((button, index) => {
+    const host = [chatHost, workHost, routinesHost, memoryHost][index];
+    button.id = `agent-tab-${index}`; host.id = `agent-panel-${index}`;
+    button.setAttribute('aria-controls', host.id); host.setAttribute('aria-labelledby', button.id);
+    button.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (index + (event.key === 'ArrowRight' ? 1 : 3)) % 4;
+      tabs[next].click(); tabs[next].focus();
+    });
+  });
+  const back = el('button', { type: 'button', class: 'btn quiet agent-back', text: '\u2190', 'aria-label': 'All agents',
+    onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } })) });
+  // 2026-10-14: reserve the app menu’s place; reuse its drawer and focus logic.
+  const menu = el('span', { class: 'agent-mobile-menu-slot', 'aria-hidden': 'true' });
+  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [search, header])]),
     ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
-    header,
-    el("div", { class: "agent-tabs", role: "tablist", "aria-label": "Agent" }, [chatTab, workTab, routinesTab, memoryTab]),
-    chatHost, workHost, routinesHost, memoryHost,
-  );
+    el('div', { class: 'agent-conversation-layout' }, [side, chatHost]), workHost, routinesHost, memoryHost);
+  const giveJob = () => {
+    show('work');
+    const flow = workHost.querySelector('.agent-job-flow');
+    if (flow) { flow.open = true; flow.querySelector('input')?.focus(); }
+  };
+  side.append(el('button', { type: 'button', class: 'btn agent-give-job', text: '+ Give it a job', onclick: giveJob }));
 
   let headerSignature = '';
   const drawHeader = (agent) => {
-    const signature = JSON.stringify([agent.name, agent.role, agent.blurb, agent.avatar, agent.enabled, agent.status,
-      agent.status_detail, agent.runs_today, agent.daily_run_cap, agent.needs_you,
-      agent.endpoint_id, agent.model_override, agent.model_effort]);
+    // A scheduled run can be stopped through the same route as a card.
+    const stoppable = new Map([
+      ...detail.cards.filter(card => card.status === 'running').map(card => [card.id, card]),
+      ...detail.runs.filter(run => run.outcome === 'running' && run.task_id).map(run => [run.task_id, { id: run.task_id }]),
+    ]);
+    const signature = JSON.stringify([agent, [...stoppable.keys()]]);
     if (signature === headerSignature) return;
     headerSignature = signature;
-    const toggle = el("button", { class: agent.enabled ? "btn" : "btn primary", text: agent.enabled ? "Turn off" : "Turn on",
-      onclick: async () => { await api(`/api/agents/${agentId}`, { method: "PATCH", body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } });
-    header.replaceChildren(
-      avatar(agent, 120),
-      el("div", { class: "agent-header-text" }, [
-        el("h2", { text: agent.name }),
-        el("div", { class: "sub", text: agent.role || "No role yet" }),
-        // No blurb means no line: invented copy would speak for the bot (2026-10-14).
-        ...(agent.blurb ? [el('p', { class: 'agent-header-blurb', text: agent.blurb })] : []),
-        el("div", { class: "agent-header-meta" }, [
-          el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
-          el('span', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
-        ]),
-      ]),
-      el("div", { class: "agent-header-actions" }, [
-        el('button', { class: 'btn primary', text: 'Chat', onclick: () => show('chat') }), toggle,
-        el('button', { class: 'btn agent-profile-open', text: 'Settings', onclick: () => profile.open() })]),
-    );
-    workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : "Work";
+    header.replaceChildren(el('button', { type: 'button', class: 'agent-profile-face', 'aria-label': `Open ${agent.name}’s profile`,
+      onclick: () => profile.open() }, [avatar(agent, 42), el('h2', { text: agent.name })]),
+      el('button', { type: 'button', class: 'btn agent-profile-open', text: 'Settings', onclick: () => profile.open() }));
+    live.replaceChildren(el('div', { class: 'title', text: 'Right now' }),
+      el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
+      el('p', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
+      el('div', { class: 'agent-header-actions' }, [el('button', { type: 'button', class: 'btn quiet', text: agent.enabled ? 'Turn off' : 'Turn on',
+        onclick: async () => { await api(`/api/agents/${agentId}`, { method: 'PATCH', body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } }),
+        ...[...stoppable.values()].map(card => el('button', { type: 'button', class: 'btn', text: 'Stop',
+          onclick: async () => { try { await api(`/api/tasks/${card.id}/stop`, { method: 'POST' }); redraw(); } catch (problem) { toast(problem.message, 'error'); } } }))]));
+    workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : 'Work';
   };
 
   const panels = new Map();
@@ -421,6 +452,47 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     const { agent } = detail;
     const reviews = detail.cards.filter((c) => c.status === "review");
     const byId = new Map([[agent.id, agent]]);
+    // 2026-10-14: each waiting ID has its own reconciled control tree. A poll
+    // can refresh neighbours without replacing an answer being composed.
+    const keys = new Set();
+    for (const [kind, items, make] of [['item', detail.inbox, inboxItem], ['review', reviews, reviewItem]]) {
+      for (const item of items) {
+        const key = `waiting:${kind}:${item.id}`; keys.add(key);
+        const node = reconcile(key, [item, agent.avatar], () => {
+          const card = make(item, agent, redraw); card.classList.add('agent-approval-card');
+          card.prepend(el('div', { class: 'agent-blocked-status', text: kind === 'review' ? 'Work · Waiting for review' : 'Bot · Waiting for you' }));
+          return card;
+        });
+        if (node.parentNode !== activity) activity.append(node);
+        const title = node.querySelector('.agent-inbox-title');
+        if (title && title.tagName !== 'BUTTON') {
+          const button = el('button', { type: 'button', class: 'agent-inbox-title agent-waiting-details', text: title.textContent,
+            onclick: () => openAgentItemSheet({ title: item.title || item.name, description: item.body || node.querySelector('.agent-inbox-body')?.textContent,
+              agent, primary: kind === 'review' ? 'Review result' : 'Answer',
+              onPrimary: () => { show('chat'); node.scrollIntoView({ block: 'center' }); node.querySelector('.btn.primary')?.click(); },
+              secondary: 'Open Work', onSecondary: () => show('work') }) });
+          title.replaceWith(button);
+        }
+      }
+    }
+    for (const [key, entry] of panels) {
+      if (!key.startsWith('waiting:') || keys.has(key)) continue;
+      if (!hasDraft(entry.node)) { entry.node.remove(); panels.delete(key); }
+      else if (!entry.notice) {
+        entry.notice = el('p', { class: 'agent-draft-notice', text: 'This item changed on the server. Your reply draft is kept here.' });
+        entry.node.prepend(entry.notice);
+      }
+    }
+    const next = reconcile('next-routines', detail.goals, () => el('div', {}, [
+      el('div', { class: 'title', text: 'Next routines' }),
+      ...detail.goals.filter(r => r.enabled).sort((a, b) => String(a.next_run_at || '').localeCompare(String(b.next_run_at || ''))).slice(0, 3).map(routine =>
+        el('button', { type: 'button', class: 'agent-routine-preview', onclick: () => openAgentItemSheet({ title: routine.name, agent,
+          description: routine.prompt || cadence(routine), details: `${cadence(routine)} · ${routine.next_run_at ? new Date(routine.next_run_at).toLocaleString() : 'Next run not scheduled'}`,
+          primary: 'Check now', onPrimary: async () => { try { await api(`/api/tasks/${routine.id}/run`, { method: 'POST' }); redraw(); } catch (problem) { toast(problem.message, 'error'); } },
+          secondary: 'Edit routine', onSecondary: () => { show('routines'); routinesHost.querySelector(`[data-routine-id="${CSS.escape(routine.id)}"] .agent-row-actions button:nth-child(3)`)?.click(); } }),
+        }, [el('strong', { text: routine.name }), el('span', { text: cadence(routine) }), el('span', { text: routine.next_run_at ? new Date(routine.next_run_at).toLocaleString() : 'Next run not scheduled' })])),
+      ...(!detail.goals.some(r => r.enabled) ? [el('p', { text: 'No upcoming routines.' })] : [])]));
+    if (next.parentNode !== upcoming) upcoming.append(next);
     const rows = [
       reconcile('inbox', [detail.inbox, reviews, agent.avatar], () => inboxPanel('Inbox', detail.inbox, reviews, byId, redraw)),
       computerHost,
@@ -432,8 +504,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     else { panels.get('triggers')?.node.remove(); panels.delete('triggers'); }
     rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.model_override, agent.model_effort, agent.deliver_to_channel,
       agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, modelCatalog, channels, redraw)));
-    for (const row of rows) if (row && row.parentNode !== workHost) workHost.append(row);
-    const goals = reconcile('goals', detail.goals, () => routinesPanel(agentId, detail.goals, redraw));
+    for (const row of rows) if (row && row.parentNode !== workHost && !(row === computerHost && root.dataset.agentTab === 'chat' && row.parentNode?.classList.contains('agent-conversation-stream'))) workHost.append(row);
+    const goals = reconcile('goals', detail.goals, () => routinesPanel(agentId, detail.goals, redraw, agent));
     if (goals.parentNode !== routinesHost) routinesHost.append(goals);
     const memory = panels.has('memory') ? panels.get('memory').node : reconcile('memory', detail.memory, () => memoryPanel(agentId, detail.memory));
     if (memory.parentNode !== memoryHost) memoryHost.append(memory);
@@ -505,14 +577,19 @@ function workPanel(agentId, cards, refresh, agent) {
   if (!open.length) panel.append(el("div", { class: "meta", style: "margin:6px 0;", text: "Nothing assigned right now." }));
   const label = { backlog: "Backlog", ready: "Up next", running: "Working on it", review: "Waiting for your review", blocked: "Blocked" };
   for (const card of open) {
-    panel.append(el("div", { class: "agent-row agent-assignment-card" }, [
+    panel.append(el("button", { type: 'button', class: "agent-row agent-assignment-card", onclick: () => openAgentItemSheet({
+      title: card.name, agent, description: card.prompt || label[card.status] || card.status,
+      primary: card.status === 'running' ? 'Stop' : 'Open task board',
+      onPrimary: async () => { if (card.status === 'running') { try { await api(`/api/tasks/${card.id}/stop`, { method: 'POST' }); refresh(); } catch (problem) { toast(problem.message, 'error'); } }
+        else document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'tasks' } })); },
+      secondary: 'Back to conversation', onSecondary: () => open(agentId) }) }, [
       avatar(agent, 36),
       el("div", {}, [el("div", { text: card.name }), el("div", { class: "meta", text: label[card.status] || card.status })]),
     ]));
   }
   const name = el("input", { placeholder: "e.g. Shortlist five roles" });
   const prompt = el("textarea", { rows: "2", placeholder: "What to do, as you would tell a person" });
-  panel.append(el("details", { class: "disclosure-panel" }, [el("summary", { text: "+ Give it a job" }), el("div", { class: "form-grid" }, [
+  panel.append(el("details", { class: "disclosure-panel agent-job-flow" }, [el("summary", { text: "+ Give it a job" }), el("div", { class: "form-grid" }, [
     el("div", { class: "field field-grow" }, [el("label", { text: "Name" }), name]),
     el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "What to do" }), prompt]),
     el("button", { class: "btn primary", text: "Assign", onclick: async () => {

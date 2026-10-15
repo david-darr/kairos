@@ -61,7 +61,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
     'profile poll keeps a focused model choice');
   const modelStart = writes.length;
   await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
-  await waitFor("document.querySelector('.agent-header .agent-model-summary')?.textContent.includes('Codex · Workspace Fast · high')");
+  await waitFor("document.querySelector('.agent-live-panel .agent-model-summary')?.textContent.includes('Codex · Workspace Fast · high')");
   assert.ok(writes.slice(modelStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).endpoint_id === 'm2' &&
     JSON.parse(w.body).model_override === 'workspace-fast' && JSON.parse(w.body).model_effort === 'high'), 'profile saves full model selection');
   await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");

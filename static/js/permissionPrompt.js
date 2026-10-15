@@ -34,7 +34,7 @@ export function dismissPermissionPrompt(requestId = null) {
  * @param {{mount?: HTMLElement}} [options]  defaults to the document body, so
  *   a caller does not need a view root in scope to raise a modal.
  */
-export function showPermissionPrompt(request, onAnswered, { mount = document.body } = {}) {
+export function showPermissionPrompt(request, onAnswered, { mount = document.body, inline = false } = {}) {
   dismissPermissionPrompt();
   const previous = document.activeElement;
   const status = el("p", { role: "alert", class: "permission-error" });
@@ -54,6 +54,11 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
     ]),
     status, buttons,
   ]);
+  // 2026-10-14: bot requests use the same choices and route in their stream.
+  if (inline) {
+    dialog.classList.add('agent-inline-permission');
+    dialog.prepend(el('div', { class: 'agent-blocked-status', text: `${request.tool} · Blocked · Waiting for confirmation` }));
+  }
   dialog.dataset.requestId = request.id;
 
   let answered = false;
@@ -101,12 +106,12 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
       if (reject) api(`/api/permissions/${encodeURIComponent(request.id)}/answer`,
                       { method: "POST", body: JSON.stringify({ choice: reject.id }) }).catch(() => {});
     }
-    if (previous?.isConnected) previous.focus();
+    if (!inline && previous?.isConnected) previous.focus();
   });
 
   open = dialog;
   mount.append(dialog);
-  dialog.showModal();
-  buttons.querySelector("button")?.focus();
+  if (inline) dialog.show();
+  else { dialog.showModal(); buttons.querySelector("button")?.focus(); }
   return dialog;
 }

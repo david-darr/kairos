@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 
-module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, liveChunk, liveEvent, liveFinish, capture }) => {
+module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, liveChunk, liveEvent, liveFinish, liveRuns, capture }) => {
   // Unit 4-iii, 2026-10-14: drive the real modal and stream registry through
   // the isolated renderer. These fixtures never send work to the real app.
   const pressEscape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))");
@@ -12,6 +12,13 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
     await fill('.agent-chat-main .side-chat-input', text);
     await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
     await waitFor(`${botCard}?.getAttribute('aria-busy') === 'true'`);
+    // The card turns busy before the start request reaches the test server,
+    // and a chunk sent before then is dropped; wait for the server's run so a
+    // test's next liveChunk always lands (2026-10-14, seen once in ui-smoke).
+    for (let tries = 0; liveRuns && liveRuns.as1?.status !== 'processing'; tries++) {
+      if (tries > 100) throw new Error('The bot turn never reached the test server');
+      await delay(50);
+    }
   };
 
   // 1-2. Both entry points use one dialog. An untouched Escape writes nothing;
