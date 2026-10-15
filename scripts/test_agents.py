@@ -29,6 +29,8 @@ from routes import agent_routes  # noqa: E402
 from services.agent_service import agent_service, is_silent  # noqa: E402
 from services.task_service import task_service  # noqa: E402
 
+REAL_TASK_BRAIN = task_scheduler._task_brain
+
 app = FastAPI()
 app.include_router(agent_routes.router)
 app.dependency_overrides[require_user] = lambda: "david"
@@ -1892,6 +1894,99 @@ class SelfSetupTests(AgentTestCase):
         self.addCleanup(self.sessions.delete_session, plain["id"])
         self.sessions.append_message(plain["id"], "user", "/setup")
         self.assertNotIn("The person ran /setup", chat_service._prepare_sent_text(plain["id"], 0, "/setup", None))
+
+class AgentModelTests(AgentTestCase):
+    """2026-10-14: bot identity selects a version for work and its own chats."""
+
+    endpoint = {"id": "codex-test", "name": "Codex", "kind": "codex_cli", "model": "sol"}
+    catalog = [
+        {"id": "sol", "display_name": "Sol", "supported_efforts": [{"effort": "low"}]},
+        {"id": "astra", "display_name": "Astra", "supported_efforts": [{"effort": "high"}]},
+    ]
+
+    def model_patches(self):
+        lookup = patch("core.model_endpoints.get_endpoint", side_effect=lambda ident: self.endpoint if ident == self.endpoint["id"] else None)
+        catalog = patch("core.model_catalog.list_models", return_value=self.catalog)
+        lookup.start(); catalog.start()
+        self.addCleanup(lookup.stop); self.addCleanup(catalog.stop)
+
+    def test_background_run_uses_bot_version_and_effort_or_connection_default(self):
+        self.model_patches()
+        agent_service.update(self.agent["id"], endpoint_id=self.endpoint["id"])
+        with patch.object(task_scheduler, "_task_brain", REAL_TASK_BRAIN):
+            default = task_scheduler._task_brain({"agent_id": self.agent["id"]})
+            self.assertEqual((default.model, default.effort), ("sol", None))
+            agent_service.update(self.agent["id"], model_override="astra", model_effort="high")
+            chosen = task_scheduler._task_brain({"agent_id": self.agent["id"]})
+        self.assertEqual((chosen.model, chosen.effort), ("astra", "high"))
+
+    def test_bot_chat_inherits_until_session_pins_its_own_version(self):
+        from core.session_manager import session_manager
+        from services import chat_service
+        self.model_patches()
+        agent_service.update(self.agent["id"], endpoint_id=self.endpoint["id"], model_override="astra", model_effort="high")
+        session = session_manager.create_session("Bot model")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        session_manager.set_model_endpoint(session["id"], self.endpoint["id"])
+        agent_service.make_agent_chat(session["id"], self.agent)
+        inherited = chat_service._build_brain(self.endpoint, session["id"])
+        self.assertEqual((inherited.model, inherited.effort), ("astra", "high"))
+        session_manager.set_model_endpoint(session["id"], self.endpoint["id"], None, "low")
+        incompatible = chat_service._build_brain(self.endpoint, session["id"])
+        self.assertEqual((incompatible.model, incompatible.effort), ("astra", "high"))
+        session_manager.set_model_endpoint(session["id"], self.endpoint["id"], "sol", "low")
+        pinned = chat_service._build_brain(self.endpoint, session["id"])
+        self.assertEqual((pinned.model, pinned.effort), ("sol", "low"))
+        ordinary = session_manager.create_session("Ordinary")
+        self.addCleanup(session_manager.delete_session, ordinary["id"])
+        session_manager.set_model_endpoint(ordinary["id"], self.endpoint["id"])
+        plain = chat_service._build_brain(self.endpoint, ordinary["id"])
+        self.assertEqual((plain.model, plain.effort), ("sol", None))
+
+    def test_open_bot_chat_reconnects_after_profile_model_change(self):
+        from core.session_manager import session_manager
+        from services import chat_service
+        self.model_patches()
+        agent_service.update(self.agent["id"], endpoint_id=self.endpoint["id"])
+        session = session_manager.create_session("Bot model change")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        session_manager.set_model_endpoint(session["id"], self.endpoint["id"])
+        agent_service.make_agent_chat(session["id"], self.agent)
+
+        async def check():
+            first, created = await chat_service._get_brain(session["id"], self.endpoint)
+            self.assertTrue(created)
+            agent_service.update(self.agent["id"], model_override="astra", model_effort="high")
+            second, rebuilt = await chat_service._get_brain(session["id"], self.endpoint)
+            self.assertTrue(rebuilt)
+            self.assertIsNot(first, second)
+            self.assertEqual((second.model, second.effort), ("astra", "high"))
+            await chat_service.close_session_brain(session["id"])
+
+        asyncio.run(check())
+
+    def test_validation_and_connection_change_clear_version_and_effort(self):
+        self.model_patches()
+        agent_service.update(self.agent["id"], endpoint_id=self.endpoint["id"], model_override="astra", model_effort="high")
+        invalid = web.patch(f'/api/agents/{self.agent["id"]}', json={"model_effort": "low"})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(agent_service.get(self.agent["id"])["model_effort"], "high")
+        changed = agent_service.update(self.agent["id"], endpoint_id=None)
+        self.assertIsNone(changed.get("model_override"))
+        self.assertIsNone(changed.get("model_effort"))
+
+    def test_legacy_bot_loads_and_runs_without_new_fields(self):
+        self.assertNotIn("model_override", self.agent)
+        self.assertNotIn("model_effort", self.agent)
+        from services.agent_service import AgentService
+        with patch("services.agent_service.write_json_atomic") as save:
+            loaded = AgentService()
+        save.assert_not_called()
+        self.assertNotIn("model_override", loaded.get(self.agent["id"]))
+        from core.brain import Brain
+        with patch.object(task_scheduler, "_task_brain", REAL_TASK_BRAIN):
+            self.assertIsInstance(task_scheduler._task_brain({"agent_id": self.agent["id"]}), Brain)
+
 
 if __name__ == "__main__":
     unittest.main()

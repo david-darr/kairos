@@ -1,5 +1,6 @@
 import { api, el, customSelect, toast, confirmDialog, openPanelDialog } from './api.js';
 import { avatarPicker, defaultAvatar } from './agentAvatar.js';
+import { agentModelPicker } from './agentModelPicker.js';
 
 // 2026-10-14: keep the entire draft in this dialog until Create succeeds.
 // The optional goal is a second existing route, so its failure is reported
@@ -30,8 +31,7 @@ export async function openCreateAgent() {
   const soul = el('textarea', { rows: '7', 'aria-label': 'Soul', placeholder: 'Standing instructions for this bot' });
   const soulCount = el('small', { class: 'agent-create-count' });
   const instructions = el('textarea', { rows: '3', 'aria-label': 'Working approach', placeholder: 'How it should work: sources, boundaries, and reporting.' });
-  const model = customSelect({}, [el('option', { value: '', text: 'Claude (default)' }),
-    ...models.map(item => el('option', { value: item.id, text: item.name }))]);
+  const model = agentModelPicker(models, {}, () => { dirty = true; });
   const channel = customSelect({}, [el('option', { value: '', text: 'In the app only' }),
     ...channels.map(item => el('option', { value: item.id, text: item.label }))]);
   const goalName = el('input', { 'aria-label': 'Routine name', placeholder: 'e.g. New postings' });
@@ -65,7 +65,7 @@ export async function openCreateAgent() {
   ]);
   const sections = [identity,
     el('section', { id: 'agent-create-soul', class: 'agent-create-section' }, [el('h3', { text: 'Soul' }), field('Standing instructions', soul, soulCount), field('Working approach', instructions)]),
-    el('section', { id: 'agent-create-model', class: 'agent-create-section' }, [el('h3', { text: 'Model' }), field('Default model', model)]),
+    el('section', { id: 'agent-create-model', class: 'agent-create-section' }, [el('h3', { text: 'Model' }), model.root]),
     el('section', { id: 'agent-create-routines', class: 'agent-create-section' }, [el('h3', { text: 'Routines' }), el('p', { class: 'meta', text: 'Optional first scheduled check.' }), field('Name', goalName), field('What to check', goalPrompt), field('When', cadence), field('Report', report)]),
     el('section', { id: 'agent-create-delivery', class: 'agent-create-section' }, [el('h3', { text: 'Delivery' }), field('Tell me on', channel)]),
   ];
@@ -92,7 +92,7 @@ export async function openCreateAgent() {
     input.addEventListener('input', () => { dirty = true; if (input === blurb) limited(blurb, 4000, blurbCount);
       if (input === soul) limited(soul, 24000, soulCount); validate(); });
   }
-  model.addEventListener('change', () => { dirty = true; }); channel.addEventListener('change', () => { dirty = true; });
+  channel.addEventListener('change', () => { dirty = true; });
   kind.addEventListener('change', () => { dirty = true; }); report.addEventListener('change', () => { dirty = true; });
   limited(blurb, 4000, blurbCount); limited(soul, 24000, soulCount); validate();
   create.addEventListener('click', async () => {
@@ -100,7 +100,7 @@ export async function openCreateAgent() {
     creating = true; validate();
     let agent;
     try { agent = await api('/api/agents', { method: 'POST', body: JSON.stringify({ name: name.value.trim(), role: role.value.trim(),
-      blurb: blurb.value.trim(), soul: soul.value, instructions: instructions.value.trim(), endpoint_id: model.value || null,
+      blurb: blurb.value.trim(), soul: soul.value, instructions: instructions.value.trim(), ...model.get(),
       avatar: picker.getSpec(), deliver_to_channel: channel.value || null }) }); }
     catch (error) { validity.textContent = error.message; creating = false; validate(); toast(error.message, 'error'); return; }
     let goalError = null;

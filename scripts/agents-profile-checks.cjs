@@ -46,6 +46,20 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
   await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('heart')");
   assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.form === 'heart'), 'profile saves avatar');
+  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Connection"]'); n.value='m2'; n.dispatchEvent(new Event('change')); })()`);
+  await waitFor("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-fast')");
+  assert.ok(await js("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Fast')"), 'profile shows catalog version names');
+  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Model version"]'); n.value='workspace-fast'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-profile-details [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
+  assert.ok(await js("document.querySelector('.agent-profile-details .agent-model-summary').textContent.includes('Codex · Workspace Fast · high')"), 'profile summary shows connection, version and effort');
+  await js("document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]').focus()");
+  await delay(10600);
+  assert.ok(await js("document.activeElement === document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]') && document.activeElement.value === 'high'"),
+    'profile poll keeps a focused model choice');
+  const modelStart = writes.length;
+  await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
+  await waitFor("document.querySelector('.agent-header .agent-model-summary')?.textContent.includes('Codex · Workspace Fast · high')");
+  assert.ok(writes.slice(modelStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).endpoint_id === 'm2' &&
+    JSON.parse(w.body).model_override === 'workspace-fast' && JSON.parse(w.body).model_effort === 'high'), 'profile saves full model selection');
   await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
   // Coordination, 2026-10-14: Access persists the peer allow-list by id.
   await js("document.querySelector('.agent-profile-section[data-section=access] summary').click()");

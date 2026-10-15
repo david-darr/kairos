@@ -1,6 +1,7 @@
 import { api, el, toast, confirmDialog } from './api.js';
 import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
 import { routinesPanel } from './routinesPanel.js';
+import { agentModelPicker } from './agentModelPicker.js';
 
 const SECTIONS = ['Overview', 'Identity', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice & alerts', 'History', 'Usage'];
 const bytes = (value) => new TextEncoder().encode(value).length;
@@ -76,16 +77,13 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const instruction = field('instructions', 'Standing instructions', 24000, true);
   const blurb = field('blurb', 'Blurb', 4000, true, 3000);
   const soul = field('soul', 'Soul', 24000, true);
-  const model = el('select', { 'aria-label': 'Default model' }, [el('option', { value: '', text: 'Claude (default)' }),
-    ...models.map(m => el('option', { value: m.id, text: m.name }))]);
+  const model = agentModelPicker(models, detail.agent, () => { modelConflict.hidden = !model.serverChanged() || !model.isDirty(); });
   const modelConflict = el('div', { class: 'agent-profile-conflict', hidden: true,
-    text: 'Default model changed on the server. Your selection is kept; saving will use it. ' });
+    text: 'Model changed on the server. Your selection is kept; saving will use it. ' });
   modelConflict.append(el('button', { class: 'btn quiet', type: 'button', text: 'Use server version', onclick: () => {
-    model.value = modelServer; modelBaseline = modelServer; modelConflict.hidden = true;
+    model.markSaved(detail.agent); modelConflict.hidden = true;
   } }));
-  let modelBaseline = '', modelServer = '';
-  const modelField = el('label', { class: 'field agent-profile-field' }, [el('span', { text: 'Default model' }), model, modelConflict]);
-  model.addEventListener('change', () => { modelConflict.hidden = model.value === modelBaseline || modelServer === modelBaseline; });
+  const modelField = el('div', {}, [model.root, modelConflict]);
   const extraFields = new Map();
   const extra = (key, label, input) => {
     const notice = el('div', { class: 'agent-profile-conflict', hidden: true,
@@ -221,10 +219,8 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     picker.setSpec(avatarSpec(next.agent));
     for (const [key, state] of fields) state.sync(key === 'soul' ? next.soul_file?.soul : next.agent[key]);
     for (const [key, state] of extraFields) state.sync(next.agent[key]);
-    modelServer = next.agent.endpoint_id || '';
-    if (model.value === modelServer) modelBaseline = modelServer;
-    if (model.value === modelBaseline && document.activeElement !== model) { model.value = modelServer; modelBaseline = modelServer; }
-    modelConflict.hidden = model.value === modelBaseline || modelServer === modelBaseline;
+    model.sync(next.agent);
+    modelConflict.hidden = !model.serverChanged() || !model.isDirty();
     const sf = next.soul_file || { soul: next.agent.soul, file_text: next.agent.soul, in_sync: true, revision: next.agent.revision };
     soulDrift.hidden = sf.in_sync;
     fileText.textContent = sf.file_text === null ? '(file is missing)' : sf.file_text;
@@ -267,7 +263,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     for (const [key, state] of extraFields) if (state.value() !== state.baseline) {
       changes[key] = key === 'daily_run_cap' ? Number(state.value()) : key === 'deliver_to_channel' ? state.value() || null : state.value();
     }
-    if (model.value !== modelBaseline) changes.endpoint_id = model.value || null;
+    if (model.isDirty()) Object.assign(changes, model.get());
     if (peersDraft !== null && JSON.stringify(peersDraft) !== peersBaseline) changes.peers = peersDraft;
     if (picker.isDirty()) {
       const spec = picker.getSpec(), saved = avatarSpec(detail.agent);
@@ -283,7 +279,9 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       && (state.key === 'soul' ? fresh.soul_file?.soul : fresh.agent[state.key]) !== state.baseline && state.conflict.hidden)
       || [...extraFields.values()].some(state => changes[state.key] !== undefined
         && (state.input.type === 'checkbox' ? !!fresh.agent[state.key] : String(fresh.agent[state.key] ?? '')) !== state.baseline && state.notice.hidden)
-      || (changes.endpoint_id !== undefined && (fresh.agent.endpoint_id || '') !== modelBaseline && modelConflict.hidden);
+      || (changes.endpoint_id !== undefined && JSON.stringify(model.baseline()) !== JSON.stringify({
+        endpoint_id: fresh.agent.endpoint_id || null, model_override: fresh.agent.model_override ?? null,
+        model_effort: fresh.agent.model_effort ?? null }) && modelConflict.hidden);
     if (changes.peers !== undefined && JSON.stringify([...(fresh.agent.peers || [])].sort()) !== peersBaseline) {
       peersBaseline = JSON.stringify([...(fresh.agent.peers || [])].sort());
       update(fresh); toast('Peers changed on the server. Review your selection, then save again.', 'info'); return;
@@ -300,7 +298,9 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       detail.agent = agent;
       if (changes.soul !== undefined) detail.soul_file = { soul: agent.soul, file_text: agent.soul, in_sync: true, revision: agent.revision };
       else if (detail.soul_file) detail.soul_file.revision = agent.revision;
-      if (changes.endpoint_id !== undefined) modelBaseline = model.value;
+      // 2026-10-14: a version or effort edit can save without changing the
+      // connection; advance its baseline so the next poll cannot flag it.
+      if (['endpoint_id', 'model_override', 'model_effort'].some(key => key in changes)) model.markSaved(agent);
       if (changes.peers !== undefined) { peersBaseline = JSON.stringify(changes.peers); peersDraft = null; }
       if (changes.avatar !== undefined) picker.markSaved();
       update(detail); toast('Profile saved', 'success'); onSaved();

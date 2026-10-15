@@ -22,6 +22,8 @@ class AgentBody(BaseModel):
     soul: Optional[str] = None
     instructions: Optional[str] = None
     endpoint_id: Optional[str] = None
+    model_override: Optional[str] = None
+    model_effort: Optional[str] = None
     color: Optional[str] = None
     avatar: Optional[dict] = None
     enabled: Optional[bool] = None

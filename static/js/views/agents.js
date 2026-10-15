@@ -9,6 +9,7 @@ import { agentAvatar } from "../agentAvatar.js";
 import { botStatusLine } from "../botStatus.js";
 import { openCreateAgent } from "../agentCreation.js";
 import { routinesPanel } from "../routinesPanel.js";
+import { agentModelSummary } from "../agentModelPicker.js";
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -66,13 +67,6 @@ function openTeam(team) {
 }
 
 const TEAM_STATE = { idle: "Idle", active: "Working", pausing: "Pausing", paused: "Paused", stopped: "Stopped", archived: "Archived" };
-
-function modelOptions(models, selected = "") {
-  return [
-    el("option", { value: "", text: "Claude (default)", ...(selected ? {} : { selected: "" }) }),
-    ...models.map((m) => el("option", { value: m.id, text: m.name, ...(m.id === selected ? { selected: "" } : {}) })),
-  ];
-}
 
 function channelOptions(channels, selected = "") {
   return [
@@ -305,6 +299,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     return;
   }
   const [models, channels] = await Promise.all([api("/api/models").catch(() => []), api("/api/channels").catch(() => [])]);
+  let catalogEndpoint = detail.agent.endpoint_id, modelCatalog = catalogEndpoint
+    ? await api(`/api/models/${catalogEndpoint}/catalog`).catch(() => []) : [];
   if (!document.body.contains(root)) return;
   root.innerHTML = "";
 
@@ -381,7 +377,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   let headerSignature = '';
   const drawHeader = (agent) => {
     const signature = JSON.stringify([agent.name, agent.role, agent.blurb, agent.avatar, agent.enabled, agent.status,
-      agent.status_detail, agent.runs_today, agent.daily_run_cap, agent.needs_you]);
+      agent.status_detail, agent.runs_today, agent.daily_run_cap, agent.needs_you,
+      agent.endpoint_id, agent.model_override, agent.model_effort]);
     if (signature === headerSignature) return;
     headerSignature = signature;
     const toggle = el("button", { class: agent.enabled ? "btn" : "btn primary", text: agent.enabled ? "Turn off" : "Turn on",
@@ -395,6 +392,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
         ...(agent.blurb ? [el('p', { class: 'agent-header-blurb', text: agent.blurb })] : []),
         el("div", { class: "agent-header-meta" }, [
           el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
+          el('span', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
         ]),
       ]),
       el("div", { class: "agent-header-actions" }, [
@@ -432,8 +430,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     ];
     if ((detail.triggers || []).length) rows.push(reconcile('triggers', detail.triggers, () => triggersPanel(detail.triggers)));
     else { panels.get('triggers')?.node.remove(); panels.delete('triggers'); }
-    rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.deliver_to_channel,
-      agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, channels, redraw)));
+    rows.push(reconcile('settings', [agent.role, agent.instructions, agent.endpoint_id, agent.model_override, agent.model_effort, agent.deliver_to_channel,
+      agent.daily_run_cap, agent.keep_signed_in, agent.status], () => settingsPanel(agent, models, modelCatalog, channels, redraw)));
     for (const row of rows) if (row && row.parentNode !== workHost) workHost.append(row);
     const goals = reconcile('goals', detail.goals, () => routinesPanel(agentId, detail.goals, redraw));
     if (goals.parentNode !== routinesHost) routinesHost.append(goals);
@@ -452,6 +450,10 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     if (version !== refreshVersion) return;
     detail = next;
     if (!document.body.contains(root)) return;
+    if (catalogEndpoint !== detail.agent.endpoint_id) {
+      catalogEndpoint = detail.agent.endpoint_id;
+      modelCatalog = catalogEndpoint ? await api(`/api/models/${catalogEndpoint}/catalog`).catch(() => []) : [];
+    }
     drawHeader(detail.agent);
     drawWork();
     profile.update(detail);
@@ -580,18 +582,17 @@ function memoryJournal(agentId, entries, refresh) {
   return panel;
 }
 
-function settingsPanel(agent, models, channels, refresh) {
+function settingsPanel(agent, models, modelCatalog, channels, refresh) {
   const role = el("input", { value: agent.role || "" });
   const instructions = el("textarea", { rows: "3" });
   instructions.value = agent.instructions || "";
-  const model = customSelect({}, modelOptions(models, agent.endpoint_id || ""));
   const channel = customSelect({}, channelOptions(channels, agent.deliver_to_channel || ""));
   const cap = el("input", { type: "number", min: "1", max: "200", value: String(agent.daily_run_cap) });
   const keep = toggle({ checked: !!agent.keep_signed_in, label: 'Keep this agent signed in' });
   const save = async () => {
     try {
       await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify({ role: role.value.trim(), instructions: instructions.value.trim(),
-        endpoint_id: model.value || null, deliver_to_channel: channel.value || null, daily_run_cap: parseInt(cap.value, 10),
+        deliver_to_channel: channel.value || null, daily_run_cap: parseInt(cap.value, 10),
         keep_signed_in: keep.checked }) });
       toast("Saved", "success"); refresh();
     } catch (problem) { toast(problem.message, "error"); }
@@ -608,7 +609,9 @@ function settingsPanel(agent, models, channels, refresh) {
   return el("details", { class: "disclosure-panel" }, [el("summary", { text: "Settings" }), el("div", { class: "form-grid" }, [
     el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "Role" }), role]),
     el("div", { class: "field field-grow", style: "flex-basis:100%;" }, [el("label", { text: "How it should work" }), instructions]),
-    el("div", { class: "field" }, [el("label", { text: "Model" }), model]),
+    el("div", { class: "field" }, [el("label", { text: "Model" }),
+      el('span', { text: agentModelSummary(agent, models, modelCatalog) }),
+      el('button', { class: 'btn quiet', type: 'button', text: 'Choose model in profile', onclick: () => openProfile(agent.id) })]),
     el("div", { class: "field" }, [el("label", { text: "Tell me on" }), channel]),
     el("div", { class: "field field-sm" }, [el("label", { text: "Runs per day" }), cap]),
     el('div', { class: 'field field-grow' }, [el('label', { text: 'Keep signed in' }), keep,

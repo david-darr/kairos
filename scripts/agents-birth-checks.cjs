@@ -57,6 +57,13 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await fill('.agent-create-dialog [aria-label=Soul]', 'Custom standing text');
   await fill('.agent-create-dialog [aria-label="Bot name"]', 'New Researcher');
   assert.equal(await js("document.querySelector('.agent-create-footer .btn.primary').disabled"), false);
+  // 2026-10-14: both bot editors read versions and effort from the selected
+  // connection's catalog, then submit the exact ID rather than display text.
+  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Connection"]'); n.value='m1'; n.dispatchEvent(new Event('change')); })()`);
+  await waitFor("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-large')");
+  assert.ok(await js("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Large')"));
+  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Model version"]'); n.value='workspace-large'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-create-dialog [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
+  assert.ok(await js("document.querySelector('.agent-create-dialog .agent-model-summary').textContent.includes('Claude · Workspace Large · high')"));
   // 2026-10-14: every picker dimension changes the live face; the saved spec
   // is the last previewed combination, including a custom hex color.
   const originalFace = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker img').src");
@@ -74,6 +81,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
   assert.ok(writes.slice(createStart).some(w => w.path === '/api/agents' && JSON.parse(w.body).soul === 'Custom standing text'));
   assert.deepEqual(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body).avatar, expectedAvatar, 'creation persists the picker spec');
+  assert.deepEqual((({endpoint_id, model_override, model_effort}) => ({endpoint_id, model_override, model_effort}))(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body)),
+    {endpoint_id:'m1', model_override:'workspace-large', model_effort:'high'}, 'creation saves connection, version and reasoning');
   assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'New Researcher');
   assert.ok(await js("!!document.querySelector('.agent-profile-sheet .agent-dot-avatar')"), 'profile uses the dot component');
   await capture?.('desktop-agent-profile');
