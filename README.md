@@ -12,7 +12,7 @@ This is the real product (v2). [jarvis-starter-kit](https://github.com/david-dar
 
 ![Kairos Home: the main card, number chips and compact cards for chats, upcoming events, agents, models, Tool Store, projects, activity and systems](docs/img/home.png)
 
-*Kairos 2.0 with sample data.*
+*Kairos 2.1 with sample data.*
 
 ## What it does
 
@@ -22,13 +22,14 @@ This is the real product (v2). [jarvis-starter-kit](https://github.com/david-dar
 - **Artifact review**: preview generated images, PDFs, Markdown, text/code, static HTML and Office files in a resizable, tabbed document pane. Select slide shapes, cells, lines or page regions and add comments to a message. Requests about a document from another chat return to that chat. Switch versions with the version picker. Office previews run locally; slide layout is approximate.
 - **Forge (Preview)**: an admin coding workspace for projects opened from a folder, cloned, or created in Kairos. Sessions use a separate Git worktree by default, a working folder for a branch. Choose Build or read-only Plan. Review Changes, revert files, and undo a turn through checkpoints. Use the editor, terminal and Git panel to stage, commit, switch branches and pull when no merge is needed. Push sends commits to a remote; merge-back brings the session branch into the main checkout. Both ask first; push never forces. Run an app server after approval and view it in App Preview. The terminal is off over Remote Access by default.
 - **Computer use**: chats and agents can operate a contained Docker browser with a live view, Stop, Take over and Hand back. An optional agent desktop adds offline document apps. Teach a task by recording your actions during takeover, then review and save a skill. Computer use, the agent desktop, reactions and keeping agent logins are off by default.
-- **Agents**: named workers with their own role, goals, memory, chats and inbox. Admins can hand work to an agent with an `@` mention in chat and receive its result there. Agents run in Auto, approving tool requests automatically within their tool and workspace limits, and can work in teams.
+- **Agents**: named bots with their own role, soul, memory, routines and inbox, each with a character face you design. A bot keeps many conversations, each with its own model, approvals and Stop. While it works you see what it is doing and for how long, and its reply arrives whole. Its page centres on the conversation: on a desktop, live work, items waiting on you and next routines sit beside the chat; on a phone it reads like a messaging thread, with questions and approvals as cards you answer in place. Run each bot on a chosen model version and reasoning level. Bots wake on events and schedules, not an idle loop. They can assign work to bots you name as their peers. Memory is tidied in journalled passes you can undo. `/setup` in a bot's chat changes its own setup with Undo, and can never widen its access. Admins can hand work to a bot with an `@` mention in chat. Bots run in Auto within their tool and workspace limits, can work in teams, and can notify you on the desktop or your phone. An optional floating window keeps a bot in view.
 - **A side browser** in the chat, opened when you ask for it or when you follow a link in a reply. In the desktop app it runs as a real sandboxed browser view with its own cookies, separate from the app's, and it cannot reach Kairos's own backend. In a plain browser tab it falls back to an embedded frame, with open-in-new-tab always available for sites that refuse to be embedded.
-- **Home dashboard**: recent conversations, projects, upcoming events, connected systems, and a live activity feed under a halftone banner of the Kairos figure (or your own picture).
+- **Home dashboard**: recent conversations, projects, upcoming events, connected systems, and a live activity feed under a halftone banner of the Kairos figure (or your own picture). Tabs can add their own cards to Home, chosen and ordered in Settings > Layout.
 - **A focused workspace**: a centered new-chat composer that settles below the conversation, independently collapsible chat history, and a 52px icon rail. Layout preferences are remembered; mobile keeps full navigation and chat-history drawers.
 - **Notes, Calendar, Email, Library**: priorities and todos, CalDAV/iCal calendar sync, IMAP/SMTP email, documents and chat files. Due-dated notes appear on the calendar. Browse and edit Vault notes, or explore their links on a Map. Admins can connect Google Drive for browsing and previews, and read or edit Google Calendar events from Calendar and chat.
+- **Skills and tools in chat**: type `@` to bring a skill, tool, automation or document into a message, or use **+ > Use a skill**. Kairos ships bundled skills, including **motion video**: it builds an animated video from code (canvas animation and a soundtrack synthesized in code), renders it to MP4 with Playwright and FFmpeg, and reviews the result before handing it over. It checks for Node, Playwright and FFmpeg first and asks before installing anything.
 - **Tasks**: scheduled automations, either your own prompts or built-in ones (Daily Brief, tidy-up jobs, skill audits). Output can be delivered to a connected channel rather than just sitting in the tab.
-- **Kairos Store** in Tool Store: browse community tabs, skills (reusable instructions), tools (MCP servers) and automations beside bundled items. Admins install through the existing scan and review gates. Community automations start off. Build with Kairos uses bundled builder skills. Sign in to GitHub to share your own items after a public file preview; submissions become pull requests for review.
+- **Kairos Store** in Tool Store: browse community tabs, skills (reusable instructions), tools (MCP servers) and automations beside bundled items. Admins install through the existing scan and review gates. Community automations start off. Build with Kairos uses bundled builder skills. Sign in to GitHub to share your own items after a public file preview; submissions become pull requests for review. Tool Store also offers **REA**, an optional reverse-engineering tool for inspecting applications, websites, JavaScript, binaries and runtime behaviour with evidence. It needs Node.js 22.19+, 24.11+ or 26+ and downloads its pinned package only after you approve.
 - **One memory, not two**: checkbox items in your vault's `Active Priorities.md` are synced into Notes on every launch, grouped by their vault headings, so asking about your priorities returns what's actually written in your vault. Ticking one in the app ticks it in the vault file too.
 - **Channels**: reach the same assistant from Discord, with conversation state shared through the same sessions and vault.
 - **Cookbook**: download and run local models without a separate install.
@@ -44,6 +45,8 @@ Memory is a folder of markdown notes, not a database, so it stays readable, port
 | **Library > Vault > Map**: your notes rendered as a linked graph | **Models**: Claude, local servers, or any API provider |
 | ![Model setup guide](docs/img/model-setup.png) | ![Forge](docs/img/forge.png) |
 | **Model setup**: a first-run guide to connecting Claude, Codex, an API key or a local model | **Forge (Preview)**: sessions in their own worktrees, with an editor, terminal and Git panel |
+| ![A bot's page](docs/img/agents.png) | ![A bot on a phone](docs/img/agents-phone.png) |
+| **Agents**: the conversation in the centre, live work and waiting items beside it | **On a phone**: a messaging-style thread with Settings and a menu for Work, Routines and Memory |
 
 <details>
 <summary>See the compact sidebar</summary>
@@ -164,7 +167,7 @@ specs/         Living architecture docs
 
 ## Status
 
-2.0.0 includes Forge with a Preview label, the community Store, guided model setup, slash suggestions, computer use, agents and artifact review. The desktop build includes its Python runtime. Forge remains Preview while development continues.
+2.1.0 rebuilds Agents (many conversations per bot, routines, an inbox of questions and approvals, bot-to-bot assignments, model versions, character faces, notifications and a conversation-first page) and adds the motion-video skill, `@` references for skills, tools, automations and documents, the optional REA tool, Home cards from tabs, a redesigned phone layout, and the fixes made since 2.0.0. It builds on 2.0.0's Forge (Preview), community Store, guided model setup, slash suggestions, computer use and artifact review. The desktop build includes its Python runtime. Forge remains Preview while development continues.
 
 macOS builds are produced on GitHub's macOS runners (`.github/workflows/build-macos.yml`), since a DMG can't be built from Windows.
 

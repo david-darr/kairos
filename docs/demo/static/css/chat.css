@@ -18,7 +18,7 @@
 .chat-activity-steps li[data-state='done'] { opacity: 1; color: var(--text-dim); }
 .chat-activity-steps li[data-state='active'] { opacity: 1; color: var(--accent); }
 .chat-activity-steps li[data-state='active'] .chat-step-marker { animation: thinking-pulse 1.8s ease-in-out infinite; }
-.chat-progress-card { font: inherit; text-align: left; }
+.chat-progress-card { font-family: inherit; text-align: left; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 @keyframes activity-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes activity-complete { from { opacity: .2; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
@@ -66,11 +66,10 @@
 .msg.msg-failed .msg-body { color: var(--text); }
 #chat-main { position: relative; min-width: 0; }
 .chat-jump { position: absolute; bottom: calc(var(--composer-height, 140px) + 12px); left: 50%; transform: translateX(-50%); z-index: 3; border-radius: 24px; box-shadow: var(--shadow-elevated); }
-.chat-jump[hidden], #model-version-btn[hidden] { display: none; }
+.chat-jump[hidden] { display: none; }
 .chat-summary-trigger { flex-shrink: 0; margin-left: auto; padding: 6px 11px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text-dim);
   font: inherit; font-size: 11px; cursor: pointer; }
-.chat-mobile-header:has(.chat-summary-trigger:not([hidden])) .chat-header-new { margin-left: 0; }
 .chat-summary-trigger:hover { color: var(--text); border-color: var(--border-strong); }
 .chat-summary-trigger[hidden], .chat-timeline[hidden] { display: none; }
 .chat-summary-trigger:focus-visible, .chat-timeline-point:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -206,7 +205,6 @@
 .model-version-form label { font-size: 12px; font-weight: 550; }
 .model-version-form input { width: 100%; min-width: 0; }
 .model-version-form p { font-size: 12px; line-height: 1.6; margin: 0; }
-.version-menu { width: 330px; max-height: 420px; }
 
 /* -- model catalog + reasoning level (David's ask 2026-09-15) ----------- */
 .model-version-search { padding: 8px 8px 4px; position: sticky; top: -4px; z-index: 1; background: var(--bg-panel-solid); }
@@ -324,7 +322,11 @@
   .artifact-foreign-bar { padding: 8px; }
 }
 .artifact-header-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-@media (max-width: 1100px) { .artifact-maximize { display: none; } }
+/* Matched on both classes deliberately: interface.css loads after this file
+   and carries a base `.btn { display: inline-flex }`, which beats a
+   single-class rule here on source order alone and brought this button back
+   at 900px (caught by scripts/artifact-pane-checks.cjs). */
+@media (max-width: 1100px) { .artifact-maximize.btn { display: none; } }
 @media (max-width: 680px) {
   .artifact-tab-label, .artifact-tab-close { min-height: 44px; }
   .artifact-tab-close { flex-basis: 44px; }
@@ -822,3 +824,42 @@
 /* Hidden images keep their loading bars visible until decoding completes. */
 .artifact-image-viewport img[hidden] { display: none; }
 .office-grid tbody th { top: auto; }
+
+/* Phone controls wrap into rows; the text area and Send remain usable at
+   320px without shrinking the model label or the touch targets. */
+@media (max-width: 768px) {
+  .input-icon-btn, .sidebar-settings-btn, .sidebar-user-card,
+  .chat-summary-trigger, .artifact-header-controls .btn, .side-chat-send {
+    min-width: 44px; min-height: 44px;
+  }
+  #chat-send, .forge-composer-send { width: 44px; height: 44px; }
+  .chat-input-right { flex-wrap: wrap; flex-shrink: 1; max-width: 100%; gap: 4px; }
+  .chat-input-bar .model-pill { flex: 1 1 100%; min-width: 0; height: auto; min-height: 44px; justify-content: flex-end; }
+  .chat-input-bar .model-pill .model-picker-btn { height: 44px; min-width: 44px; max-width: 100%; font-size: 12px; }
+  .chat-input-bar .model-picker-wrap { min-width: 0; }
+  .side-chat-input { font-size: 16px; }
+  #chat-input, .side-chat-input { max-height: min(200px, 25dvh); }
+}
+
+/* Phone conversation: keep the title readable and give touch menus room. */
+.chat-phone-tools { display: none; }
+@media (max-width: 768px) {
+  .mobile-menu-btn { box-shadow: none; border-radius: 14px; }
+  .chat-phone-tools { display: block; flex-shrink: 0; }
+  .chat-phone-tools .overflow-menu { left: auto; right: 0; min-width: 210px; max-width: calc(100vw - 32px); }
+  .chat-mobile-header > .chat-files-toggle,
+  .chat-mobile-header > .chat-documents-toggle,
+  .chat-mobile-header > .chat-summary-trigger { display: none; }
+  .chat-mobile-header { gap: 6px; min-height: 68px; padding-right: 12px; background: var(--bg-panel); }
+  .chat-title { flex: 1; font-size: 14px; letter-spacing: 0; color: var(--text); font-weight: 500; }
+  .chat-mobile-header .input-icon-btn { flex-shrink: 0; border-radius: 12px; }
+  .chat-mobile-header .chat-documents-toggle { font-size: 11px; padding-inline: 8px; }
+  #chat-messages { padding: 22px 18px 16px; gap: 26px; scrollbar-gutter: auto; }
+  #chat-messages .msg { font-size: 16px; line-height: 1.7; }
+  #chat-messages .chat-prose { font-size: 16px; }
+  .msg.user .msg-body { padding: 12px 16px; border-radius: 20px 20px 6px 20px; }
+  .chat-input-bar { border-color: var(--border-strong); box-shadow: var(--shadow-elevated); }
+  .chat-input-bar .model-picker-btn { font-size: 12px; }
+  .overflow-menu .overflow-menu-item, .model-picker-option { min-height: 44px; }
+  .composer-hint { font-size: 10px; line-height: 1.5; }
+}

@@ -114,7 +114,7 @@
 @media (max-width: 768px) {
   .forge-transcript-document { padding-top: 8px; }
   .forge-work-spine { margin-right: 8px; padding-left: 12px; }
-  .forge-transcript-composer { margin-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .forge-transcript-composer { margin-bottom: max(6px, var(--mobile-safe-bottom)); }
 }
 
 /* Forge Preview follows the app's appearance tokens. */
@@ -540,7 +540,7 @@ nav#nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: 
 }
 @media (max-width: 768px) {
   #sidebar-toggle { display: none; }
-  .sidebar-header { padding-left: 40px; } /* Clears the fixed mobile menu button. */
+  .sidebar-header { padding-left: 46px; } /* Clears the fixed mobile menu button. */
 }
 
 .nav-item {
@@ -1004,7 +1004,6 @@ input[type="checkbox"]:checked::after {
 }
 .chat-mobile-menu-btn { color: var(--text-faint); }
 .chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.chat-header-new { margin-left: auto; flex-shrink: 0; }
 .chat-composer-dock { flex-shrink: 0; width: min(calc(100% - 48px), var(--chat-column)); margin: 0 auto; position: relative; z-index: 4; }
 #chat-main.is-empty #chat-messages { flex: 0; padding: 0; }
 #chat-main.is-empty .chat-composer-dock { margin-block: auto; }
@@ -1595,19 +1594,24 @@ input[type="checkbox"]:checked::after {
    between the chat view itself and this overlay. */
 #chat-progress-host {
   position: fixed; top: calc(var(--titlebar-h) + 20px); right: 20px; z-index: 3000;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
   max-width: calc(100vw - 40px); max-height: calc(100dvh - var(--titlebar-h) - 40px); overflow-y: auto;
   pointer-events: none;
 }
+#chat-progress-list {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  max-width: 100%; max-height: 164px; overflow-y: auto;
+}
+#chat-progress-list[hidden], .chat-progress-card[hidden] { display: none; }
 .chat-progress-card {
   flex-shrink: 0;
   pointer-events: auto; cursor: pointer;
-  display: flex; align-items: center; gap: 8px;
-  max-width: 280px; padding: 9px 13px; font-size: 12.5px; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+  max-width: min(200px, 100%); padding: 5px 10px; font-size: 11px; line-height: 16px; color: var(--text);
   background: var(--bg-panel-solid);
   backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6);
   border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-elevated);
-  border-left: 3px solid var(--accent);
+  border-left: 2px solid var(--accent);
   opacity: 0; transform: translateY(-10px);
   transition: opacity 0.22s ease, transform 0.22s ease;
 }
@@ -1616,7 +1620,7 @@ input[type="checkbox"]:checked::after {
 .chat-progress-card.failed { border-left-color: var(--danger); }
 .chat-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-progress-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
   animation: thinking-pulse 1.8s ease-in-out infinite;
 }
 .chat-progress-card.done .chat-progress-dot,
@@ -1641,6 +1645,7 @@ input[type="checkbox"]:checked::after {
    ====================================================================== */
 .mobile-menu-btn { display: none; }
 .mobile-backdrop { display: none; }
+.mobile-drawer-heading { display: none; }
 
 /* Workspace details. Shared by built-in and custom views. */
 button { font-family: inherit; }
@@ -1980,10 +1985,35 @@ button.dashboard-row:hover { background: var(--surface-2); }
 }
 
 @media (max-width: 768px) {
+  /* A shared phone shell: generous navigation, warm surfaces and quiet chrome. */
+  .mobile-menu-btn { box-shadow: none; border-radius: 14px; }
+  #sidebar, #chat-sessions { border-radius: 0 24px 24px 0; border-right: 1px solid var(--hairline-soft); }
+  #sidebar .sidebar-header { min-height: 44px; margin-bottom: 20px; }
+  #sidebar .nav-item { min-height: 48px; border-radius: 12px; margin-bottom: 3px; }
+  #sidebar .nav-item.active { background: var(--accent-dim); color: var(--accent); }
+  #sidebar .nav-group-label { padding-left: 14px; letter-spacing: .1em; }
+  #sidebar .sidebar-user-card, #sidebar .sidebar-settings-btn { min-height: 44px; }
+  #sidebar .sidebar-settings-btn { min-width: 44px; }
+  .mobile-drawer-heading { display: block; padding: 0 12px 18px; }
+  .mobile-drawer-eyebrow { color: var(--text-faint); font-size: 11px; letter-spacing: .06em; }
+  .mobile-drawer-heading h2 { color: var(--text); font-size: 23px; font-weight: 500; margin: 5px 0 0; }
+  #chat-sessions .session-item { min-height: 52px; border-radius: 12px; }
+  #sidebar.drawer-dragging, #chat-sessions.drawer-dragging {
+    transform: translateX(var(--drawer-swipe-x)); transition: none;
+    box-shadow: 12px 0 40px rgba(var(--shade-rgb), .16);
+  }
+  .mobile-backdrop, .chat-sessions-backdrop { overscroll-behavior: none; touch-action: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #sidebar, #chat-sessions { transition: none !important; }
+}
+
+@media (max-width: 768px) {
   .mobile-menu-btn {
     display: flex; align-items: center; justify-content: center;
-    position: fixed; top: calc(var(--titlebar-h) + 12px); left: 12px; z-index: 60;
-    width: 38px; height: 38px; border-radius: 9px;
+    position: fixed; top: calc(var(--titlebar-h) + 12px + var(--mobile-safe-top)); left: max(12px, var(--mobile-safe-left)); z-index: 60;
+    width: 44px; height: 44px; border-radius: 9px;
     background: var(--bg-panel-solid);
     backdrop-filter: blur(14px) saturate(1.5); -webkit-backdrop-filter: blur(14px) saturate(1.5);
     border: 1px solid var(--border); color: var(--text); cursor: pointer;
@@ -2003,13 +2033,17 @@ button.dashboard-row:hover { background: var(--surface-2); }
     position: fixed; inset: var(--titlebar-h) auto 0 0; z-index: 56;
     width: 78vw; max-width: 300px; height: auto;
     transform: translateX(-100%); transition: transform 0.22s ease, box-shadow 0.22s ease;
+    padding-top: calc(22px + var(--mobile-safe-top));
+    padding-bottom: max(14px, var(--mobile-safe-bottom));
+    padding-left: max(10px, var(--mobile-safe-left));
   }
   /* Shadow only while open, as with the chat history drawer. */
   #sidebar.open { transform: translateX(0); box-shadow: 16px 0 50px rgba(var(--shade-rgb), 0.5); }
   .nav-item { padding: 13px 14px; font-size: 14.5px; } /* bigger touch targets */
 
-  #content { width: 100%; }
-  .view { padding: 64px 14px 14px; } /* clears the fixed hamburger button */
+  html, body { height: 100dvh; }
+  #content { width: 100%; padding: 0 var(--mobile-safe-right) 0 var(--mobile-safe-left); }
+  .view { padding: 72px 14px 14px; } /* clears the fixed hamburger button */
 
 
   /* Chat: sessions list becomes its own slide-out drawer (Claude/ChatGPT's
@@ -2022,6 +2056,8 @@ button.dashboard-row:hover { background: var(--surface-2); }
     width: 82vw; max-width: 320px; height: auto;
     transform: translateX(-100%); transition: transform 0.22s ease, box-shadow 0.22s ease;
     background: var(--bg-panel-solid);
+    padding-top: calc(14px + var(--mobile-safe-top));
+    padding-bottom: max(14px, var(--mobile-safe-bottom));
   }
   /* The shadow only while open: closed, it would bleed onto the page's left edge. */
   #chat-sessions.open { transform: translateX(0); box-shadow: 16px 0 50px rgba(var(--shade-rgb), 0.5); }
@@ -2039,7 +2075,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .model-picker-btn { max-width: 130px; }
   .chat-input-bar {
     margin: 0 0 10px; width: 100%; border-radius: 22px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    padding-bottom: max(10px, var(--mobile-safe-bottom));
   }
   .attach-strip { padding-left: 12px; padding-right: 12px; }
   .msg.user .msg-body { max-width: 88%; }
@@ -2120,7 +2156,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .view-header .sub { font-size: 12px; }
   .card { padding: 16px; }
   .chat-layout { padding: 0; }
-  .chat-mobile-header { padding: 12px 16px 12px 62px; min-height: 62px; letter-spacing: .05em; color: var(--text-dim); }
+  .chat-mobile-header { padding: 12px 16px 12px 62px; min-height: 68px; letter-spacing: .05em; color: var(--text-dim); }
   .chat-suggestions { gap: 6px; }
   .suggestion-chip { font-size: 11px; padding: 8px 10px; }
   .chat-composer-dock { width: calc(100% - 24px); }
@@ -2128,9 +2164,9 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .chat-input-bar .model-picker-btn { max-width: 160px; font-size: 10px; }
   .chat-input-right { gap: 4px; }
   #chat-input { font-size: 16px; }
-  .composer-hint { font-size: 9px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .composer-hint { font-size: 9px; padding-bottom: max(10px, var(--mobile-safe-bottom)); }
   .model-picker-menu { min-width: 200px; max-width: calc(100vw - 48px); }
-  .settings-mobile-page .settings-titlebar { padding-left: 62px; min-height: 62px; }
+  .settings-mobile-page .settings-titlebar { padding-left: 62px; min-height: 68px; }
   .settings-content { padding: 18px 16px; }
   .cal-day { min-height: 65px; padding: 4px; }
   .cal-event-pill { font-size: 9px; padding: 2px; }

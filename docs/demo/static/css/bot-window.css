@@ -1,0 +1,53 @@
+/* The floating bot window (2026-10-14). Built on kairos-theme.css's base
+   variables only: style.css carries the whole app shell, far too much for a
+   small always-on-top window. Status colours follow the spec: gold needs you,
+   green works, muted waits. */
+:root {
+  color-scheme: light;
+  --bw-surface: var(--k-surface, #fbf6ee);
+  --bw-paper: var(--k-parchment, #f3eadb);
+  --bw-ink: var(--k-ink, #3a2a20);
+  --bw-dim: var(--k-ink-dim, #6d5d50);
+  --bw-faint: var(--k-ink-faint, #9a8b7d);
+  --bw-line: var(--k-hairline, rgba(58, 42, 32, .12));
+  --bw-gold: var(--k-gold-text, #815e1e);
+  --bw-green: var(--k-success, #4d6c48);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column; overflow: hidden;
+  font: 13px/1.35 var(--k-font-sans, Jost, sans-serif); color: var(--bw-ink);
+  background: var(--bw-surface); border: 1px solid var(--bw-line); border-radius: 18px;
+}
+/* The bar is the window's drag handle; the close button opts back out. */
+.bot-window-bar {
+  display: flex; align-items: center; justify-content: space-between; flex: none;
+  height: 38px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--bw-line);
+  -webkit-app-region: drag; user-select: none;
+}
+.bot-window-title { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--bw-dim); }
+.bot-window-close {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border: 0; border-radius: 50%; background: none; color: var(--bw-faint); cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.bot-window-close:hover { background: var(--bw-paper); color: var(--bw-ink); }
+#bots { flex: 1; overflow-y: auto; padding: 6px; }
+.bot-window-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.bot-window-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.bot-window-row:hover, .bot-window-row:focus-visible { background: var(--bw-paper); outline: none; }
+.bot-window-row:focus-visible { box-shadow: 0 0 0 2px var(--bw-gold); }
+.bot-window-copy { display: grid; min-width: 0; gap: 1px; }
+.bot-window-name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-window-line { font-size: 12px; color: var(--bw-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-state='needs_you'] .bot-window-line { color: var(--bw-gold); }
+[data-state='working'] .bot-window-line { color: var(--bw-green); }
+.agent-dot-avatar { display: inline-flex; flex: none; aspect-ratio: 1; }
+.agent-dot-avatar img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.bot-window-empty { margin: 18px 12px; color: var(--bw-faint); text-align: center; }
+.bot-window-offline { display: none; margin: 0; padding: 8px 12px; font-size: 12px; color: var(--bw-faint); border-top: 1px solid var(--bw-line); }
+body.is-offline .bot-window-offline { display: block; }
