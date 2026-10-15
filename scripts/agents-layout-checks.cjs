@@ -111,9 +111,16 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitFor("!document.querySelector('.agent-conversations-home.is-open')");
     ok(await js("[...document.querySelectorAll('.agent-chat-main .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)')].every(b => { const r=b.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }) && document.querySelector('.agent-chat-main .side-chat-send').textContent === 'Send'"), 'picking a conversation returns to the thread; composer targets stay 44px');
     ok(await js("(() => { const u=getComputedStyle(document.querySelector('.msg.user .msg-body')), a=getComputedStyle(document.querySelector('.msg.assistant .msg-body')); return u.backgroundColor !== a.backgroundColor && document.querySelector('.msg.user .msg-body').getBoundingClientRect().right > document.querySelector('.agent-conversation-stream').getBoundingClientRect().right - 12; })()"), 'phone bubbles: the person on the right, a distinct fill');
+    // 2026-10-15 (David): the gear opens the bot's full settings; the face
+    // opens its profile.
     await js("document.querySelector('.agent-profile-open').click()");
     await delay(300);
-    ok(await js("document.querySelector('.agent-profile-tabs').getBoundingClientRect().height >= 40 && document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect().top >= 0"), 'phone profile keeps its face and full-height tabs on screen');
+    ok(await js("!document.querySelector('.agent-profile-all').hidden && document.querySelector('.agent-profile-details').hidden && !!document.querySelector('.agent-profile-section[data-section=model]')"), 'phone Settings gear opens All settings');
+    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
+    await delay(300);
+    await js("document.querySelector('.agent-profile-face').click()");
+    await delay(300);
+    ok(await js("!document.querySelector('.agent-profile-details').hidden && document.querySelector('.agent-profile-tabs').getBoundingClientRect().height >= 40 && document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect().top >= 0"), 'phone profile keeps its face and full-height tabs on screen');
     await capture('agents-phone-profile');
     await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
     const question = "[...document.querySelectorAll('.agent-inline-activity .agent-inbox-question')].find(n => n.textContent.includes('Which direction?'))";

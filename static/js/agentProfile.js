@@ -357,10 +357,12 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish(); else closeTimer = setTimeout(finish, 220);
     opener?.focus(); };
   let opener = null;
-  const openSheet = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+  // 2026-10-15 (David): the bot page's Settings gear opens straight into All
+  // settings; the face still opens the profile's simple Details view.
+  const openSheet = (startMode = 'simple') => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
     opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false;
     sheet.classList.remove('is-closing'); backdrop.classList.remove('is-closing');
-    setTab('details'); setMode('simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
+    setTab('details'); setMode(startMode === 'all' ? 'all' : 'simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
   closeButton.onclick = close; backdrop.onclick = close; allButton.onclick = () => setMode('all'); simpleButton.onclick = () => setMode('simple');
   detailsButton.onclick = () => setTab('details'); libraryButton.onclick = () => setTab('library');
   simpleTabs.addEventListener('keydown', event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
