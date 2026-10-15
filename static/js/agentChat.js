@@ -30,10 +30,9 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
     const query = (options.search?.value || '').trim().toLocaleLowerCase();
     list.querySelectorAll('.agent-chat-item').forEach(item => { item.hidden = !item.querySelector('.agent-chat-title').textContent.toLocaleLowerCase().includes(query); });
     scope.textContent = query ? 'Matching loaded titles only' : 'Search covers loaded conversation titles';
-    side.open = !!query;
   };
   options.search?.addEventListener('input', filter);
-  const dispose = () => { closePane(); media.removeEventListener('change', placeActivity); options.search?.removeEventListener('input', filter); };
+  const dispose = () => { closePane(); media.removeEventListener('change', placeActivity); options.search?.removeEventListener('input', filter); side.remove(); };
 
   const list = el('div', { class: 'agent-chat-list', role: 'list', 'aria-label': `Chats with ${agent.name}` });
   const main = el('section', { class: 'agent-chat-main' });
@@ -43,11 +42,17 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
     (Number.isFinite(agent.daily_run_cap) && agent.runs_today >= agent.daily_run_cap);
   const honesty = scheduled ? el('p', { class: 'agent-chat-honesty', text: `${agent.name} will answer here, but will not pick up scheduled work while turned off or capped.` }) : null;
   const scope = el('p', { class: 'agent-search-scope', text: 'Search covers loaded conversation titles' });
-  const side = el('details', { class: 'agent-chat-side' }, [el('summary', { text: 'Conversations' }), newChat, scope, list]);
+  // 2026-10-15 (David): the conversation list left the chat column. On a
+  // desktop it is a panel in the bot page's left column; on a phone the page
+  // shows it as a sheet from the menu. The page owns where it sits.
+  const side = el('section', { class: 'agent-chat-side', 'aria-label': `Conversations with ${agent.name}` }, [
+    el('div', { class: 'agent-chat-side-head' }, [el('h3', { text: 'Conversations' }), newChat]),
+    ...(options.search ? [options.search] : []), scope, list]);
+  (options.conversations || host).append(side);
   host.replaceChildren(el('div', { class: 'agent-chat' }, [
-    side,
     ...(honesty ? [honesty] : []), main,
   ]));
+  if (!options.conversations) host.prepend(side);
 
   const pane = async (id) => {
     closePane();
@@ -77,6 +82,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
     try { await api(`/api/sessions/${id}`); }
     catch { remember(agent.id, null); await pane(null); refreshList(); return; }
     if (host.isConnected) await pane(id);
+    options.onPick?.();
   };
 
   const markActive = () => list.querySelectorAll('.agent-chat-item').forEach((item) => {
@@ -111,6 +117,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
       const created = await api(`/api/agents/${agent.id}/chat`, { method: 'POST' });
       await refreshList();
       await pane(created.id);
+      options.onPick?.();
       main.querySelector('textarea')?.focus();
     } catch (problem) { toast(problem.message, 'error'); }
   });

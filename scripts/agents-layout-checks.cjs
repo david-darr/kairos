@@ -65,6 +65,21 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await delay(250);
     ok(await js("!document.querySelector('.agent-item-sheet') && !document.querySelector('.agent-profile-sheet').hidden && document.activeElement === document.querySelector('.agent-profile-section[data-section=routines] .routine-details-open')"), 'Escape closes only the nested sheet and restores profile focus');
     await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
+    // 2026-10-15 (David): Conversations left the chat column for the left
+    // panels, with its search beside the list it filters.
+    ok(await js("!!document.querySelector('.agent-live-panels > .agent-conversations-home > .agent-chat-side .agent-thread-search') && !document.querySelector('.agent-chat .agent-chat-side') && !document.querySelector('.agent-chat-side summary')"), 'desktop conversations sit in the left column with their search');
+    // The profile sheet once began under the desktop title bar, hiding the
+    // face; in a short window its tabs were squeezed to a sliver.
+    win.setContentSize(1280, 600);
+    await js("document.documentElement.classList.add('electron-shell')");
+    await delay(150);
+    await js("document.querySelector('.agent-profile-face').click()");
+    await delay(300);
+    ok(await js("(() => { const bar=document.querySelector('.titlebar').getBoundingClientRect().bottom, sheet=document.querySelector('.agent-profile-sheet').getBoundingClientRect(), face=document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect(), tabs=document.querySelector('.agent-profile-tabs').getBoundingClientRect(); return bar > 0 && sheet.top >= bar - 1 && face.top >= bar && Math.abs(sheet.bottom - innerHeight) < 1 && tabs.height >= 40; })()"), 'desktop profile sheet starts below the title bar with full-height tabs');
+    await capture('agents-profile-titlebar');
+    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
+    await js("document.documentElement.classList.remove('electron-shell')");
+    win.setContentSize(1440, 900);
     // Use a plain question to cover Reply/Dismiss separately from Open computer.
     inbox.push({ id:'i3', agent_id:'a1', kind:'question', title:'Which direction?', body:'Tell me which option to use.', created_at:Date.now()/1000 });
     demoState.agentReview = true;
@@ -72,6 +87,35 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await navigate('agents', { agentId:'a1' });
     await waitFor("document.querySelectorAll('.agent-conversation-stream .agent-approval-card').length >= 4");
     ok(await js("(() => { const n=document.querySelector('.agent-profile-face').getBoundingClientRect(), t=document.querySelector('.agent-conversation-topbar').getBoundingClientRect(); return Math.abs(n.left+n.width/2 - (t.left+t.width/2)) < 10 && !!document.querySelector('.agent-profile-face h2') && getComputedStyle(document.querySelector('.agent-profile-open')).display !== 'none'; })()"), 'phone face and name centred with Settings');
+    // 2026-10-15 (David): a phone thread reads like Messages. Settings and More
+    // sit on the right; More holds the four places the segments held.
+    ok(await js("getComputedStyle(document.querySelector('.agent-tabs')).display === 'none' && document.querySelector('.agent-profile-open').getAttribute('aria-label') === 'Settings' && getComputedStyle(document.querySelector('.agent-more')).display !== 'none'"), 'phone top bar swaps the segments for Settings and More');
+    ok(await js("(() => { const s=document.querySelector('.agent-profile-open').getBoundingClientRect(), m=document.querySelector('.agent-more').getBoundingClientRect(), t=document.querySelector('.agent-conversation-topbar').getBoundingClientRect(); return s.right <= m.left && t.right - m.right < 2 && s.width >= 44 && m.width >= 44; })()"), 'Settings then More at the right edge, 44px each');
+    await js("document.querySelector('.agent-more').click()");
+    ok(await js("JSON.stringify([...document.querySelectorAll('.agent-more-item')].map(n => n.textContent.replace(/ \\(\\d+\\)$/, ''))) === JSON.stringify(['Chat and conversations','Work','Routines','Memory']) && document.querySelector('.agent-more').getAttribute('aria-expanded') === 'true' && document.activeElement === document.querySelector('.agent-more-item[aria-checked=true]')"), 'More lists the four places and focuses the current one');
+    await capture('agents-phone-more');
+    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
+    ok(await js("document.activeElement.dataset.place === 'work'"), 'arrow keys move through More');
+    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    ok(await js("document.querySelector('.agent-more-menu').hidden && document.activeElement === document.querySelector('.agent-more')"), 'Escape closes More and returns focus');
+    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=routines]').click()");
+    ok(await js("document.querySelector('.agent-conversation-page').dataset.agentTab === 'routines' && !document.querySelector('.agent-routines-host').hidden"), 'More opens Routines');
+    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
+    await delay(320); // the sheet rises over 240ms; measure it settled
+    ok(await js("(() => { const n=document.querySelector('.agent-conversations-home.is-open'); if (!n) return false; const r=n.getBoundingClientRect(); return document.querySelector('.agent-conversation-page').dataset.agentTab === 'chat' && r.top <= 0 && r.height >= innerHeight - 1 && n.contains(document.activeElement) && n.getAttribute('aria-modal') === 'true'; })()"), 'Chat and conversations opens the conversation sheet');
+    await capture('agents-phone-conversations');
+    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    ok(await js("!document.querySelector('.agent-conversations-home.is-open') && document.activeElement === document.querySelector('.agent-more')"), 'Escape closes the conversation sheet');
+    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
+    await js("document.querySelector('.agent-conversations-home .agent-chat-open').click()");
+    await waitFor("!document.querySelector('.agent-conversations-home.is-open')");
+    ok(await js("[...document.querySelectorAll('.agent-chat-main .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)')].every(b => { const r=b.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }) && document.querySelector('.agent-chat-main .side-chat-send').textContent === 'Send'"), 'picking a conversation returns to the thread; composer targets stay 44px');
+    ok(await js("(() => { const u=getComputedStyle(document.querySelector('.msg.user .msg-body')), a=getComputedStyle(document.querySelector('.msg.assistant .msg-body')); return u.backgroundColor !== a.backgroundColor && document.querySelector('.msg.user .msg-body').getBoundingClientRect().right > document.querySelector('.agent-conversation-stream').getBoundingClientRect().right - 12; })()"), 'phone bubbles: the person on the right, a distinct fill');
+    await js("document.querySelector('.agent-profile-open').click()");
+    await delay(300);
+    ok(await js("document.querySelector('.agent-profile-tabs').getBoundingClientRect().height >= 40 && document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect().top >= 0"), 'phone profile keeps its face and full-height tabs on screen');
+    await capture('agents-phone-profile');
+    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
     const question = "[...document.querySelectorAll('.agent-inline-activity .agent-inbox-question')].find(n => n.textContent.includes('Which direction?'))";
     await js(`${question}.scrollIntoView({block:'center'});`);
     await capture('ui3-after-mobile-approvals');

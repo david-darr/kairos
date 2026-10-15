@@ -312,7 +312,10 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   const live = el('section', { class: 'agent-live-panel glass card', 'aria-label': 'Live state' });
   const upcoming = el('section', { class: 'agent-next-panel glass card', 'aria-label': 'Next routines' });
   const activity = el('div', { class: 'agent-inline-activity', 'aria-label': 'Waiting on you' });
-  const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [live, activity, upcoming]);
+  // 2026-10-15: the conversation list heads the left column on a desktop; on
+  // a phone the same panel becomes a sheet opened from the More menu.
+  const conversations = el('div', { class: 'agent-conversations-home' });
+  const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [conversations, live, activity, upcoming]);
   const search = el('input', { type: 'search', class: 'agent-thread-search', placeholder: 'Search chats',
     'aria-label': 'Search this bot’s loaded conversation titles', title: 'Filters loaded conversation titles' });
   const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
@@ -369,12 +372,13 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     }
     root.dataset.agentTab = which;
     side.hidden = which !== 'chat';
-    search.hidden = which !== 'chat';
+    if (which !== 'chat') closeConversations();
     const active = [chatTab, workTab, routinesTab, memoryTab].findIndex(button => button.classList.contains('active'));
     segments.style.setProperty('--segment', active);
     if (which === "chat" && !chatMounted) {
       chatMounted = true;
-      mountAgentChat(chatHost, detail.agent, sessionId, { search, activity }).then((cleanup) => cleanups.push(cleanup));
+      mountAgentChat(chatHost, detail.agent, sessionId, { search, activity, conversations, onPick: () => closeConversations() })
+        .then((cleanup) => cleanups.push(cleanup));
     }
     if (which === 'work' || which === 'chat') syncComputer();
     else if (computerView) { computerView.dispose(); computerView = null; computerHost.replaceChildren(); }
@@ -400,7 +404,69 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } })) });
   // 2026-10-14: reserve the app menu’s place; reuse its drawer and focus logic.
   const menu = el('span', { class: 'agent-mobile-menu-slot', 'aria-hidden': 'true' });
-  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [search, header])]),
+  // 2026-10-15 (David): on a phone the page reads like a Messages thread. The
+  // segmented control gives way to a More button whose menu holds the same
+  // four places; the tab buttons stay mounted so deep links and the desktop
+  // keep one source of truth.
+  const more = el('button', { type: 'button', class: 'agent-more', 'aria-label': 'More', title: 'More',
+    'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'agent-more-menu' });
+  more.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
+  const moreMenu = el('div', { class: 'agent-more-menu', id: 'agent-more-menu', role: 'menu', 'aria-label': 'Go to', hidden: true });
+  const places = [['chat', 'Chat and conversations', chatTab], ['work', 'Work', workTab], ['routines', 'Routines', routinesTab], ['memory', 'Memory', memoryTab]];
+  const closeMore = (refocus = true) => {
+    if (moreMenu.hidden) return;
+    moreMenu.hidden = true; more.setAttribute('aria-expanded', 'false');
+    if (refocus) more.focus();
+  };
+  const openMore = () => {
+    moreMenu.replaceChildren(...places.map(([name, label, button]) => el('button', { type: 'button', role: 'menuitemradio',
+      class: 'agent-more-item', 'aria-checked': String(root.dataset.agentTab === name), 'data-place': name,
+      text: name === 'work' ? button.textContent : label,
+      onclick: () => { closeMore(false); show(name); if (name === 'chat') openConversations(); else more.focus(); } })));
+    moreMenu.hidden = false; more.setAttribute('aria-expanded', 'true');
+    (moreMenu.querySelector('[aria-checked=true]') || moreMenu.firstChild).focus();
+  };
+  more.addEventListener('click', () => moreMenu.hidden ? openMore() : closeMore());
+  moreMenu.addEventListener('keydown', event => {
+    const items = [...moreMenu.querySelectorAll('.agent-more-item')], at = items.indexOf(document.activeElement);
+    if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); closeMore(); return; }
+    const next = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 }[event.key];
+    if (next === undefined) return;
+    event.preventDefault(); items[(next + items.length) % items.length].focus();
+  });
+  const outside = event => { if (!moreMenu.hidden && !moreMenu.contains(event.target) && !more.contains(event.target)) closeMore(false); };
+  document.addEventListener('pointerdown', outside, true);
+  cleanups.push(() => document.removeEventListener('pointerdown', outside, true));
+
+  // The phone's conversation sheet: the same panel the desktop shows in its
+  // left column, fixed over the page while open.
+  const conversationsClose = el('button', { type: 'button', class: 'btn quiet agent-conversations-close', 'aria-label': 'Back to the chat', text: 'Done', onclick: () => closeConversations() });
+  conversations.append(conversationsClose);
+  let conversationsOpener = null;
+  function openConversations() {
+    if (!matchMedia('(max-width: 768px)').matches) { search.focus(); return; }
+    conversationsOpener = document.activeElement;
+    conversations.classList.add('is-open'); root.classList.add('agent-conversations-open');
+    conversations.setAttribute('role', 'dialog'); conversations.setAttribute('aria-modal', 'true'); conversations.setAttribute('aria-label', 'Conversations');
+    (conversations.querySelector('.agent-chat-new') || conversationsClose).focus();
+  }
+  function closeConversations() {
+    if (!conversations.classList.contains('is-open')) return;
+    conversations.classList.remove('is-open'); root.classList.remove('agent-conversations-open');
+    for (const name of ['role', 'aria-modal', 'aria-label']) conversations.removeAttribute(name);
+    const target = conversationsOpener?.isConnected && conversationsOpener.getClientRects().length ? conversationsOpener : more;
+    conversationsOpener = null; target.focus();
+  }
+  conversations.addEventListener('keydown', event => {
+    if (!conversations.classList.contains('is-open')) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeConversations(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = [...conversations.querySelectorAll('button:not(:disabled), input')].filter(node => node.getClientRects().length);
+    const first = focusable[0], last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [header, more, moreMenu])]),
     ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
     el('div', { class: 'agent-conversation-layout' }, [side, chatHost]), workHost, routinesHost, memoryHost);
   const giveJob = () => {
@@ -422,7 +488,9 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     headerSignature = signature;
     header.replaceChildren(el('button', { type: 'button', class: 'agent-profile-face', 'aria-label': `Open ${agent.name}’s profile`,
       onclick: () => profile.open() }, [avatar(agent, 42), el('h2', { text: agent.name })]),
-      el('button', { type: 'button', class: 'btn agent-profile-open', text: 'Settings', onclick: () => profile.open() }));
+      el('button', { type: 'button', class: 'btn agent-profile-open', 'aria-label': 'Settings', title: 'Settings', onclick: () => profile.open() }, [
+        el('span', { class: 'agent-icon', 'aria-hidden': 'true' }), el('span', { class: 'agent-profile-open-label', text: 'Settings' })]));
+    header.querySelector('.agent-profile-open .agent-icon').innerHTML = ICONS.settings;
     live.replaceChildren(el('div', { class: 'title', text: 'Right now' }),
       el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
       el('p', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
