@@ -706,6 +706,10 @@ function setupAutoUpdate() {
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // electron-updater turns prereleases on for a prerelease install and then
+  // follows only that channel, so 2.0.0-rc.1 never saw 2.0.0 or 2.1.0 (found
+  // 2026-10-15). Kairos has no beta channel: every install follows stable.
+  autoUpdater.allowPrerelease = false;
 
   autoUpdater.on("error", (err) => {
     // Never surfaced to the user: being offline, or GitHub being briefly
