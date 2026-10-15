@@ -695,7 +695,7 @@ export async function render(container, tabId, options = {}) {
       + '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur"/>'
       + '<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>'
       + '<feComposite in="SourceGraphic" in2="goo" operator="atop" result="shape"/>'
-      + '<feDropShadow in="goo" dx="0" dy="6" stdDeviation="9" flood-color="#2b2116" flood-opacity="0.12" result="shadow"/>'
+      + '<feDropShadow in="goo" dx="0" dy="6" stdDeviation="9" style="flood-color: rgb(var(--shade-rgb))" flood-opacity="0.12" result="shadow"/>'
       + '<feMerge><feMergeNode in="shadow"/><feMergeNode in="goo"/></feMerge></filter>';
     document.body.append(svg);
   }

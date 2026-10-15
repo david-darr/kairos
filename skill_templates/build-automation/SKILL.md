@@ -13,14 +13,17 @@ to finish a new automation; instructions alone do not schedule work.
 
 The `create_task` arguments are `name`, `prompt`, `schedule_kind` (required),
 plus optional `run_at`, `interval_seconds`, `run_time`, `deliver_to_channel`,
-`status` and `depends_on`. Choose one schedule:
+`status`, `depends_on`, `time_zone` and `weekdays`. Choose one schedule:
 
 - `once`: `run_at` is an ISO datetime. Use an explicit timezone and confirm
   the intended date. A claimed scheduled occurrence disables the task.
-- `interval`: `interval_seconds` is a positive integer. It is measured from
-  the scheduling pass, not an exact clock time. Use daily for a time of day.
+- `interval`: `interval_seconds` is a positive integer. Occurrences advance
+  from the previous scheduled time so runs do not drift. Use daily for a time of day.
 - `daily`: `run_time` is `HH:MM`, 24-hour time, in the Kairos machine's local
-  timezone. Resolve ambiguous local times with the person before scheduling.
+  timezone unless `time_zone` names an IANA timezone. Optional `weekdays` is
+  a list of integers, Monday 0 through Sunday 6. Confirm the intended local
+  time and days with the person. A spring-forward gap shifts forward by the
+  gap; a repeated fall-back time uses its first occurrence (2026-10-15).
 - `card`: one-off work on the board, with `status: "backlog"` (default) or
   `"ready"` to run automatically. `depends_on` contains card IDs whose results
   the card receives after they complete. Cards go to review after success.

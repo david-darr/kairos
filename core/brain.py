@@ -269,6 +269,7 @@ class Brain:
         # rules. Anything outside it used to hang on a prompt nothing could
         # answer; it now reaches the person instead. Admin shell grants are
         # seeded here too, so Settings can show and revoke the auto behavior.
+        permissions.retire_builtin_grants({f"mcp__hive_mind__{name}" for name in tool_registry.CLAUDE_REVIEW_TOOLS})
         permissions.ensure_seeded([*allowed_tools, "Write", "Edit"])
         # Only what still has a standing grant is pre-approved. Revoking a
         # built-in in Settings > Permissions used to change nothing: this list

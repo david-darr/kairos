@@ -50,6 +50,20 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.behavior, "deny")
         self.assertIn("Settings", decision.reason)
 
+    async def test_retiring_a_builtin_grant_preserves_the_persons_choices(self):
+        # Removing the pre-approval list entry must also fix upgraded installs
+        # without erasing an explicit grant (2026-10-15).
+        tools = {"mcp__hive_mind__agent_configure_self", "mcp__hive_mind__agent_setup_undo"}
+        permissions.ensure_seeded([*tools, "read_skill"])
+        data = permissions._load()
+        data["rules"].append({"id": "personal", "tool": "mcp__hive_mind__agent_setup_undo", "content": None,
+                              "behavior": "allow", "scope": "forever", "source": "settings"})
+        permissions._save(data)
+        permissions.retire_builtin_grants(tools)
+        permissions.retire_builtin_grants(tools)
+        self.assertEqual(permissions.standing_grants(), {"read_skill", "mcp__hive_mind__agent_setup_undo"})
+        self.assertIn("personal", {rule["id"] for rule in permissions._load()["rules"]})
+
     async def test_silence_denies_and_does_not_pretend_the_owner_refused(self):
         permissions.open_channel("chat:1")
         decision = await permissions.decide(surface="chat:1", tool="Bash",

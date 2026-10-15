@@ -252,6 +252,8 @@ class MoreReferenceTests(unittest.TestCase):
     def test_routes_pass_authenticated_user_and_save_canonical_labels(self):
         from routes import chat_routes, task_routes
         from fastapi import HTTPException
+        # Live chat checks the authenticated session owner first (2026-10-15).
+        self.sessions.sessions["current"]["owner_user"] = "david"
         self.task["owner"] = "another-user"
         with patch.object(chat_routes.auth_manager, "is_admin", return_value=False):
             self.assertEqual(chat_routes.search_chat_references("", "current", "automation", "david"), [])

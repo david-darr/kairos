@@ -52,6 +52,9 @@ ALL = frozenset({CLAUDE, OPENAI, CODEX})
 CODEX_ONLY = frozenset({CODEX})
 READ, WRITE, EXEC, EXTERNAL = "read", "write", "exec", "external"
 SMALL_WINDOW = 32768
+# These handlers check the chat, but cannot verify the person's agreement
+# (2026-10-15). Keep Claude's own approval and retire their old seeded grants.
+CLAUDE_REVIEW_TOOLS = frozenset({"agent_configure_self", "agent_setup_undo"})
 
 # Claude Code's native tools, shared with Settings > Agent Tools and the
 # composer catalog. The SDK supplies these tools, not our dispatch table.
@@ -250,10 +253,13 @@ async def dispatch(name: str, args: dict, ctx: ToolContext, surface: str) -> str
 
 
 def claude_preapproved(agent: bool = False, session_id: str | None = None) -> list[str]:
-    """Claude's pre-approved Kairos tools: every registry tool on its surface.
-    Each asks the person itself where it needs to (Google changes, run_code
-    with the internet), so none needs Claude Code's own prompt."""
-    return [f"mcp__hive_mind__{s.name}" for s in specs(CLAUDE, is_admin=True, agent=agent, session_id=session_id)]
+    """Claude's pre-approved Kairos tools, except self-setup writes.
+    The remaining tools enforce their own boundaries (Google changes,
+    run_code with the internet, or the person's configured Peers list)."""
+    # Self-setup says the person must agree, but its handlers only check the
+    # chat's identity; retain Claude's approval for those writes (2026-10-15).
+    return [f"mcp__hive_mind__{s.name}" for s in specs(CLAUDE, is_admin=True, agent=agent, session_id=session_id)
+            if s.name not in CLAUDE_REVIEW_TOOLS]
 
 
 def _flag(name: str, schema: dict) -> str:

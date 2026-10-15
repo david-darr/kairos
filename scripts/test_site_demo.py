@@ -8,6 +8,7 @@ answers with is the same module ui-smoke tests against.
 Run: python scripts/test_site_demo.py (rebuild with scripts/build_site_demo.py)
 """
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,9 @@ spec.loader.exec_module(build)
 
 
 class SiteDemoTests(unittest.TestCase):
+    def test_current_chat_module_receives_the_demos_live_reply(self):
+        subprocess.run(["node", "scripts/test_site_demo_live.cjs"], cwd=REPO, check=True, timeout=35)
+
     def test_the_demo_is_built_from_the_current_app(self):
         self.assertEqual(build.check(), [], "docs/demo is stale; run python scripts/build_site_demo.py")
 

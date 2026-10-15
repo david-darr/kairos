@@ -19,6 +19,7 @@ os.environ['JARVIS_DATA_DIR'] = environment.name
 import httpx
 from fastapi import FastAPI
 from core import file_checkpoints, middleware, runs, session_manager_store as store
+from core.auth import SINGLE_USER
 from core.session_manager import session_manager
 from routes import chat_routes, run_routes
 from services import chat_service
@@ -31,7 +32,7 @@ def tearDownModule():
 
 class TranscriptTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.session = session_manager.create_session('Transcript fixture')
+        self.session = session_manager.create_session('Transcript fixture', owner_user=SINGLE_USER)
         self.id = self.session['id']
         self.context = runs.RunContext('chat', session_id=self.id)
         self.addCleanup(store.delete_all_sessions)
@@ -127,7 +128,7 @@ class TranscriptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_http_serialization_keeps_non_forge_bytes_unchanged(self):
         app = FastAPI(); app.include_router(chat_routes.router)
-        app.dependency_overrides[middleware.require_user] = lambda: 'admin'
+        app.dependency_overrides[middleware.require_user] = lambda: SINGLE_USER
 
         async def stream_message(*args):
             items, _ = await self.stream(bool((session_manager.get_session(self.id) or {}).get('forge')))

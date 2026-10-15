@@ -306,6 +306,8 @@ class BuilderToolTests(unittest.TestCase):
                         self.assertEqual(request["tool"], name)
                         self.assertTrue(permissions.answer(request["id"], "reject", "admin"))
                         self.assertEqual((await future).behavior, "deny")
+                        # Mobile viewers dismiss the same request (2026-10-15).
+                        self.assertEqual(await asyncio.wait_for(queue.get(), 1), {"permission_closed": request["id"]})
         asyncio.run(exercise())
 
 

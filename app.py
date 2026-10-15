@@ -155,12 +155,13 @@ async def lifespan(_app: FastAPI):
     # the tailnet must still boot normally.
     await remote_access.start_if_enabled()
     await swarm_service.startup(_app)
-    from core import mobile_activity
-    mobile_activity.recover()
-    mobile_notifications.start()
-    from services import bot_push
-    bot_push.start()
     try:
+        # Startup after Swarm must share its cleanup boundary (2026-10-15).
+        from core import mobile_activity
+        mobile_activity.recover()
+        mobile_notifications.start()
+        from services import bot_push
+        bot_push.start()
         yield
     finally:
         from services.forge_apps import forge_apps

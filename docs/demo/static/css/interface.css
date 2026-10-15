@@ -486,8 +486,8 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
     height: calc(var(--mobile-safe-top) + 10px); pointer-events: none;
     background: color-mix(in srgb, var(--bg) 72%, transparent);
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    mask-image: linear-gradient(to bottom, #000 0, #000 var(--mobile-safe-top), transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 var(--mobile-safe-top), transparent 100%);
+    mask-image: linear-gradient(to bottom, var(--text) 0, var(--text) var(--mobile-safe-top), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--text) 0, var(--text) var(--mobile-safe-top), transparent 100%);
   }
   /* Scroll remains available by touch, mouse wheel and keyboard. */
   *, *::before, *::after { scrollbar-width: none; }

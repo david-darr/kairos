@@ -23,6 +23,7 @@ ALLOWED_FILES = {
     "js/appearance.js": "derives the tokens for a person's own base color",
     "js/views/agents.js": "the agent colors the backend accepts (services/agent_service.py COLORS)",
     "js/views/appearancePanel.js": "the base colors a person can pick",
+    "js/agentAvatar.js": "the faces' own illustration palette (2026-10-15), independent of app appearance",
 }
 # Single literals allowed elsewhere, each with why.
 ALLOWED_SNIPPETS = (

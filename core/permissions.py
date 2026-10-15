@@ -206,6 +206,18 @@ def ensure_seeded(tools: list[str]) -> None:
     _save(data)
 
 
+def retire_builtin_grants(tools: set[str]) -> None:
+    """Undo an automatic grant withdrawn by a release review (2026-10-15).
+    Explicit grants from the person survive; only the old built-in defaults go.
+    """
+    data = _load()
+    kept = [rule for rule in data["rules"]
+            if not (rule["tool"] in tools and rule.get("source") == "built-in")]
+    if len(kept) != len(data["rules"]):
+        data["rules"] = kept
+        _save(data)
+
+
 def standing_grants() -> set[str]:
     """Tools a saved rule allows whole and for good - what core/brain.py may
     still pre-approve. A seeded built-in grant that has been revoked is no

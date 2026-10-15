@@ -797,15 +797,31 @@ class AppWiringTests(unittest.IsolatedAsyncioTestCase):
                  "connector_hub": Mock(start_all=AsyncMock(), stop_all=AsyncMock()),
                  "remote_access": Mock(start_if_enabled=AsyncMock(), stop=AsyncMock()),
                  "chat_service": Mock(shutdown=AsyncMock()),
+                 "mobile_notifications": Mock(shutdown=AsyncMock()),
                  "tab_hooks": Mock(reconcile=AsyncMock(), stop_all=AsyncMock()),
                  "start_store_watch": Mock(), "stop_store_watch": AsyncMock(),
                  # A backup restored before the imports (core/backup.py); none here.
                  "_RESTORED": None}
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), scope)
         application = FastAPI()
-        with self.assertRaisesRegex(RuntimeError, "fixture failure"):
-            async with scope["lifespan"](application):
-                raise RuntimeError("fixture failure")
+        # New live services stay isolated too (2026-10-15). Exercise both a
+        # serving failure and a startup failure after Swarm has opened.
+        from core import mobile_activity, computer
+        from services import bot_push, chat_live
+        with patch.object(mobile_activity, "recover"), patch.object(bot_push, "start"), \
+             patch.object(computer.manager, "close_all", new_callable=AsyncMock), \
+             patch.object(chat_live, "shutdown", new_callable=AsyncMock):
+            with self.assertRaisesRegex(RuntimeError, "fixture failure"):
+                async with scope["lifespan"](application):
+                    raise RuntimeError("fixture failure")
+            swarm.shutdown.assert_awaited_once_with(application)
+            for collaborator in scope.values():
+                if isinstance(collaborator, Mock):
+                    collaborator.reset_mock()
+            scope["mobile_notifications"].start.side_effect = RuntimeError("startup failure")
+            with self.assertRaisesRegex(RuntimeError, "startup failure"):
+                async with scope["lifespan"](application):
+                    self.fail("startup should fail before serving")
         swarm.startup.assert_awaited_once_with(application)
         swarm.shutdown.assert_awaited_once_with(application)
         scope["chat_service"].shutdown.assert_awaited_once()

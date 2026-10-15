@@ -4,14 +4,15 @@
    green works, muted waits. */
 :root {
   color-scheme: light;
-  --bw-surface: var(--k-surface, #fbf6ee);
-  --bw-paper: var(--k-parchment, #f3eadb);
-  --bw-ink: var(--k-ink, #3a2a20);
-  --bw-dim: var(--k-ink-dim, #6d5d50);
-  --bw-faint: var(--k-ink-faint, #9a8b7d);
-  --bw-line: var(--k-hairline, rgba(58, 42, 32, .12));
-  --bw-gold: var(--k-gold-text, #815e1e);
-  --bw-green: var(--k-success, #4d6c48);
+  /* The loaded theme supplies every colour; fallbacks hid palette drift (2026-10-15). */
+  --bw-surface: var(--k-surface);
+  --bw-paper: var(--k-parchment);
+  --bw-ink: var(--k-ink);
+  --bw-dim: var(--k-ink-dim);
+  --bw-faint: var(--k-ink-faint);
+  --bw-line: var(--k-hairline);
+  --bw-gold: var(--k-gold-text);
+  --bw-green: var(--k-success);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }

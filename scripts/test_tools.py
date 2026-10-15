@@ -41,7 +41,7 @@ from services.notes_service import notes_service  # noqa: E402
 
 CLI_PATH = Path(__file__).resolve().parents[1] / "mcp_servers" / "hive_mind_cli.py"
 # Claude's pre-approved JARVIS tools on 2026-10-05, when core/brain.py still
-# listed them by hand: the registry must reproduce exactly these, no more.
+# listed them by hand, plus the explicitly reviewed additions below.
 CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     "search_sessions list_skills search_skills read_skill list_notes list_tasks list_upcoming_events list_specs "
     "read_spec list_documents read_document list_contacts list_task_runs create_note update_note delete_note "
@@ -50,7 +50,10 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     # Helpers (roadmap phase 5, 2026-10-06): delegate and collect.
     "delegate helper_results computer "
     # Agent mentions (2026-10-08): hand work to a named agent from a chat.
-    "hand_to_agent save_skill add_mcp_server forge_app_logs").split()}
+    "hand_to_agent save_skill add_mcp_server forge_app_logs "
+    # Reviewed 2026-10-15: own-topic reads (decb912); peer-scoped, capped
+    # assignments and requester-owned question answers (5421f76).
+    "agent_read_topic agent_assign agent_answer_assignment").split()}
 
 
 def load_cli():
@@ -88,6 +91,8 @@ class SurfaceTests(unittest.TestCase):
     def test_claudes_pre_approvals_are_exactly_the_old_list(self):
         self.assertEqual(set(tool_registry.claude_preapproved(agent=True)), CLAUDE_APPROVED_BEFORE)
         self.assertNotIn("mcp__hive_mind__agent_ask", tool_registry.claude_preapproved(agent=False))
+        for name in ("agent_configure_self", "agent_setup_undo"):
+            self.assertNotIn(f"mcp__hive_mind__{name}", tool_registry.claude_preapproved(agent=True))
 
     def test_every_tool_says_what_it_does(self):
         for spec in tool_registry.specs(tool_registry.OPENAI, True, True) + tool_registry.specs(tool_registry.CLAUDE, True, True):

@@ -153,6 +153,12 @@ async def start_run(task: dict, source: str = "manual", wait: bool = False) -> b
     if lock.locked() and not wait:
         return False
     async with lock:
+        # A queued schedule may have been paused while the lock was held
+        # (2026-10-15). Admission must see the live task, not the due snapshot.
+        if source == "schedule" and task.get("schedule_kind") != "card":
+            task = task_service.get_task(task["id"])
+            if task is None or not task_service.is_due(task["id"]):
+                return False
         work = asyncio.get_running_loop().create_task(_run_task(task, source))
         _running[task["id"]] = work
         if source == "schedule":
@@ -168,6 +174,11 @@ async def start_run(task: dict, source: str = "manual", wait: bool = False) -> b
             await asyncio.gather(work, return_exceptions=True)
             raise
         finally:
+            # Also covers cancellation before the worker enters its handler
+            # (2026-10-15); helper cancellation is safe to repeat.
+            if work.cancelled():
+                helpers.stop_parent(f"task:{task['id']}")
+                task_service.record_stopped(task["id"])
             _running.pop(task["id"], None)
             _scheduled.discard(task["id"])
         if work.cancelled():

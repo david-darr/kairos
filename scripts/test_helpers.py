@@ -306,6 +306,30 @@ class CollectTests(Base):
         store.delete_session("chat-gone")
         self.assertEqual(self.statuses(), [])
 
+    def test_cancelling_before_the_task_worker_starts_stops_its_helpers(self):
+        # The worker's own cancellation handler has not run yet (2026-10-15).
+        async def go():
+            FakeBrain.gate = asyncio.Event()
+            token = runs.CURRENT.set(runs.RunContext("task", task_id="t-early"))
+            try:
+                with patch.object(helpers, "WAIT_SECONDS", 0.2):
+                    await helpers.delegate([{"goal": "slow job"}], Ctx(session_id=None))
+            finally:
+                runs.CURRENT.reset(token)
+            from core import task_scheduler
+            loop = asyncio.get_running_loop()
+            create = loop.create_task
+            def cancelled(coro):
+                work = create(coro)
+                work.cancel()
+                return work
+            with patch.object(loop, "create_task", side_effect=cancelled), \
+                 patch.object(task_scheduler.task_service, "record_stopped") as stopped:
+                await task_scheduler.start_run({"id": "t-early", "name": "Early", "schedule_kind": "card"})
+            stopped.assert_called_once_with("t-early")
+            await until_statuses(self, ["stopped"])
+        asyncio.run(go())
+
 
 class ScopeTests(unittest.TestCase):
     def test_a_helper_brain_has_only_read_tools_and_the_browser(self):
