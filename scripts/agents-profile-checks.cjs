@@ -37,7 +37,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor("document.querySelector('.agent-memory').dataset.draftBaseline === 'Half-typed memory draft'");
   assert.ok(writes.slice(saveStart).some(w => w.path === '/api/agents/a2/memory' && JSON.parse(w.body).text === 'Half-typed memory draft'), 'memory saves');
 
-  await js("document.querySelector('.agent-profile-open').click()");
+  await js("document.querySelector('.agent-profile-face').click()");
   await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
   await capture?.('desktop-agent-profile-settings');
   assert.ok(await js("document.querySelector('.agent-profile-details:not([hidden])') && document.querySelector('.agent-profile-tab.active').textContent === 'Details'"));
