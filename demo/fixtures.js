@@ -1111,6 +1111,25 @@
     // Teams (agents phase 5) are listed in the Agents tab from Swarm.
     if (route === "/api/swarm/systems") return { items: state.empty ? [] : [{ id: "s1", name: "Launch team", mission: "Launch the newsletter with two agents and a fact checker.",
       state: "active", active_tasks: 1, configuration: {} }], total: state.empty ? 0 : 1, offset: 0 };
+    // One team's detail, so opening a team from the Agents tab renders in the
+    // demo (2026-10-14); the same shape scripts/swarm-smoke.cjs serves.
+    if (route === "/api/swarm/status") return { available: true, execution_available: false, blockers: [],
+      detail: "Agent execution is not connected in the demo." };
+    if (route === "/api/swarm/systems/s1") {
+      const agents = [
+        { id: "s1-m1", system_id: "s1", pool_id: "s1-pool", name: "Editor", role: "Lead", is_lead: 1, enabled: 1 },
+        { id: "s1-m2", system_id: "s1", pool_id: "s1-pool", name: "Scout", role: "Researcher", is_lead: 0, enabled: 1 },
+      ];
+      const page = items => ({ items, total: items.length, offset: 0 });
+      return { system: { id: "s1", name: "Launch team", mission: "Launch the newsletter with two agents and a fact checker.",
+          owner: "demo", state: "active", revision: 1, reason: null, created_at: now - 7200, configuration: {} },
+        agents, budgets: [], quotas: [], dependencies: [], allocation_ownership_unresolved: false, event_cursor: 0,
+        availability: { available: true, execution_available: false, blockers: [], detail: "Agent execution is not connected in the demo." },
+        pages: { tasks: page([{ id: "t1", system_id: "s1", run_id: "s1-run", agent_id: "s1-m2", objective: "Draft the first issue",
+            state: "running", revision: 1, checkpoint: "{}", result: null, created_at: now - 900 }]),
+          messages: page([]), runs: page([]), attempts: page([]), events: page([]), checkpoints: page([]), shifts: page([]) } };
+    }
+    if (/^\/api\/swarm\/systems\/s1\/[a-z]+$/.test(route)) return { items: [], total: 0, offset: 0 };
     if (/^\/api\/tasks\/[^/]+\/runs$/.test(route)) return state.empty ? [] : runs[route.split("/")[3]] || [];
     if (route === "/api/tasks/builtin") return ["Daily briefing", "Review priorities", "Organize memory", "Inbox triage"].map((label, i) => {
       const task = tasks.find(t => t.builtin_action === 'routine' + i);

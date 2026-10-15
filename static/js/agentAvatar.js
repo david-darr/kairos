@@ -114,35 +114,83 @@ export function avatarPicker(initial, onChange = () => {}) {
   const root = document.createElement('div'); root.className = 'agent-avatar-picker';
   const preview = document.createElement('div'); preview.className = 'agent-avatar-picker-preview';
   const controls = document.createElement('div'); controls.className = 'agent-avatar-picker-controls';
-  const fields = {};
-  const field = (key, values) => {
-    const label = document.createElement('label'); label.textContent = key[0].toUpperCase() + key.slice(1);
-    const select = document.createElement('select'); select.setAttribute('aria-label', `Avatar ${key}`);
-    for (const value of values) { const option = document.createElement('option'); option.value = value; option.textContent = value[0].toUpperCase() + value.slice(1); select.append(option); }
-    if (key === 'color') { const option = document.createElement('option'); option.value = ''; option.textContent = 'Custom'; select.append(option); }
-    select.value = key === 'color' && !AVATAR_COLORS.includes(spec.color) ? '' : spec[key];
-    select.onchange = () => { spec[key] = key === 'color' && !select.value ? custom.value.toUpperCase() : select.value;
-      dirty = true; paint(); onChange(spec); };
-    label.append(select); controls.append(label); fields[key] = select;
+  const groups = new Map();
+  const custom = document.createElement('input'); custom.type = 'color'; custom.className = 'agent-avatar-custom-input';
+  custom.setAttribute('aria-label', 'Avatar custom color');
+  const change = (key, value) => { spec = { ...spec, [key]: value }; dirty = true; sync(); paint(true); onChange({ ...spec }); };
+  // 2026-10-14: roving radio focus gives each visual grid one Tab stop and
+  // arrow navigation; thumbnails reuse avatarUrl's cached SVG data URLs.
+  const group = (key, values, kind = 'faces') => {
+    const section = document.createElement('section'); section.className = `agent-avatar-choice agent-avatar-choice-${key}`;
+    const title = document.createElement('h4'); title.textContent = key[0].toUpperCase() + key.slice(1);
+    const grid = document.createElement('div'); grid.className = kind === 'finish' ? 'segmented-tabs agent-avatar-options' : `agent-avatar-options agent-avatar-options-${kind}`;
+    grid.setAttribute('role', 'radiogroup'); grid.setAttribute('aria-label', `Avatar ${key}`);
+    const buttons = values.map(value => {
+      const button = document.createElement('button'); button.type = 'button'; button.dataset.value = value;
+      button.className = kind === 'finish' ? 'segmented-tab agent-avatar-option' : 'agent-avatar-option';
+      button.setAttribute('role', 'radio'); button.setAttribute('aria-label', value === 'custom' ? 'Custom color' : value);
+      if (kind === 'color') {
+        button.classList.add('agent-avatar-swatch');
+        if (value === 'custom') button.textContent = '+';
+        else button.style.setProperty('--swatch', value);
+      } else if (kind === 'finish') button.textContent = value[0].toUpperCase() + value.slice(1);
+      else {
+        const image = document.createElement('img'); image.alt = ''; image.loading = 'lazy'; button.append(image);
+        const label = document.createElement('span'); label.textContent = value; button.append(label);
+      }
+      button.addEventListener('click', () => value === 'custom' ? custom.click() : change(key, value));
+      grid.append(button); return button;
+    });
+    grid.addEventListener('keydown', event => {
+      const direction = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0;
+      if (!direction && !['Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const index = buttons.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + direction + buttons.length) % buttons.length;
+      buttons[next].focus();
+      if (buttons[next].dataset.value !== 'custom') change(key, buttons[next].dataset.value);
+    });
+    section.append(title, grid); controls.append(section); groups.set(key, buttons);
   };
-  field('form', AVATAR_FORMS); field('color', AVATAR_COLORS); field('finish', AVATAR_FINISHES);
-  field('face', AVATAR_FACES); field('accessory', AVATAR_ACCESSORIES);
-  const custom = document.createElement('input'); custom.type = 'color'; custom.setAttribute('aria-label', 'Avatar custom color');
+  group('color', [...AVATAR_COLORS, 'custom'], 'color');
+  group('form', AVATAR_FORMS); group('face', AVATAR_FACES);
+  group('accessory', AVATAR_ACCESSORIES); group('finish', AVATAR_FINISHES, 'finish');
   custom.value = /^#[0-9a-f]{6}$/i.test(spec.color) ? spec.color : AVATAR_COLORS[0];
-  custom.oninput = () => { spec.color = custom.value.toUpperCase(); fields.color.value = ''; dirty = true; paint(); onChange(spec); };
-  const customLabel = document.createElement('label'); customLabel.textContent = 'Custom color'; customLabel.append(custom); controls.append(customLabel);
+  custom.oninput = () => change('color', custom.value.toUpperCase());
   const shuffle = document.createElement('button'); shuffle.type = 'button'; shuffle.className = 'btn agent-avatar-shuffle'; shuffle.textContent = 'Shuffle';
   shuffle.onclick = () => { const choose = values => values[Math.floor(Math.random() * values.length)];
     let next; do { next = { form: choose(AVATAR_FORMS), color: choose(AVATAR_COLORS), finish: choose(AVATAR_FINISHES),
       face: choose(AVATAR_FACES), accessory: choose(AVATAR_ACCESSORIES) }; } while (JSON.stringify(next) === JSON.stringify(spec));
-    spec = next; dirty = true; sync(); paint(); onChange(spec);
+    spec = next; dirty = true; sync(); paint(false);
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) preview.animate([
+      { transform: 'rotate(-9deg) scale(.9)', opacity: .65 }, { transform: 'rotate(8deg) scale(1.06)', opacity: 1 },
+      { transform: 'none', opacity: 1 }], { duration: 300, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    onChange({ ...spec });
   };
-  controls.append(shuffle); root.append(preview, controls);
-  function sync() { for (const [key, select] of Object.entries(fields)) select.value = key === 'color' && !AVATAR_COLORS.includes(spec.color) ? '' : spec[key];
-    custom.value = spec.color; }
-  function paint() { preview.replaceChildren(agentAvatar({ avatar: spec }, 112)); }
-  paint();
+  controls.append(shuffle, custom); root.append(preview, controls);
+  function sync() {
+    for (const [key, buttons] of groups) {
+      const selected = key === 'color' && !AVATAR_COLORS.includes(spec.color) ? 'custom' : spec[key];
+      for (const button of buttons) {
+        const active = button.dataset.value === selected;
+        button.setAttribute('aria-checked', String(active)); button.tabIndex = active ? 0 : -1;
+        if (button.dataset.value === 'custom') button.style.setProperty('--swatch', spec.color);
+        const image = button.querySelector('img');
+        if (image) image.src = avatarUrl({ ...spec, [key]: button.dataset.value });
+      }
+    }
+    custom.value = spec.color;
+  }
+  function paint(animate = false) {
+    preview.getAnimations().forEach(animation => animation.cancel());
+    preview.replaceChildren(agentAvatar({ avatar: spec }, 176));
+    if (animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) preview.animate([
+      { transform: 'scale(.92)', opacity: .8 }, { transform: 'scale(1.035)', opacity: 1 },
+      { transform: 'none', opacity: 1 }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+  sync(); paint();
   return { root, getSpec: () => ({ ...spec }), isDirty: () => dirty,
-    setSpec(next) { if (dirty || root.contains(document.activeElement)) return; spec = { ...next }; sync(); paint(); },
+    setSpec(next) { if (dirty || root.contains(document.activeElement) || JSON.stringify(spec) === JSON.stringify(next)) return;
+      spec = { ...next }; sync(); paint(); },
     markSaved() { dirty = false; } };
 }

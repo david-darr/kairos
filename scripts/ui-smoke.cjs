@@ -62,6 +62,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/chat/live/snapshot') {
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
     }
+    // A team's live events (static/js/swarmEvents.js): an idle stream, held
+    // open, so the team page renders in the demo without errors (2026-10-14).
+    if (/^\/api\/swarm\/systems\/[^/]+\/events$/.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      res.write(': idle' + String.fromCharCode(10, 10)); return;
+    }
     if (url.pathname === '/api/chat/live/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
       liveClients.add(res); res.write(`data: ${JSON.stringify(liveSnapshot())}\n\n`);
@@ -2352,10 +2358,11 @@ app.whenReady().then(async () => {
     assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
     // Every bot surface on a phone: no sideways scroll, 44px targets.
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
+    await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases", "Agent appearance and reduced motion"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));

@@ -1,6 +1,7 @@
 import { api, el, customSelect, toast, confirmDialog, openPanelDialog } from './api.js';
 import { avatarPicker, defaultAvatar } from './agentAvatar.js';
 import { agentModelPicker } from './agentModelPicker.js';
+import { row, group } from './settingsKit.js';
 
 // 2026-10-14: keep the entire draft in this dialog until Create succeeds.
 // The optional goal is a second existing route, so its failure is reported
@@ -18,7 +19,10 @@ function limited(input, limit, counter) {
   if (value !== input.value) input.value = value;
   counter.textContent = `${bytes(value).toLocaleString()} / ${limit.toLocaleString()} bytes`;
 }
-const field = (label, control, extra = null) => el('label', { class: 'agent-create-field' }, [el('span', { text: label }), control, extra]);
+// 2026-10-14: creation uses the same label/description/control row as Settings;
+// long answers stack so their whole draft remains visible while editing.
+const field = (label, control, extra = null) => row({ title: label, control, below: extra,
+  stack: control.tagName === 'TEXTAREA' || control.classList.contains('agent-create-cadence'), cls: 'agent-create-field' });
 
 export async function openCreateAgent() {
   const [models, channels] = await Promise.all([
@@ -53,30 +57,50 @@ export async function openCreateAgent() {
     validity.textContent = reason; create.disabled = !!reason || creating;
   };
   const presets = el('div', { class: 'agent-create-presets' });
-  for (const [title, job, about, standing] of PRESETS) presets.append(el('button', { type: 'button', class: 'btn quiet', text: title, onclick: () => {
+  for (const [title, job, about, standing] of PRESETS) presets.append(el('button', { type: 'button', class: 'agent-create-preset', 'aria-pressed': 'false', onclick: (event) => {
+    for (const choice of presets.children) choice.setAttribute('aria-pressed', String(choice === event.currentTarget));
     role.value = job; blurb.value = about; soul.value = standing; instructions.value = standing;
     dirty = true; limited(blurb, 4000, blurbCount); limited(soul, 24000, soulCount); validate();
-  } }));
+  } }, [el('strong', { text: title }), el('span', { text: about })]));
   const identity = el('section', { id: 'agent-create-identity', class: 'agent-create-section' }, [
     el('h3', { text: 'Identity' }), el('p', { class: 'meta', text: 'Start with a role, then change every word to make it yours.' }), presets,
     el('div', { class: 'agent-create-identity-grid' }, [
-      el('div', {}, [field('Name', name), field('Job / role', role), field('Blurb', blurb, blurbCount)]), picker.root,
+      group({}, [field('Name', name), field('Job / role', role), field('Blurb', blurb, blurbCount)]), picker.root,
     ]),
   ]);
   const sections = [identity,
-    el('section', { id: 'agent-create-soul', class: 'agent-create-section' }, [el('h3', { text: 'Soul' }), field('Standing instructions', soul, soulCount), field('Working approach', instructions)]),
+    el('section', { id: 'agent-create-soul', class: 'agent-create-section' }, [el('h3', { text: 'Soul' }),
+      group({}, [field('Standing instructions', soul, soulCount), field('Working approach', instructions)])]),
     el('section', { id: 'agent-create-model', class: 'agent-create-section' }, [el('h3', { text: 'Model' }), model.root]),
-    el('section', { id: 'agent-create-routines', class: 'agent-create-section' }, [el('h3', { text: 'Routines' }), el('p', { class: 'meta', text: 'Optional first scheduled check.' }), field('Name', goalName), field('What to check', goalPrompt), field('When', cadence), field('Report', report)]),
-    el('section', { id: 'agent-create-delivery', class: 'agent-create-section' }, [el('h3', { text: 'Delivery' }), field('Tell me on', channel)]),
+    el('section', { id: 'agent-create-routines', class: 'agent-create-section' }, [el('h3', { text: 'Routines' }), el('p', { class: 'meta', text: 'Optional first scheduled check.' }),
+      group({}, [field('Name', goalName), field('What to check', goalPrompt), field('When', cadence), field('Report', report)])]),
+    el('section', { id: 'agent-create-delivery', class: 'agent-create-section' }, [el('h3', { text: 'Delivery' }), group({}, [field('Tell me on', channel)])]),
   ];
   const links = el('nav', { class: 'agent-create-nav', 'aria-label': 'Creation sections' },
     ['Identity', 'Soul', 'Model', 'Routines', 'Delivery'].map((title, index) => el('button', { type: 'button', text: title,
-      onclick: () => sections[index].scrollIntoView({ block: 'start', behavior: 'smooth' }) })));
+      onclick: () => sections[index].scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }) })));
   const body = el('div', { class: 'agent-create-body' }, [links, el('div', { class: 'agent-create-sections' }, sections)]);
   const cancel = el('button', { type: 'button', class: 'btn', text: 'Cancel' });
   const footer = el('div', { class: 'agent-create-footer' }, [validity, cancel, create]);
   const dialog = openPanelDialog({ title: 'New bot', body, footer, className: 'agent-create-dialog', initialFocus: name,
-    onClose: () => { document.removeEventListener('keydown', escapeDraft, true); } });
+    onClose: () => { document.removeEventListener('keydown', escapeDraft, true); scrollBody?.removeEventListener('scroll', onScroll);
+      if (scrollFrame) cancelAnimationFrame(scrollFrame); } });
+  // 2026-10-14: one scroll listener tracks the section crossing the dialog's
+  // reading line. Scheduling in a frame avoids layout work during scrolling.
+  const scrollBody = dialog.panel.querySelector('.modal-body');
+  let scrollFrame = 0;
+  function onScroll() {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      const top = scrollBody.getBoundingClientRect().top + 80;
+      let active = 0;
+      sections.forEach((section, index) => { if (section.getBoundingClientRect().top <= top) active = index; });
+      [...links.children].forEach((link, index) => { link.classList.toggle('active', index === active);
+        if (index === active) link.setAttribute('aria-current', 'step'); else link.removeAttribute('aria-current'); });
+    });
+  }
+  scrollBody.addEventListener('scroll', onScroll, { passive: true }); onScroll();
   cancel.addEventListener('click', () => dialog.close());
   // 2026-10-14: the shared panel closes on Escape. Intercept only a typed
   // draft before it reaches that handler; the nested confirmation owns its Escape.
