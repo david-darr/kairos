@@ -4,6 +4,7 @@
 // nothing the person can see and would risk their real routines. This is the
 // one place the two words meet. The bot page's Routines tab and the profile
 // sheet's Routines section share this panel.
+import { openAgentItemSheet } from './agentItemSheet.js';
 import { api, el, customSelect, toast, confirmDialog } from './api.js';
 
 export function cadence(routine) {
@@ -13,11 +14,15 @@ export function cadence(routine) {
   return minutes % 60 === 0 ? `Every ${minutes / 60 === 1 ? 'hour' : `${minutes / 60} hours`}` : `Every ${minutes} minutes`;
 }
 
-function routineRow(routine, refresh) {
+function routineRow(routine, refresh, agent) {
   const summary = () => `${cadence(routine)} · ${routine.report_when === 'always' ? 'always reports' : 'reports when notable'}${routine.enabled ? '' : ' · paused'}`;
   const row = el('div', { class: 'agent-row routine-row' });
   row.dataset.routineId = routine.id;
-  const view = el('div', {}, [el('div', { class: 'routine-name', text: routine.name }), el('div', { class: 'meta', text: summary() })]);
+  const view = el('div', {}, [el('button', { type: 'button', class: 'routine-name routine-details-open', text: routine.name,
+    onclick: () => openAgentItemSheet({ title: routine.name, agent: agent || { id: routine.agent_id, name: 'Routine' },
+      description: routine.prompt, details: `${cadence(routine)} · ${routine.next_run_at ? new Date(routine.next_run_at).toLocaleString() : 'Next run not scheduled'}`,
+      primary: 'Check now', onPrimary: () => row.querySelector('.agent-row-actions button')?.click(),
+      secondary: 'Edit routine', onSecondary: () => { view.hidden = true; editor.hidden = false; name.focus(); } }) }), el('div', { class: 'meta', text: summary() })]);
   // Editing covers what the existing update route allows: the name and what to
   // check. A different schedule is a new routine (remove, then add).
   const name = el('input', { value: routine.name, 'aria-label': 'Routine name' });
@@ -56,13 +61,13 @@ function routineRow(routine, refresh) {
   return row;
 }
 
-export function routinesPanel(agentId, routines, refresh) {
+export function routinesPanel(agentId, routines, refresh, agent = null) {
   const panel = el('div', { class: 'glass card routines-panel' }, [
     el('div', { class: 'title', text: 'Routines' }),
     el('div', { class: 'meta', style: 'margin:4px 0 10px;', text: 'Run on a schedule. Quiet routines only report when something turned up.' }),
   ]);
   if (!routines.length) panel.append(el('p', { class: 'meta routines-empty', text: 'No routines yet.' }));
-  for (const routine of routines) panel.append(routineRow(routine, refresh));
+  for (const routine of routines) panel.append(routineRow(routine, refresh, agent));
   const name = el('input', { placeholder: 'e.g. New postings', 'aria-label': 'New routine name' });
   const prompt = el('textarea', { rows: '2', placeholder: 'What to check, and what counts as worth telling you', 'aria-label': 'What the new routine checks' });
   const kind = customSelect({}, [el('option', { value: 'daily', text: 'Every day at' }), el('option', { value: 'interval', text: 'Every N hours' })]);

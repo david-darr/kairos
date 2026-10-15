@@ -41,11 +41,29 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
   await capture?.('desktop-agent-profile-settings');
   assert.ok(await js("document.querySelector('.agent-profile-details:not([hidden])') && document.querySelector('.agent-profile-tab.active').textContent === 'Details'"));
+  assert.ok(await js("document.querySelector('.agent-profile-details .set-header') && document.querySelectorAll('.agent-profile-details .set-section .set-row').length >= 3"), 'profile uses settings groups and rows');
+  await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.focus(); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowRight', bubbles:true, cancelable:true })); })()");
+  assert.ok(await js("document.querySelector('.agent-profile-tabs').dataset.active === 'library' && document.querySelector('.agent-profile-tab.active').textContent === 'Library'"), 'segment arrow moves the tab indicator');
+  await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
   const avatarStart = writes.length;
-  await js(`(() => { const f=document.querySelector('.agent-profile-sheet [aria-label="Avatar form"]'); f.value='heart'; f.dispatchEvent(new Event('change')); })()`);
+  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Avatar form\"] [data-value=heart]').click()");
   await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
   await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('heart')");
   assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.form === 'heart'), 'profile saves avatar');
+  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Connection"]'); n.value='m2'; n.dispatchEvent(new Event('change')); })()`);
+  await waitFor("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-fast')");
+  assert.ok(await js("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Fast')"), 'profile shows catalog version names');
+  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Model version"]'); n.value='workspace-fast'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-profile-details [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
+  assert.ok(await js("document.querySelector('.agent-profile-details .agent-model-summary').textContent.includes('Codex · Workspace Fast · high')"), 'profile summary shows connection, version and effort');
+  await js("document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]').focus()");
+  await delay(10600);
+  assert.ok(await js("document.activeElement === document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]') && document.activeElement.value === 'high'"),
+    'profile poll keeps a focused model choice');
+  const modelStart = writes.length;
+  await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
+  await waitFor("document.querySelector('.agent-live-panel .agent-model-summary')?.textContent.includes('Codex · Workspace Fast · high')");
+  assert.ok(writes.slice(modelStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).endpoint_id === 'm2' &&
+    JSON.parse(w.body).model_override === 'workspace-fast' && JSON.parse(w.body).model_effort === 'high'), 'profile saves full model selection');
   await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
   // Coordination, 2026-10-14: Access persists the peer allow-list by id.
   await js("document.querySelector('.agent-profile-section[data-section=access] summary').click()");
@@ -72,16 +90,17 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.deepEqual(await js("[...document.querySelectorAll('.agent-profile-section:not([hidden])')].map(x => x.dataset.section)"), ['soul'], 'search filters sections');
   await js("(() => { const q = document.querySelector('.agent-profile-all [type=search]'); q.value = ''; q.dispatchEvent(new Event('input')); })()");
   await js("(() => { const a = document.querySelector('[aria-label=Blurb]'); a.value = 'x'.repeat(3001); a.dispatchEvent(new Event('input', { bubbles:true })); })()");
-  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('label').querySelector('.agent-profile-counter').hidden"), 'blurb counter appears past 3000');
+  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('.set-row').querySelector('.agent-profile-counter').hidden"), 'blurb counter appears past 3000');
   await js("(() => { const a = document.querySelector('[aria-label=Soul]'); a.value = '🙂'.repeat(7000); a.dispatchEvent(new Event('input', { bubbles:true })); })()");
   assert.equal(await js("new TextEncoder().encode(document.querySelector('[aria-label=Soul]').value).length"), 24000, 'soul enforced in UTF-8 bytes');
   assert.equal(await js("document.querySelector('[aria-label=Soul]').value.length"), 12000, 'multi-byte characters are kept whole');
   agents[1].blurb = 'Server biography';
   await delay(10600);
   assert.equal(await js("document.querySelector('[aria-label=Blurb]').value.length"), 3001, 'poll keeps conflicting profile draft');
-  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('label').querySelector('.agent-profile-conflict').hidden"), 'server conflict is visible');
+  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('.set-row').querySelector('.agent-profile-conflict').hidden"), 'server conflict is visible');
 
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))");
+  await waitFor("document.querySelector('.agent-profile-sheet').hidden");
   assert.ok(await js("document.querySelector('.agent-profile-sheet').hidden"), 'Escape closes sheet');
   win.setSize(390, 844);
   await js("document.querySelector('.agent-profile-open').click()");

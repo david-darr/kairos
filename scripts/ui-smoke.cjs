@@ -9,6 +9,12 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
 const output = path.join(root, "data", "ui-review", "run-" + Date.now());
+// 2026-10-14: baseline captures read HEAD without rewriting the worktree.
+const layoutBefore = process.argv.includes('--agents-layout-before');
+const baselineFiles = layoutBefore ? new Map([
+  'static/js/views/agents.js', 'static/js/agentChat.js', 'static/js/sessionChat.js',
+  'static/js/permissionPrompt.js', 'static/js/routinesPanel.js', 'static/js/agentProfile.js', 'static/css/interface.css',
+].map(file => [path.join(root, file), fs.readFileSync(path.join(root, '.scratch-layout', 'baseline', file))])) : new Map();
 const updateDocImages = process.argv.includes("--update-doc-images");
 const updateChatImage = process.argv.includes("--update-chat-image");
 let unavailable = false;
@@ -61,6 +67,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') reads.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
     if (url.pathname === '/api/chat/live/snapshot') {
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
+    }
+    // A team's live events (static/js/swarmEvents.js): an idle stream, held
+    // open, so the team page renders in the demo without errors (2026-10-14).
+    if (/^\/api\/swarm\/systems\/[^/]+\/events$/.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      res.write(': idle' + String.fromCharCode(10, 10)); return;
     }
     if (url.pathname === '/api/chat/live/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -198,7 +210,7 @@ const server = http.createServer(async (req, res) => {
       ".svg": "image/svg+xml", ".webp": "image/webp", ".jpg": "image/jpeg", ".woff2": "font/woff2", ".wasm": "application/wasm" };
     res.setHeader("Content-Type", mime[path.extname(file)] || "application/octet-stream");
     res.setHeader("Cache-Control", "no-store");
-    res.end(fs.readFileSync(file));
+    res.end(baselineFiles.get(file) || fs.readFileSync(file));
   } catch { res.writeHead(404); res.end(); }
 });
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
@@ -301,9 +313,16 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    if (layoutBefore || process.argv.includes('--agents-layout-only') || process.argv.includes('--agents-layout-captures')) {
+      const result = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState,
+        inbox: calendarFixtures.agentInbox, capturesOnly: layoutBefore || process.argv.includes('--agents-layout-captures'), stage: layoutBefore ? 'before' : 'after' });
+      assert.deepEqual(errors, [], 'UI-3 renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, ...result, errors }, null, 2));
+      console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--agents-birth-only')) {
       await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        win, liveChunk, liveEvent, liveFinish, capture });
+        win, liveChunk, liveEvent, liveFinish, liveRuns, capture });
       assert.deepEqual(errors, [], 'Agent birth renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
@@ -2298,7 +2317,7 @@ app.whenReady().then(async () => {
       'The sidebar has no bot, team or pinned sections');
     assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
     await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      win, liveChunk, liveEvent, liveFinish, capture });
+      win, liveChunk, liveEvent, liveFinish, liveRuns, capture });
     // 2026-10-14: the floating bot window's own page, in a window of its own
     // against the demo data: highest need first, quiet bots left out.
     {
@@ -2351,11 +2370,13 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
     assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
     // Every bot surface on a phone: no sideways scroll, 44px targets.
+    const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
+    await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
-    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases"], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
+    fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: true, checks: ["artifact split/resize/persistence, maximize/Escape, retained tabs/renderers and overlays", "10 tabs desktop/mobile", "52px icon rail layout and animation", "sidebar persistence, keyboard, tooltips, mobile override", "vault search/read", "Settings and usable mobile forms", "Home chat link and model menu", "beam/core reduced motion", "centered new-chat composer", "independent history persistence, draft retention and mobile focus", "new-chat landing does not write data", "mocked note completion", "delayed navigation", "10 empty views and unavailable status", "website desktop/mobile layouts, anchors, images, five preview states, live halftone and fallback, release-driven downloads, phone menu, FAQ, 404 and reduced motion", "site demo from disk", "Agents profile and draft retention", "Agents roster, status, inbox, tabs and upkeep Undo", "Agent birth and turns: 12 cases", "Agent appearance and reduced motion", `UI-3 conversation layout: ${agentLayout.checks} assertions`], docImagesUpdated: updateDocImages, errors, writes }, null, 2));
   } catch (error) {
     await capture("failure").catch(() => {});
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ passed: false, failure: error.stack, actual: error.actual, expected: error.expected, errors }, null, 2));

@@ -79,7 +79,7 @@ def validate_avatar(value: dict) -> dict:
 # of these gets the color in the same position.
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
 # Fields a person may change; everything else is the service's.
-EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "color", "enabled", "daily_run_cap",
+EDITABLE = ("name", "role", "blurb", "soul", "instructions", "endpoint_id", "model_override", "model_effort", "color", "enabled", "daily_run_cap",
             "deliver_to_channel", "integration_ids", "keep_signed_in", "memory_upkeep", "peers", "avatar")
 # What /setup may change about a bot, and nothing else (Agents 2.0, 2026-10-14).
 SELF_CONFIGURABLE = ("role", "blurb", "soul", "deliver_to_channel")
@@ -93,6 +93,33 @@ APPROVALS = {"approve", "approved", "lgtm", "ok", "okay", "yes", "looks good", "
 # Ten quiet seconds joins a burst without making a lone result wait through
 # a minute of silence (Agents 2.0 phase 2-iii, 2026-10-13).
 AGENT_BATCH_QUIET_SECONDS = 10
+
+
+def _check_model(endpoint_id: Optional[str], override: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Apply the chat model route's ID and catalog effort rules to bots."""
+    from core import model_catalog, model_endpoints
+    endpoint = model_endpoints.get_endpoint(endpoint_id) if endpoint_id else None
+    if endpoint_id and endpoint is None:
+        raise ValueError("endpoint_id must name a model added in Settings")
+    if override is not None:
+        if not endpoint or endpoint["kind"] not in ("claude_cli", "codex_cli", "api"):
+            raise ValueError("Model versions are available only for CLI and API endpoints")
+        if not isinstance(override, str):
+            raise ValueError("Enter a valid model ID (160 characters maximum)")
+        override = override.strip()
+        if len(override) > 160 or (override and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+\[\]-]*", override)):
+            raise ValueError("Enter a valid model ID (160 characters maximum)")
+    if effort is not None:
+        if not isinstance(effort, str):
+            raise ValueError("That reasoning level isn't supported by the selected model")
+        effort = effort.strip() or None
+    if effort is not None:
+        if not endpoint:
+            raise ValueError("Choose a model before setting a reasoning level")
+        resolved = (endpoint.get("model") if override is None else override) or None
+        if not model_catalog.validate_effort(endpoint["kind"], resolved, effort):
+            raise ValueError("That reasoning level isn't supported by the selected model")
+    return override, effort
 
 
 class AdmissionDenied(ValueError):
@@ -135,13 +162,15 @@ class AgentService:
                deliver_to_channel: Optional[str] = None, integration_ids: Optional[list] = None,
                keep_signed_in: bool = False, memory_upkeep: bool = False,
                blurb: str = "", soul: Optional[str] = None, peers: Optional[list[str]] = None,
-               avatar: Optional[dict] = None) -> dict:
+               avatar: Optional[dict] = None, model_override: Optional[str] = None,
+               model_effort: Optional[str] = None) -> dict:
         name = _clean_name(name)
         self._check_unique(name, None)
         role = _profile_text("role", role, 200)
         blurb = _profile_text("blurb", blurb, 4000)
         if soul is not None:
             _check_soul(soul)
+        model_override, model_effort = _check_model(endpoint_id, model_override, model_effort)
         agent_id = uuid.uuid4().hex[:10]
         agent = {
             "id": agent_id, "name": name, "role": role, "blurb": blurb,
@@ -159,6 +188,10 @@ class AgentService:
             agent["soul"] = soul
         if avatar is not None:
             agent["avatar"] = validate_avatar(avatar)
+        if model_override is not None:
+            agent["model_override"] = model_override
+        if model_effort is not None:
+            agent["model_effort"] = model_effort
         self._agents[agent_id] = agent
         if soul is not None:
             self._write_soul_file(agent_id, soul)
@@ -195,6 +228,19 @@ class AgentService:
                 elif key == "avatar":
                     value = validate_avatar(value)
                 changes[key] = value
+            # 2026-10-14: validate the complete selection before mutating the
+            # identity. A connection switch without an explicit new version
+            # must never carry a version or effort to another provider.
+            if "endpoint_id" in changes and changes["endpoint_id"] != agent.get("endpoint_id"):
+                changes.setdefault("model_override", None)
+                changes.setdefault("model_effort", None)
+            if "model_override" in changes and changes["model_override"] != agent.get("model_override"):
+                changes.setdefault("model_effort", None)
+            if any(key in changes for key in ("endpoint_id", "model_override", "model_effort")):
+                changes["model_override"], changes["model_effort"] = _check_model(
+                    changes.get("endpoint_id", agent.get("endpoint_id")),
+                    changes.get("model_override", agent.get("model_override")),
+                    changes.get("model_effort", agent.get("model_effort")))
             # A normal profile edit must not erase a hand edit before the
             # person has resolved it (Agents 2.0 unit 4-0, 2026-10-13).
             if "soul" in changes and not self.read_soul(agent_id)["in_sync"]:

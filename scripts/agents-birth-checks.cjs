@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 
-module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, liveChunk, liveEvent, liveFinish, capture }) => {
+module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, liveChunk, liveEvent, liveFinish, liveRuns, capture }) => {
   // Unit 4-iii, 2026-10-14: drive the real modal and stream registry through
   // the isolated renderer. These fixtures never send work to the real app.
   const pressEscape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))");
@@ -12,6 +12,13 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
     await fill('.agent-chat-main .side-chat-input', text);
     await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
     await waitFor(`${botCard}?.getAttribute('aria-busy') === 'true'`);
+    // The card turns busy before the start request reaches the test server,
+    // and a chunk sent before then is dropped; wait for the server's run so a
+    // test's next liveChunk always lands (2026-10-14, seen once in ui-smoke).
+    for (let tries = 0; liveRuns && liveRuns.as1?.status !== 'processing'; tries++) {
+      if (tries > 100) throw new Error('The bot turn never reached the test server');
+      await delay(50);
+    }
   };
 
   // 1-2. Both entry points use one dialog. An untouched Escape writes nothing;
@@ -22,6 +29,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor(`!!document.querySelector('${modal}')`);
   await capture?.('desktop-agent-create');
   assert.ok(await js("!!document.querySelector('.agent-create-dialog .agent-dot-avatar') && !document.querySelector('.agent-create-dialog .agent-portrait')"), 'creation leads with a dot face');
+  assert.ok(await js("document.querySelectorAll('.agent-create-dialog .set-group .set-row').length >= 8"), 'creation uses Settings groups and rows');
   assert.ok(await js("document.querySelector('.agent-create-dialog [aria-label=\"Bot name\"]')"));
   await pressEscape();
   await waitFor(`!document.querySelector('${modal}')`);
@@ -52,21 +60,32 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await js("document.querySelector('.agents-view .agent-new-card').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   assert.ok(await js("document.querySelector('.agent-create-footer .btn.primary').disabled && document.querySelector('.agent-create-validity').textContent.includes('name')"));
-  await js("[...document.querySelectorAll('.agent-create-presets button')].find(n => n.textContent === 'Researcher').click()");
+  await js("[...document.querySelectorAll('.agent-create-presets button')].find(n => n.querySelector('strong')?.textContent === 'Researcher').click()");
+  assert.ok(await js("document.querySelector('.agent-create-preset[aria-pressed=true] strong')?.textContent === 'Researcher'"), 'preset is marked as a choice');
   assert.ok(await js("document.querySelector('[aria-label=Job]').value.includes('Research') && document.querySelector('.agent-create-dialog [aria-label=Soul]').value.includes('sources')"));
   await fill('.agent-create-dialog [aria-label=Soul]', 'Custom standing text');
   await fill('.agent-create-dialog [aria-label="Bot name"]', 'New Researcher');
   assert.equal(await js("document.querySelector('.agent-create-footer .btn.primary').disabled"), false);
+  // 2026-10-14: both bot editors read versions and effort from the selected
+  // connection's catalog, then submit the exact ID rather than display text.
+  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Connection"]'); n.value='m1'; n.dispatchEvent(new Event('change')); })()`);
+  await waitFor("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-large')");
+  assert.ok(await js("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Large')"));
+  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Model version"]'); n.value='workspace-large'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-create-dialog [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
+  assert.ok(await js("document.querySelector('.agent-create-dialog .agent-model-summary').textContent.includes('Claude · Workspace Large · high')"));
   // 2026-10-14: every picker dimension changes the live face; the saved spec
   // is the last previewed combination, including a custom hex color.
-  const originalFace = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker img').src");
+  const originalFace = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
   for (const [key, value] of [['form', 'cloud'], ['color', '#FA70AB'], ['finish', 'plush'], ['face', 'curious'], ['accessory', 'flower']]) {
-    await js(`(() => { const s = document.querySelector('.agent-create-dialog [aria-label="Avatar ${key}"]'); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change')); })()`);
+    await js(`document.querySelector('.agent-create-dialog [aria-label="Avatar ${key}"] [data-value="${value}"]').click()`);
   }
-  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker img').src"), originalFace, 'picker updates live preview');
-  const beforeShuffle = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker img').src");
+  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), originalFace, 'picker updates live preview');
+  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Avatar color\"] [role=radio]').length"), 10, 'nine swatches and custom color');
+  await js("(() => { const face=document.querySelector('.agent-create-dialog [aria-label=\"Avatar face\"] [aria-checked=true]'); face.focus(); face.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowRight', bubbles:true, cancelable:true })); })()");
+  assert.equal(await js("document.querySelector('.agent-create-dialog [aria-label=\"Avatar face\"] [aria-checked=true]').dataset.value"), 'sleepy', 'arrow moves radio selection');
+  const beforeShuffle = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
   await js("document.querySelector('.agent-create-dialog .agent-avatar-shuffle').click()");
-  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker img').src"), beforeShuffle, 'Shuffle changes the face');
+  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), beforeShuffle, 'Shuffle changes the face');
   await js(`(() => { const c = document.querySelector('.agent-create-dialog [aria-label="Avatar custom color"]'); c.value='#123abc'; c.dispatchEvent(new Event('input')); })()`);
   const expectedAvatar = await js("JSON.parse(document.querySelector('.agent-create-dialog .agent-dot-avatar').dataset.avatarSpec)");
   const createStart = writes.length;
@@ -74,6 +93,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
   assert.ok(writes.slice(createStart).some(w => w.path === '/api/agents' && JSON.parse(w.body).soul === 'Custom standing text'));
   assert.deepEqual(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body).avatar, expectedAvatar, 'creation persists the picker spec');
+  assert.deepEqual((({endpoint_id, model_override, model_effort}) => ({endpoint_id, model_override, model_effort}))(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body)),
+    {endpoint_id:'m1', model_override:'workspace-large', model_effort:'high'}, 'creation saves connection, version and reasoning');
   assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'New Researcher');
   assert.ok(await js("!!document.querySelector('.agent-profile-sheet .agent-dot-avatar')"), 'profile uses the dot component');
   await capture?.('desktop-agent-profile');

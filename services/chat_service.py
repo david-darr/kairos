@@ -138,10 +138,27 @@ async def _get_brain(session_id: str, endpoint: dict, is_admin: bool = False) ->
     _prime_with_history)."""
     principal_changed = session_manager.bind_execution_admin(session_id, is_admin)
     brain = _brains.get(session_id)
-    plan = ((session_manager.get_session(session_id) or {}).get('forge') or {}).get('mode') == 'plan'
+    session = session_manager.get_session(session_id) or {}
+    plan = (session.get('forge') or {}).get('mode') == 'plan'
     if brain is not None and (principal_changed or brain.is_admin != is_admin or (getattr(brain, 'read_only', False) is True) != plan):
         await close_session_brain(session_id)
         brain = None
+    # 2026-10-14: a profile save can change a bot's inherited model while
+    # its chat brain is open. Reconnect at the next turn so the new version
+    # takes effect without touching ordinary chats or a session's own pin.
+    if brain is not None and session.get('agent_id') and session.get('model_endpoint_id') == endpoint['id']:
+        from services.agent_service import agent_service
+        agent = agent_service.get(session['agent_id'])
+        if agent and agent.get('endpoint_id') == endpoint['id']:
+            own = session.get('model_override')
+            chosen = agent.get('model_override') if own is None else own
+            expected_model = (endpoint.get('model') if chosen is None else chosen) or None
+            expected_effort = session.get('model_effort')
+            if expected_effort is None and own is None:
+                expected_effort = agent.get('model_effort')
+            if brain.model != expected_model or getattr(brain, 'effort', None) != expected_effort:
+                await close_session_brain(session_id)
+                brain = None
     if brain is not None:
         # A signed-in MCP server's token renewed here changes the header the
         # open Claude connection was built with, so the check below
@@ -200,20 +217,35 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
     # An agent's own run (no chat) or a chat with an agent: its tools and,
     # for a run, the integrations chosen for it (services/agent_service.py).
     agent_id = agent_id or (session or {}).get("agent_id")
-    if agent_id and session is None:
+    agent = None
+    if agent_id:
         from services.agent_service import agent_service
-        integration_ids = (agent_service.get(agent_id) or {}).get("integration_ids")
+        agent = agent_service.get(agent_id)
+        if session is None:
+            integration_ids = (agent or {}).get("integration_ids")
     # Projects (David's ask 2026-09-12) — read once here rather than in each
     # Brain subclass, so every model kind picks it up the same way. See
     # core/projects.py's project_addendum() for what actually gets injected.
     project_id = (session or {}).get("project_id")
     override = (session or {}).get("model_override")
+    # 2026-10-14: only an attached bot session or detached bot run inherits
+    # the bot's version. A session pin wins, and ordinary chats have no bot.
+    inherits_agent_model = (override is None and agent and
+                            (session is None or session.get("model_endpoint_id") == agent.get("endpoint_id")))
+    if inherits_agent_model:
+        override = agent.get("model_override")
     cli_model = endpoint.get("model") if override is None else override
     # Reasoning effort (David's ask 2026-09-15) — validated at the route
     # boundary against core/model_catalog.py, so by here it's either None
     # (send nothing, the pre-existing behaviour) or a value the provider
     # advertises for this model.
     effort = (session or {}).get("model_effort")
+    if inherits_agent_model:
+        # 2026-10-14: a session's level was validated against the connection
+        # default. If the bot supplies a different version, an incompatible
+        # level must not reach the provider; keep the bot's supported level.
+        if effort is None or not model_catalog.validate_effort(endpoint["kind"], cli_model or None, effort):
+            effort = agent.get("model_effort")
     if endpoint["kind"] == "claude_cli":
         return Brain(cwd_override=workspace_dir, integration_ids=integration_ids,
                      session_id=session_id, model=cli_model or None, is_admin=is_admin,

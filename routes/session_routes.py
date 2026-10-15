@@ -162,6 +162,16 @@ async def set_session_model(session_id: str, body: SetModelRequest, user: str = 
         if not endpoint:
             raise HTTPException(400, "Choose a model before setting a reasoning level")
         resolved_model = (endpoint.get("model") if override is None else override) or None
+        # 2026-10-14: an attached bot chat inherits its bot's version when
+        # the session has no pin. Validate a new effort against that actual
+        # version, while ordinary sessions keep the connection rule above.
+        if override is None:
+            session = session_manager.get_session(session_id) or {}
+            if session.get("agent_id") and session.get("model_endpoint_id") == body.model_endpoint_id:
+                from services.agent_service import agent_service
+                agent = agent_service.get(session["agent_id"])
+                if agent and agent.get("endpoint_id") == body.model_endpoint_id and agent.get("model_override") is not None:
+                    resolved_model = agent["model_override"] or None
         if not model_catalog.validate_effort(endpoint["kind"], resolved_model, effort):
             raise HTTPException(400, "That reasoning level isn't supported by the selected model")
     async with chat_service.session_operation(session_id):

@@ -1,6 +1,8 @@
 import { api, el, toast, confirmDialog } from './api.js';
 import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
 import { routinesPanel } from './routinesPanel.js';
+import { agentModelPicker } from './agentModelPicker.js';
+import { pageHeader, group, row, toggle, note } from './settingsKit.js';
 
 const SECTIONS = ['Overview', 'Identity', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice & alerts', 'History', 'Usage'];
 const bytes = (value) => new TextEncoder().encode(value).length;
@@ -16,21 +18,37 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const titlebar = el('div', { class: 'agent-profile-titlebar' }, [photo, heading, closeButton]);
   const simpleButton = el('button', { class: 'btn quiet', type: 'button', text: 'Simple view' });
   const allButton = el('button', { class: 'btn quiet', type: 'button', text: 'All settings' });
-  const detailsButton = el('button', { class: 'agent-profile-tab', type: 'button', text: 'Details' });
-  const libraryButton = el('button', { class: 'agent-profile-tab', type: 'button', text: 'Library' });
-  const simpleTabs = el('div', { class: 'agent-profile-tabs' }, [detailsButton, libraryButton]);
-  const details = el('div', { class: 'agent-profile-details' });
-  const library = el('div', { class: 'agent-profile-library' });
+  const detailsButton = el('button', { class: 'segmented-tab agent-profile-tab', type: 'button', role: 'tab', text: 'Details' });
+  const libraryButton = el('button', { class: 'segmented-tab agent-profile-tab', type: 'button', role: 'tab', text: 'Library' });
+  const simpleTabs = el('div', { class: 'segmented-tabs agent-profile-tabs', role: 'tablist', 'aria-label': 'Profile views' }, [detailsButton, libraryButton]);
+  const details = el('div', { class: 'agent-profile-details', role: 'tabpanel' });
+  const library = el('div', { class: 'agent-profile-library', role: 'tabpanel' });
   const search = el('input', { type: 'search', placeholder: 'Search settings', 'aria-label': 'Search settings' });
   const accordion = el('div', { class: 'agent-profile-accordion' });
-  const all = el('div', { class: 'agent-profile-all' }, [search, accordion]);
+  const all = el('div', { class: 'agent-profile-all' }, [pageHeader('All settings', 'Every part of this bot, in one place.'), search, accordion]);
   const sections = new Map();
   for (const name of SECTIONS) {
-    const content = el('div', { class: 'agent-profile-section-body' });
-    const item = el('details', { class: 'agent-profile-section', 'data-section': name.toLowerCase() }, [el('summary', { text: name }), content]);
+    const content = el('div', { class: 'set-group agent-profile-section-body' });
+    const summary = el('summary', {}, [el('span', { class: 'set-section-title', text: name }), el('span', { class: 'agent-profile-chevron', 'aria-hidden': 'true', text: '›' })]);
+    const item = el('details', { class: 'set-section agent-profile-section', 'data-section': name.toLowerCase() }, [summary, content]);
+    // 2026-10-14: keep disclosure content mounted for drafts; animate its
+    // measured height while native summary keeps Enter and Space behaviour.
+    summary.addEventListener('click', event => {
+      event.preventDefault();
+      const opening = !item.open;
+      content.getAnimations().forEach(animation => animation.cancel());
+      if (opening) item.open = true;
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { item.open = opening; return; }
+      const height = content.scrollHeight;
+      const animation = content.animate(opening
+        ? [{ height: '0px', opacity: 0 }, { height: `${height}px`, opacity: 1 }]
+        : [{ height: `${height}px`, opacity: 1 }, { height: '0px', opacity: 0 }],
+      { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      animation.onfinish = () => { if (!opening) item.open = false; };
+    });
     sections.set(name, { item, content }); accordion.append(item);
   }
-  const empty = (name) => el('p', { class: 'meta', text: `${name} settings are not available yet.` });
+  const empty = (name) => note(`${name} settings are not available yet.`);
   for (const name of ['Skills', 'Routines', 'Permissions', 'Voice & alerts', 'Usage']) sections.get(name).content.append(empty(name));
   const fields = new Map();
   const field = (key, label, limit, multiline = false, countAfter = 0) => {
@@ -40,7 +58,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     const useServer = el('button', { class: 'btn quiet', type: 'button', text: 'Use server version' });
     const serverText = el('pre', { class: 'agent-profile-file-text' });
     conflict.append(el('span', { text: 'Changed on the server while you were editing. Your draft is kept; choose which version to use.' }), serverText, useServer);
-    const wrap = el('label', { class: 'field agent-profile-field' }, [el('span', { text: label }), input, counter, conflict]);
+    const wrap = row({ title: label, description: ({ name: 'Shown in the roster and conversations.', role: 'The job people see at a glance.',
+      blurb: 'A short introduction.', soul: 'The bot’s persistent character and boundaries.',
+      instructions: 'How this bot approaches its work.' })[key],
+      control: input, below: [counter, conflict], stack: multiline, cls: 'agent-profile-field' });
     const state = { key, input, counter, conflict, wrap, limit, baseline: '', dirty: false, server: '' };
     const length = (value) => key === 'soul' ? bytes(value) : Array.from(value).length;
     const enforce = () => {
@@ -71,30 +92,30 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     };
     fields.set(key, state); return wrap;
   };
-  const identity = el('div', { class: 'agent-profile-pair' }, [field('name', 'Name', 100), field('role', 'Job', 200)]);
+  const identity = el('div', { class: 'set-group agent-profile-identity' }, [field('name', 'Name', 100), field('role', 'Job', 200)]);
   const picker = avatarPicker(avatarSpec(detail.agent));
   const instruction = field('instructions', 'Standing instructions', 24000, true);
   const blurb = field('blurb', 'Blurb', 4000, true, 3000);
   const soul = field('soul', 'Soul', 24000, true);
-  const model = el('select', { 'aria-label': 'Default model' }, [el('option', { value: '', text: 'Claude (default)' }),
-    ...models.map(m => el('option', { value: m.id, text: m.name }))]);
+  const model = agentModelPicker(models, detail.agent, () => { modelConflict.hidden = !model.serverChanged() || !model.isDirty(); });
   const modelConflict = el('div', { class: 'agent-profile-conflict', hidden: true,
-    text: 'Default model changed on the server. Your selection is kept; saving will use it. ' });
+    text: 'Model changed on the server. Your selection is kept; saving will use it. ' });
   modelConflict.append(el('button', { class: 'btn quiet', type: 'button', text: 'Use server version', onclick: () => {
-    model.value = modelServer; modelBaseline = modelServer; modelConflict.hidden = true;
+    model.markSaved(detail.agent); modelConflict.hidden = true;
   } }));
-  let modelBaseline = '', modelServer = '';
-  const modelField = el('label', { class: 'field agent-profile-field' }, [el('span', { text: 'Default model' }), model, modelConflict]);
-  model.addEventListener('change', () => { modelConflict.hidden = model.value === modelBaseline || modelServer === modelBaseline; });
+  const modelField = el('div', {}, [model.root, modelConflict]);
   const extraFields = new Map();
   const extra = (key, label, input) => {
     const notice = el('div', { class: 'agent-profile-conflict', hidden: true,
       text: 'Changed on the server. Your draft is kept; saving will use your value. ' });
-    const wrap = el('label', { class: 'field agent-profile-field' }, [el('span', { text: label }), input, notice]);
-    const value = () => input.type === 'checkbox' ? input.checked : input.value;
-    const assign = (next) => { if (input.type === 'checkbox') input.checked = !!next; else input.value = next ?? ''; };
-    const state = { key, input, notice, baseline: undefined, server: undefined, value, sync(next) {
-      next = input.type === 'checkbox' ? !!next : String(next ?? '');
+    const boolean = input.type === 'checkbox' || input.getAttribute('role') === 'switch';
+    const wrap = row({ title: label, description: ({ enabled: 'Allow this bot to run.', daily_run_cap: 'Maximum runs each day.', keep_signed_in: 'Keep browser sessions between runs.',
+      memory_upkeep: 'Let the bot maintain its memory.', deliver_to_channel: 'Where updates should arrive.' })[key],
+      control: input, below: notice, cls: 'agent-profile-field' });
+    const value = () => boolean ? input.checked : input.value;
+    const assign = (next) => { if (boolean) input.checked = !!next; else input.value = next ?? ''; };
+    const state = { key, input, notice, boolean, baseline: undefined, server: undefined, value, sync(next) {
+      next = boolean ? !!next : String(next ?? '');
       this.server = next;
       if (value() === next) this.baseline = next;
       if (this.baseline === undefined || (value() === this.baseline && document.activeElement !== input)) {
@@ -104,15 +125,16 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     } };
     input.addEventListener('input', () => { notice.hidden = value() === state.baseline || state.server === state.baseline; });
     input.addEventListener('change', () => { notice.hidden = value() === state.baseline || state.server === state.baseline; });
+    if (boolean) input.addEventListener('click', () => { notice.hidden = value() === state.baseline || state.server === state.baseline; });
     notice.append(el('button', { class: 'btn quiet', type: 'button', text: 'Use server version', onclick: (event) => {
       event.preventDefault(); assign(state.server); state.baseline = state.server; notice.hidden = true;
     } }));
     extraFields.set(key, state); return wrap;
   };
-  const enabled = extra('enabled', 'On', el('input', { type: 'checkbox' }));
+  const enabled = extra('enabled', 'On', toggle({ label: 'Bot on' }));
   const cap = extra('daily_run_cap', 'Runs per day', el('input', { type: 'number', min: '1', max: '200' }));
-  const keep = extra('keep_signed_in', 'Keep browser sign in', el('input', { type: 'checkbox' }));
-  const upkeep = extra('memory_upkeep', 'Memory upkeep', el('input', { type: 'checkbox' }));
+  const keep = extra('keep_signed_in', 'Keep browser sign in', toggle({ label: 'Keep browser sign in' }));
+  const upkeep = extra('memory_upkeep', 'Memory upkeep', toggle({ label: 'Memory upkeep' }));
   const channel = extra('deliver_to_channel', 'Tell me on', el('select', {}, [
     el('option', { value: '', text: 'In the app only' }), ...channels.map(c => el('option', { value: c.id, text: c.label }))]));
   const save = el('button', { class: 'btn primary', type: 'button', text: 'Save profile' });
@@ -149,7 +171,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     if (key === routinesKey) return;
     if (routines.contains(document.activeElement) || routines.querySelector('details[open], .routine-editor:not([hidden])')) return;
     routinesKey = key;
-    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.()));
+    routines.replaceChildren(routinesPanel(detail.agent.id, goals || [], () => onSaved?.(), detail.agent));
   };
   drawRoutines(detail.goals);
   const usage = el('p', { class: 'meta' });
@@ -166,14 +188,17 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   // A field has one DOM node. Switching modes moves it, preserving its value.
   // Separate save buttons avoid moving the same button between sections.
   const sectionSave = () => el('button', { class: 'btn primary', type: 'button', text: 'Save profile', onclick: () => save.click() });
-  details.append(picker.root, identity, instruction, modelField, allButton, save);
+  const characterGroup = group({ title: 'Character', description: 'Give this bot a face of its own.' }, [picker.root]);
+  const identityGroup = group({ title: 'Identity', description: 'How this bot introduces itself and works.' }, [identity, instruction]);
+  const modelGroup = group({ title: 'Model', description: 'Connection, version and effort.' }, [modelField]);
+  details.append(pageHeader('Details', 'The essentials for this bot.'), characterGroup, identityGroup, modelGroup, save);
   sections.get('Overview').content.append(blurb, enabled, sectionSave());
   sections.get('Soul').content.append(soulDrift, soul, sectionSave());
   sections.get('Memory').content.append(memory, upkeep, sectionSave());
   sections.get('Routines').content.replaceChildren(routines, cap, sectionSave());
   sections.get('Access').content.append(access, peersField, keep, sectionSave(), forget, remove);
   sections.get('Voice & alerts').content.replaceChildren(channel, sectionSave());
-  sections.get('Usage').content.replaceChildren(usage);
+  sections.get('Usage').content.replaceChildren(row({ title: 'Daily runs', description: 'Used today against this bot’s cap.', control: usage }));
   // Changes the bot made to itself through /setup, each with its Undo
   // (Agents 2.0, 2026-10-14). The server refuses a stale undo with a reason.
   const setupChanges = el('div', { class: 'agent-profile-setup-changes' });
@@ -206,12 +231,17 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   const setMode = (next) => {
     mode = next;
     if (mode === 'all') { identitySlot.prepend(picker.root, identity, instruction); modelSlot.prepend(modelField); }
-    else { details.prepend(picker.root, identity, instruction, modelField); }
+    else { characterGroup.body.append(picker.root); identityGroup.body.append(identity, instruction); modelGroup.body.append(modelField); }
     simpleTabs.hidden = mode !== 'simple'; details.hidden = mode !== 'simple' || tab !== 'details';
-    library.hidden = mode !== 'simple' || tab !== 'library'; all.hidden = mode !== 'all'; simpleButton.hidden = mode !== 'all';
+    library.hidden = mode !== 'simple' || tab !== 'library'; all.hidden = mode !== 'all';
+    simpleButton.hidden = mode !== 'all'; allButton.hidden = mode !== 'simple';
   };
   const setTab = (next) => { tab = next; detailsButton.classList.toggle('active', tab === 'details');
-    libraryButton.classList.toggle('active', tab === 'library'); setMode(mode); if (next === 'library') loadLibrary(); };
+    libraryButton.classList.toggle('active', tab === 'library'); simpleTabs.dataset.active = tab;
+    detailsButton.setAttribute('aria-selected', String(tab === 'details'));
+    libraryButton.setAttribute('aria-selected', String(tab === 'library'));
+    detailsButton.tabIndex = tab === 'details' ? 0 : -1; libraryButton.tabIndex = tab === 'library' ? 0 : -1;
+    setMode(mode); if (next === 'library') loadLibrary(); };
   const update = (next) => {
     detail = next;
     heading.textContent = next.agent.name;
@@ -221,10 +251,8 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     picker.setSpec(avatarSpec(next.agent));
     for (const [key, state] of fields) state.sync(key === 'soul' ? next.soul_file?.soul : next.agent[key]);
     for (const [key, state] of extraFields) state.sync(next.agent[key]);
-    modelServer = next.agent.endpoint_id || '';
-    if (model.value === modelServer) modelBaseline = modelServer;
-    if (model.value === modelBaseline && document.activeElement !== model) { model.value = modelServer; modelBaseline = modelServer; }
-    modelConflict.hidden = model.value === modelBaseline || modelServer === modelBaseline;
+    model.sync(next.agent);
+    modelConflict.hidden = !model.serverChanged() || !model.isDirty();
     const sf = next.soul_file || { soul: next.agent.soul, file_text: next.agent.soul, in_sync: true, revision: next.agent.revision };
     soulDrift.hidden = sf.in_sync;
     fileText.textContent = sf.file_text === null ? '(file is missing)' : sf.file_text;
@@ -267,7 +295,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     for (const [key, state] of extraFields) if (state.value() !== state.baseline) {
       changes[key] = key === 'daily_run_cap' ? Number(state.value()) : key === 'deliver_to_channel' ? state.value() || null : state.value();
     }
-    if (model.value !== modelBaseline) changes.endpoint_id = model.value || null;
+    if (model.isDirty()) Object.assign(changes, model.get());
     if (peersDraft !== null && JSON.stringify(peersDraft) !== peersBaseline) changes.peers = peersDraft;
     if (picker.isDirty()) {
       const spec = picker.getSpec(), saved = avatarSpec(detail.agent);
@@ -282,8 +310,10 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
     const unseen = [...fields.values()].some(state => changes[state.key] !== undefined
       && (state.key === 'soul' ? fresh.soul_file?.soul : fresh.agent[state.key]) !== state.baseline && state.conflict.hidden)
       || [...extraFields.values()].some(state => changes[state.key] !== undefined
-        && (state.input.type === 'checkbox' ? !!fresh.agent[state.key] : String(fresh.agent[state.key] ?? '')) !== state.baseline && state.notice.hidden)
-      || (changes.endpoint_id !== undefined && (fresh.agent.endpoint_id || '') !== modelBaseline && modelConflict.hidden);
+        && (state.boolean ? !!fresh.agent[state.key] : String(fresh.agent[state.key] ?? '')) !== state.baseline && state.notice.hidden)
+      || (changes.endpoint_id !== undefined && JSON.stringify(model.baseline()) !== JSON.stringify({
+        endpoint_id: fresh.agent.endpoint_id || null, model_override: fresh.agent.model_override ?? null,
+        model_effort: fresh.agent.model_effort ?? null }) && modelConflict.hidden);
     if (changes.peers !== undefined && JSON.stringify([...(fresh.agent.peers || [])].sort()) !== peersBaseline) {
       peersBaseline = JSON.stringify([...(fresh.agent.peers || [])].sort());
       update(fresh); toast('Peers changed on the server. Review your selection, then save again.', 'info'); return;
@@ -300,7 +330,9 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
       detail.agent = agent;
       if (changes.soul !== undefined) detail.soul_file = { soul: agent.soul, file_text: agent.soul, in_sync: true, revision: agent.revision };
       else if (detail.soul_file) detail.soul_file.revision = agent.revision;
-      if (changes.endpoint_id !== undefined) modelBaseline = model.value;
+      // 2026-10-14: a version or effort edit can save without changing the
+      // connection; advance its baseline so the next poll cannot flag it.
+      if (['endpoint_id', 'model_override', 'model_effort'].some(key => key in changes)) model.markSaved(agent);
       if (changes.peers !== undefined) { peersBaseline = JSON.stringify(changes.peers); peersDraft = null; }
       if (changes.avatar !== undefined) picker.markSaved();
       update(detail); toast('Profile saved', 'success'); onSaved();
@@ -318,15 +350,27 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   };
   search.addEventListener('input', () => { const q = search.value.trim().toLowerCase();
     for (const [name, section] of sections) section.item.hidden = !!q && !name.toLowerCase().includes(q); });
-  const close = () => { if (!open) return; open = false; sheet.hidden = backdrop.hidden = true; opener?.focus(); };
+  let closeTimer = null;
+  const close = () => { if (!open) return; open = false;
+    sheet.classList.add('is-closing'); backdrop.classList.add('is-closing');
+    const finish = () => { sheet.hidden = backdrop.hidden = true; sheet.classList.remove('is-closing'); backdrop.classList.remove('is-closing'); closeTimer = null; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish(); else closeTimer = setTimeout(finish, 220);
+    opener?.focus(); };
   let opener = null;
-  const openSheet = () => { opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false; setTab('details'); setMode('simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
+  const openSheet = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    opener = document.activeElement; open = true; sheet.hidden = backdrop.hidden = false;
+    sheet.classList.remove('is-closing'); backdrop.classList.remove('is-closing');
+    setTab('details'); setMode('simple'); closeButton.focus(); loadPeers().catch(error => { peersChoices.textContent = `Peers could not be loaded: ${error.message}`; }); };
   closeButton.onclick = close; backdrop.onclick = close; allButton.onclick = () => setMode('all'); simpleButton.onclick = () => setMode('simple');
   detailsButton.onclick = () => setTab('details'); libraryButton.onclick = () => setTab('library');
+  simpleTabs.addEventListener('keydown', event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault(); const next = event.key === 'Home' || event.key === 'ArrowLeft' ? 'details' : 'library';
+    setTab(next); (next === 'details' ? detailsButton : libraryButton).focus(); });
   const keydown = (event) => { if (open && event.key === 'Escape') { event.preventDefault(); close(); } };
   document.addEventListener('keydown', keydown);
-  sheet.append(el('div', { class: 'agent-profile-top' }, [titlebar, simpleButton]), simpleTabs, body);
+  sheet.append(el('div', { class: 'agent-profile-top' }, [titlebar, allButton, simpleButton]), simpleTabs, body);
   body.append(details, library, all); root.append(backdrop, sheet);
   update(detail); setTab('details');
-  return { open: openSheet, update, close, dispose: () => { document.removeEventListener('keydown', keydown); sheet.remove(); backdrop.remove(); } };
+  return { open: openSheet, update, close, dispose: () => { if (closeTimer) clearTimeout(closeTimer);
+    document.removeEventListener('keydown', keydown); sheet.remove(); backdrop.remove(); } };
 }
