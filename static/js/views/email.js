@@ -4,7 +4,7 @@ import { ICONS } from "../icons.js";
 export async function render(container) {
   container.innerHTML = "";
 
-  const wrap = el("div", { class: "view-constrained" });
+  const wrap = el("div", { class: "view-constrained email-view" });
 
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
@@ -110,15 +110,20 @@ async function refreshTriage(host) {
       data.generated_at ? "Nothing important in the last day." : "No results yet — run it to see what's worth your attention." }));
   } else {
     for (const it of data.items) {
-      body.push(el("div", { style: "padding:9px 0;border-top:1px solid var(--border);" }, [
-        el("div", { class: "title", style: "font-size:12.5px;", text: it.subject || "(no subject)" }),
-        el("div", { class: "meta", style: "margin-top:2px;", text: `${it.from || ""}${it.date ? " · " + it.date : ""}` }),
-        el("div", { class: "meta", style: "margin-top:3px;color:var(--accent);", text: it.reason || "" }),
+      // Class hooks and the sender's initial are for the redesign look; the
+      // initial stays hidden (redesign-email.css) unless the redesign preview is on.
+      body.push(el("div", { class: "email-item", style: "padding:9px 0;border-top:1px solid var(--border);" }, [
+        el("span", { class: "email-item-avatar", "aria-hidden": "true", text: (String(it.from || "").match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
+        el("div", { class: "email-item-body" }, [
+          el("div", { class: "title", style: "font-size:12.5px;", text: it.subject || "(no subject)" }),
+          el("div", { class: "meta email-item-from", style: "margin-top:2px;", text: `${it.from || ""}${it.date ? " · " + it.date : ""}` }),
+          el("div", { class: "meta email-item-reason", style: "margin-top:3px;color:var(--accent);", text: it.reason || "" }),
+        ]),
       ]));
     }
   }
 
-  host.appendChild(el("div", { class: "glass bracket card" }, [
+  host.appendChild(el("div", { class: "glass bracket card email-triage-card" }, [
     el("div", { class: "card-row", style: "justify-content:space-between;align-items:flex-start;" }, [
       el("div", {}, [
         el("div", { class: "title", text: "Important today" }),
@@ -176,7 +181,7 @@ async function refresh(list, focusTarget) {
       toast("Account removed", "success");
     }, { danger: true });
 
-    const card = el("div", { class: "glass bracket card has-row-actions" }, [
+    const card = el("div", { class: "glass bracket card has-row-actions email-account" }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", text: account.email }),

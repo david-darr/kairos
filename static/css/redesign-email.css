@@ -1,0 +1,134 @@
+/* Redesign preview, step 3: Email. Loaded after redesign.css and built on its
+   --rd-* tokens. A restyle only: same markup, controls and behaviour, in the
+   Parchment & Bistre look. Every rule sits under .kairos-redesign except the
+   one noted below, so with the switch off Email is untouched. Gold stays a
+   hairline and a detail, never text. */
+
+/* The sender's initial in "Important today" exists in the markup (email.js)
+   but only the redesign shows it. This is the one rule outside the scope: it
+   keeps a new element hidden when the switch is off. */
+.email-item-avatar { display: none; }
+
+.kairos-redesign {
+  --rde-line: color-mix(in srgb, var(--point) 22%, transparent);
+  --rde-tint: color-mix(in srgb, var(--point) 14%, transparent);
+}
+
+/* -- Layout: Important today on the left, the accounts and the connect form on the right ---- */
+.kairos-redesign .email-view {
+  max-width: 1060px;
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); column-gap: 20px; row-gap: 16px; align-items: start;
+  /* The last row takes the slack, so a tall triage card never stretches the right column. */
+  grid-template-rows: auto auto auto 1fr;
+}
+.kairos-redesign .email-view > * { margin: 0 !important; min-width: 0; }
+.kairos-redesign .email-view > .view-header { grid-column: 1 / -1; padding-bottom: 6px; margin-bottom: 0; }
+.kairos-redesign .email-view > #email-triage { grid-column: 1; grid-row: 2 / 5; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel { grid-column: 2; grid-row: 2; }
+.kairos-redesign .email-view > #email-accounts-list { grid-column: 2; grid-row: 3; }
+.kairos-redesign .email-view > .view-header h2 { font-size: clamp(36px, 4.2vw, 52px); }
+.kairos-redesign .email-view > .view-header .sub { margin-top: 8px; font-size: 15px; }
+
+/* -- Important today ----------------------------------------------------------------------------- */
+.kairos-redesign .email-triage-card {
+  padding: 18px 22px 10px; background-color: var(--rd-surface); border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .email-triage-card:hover { border-color: var(--rd-line-strong); }
+.kairos-redesign .email-triage-card > .card-row { gap: 12px 16px !important; flex-wrap: wrap; padding-bottom: 6px; }
+.kairos-redesign .email-triage-card > .card-row > div > .title {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 28px; line-height: 1.1; color: var(--rd-ink);
+}
+.kairos-redesign .email-triage-card .meta { color: var(--rd-ink-dim); font-size: 12.5px; }
+.kairos-redesign .email-triage-card > .meta { padding: 10px 0 8px; font-size: 13px; }
+/* Refresh now is the page's primary action: the dark pill. */
+.kairos-redesign .email-triage-card button.btn.btn.btn.btn {
+  min-height: 40px; padding: 0 20px; font-size: 14px; background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign .email-triage-card button.btn.btn.btn.btn.btn:hover:not(:disabled) { background: var(--rd-primary-hover); border-color: transparent; }
+.kairos-redesign .email-triage-card button.btn.btn.btn.btn:disabled { opacity: .7; }
+
+.kairos-redesign .email-item {
+  display: flex; gap: 14px; padding: 14px 0 !important; border-top: 1px solid var(--rde-line) !important;
+}
+.kairos-redesign .email-item-avatar {
+  flex: 0 0 36px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--rd-surface-2); color: var(--rd-ink); font-size: 14px; font-weight: 500;
+}
+.kairos-redesign .email-item-body { flex: 1; min-width: 0; }
+.kairos-redesign .email-item .title { font-size: 15px !important; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.kairos-redesign .email-item-from { margin-top: 2px !important; font-size: 13px; color: var(--rd-ink-dim); }
+.kairos-redesign .email-item-reason {
+  display: inline-block; margin-top: 6px !important; padding: 4px 10px; border-radius: 8px; background: var(--rde-tint);
+  color: var(--rd-ink) !important; font-size: 13px; line-height: 1.4;
+}
+.kairos-redesign .email-triage-card .meta[style*="--danger"] { color: var(--danger) !important; }
+
+/* -- Connect an account ---------------------------------------------------------------------------- */
+.kairos-redesign .email-view.email-view > details.disclosure-panel {
+  padding: 14px 18px; background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .email-view.email-view > details.disclosure-panel:not([open]) { align-self: start; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 36px; margin: 0; padding: 0;
+  border: 0; border-radius: 10px; background: transparent; color: var(--rd-ink); font-size: 14px; font-weight: 500; cursor: pointer; list-style: none;
+}
+.kairos-redesign .email-view.email-view > details.disclosure-panel > summary:hover { background: transparent; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel > summary::after {
+  content: ""; flex: none; width: 8px; height: 8px; margin-right: 4px; border-right: 1.5px solid var(--rd-ink-dim); border-bottom: 1.5px solid var(--rd-ink-dim);
+  transform: rotate(45deg); transition: transform 160ms var(--ease-out);
+}
+.kairos-redesign .email-view.email-view > details.disclosure-panel[open] > summary::after { transform: rotate(-135deg); margin-top: 4px; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel > summary:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel[open] > summary { margin-bottom: 12px; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid {
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); gap: 10px 8px; align-items: end; margin-bottom: 10px !important;
+}
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid:first-of-type { grid-template-columns: minmax(0, 1fr); }
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > .field { flex: none; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > .btn { grid-column: 1 / -1; justify-self: start; margin-top: 4px; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel .field > label { font-size: 12px; letter-spacing: 0; color: var(--rd-ink-dim); }
+.kairos-redesign .email-view.email-view > details.disclosure-panel :is(input:not([type=checkbox]), select) { min-height: 38px; width: 100%; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > button.btn.btn.btn.btn {
+  min-height: 38px; padding: 0 18px; font-size: 13px; background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > button.btn.btn.btn.btn.btn:hover:not(:disabled) { background: var(--rd-primary-hover); border-color: transparent; }
+
+/* -- Connected accounts ------------------------------------------------------------------------------ */
+.kairos-redesign #email-accounts-list::before {
+  content: "Connected accounts"; display: block; margin: 0 2px 8px; font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+  text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8);
+}
+.kairos-redesign .email-account { padding: 14px 18px; margin: 0 0 10px; border-radius: var(--rd-radius-card); }
+.kairos-redesign .email-account > .card-row { flex-direction: column; align-items: stretch; gap: 10px; }
+.kairos-redesign .email-account .title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.kairos-redesign .email-account .meta { color: var(--rd-ink-dim); font-size: 12px; overflow-wrap: anywhere; }
+.kairos-redesign .email-account .meta:first-of-type { font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace); }
+.kairos-redesign .email-account > .card-row > .card-row { justify-content: flex-start; flex-wrap: wrap; gap: 6px !important; }
+.kairos-redesign .email-account .btn { min-height: 32px; padding: 0 14px; font-size: 12px; }
+.kairos-redesign .email-account .row-actions { opacity: 1; }
+.kairos-redesign #email-accounts-list > .empty-state-rich {
+  padding: 28px 20px; background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign #email-accounts-list .empty-state-title { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; color: var(--rd-ink); }
+.kairos-redesign #email-accounts-list .empty-state-hint { color: var(--rd-ink-dim); }
+.kairos-redesign #email-accounts-list .empty-state-icon { opacity: .7; color: var(--rd-ink-dim); }
+.kairos-redesign #email-accounts-list .empty-state-rich .btn { min-height: 38px; padding: 0 18px; font-size: 13px; }
+
+/* -- Phones ---------------------------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .kairos-redesign .email-view { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .kairos-redesign .email-view > #email-triage,
+  .kairos-redesign .email-view.email-view > details.disclosure-panel,
+  .kairos-redesign .email-view > #email-accounts-list { grid-column: 1; grid-row: auto; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign .email-triage-card { padding: 16px 16px 8px; }
+  .kairos-redesign .email-triage-card > .card-row > div > .title { font-size: 26px; }
+  .kairos-redesign .email-triage-card button.btn.btn.btn.btn { min-height: 44px; }
+  .kairos-redesign .email-view.email-view > details.disclosure-panel { padding: 12px 16px; }
+  .kairos-redesign .email-view.email-view > details.disclosure-panel > summary { min-height: 44px; }
+  .kairos-redesign .email-view.email-view > details.disclosure-panel :is(input:not([type=checkbox]), select) { min-height: 44px; font-size: 16px; }
+  .kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > button.btn.btn.btn.btn { min-height: 44px; }
+  .kairos-redesign .email-account .btn { min-height: 40px; }
+}

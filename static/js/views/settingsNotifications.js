@@ -1,10 +1,13 @@
 import { api, el } from '../api.js';
-import { pageHeader, group, row, note, toggle } from '../settingsKit.js';
+import { group, row, note, toggle } from '../settingsKit.js';
 import { supportReason, registration, currentDevice, enableNotifications, disableNotifications } from '../mobileNotifications.js';
 import { prefs as botPrefs, savePrefs as saveBotPrefs } from '../botNotifications.js';
 
 export async function renderNotificationsPanel(container) {
-  container.replaceChildren(pageHeader('Notifications', 'Know when a chat finishes, or a bot needs you, even after you leave Kairos.'));
+  // The Settings shell already draws the page title; this panel only adds its own description.
+  const intro = note('Know when a chat finishes, or a bot needs you, even after you leave Kairos.');
+  intro.style.marginBottom = '14px';
+  container.replaceChildren(intro);
   container.append(await botsGroup());
   // Phone and browser push needs HTTPS Remote Access; desktop notifications
   // above do not, so a missing connection no longer hides them (2026-10-14).

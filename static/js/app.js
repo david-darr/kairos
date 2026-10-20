@@ -617,6 +617,7 @@ async function startApp() {
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
   floatingProgress.init({ switchTab });
+  import('./redesignShell.js').then(shell => shell.init()).catch(() => {}); // the redesign preview's sidebar row; inert with the switch off
   await chatStream.connect();
   notificationRegistration().catch(() => {});
   const openNotificationChat = async url => {

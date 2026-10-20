@@ -4,6 +4,7 @@ import { ICONS } from "../icons.js";
 import { mountDither } from "../dither.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
+import { mountRedesignHome } from "../redesignHome.js";
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
 
 const navigate = (tab, options = {}) => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab, ...options } }));
@@ -172,8 +173,10 @@ export function render(container, tabId, options = {}) {
   }
   for (const [id, panel] of Object.entries(parts)) panel.dataset.homeSection = id;
   const grid = el("div", { class: "dashboard-grid" });
+  let redesign = null;  // redesignHome.js, only drawing while the redesign preview is on
   const arrange = () => {
     const { order, hidden } = homeLayout();
+    if (redesign?.arrange(order, hidden)) return;
     grid.replaceChildren(...order.filter((id) => parts[id] && !hidden.includes(id)).map((id) => parts[id]));
   };
   arrange();
@@ -214,6 +217,8 @@ export function render(container, tabId, options = {}) {
   }
   // Each request fills its own card. Quota or store reads cannot hold up chats.
   const data = {};
+  redesign = mountRedesignHome({ container, content, hero, header, grid, parts, data: () => data, refresh: () => refresh(), rearrange: () => arrange() });
+  arrange();
   const statSpecs = [
     ["sessions", "chats", "chat"], ["notes", "open notes", "notes"],
     ["tasks", "automations on", "tasks"], ["events", "this week", "calendar"],
@@ -417,6 +422,7 @@ export function render(container, tabId, options = {}) {
     }
     if (["skills", "integrations", "tabs", "catalog"].includes(key)) drawStore();
     content.classList.add("is-filled");
+    redesign?.update(key);
   }
 
   async function refresh() {
@@ -463,5 +469,5 @@ export function render(container, tabId, options = {}) {
   document.addEventListener("jarvis:tabs-changed", refresh);
   const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
 }

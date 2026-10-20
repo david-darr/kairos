@@ -237,7 +237,7 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
   ]);
   // The shared dialog footer, as confirmDialog uses; .row-actions is hover-revealed.
   const dialog = openPanelDialog({ title: 'Delete this event?', body, footer: el('div', {}, [cancel, remove]),
-    className: 'confirm-panel', owner, opener: document.activeElement, group: 'calendar-delete' });
+    className: 'confirm-panel cal-delete-dialog', owner, opener: document.activeElement, group: 'calendar-delete' });
   cancel.onclick = () => dialog.close();
   remove.onclick = async () => {
     remove.disabled = true;
@@ -261,16 +261,19 @@ export function weekGrid(grid, start, items, selectDay, edit) {
   for (let hour = 0; hour < 24; hour++) hours.append(el('span', { text: hourLabel(hour), style: `top:${hour * 42}px` }));
   timeline.append(hours);
   const today = new Date();
+  // Class hooks only (restyle): the source of each item and today's column.
+  const source = item => ` cal-src-${item.source || 'event'}`;
   for (let day = 0; day < 7; day++) {
     const date = new Date(start); date.setDate(date.getDate() + day);
     const next = new Date(date); next.setDate(next.getDate() + 1);
     const dayItems = itemsOnDay(items, date);
-    const cell = el('div', { class: 'cal-week-heading' }, [el('button', { type: 'button', class: 'btn quiet',
+    const isToday = date.toDateString() === today.toDateString();
+    const cell = el('div', { class: 'cal-week-heading' + (isToday ? ' is-today' : '') }, [el('button', { type: 'button', class: 'btn quiet',
       text: date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }), onclick: () => selectDay(date, dayItems) })]);
-    for (const item of dayItems.filter(item => item.all_day)) cell.append(eventColor(el('button', { type: 'button', class: 'cal-event-pill', text: item.title,
+    for (const item of dayItems.filter(item => item.all_day)) cell.append(eventColor(el('button', { type: 'button', class: 'cal-event-pill' + source(item), text: item.title,
       onclick: () => edit(item, date, dayItems) }), item));
     header.append(cell);
-    const column = el('div', { class: 'cal-week-day', 'aria-label': date.toDateString() });
+    const column = el('div', { class: 'cal-week-day' + (isToday ? ' is-today' : ''), 'aria-label': date.toDateString() });
     const minutes = stamp => stamp <= date ? 0 : stamp >= next ? 1440 : stamp.getHours() * 60 + stamp.getMinutes();
     const events = dayItems.filter(item => !item.all_day).map(item => ({ item, from: minutes(new Date(item.start)),
       to: minutes(item.end ? new Date(item.end) : new Date(new Date(item.start).getTime() + 1800000)) })).sort((a, b) => a.from - b.from);
@@ -281,13 +284,13 @@ export function weekGrid(grid, start, items, selectDay, edit) {
       lanes[lane] = Math.max(event.from + 15, event.to); event.lane = lane;
     }
     for (const event of events) {
-      const node = eventColor(el('button', { type: 'button', class: 'cal-week-event', text: event.item.title, title: event.item.title,
+      const node = eventColor(el('button', { type: 'button', class: 'cal-week-event' + source(event.item), text: event.item.title, title: event.item.title,
         onclick: () => edit(event.item, date, dayItems) }), event.item);
       node.style.top = `${event.from * .7}px`; node.style.height = `${Math.max(18, (event.to - event.from) * .7)}px`;
       node.style.left = `${event.lane * 100 / lanes.length}%`; node.style.width = `${100 / lanes.length}%`;
       column.append(node);
     }
-    if (date.toDateString() === today.toDateString()) column.append(el('div', { class: 'cal-today-line', 'aria-label': 'Current time', style: `top:${(today.getHours() * 60 + today.getMinutes()) * .7}px` }));
+    if (isToday) column.append(el('div', { class: 'cal-today-line', 'aria-label': 'Current time', style: `top:${(today.getHours() * 60 + today.getMinutes()) * .7}px` }));
     timeline.append(column);
   }
   grid.replaceChildren(header, timeline);

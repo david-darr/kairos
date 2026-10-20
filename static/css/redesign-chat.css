@@ -1,0 +1,73 @@
+/* Redesign preview: chat. Every rule scoped under .kairos-redesign.
+   redesignChat.js (desktop only, switch on) moves the model picker into the
+   composer and dresses the conversations button; phones and the switch-off
+   state keep the layout in interface.css untouched. */
+
+@media (min-width: 769px) {
+  /* -- Conversations button ------------------------------------------------- */
+  .kairos-redesign .chat-mobile-header.rd-chat-header { align-items: center; gap: 14px; }
+  .kairos-redesign .rd-chat-header #chat-history-toggle {
+    flex: none; width: auto; max-width: 260px; height: 44px; padding: 0 14px 0 14px; gap: 9px;
+    border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill);
+    background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+    color: var(--rd-ink); font-family: var(--rd-font-ui); font-size: 13.5px; font-weight: 500;
+    cursor: pointer; transition: background .16s ease, color .16s ease, border-color .16s ease;
+  }
+  .kairos-redesign .rd-chat-header #chat-history-toggle:hover { background: var(--rd-surface-2); border-color: var(--rd-ink-faint); }
+  .kairos-redesign .rd-chat-header #chat-history-toggle:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .rd-chat-header #chat-history-toggle :is(.conversation-mark, .conversation-copy) { display: none; }
+  .kairos-redesign .rd-conv-icon { display: inline-flex; flex: none; color: currentColor; }
+  .kairos-redesign .rd-conv-label { flex: none; white-space: nowrap; }
+  .kairos-redesign .rd-conv-count {
+    flex: none; min-width: 22px; height: 22px; padding: 0 7px; display: inline-grid; place-items: center;
+    border-radius: var(--rd-radius-pill); font-size: 11px; font-weight: 600; line-height: 1;
+    background: color-mix(in srgb, var(--rd-ink) 10%, transparent); color: var(--rd-ink-dim);
+  }
+  .kairos-redesign .rd-conv-count[hidden] { display: none; }
+  .kairos-redesign .rd-chat-header #chat-history-toggle > svg:last-child {
+    width: 10px; height: 10px; color: var(--rd-ink-faint); transition: transform .2s ease;
+  }
+  /* Open: the pill turns to the dark primary, and the chevron flips. */
+  .kairos-redesign .rd-chat-header #chat-history-toggle[aria-expanded="true"] {
+    background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+  }
+  .kairos-redesign .rd-chat-header #chat-history-toggle[aria-expanded="true"]:hover { background: var(--rd-primary-hover); }
+  .kairos-redesign .rd-chat-header #chat-history-toggle[aria-expanded="true"] .rd-conv-count {
+    background: color-mix(in srgb, var(--rd-primary-fg) 22%, transparent); color: var(--rd-primary-fg);
+  }
+  .kairos-redesign .rd-chat-header #chat-history-toggle[aria-expanded="true"] > svg:last-child {
+    transform: rotate(90deg); color: var(--rd-primary-fg);
+  }
+  .kairos-redesign .rd-chat-header #chat-history-toggle[aria-expanded="false"] > svg:last-child { transform: rotate(-90deg); }
+  /* The chat's own title, now beside the button instead of inside it. */
+  .kairos-redesign .rd-chat-title {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-family: var(--rd-font-title); font-style: italic; font-size: 24px; line-height: 1.2; color: var(--rd-ink);
+  }
+  /* The goo morph clones the button; give the clone the same shape. */
+  .kairos-redesign .chat-history-goo-title {
+    height: 44px; padding: 0 14px; gap: 9px; font-family: var(--rd-font-ui); font-size: 13.5px; font-weight: 500;
+  }
+  .kairos-redesign .chat-history-goo-title :is(.conversation-mark, .conversation-copy) { display: none; }
+  .kairos-redesign .chat-history-goo-title .rd-conv-count { background: color-mix(in srgb, var(--rd-ink) 10%, transparent); }
+
+  /* -- Model picker in the prompt bar --------------------------------------- */
+  .kairos-redesign .chat-input-right { align-items: center; gap: 8px; }
+  .kairos-redesign .chat-header-model.model-pill.rd-in-composer {
+    flex: 0 1 auto; height: 40px; max-width: 250px; min-width: 0;
+    border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill);
+    background: color-mix(in srgb, var(--rd-ink) 5%, transparent); box-shadow: none;
+  }
+  .kairos-redesign .rd-in-composer .model-picker-wrap { height: 100%; }
+  .kairos-redesign .rd-in-composer .model-picker-btn {
+    height: 100%; min-height: 0; padding: 0 12px; font-family: var(--rd-font-ui); font-size: 12.5px; font-weight: 500; color: var(--rd-ink);
+    border-radius: var(--rd-radius-pill); background: transparent;
+  }
+  .kairos-redesign .rd-in-composer .model-picker-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--rd-ink) 8%, transparent); }
+  .kairos-redesign .rd-in-composer .model-picker-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .rd-in-composer .model-picker-btn:disabled { opacity: .55; }
+  .kairos-redesign .rd-in-composer .model-picker-menu {
+    z-index: 90; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-field);
+    background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+  }
+}

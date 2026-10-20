@@ -22,6 +22,7 @@ import { mountChatReferences, renderReferenceChips } from '../chatReferences.js'
 import { mountChatTimeline } from '../chatTimeline.js';
 import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
+import { mountRedesignChat } from '../redesignChat.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -1108,6 +1109,7 @@ export async function render(container, tabId, options = {}) {
   syncBeam();
 
   container.append(sessionsPanel, sessionsBackdrop, main);
+  const redesignChat = mountRedesignChat(container);  // redesignChat.js; inert with the preview off
   // A second chat beside this one (static/js/sideChat.js).
   const disposeSideChat = mountSideChat(container, {
     mainSessionId: () => activeSessionId,
@@ -1242,6 +1244,7 @@ export async function render(container, tabId, options = {}) {
     disposed = true;
     document.removeEventListener('kairos:models-changed', onModelsChanged);
     handoffs.dispose();
+    redesignChat.dispose();
     disposeSideChat();
     backdrop.dispose();
     if (activeBackdrop === backdrop) activeBackdrop = null;

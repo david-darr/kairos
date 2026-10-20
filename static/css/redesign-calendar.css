@@ -1,0 +1,268 @@
+/* Redesign preview, step 3: Calendar. Loaded after redesign.css and built on
+   its --rd-* tokens. A restyle only: same markup, controls and behaviour, in
+   the Parchment & Bistre look. Every rule sits under .kairos-redesign, so with
+   the switch off Calendar is untouched. Gold stays a hairline and a detail,
+   never text. */
+
+/* The Month/Week wrapper exists in the markup (calendar.js) but only the
+   redesign draws it. This is the one rule outside the scope: it keeps the
+   wrapper layout-neutral when the switch is off. */
+.cal-view-switch { display: contents; }
+
+.kairos-redesign {
+  --rdc-line: color-mix(in srgb, var(--point) 22%, transparent);
+  --rdc-line-soft: color-mix(in srgb, var(--point) 15%, transparent);
+  --rdc-today: color-mix(in srgb, var(--point) 9%, transparent);
+  --rdc-selected: color-mix(in srgb, var(--point) 20%, transparent);
+  /* The four kinds of item, as in the design: personal Google calendars and
+     team calendars take their own calendar color; Kairos events are powder
+     blue; notes due are a dashed gold outline. */
+  --rdc-kairos-fill: color-mix(in srgb, var(--k-powder) 34%, var(--rd-surface-solid));
+  --rdc-kairos-line: color-mix(in srgb, var(--k-powder) 80%, var(--rd-ink) 20%);
+  --rdc-note-line: var(--point);
+}
+
+/* -- Layout ---------------------------------------------------------------------
+   The header, the Add button, the navigation and the grid share one grid so the
+   title row carries the actions, as in the design. */
+.kairos-redesign .cal-layout { gap: 24px; }
+.kairos-redesign .cal-left {
+  flex: 1 1 0; min-width: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-content: start; column-gap: 8px;
+}
+.kairos-redesign .cal-left > .view-header { display: contents; }
+.kairos-redesign .cal-left > .view-header > div { grid-column: 1; align-self: end; padding-bottom: 18px; }
+.kairos-redesign .cal-left > .view-header .cal-calendars-trigger { grid-column: 2; grid-row: 1; align-self: end; margin-bottom: 18px; }
+.kairos-redesign .cal-left > .cal-create-bar { grid-column: 3; grid-row: 1; align-self: end; margin: 0 0 18px; }
+.kairos-redesign .cal-left > .cal-nav { grid-column: 1 / -1; }
+.kairos-redesign .cal-left > .cal-grid { grid-column: 1 / -1; }
+.kairos-redesign .cal-left > .view-header h2 { font-size: clamp(36px, 4.2vw, 52px); }
+.kairos-redesign .cal-left > .view-header .sub { margin-top: 6px; font-size: 15px; }
+
+/* Header buttons: 44px pills */
+.kairos-redesign .cal-calendars-trigger,
+.kairos-redesign .cal-create-bar .btn { min-height: 44px; padding: 0 20px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.kairos-redesign .cal-calendars-trigger svg { width: 16px; height: 16px; }
+
+/* -- Navigation -------------------------------------------------------------------- */
+.kairos-redesign .cal-nav { gap: 8px 10px; margin: 0 0 14px; align-items: center; }
+.kairos-redesign .cal-nav > .btn { min-height: 38px; padding: 0 14px; font-size: 13px; border-color: var(--rd-line-strong); }
+/* Prev, Today and Next read as one joined group; the period label follows it
+   (order only, so the keyboard order is unchanged). */
+.kairos-redesign .cal-nav > .cal-month-label { order: 1; }
+.kairos-redesign .cal-nav > .cal-view-switch { order: 2; }
+.kairos-redesign .cal-nav > .btn:last-child { order: 3; }
+.kairos-redesign .cal-nav > .btn:nth-child(1) { border-radius: 999px 0 0 999px; padding-left: 16px; }
+.kairos-redesign .cal-nav > .btn:nth-child(2) { border-radius: 0; margin-left: -11px; }
+.kairos-redesign .cal-nav > .btn:nth-child(4) { border-radius: 0 999px 999px 0; margin-left: -11px; padding-right: 16px; }
+.kairos-redesign .cal-nav > .btn:nth-child(2):hover,
+.kairos-redesign .cal-nav > .btn:nth-child(4):hover { z-index: 1; }
+.kairos-redesign .cal-nav > .btn:focus-visible { z-index: 2; }
+.kairos-redesign .cal-month-label {
+  min-width: 0; padding: 0 6px; font-size: 18px; font-weight: 500; color: var(--rd-ink);
+  text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8);
+}
+/* Month and Week: one rounded tray, a raised surface pill on the selected half.
+   The repeated .btn lifts these over the shared secondary-pill rule in
+   redesign.css and the Month/Week accent rule in style.css. */
+.kairos-redesign .cal-view-switch {
+  display: inline-flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px;
+  background: color-mix(in srgb, var(--rd-ink) 7%, var(--rd-surface-solid)); border: 1px solid var(--rd-line);
+}
+.kairos-redesign .cal-view-switch > button.btn.btn.btn.btn {
+  height: 32px; min-height: 32px; margin: 0; padding: 0 16px; border: 0; border-radius: 999px; box-shadow: none;
+  background: transparent; color: var(--rd-ink-dim); font-size: 13px; font-weight: 400;
+}
+.kairos-redesign .cal-view-switch > button.btn.btn.btn.btn.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rd-ink) 8%, transparent); color: var(--rd-ink); border: 0;
+}
+.kairos-redesign .cal-view-switch > button.btn.btn.btn.btn[aria-pressed="true"] {
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 3px rgba(var(--shade-rgb), .18);
+}
+.kairos-redesign .cal-view-switch > button.btn.btn.btn.btn.btn[aria-pressed="true"]:hover:not(:disabled) { background: var(--rd-surface-solid); }
+.kairos-redesign .cal-view-switch > button.btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+
+/* -- Month grid ---------------------------------------------------------------------- */
+.kairos-redesign .cal-grid {
+  background: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: 16px; box-shadow: var(--rd-shadow);
+  gap: 0; overflow: hidden;
+}
+.kairos-redesign .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(6, minmax(92px, 1fr)); }
+.kairos-redesign .cal-weekday {
+  background: transparent; padding: 10px 10px; text-align: left; border-bottom: 1px solid var(--rdc-line);
+  font-size: var(--rd-label-size); letter-spacing: .12em; text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .cal-day {
+  background: transparent; min-height: 0; padding: 6px; gap: 3px; border-radius: 0; box-shadow: none;
+  border-right: 1px solid var(--rdc-line-soft); border-bottom: 1px solid var(--rdc-line-soft); color: var(--rd-ink);
+}
+.kairos-redesign .cal-day:nth-child(7n + 8) { border-right: 0; }
+.kairos-redesign .cal-day:hover { background: rgba(var(--ink-rgb), .035); }
+.kairos-redesign .cal-day.other-month { opacity: 1; color: var(--rd-ink-faint); }
+.kairos-redesign .cal-day.other-month .cal-event-pill { opacity: .7; }
+.kairos-redesign .cal-day.today { background: var(--rdc-today); box-shadow: none; }
+.kairos-redesign .cal-day.selected { background: var(--rdc-selected); box-shadow: inset 0 0 0 1.5px var(--rd-line-strong); }
+.kairos-redesign .cal-day:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+.kairos-redesign .cal-day-num { align-self: flex-start; padding: 2px 4px; font-size: 12px; color: inherit; }
+.kairos-redesign .cal-day.today .cal-day-num {
+  width: 24px; height: 24px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-weight: 500;
+}
+
+/* -- Item pills and blocks (month pills, all-day chips, week blocks) --------------------- */
+.kairos-redesign :is(.cal-event-pill, .cal-week-event) {
+  color: var(--rd-ink); border: 1px solid transparent; border-radius: 6px; font-family: var(--rd-font-ui);
+}
+.kairos-redesign .cal-event-pill { font-size: 11px; padding: 2px 6px; }
+.kairos-redesign :is(.cal-event-pill, .cal-week-event):is(.event, .cal-src-calendar, .cal-src-tab, .cal-src-event) {
+  background: var(--rdc-kairos-fill); border-color: var(--rdc-kairos-line);
+}
+.kairos-redesign :is(.cal-event-pill, .cal-week-event):is(.note, .cal-src-note) {
+  background: transparent; border: 1px dashed var(--rdc-note-line); color: var(--rd-ink);
+}
+.kairos-redesign :is(.cal-event-pill, .cal-week-event).cal-google-event {
+  background: color-mix(in srgb, var(--calendar-color) 22%, var(--rd-surface-solid));
+  border: 1px solid color-mix(in srgb, var(--calendar-color) 55%, transparent);
+  border-left: 4px solid var(--calendar-color); color: var(--rd-ink);
+}
+.kairos-redesign .cal-event-pill.overflow { background: none; border: 0; color: var(--rd-ink-dim); padding: 2px 6px 0; }
+.kairos-redesign .cal-event-pill.completed { opacity: .55; }
+
+/* -- Week view ---------------------------------------------------------------------------- */
+.kairos-redesign .cal-week-grid { max-height: min(640px, calc(100dvh - 250px)); min-height: 420px; }
+.kairos-redesign .cal-week-header { background: var(--rd-surface-solid); border-bottom: 1px solid var(--rdc-line); }
+.kairos-redesign .cal-week-header > span {
+  padding: 22px 8px 0 0; text-align: right; font-size: 11px; color: var(--rd-ink-faint);
+}
+.kairos-redesign .cal-week-heading { border-left: 1px solid var(--rdc-line-soft); padding: 8px 4px 6px; display: flex; flex-direction: column; gap: 4px; }
+.kairos-redesign .cal-week-heading .btn.quiet {
+  min-height: 32px; padding: 0 8px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--rd-ink); width: auto; align-self: center;
+}
+.kairos-redesign .cal-week-heading .btn.quiet:hover:not(:disabled) { background: rgba(var(--ink-rgb), .06); }
+.kairos-redesign .cal-week-heading.is-today .btn.quiet { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+.kairos-redesign .cal-week-heading .cal-event-pill { width: 100%; text-align: left; cursor: pointer; }
+.kairos-redesign .cal-week-hours span { font-size: 11px; color: var(--rd-ink-faint); right: 8px; transform: translateY(-6px); }
+.kairos-redesign .cal-week-hours { text-align: right; }
+.kairos-redesign .cal-week-hours span:first-child { transform: none; }
+.kairos-redesign .cal-week-day {
+  border-left: 1px solid var(--rdc-line-soft);
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 41px, var(--rdc-line-soft) 41px, var(--rdc-line-soft) 42px);
+}
+.kairos-redesign .cal-week-day.is-today { background-color: var(--rdc-today); }
+.kairos-redesign .cal-week-event { padding: 3px 8px; border-radius: 8px; font-size: 12px; line-height: 1.35; cursor: pointer; }
+.kairos-redesign .cal-week-event:hover { filter: brightness(.97); }
+.kairos-redesign .cal-week-event:focus-visible,
+.kairos-redesign .cal-week-heading .cal-event-pill:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+.kairos-redesign .cal-today-line { border-top-color: var(--danger); }
+.kairos-redesign .cal-today-line::before {
+  content: ""; position: absolute; left: -5px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger);
+}
+
+/* -- The day panel: Next 7 Days, or the chosen day ----------------------------------------- */
+.kairos-redesign .cal-day-panel {
+  flex: 0 0 clamp(290px, 27%, 380px); min-width: 0; padding: 24px 22px 22px;
+  background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .cal-day-panel-title {
+  margin-bottom: 14px; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 28px; line-height: 1.1; color: var(--rd-ink);
+}
+.kairos-redesign .cal-upcoming-day-label {
+  margin: 18px 0 2px; font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking);
+  text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .cal-day-panel .empty-state { padding: 24px 0; color: var(--rd-ink-dim); }
+/* Items are flat rows divided by hairlines, not stacked cards */
+.kairos-redesign .cal-day-panel .card {
+  margin: 0; padding: 10px 0; background: transparent; border: 0; border-top: 1px solid var(--rdc-line-soft); border-radius: 0; box-shadow: none;
+}
+.kairos-redesign .cal-day-panel .card:hover { border-top-color: var(--rdc-line-soft); }
+.kairos-redesign .cal-day-panel .card .title { font-size: 14px; }
+.kairos-redesign .cal-day-panel .card .meta { margin-top: 2px; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .cal-day-panel .card.cal-google-event {
+  border-left: 3px solid var(--calendar-color); padding-left: 10px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: start;
+}
+.kairos-redesign .cal-day-panel .card.cal-google-event > :is(.title, .meta) { grid-column: 1; }
+.kairos-redesign .cal-day-panel .card.cal-google-event > .row-actions { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+.kairos-redesign .cal-day-panel .card input[type=checkbox] { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--rd-focus); align-self: flex-start; }
+.kairos-redesign .cal-day-panel .card .card-row { align-items: flex-start; gap: 10px; }
+.kairos-redesign .cal-day-panel .card .btn.quiet { min-height: 30px; padding: 0 10px; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .cal-day-panel .card-row > .meta { margin-top: 3px; white-space: nowrap; }
+
+/* -- Dialogs: event editor, delete, Google calendars, archive ---------------------------------- */
+.kairos-redesign .modal-backdrop:has(> :is(.cal-event-dialog, .cal-calendars-dialog, .cal-delete-dialog, .cal-archive-panel)) { background: rgba(var(--shade-rgb), .32); }
+.kairos-redesign :is(.cal-event-dialog, .cal-calendars-dialog, .cal-delete-dialog, .cal-archive-panel) {
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); border-radius: 20px; box-shadow: 0 24px 70px rgba(var(--shade-rgb), .28);
+  color: var(--rd-ink);
+}
+.kairos-redesign .cal-event-dialog { padding: 22px 24px; }
+.kairos-redesign :is(.cal-event-dialog > h3, .cal-archive-panel > h4) {
+  margin: 0 0 16px; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 28px; line-height: 1.1; color: var(--rd-ink);
+}
+.kairos-redesign .cal-archive-panel > h4 { align-items: flex-start; }
+.kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog) .modal-header { margin: 0; align-items: center; line-height: 1.15; }
+.kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog) .modal-header > span {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 28px; line-height: 1.15; color: var(--rd-ink);
+}
+.kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog, .cal-archive-panel) .modal-close-btn {
+  width: 36px; height: 36px; display: grid; place-items: center; flex: none; font-size: 20px; line-height: 1; border-radius: 10px; color: var(--rd-ink-dim);
+}
+.kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog, .cal-archive-panel) .modal-close-btn:hover { background: var(--rd-surface-2); color: var(--rd-ink); }
+.kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog, .cal-archive-panel) .modal-close-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+.kairos-redesign :is(.cal-event-dialog, .cal-calendars-dialog, .cal-delete-dialog) .field > label,
+.kairos-redesign .cal-event-dialog .cal-checkbox-label {
+  font-size: 12px; letter-spacing: 0; color: var(--rd-ink-dim);
+}
+.kairos-redesign .cal-event-dialog .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; align-items: start; }
+.kairos-redesign .cal-event-dialog .form-grid > :is(.field-grow, .cal-checkbox-label, .field:has([aria-label=Location])) { grid-column: 1 / -1; }
+.kairos-redesign .cal-event-dialog .form-grid > [hidden] { display: none; }
+.kairos-redesign .cal-event-dialog [data-repeat-controls] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; padding: 0; }
+.kairos-redesign .cal-event-dialog [data-repeat-controls] > .field-grow { grid-column: 1 / -1; }
+.kairos-redesign .cal-event-dialog [data-repeat-controls][hidden] { display: none; }
+.kairos-redesign .cal-event-dialog input:not([type=checkbox]), .kairos-redesign .cal-event-dialog select { min-height: 38px; }
+.kairos-redesign .cal-event-dialog .row-actions { gap: 8px; margin-top: 16px; }
+.kairos-redesign .cal-event-dialog [role=status]:not(:empty) { margin-top: 10px; color: var(--danger); }
+.kairos-redesign .cal-event-dialog .btn { min-height: 40px; padding: 0 18px; font-size: 14px; }
+.kairos-redesign .cal-event-dialog .btn.quiet { background: transparent; border-color: transparent; color: var(--rd-ink-dim); }
+.kairos-redesign .cal-delete-dialog .btn.danger { background: var(--danger); border-color: transparent; color: var(--rd-surface-solid); }
+.kairos-redesign .cal-delete-dialog .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 86%, var(--rd-ink)); border-color: transparent; }
+.kairos-redesign .cal-delete-dialog [role=status]:not(:empty) { color: var(--danger); }
+.kairos-redesign .cal-calendars-dialog .cal-calendar-choice {
+  border: 1px solid var(--rd-line); border-radius: 12px; background: var(--rd-surface-solid);
+}
+.kairos-redesign .cal-calendar-choice.cal-google-event { border-left: 4px solid var(--calendar-color); }
+.kairos-redesign .cal-calendars-dialog .cal-calendar-choice input { accent-color: var(--rd-focus); }
+.kairos-redesign .cal-archive-panel .muted { color: var(--rd-ink-dim); }
+.kairos-redesign .cal-archive-panel .card-row { padding: 10px 0; margin-top: 0 !important; border-top: 1px solid var(--rdc-line-soft); }
+.kairos-redesign .cal-archive-panel .card-row .title { font-size: 14px !important; }
+.kairos-redesign .cal-archive-panel .card-row .meta { color: var(--rd-ink-dim); }
+
+/* -- Phones ---------------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign .cal-layout { gap: 14px; }
+  .kairos-redesign .cal-left { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 8px; }
+  .kairos-redesign .cal-left > .view-header > div { grid-column: 1 / -1; padding-bottom: 12px; }
+  .kairos-redesign .cal-left > .view-header .cal-calendars-trigger { grid-column: 1; grid-row: 2; margin-bottom: 14px; justify-content: center; align-self: stretch; padding: 0 12px; }
+  .kairos-redesign .cal-left > .cal-create-bar { grid-column: 2; grid-row: 2; margin-bottom: 14px; align-self: stretch; display: flex; }
+  .kairos-redesign .cal-create-bar .btn { flex: 1; justify-content: center; padding: 0 12px; }
+  .kairos-redesign .cal-nav > .btn { min-height: 44px; height: 44px; }
+  .kairos-redesign .cal-nav { gap: 8px; }
+  .kairos-redesign .cal-month-label { flex: 1 0 100%; text-align: left; padding: 2px 4px 0; }
+  .kairos-redesign .cal-view-switch > button.btn.btn.btn.btn { height: 38px; min-height: 38px; }
+  .kairos-redesign .cal-nav > .btn:nth-child(2), .kairos-redesign .cal-nav > .btn:nth-child(4) { margin-left: -9px; }
+  .kairos-redesign .cal-nav > .btn:last-child { margin-left: auto; }
+  .kairos-redesign .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(6, minmax(66px, 1fr)); }
+  .kairos-redesign .cal-weekday { padding: 8px 2px; text-align: center; letter-spacing: .06em; }
+  .kairos-redesign .cal-day { padding: 3px; }
+  .kairos-redesign .cal-day-num { padding: 2px; }
+  .kairos-redesign .cal-day.today .cal-day-num { width: 22px; height: 22px; }
+  .kairos-redesign .cal-event-pill { font-size: 10px; padding: 1px 3px; }
+  .kairos-redesign .cal-week-grid { max-height: min(520px, calc(100dvh - 300px)); }
+  .kairos-redesign .cal-day-panel { flex: none; width: 100%; padding: 20px 18px; }
+  .kairos-redesign .cal-day-panel-title { font-size: 26px; }
+  .kairos-redesign .cal-event-dialog .form-grid,
+  .kairos-redesign .cal-event-dialog [data-repeat-controls] { grid-template-columns: 1fr; }
+  .kairos-redesign .cal-event-dialog { border-radius: 0; padding: 20px 16px; }
+  .kairos-redesign .cal-event-dialog input:not([type=checkbox]), .kairos-redesign .cal-event-dialog select { min-height: 44px; }
+  .kairos-redesign .cal-event-dialog .btn { min-height: 44px; }
+}

@@ -1,0 +1,284 @@
+/* Redesign preview, step 4: Tool Store and its dialogs. Loaded after
+   redesign.css and built on its --rd-* tokens. Every rule sits under
+   .kairos-redesign, so with the switch off the store is untouched. The same
+   markup and behaviour; only the look changes. Dialogs are body-level panels,
+   so they are matched by the .tool-store-dialog hook (tool-store.js), by
+   .store-publish-panel, and by the builder form inside a panel. */
+
+.kairos-redesign {
+  --rdt-ok-fill: rgba(var(--success-rgb), .14);
+  --rdt-warn-fill: color-mix(in srgb, var(--point) 18%, transparent);
+  --rdt-err-fill: rgba(var(--danger-rgb), .12);
+  --rdt-note: color-mix(in srgb, var(--rd-surface-2) 70%, transparent);
+  --rdt-divider: color-mix(in srgb, var(--point) 20%, transparent);
+}
+
+/* -- Page header ------------------------------------------------------------- */
+.kairos-redesign .tool-store-view { max-width: 1120px; margin: 0 auto; padding: 32px 36px 64px; }
+.kairos-redesign .tool-store-view .view-header { padding-bottom: 0; margin-bottom: 0; }
+.kairos-redesign .tool-store-view .view-header > div::before {
+  content: "Intelligence"; display: block; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .tool-store-view .view-header h2 { margin: 4px 0 0; font-size: clamp(38px, 5vw, 52px); line-height: 1.02; }
+.kairos-redesign .tool-store-view .view-header .sub { max-width: 620px; margin-top: 8px; font-size: 14px; }
+
+/* -- Search, category tray, added only -------------------------------------- */
+.kairos-redesign .tool-store-toolbar { gap: 10px; margin: 20px 0 12px; }
+.kairos-redesign .tool-store-search {
+  height: 40px; padding: 0 16px; border-radius: var(--rd-radius-pill); font-size: 14px;
+  background-color: var(--rd-surface-solid); border: 1px solid var(--rd-line);
+}
+.kairos-redesign .tool-store-filters {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; margin: 0; border-radius: var(--rd-radius-pill);
+  border: 0; background: rgba(var(--ink-rgb), .06);
+}
+.kairos-redesign .tool-store-filters .segmented-tab {
+  min-height: 32px; padding: 0 14px; border-radius: var(--rd-radius-pill); font-size: 13px; color: var(--rd-ink-dim);
+}
+.kairos-redesign .tool-store-filters .segmented-tab.active {
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 2px rgba(var(--shade-rgb), .12);
+}
+.kairos-redesign .tool-store-filters .segmented-tab:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+.kairos-redesign .tool-store-installed { font-size: 13px; color: var(--rd-ink); }
+.kairos-redesign .tool-store-summary { gap: 10px 16px; min-height: 0; margin-bottom: 4px; align-items: flex-start; flex-direction: column-reverse; }
+.kairos-redesign .tool-store-summary > .meta { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-manage { gap: 6px; }
+.kairos-redesign .tool-store-manage .btn { min-height: 36px; padding: 0 14px; font-size: 13px; }
+.kairos-redesign .tool-store-manage .btn.quiet {
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .tool-store-manage .btn.quiet:hover:not(:disabled) { background: var(--rd-surface-2); }
+
+/* -- Update banner ----------------------------------------------------------- */
+.kairos-redesign .tool-store-update-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0 4px; padding: 12px 16px;
+  border-radius: 14px; background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong);
+}
+.kairos-redesign .tool-store-update-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--point); flex: none; }
+.kairos-redesign .tool-store-update-text { flex: 1 1 240px; font-size: 14px; }
+.kairos-redesign .tool-store-update-banner .btn { min-height: 34px; padding: 0 14px; font-size: 12.5px; }
+
+/* -- Section labels ----------------------------------------------------------- */
+.kairos-redesign .tool-store-heading {
+  margin: 24px 0 10px; padding: 0 4px; font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .tool-store-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+
+/* -- Cards ---------------------------------------------------------------------- */
+.kairos-redesign .tool-store-card {
+  gap: 0; padding: 14px 16px; border-radius: 14px; background-color: var(--rd-surface);
+  border: 1px solid var(--rd-line); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .tool-store-card:hover { border-color: var(--rd-line-strong); }
+.kairos-redesign .tool-store-card-top { order: 0; position: absolute; top: 14px; right: 16px; }
+.kairos-redesign .tool-store-card { position: relative; }
+.kairos-redesign .tool-store-mark { display: none; }
+.kairos-redesign .tool-store-card h4 { margin: 0 0 6px; padding-right: 110px; font-size: 14px; font-weight: 500; color: var(--rd-ink); }
+.kairos-redesign .tool-store-card[data-skill] h4,
+.kairos-redesign .tool-store-card:has(.tool-store-version, .tool-store-card-foot > .meta) h4 { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 13.5px; }
+.kairos-redesign .tool-store-card p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-card .meta { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-card-foot { flex-wrap: wrap; justify-content: flex-start; gap: 6px; min-height: 0; margin-top: auto; }
+.kairos-redesign .tool-store-card-foot > .meta,
+.kairos-redesign .tool-store-card-foot > .tool-store-version,
+.kairos-redesign .tool-store-card-foot > a:first-child { flex: 1 0 100%; font-size: 11.5px; color: var(--rd-ink-faint); order: -1; }
+.kairos-redesign .tool-store-card .btn {
+  min-height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign .tool-store-card .btn:not(.primary):not(.danger) {
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .tool-store-card .btn.quiet.danger,
+.kairos-redesign .tool-store-card .btn.danger {
+  background: transparent; border: 1px solid var(--rd-line-strong); color: var(--danger);
+}
+.kairos-redesign .tool-store-card .btn.danger:hover:not(:disabled) { background: var(--rdt-err-fill); }
+.kairos-redesign .tool-store-card .tool-store-action .btn:not(.quiet):not(.danger),
+.kairos-redesign .tool-store-card .tool-store-card-foot > .btn.primary,
+.kairos-redesign .tool-store-card .tool-store-health + .tool-store-card-foot .tool-store-action .btn:not(.quiet) {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign .tool-store-card .btn:disabled { opacity: .5; }
+.kairos-redesign .tool-store-card-foot a, .kairos-redesign .tool-store-action a {
+  color: var(--rd-ink); text-decoration: underline; text-decoration-color: var(--rd-line-strong); text-underline-offset: 2px;
+}
+.kairos-redesign .tool-store-action { justify-content: flex-start; }
+.kairos-redesign .tool-store-card-foot > .tool-store-action { order: 0; }
+
+/* Badges are filled status pills. */
+.kairos-redesign .tool-store-badge {
+  padding: 2px 8px; font-size: 11px; background: var(--rdt-ok-fill); color: var(--rd-ink);
+}
+.kairos-redesign .tool-store-badge.muted { background: var(--rd-surface-2); color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-badge.blocked { background: var(--rdt-err-fill); color: var(--danger); }
+.kairos-redesign .tool-store-card .pill, .kairos-redesign .tool-store-card-top .pill { font-size: 11px; }
+
+/* Health and held tools sit as quiet notes inside the card. */
+.kairos-redesign .tool-store-health { margin: 0 0 8px; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-health.health-working span { color: var(--rd-ink-dim); }
+.kairos-redesign .tool-store-health .btn { min-height: 26px; padding: 0 10px; }
+.kairos-redesign .tool-store-held {
+  margin: 0 0 10px; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--rdt-warn-fill); color: var(--rd-ink); font-size: 12px;
+}
+.kairos-redesign .tool-store-held .title { color: var(--rd-ink); font-size: 12px; font-weight: 500; }
+.kairos-redesign .tool-store-held-tool { padding-top: 6px; border-top: 1px solid var(--rdt-divider); }
+.kairos-redesign .tool-store-held .btn { min-height: 26px; }
+.kairos-redesign .tool-store-held > .btn { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+
+/* Tab cards: status pill on top, then the build-your-own card, dashed. */
+.kairos-redesign .tool-store-card-top .pill { position: static; }
+.kairos-redesign .tool-store-card[data-tab-slug] .tool-store-card-foot { margin-top: 8px; }
+.kairos-redesign .tool-store-card[data-tab-slug] p { margin-bottom: 8px; }
+.kairos-redesign .tool-store-card p.tool-store-tab-reason { color: var(--danger); }
+.kairos-redesign .tool-store-build-card { border-style: dashed; justify-content: center; }
+.kairos-redesign .tool-store-build-card h4 { padding-right: 0; }
+.kairos-redesign .tool-store-broken { border-color: rgba(var(--danger-rgb), .35); }
+
+.kairos-redesign .tool-store-notice, .kairos-redesign .tool-store-empty {
+  border-radius: 14px; border: 1px solid var(--rd-line); background: var(--rd-surface); color: var(--rd-ink-dim);
+}
+
+/* -- GitHub account chip and submissions -------------------------------------- */
+.kairos-redesign .store-github { margin: 0 0 14px; }
+.kairos-redesign .store-github-strip {
+  display: inline-flex; margin-bottom: 8px; padding: 6px 12px; border-radius: 14px; font-size: 12px;
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong);
+}
+.kairos-redesign .store-github-strip .btn { min-height: 26px; padding: 0 10px; font-size: 12px; }
+.kairos-redesign .store-github h4 {
+  margin: 10px 0 6px; font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking);
+  text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .store-github a, .kairos-redesign .store-publish-panel a { color: var(--rd-ink); text-decoration: underline; text-underline-offset: 2px; }
+.kairos-redesign .store-device-code { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 16px; }
+.kairos-redesign .store-submission .tool-store-badge { background: var(--rdt-warn-fill); }
+.kairos-redesign .submission-merged { background: var(--rdt-ok-fill); }
+.kairos-redesign .submission-closed { background: var(--rd-surface-2); color: var(--rd-ink-dim); }
+
+/* -- Dialogs ------------------------------------------------------------------- */
+.kairos-redesign .modal-backdrop:has(> :is(.tool-store-dialog, .confirm-panel, .store-publish-panel, .panel-dialog:has(.tab-build-form))) {
+  background: rgba(var(--shade-rgb), .32);
+}
+.kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) {
+  gap: 12px; padding: 20px 22px; border-radius: 20px; background: var(--rd-surface-solid);
+  border: 1px solid var(--rd-line-strong); box-shadow: 0 24px 60px rgba(var(--shade-rgb), .22);
+  font-size: 13px; color: var(--rd-ink);
+}
+.kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) .modal-header {
+  margin: 0; align-items: flex-start; font-family: var(--rd-font-title); font-style: italic; font-weight: 500;
+  font-size: 28px; line-height: 1.1; color: var(--rd-ink);
+}
+.kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) .modal-close-btn {
+  flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--rd-line-strong);
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-family: var(--rd-font-ui); font-style: normal; font-size: 16px; line-height: 1;
+}
+.kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) .modal-close-btn:hover { background: var(--rd-surface-2); }
+.kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) .modal-close-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .confirm-panel { width: 560px; }
+.kairos-redesign .confirm-panel .muted { font-size: 13px; color: var(--rd-ink-dim); white-space: pre-wrap; margin: 0; }
+.kairos-redesign .tool-store-dialog .modal-footer, .kairos-redesign .store-publish-panel .modal-footer { justify-content: flex-end; }
+.kairos-redesign :is(.tool-store-dialog, .confirm-panel) .btn,
+.kairos-redesign .store-publish-panel .btn,
+.kairos-redesign .panel-dialog:has(.tab-build-form) .btn { min-height: 32px; padding: 0 14px; font-size: 12.5px; }
+.kairos-redesign .modal-footer .btn.danger { color: var(--danger); background: transparent; border-color: var(--rd-line-strong); }
+.kairos-redesign .confirm-panel .modal-footer .btn:last-child:not(.danger):not(.primary):not(.quiet) {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+
+/* Notes inside dialogs. */
+.kairos-redesign .tool-store-dialog .tool-store-install > p.meta,
+.kairos-redesign .tool-store-dialog .tool-store-action,
+.kairos-redesign .store-publish-body > .muted {
+  padding: 8px 10px; border-radius: 10px; background: var(--rdt-note); color: var(--rd-ink-dim); font-size: 12px; margin: 0 0 12px;
+}
+.kairos-redesign .tool-store-dialog .tool-store-action:empty { display: none; }
+.kairos-redesign .tool-store-dialog .tool-store-action { justify-content: flex-start; flex-wrap: wrap; }
+.kairos-redesign .tool-store-dialog .meta { color: var(--rd-ink-dim); font-size: 12px; }
+
+/* Forms: a primary pill beside each field row. */
+.kairos-redesign .tool-store-form-row { gap: 8px; align-items: stretch; }
+.kairos-redesign .tool-store-form-row > .btn:not(.quiet):not(.primary):not(.danger) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .tool-store-form-row > .btn:not(.quiet):not(.primary):not(.danger):hover:not(:disabled) { background: var(--rd-primary-hover); }
+.kairos-redesign .tool-store-form-row > :is(input, select) { min-height: 34px; border-radius: 10px; font-size: 13px; }
+.kairos-redesign .tool-store-install > .btn.quiet { background: transparent; border: 0; padding: 0; min-height: 0; color: var(--rd-ink); text-decoration: underline; text-underline-offset: 2px; }
+.kairos-redesign .tool-store-install input[type="file"] { padding: 6px 10px; font-size: 12.5px; }
+
+/* Scan reports and reviews. */
+.kairos-redesign .tool-store-scan { padding: 12px; border-radius: 12px; border: 1px solid var(--rd-line-strong); background: transparent; }
+.kairos-redesign .tool-store-scan .title { font-weight: 500; margin-bottom: 6px; }
+.kairos-redesign .tool-store-scan pre, .kairos-redesign .tool-store-skill-body, .kairos-redesign .tool-store-tab-files {
+  font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 12px; line-height: 1.55; color: var(--rd-ink);
+}
+.kairos-redesign .tool-store-skill-body, .kairos-redesign .tool-store-tab-files {
+  padding: 12px; border-radius: 12px; background: var(--rdt-note); max-height: 260px; overflow: auto;
+}
+.kairos-redesign .tool-store-tab-review .tool-store-tab-hash {
+  padding: 8px 10px; border-radius: 10px; background: var(--rdt-note); font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 12px; color: var(--rd-ink);
+}
+.kairos-redesign .tool-store-dialog .modal-footer .tool-store-card-foot { flex-wrap: wrap; justify-content: flex-end; }
+
+/* Skill manager: create row, list rows, editor and findings. */
+.kairos-redesign .tool-store-manager > .tool-store-heading { display: none; }
+.kairos-redesign .tool-store-manager .glass.card {
+  background-color: var(--rdt-note); border: 1px solid var(--rdt-divider); border-radius: 14px; box-shadow: none; padding: 12px;
+}
+.kairos-redesign .tool-store-manager :is(.card-row > input[placeholder] ~ .btn, .card-row:has(> .btn + .btn) > .btn:first-child:not(.danger)):not(.primary):not(.quiet) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .tool-store-manager #skills-list { margin-top: 12px !important; }
+.kairos-redesign .tool-store-manager #skills-list > .glass.card { margin-bottom: 8px; background-color: transparent; border-color: var(--rdt-divider); }
+.kairos-redesign .tool-store-manager #skills-list .title { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 13px; font-weight: 600; }
+.kairos-redesign .tool-store-manager textarea { font-size: 12px; line-height: 1.5; border-radius: 10px; }
+.kairos-redesign .tool-store-manager details { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: var(--rd-surface-solid); }
+.kairos-redesign .tool-store-manager details summary { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.kairos-redesign .tool-store-manager .btn.danger { color: var(--danger); background: transparent; }
+.kairos-redesign .tool-store-manager .btn.danger[class*=""]:where(:not(.row-action-btn)) { border-color: var(--rd-line-strong); }
+.kairos-redesign .empty-state-rich { background: transparent; }
+
+/* Builder and tab builder. */
+.kairos-redesign .panel-dialog .tab-build-form { gap: 12px; }
+.kairos-redesign .panel-dialog .tab-build-field label { font-size: 12px; color: var(--rd-ink-dim); letter-spacing: 0; }
+.kairos-redesign .tab-build-chips { gap: 6px; }
+.kairos-redesign .tab-build-chip {
+  min-height: 30px; padding: 0 12px; border-radius: var(--rd-radius-pill); font-size: 12px; font-family: var(--rd-font-ui);
+  border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); color: var(--rd-ink);
+}
+.kairos-redesign .tab-build-chip:hover { background: var(--rd-surface-2); color: var(--rd-ink); }
+.kairos-redesign .tab-build-chip.active { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .tab-build-chip:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .tab-build-checkbox-row { color: var(--rd-ink); font-size: 13px; }
+.kairos-redesign .tab-build-checkbox-row input { accent-color: var(--rd-ink); }
+.kairos-redesign .tab-build-build-btn:not(.primary):not(.quiet):not(.danger) { align-self: flex-end; background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; padding: 0 18px; }
+.kairos-redesign .tab-build-build-btn:not(.primary):hover:not(:disabled) { background: var(--rd-primary-hover); }
+.kairos-redesign .tab-build-error { font-size: 12.5px; }
+
+/* Share to store. */
+.kairos-redesign .store-publish-fields { gap: 10px; }
+.kairos-redesign .store-publish-fields .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .store-publish-fields .field:has(textarea) { grid-column: 1 / -1; }
+.kairos-redesign .store-publish-preview { border-radius: 12px; border: 0; background: var(--rdt-note); }
+.kairos-redesign .store-publish-preview h5 { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 12px; font-weight: 500; }
+.kairos-redesign .store-publish-preview pre { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); }
+
+/* -- Phones --------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign .tool-store-view { padding: 20px 16px 48px; }
+  .kairos-redesign .tool-store-view .view-header > div::before { padding-left: 54px; margin-top: 4px; }
+  .kairos-redesign .tool-store-view .view-header h2 { font-size: 40px; }
+  .kairos-redesign .tool-store-filters { width: 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .kairos-redesign .tool-store-filters .segmented-tab { min-height: 36px; padding: 0 14px; }
+  .kairos-redesign .tool-store-installed { min-height: 36px; }
+  .kairos-redesign .tool-store-manage .btn { min-height: 40px; }
+  .kairos-redesign .tool-store-grid { grid-template-columns: 1fr; }
+  .kairos-redesign .tool-store-card .btn { min-height: 36px; }
+  .kairos-redesign .modal-backdrop > .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) {
+    border-radius: 0; padding: 16px; background: var(--rd-surface-solid); }
+  .kairos-redesign .panel-dialog:is(.tool-store-dialog, .confirm-panel, .store-publish-panel, :has(.tab-build-form)) .modal-header { font-size: 26px; }
+}
+
+/* Review files sits above the card actions as a compact pill. */
+.kairos-redesign .tool-store-card > .btn { align-self: flex-start; margin-bottom: 6px; }
+
+/* Quiet buttons inside dialogs read as hairline pills (the Advanced link keeps its text style). */
+.kairos-redesign :is(.tool-store-dialog, .store-publish-panel) :is(.modal-body, .modal-footer) .btn.quiet:not(.danger):not(.tool-store-install > .btn):not(.tool-store-held *) {
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); color: var(--rd-ink);
+}

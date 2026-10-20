@@ -510,11 +510,25 @@ function buildNav() {
   const navList = el("div", { class: "settings-nav-list" });
   nav.append(search, navList);
 
-  const entries = [];
+  const entries = [], folds = [];
+  const setFold = (fold, block, collapsed) => {
+    if (collapsed) block.dataset.collapsed = "true"; else delete block.dataset.collapsed;
+    fold.setAttribute("aria-expanded", String(!collapsed));
+  };
   for (const group of visibleSections()) {
     const heading = el("div", { class: "settings-nav-group", text: group.label });
     const block = el("div", { class: "settings-nav-block" });
     navList.append(heading, block);
+    // Redesign preview: Administration can fold. The button has no text and
+    // stays display:none until redesign-settings.css shows it, so with the
+    // switch off nothing about the nav changes.
+    if (group.id === "administration") {
+      const fold = el("button", { type: "button", class: "settings-nav-fold", "aria-expanded": "true", "aria-label": "Administration pages" });
+      fold.dataset.count = String(group.sections.length);
+      fold.addEventListener("click", () => setFold(fold, block, block.dataset.collapsed !== "true"));
+      heading.append(fold);
+      folds.push({ fold, block });
+    }
     const items = [];
     for (const sec of group.sections) {
       const icon = el("span", { class: "settings-nav-icon", "aria-hidden": "true" });
@@ -540,6 +554,7 @@ function buildNav() {
 
   search.addEventListener("input", () => {
     const q = search.value.trim().toLowerCase();
+    if (q) for (const { fold, block } of folds) setFold(fold, block, false);  // a search never hides its matches
     for (const entry of entries) {
       if (entry.sec) entry.item.hidden = !matches(entry.sec, q);
       // A group heading with nothing under it is noise, so it hides with

@@ -1,9 +1,16 @@
-import { api, el, toast, confirmDialog, customSelect, openPanelDialog } from "../api.js";
+import { api, el, toast, confirmDialog as baseConfirmDialog, customSelect, openPanelDialog } from "../api.js";
 import { ICONS } from "../icons.js";
 import { pill } from "../settingsKit.js";
 import { shareButton, githubStrip } from "../storePublish.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
+
+// Redesign hook: tag confirmation panels so the Tool Store sheet can style them.
+function confirmDialog(options) {
+  const pending = baseConfirmDialog(options);
+  [...document.querySelectorAll(".panel-dialog.confirm-panel")].at(-1)?.classList.add("tool-store-dialog");
+  return pending;
+}
 
 // Browse what Kairos can use. Skill content and live MCP tool schemas stay
 // behind their own read/describe calls; this view only loads catalog metadata.
@@ -40,7 +47,7 @@ export async function render(container) {
     return { ...config, button };
   });
   const popup = (title, body, opener, onClose) => openPanelDialog({ title, body, opener, owner: view,
-    wide: true, group: "tool-store", onClose });
+    wide: true, group: "tool-store", className: "tool-store-dialog", onClose });
   manageSkills.setAttribute("aria-haspopup", "dialog");
   manageTools.setAttribute("aria-haspopup", "dialog");
   manageSkills.addEventListener("click", () => showSkillManager());
@@ -97,6 +104,9 @@ export async function render(container) {
   refreshCommunity.hidden = !state.admin;
   draw();
   if (state.admin) githubStrip(githubHost);
+  // Redraw when the redesign switch flips (the update banner is redesign-only).
+  const onAppearance = () => { if (view.isConnected) draw(); else document.removeEventListener("kairos:appearance", onAppearance); };
+  document.addEventListener("kairos:appearance", onAppearance);
 
   async function showSkillManager(focusSlug = null, opener = manageSkills) {
     const managerHost = el("div", { class: "tool-store-manager" });
@@ -238,6 +248,18 @@ export async function render(container) {
     installTab.hidden = state.kind !== "tabs" || !state.admin;
     results.innerHTML = "";
     const q = state.query;
+    // Redesign only: surface a community update above the lists.
+    const pendingUpdate = document.documentElement.classList.contains("kairos-redesign") && state.admin
+      ? state.community.find(item => item.installed && item.update_available) : null;
+    if (pendingUpdate) results.append(el("div", { class: "tool-store-update-banner", role: "status" }, [
+      el("span", { class: "tool-store-update-dot", "aria-hidden": "true" }),
+      el("span", { class: "tool-store-update-text" }, [el("strong", { text: pendingUpdate.name }), " has a community update."]),
+      el("button", { type: "button", class: "btn primary", text: "Review update", onclick: () => {
+        const target = [...results.querySelectorAll("[data-community-slug]")].find(card => card.dataset.communitySlug === pendingUpdate.slug && card.dataset.communityKind === pendingUpdate.kind);
+        target?.scrollIntoView({ block: "center" });
+        [...(target?.querySelectorAll(".btn.primary") || [])].find(b => b.textContent === "Update")?.click();
+      } }),
+    ]));
     const skills = !["all", "skills"].includes(state.kind) ? [] : state.skills.filter((item) =>
       !q || `${item.slug} ${item.description}`.toLowerCase().includes(q));
     const tools = !["all", "tools"].includes(state.kind) ? [] : state.servers.filter((item) =>

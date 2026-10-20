@@ -80,7 +80,10 @@ export async function render(container) {
   const archiveBtn = el("button", { class: "btn", text: "Archive", style: "margin-left:auto;" });
   const monthBtn = el('button', { class: 'btn', text: 'Month', 'aria-pressed': String(viewMode === 'month') });
   const weekBtn = el('button', { class: 'btn', text: 'Week', 'aria-pressed': String(viewMode === 'week') });
-  nav.append(prevBtn, todayBtn, monthLabel, nextBtn, monthBtn, weekBtn, archiveBtn);
+  // The wrapper only lets the redesign draw Month and Week as one segmented
+  // control; with the switch off it is display: contents (redesign-calendar.css).
+  const viewSwitch = el('div', { class: 'cal-view-switch', role: 'group', 'aria-label': 'Calendar view' }, [monthBtn, weekBtn]);
+  nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
 
   const grid = el("div", { class: "cal-grid glass" });
 
@@ -206,7 +209,7 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
 
     const dayItems = byDay[dayKey] = itemsOnDay(items, cursor);
     for (const item of dayItems.slice(0, 2)) {
-      cell.appendChild(eventColor(el("div", { class: "cal-event-pill " + (item.source === "note" ? "note" : "event") + (item.completed ? " completed" : ""), text: item.title, title: item.title }), item));
+      cell.appendChild(eventColor(el("div", { class: "cal-event-pill " + (item.source === "note" ? "note" : "event") + ` cal-src-${item.source || "event"}` + (item.completed ? " completed" : ""), text: item.title, title: item.title }), item));
     }
     const overflow = dayItems.length - 2;
     if (overflow > 0) cell.appendChild(el("div", { class: "cal-event-pill overflow", text: `+${overflow} more` }));
@@ -362,7 +365,7 @@ function getArchiveModal() {
   if (archiveModal) return archiveModal;
   const closeBtn = el("button", { class: "modal-close-btn", text: "✕" });
   const body = el("div", { style: "overflow-y:auto;flex:1;margin-top:10px;" });
-  const panel = el("div", { class: "glass modal-panel" }, [
+  const panel = el("div", { class: "glass modal-panel cal-archive-panel" }, [
     el("h4", { text: "Archive" }, [closeBtn]),
     el("div", { class: "muted", text: "Checked-off events and notes. Reopen to bring one back to the active calendar." }),
     body,

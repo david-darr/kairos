@@ -1,7 +1,7 @@
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, redesign: false });
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -44,6 +44,7 @@ function normalize(raw = {}) {
   }
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
+  if (typeof raw.redesign === 'boolean') value.redesign = raw.redesign;
   // Terminal chat style (David's ask 2026-09-25): chats look and read like a
   // terminal harness. Presentation only; see the [data-chat-style] rules.
   if (['standard', 'terminal'].includes(raw.chatStyle)) value.chatStyle = raw.chatStyle;
@@ -291,6 +292,7 @@ function apply() {
   root.dataset.appearance = settings.mode;
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
+  syncRedesign(root);
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');
@@ -329,6 +331,35 @@ function apply() {
   syncTitleBar();
   // The halftone backgrounds redraw in the new colors (chatBackdrop.js, home.js).
   document.dispatchEvent(new CustomEvent('kairos:appearance'));
+}
+
+// Redesign preview (step 1 of the visual refresh): an opt-in class on the root
+// that static/css/redesign.css keys off, plus one washed halftone backdrop
+// behind every tab except Chat and Forge. It reuses chatBackdrop.js's sky
+// scene (same renderer, cache and halftone/color palette) in a host inside
+// #content, so no image is shipped and no existing view is touched. The host
+// exists only while the switch is on.
+let redesignBackdrop = null;
+function syncRedesign(root) {
+  root.classList.toggle('kairos-redesign', settings.redesign);
+  if (!settings.redesign) {
+    redesignBackdrop?.dispose(); redesignBackdrop?.host.remove(); redesignBackdrop = null;
+    return;
+  }
+  const content = document.getElementById('content');
+  if (!content || redesignBackdrop?.host.isConnected) return;
+  const host = document.createElement('div');
+  host.className = 'kairos-redesign-backdrop';
+  host.setAttribute('aria-hidden', 'true');
+  content.prepend(host);
+  redesignBackdrop = { host, dispose() {} };
+  import('./chatBackdrop.js').then(({ mountChatBackdrop }) => {
+    if (!host.isConnected) return;  // switched off (or replaced) while loading
+    const mounted = mountChatBackdrop(host);
+    redesignBackdrop = { host, dispose: mounted.dispose };
+    // Still: no dissolve, so reduced motion needs nothing more here.
+    mounted.show('sky');
+  }).catch(() => { /* the parchment stays */ });
 }
 
 // The desktop window's own controls (electron/preload.js setTitleBar).

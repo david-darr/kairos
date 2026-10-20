@@ -1,0 +1,261 @@
+/* Redesign preview, step 3: Forge (Forge Home and the Forge session workspace).
+   Every rule sits under .kairos-redesign, so with the switch off nothing here
+   applies. It restyles the existing markup only, built on the --rd-* tokens in
+   redesign.css (no raw color values). Forge's original rules live in style.css
+   and interface.css and are left alone; these win by specificity. Gold is a
+   hairline and a detail, never text. */
+
+.kairos-redesign {
+  --rdf-tint: rgba(var(--ink-rgb), .06);
+  --rdf-row-line: color-mix(in srgb, var(--point) 18%, transparent);
+  --rdf-pill-fill: color-mix(in srgb, var(--point) 16%, transparent);
+  --rdf-danger-line: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+/* -- Forge Home: the washed sky backdrop ------------------------------------
+   redesign.css hides the sky on both Forge views. Forge Home takes it back
+   (the specificity here beats that one rule and still honours the halftone
+   preference); the session view stays plain so the terminal and editor keep
+   their contrast. */
+.kairos-redesign[data-view="forgeHome"]:not([data-halftone="off"]):not([data-halftone="none"]) .kairos-redesign-backdrop { display: block; }
+.kairos-redesign .forge-home .forge-banner { display: none; }
+.kairos-redesign .forge-hero {
+  background: none; border: 0; border-radius: 0; overflow: visible; padding: 28px 0 4px;
+}
+.kairos-redesign .forge-hero-copy { width: min(100%, 820px); }
+.kairos-redesign .forge-hero .eyebrow {
+  display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0;
+  font-size: var(--rd-label-size); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .forge-preview {
+  padding: 1px 9px; border: 0; border-radius: var(--rd-radius-pill); background: var(--rdf-pill-fill);
+  color: var(--rd-ink-dim); font-size: 11px; letter-spacing: .04em; text-transform: none;
+}
+.kairos-redesign .forge-hero h1 {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; letter-spacing: 0; line-height: 1.05;
+  font-size: clamp(32px, 4.4vw, 44px); margin: 10px 0 18px; color: var(--rd-ink);
+  text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8), 0 0 2px rgba(var(--wash-rgb), .9);
+}
+
+/* -- The task composer ------------------------------------------------------- */
+.kairos-redesign .forge-composer.chat-input-bar {
+  padding: 16px 12px 10px 18px; border-radius: 22px; border: 1px solid var(--rd-line-strong);
+  background: color-mix(in srgb, var(--rd-surface-solid) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: 0 14px 44px rgba(var(--shade-rgb), .12);
+}
+.kairos-redesign .forge-composer textarea { font-size: 16px; line-height: 1.5; color: var(--rd-ink); background: transparent; border: 0; border-radius: 0; }
+.kairos-redesign .forge-composer.chat-input-bar .custom-select-btn {
+  height: 32px; min-height: 32px; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill);
+  background: transparent; font-size: 12px;
+}
+.kairos-redesign .forge-composer.chat-input-bar .custom-select-btn:hover { background: var(--rd-surface-2); }
+.kairos-redesign .forge-composer .forge-mode-pill,
+.kairos-redesign .forge-composer .model-pill { border-color: var(--rd-line-strong); background: transparent; }
+.kairos-redesign .forge-composer .model-pill .custom-select-btn,
+.kairos-redesign .forge-composer .forge-mode-pill .custom-select-btn { border-color: transparent; }
+.kairos-redesign .forge-composer .model-pill .custom-select-btn:hover,
+.kairos-redesign .forge-composer .forge-mode-pill .custom-select-btn:hover { background: var(--rd-surface-2); }
+.kairos-redesign .forge-variant-pill { border-left-color: var(--rd-line); }
+.kairos-redesign .forge-picker-prefix { color: var(--rd-ink-dim); font-size: 12px; }
+.kairos-redesign .forge-composer-send { border-radius: 50%; }
+.kairos-redesign .forge-composer-send:disabled { opacity: .45; }
+.kairos-redesign .forge-composer-hint { text-align: center; font-size: 12px; color: var(--rd-ink); }
+.kairos-redesign .forge-composer-hint.forge-in-place-hint { color: var(--danger); }
+.kairos-redesign .forge-warning {
+  border-radius: 12px; background: color-mix(in srgb, var(--point) 14%, var(--rd-surface-solid));
+  border-color: var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .forge-first-commit { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.kairos-redesign .forge-first-commit > p { flex: 1 1 200px; margin: 0; }
+
+/* -- The toolbar and the widgets ---------------------------------------------- */
+.kairos-redesign .forge-toolbar { padding: 16px 0 12px; }
+.kairos-redesign .forge-toolbar > .meta {
+  font-size: 12px; letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink);
+}
+.kairos-redesign .forge-toolbar .btn {
+  height: 34px; padding: 0 14px; background: var(--rd-surface); border: 1px solid var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .forge-toolbar .btn:hover:not(:disabled) { background: var(--rd-surface-2); }
+.kairos-redesign .forge-widget-grid { gap: 16px; align-items: start; }
+.kairos-redesign .forge-panel {
+  padding: 16px 18px 12px; border-radius: 18px; border: 1px solid var(--rd-line);
+  background: var(--rd-surface); box-shadow: none;
+}
+.kairos-redesign .forge-lifespan { padding: 18px 20px; }
+.kairos-redesign .forge-panel-header { margin-bottom: 8px; }
+.kairos-redesign .forge-panel-header h2 {
+  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking);
+  text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .forge-panel-header .custom-select-btn { height: 32px; min-height: 32px; border-radius: var(--rd-radius-pill); font-size: 12px; }
+.kairos-redesign .forge-widget-body .dashboard-row { padding: 10px 0; }
+.kairos-redesign .forge-widget-body .dashboard-row + .dashboard-row { border-top-color: var(--rdf-row-line); }
+.kairos-redesign .forge-widget-body .dashboard-row-copy strong { font-size: 14px; font-weight: 500; }
+.kairos-redesign .forge-widget-body .dashboard-row-copy small { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .forge-widget-body .forge-running-service .dashboard-row-copy small { font-family: var(--font-mono); }
+.kairos-redesign .forge-session-row > small { color: var(--success); font-size: 12px; }
+.kairos-redesign .forge-activity-total { font-size: 20px; font-weight: 500; margin: 2px 0; }
+.kairos-redesign .forge-chart-caption { color: var(--rd-ink-faint); }
+
+/* Repo lifespan: tiles for the stats, quiet bordered sub-panels */
+.kairos-redesign .forge-stats {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; border: 0; border-radius: 0; margin: 4px 0 12px; overflow: visible;
+}
+.kairos-redesign .forge-stat { padding: 12px 14px; gap: 2px; border: 0; border-radius: 12px; background: var(--rd-ground); }
+.kairos-redesign .forge-stat > .meta { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .forge-stat strong { font-size: 22px; }
+.kairos-redesign .forge-delta { font-size: 11px; color: var(--rd-ink-dim); }
+.kairos-redesign .forge-lifespan h3 { margin: 10px 0 0; font-size: 13px; font-weight: 500; }
+.kairos-redesign .forge-analysis-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.kairos-redesign .forge-analysis-grid .forge-panel { padding: 14px; border-radius: 12px; background: transparent; border-color: var(--rd-line); }
+.kairos-redesign .forge-analysis-grid .forge-panel-header h2 { font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--rd-ink); }
+.kairos-redesign .forge-ranked thead { color: var(--rd-ink-dim); }
+.kairos-redesign .forge-ranked th, .kairos-redesign .forge-ranked td { border-bottom-color: var(--rdf-row-line); }
+.kairos-redesign .forge-chart-tooltip { border-radius: 10px; border-color: var(--rd-line-strong); }
+
+/* -- Dialogs opened from Forge (add project, customize, run app, end session) -- */
+.kairos-redesign .panel-dialog:has(.forge-form, .forge-end-options, .forge-app-suggestions, .forge-app-command) {
+  border-radius: 18px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid);
+}
+.kairos-redesign .panel-dialog:has(.forge-form, .forge-end-options, .forge-app-suggestions, .forge-app-command) .modal-header > span {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 26px; line-height: 1.1;
+}
+.kairos-redesign .forge-end-options { width: 100%; flex-direction: column; align-items: stretch; }
+.kairos-redesign .forge-end-options .btn { width: 100%; height: 38px; justify-content: center; }
+.kairos-redesign .modal-panel .modal-footer .forge-end-options .btn:first-child:not(:disabled) {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign .modal-panel .modal-footer .forge-end-options .btn.danger { color: var(--danger); border-color: var(--rdf-danger-line); background: transparent; }
+
+/* -- The workspace: project sidebar ------------------------------------------- */
+.kairos-redesign .forge-project-sidebar { background: var(--rd-surface-solid); border-right-color: var(--rd-line); }
+.kairos-redesign .forge-project-header { border-bottom: 0; }
+.kairos-redesign .forge-project-heading strong { font-size: 14px; }
+.kairos-redesign .forge-sidebar-tabs {
+  height: 36px; margin: 2px 8px 8px; padding: 3px; gap: 2px; border: 0; border-radius: var(--rd-radius-pill); background: var(--rdf-tint);
+}
+.kairos-redesign .forge-sidebar-tab { flex-direction: row; gap: 4px; height: 30px; padding: 0 6px; border-radius: var(--rd-radius-pill); font-size: 12px; }
+.kairos-redesign .forge-sidebar-tab[aria-selected=true] {
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 2px rgba(var(--shade-rgb), .12);
+}
+.kairos-redesign .forge-sidebar-tab:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+.kairos-redesign .forge-session-search input { border-radius: 10px; border-color: var(--rd-line); background: var(--rd-ground); }
+.kairos-redesign .forge-session-card { padding: 8px 10px; border-radius: 12px; }
+.kairos-redesign .forge-session-card[aria-pressed=true] { background: var(--rd-surface-2); box-shadow: inset 0 0 0 1px var(--rd-line-strong); }
+.kairos-redesign .forge-session-card.status-approval { border-radius: 12px; }
+.kairos-redesign .forge-card-title { font-weight: 500; }
+.kairos-redesign .forge-running-strip button { border-radius: 10px; background: rgba(var(--success-rgb), .12); border: 0; }
+.kairos-redesign .forge-sidebar-toolbar { border-bottom-color: var(--rd-line); }
+.kairos-redesign .forge-small-button, .kairos-redesign .forge-git-actions .forge-small-button {
+  border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: var(--rd-surface); color: var(--rd-ink);
+}
+.kairos-redesign .forge-small-button:hover:not(:disabled) { background: var(--rd-surface-2); color: var(--rd-ink); }
+.kairos-redesign .forge-small-button:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .forge-sidebar-toolbar .forge-small-button { border-color: transparent; background: transparent; color: var(--rd-ink-dim); }
+.kairos-redesign .forge-sidebar-toolbar .forge-small-button:hover:not(:disabled) { background: var(--rd-surface-2); color: var(--rd-ink); }
+.kairos-redesign .forge-git-content > textarea + .forge-small-button:not(:disabled) {
+  height: 28px; background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; font-weight: 500;
+}
+.kairos-redesign .forge-git-content > textarea + .forge-small-button:disabled { align-self: flex-start; }
+.kairos-redesign .forge-git-content textarea, .kairos-redesign .forge-git-content input { border-radius: 10px; }
+.kairos-redesign .forge-git-files > strong { letter-spacing: var(--rd-label-tracking); text-transform: uppercase; font-size: var(--rd-label-size); font-weight: 500; }
+.kairos-redesign .forge-tree-root > strong { letter-spacing: var(--rd-label-tracking); font-weight: 500; }
+.kairos-redesign .forge-tree-row.selected { background: var(--rd-surface-2); color: var(--rd-ink); }
+.kairos-redesign .forge-tree-row { border-radius: 8px; }
+.kairos-redesign .forge-change-row { border-radius: 10px; margin: 0 6px; }
+.kairos-redesign .forge-project-resizer:hover, .kairos-redesign .forge-project-resizer.dragging { background: var(--rd-line-strong); }
+.kairos-redesign .forge-project-mark { border-radius: 6px; background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); color: var(--rd-ink); }
+.kairos-redesign .forge-project-row { border-radius: 10px; }
+.kairos-redesign .forge-project-row:hover, .kairos-redesign .forge-project-row[aria-pressed=true] { background: var(--rd-surface-solid); }
+.kairos-redesign .forge-project-row[aria-pressed=true] { box-shadow: inset 0 0 0 1px var(--rd-line-strong); }
+.kairos-redesign .forge-project-section > header { letter-spacing: var(--rd-label-tracking); text-transform: uppercase; font-size: var(--rd-label-size); }
+.kairos-redesign[data-app-mode="forge"] .forge-mode-switch { border-color: transparent; background: var(--rdf-tint); border-radius: 12px; }
+.kairos-redesign[data-app-mode="forge"] .forge-mode-switch .segmented-tab { border-radius: 9px; }
+
+/* -- The workspace: tabs and panes --------------------------------------------- */
+.kairos-redesign .forge-workspace { background: var(--rd-ground); }
+.kairos-redesign .forge-surface-bar { height: 44px; gap: 4px; padding: 0 8px; border-bottom-color: var(--rd-line); }
+.kairos-redesign .forge-surface-tabs { gap: 4px; }
+.kairos-redesign .forge-surface-tab-group {
+  height: 32px; border: 1px solid transparent; border-radius: 10px; background: color-mix(in srgb, var(--rd-surface-solid) 55%, transparent);
+}
+.kairos-redesign .forge-surface-tab-group.visible {
+  border-color: var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .08);
+}
+.kairos-redesign .forge-surface-tab-group.visible .forge-surface-tab, .kairos-redesign .forge-surface-tab[aria-selected=true] { color: var(--rd-ink); font-weight: 500; }
+.kairos-redesign .forge-surface-tab:focus-visible, .kairos-redesign .forge-tab-close:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+.kairos-redesign .forge-pane-divider { width: 2px; background: var(--rd-line); }
+.kairos-redesign .forge-pane-divider:hover, .kairos-redesign .forge-pane-divider.dragging { background: var(--rd-line-strong); }
+.kairos-redesign .forge-surface-bar > .btn { height: 30px; min-height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* -- A session: header, transcript, composer ------------------------------------ */
+.kairos-redesign .forge-session-header, .kairos-redesign .forge-plan-note { background: var(--rd-surface-solid); }
+.kairos-redesign .forge-session-header { gap: 6px; padding: 8px 12px; border-bottom-color: var(--rd-line); }
+.kairos-redesign .forge-session-header > strong {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 20px; line-height: 1.1;
+}
+.kairos-redesign .forge-session-header .btn {
+  margin-left: 0; min-height: 30px; height: 30px; padding: 0 12px; font-size: 12px;
+  background: var(--rd-surface); border: 1px solid var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .forge-session-header .btn:hover:not(:disabled) { background: var(--rd-surface-2); }
+.kairos-redesign .forge-session-header .forge-run-app { margin-left: auto; }
+.kairos-redesign .forge-session-header > .btn:last-child { color: var(--danger); border-color: var(--rdf-danger-line); }
+.kairos-redesign .forge-session-header .custom-select-btn { height: 30px; min-height: 30px; border-radius: var(--rd-radius-pill); border-color: var(--rd-line-strong); font-size: 12px; }
+.kairos-redesign .forge-plan-note { border-bottom: 1px solid var(--rd-line); color: var(--rd-ink-dim); }
+.kairos-redesign .forge-prompt {
+  width: fit-content; max-width: 85%; margin-left: auto; padding: 8px 14px; border: 0; border-radius: 14px 14px 4px 14px; background: var(--rd-surface-2);
+}
+.kairos-redesign .forge-work-label { color: var(--rd-ink-dim); }
+.kairos-redesign .forge-work-spine { border-left-color: var(--rd-line-strong); }
+.kairos-redesign .forge-inline-diff { border-radius: 10px; border-color: var(--rd-line-strong); background: var(--rd-ground); }
+.kairos-redesign .forge-inline-diff-head { border-bottom-color: var(--rd-line); }
+.kairos-redesign .forge-inline-permission {
+  padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--point) 14%, transparent);
+}
+.kairos-redesign .forge-inline-permission .btn { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .forge-turn-review {
+  gap: 6px; margin: 8px 16px 0; padding: 8px 10px; border-radius: 12px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); color: var(--rd-ink);
+}
+.kairos-redesign .forge-turn-review .forge-small-button, .kairos-redesign .forge-turn-review .btn { height: 28px; padding: 0 12px; }
+.kairos-redesign .forge-turn-review .forge-small-button:nth-last-child(2) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .forge-jump.btn { border-radius: var(--rd-radius-pill); border-color: var(--rd-line-strong); }
+.kairos-redesign .forge-transcript-composer {
+  border-radius: 16px; border-color: var(--rd-line-strong); background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent);
+}
+.kairos-redesign .forge-transcript-composer:focus-within { border-color: var(--rd-focus); }
+.kairos-redesign .forge-composer-chips .custom-select-btn { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .forge-transcript-footer .btn { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .forge-transcript-footer .forge-send:not(.danger):not(:disabled), .kairos-redesign .forge-transcript-footer .btn.primary {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+
+/* -- Files, diffs, apps and terminals ------------------------------------------- */
+.kairos-redesign .forge-file-title { border-bottom-color: var(--rd-line); background: transparent; }
+.kairos-redesign .forge-editor-toolbar .btn:not(:disabled) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .forge-editor-toolbar .btn { height: 30px; min-height: 30px; }
+.kairos-redesign .forge-line-numbers { border-right-color: var(--rd-line); }
+.kairos-redesign .forge-revert-hunk, .kairos-redesign .forge-revert { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .forge-preview-toolbar, .kairos-redesign .forge-preview-logs, .kairos-redesign .forge-terminal-toolbar { border-color: var(--rd-line); }
+.kairos-redesign .forge-preview-toolbar .btn, .kairos-redesign .forge-preview-log-controls .btn { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .forge-preview-widths [aria-pressed=true] { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .forge-preview-path { border-radius: 10px; }
+.kairos-redesign .forge-preview-viewport { background: var(--rd-surface-2); }
+.kairos-redesign .forge-terminal-toolbar .btn { border-radius: var(--rd-radius-pill); height: 30px; min-height: 30px; }
+.kairos-redesign .forge-app-suggestions button { border-radius: 12px; }
+
+/* -- Phones ------------------------------------------------------------------------ */
+@media (max-width: 768px) {
+  .kairos-redesign .forge-hero { padding: 40px 0 0; }
+  .kairos-redesign .forge-hero h1 { font-size: 32px; }
+  .kairos-redesign .forge-composer.chat-input-bar { padding: 12px; border-radius: 20px; }
+  .kairos-redesign .forge-panel { padding: 14px 16px 10px; }
+  .kairos-redesign .forge-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kairos-redesign .forge-sidebar-tabs { height: 44px; }
+  .kairos-redesign .forge-sidebar-tab { height: 38px; }
+  .kairos-redesign .forge-session-header .btn { min-height: 44px; height: 44px; }
+  .kairos-redesign .forge-session-header > strong { font-size: 22px; }
+  .kairos-redesign .forge-prompt { max-width: 92%; }
+}

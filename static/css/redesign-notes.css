@@ -1,0 +1,124 @@
+/* Redesign preview, step 3: Notes. Every rule sits under .kairos-redesign, so
+   with the switch off the Notes tab is untouched. Reuses the --rd-* tokens from
+   redesign.css. The capture form becomes one pill bar, and the notes become
+   rows inside one soft surface card, as in the mockup (Notes.dc.html). */
+
+.kairos-redesign #view-content[data-view="notes"] .view-header h2 { font-size: clamp(38px, 4.6vw, 52px); }
+.kairos-redesign #view-content[data-view="notes"] .view-header .sub { margin-top: 8px; font-size: 15px; }
+
+/* A tighter header on desktop leaves more room for the list. */
+@media (min-width: 769px) {
+  .kairos-redesign #view-content[data-view="notes"] .view-header { padding-bottom: 6px; margin-bottom: 4px; }
+  .kairos-redesign #view-content[data-view="notes"] .view-header .sub { margin-top: 4px; }
+  .kairos-redesign #view-content[data-view="notes"] .view-constrained > .glass.card { padding: 4px 6px 4px 20px; margin-bottom: 12px; }
+}
+
+/* -- Capture bar -------------------------------------------------------------- */
+.kairos-redesign #view-content[data-view="notes"] .view-constrained > .glass.card {
+  padding: 8px 8px 8px 20px; border-radius: var(--rd-radius-pill); border-color: var(--rd-line-strong);
+  background-color: var(--rd-surface-solid);
+}
+.kairos-redesign #view-content[data-view="notes"] .form-grid { flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow { flex: 1 1 240px; min-width: 0; }
+/* The note label stays for screen readers; the placeholder says it for everyone else. */
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow > label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field > label {
+  margin: 0; font-size: 12px; color: var(--rd-ink-dim); white-space: nowrap;
+}
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow input {
+  width: 100%; height: 44px; border: 0; background: transparent; box-shadow: none; font-size: 16px; padding-left: 0;
+}
+.kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) input {
+  height: 40px; border-radius: var(--rd-radius-pill); border: 1px dashed var(--rd-line-strong); background: transparent;
+  color: var(--rd-ink-dim); font-size: 13px; padding: 0 14px;
+}
+.kairos-redesign #view-content[data-view="notes"] .form-grid .btn { height: 44px; margin: 0; padding: 0 22px; font-size: 14px; }
+.kairos-redesign #view-content[data-view="notes"] .form-grid input:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+/* -- The list: one surface, compact single-line rows ---------------------------------- */
+.kairos-redesign #view-content[data-view="notes"] #notes-list { margin-top: 0 !important; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list:has(> .card) {
+  background-color: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: 16px;
+  box-shadow: var(--rd-shadow); overflow: hidden;
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card {
+  min-height: 38px; margin: 0; padding: 0 8px 0 14px; border: 0; border-radius: 0; box-shadow: none; background: transparent;
+  display: flex; align-items: center;
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card + .card { border-top: 1px solid var(--rd-line); }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card:hover { background: var(--rd-surface-2); }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card > .card-row { width: 100%; gap: 8px; flex-wrap: nowrap; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card > .card-row > .card-row {
+  gap: 12px !important; flex: 1 1 0; min-width: 0; flex-wrap: nowrap; justify-content: flex-start;
+}
+/* Title and due pill share one line: the title takes its own width and truncates, the pill sits at the right. */
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card > .card-row > .card-row > div {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left;
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list .note-title {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 14px; font-weight: 400; color: var(--rd-ink);
+}
+/* Reading a long note: focusing its row lets the title wrap in full. */
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card:focus-within .note-title { white-space: normal; overflow: visible; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card:focus-within { padding-top: 4px; padding-bottom: 4px; }
+/* A drawn checkbox: 22px box inside a 44px hit area. */
+.kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none; position: relative; flex: none; box-sizing: border-box;
+  width: 32px; height: 32px; margin: 0 -4px 0 -8px; padding: 0; border: 0; border-radius: 12px; background: transparent; cursor: pointer;
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"]::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; box-sizing: border-box;
+  border: 1.5px solid var(--rd-line-strong); border-radius: 6px; background: var(--rd-surface-solid);
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"]:checked::before { background: var(--accent); border-color: var(--accent); }
+.kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"]:checked::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 10px; margin: -7px 0 0 -2px;
+  border: solid var(--rd-surface-solid); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"]:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -4px; }
+/* Finished notes go quiet. */
+.kairos-redesign #view-content[data-view="notes"] #notes-list .note-title.is-done { color: var(--rd-ink-faint); opacity: 1; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card:has(.note-title.is-done) { background: transparent; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .card:has(.note-title.is-done) .meta { opacity: .6; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list .meta {
+  display: block; flex: 0 1 auto; min-width: 0; max-width: 46%; overflow: hidden; text-overflow: ellipsis; margin: 0 0 0 auto; padding: 2px 10px; border-radius: var(--rd-radius-pill);
+  background: var(--rd-surface-2); color: var(--rd-ink-dim); font-size: 12px; white-space: nowrap;
+}
+.kairos-redesign #view-content[data-view="notes"] #notes-list .row-action-btn { width: 32px; height: 32px; border-radius: 50%; color: var(--rd-ink-dim); }
+.kairos-redesign #view-content[data-view="notes"] #notes-list .row-action-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+/* Touch screens have no hover, so the delete action stays visible there. */
+@media (hover: none) { .kairos-redesign #view-content[data-view="notes"] #notes-list .row-actions { opacity: 1; } }
+
+/* -- Count and Clear finished (they sit at the right of the page header; hidden with the switch off) -- */
+.notes-finished-bar[hidden] { display: none; }
+.kairos-redesign #view-content[data-view="notes"] .notes-finished-bar {
+  display: flex; align-items: center; gap: 12px; margin-left: auto; align-self: flex-end;
+}
+.kairos-redesign #view-content[data-view="notes"] .notes-finished-count {
+  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign #view-content[data-view="notes"] .notes-finished-bar .btn { height: 32px; padding: 0 14px; font-size: 13px; }
+.kairos-redesign #view-content[data-view="notes"] #notes-list .meta.is-overdue { background: rgba(var(--danger-rgb), .12); color: var(--danger); }
+
+/* -- Empty state ---------------------------------------------------------------- */
+.kairos-redesign #view-content[data-view="notes"] #notes-list > .empty-state {
+  background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: 16px; box-shadow: var(--rd-shadow);
+}
+
+/* -- Phones --------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="notes"] .view-header h2 { font-size: 36px; }
+  .kairos-redesign #view-content[data-view="notes"] .view-constrained > .glass.card { padding: 12px 14px; border-radius: 22px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) { flex: 1 1 100%; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) input { flex: 1; min-width: 0; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .btn { flex: 1 1 100%; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list > .card { min-height: 48px; padding: 0 6px 0 14px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"] { width: 44px; height: 44px; margin: 0 -10px 0 -12px; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar { margin-left: 0; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .row-action-btn { width: 44px; height: 44px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { font-size: 11px; padding: 2px 8px; }
+}

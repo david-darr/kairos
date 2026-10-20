@@ -1,0 +1,194 @@
+/* Redesign preview, step 3: Library (Documents & files, Vault, Google Drive,
+   and the document editor). Every rule sits under .kairos-redesign, so with
+   the switch off the tab is untouched. Reuses the --rd-* tokens from
+   redesign.css. Mockups: Library.dc.html, LibraryVault.dc.html and
+   LibraryDrive.dc.html. */
+
+.kairos-redesign {
+  --rdl-tray: rgba(var(--ink-rgb), .06);
+  --rdl-tint: color-mix(in srgb, var(--point) 16%, var(--rd-surface-solid));
+  --rdl-hover: color-mix(in srgb, var(--point) 10%, transparent);
+}
+.kairos-redesign #view-content[data-view="library"] .view-header h2 { font-size: clamp(38px, 4.6vw, 52px); }
+.kairos-redesign #view-content[data-view="library"] .view-header .sub { margin-top: 6px; font-size: 14px; }
+
+/* -- Segmented switches (section, Vault mode, Drive layout) --------------------- */
+.kairos-redesign #view-content[data-view="library"] .segmented-tabs {
+  gap: 2px; padding: 4px; border: 0; border-radius: var(--rd-radius-pill); background: var(--rdl-tray);
+}
+.kairos-redesign #view-content[data-view="library"] .segmented-tab {
+  min-height: 32px; padding: 0 14px; border-radius: var(--rd-radius-pill); font-size: 13px; color: var(--rd-ink-dim);
+}
+.kairos-redesign #view-content[data-view="library"] .segmented-tab:hover:not(.active) { color: var(--rd-ink); }
+.kairos-redesign #view-content[data-view="library"] .segmented-tab.active {
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 2px rgba(var(--shade-rgb), .12);
+}
+.kairos-redesign #view-content[data-view="library"] .segmented-tab:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+.kairos-redesign #view-content[data-view="library"] .library-tabs { margin: -4px 0 18px; }
+
+/* -- Documents & files -------------------------------------------------------------- */
+.kairos-redesign .library-view > .glass.card { padding: 10px 12px; border-radius: 18px; }
+.kairos-redesign .library-view > .glass.card input:not([type="file"]) { height: 42px; border-radius: var(--rd-radius-pill); padding: 0 16px; }
+.kairos-redesign .library-view > .glass.card .btn { height: 42px; padding: 0 18px; }
+.kairos-redesign .library-section { border-radius: 18px; }
+.kairos-redesign .library-section-summary { padding: 14px 18px; }
+.kairos-redesign .library-section[open] > .library-section-summary { border-bottom-color: var(--rd-line); }
+.kairos-redesign .library-section-summary:hover, .kairos-redesign .library-chat-summary:hover { background: var(--rdl-hover); }
+.kairos-redesign .library-section-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--rd-surface-2); color: var(--rd-ink-dim); }
+.kairos-redesign .library-section-icon svg { width: 18px; height: 18px; }
+.kairos-redesign .library-section-copy strong { font-size: 15px; font-weight: 500; }
+.kairos-redesign .library-section-copy small { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .library-count { background: var(--rd-surface-2); color: var(--rd-ink-dim); }
+.kairos-redesign .library-chevron { color: var(--rd-ink-dim); }
+.kairos-redesign .document-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); padding: 14px 18px 18px; gap: 10px; }
+.kairos-redesign .library-document-card, .kairos-redesign .library-file-row {
+  border: 1px solid var(--rd-line); border-radius: 14px; background: var(--rd-ground); color: var(--rd-ink);
+}
+.kairos-redesign .library-document-card { min-height: 0; padding: 14px; }
+.kairos-redesign .library-document-card:hover, .kairos-redesign .library-file-row:not(:disabled):hover {
+  background: var(--rdl-tint); border-color: var(--rd-line-strong);
+}
+.kairos-redesign .library-document-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--rd-surface-2); color: var(--rd-ink-dim); font-size: 15px; }
+.kairos-redesign .library-document-copy strong, .kairos-redesign .library-file-copy strong { font-size: 14px; font-weight: 500; }
+.kairos-redesign .library-document-copy small, .kairos-redesign .library-file-copy small { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .library-row-arrow { color: var(--rd-ink-faint); }
+.kairos-redesign .library-document-card:hover .library-row-arrow, .kairos-redesign .library-file-row:hover .library-row-arrow { color: var(--rd-ink); }
+.kairos-redesign .library-chat-files { padding: 12px 18px 18px; gap: 8px; }
+.kairos-redesign .library-chat-group { border: 1px solid var(--rd-line); border-radius: 12px; background: var(--rd-ground); }
+.kairos-redesign .library-chat-group[open] > .library-chat-summary { border-bottom-color: var(--rd-line); }
+.kairos-redesign .library-chat-title { font-size: 14px; font-weight: 500; }
+.kairos-redesign .library-file-list { padding: 8px; }
+.kairos-redesign .library-file-row { border-radius: 10px; background: transparent; border-color: transparent; }
+.kairos-redesign .library-file-kind { border-radius: 6px; background: var(--rd-surface-2); color: var(--rd-ink-dim); font-weight: 600; }
+.kairos-redesign .library-empty { color: var(--rd-ink-dim); }
+.kairos-redesign .library-section-summary:focus-visible, .kairos-redesign .library-chat-summary:focus-visible,
+.kairos-redesign .library-document-card:focus-visible, .kairos-redesign .library-file-row:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+
+/* -- Document editor ------------------------------------------------------------------ */
+.kairos-redesign .library-editor {
+  gap: 10px; padding: 16px 20px; border: 1px solid var(--rd-line); border-radius: 18px; box-shadow: var(--rd-shadow);
+  background-color: var(--rd-surface); height: fit-content;
+}
+.kairos-redesign .library-editor > .view-header { margin-bottom: 0; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.kairos-redesign .library-editor > .view-header > .card-row:first-child { flex-wrap: wrap; justify-content: flex-start; }
+.kairos-redesign .library-editor > .view-header .meta { color: var(--rd-ink-dim); font-size: 12px; }
+.kairos-redesign #view-content .library-editor > .view-header input {
+  min-height: 46px; padding: 0 4px; border-color: transparent; background: transparent;
+  font-family: var(--rd-font-title) !important; font-style: italic; font-size: 30px !important; font-weight: 500; line-height: 1.1;
+}
+.kairos-redesign #view-content .library-editor > .view-header input:focus { border-color: var(--rd-line-strong); background: var(--rd-ground); }
+.kairos-redesign .library-editor > .view-header .btn { height: 36px; padding: 0 16px; }
+.kairos-redesign .library-editor > .view-header > .card-row:last-child .btn:not(.danger) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign .library-editor > textarea { margin-top: 4px !important; border-radius: 12px; background: var(--rd-ground); padding: 14px; }
+
+/* -- Vault: the intro, the browser and the reader ----------------------------------------- */
+.kairos-redesign .library-vault-intro { margin: 8px 0 12px; align-items: center; }
+.kairos-redesign .library-vault-intro h3 {
+  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .library-vault-intro p { color: var(--rd-ink-dim); font-size: 13px; }
+.kairos-redesign .library-vault-browser {
+  border: 1px solid var(--rd-line); border-radius: 18px; background-color: var(--rd-surface); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .library-vault-sidebar { padding: 12px; border-right-color: var(--rd-line); }
+.kairos-redesign .library-vault-sidebar-head input { height: 34px; border-radius: 10px; font-size: 13px; background: var(--rd-ground); }
+.kairos-redesign .library-vault-sidebar > .meta { color: var(--rd-ink-dim); font-size: 12px; }
+.kairos-redesign .library-vault-folder-summary, .kairos-redesign .library-vault-note {
+  border-radius: 8px; font-size: 13px; color: var(--rd-ink);
+}
+.kairos-redesign .library-vault-folder-summary:hover, .kairos-redesign .library-vault-note:hover { background: var(--rdl-hover); }
+.kairos-redesign .library-vault-note.active { background: var(--rdl-tint); }
+.kairos-redesign .library-vault-children { border-left-color: var(--rd-line); }
+.kairos-redesign .library-vault-mark { color: var(--rd-ink-dim); }
+.kairos-redesign .library-vault-note.active .library-vault-mark { color: var(--rd-ink); }
+.kairos-redesign .library-vault-reader-head { padding: 18px 26px 12px; border-bottom-color: var(--rd-line); }
+.kairos-redesign .library-vault-reader-title h3 {
+  margin-top: 2px; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 30px; line-height: 1.1;
+}
+.kairos-redesign .library-vault-reader-title .meta, .kairos-redesign .library-vault-reader-title small { color: var(--rd-ink-dim); }
+.kairos-redesign .library-vault-reading { font-size: 14px; line-height: 1.7; padding: 20px min(5vw, 42px); }
+.kairos-redesign .library-vault-reading h1, .kairos-redesign .library-vault-reading h2, .kairos-redesign .library-vault-reading h3 { font-weight: 500; }
+.kairos-redesign .library-vault-reading a, .kairos-redesign .vault-note-link { color: var(--rd-ink); text-decoration-color: var(--rd-line-strong); text-underline-offset: 3px; }
+.kairos-redesign .library-vault-editor { background: var(--rd-ground); font-size: 14px; }
+.kairos-redesign .library-vault-empty h3 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; }
+
+/* -- Vault map ------------------------------------------------------------------------------ */
+.kairos-redesign .library-vault-host .vault-graph-wrap {
+  border: 1px solid var(--rd-line); border-radius: 18px; box-shadow: var(--rd-shadow); overflow: hidden;
+}
+.kairos-redesign .vault-search { border-radius: 10px; height: 34px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); }
+.kairos-redesign .vault-toolbar .btn { height: 34px; }
+.kairos-redesign .vault-caption { color: var(--rd-ink-dim); }
+.kairos-redesign .vault-search-results { border-radius: 12px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+.kairos-redesign .vault-search-result:hover { background: var(--rdl-hover); }
+.kairos-redesign .vault-panel { border-radius: 18px; border-color: var(--rd-line); background-color: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+.kairos-redesign .vault-panel-header { border-bottom-color: var(--rd-line); }
+.kairos-redesign .vault-panel-actions .btn { padding: 4px 12px; font-size: 11px; }
+.kairos-redesign .vault-panel-breadcrumb { color: var(--rd-ink-dim); }
+.kairos-redesign .vault-child-row:hover { background: var(--rdl-hover); color: var(--rd-ink); }
+.kairos-redesign .vault-panel-resize-handle:hover, .kairos-redesign .vault-panel-resize-handle.dragging { background: var(--rd-focus); }
+
+/* -- Google Drive ------------------------------------------------------------------------------ */
+.kairos-redesign .google-account-line {
+  padding: 10px 14px; border: 1px solid var(--rd-line); border-radius: 18px; background-color: var(--rd-surface); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .google-account-line strong { font-weight: 500; color: var(--rd-ink-dim); }
+.kairos-redesign .google-browser {
+  border: 1px solid var(--rd-line); border-radius: 18px; background-color: var(--rd-surface); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .google-rail { padding: 14px; border-right-color: var(--rd-line); gap: 4px; }
+.kairos-redesign .google-new-menu { margin-bottom: 10px; }
+.kairos-redesign .google-new-menu summary { display: flex; justify-content: center; align-items: center; height: 40px; width: 100%; }
+.kairos-redesign .google-rail .google-section {
+  height: 34px; padding: 0 12px; justify-content: flex-start; border: 0; border-radius: 10px; background: transparent;
+  color: var(--rd-ink-dim); font-size: 13px; font-weight: 400;
+}
+.kairos-redesign .google-rail .google-section:hover:not([aria-current="true"]) { background: var(--rdl-hover); color: var(--rd-ink); }
+.kairos-redesign .google-rail .google-section[aria-current="true"] { background: var(--rdl-tint); color: var(--rd-ink); font-weight: 500; }
+.kairos-redesign .google-storage { color: var(--rd-ink-dim); font-size: 12px; }
+.kairos-redesign .google-toolbar { padding: 0; border: 0; background: transparent; gap: 8px; }
+.kairos-redesign .google-toolbar input[type="search"], .kairos-redesign .google-toolbar input:not([type]) { height: 36px; border-radius: var(--rd-radius-pill); font-size: 13px; padding: 0 14px; }
+.kairos-redesign .google-toolbar select, .kairos-redesign .google-toolbar .custom-select-btn { height: 36px; border-radius: var(--rd-radius-pill); font-size: 12px; }
+.kairos-redesign .google-toolbar .btn { height: 36px; padding: 0 14px; font-size: 13px; }
+.kairos-redesign .google-toolbar .btn[aria-pressed="true"] { background: var(--rd-surface-solid); border-color: var(--rd-line-strong); color: var(--rd-ink); font-weight: 600; }
+.kairos-redesign .google-breadcrumbs { font-size: 13px; color: var(--rd-ink-dim); }
+.kairos-redesign .google-breadcrumbs .btn { height: 28px; padding: 0 12px; font-size: 12px; }
+.kairos-redesign .google-selection-toolbar { padding: 8px 10px; border-radius: 12px; background: var(--rdl-tint); font-size: 13px; }
+.kairos-redesign .google-selection-toolbar .btn { height: 30px; padding: 0 12px; font-size: 12px; }
+.kairos-redesign .google-file-row { color: var(--rd-ink); }
+.kairos-redesign .google-file-row:hover, .kairos-redesign .google-file-row:focus-within { background: var(--rdl-hover); }
+.kairos-redesign .google-grid .google-file-row { border: 1px solid var(--rd-line); border-radius: 12px; background: var(--rd-ground); }
+.kairos-redesign .google-grid .google-file-row:hover { border-color: var(--rd-line-strong); background: var(--rdl-hover); }
+.kairos-redesign .google-file-row.selected, .kairos-redesign .google-grid .google-file-row.selected {
+  background: var(--rdl-tint); outline: 0; border-color: var(--rd-line-strong); box-shadow: inset 0 0 0 1px var(--rd-line-strong);
+}
+.kairos-redesign .google-file-row input[type="checkbox"] { accent-color: var(--accent); }
+.kairos-redesign .google-thumbnail { border-radius: 8px; background: var(--rd-surface-2); }
+.kairos-redesign .google-type { border-radius: 6px; background: var(--rd-surface-2); color: var(--rd-ink-dim); font-weight: 600; }
+.kairos-redesign .google-file-copy strong { font-size: 13px; font-weight: 500; }
+.kairos-redesign .google-file-copy small { font-size: 11px; color: var(--rd-ink-dim); }
+.kairos-redesign .google-main .google-detail {
+  border: 1px solid var(--rd-line); border-radius: 18px; background-color: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .google-detail-head h3 { font-weight: 500; font-size: 17px; }
+.kairos-redesign .google-actions .btn { height: 30px; padding: 0 12px; font-size: 12px; }
+.kairos-redesign .google-inline-prompt { border-color: var(--rd-line-strong); border-radius: 12px; background: var(--rd-ground); }
+.kairos-redesign .google-context-menu { border-radius: 12px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+.kairos-redesign .google-drop-active { outline-color: var(--rd-focus); }
+.kairos-redesign .google-sheet-grid, .kairos-redesign .google-form-responses pre, .kairos-redesign .google-reader { border-color: var(--rd-line); border-radius: 12px; }
+.kairos-redesign .google-member, .kairos-redesign .google-form-item { border-bottom-color: var(--rd-line); }
+.kairos-redesign .google-editor-head { border-top-color: var(--rd-line); }
+.kairos-redesign .google-file-row:focus-visible, .kairos-redesign .google-section:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+
+/* -- Phones ------------------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="library"] .view-header h2 { font-size: 36px; }
+  .kairos-redesign #view-content[data-view="library"] .segmented-tab { min-height: 40px; }
+  .kairos-redesign .library-section-summary { padding: 12px 14px; }
+  .kairos-redesign .document-grid { padding: 10px 12px 14px; }
+  .kairos-redesign .library-chat-files { padding: 10px 12px 14px; }
+  .kairos-redesign .library-editor { padding: 12px 14px; }
+  .kairos-redesign .library-vault-reader-head { padding: 14px 16px 10px; }
+  .kairos-redesign .library-vault-reader-title h3 { font-size: 26px; }
+  .kairos-redesign .google-rail .google-section { flex: 1 1 auto; justify-content: center; border: 1px solid var(--rd-line); }
+}

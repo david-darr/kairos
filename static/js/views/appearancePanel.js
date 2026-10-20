@@ -101,6 +101,14 @@ export function renderAppearancePanel(content, _status, page) {
     el('p', { class: 'meta', text: 'Replace any scene with your own picture. PNG, JPEG or WebP · Up to 12 MB · Stored only on this device.' }),
   ]);
 
+  // Redesign preview: the new look, behind a switch. Off by default, saved
+  // per user on this device like the rest, applied live (appearance.js).
+  const redesign = toggle({ label: 'Redesign preview', onChange: (on) => { updateAppearance({ redesign: on }); sync(); } });
+  redesign.id = 'appearance-redesign';
+  const redesignSection = el('div', { class: 'appearance-redesign-setting' }, [
+    group({}, [row({ title: 'Redesign preview', description: 'Try the new look: soft cards, pill buttons and a washed halftone backdrop on every tab except Chat. Changes only how Kairos looks.', control: redesign })]),
+  ]);
+
   const controls = new Map();
   function dial(key, title, description) {
     const output = el('output', { for: `appearance-${key}` });
@@ -223,7 +231,7 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  root.append(previewFrame, modes, palette, halftoneSection, imageOptions, shaderOptions, chatStyleSection, overlaySection, status);
+  root.append(previewFrame, modes, palette, halftoneSection, imageOptions, shaderOptions, chatStyleSection, redesignSection, overlaySection, status);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
@@ -231,6 +239,7 @@ export function renderAppearancePanel(content, _status, page) {
     for (const [style, button] of styleButtons) button.setAttribute('aria-pressed', String(style === value.chatStyle));
     palette.hidden = value.mode === 'default'; imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
+    redesign.checked = value.redesign;
     for (const [slot, { thumb, reset }] of Object.entries(halftoneCards)) {
       const info = value.halftoneSlots[slot];
       thumb.src = halftoneSource(slot);

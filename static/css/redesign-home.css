@@ -1,0 +1,216 @@
+/* Redesign preview: home. Every rule scoped under .kairos-redesign.
+   Built from the --rd-* tokens (redesign.css); no raw colors here.
+   The grid is 12 columns. views/../redesignHome.js sets --rd-span on each card
+   (natural 4/6/8/12, the last card of a row widened so rows always fill), and
+   cards in a row are equal height. One column below 760px of Home's own width. */
+
+/* -- Page ---------------------------------------------------------------------- */
+.kairos-redesign .dashboard { padding: 28px 48px 48px; }
+.kairos-redesign .dashboard-content { max-width: 1320px; display: flex; flex-direction: column; gap: 20px; }
+.kairos-redesign .dashboard-customize { display: none; }
+
+/* -- Hero: the washed figure as a soft tint, copy on the left -------------------- */
+.kairos-redesign .dashboard-hero {
+  min-height: 440px; margin: 0; padding: 30px 32px 28px; border-radius: 22px;
+  border: 1px solid var(--rd-line-strong); box-shadow: 0 10px 36px rgba(var(--shade-rgb), .1);
+  background: var(--rd-ground);
+}
+.kairos-redesign .dashboard-core::after {
+  background: linear-gradient(90deg, rgba(var(--wash-rgb), .96) 0%, rgba(var(--wash-rgb), .88) 36%, rgba(var(--wash-rgb), .1) 70%, rgba(var(--wash-rgb), 0) 100%);
+}
+.kairos-redesign .dashboard-header { align-items: flex-start; flex-wrap: wrap; gap: 8px 8px; }
+.kairos-redesign .dashboard-header > div:first-child { margin-right: auto; }
+.kairos-redesign .dashboard-header .eyebrow { font-size: 11px; letter-spacing: .16em; }
+.kairos-redesign .dashboard-header p { font-size: 13px; color: var(--rd-ink-dim); margin-top: 6px; }
+.kairos-redesign .dashboard-system-pill,
+.kairos-redesign .hm-customize {
+  display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; box-sizing: border-box;
+  border-radius: var(--rd-radius-pill); background: var(--rd-surface); border: 1px solid var(--rd-line);
+  font: 400 12px var(--rd-font-ui); color: var(--rd-ink);
+}
+.kairos-redesign .hm-customize { cursor: pointer; }
+.kairos-redesign .hm-customize:hover { background: var(--rd-surface-2); border-color: var(--rd-line-strong); }
+.kairos-redesign .hm-customize:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .dashboard-system-pill .status-dot { width: 7px; height: 7px; }
+.kairos-redesign .dashboard-intro { max-width: 440px; padding: 30px 0 44px; display: flex; flex-direction: column; }
+.kairos-redesign .dashboard-intro .eyebrow { font-size: 11px; letter-spacing: .16em; }
+.kairos-redesign .dashboard-intro h1 { font-size: clamp(40px, 4.4vw, 52px); line-height: 1.08; margin: 14px 0 0; }
+.kairos-redesign .dashboard-intro h1 span { color: var(--rd-ink-dim); }
+.kairos-redesign .dashboard-intro > p { max-width: 440px; margin: 18px 0 0; font-size: 15px; line-height: 1.7; color: var(--rd-ink); }
+.kairos-redesign .dashboard-actions { margin-top: 22px; gap: 22px; }
+.kairos-redesign .dashboard-actions .btn.primary { height: 46px; padding: 0 22px; font-size: 14px; }
+.kairos-redesign .dashboard-actions .btn.quiet { color: var(--rd-ink); font-size: 14px; border-color: transparent; background: transparent; padding: 0; }
+.kairos-redesign .dashboard-actions .btn.quiet:hover { background: transparent; text-decoration: underline; }
+.kairos-redesign .dashboard-next { position: absolute; left: 0; bottom: 0; margin: 0; font-size: 12px; color: var(--rd-ink-dim); max-width: none; }
+
+/* -- The 12-column grid ------------------------------------------------------------ */
+.kairos-redesign .dashboard-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; align-items: stretch; container-type: inline-size;
+}
+.kairos-redesign .dashboard-grid > * { grid-column: span var(--rd-span, 4); min-width: 0; }
+.kairos-redesign .dashboard-grid > [hidden] { display: none; }
+@container (max-width: 759px) {
+  .kairos-redesign .dashboard-grid > * { grid-column: span 12; }
+}
+
+/* -- Cards ------------------------------------------------------------------------- */
+.kairos-redesign .dashboard-section {
+  box-sizing: border-box; display: flex; flex-direction: column; padding: 18px 22px 12px; min-width: 0;
+  border-radius: var(--rd-radius-card); background: var(--rd-surface); border: 1px solid var(--rd-line); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .dashboard-section-header { margin: 0; padding-bottom: 6px; }
+.kairos-redesign .dashboard-section-header h2 { color: var(--rd-ink-dim); }
+.kairos-redesign .dashboard-section-header .btn.quiet { color: var(--rd-ink); font-size: 14px; padding: 0 0 0 8px; border-color: transparent; background: transparent; }
+.kairos-redesign .dashboard-section-header .btn.quiet:hover { background: transparent; text-decoration: underline; }
+.kairos-redesign .dashboard-section-body { flex: 1; }
+.kairos-redesign .dashboard-row { padding: 9px 0; font-size: 14px; min-height: 0; }
+.kairos-redesign .dashboard-row + .dashboard-row,
+.kairos-redesign .dashboard-model + .dashboard-model { border-top-color: var(--rd-line); }
+.kairos-redesign .dashboard-section-body > .dashboard-row:first-child { border-top: 1px solid var(--rd-line); }
+.kairos-redesign button.dashboard-row:hover { background: transparent; }
+.kairos-redesign button.dashboard-row:hover .dashboard-row-title { text-decoration: underline; text-decoration-color: var(--rd-line-strong); text-underline-offset: 3px; }
+.kairos-redesign .dashboard-row-detail,
+.kairos-redesign .dashboard-event-date { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .dashboard-event-date { width: 84px; }
+.kairos-redesign .dashboard-empty { font-size: 13px; color: var(--rd-ink-dim); }
+.kairos-redesign .dashboard-section :is(button, a):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+/* Models: a ring per limit window */
+.kairos-redesign .dashboard-model { padding: 8px 0; }
+.kairos-redesign .dashboard-model-usage,
+.kairos-redesign .dashboard-quota-note { color: var(--rd-ink-dim); font-size: 11px; }
+.kairos-redesign .dashboard-quota { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 4px 0 4px 8px; }
+.kairos-redesign .dashboard-quota-window { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; }
+.kairos-redesign .dashboard-quota-window .dashboard-quota-track { display: none; }
+.kairos-redesign .dashboard-quota-head { flex-direction: column; gap: 1px; font-size: 12px; font-weight: 500; color: var(--rd-ink); }
+.kairos-redesign .dashboard-quota-reset { font-weight: 400; font-size: 11px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-ring {
+  flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%;
+  background: conic-gradient(var(--accent) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%);
+  -webkit-mask: radial-gradient(circle, transparent 11px, black 12px); mask: radial-gradient(circle, transparent 11px, black 12px);
+}
+.kairos-redesign .hm-ring.tone-watch { background: conic-gradient(var(--warn) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
+.kairos-redesign .hm-ring.tone-crit { background: conic-gradient(var(--danger) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
+
+/* Systems: one row per system */
+.kairos-redesign .dashboard-system-chips { flex-direction: column; flex-wrap: nowrap; gap: 0; }
+.kairos-redesign .dashboard-system-chip {
+  display: flex; gap: 10px; padding: 9px 0; border: 0; border-top: 1px solid var(--rd-line); border-radius: 0; font-size: 14px; background: transparent;
+}
+.kairos-redesign .dashboard-system-chip .status-dot { flex: 0 0 8px; width: 8px; height: 8px; }
+.kairos-redesign .dashboard-system-chip > span:nth-child(2) { flex: 1; }
+.kairos-redesign .dashboard-system-chip .meta { font-size: 12px; color: var(--rd-ink-dim); }
+
+/* At a glance: the number strip inside a card */
+.kairos-redesign .hm-glance .dashboard-stats { flex-wrap: wrap; gap: 10px; padding: 4px 0 8px; margin: 0; }
+.kairos-redesign .hm-glance .dashboard-stat {
+  padding: 10px 16px; border-radius: var(--rd-radius-pill); background: var(--rd-surface); border: 1px solid var(--rd-line);
+  align-items: baseline;
+}
+.kairos-redesign .hm-glance .dashboard-stat:hover { background: var(--rd-surface-2); border-color: var(--rd-line-strong); }
+.kairos-redesign .hm-glance .dashboard-stat-value { font-size: 22px; font-weight: 500; letter-spacing: 0; }
+.kairos-redesign .hm-glance .dashboard-stat-label { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-glance .dashboard-attention { border-color: var(--rd-line-strong); }
+.kairos-redesign .dashboard-stat:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+/* Tab cards */
+.kairos-redesign .dashboard-tab-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--rd-radius-pill); background: var(--accent-dim); color: var(--rd-ink); }
+.kairos-redesign .dashboard-tab-figure .dashboard-stat-value { font-size: 30px; font-weight: 500; }
+.kairos-redesign .dashboard-quota-fill.tone-ample { background: var(--accent); }
+
+/* -- Needs you ---------------------------------------------------------------------- */
+.kairos-redesign .hm-needs { border-color: var(--rd-line-strong); }
+.kairos-redesign .hm-needs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 0 6px; }
+.kairos-redesign .hm-needs-head h2 {
+  margin: 0; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 26px; letter-spacing: 0;
+  text-transform: none; color: var(--rd-ink);
+}
+.kairos-redesign .hm-needs-count { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-need { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--rd-line); }
+.kairos-redesign .hm-need-lead {
+  flex: 0 0 32px; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; overflow: hidden;
+  background: var(--rd-surface-2); color: var(--rd-ink); font-size: 13px; font-weight: 500;
+}
+.kairos-redesign .hm-need-lead.is-danger { background: rgba(var(--danger-rgb), .14); color: var(--danger); font-size: 14px; font-weight: 600; }
+.kairos-redesign .hm-need-lead.is-avatar { background: transparent; }
+.kairos-redesign .hm-need-text { flex: 1 1 200px; min-width: 0; }
+.kairos-redesign .hm-need-title { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.kairos-redesign .hm-need-sub { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-need-sub.is-danger { color: var(--danger); }
+.kairos-redesign .hm-need-body {
+  margin-top: 4px; font-size: 13px; color: var(--rd-ink-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.kairos-redesign .hm-need-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.kairos-redesign .hm-compose { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-left: 44px; }
+.kairos-redesign .hm-compose[hidden] { display: none; }
+.kairos-redesign .hm-compose-input { flex: 1 1 200px; min-width: 0; height: 36px; padding: 0 14px; }
+.kairos-redesign .hm-clear {
+  padding: 18px 0 16px; border-top: 1px solid var(--rd-line); font-family: var(--rd-font-title); font-style: italic; font-size: 22px; color: var(--rd-ink-dim);
+}
+
+/* Shared pill buttons for Needs you and the sheet */
+.kairos-redesign .hm-btn {
+  height: 36px; padding: 0 16px; border-radius: var(--rd-radius-pill); border: 1px solid transparent; cursor: pointer;
+  font: 500 13px var(--rd-font-ui); display: inline-flex; align-items: center; box-sizing: border-box;
+}
+.kairos-redesign .hm-btn-primary { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+.kairos-redesign .hm-btn-primary:hover { background: var(--rd-primary-hover); }
+.kairos-redesign .hm-btn-secondary { background: var(--rd-surface-solid); color: var(--rd-ink); border-color: var(--rd-line-strong); font-weight: 400; }
+.kairos-redesign .hm-btn-secondary:hover { background: var(--rd-surface-2); }
+.kairos-redesign .hm-btn-ghost { background: transparent; color: var(--rd-ink-dim); font-weight: 400; padding: 0 12px; }
+.kairos-redesign .hm-btn-ghost:hover { color: var(--rd-ink); text-decoration: underline; }
+.kairos-redesign .hm-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+/* -- Customize sheet (lives on <body>, so it carries its own scope) ---------------------- */
+.kairos-redesign .hm-sheet-root { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; }
+.kairos-redesign .hm-scrim { position: absolute; inset: 0; background: rgba(var(--shade-rgb), .32); }
+.kairos-redesign .hm-sheet {
+  position: relative; width: 400px; max-width: 100%; height: 100%; box-sizing: border-box; overflow-y: auto; padding: 26px 24px 28px;
+  background: var(--rd-surface-solid); color: var(--rd-ink); border-left: 1px solid var(--rd-line-strong); box-shadow: -10px 0 36px rgba(var(--shade-rgb), .14);
+  font-family: var(--rd-font-ui);
+}
+.kairos-redesign .hm-sheet-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.kairos-redesign .hm-sheet-top h2 { margin: 0; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 28px; letter-spacing: 0; text-transform: none; color: var(--rd-ink); }
+.kairos-redesign .hm-sheet-top .hm-btn { height: 32px; font-size: 13px; }
+.kairos-redesign .hm-sheet-intro { margin: 8px 0 14px; font-size: 13px; line-height: 1.6; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-sheet-group { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
+.kairos-redesign .hm-sheet-group:first-child { margin-top: 0; }
+.kairos-redesign .hm-sheet-group h3 { margin: 0; font-size: 12px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-sheet-group span { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-sheet-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--rd-line); }
+.kairos-redesign .hm-sheet-group + .hm-sheet-row { margin-top: 6px; }
+.kairos-redesign .hm-sheet-text { flex: 1; min-width: 0; }
+.kairos-redesign .hm-sheet-label { font-size: 14px; font-weight: 500; }
+.kairos-redesign .hm-sheet-sub { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-switch {
+  flex: 0 0 40px; width: 40px; height: 24px; padding: 0; position: relative; border: 0; border-radius: var(--rd-radius-pill); cursor: pointer;
+  background: var(--rd-line-strong);
+}
+.kairos-redesign .hm-switch[aria-checked="true"] { background: var(--rd-primary-bg); }
+.kairos-redesign .hm-switch-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--rd-surface-solid); transition: left 120ms ease; }
+.kairos-redesign .hm-switch[aria-checked="true"] .hm-switch-knob { left: 19px; }
+.kairos-redesign .hm-ib {
+  flex: 0 0 30px; height: 30px; padding: 0; border-radius: var(--rd-radius-pill); border: 1px solid var(--rd-line-strong);
+  background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 14px; cursor: pointer;
+}
+.kairos-redesign .hm-ib:disabled { opacity: .35; cursor: default; }
+.kairos-redesign .hm-sheet-foot { margin-top: 22px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.kairos-redesign .hm-sheet-foot .hm-btn { height: 38px; }
+.kairos-redesign .hm-link { border: 0; background: none; padding: 4px 0; font: 400 13px var(--rd-font-ui); color: var(--rd-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.kairos-redesign .hm-sheet-root :is(.hm-ib, .hm-switch, .hm-link):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .kairos-redesign .hm-switch-knob { transition: none; } }
+
+/* -- Phones -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign .dashboard { padding: 72px 16px max(24px, var(--mobile-safe-bottom, 0px)); }
+  .kairos-redesign .dashboard-content { gap: 16px; }
+  .kairos-redesign .dashboard-hero { min-height: 420px; padding: 20px 18px 22px; border-radius: 22px; }
+  .kairos-redesign .dashboard-intro h1 { font-size: 42px; }
+  .kairos-redesign .dashboard-core::after { background: linear-gradient(180deg, rgba(var(--wash-rgb), .9) 0%, rgba(var(--wash-rgb), .8) 55%, rgba(var(--wash-rgb), .35) 100%); }
+  .kairos-redesign .dashboard-actions { flex-direction: row; align-items: center; }
+  .kairos-redesign .dashboard-grid { gap: 16px; }
+  .kairos-redesign .dashboard-section { padding: 16px 18px 10px; }
+  .kairos-redesign .hm-need-actions { width: 100%; justify-content: flex-end; }
+  .kairos-redesign .hm-compose { padding-left: 0; }
+  .kairos-redesign .hm-sheet { width: 100%; }
+}

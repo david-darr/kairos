@@ -1,0 +1,239 @@
+/* Redesign preview: tasks tab (work board, schedules, triggers, library).
+   Every rule scoped under .kairos-redesign, so with the switch off the tab is
+   untouched. Built on the --rd-* tokens from redesign.css; no raw colors.
+   Gold stays a hairline and a fill, never text. */
+
+.kairos-redesign {
+  --rdt-pill-ok: rgba(var(--success-rgb), .14);
+  --rdt-pill-warn: color-mix(in srgb, var(--point) 18%, transparent);
+  --rdt-pill-error: rgba(var(--danger-rgb), .12);
+  --rdt-pill-muted: var(--surface-2);
+  --rdt-divider: color-mix(in srgb, var(--point) 20%, transparent);
+}
+
+/* -- Page: sections stacked in the mockup's order ---------------------------- */
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) {
+  display: flex; flex-direction: column; gap: 24px; max-width: 1140px;
+}
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > * { margin: 0; min-width: 0; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header { order: 0; margin-bottom: 0; padding-bottom: 0; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel { order: 1; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-board-card { order: 2; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > #tasks-list { order: 3; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card { order: 4; }
+.kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .automation-library { order: 5; }
+
+.kairos-redesign[data-view="tasks"] .view-header { align-items: flex-end; }
+.kairos-redesign[data-view="tasks"] .view-header h2 { font-size: clamp(36px, 4.4vw, 52px); line-height: 1.02; }
+.kairos-redesign[data-view="tasks"] .view-header .sub { margin-top: 8px; font-size: 15px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .view-header > .btn { min-height: 44px; padding: 0 20px; font-size: 14px; }
+
+/* -- Section blocks: a small label, one dim line, then the content ------------- */
+.kairos-redesign[data-view="tasks"] :is(.task-board-card, .triggers-card, .automation-library) {
+  background: none; border: 0; box-shadow: none; padding: 0; border-radius: 0;
+}
+.kairos-redesign[data-view="tasks"] :is(.task-board-card, .automation-library) > .title,
+.kairos-redesign[data-view="tasks"] .triggers-head > div > .title {
+  font-family: var(--rd-font-ui); font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] :is(.task-board-card, .automation-library) > .meta,
+.kairos-redesign[data-view="tasks"] .triggers-head .meta { margin: 4px 0 12px !important; font-size: 12.5px; color: var(--rd-ink-dim); max-width: 78ch; }
+.kairos-redesign[data-view="tasks"] .automation-library > .meta { margin-bottom: 14px !important; }
+.kairos-redesign[data-view="tasks"] .triggers-head { margin-bottom: 4px; align-items: flex-end; }
+.kairos-redesign[data-view="tasks"] .triggers-card .set-section { margin-bottom: 14px; margin-top: 14px; }
+
+/* The list of scheduled tasks gets the label the mockup shows. */
+.kairos-redesign[data-view="tasks"] #tasks-list { margin-top: 0 !important; }
+.kairos-redesign[data-view="tasks"] #tasks-list:has(> .card)::before {
+  content: "Scheduled tasks"; display: block; padding: 0 2px 10px;
+  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking);
+  text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] #tasks-list > .tool-store-heading {
+  margin: 22px 2px 10px; font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] #tasks-list > .empty-state-rich {
+  background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign[data-view="tasks"] #tasks-list > .empty-state-rich .empty-state-title { color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] #tasks-list > .empty-state-rich .empty-state-hint { color: var(--rd-ink-dim); }
+
+/* -- The two add forms --------------------------------------------------------- */
+.kairos-redesign[data-view="tasks"] .view-constrained > details.disclosure-panel:not([open]) { align-self: flex-start; }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) > summary {
+  display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; cursor: pointer;
+  border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: var(--rd-surface);
+  color: var(--rd-ink); font-size: 13px; font-weight: 500; list-style: none;
+}
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) > summary::-webkit-details-marker { display: none; }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) > summary:hover { background: var(--rd-surface-2); }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) > summary:focus-visible {
+  outline: 2px solid var(--rd-focus); outline-offset: 2px;
+}
+/* "+ Schedule a task" is the page's primary action: the dark pill. */
+.kairos-redesign[data-view="tasks"] .view-constrained > details.disclosure-panel > summary {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign[data-view="tasks"] .view-constrained > details.disclosure-panel > summary:hover { background: var(--rd-primary-hover); }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel)[open] { padding: 16px 18px; }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel)[open] > summary { margin-bottom: 14px; }
+.kairos-redesign[data-view="tasks"] .task-board-card details.disclosure-panel { margin-bottom: 12px; }
+.kairos-redesign[data-view="tasks"] .task-board-card details.disclosure-panel:not([open]) { display: inline-block; }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) .form-grid { gap: 12px 14px; }
+.kairos-redesign[data-view="tasks"] :is(.view-constrained > details.disclosure-panel, .task-board-card details.disclosure-panel) .field > label {
+  font-size: 12px; color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] .task-board-card details.disclosure-panel .btn.primary { min-height: 36px; }
+
+/* -- Work board ---------------------------------------------------------------- */
+.kairos-redesign[data-view="tasks"] .task-board { gap: 10px; margin-top: 0; }
+.kairos-redesign[data-view="tasks"] .board-column {
+  padding: 10px; gap: 10px; border-radius: 14px; background: color-mix(in srgb, var(--rd-surface-solid) 70%, transparent);
+  border: 1px solid var(--rdt-divider);
+}
+.kairos-redesign[data-view="tasks"] .board-column-title {
+  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking); color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] .board-card {
+  padding: 11px 12px; gap: 7px; border-radius: 12px; background: var(--rd-surface-solid);
+  border: 1px solid var(--rd-line-strong); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .04);
+}
+.kairos-redesign[data-view="tasks"] .board-card-name { font-size: 13.5px; font-weight: 500; color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] .board-card .meta { margin: 0; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .board-card-running { border-color: var(--rd-focus); }
+.kairos-redesign[data-view="tasks"] .board-card-review { border-color: var(--warn); }
+.kairos-redesign[data-view="tasks"] .board-card-blocked { border-color: var(--danger); }
+.kairos-redesign[data-view="tasks"] .board-card-done { opacity: .75; }
+.kairos-redesign[data-view="tasks"] .board-card-output > summary { font-size: 11.5px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .board-card-output > summary:focus-visible,
+.kairos-redesign[data-view="tasks"] .run-history-panel > summary:focus-visible,
+.kairos-redesign[data-view="tasks"] .run-row > summary:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; border-radius: 6px; }
+.kairos-redesign[data-view="tasks"] .board-card-text {
+  padding: 7px 9px; border-radius: 9px; background: var(--rd-ground); color: var(--rd-ink); font-size: 12px;
+}
+.kairos-redesign[data-view="tasks"] .board-card-text.is-error { background: var(--rdt-pill-error); color: var(--danger); }
+.kairos-redesign[data-view="tasks"] .board-card-actions { gap: 5px; }
+.kairos-redesign[data-view="tasks"] .board-card-actions .btn { min-height: 28px; padding: 0 11px; font-size: 11.5px; }
+/* Dark pills for the step that moves a card forward. */
+.kairos-redesign[data-view="tasks"] .board-card-backlog .board-card-actions .btn:nth-child(2),
+.kairos-redesign[data-view="tasks"] .board-card-review .board-card-actions .btn:first-child {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign[data-view="tasks"] .board-card-backlog .board-card-actions .btn:nth-child(2):hover:not(:disabled),
+.kairos-redesign[data-view="tasks"] .board-card-review .board-card-actions .btn:first-child:hover:not(:disabled) { background: var(--rd-primary-hover); }
+.kairos-redesign[data-view="tasks"] .btn.danger, .kairos-redesign[data-view="tasks"] .btn.quiet.danger { color: var(--danger); border-color: rgba(var(--danger-rgb), .45); }
+.kairos-redesign[data-view="tasks"] .btn.danger:hover:not(:disabled) { background: rgba(var(--danger-rgb), .08); }
+.kairos-redesign[data-view="tasks"] .btn.quiet { border-color: var(--rd-line-strong); color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] .board-feedback { min-height: 30px; font-size: 12px; border-radius: 10px; }
+
+/* -- Scheduled task cards ------------------------------------------------------- */
+.kairos-redesign[data-view="tasks"] #tasks-list > .card { padding: 16px 20px; margin-bottom: 10px; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row { gap: 10px; flex-wrap: wrap; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > div:first-child { flex: 1 1 240px; min-width: 0; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .title { font-size: 16px; font-weight: 500; color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .meta { color: var(--rd-ink-dim); font-size: 12.5px; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card[data-enabled="false"] .title { color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row { flex: 0 1 auto; justify-content: flex-end; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .btn { min-height: 34px; padding: 0 14px; font-size: 12.5px; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .custom-select-btn { min-height: 34px; border-radius: var(--rd-radius-pill); font-size: 12px !important; padding: 0 12px; }
+@media (min-width: 769px) {
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row { flex-wrap: nowrap; align-items: center; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row .custom-select { flex: 0 0 150px; width: 150px; min-width: 0; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row .btn { white-space: nowrap; }
+}
+/* Run now is the card's dark pill. Turn on/off and Share stay hairline. */
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row > .btn:not(.quiet):not(.danger) {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row > .btn:not(.quiet):not(.danger):hover:not(:disabled) { background: var(--rd-primary-hover); }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row > .btn:disabled { opacity: .6; }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .row-action-btn { width: 34px; height: 34px; border-radius: var(--rd-radius-pill); border: 1px solid var(--rd-line-strong); color: var(--danger); }
+.kairos-redesign[data-view="tasks"] #tasks-list > .card .row-actions { opacity: 1; }
+/* Gold is never text: the "running now" line inherits ink instead. */
+.kairos-redesign[data-view="tasks"] #tasks-list .meta[style*="var(--accent)"] { color: var(--rd-ink-dim) !important; font-weight: 500; }
+.kairos-redesign[data-view="tasks"] #tasks-list .meta[style*="var(--text-faint)"] { color: var(--rd-ink-dim) !important; }
+/* Delivery and run errors read as a tinted notice, as in the mockup. */
+.kairos-redesign[data-view="tasks"] #tasks-list .meta[style*="var(--danger)"] {
+  padding: 8px 12px; border-radius: 10px; background: var(--rdt-pill-error); color: var(--danger) !important;
+}
+.kairos-redesign[data-view="tasks"] #tasks-list .meta[style*="var(--text)"] { color: var(--rd-ink) !important; font-size: 13px; }
+
+/* -- Run history (shared with the board cards) -------------------------------------- */
+.kairos-redesign[data-view="tasks"] .run-history-panel { margin-top: 8px; }
+.kairos-redesign[data-view="tasks"] .run-history-panel > summary { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .run-history { gap: 6px; margin-top: 8px; }
+.kairos-redesign[data-view="tasks"] .run-row > summary { font-size: 12px; color: var(--rd-ink); line-height: 1.7; }
+.kairos-redesign[data-view="tasks"] .run-outcome {
+  padding: 1px 9px; border: 0; border-radius: var(--rd-radius-pill); font-size: 11px; font-weight: 500;
+  background: var(--rdt-pill-muted); color: var(--rd-ink-dim);
+}
+.kairos-redesign[data-view="tasks"] .run-outcome.run-succeeded { background: var(--rdt-pill-ok); color: var(--success); }
+.kairos-redesign[data-view="tasks"] .run-outcome.run-failed { background: var(--rdt-pill-error); color: var(--danger); }
+.kairos-redesign[data-view="tasks"] .run-outcome.run-lost { background: var(--rdt-pill-warn); color: var(--warn); }
+.kairos-redesign[data-view="tasks"] .run-meta { color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .run-delivery { font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .run-delivery.is-error {
+  padding: 6px 10px; border-radius: 10px; background: var(--rdt-pill-error); color: var(--danger);
+}
+.kairos-redesign[data-view="tasks"] .run-delivery .btn { min-height: 26px; padding: 0 11px; font-size: 11.5px; }
+.kairos-redesign[data-view="tasks"] .run-text { padding: 8px 10px; border-radius: 10px; background: var(--rd-ground); color: var(--rd-ink); font-size: 12px; }
+.kairos-redesign[data-view="tasks"] .run-text.is-error { background: var(--rdt-pill-error); color: var(--danger); }
+.kairos-redesign[data-view="tasks"] .run-steps { min-height: 26px; padding: 0 11px; font-size: 11.5px; }
+.kairos-redesign[data-view="tasks"] .run-more { min-height: 28px; }
+
+/* -- Triggers (built from the Settings kit rows, which are already restyled) ------ */
+.kairos-redesign[data-view="tasks"] .triggers-card .set-group {
+  background-color: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: 18px; box-shadow: var(--rd-shadow);
+}
+.kairos-redesign[data-view="tasks"] .triggers-card .set-section-title { margin-bottom: 8px; }
+.kairos-redesign[data-view="tasks"] .triggers-card .set-row { padding: 14px 20px; }
+.kairos-redesign[data-view="tasks"] .triggers-card .set-row-title { font-size: 15px; font-weight: 500; }
+.kairos-redesign[data-view="tasks"] .triggers-card .set-row-description { font-size: 12.5px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .trigger-pending { background: var(--rdt-pill-warn); }
+.kairos-redesign[data-view="tasks"] .trigger-pending .set-row-title { font-size: 14px; font-weight: 400; }
+.kairos-redesign[data-view="tasks"] .trigger-row .set-pill-accent { background: var(--rdt-pill-muted); color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] .trigger-row .set-badge { border-radius: 10px; }
+.kairos-redesign[data-view="tasks"] .trigger-event .set-row-title { font-size: 14px; }
+.kairos-redesign[data-view="tasks"] .triggers-card .set-back { min-height: 32px; padding: 0 12px; color: var(--rd-ink-dim); border-color: transparent; }
+/* Trigger details and the add form open as a page of their own: the title is the serif. */
+.kairos-redesign[data-view="tasks"] .triggers-card > .title,
+.kairos-redesign[data-view="tasks"] .triggers-head:has(> .card-row) > div > .title {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 30px; line-height: 1.1;
+  letter-spacing: 0; text-transform: none; color: var(--rd-ink); margin-bottom: 4px;
+}
+.kairos-redesign[data-view="tasks"] .triggers-card > .title { margin-bottom: 14px; }
+.kairos-redesign[data-view="tasks"] .triggers-head:has(> .card-row) .meta { color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .trigger-secret .set-mono, .kairos-redesign[data-view="tasks"] .triggers-card .set-mono {
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--rd-ink);
+}
+.kairos-redesign[data-view="tasks"] .triggers-card .set-error { color: var(--danger); }
+
+/* -- Automation library ------------------------------------------------------------- */
+.kairos-redesign[data-view="tasks"] .automation-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.kairos-redesign[data-view="tasks"] .automation-card { padding: 16px 18px; gap: 12px; border-radius: 18px; }
+.kairos-redesign[data-view="tasks"] .automation-card .title { font-size: 15px !important; font-weight: 500; color: var(--rd-ink); }
+.kairos-redesign[data-view="tasks"] .automation-card .meta { font-size: 13px; color: var(--rd-ink-dim); }
+.kairos-redesign[data-view="tasks"] .automation-card .meta[style*="var(--text-faint)"] { font-size: 12px; color: var(--rd-ink-faint) !important; }
+.kairos-redesign[data-view="tasks"] .automation-card .custom-select-btn { min-height: 34px; border-radius: var(--rd-radius-pill); font-size: 12px !important; padding: 0 12px; }
+.kairos-redesign[data-view="tasks"] .automation-card .btn { min-height: 34px; padding: 0 16px; font-size: 12.5px; }
+.kairos-redesign[data-view="tasks"] .automation-card .btn:not(.danger) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+.kairos-redesign[data-view="tasks"] .automation-card .btn:not(.danger):hover:not(:disabled) { background: var(--rd-primary-hover); }
+.kairos-redesign[data-view="tasks"] .automation-card .btn.danger { background: transparent; }
+.kairos-redesign[data-view="tasks"] .automation-card .custom-select-btn:disabled,
+.kairos-redesign[data-view="tasks"] .automation-card .custom-select[disabled] .custom-select-btn { opacity: .65; }
+
+/* -- Phones ---------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) { gap: 20px; }
+  .kairos-redesign[data-view="tasks"] .view-header h2 { font-size: 40px; }
+  .kairos-redesign[data-view="tasks"] .view-header > .btn { width: 100%; min-height: 44px; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card { padding: 14px 16px; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row { justify-content: flex-start; width: 100%; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row .custom-select { flex: 1 1 140px; }
+  .kairos-redesign[data-view="tasks"] .triggers-card .set-row { padding: 12px 14px; }
+  .kairos-redesign[data-view="tasks"] .triggers-head > .btn { width: 100%; min-height: 44px; }
+  .kairos-redesign[data-view="tasks"] .board-card-actions .btn { min-height: 36px; }
+  .kairos-redesign[data-view="tasks"] .automation-card { padding: 14px 16px; }
+}

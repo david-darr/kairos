@@ -122,3 +122,9 @@ export function init({ switchTab }) {
   // against init-order changes later).
   for (const { sessionId, ...entry } of chatStream.listInFlight()) render(sessionId, entry);
 }
+
+// The redesigned sidebar's "need you" row (redesignShell.js) opens a chat the
+// same way one of this overlay's cards does.
+export function openSession(sessionId) {
+  return _switchTab ? jumpToSession(sessionId) : Promise.resolve();
+}
