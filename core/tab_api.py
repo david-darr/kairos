@@ -19,6 +19,7 @@ import imaplib
 import os
 import re
 import tempfile
+from urllib.parse import quote
 from contextlib import contextmanager
 
 from core import atomic_io, model_endpoints, secret_storage, tab_folders, token_usage
@@ -148,11 +149,56 @@ def email_accounts():
     return [{k: a.get(k) for k in ("id", "email", "name")} for a in email_service.list_accounts()]
 
 
-class _ReadOnlyMailbox:
-    __slots__ = ("__box",)
+def email_sent_folder(account_id):
+    """Discover the actual Sent folder through read-only IMAP LIST metadata."""
+    from services.email_service import email_service
+    account = email_service.get_account(account_id, decrypted=True)
+    if not account:
+        raise ValueError("The connected email account was removed")
+    with imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"], timeout=20) as box:
+        box.login(account["email"], secret_storage.decrypt(account["password_encrypted"]))
+        status, rows = box.list()
+        if status != "OK":
+            raise ValueError("The Sent folder could not be discovered")
+        fallback = []
+        for row in rows or []:
+            if not isinstance(row, bytes):
+                continue
+            match = re.fullmatch(rb'\(([^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(.+)', row)
+            if not match or b"\\noselect" in match[1].lower().split():
+                continue
+            name = match[2].decode("ascii")
+            if name.startswith('"') and name.endswith('"'):
+                name = re.sub(r'\\(.)', r'\1', name[1:-1])
+            if b"\\sent" in match[1].lower().split():
+                return name
+            if name.casefold() in ("sent", "sent items", "sent messages", "[gmail]/sent mail", "[google mail]/sent mail"):
+                fallback.append(name)
+        if len(fallback) == 1:
+            return fallback[0]
+    raise ValueError("No Sent folder was identified for this account")
 
-    def __init__(self, box):
+
+class _ReadOnlyMailbox:
+    __slots__ = ("__box", "__gmail_account")
+
+    def __init__(self, box, gmail_account=None):
         self.__box = box
+        self.__gmail_account = gmail_account
+
+    def message_link(self, uid):
+        """Provider-assigned provenance only; this fetch cannot mark mail read."""
+        if not self.__gmail_account:
+            return None
+        identity = uid.decode("ascii") if isinstance(uid, bytes) else str(uid)
+        if not re.fullmatch(r"[1-9][0-9]{0,19}", identity):
+            raise ValueError("Invalid message UID")
+        status, rows = self.__box.uid("fetch", identity, "(X-GM-MSGID)")
+        data = b" ".join(row for row in rows or [] if isinstance(row, bytes))
+        found = re.search(rb"\bX-GM-MSGID\s+([0-9]+)\b", data)
+        if status != "OK" or not found or not 0 < int(found[1]) < 2 ** 64:
+            return None
+        return f"https://mail.google.com/mail/u/?authuser={quote(self.__gmail_account, safe='')}#all/{int(found[1]):x}"
 
     def uid(self, command, *args):
         command = command.lower()
@@ -198,7 +244,50 @@ def open_mailbox(account_id, folder):
         status, _ = box.select(quoted, readonly=True)
         if status != "OK":
             raise ValueError("The mailbox folder could not be opened")
-        yield _ReadOnlyMailbox(box)
+        gmail = account["email"] if account["imap_host"].lower().rstrip(".") in ("imap.gmail.com", "imap.googlemail.com") else None
+        yield _ReadOnlyMailbox(box, gmail_account=gmail)
+
+
+def email_message_link(account_id, folder, external_id, message_id=None, lookup=True):
+    """Resolve a Gmail message from stored provenance, with an exact-ID search fallback.
+
+    No hostname or target URL comes from an email body or the caller. Other
+    IMAP providers do not have a portable message URL; return None honestly.
+    """
+    from services.email_service import email_service
+    account = email_service.get_account(account_id)
+    if not account or account["imap_host"].lower().rstrip(".") not in ("imap.gmail.com", "imap.googlemail.com"):
+        return None
+    identity = re.fullmatch(r"([0-9]+):([1-9][0-9]{0,19})", str(external_id))
+    mid = (message_id or "").strip().strip("<>")
+    valid_mid = len(mid) <= 998 and bool(re.fullmatch(r"[^\s<>\x00-\x1f]+@[^\s<>\x00-\x1f]+", mid))
+    if lookup:
+        try:
+            with open_mailbox(account_id, folder) as mailbox:
+                _, values = mailbox.response("UIDVALIDITY")
+                validity = next((v.decode("ascii") for v in values or [] if isinstance(v, bytes)), "")
+                if identity and validity == identity[1]:
+                    url = mailbox.message_link(identity[2])
+                    if url:
+                        return {"url": url, "direct": True, "provider": "Gmail"}
+                # The folder may have been rebuilt since capture. Match the
+                # RFC Message-ID instead of trusting a reused numeric UID.
+                if valid_mid:
+                    term = '"<' + mid.replace("\\", "\\\\").replace('"', '\\"') + '>"'
+                    status, rows = mailbox.uid("search", None, "HEADER", "Message-ID", term)
+                    if status == "OK":
+                        found = (rows[0] or b"").split() if rows else []
+                        if len(found) == 1:
+                            url = mailbox.message_link(found[0])
+                            if url:
+                                return {"url": url, "direct": True, "provider": "Gmail"}
+        except (OSError, imaplib.IMAP4.error, ValueError, UnicodeError):
+            pass  # A moved/archived message can still be found in webmail.
+    if valid_mid:
+        query = quote("in:anywhere rfc822msgid:" + mid, safe="")
+        return {"url": f"https://mail.google.com/mail/u/?authuser={quote(account['email'], safe='')}#search/{query}",
+                "direct": False, "provider": "Gmail"}
+    return None
 
 
 def message_connections():
@@ -223,6 +312,19 @@ def document(document_id):
 def backlog_card(card_id):
     from services.task_service import task_service
     return task_service.get_task(card_id)
+
+
+def backlog_result(card_id):
+    """Latest successful assignment output and its actual recorded actions."""
+    from services.task_service import task_service
+    from core import session_manager_store
+    latest = next(iter(task_service.list_runs(card_id)), None)
+    if not latest or latest.get("outcome") != "succeeded":
+        return None
+    run_id = latest.get("run_id")
+    return {"id": latest["id"], "at": latest.get("ran_at"), "output": latest.get("output") or "",
+            "actions": [step for step in session_manager_store.run_events(run_id)
+                        if step.get("kind") == "tool_finished"] if run_id else []}
 
 
 def create_backlog_card(title, description, agent_id):
@@ -318,7 +420,7 @@ class TabAPI:
             raise ValueError("Encrypted value does not belong to this tab")
         return plain[len(prefix):]
 
-    def chat_session(self, key, title, untrusted=None, model_endpoint_id=None):
+    def chat_session(self, key, title, untrusted=None, model_endpoint_id=None, owner_user=None):
         """Get/create this tab's persistent chat for ``key``.
 
         ``untrusted``: a short label for outside text the tab places in the
@@ -330,7 +432,8 @@ class TabAPI:
         if model_endpoint_id is not None and model_endpoints.get_endpoint(model_endpoint_id) is None:
             model_endpoint_id = None
         # Preserve the original slug:key identity of existing tab chats.
-        session_id = session_manager.get_or_create_channel_session(f"{self.slug}:{key}", title, model_endpoint_id)
+        ownership = {"owner_user": owner_user} if owner_user is not None else {}
+        session_id = session_manager.get_or_create_channel_session(f"{self.slug}:{key}", title, model_endpoint_id, **ownership)
         if untrusted:
             session_manager.set_untrusted_context(session_id, f"{self.slug} tab: {str(untrusted)[:80]}")
         return session_id

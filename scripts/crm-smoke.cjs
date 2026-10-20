@@ -41,6 +41,7 @@ const server = http.createServer(async (req, res) => {
     else if (url.pathname === '/api/agents') value = [];
     else if (url.pathname === '/api/tab-crm/messages/message1') value = { subject: 'Proposal', sender: 'customer@example.com', account: 'work@example.com',
       sent_at: new Date().toISOString(), body: 'Please send the revised proposal by Friday.\n<script>steal()</script><img src="https://example.com/tracker">', url: null };
+    else if (url.pathname === '/api/tab-crm/messages/message1/original') value = { url: 'https://mail.google.com/mail/u/?authuser=work%40example.com#all/11b9d7d41d395e91', direct: true };
     else if (url.pathname === '/api/tab-crm' && req.method === 'GET') value = state;
     else if (url.pathname === '/api/tab-crm/tasks/task1/reply' && req.method === 'GET') value = replyState();
     else if (url.pathname === '/api/sessions/crm-session') value = { id: 'crm-session', title: 'CRM: Send revised proposal', model_endpoint_id: 'm1',
@@ -123,6 +124,7 @@ app.whenReady().then(async () => {
   try {
     await win.loadURL(base);
     await wait("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    await js("window.__crmOriginalLinks=[]; window.jarvis={browser:{onOpenRequest:()=>()=>{},openExternal:async url=>{window.__crmOriginalLinks.push(url);return {ok:true}}}}; void 0;");
     await js("document.getElementById('onboarding-overlay')?.classList.add('hidden')");
     await js("import('/static/js/app.js').then(m=>m.switchTab('crm'))");
     await wait("document.querySelectorAll('.crm-task').length===1");
@@ -132,6 +134,16 @@ app.whenReady().then(async () => {
     await wait("!!document.querySelector('.crm-detail')");
     await capture('desktop-detail');
     await click('Open source');
+    assert.equal(await js("window.__crmOriginalLinks[0]"), 'https://mail.google.com/mail/u/?authuser=work%40example.com#all/11b9d7d41d395e91');
+    assert.equal(await js("!!document.querySelector('.crm-source-modal')"), false, 'Open source launches original webmail, not the captured-text dialog');
+    // Plain web mode reserves the new tab during the click and removes its
+    // opener before navigating it, even when source resolution is asynchronous.
+    await js("window.__crmNative=window.jarvis; window.jarvis=undefined; window.__crmOldOpen=window.open; window.__crmWebTab={opener:window,location:{replace:url=>window.__crmWebUrl=url},close:()=>{window.__crmWebClosed=true}}; window.open=()=>window.__crmWebTab; void 0;");
+    await click('Open source');
+    assert.equal(await js("window.__crmWebTab.opener===null"), true, 'webmail cannot navigate the original app through its opener');
+    assert.equal(await js("window.__crmWebUrl"), 'https://mail.google.com/mail/u/?authuser=work%40example.com#all/11b9d7d41d395e91');
+    await js("window.open=window.__crmOldOpen; window.jarvis=window.__crmNative; void 0;");
+    await click('View captured text');
     await wait("!!document.querySelector('.crm-source-modal')");
     assert.equal(await js("document.querySelectorAll('.crm-source-modal img,.crm-source-modal script').length"), 0);
     assert.ok(await js("document.querySelector('.crm-source-text').textContent.includes('<script>steal()</script>')"));
@@ -141,6 +153,18 @@ app.whenReady().then(async () => {
     assert.equal(state.tasks[0].status, 'done');
     await click('Reopen');
     assert.equal(state.tasks[0].status, 'active');
+    state.tasks[0].status = 'done';
+    state.tasks[0].completion = { kind: 'sent_email', actor: 'user', quote: 'Here is the revised proposal.',
+      url: 'https://mail.google.com/mail/u/0/#all/123', at: Date.now() / 1000 };
+    await delay(5500);
+    assert.ok(await js("document.querySelector('.crm-completion').textContent.includes('daily Sent-mail check')"));
+    await click('View completion email');
+    assert.equal(await js("window.__crmOriginalLinks.at(-1)"), 'https://mail.google.com/mail/u/0/#all/123');
+    await capture('desktop-daily-completed');
+    await js("[...document.querySelectorAll('.crm-detail button')].find(b=>b.textContent==='View completion email').scrollIntoView({block:'center'})");
+    await capture('desktop-daily-evidence');
+    await click('Reopen');
+    assert.equal(await js("[...document.querySelectorAll('.crm-detail button')].find(b=>b.textContent==='View completion email').hidden"), true);
     // Draft a reply with AI, then send it after confirming where it goes.
     const sentBefore = writes.length;
     await js("document.querySelector('[data-work=draft]').open=true");
@@ -166,6 +190,20 @@ app.whenReady().then(async () => {
     assert.equal(writes.filter((w) => w.path === '/api/chat/live').pop()?.fields.session_id, 'crm-session');
     await js("document.querySelector('[data-work=draft]').scrollIntoView({block:'start'})");
     await capture('desktop-task-work');
+    // An asynchronous completion updates status without replacing a live chat
+    // or losing the person's unsent follow-up and focus.
+    await js("window.__crmChat=document.querySelector('.crm-chat'); window.__crmComposer=document.querySelector('.crm-chat textarea'); window.__crmComposer.value='Keep this unsent follow-up'; window.__crmComposer.focus()");
+    state.tasks[0].status = 'done';
+    state.tasks[0].completion = { kind: 'chat', actor: 'user', quote: 'I sent the revised proposal.', at: Date.now() / 1000 };
+    await delay(5500);
+    assert.equal(await js("document.querySelector('.crm-chat')===window.__crmChat"), true, 'completion preserves chat controller');
+    assert.equal(await js("window.__crmComposer.value"), 'Keep this unsent follow-up', 'completion preserves unsent text');
+    assert.equal(await js("document.activeElement===window.__crmComposer"), true, 'completion preserves focus');
+    assert.ok(await js("document.querySelector('.crm-completion').textContent.includes('Completed automatically from chat')"));
+    assert.ok(await js("[...document.querySelectorAll('.crm-detail button')].some(b=>b.textContent==='Reopen')"));
+    await capture('desktop-auto-completed');
+    await click('Reopen');
+    assert.equal(state.tasks[0].status, 'active');
     await click('Add task');
     await wait("document.querySelector('.crm-detail h3').textContent==='New task'");
     await js("document.querySelector('.crm-detail input').value='Call the client'; document.querySelector('.crm-detail input').dispatchEvent(new Event('input',{bubbles:true}))");
@@ -176,6 +214,8 @@ app.whenReady().then(async () => {
     await capture('desktop-contacts');
     await click('Sources');
     await wait("document.querySelector('.crm-settings')");
+    assert.equal(await js("[...document.querySelectorAll('.crm-check')].find(l=>l.textContent.includes('Check Sent mail daily')).querySelector('input').checked"), true);
+    await js("[...document.querySelectorAll('.crm-check')].find(l=>l.textContent.includes('Check Sent mail daily')).querySelector('input').click()");
     // The Model select loads the connection's choices; pick one the way a person does.
     const modelButton = "[...document.querySelectorAll('.crm-settings .field')].find((f)=>f.querySelector('label')?.textContent==='Model')?.querySelector('.custom-select-btn')";
     await wait(`${modelButton} && !${modelButton}.disabled`);
@@ -194,11 +234,14 @@ app.whenReady().then(async () => {
     const saved = writes.filter((w) => w.path === '/api/tab-crm/settings').pop();
     assert.ok(saved, 'settings saved');
     assert.equal(saved.fields.model, 'claude-haiku-5-5');
+    assert.equal(saved.fields.daily_completion, false, 'daily completion checkbox is saved independently');
     assert.equal(saved.fields.schedule_mode, 'times');
     assert.deepEqual(saved.fields.schedule_times, ['09:00', '17:00']);
     assert.deepEqual(saved.fields.schedule_days, [0, 1, 2, 3, 4]);
     win.setContentSize(390, 844); await delay(200);
     await capture('mobile-sources');
+    await js("[...document.querySelectorAll('.crm-check')].find(l=>l.textContent.includes('Check Sent mail daily')).scrollIntoView({block:'center'})");
+    await capture('mobile-daily-settings');
     assert.equal(await overflow(), false, 'Sources fit a phone');
     await click('Tasks');
     await capture('mobile-tasks');

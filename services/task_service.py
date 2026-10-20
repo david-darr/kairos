@@ -341,6 +341,7 @@ class TaskService:
         if status == "ready" and card["status"] == "blocked":
             card["attempts"] = 0
         card["status"] = status
+        card["status_changed_at"] = time.time()
         self._save_tasks()
         self._sync_handoff(card)
         return card

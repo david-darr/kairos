@@ -656,9 +656,10 @@ ipcMain.handle("browser:navigate", (event, url) => {
   if (!fromAppWindow(event)) return { ok: false, reason: "denied" };
   return sideBrowser.navigate(url);
 });
-ipcMain.handle("browser:external", (event) => {
+ipcMain.handle("browser:external", async (event, rawUrl) => {
   if (!fromAppWindow(event)) return { ok: false };
-  return sideBrowser.openExternal();
+  if (rawUrl === undefined) return sideBrowser.openExternal();
+  return sideBrowser.openExternalUrl(rawUrl);
 });
 ipcMain.handle("browser:state", (event) => (fromAppWindow(event) ? sideBrowser.state() : { open: false }));
 // Fire-and-forget controls. Each is a no-op when the pane isn't open, so the

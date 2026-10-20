@@ -631,7 +631,7 @@ class SessionManager:
         return session_id if session_id and store.session_exists(session_id) else None
 
     def get_or_create_channel_session(self, channel_key: str, title: str,
-                                       model_endpoint_id: Optional[str] = None) -> str:
+                                      model_endpoint_id: Optional[str] = None, owner_user: str | None = None) -> str:
         """Stable session-per-channel mapping (e.g. "discord:<bot_id>" -> one
         shared session), so a comms adapter's conversation persists across
         restarts and shows up in the normal Chats sidebar like any other
@@ -652,9 +652,16 @@ class SessionManager:
         doesn't silently change" behavior)."""
         existing = self.get_channel_session_id(channel_key)
         if existing:
+            if owner_user is not None:
+                session = self._require(existing)
+                if session.get("owner_user") not in (None, owner_user):
+                    raise ValueError("This chat belongs to another person")
+                if session.get("owner_user") is None:
+                    session["owner_user"] = owner_user
+                    store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
             return existing
 
-        session = self.create_session(title)
+        session = self.create_session(title, owner_user=owner_user)
         if model_endpoint_id:
             self.set_model_endpoint(session["id"], model_endpoint_id)
         store.set_channel_session(channel_key, session["id"])

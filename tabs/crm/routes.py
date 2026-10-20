@@ -31,6 +31,7 @@ class SettingsBody(BaseModel):
     timezone: str | None = None
     review_all: bool | None = None
     auto_scan: bool | None = None
+    daily_completion: bool | None = None
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     lookback_days: int | None = Field(default=None, ge=1, le=90)
     max_messages: int | None = Field(default=None, ge=1, le=100)
@@ -89,7 +90,8 @@ def problem(call):
 
 @router.get("")
 async def overview(user: str = Depends(active_user)):
-    return {**crm_service.snapshot(user), "can_connect": tab_api.is_admin(user), "scanning": crm_scanner.scanning(user)}
+    return {**crm_service.snapshot(user), "daily_completion_status": crm_service.daily_status(user),
+            "can_connect": tab_api.is_admin(user), "scanning": crm_scanner.scanning(user)}
 
 
 @router.put("/settings")
@@ -189,6 +191,22 @@ async def evidence(message_id: str, user: str = Depends(active_user)):
     return problem(lambda: crm_service.message(user, message_id))
 
 
+@router.get("/messages/{message_id}/original")
+async def original_message(message_id: str, user: str = Depends(active_user)):
+    message = problem(lambda: crm_service.message(user, message_id))
+    if message.get("url"):
+        return {"url": message["url"], "direct": True}
+    if message.get("source_kind") != "email":
+        return {"url": None}
+    source = problem(lambda: crm_service.source(user, message["source_id"]))
+    result = await asyncio.to_thread(tab_api.email_message_link, source["connection_id"],
+        message.get("folder") or source["folder"], message.get("external_id"), message.get("message_id"),
+        lookup=tab_api.is_admin(user))
+    if result and result.get("direct"):
+        crm_service.save_source_link(user, message_id, result["url"])
+    return result or {"url": None}
+
+
 @router.post("/tasks/{task_id}/agent")
 async def assign(task_id: str, body: AgentBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
     task = problem(lambda: crm_service.task(user, task_id))
@@ -265,6 +283,16 @@ async def send_reply(task_id: str, body: ReplyBody, user: str = Depends(active_u
         raise HTTPException(502, "The email couldn't be sent; check the account in Email settings")
     crm_service.set_work(user, task_id, reply_draft="",
                          last_reply={"at": time.time(), "to": target["to"], "subject": target["subject"]})
+    # A successful send is evidence, not a blanket completion: the reader
+    # still checks whether the reply actually fulfilled this task's whole goal.
+    from . import completion
+    try:
+        at = time.time()
+        completion.capture(user, {"id": f"reply:{task_id}:{at}", "task_id": task_id,
+            "at": at, "kind": "reply", "message": f"I sent this reply to {target['to']}:\n{body.draft}",
+            "reply": "", "actions": [{"name": "send_email", "ok": True, "detail": "The person confirmed this send and the mail transport succeeded."}]})
+    except Exception as error:
+        logger.warning("CRM sent-reply completion receipt failed category=%s", type(error).__name__)
     return reply_state(user, task_id)
 
 

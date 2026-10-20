@@ -6,7 +6,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
-from email.utils import parseaddr
+from email.utils import parseaddr, getaddresses
 from html.parser import HTMLParser
 
 from core import tab_api
@@ -111,6 +111,8 @@ def read_mailbox(source, settings, known):
                 raise ValueError("Searching the mailbox failed")
             all_ids = (data[0] or b"").split()
             new_ids = [uid for uid in all_ids if f"{validity}:{uid.decode()}" not in known]
+            if settings.get("completion_only"):
+                new_ids.reverse()
             for uid in new_ids[:settings["max_messages"]]:
                 identity = f"{validity}:{uid.decode()}"
                 try:
@@ -120,7 +122,7 @@ def read_mailbox(source, settings, known):
                     body = text_body(msg)
                     context, incomplete = [], False
                     # Reference failures affect context, never the current message.
-                    for reference in references[-4:]:
+                    for reference in ([] if settings.get("completion_only") else references[-4:]):
                         try:
                             query = '"' + reference.replace("\\", "\\\\").replace('"', '\\"') + '"'
                             ok, found = box.uid("search", None, "HEADER", "Message-ID", query)
@@ -138,14 +140,24 @@ def read_mailbox(source, settings, known):
                             if isinstance(problem, (imaplib.IMAP4.abort, OSError)):
                                 break
                     combined = normalize_text("\n\n".join(context))
+                    url = None
+                    if callable(getattr(box, "message_link", None)):
+                        try:
+                            url = box.message_link(uid)
+                        except Exception as problem:
+                            logger.warning("CRM failure category=message_link exception=%s", type(problem).__name__)
                     results.append({"external_id": identity, "message_id": mid,
+                        "recipients": [{"name": name, "email": address} for name, address in
+                                       getaddresses([header(msg.get(h)) for h in ("To", "Cc", "Bcc")])],
+                        "references": references,
+                        "attachments": [header(p.get_filename()) for p in msg.walk() if p.get_filename()],
                         "thread_id": references[0] if references else mid or identity,
                         "subject": header(msg.get("Subject")), "sender": parseaddr(header(msg.get("From")))[1],
                         "sender_name": parseaddr(header(msg.get("From")))[0], "sent_at": message_time(msg.get("Date")),
                         "body": body[:MAX_TEXT], "context": combined[:12000],
                         "truncated": truncated or len(body) > MAX_TEXT or len(combined) > 12000,
                         "context_incomplete": incomplete or len(context) < min(len(references), 4),
-                        "url": None, "account": account["email"], "folder": source["folder"]})
+                        "url": url, "account": account["email"], "folder": source["folder"]})
                 except Exception as problem:
                     logger.warning("CRM failure category=imap_read exception=%s", type(problem).__name__)
                     failed_ids.append(identity)

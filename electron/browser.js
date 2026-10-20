@@ -284,6 +284,18 @@ function reload() {
   if (view && !view.webContents.isDestroyed()) view.webContents.reload();
 }
 
+async function openExternalUrl(raw) {
+  if (typeof raw !== "string" || raw.length > 4000) return { ok: false };
+  const safe = safeUrl(raw);
+  if (!safe) return { ok: false };
+  const url = new URL(safe);
+  if (url.protocol !== "https:" || url.username || url.password) return { ok: false };
+  try {
+    await shell.openExternal(url.toString());
+    return { ok: true };
+  } catch { return { ok: false }; }
+}
+
 function openExternal() {
   if (!view || view.webContents.isDestroyed()) return { ok: false };
   const safe = safeUrl(view.webContents.getURL());
@@ -324,7 +336,7 @@ async function captureStill() {
 
 module.exports = {
   PARTITION, attach, open, navigate, setBounds, setVisible,
-  goBack, goForward, reload, openExternal, close, isOpen, state, captureStill,
+  goBack, goForward, reload, openExternal, openExternalUrl, close, isOpen, state, captureStill,
   // Exported for scripts/browser-smoke.cjs, which asserts the blocking rules
   // directly rather than inferring them from behaviour. _webContents lets
   // that suite run JS inside the loaded page to prove the sandbox is real —

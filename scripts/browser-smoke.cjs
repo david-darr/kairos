@@ -75,6 +75,22 @@ app.whenReady().then(async () => {
   if (process.argv.includes('--verify-failure')) { finish(1, 'EXPECTED FAILURE: exit-code verification'); return; }
   await new Promise(resolve => server.listen(BACKEND_PORT, '127.0.0.1', resolve));
 
+  await check('opens original-message links externally with URL validation', async () => {
+    const { shell } = require('electron');
+    const original = shell.openExternal;
+    const opened = [];
+    shell.openExternal = async url => { opened.push(url); };
+    try {
+      const link = 'https://mail.google.com/mail/u/?authuser=work%40example.com#all/11b9d7d41d395e91';
+      assert.equal((await sideBrowser.openExternalUrl(link)).ok, true);
+      assert.deepEqual(opened, [link]);
+      for (const bad of ['javascript:alert(1)', 'file:///C:/secret', 'https://name:pass@example.com/', 'https://127.0.0.1/api/settings', 'http://example.com/']) {
+        assert.equal((await sideBrowser.openExternalUrl(bad)).ok, false);
+      }
+      assert.equal(opened.length, 1, 'unsafe URLs never reach the OS browser');
+    } finally { shell.openExternal = original; }
+  });
+
   // -- URL gating. The single choke point every entry path funnels through,
   // so it is tested directly rather than through six different callers.
   await check('rejects non-web schemes', () => {

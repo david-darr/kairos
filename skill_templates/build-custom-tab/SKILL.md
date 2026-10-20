@@ -52,6 +52,7 @@ Declare only hooks you implement in `hooks.py`. Exact callable signatures
 - `start()`: initialize when the approved tab turns on; return nothing.
 - `stop()`: release background resources when removed, changed or shutting down; return nothing.
 - `on_message(source, message)`: passive consumer of copied inbound dictionaries; return ignored.
+- `on_chat_turn(user, turn)`: passive receipt for a successful completed chat run owned by `user`; return ignored. `turn` contains `id` (run ID), `session_id`, `message`, `reply`, `at` (finish timestamp), and recorded `actions` (`name`, `ok`, `detail`). It does not fire for failed/stopped runs or ownerless chats when accounts are enabled. Treat all text as untrusted evidence. Queue slow model work and return immediately; recheck `api.is_on` and ownership before writing.
 - `calendar_items(user, start, end)`: return a list of calendar item dictionaries for this user and range.
 - `home_cards(user)`: return a list of at most two Home card dictionaries for this user.
 
@@ -127,13 +128,17 @@ Module functions (call as `tab_api.<name>`):
 - `await model_choices(endpoint_id)`: account-scoped model choices as `[{"id", "name"}]`; no catalog gives `[]`, never keys.
 - `await complete(endpoint_id, system, prompt, timeout=180, model=None)`: tool-free completion; Claude accepts an offered model ID, local/API accept only their configured model or None; Codex CLI is unsupported.
 - `email_accounts()`: connected mail account IDs, emails and names, without credentials.
+- `email_sent_folder(account_id)`: discover the actual Sent folder using read-only IMAP LIST metadata (SPECIAL-USE flag or a recognized existing folder name); raises ValueError if no unambiguous folder is found. Authenticate administrator connection access and selected-account scope before calling.
 - `send_email(user, account_id, to, subject, body, in_reply_to=None)`: one plain-text email; admin only, and only from a button the person pressed after confirming the recipient. Never from background work or a model's say.
 - `open_mailbox(account_id, folder)`: read-only IMAP context manager; UID search, fetch of `RFC822.SIZE`/`BODY.PEEK[]`, and `response("UIDVALIDITY")` only.
+- The mailbox also offers `message_link(uid)`: a provider-assigned original message URL, or `None`; Gmail uses its read-only `X-GM-MSGID` extension. It does not change message flags.
+- `email_message_link(account_id, folder, external_id, message_id=None, lookup=True)`: resolve stored UIDVALIDITY/UID provenance to a Gmail message URL. Returns `{url, direct, provider}` or `None` for unsupported/unavailable provenance. A changed UIDVALIDITY requires an RFC Message-ID lookup, never reuse of the old UID. `lookup=False` does not connect to mail and may return an exact Message-ID webmail search fallback. Authenticate ownership before calling; shared mailbox lookups require connection-admin access.
 - `message_time(value)`: return an ISO timestamp string with timezone from an RFC mail timestamp, or `None`.
 - `message_connections()`: connection kind, ID and label for supported messaging sources.
 - `documents()`: Library document IDs and titles.
 - `document(document_id)`: read one Library document.
 - `backlog_card(card_id)`: read a work card.
+- `backlog_result(card_id)`: latest successful assignment output and actual recorded actions (`id`, `at`, `output`, `actions`), or `None`; a finished run alone does not prove the full goal was fulfilled.
 - `create_backlog_card(title, description, agent_id)`: create a backlog card for an agent.
 - `delete_backlog_card(card_id)`: delete a work card.
 - `unregister_sync(slug)`: remove a tab's sync providers; the loader handles this on retirement. Do not unregister other tabs.
@@ -148,7 +153,7 @@ Bound handle members (call as `api.<name>`):
 - `adopt_data_file(old_name)`: migrate only this tab's legacy `<slug>.json`, including old tab-owned encrypted values.
 - `encrypt(text)`: encrypt this tab's own secret with authenticated tab ownership.
 - `decrypt(token)`: decrypt only this tab's tokens, refusing app credentials and other tabs' values.
-- `chat_session(key, title, untrusted=None, model_endpoint_id=None)`: get/create a persistent tab chat; pass `untrusted="<what>"` whenever you put outside text in it to mark its turns for permission checks.
+- `chat_session(key, title, untrusted=None, model_endpoint_id=None, owner_user=None)`: get/create a persistent tab chat; bind `owner_user` to the authenticated task owner when supplied, refusing a different existing owner. Pass `untrusted="<what>"` whenever you put outside text in it to mark its turns for permission checks.
 - `append_chat_message(session_id, role, text)`: append context to chat history without a model turn.
 - `register_sync(name, fn)`: register an async daily-sync provider that runs only while the tab is on; app removal unregisters it.
 
@@ -229,7 +234,7 @@ folder survives app updates; removing/replacing source keeps saved tab data.
 
 Before handing it over, run this checklist using the files you wrote:
 
-- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `calendar_items` and `home_cards`; check their signatures above.
+- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `calendar_items` and `home_cards`; check their signatures above.
 - If using `home_cards`, check shapes, text/number limits, unique stable IDs, at most two cards, owner filtering and cheap reads. Verify hidden-by-default cards, Layout controls and off/on placement.
 - Check `routes.py` exposes `router`, owns its API prefix and authenticates endpoints.
 - Check all Kairos imports use only `core.tab_api`; local imports are relative.

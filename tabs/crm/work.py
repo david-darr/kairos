@@ -78,7 +78,7 @@ def open_chat(owner, task_id):
     task = crm_service.task(owner, task_id)
     settings = crm_service.settings(owner)
     session_id = api.chat_session(f"{owner}:{task_id}", ("CRM: " + task["title"])[:80],
-                                  untrusted="CRM source messages", model_endpoint_id=settings["endpoint_id"])
+                                  untrusted="CRM source messages", model_endpoint_id=settings["endpoint_id"], owner_user=owner)
     seen = task.get("chat_evidence_count")
     if task.get("chat_session_id") != session_id or seen is None:
         api.append_chat_message(session_id, "user",

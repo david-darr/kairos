@@ -102,7 +102,7 @@ contextBridge.exposeInMainWorld("jarvis", {
     open: (url, bounds) => ipcRenderer.invoke("browser:open", url, bounds),
     navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
     state: () => ipcRenderer.invoke("browser:state"),
-    openExternal: () => ipcRenderer.invoke("browser:external"),
+    openExternal: (url) => ipcRenderer.invoke("browser:external", url),
     back: () => ipcRenderer.send("browser:back"),
     forward: () => ipcRenderer.send("browser:forward"),
     reload: () => ipcRenderer.send("browser:reload"),

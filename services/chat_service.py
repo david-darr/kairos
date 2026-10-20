@@ -600,6 +600,11 @@ def _reply_hook(session_id: str, endpoint: dict, message: str, reply: str) -> No
     """chat.reply for the person's lifecycle hooks (services/hook_service.py)."""
     from services.hook_service import hook_service
     session = session_manager.get_session(session_id) or {}
+    from core import tab_hooks
+    try:
+        tab_hooks.emit_chat_turn(session, message, reply)
+    except Exception:
+        logger.exception("Passive tab chat receipt failed")
     hook_service.emit("chat.reply", {"source": "agent" if session.get("agent_id") else "chat", "session_id": session_id,
                                      "title": session.get("title") or "", "agent_id": session.get("agent_id"),
                                      "model": endpoint.get("name"), "message": message, "reply": reply})

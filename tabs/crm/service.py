@@ -21,6 +21,7 @@ api.adopt_data_file("crm.json")
 STATUSES = ("active", "in_progress", "waiting", "needs_review", "done", "dismissed")
 PRIORITIES = ("urgent", "high", "normal", "low")
 DEFAULTS = {"endpoint_id": None, "model": None, "timezone": "UTC", "review_all": False,
+            "daily_completion": True,
             "auto_scan": False, "interval_minutes": 30, "lookback_days": 14, "max_messages": 40,
             "schedule_mode": "interval", "schedule_times": ["09:00"], "schedule_days": list(range(7)),
             "schedule_since": 0}
@@ -70,7 +71,15 @@ class CRMService:
 
     def owners(self):
         with self._lock:
-            return list(self._data["settings"])
+            return sorted(set(self._data["settings"]) | {t["owner"] for t in self._data["tasks"].values()})
+
+    def daily_status(self, owner):
+        with self._lock:
+            return copy.deepcopy(self._data.get("daily_completion", {}).get(owner, {}))
+
+    def save_daily_status(self, owner, **fields):
+        with self.transaction():
+            self._data.setdefault("daily_completion", {}).setdefault(owner, {}).update(fields)
 
     def configure(self, owner, fields):
         values = {**self.settings(owner), **fields}
@@ -168,6 +177,19 @@ class CRMService:
                 raise KeyError(message_id)
             return copy.deepcopy(message)
 
+    def save_source_link(self, owner, message_id, url):
+        self.message(owner, message_id)
+        value = safe_url(url)
+        if not value:
+            raise ValueError("Original message links must use HTTPS")
+        with self.transaction():
+            self._data["messages"][message_id]["url"] = value
+            for task in self._data["tasks"].values():
+                if task["owner"] == owner:
+                    for evidence in task["evidence"]:
+                        if evidence["message_id"] == message_id:
+                            evidence["url"] = value
+
     def pending(self, owner, source_id):
         with self._lock:
             return copy.deepcopy(sorted((m for m in self._data["messages"].values()
@@ -247,6 +269,12 @@ class CRMService:
                 task["deadline_kind"] = "manual"
             if "priority" in fields:
                 task["priority_reason"] = "Set by you"
+            if "status" in fields:
+                task["completion_not_before"] = time.time()
+                task["completion"] = ({"kind": "manual", "at": time.time(), "actor": "user"}
+                                      if fields["status"] == "done" else None)
+                if fields["status"] == "done":
+                    task["proposal"] = None
             if task["status"] != "needs_review":
                 task["review_reason"] = None
             task["updated_at"] = time.time()
@@ -274,6 +302,17 @@ class CRMService:
                 if target:
                     if evidence not in target["evidence"]:
                         target["evidence"].append(evidence)
+                    # Only an explicit, unambiguous confirmation in the current
+                    # source message can close the same outstanding action.
+                    if (item["status"] == "done" and not item.get("review_reason")
+                            and item["evidence"] in message["body"]
+                            and not re.search(r"\b(not|never|haven't|hasn't|didn't|couldn't|can't|will|would|should|plan to|need to)\b",
+                                              item["evidence"].replace("\u2019", "'"), re.I)
+                            and target["status"] in ("active", "in_progress", "waiting")
+                            and self._source_completion_is_new(target, message)):
+                        self._finish(target, {"kind": "source", "message_id": message_id,
+                                              "quote": item["evidence"], "actor": "source"})
+                        continue
                     # New evidence never reopens a dismissed/completed task or overwrites user edits.
                     changed = any(item.get(n) != target.get(n) for n in ("due_date", "status", "title", "priority", "project"))
                     if changed and target["status"] not in ("done", "dismissed"):
@@ -332,7 +371,80 @@ class CRMService:
 
     # Reply and chat bookkeeping. Kept out of update_task: these aren't the
     # person's edits, so they must not land in a task's overrides.
-    _WORK_FIELDS = ("reply_draft", "last_reply", "chat_session_id", "chat_evidence_count")
+    _WORK_FIELDS = ("reply_draft", "last_reply", "chat_session_id", "chat_evidence_count", "completion_card_receipt")
+
+    @staticmethod
+    def _source_completion_is_new(task, message):
+        guard = task.get("completion_not_before", 0)
+        if not guard:
+            return True
+        try:
+            return datetime.fromisoformat(message["sent_at"].replace("Z", "+00:00")).timestamp() > guard
+        except (KeyError, ValueError, TypeError):
+            return False
+
+    @staticmethod
+    def _finish(task, receipt):
+        now = time.time()
+        task.update(status="done", proposal=None, review_reason=None, snoozed_until=None,
+                    completion={**receipt, "at": now}, updated_at=now)
+
+    def auto_complete(self, owner, task_id, version, receipt, observed_at):
+        """Compare-and-set protects edits/reopens made while a model was judging."""
+        with self.transaction():
+            task = self._data["tasks"].get(task_id)
+            if not task or task["owner"] != owner:
+                raise KeyError(task_id)
+            if (task["updated_at"] != version or task["status"] not in ("active", "in_progress", "waiting")
+                    or observed_at <= task.get("completion_not_before", 0)):
+                return False
+            self._finish(task, receipt)
+            return True
+
+    def queue_completion(self, owner, turn):
+        with self.transaction():
+            queue = self._data.setdefault("completion_queue", {})
+            identity = owner + ":" + turn["id"]
+            if identity in queue:
+                return False
+            tasks = [t for t in self._data["tasks"].values() if t["owner"] == owner
+                     and t["status"] in ("active", "in_progress", "waiting")
+                     and t["created_at"] <= turn["at"]
+                     and (not turn.get("task_id") or t["id"] == turn["task_id"])
+                     and turn["at"] > t.get("completion_not_before", 0)]
+            text = key(str(turn.get("message") or "") + " " + str(turn.get("reply") or ""))
+            words = set(text.split())
+            generic = {"the", "and", "for", "this", "that", "with", "from", "send", "sent", "done", "task", "please"}
+            def relevant(task):
+                if turn.get("task_id") or (turn.get("session_id") and turn["session_id"] == task.get("chat_session_id")):
+                    return True
+                terms = {word for word in key(task["title"] + " " + task.get("project", "") + " " + task.get("contact", "")).split()
+                         if len(word) >= 3 and word not in generic}
+                return bool(terms & words)
+            tasks = [t for t in tasks if relevant(t)]
+            if not tasks:
+                return False
+            queue[identity] = {"id": identity, "owner": owner, "turn": copy.deepcopy(turn),
+                "tasks": [{k: t.get(k) for k in ("id", "title", "notes", "project", "contact", "updated_at")}
+                          for t in tasks], "attempts": 0, "state": "pending"}
+            return True
+
+    def completion_queue(self):
+        with self._lock:
+            return copy.deepcopy([r for r in self._data.get("completion_queue", {}).values()
+                                  if r["state"] == "pending" and r["attempts"] < 3])
+
+    def finish_completion_check(self, identity, success):
+        with self.transaction():
+            queue = self._data["completion_queue"]
+            check = queue[identity]
+            check["attempts"] += 1
+            if success or check["attempts"] >= 3:
+                # Keep a small deduplication receipt, not another chat transcript.
+                check.update(state="checked" if success else "failed", turn=None, tasks=[])
+            completed = [k for k, v in queue.items() if v["state"] != "pending"]
+            for key in completed[:-100]:
+                del queue[key]
 
     def set_work(self, owner, task_id, **fields):
         self.task(owner, task_id)

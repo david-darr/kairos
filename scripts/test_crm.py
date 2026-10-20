@@ -707,7 +707,8 @@ class RouteTests(unittest.TestCase):
         from kairos_tabs.crm import work as crm_work
         task = self.email_task()
         appended, opened = [], []
-        def chat_session(key, title, untrusted=None, model_endpoint_id=None):
+        def chat_session(key, title, untrusted=None, model_endpoint_id=None, owner_user=None):
+            self.assertEqual(owner_user, "alice")
             opened.append((key, untrusted))
             return "session-1"
         with patch.object(crm_work.api, "chat_session", chat_session), \

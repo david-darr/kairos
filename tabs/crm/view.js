@@ -52,6 +52,7 @@ export async function render(container) {
   let data, connections = { connections: [], models: [] }, agents = [];
   let mode = "tasks", filter = "open", query = "", contactFilter = "", projectFilter = "", sourceFilter = "", priorityFilter = "";
   let selected = null, disposed = false, pollTimer = null, editing = false, closeSource = null, closeChat = () => {};
+  let refreshList = () => {}, refreshDetailStatus = () => {};
   const openWork = new Set();
   const wrap = el("div", { class: "view-constrained crm-view" });
   const heading = el("div", { class: "view-header" }, [el("div", {}, [
@@ -73,8 +74,9 @@ export async function render(container) {
 
   async function load(poll = false) {
     clearTimeout(pollTimer);
+    const previousTasks = JSON.stringify([data?.tasks, data?.sources, data?.runs, data?.scanning]);
     data = await api(BASE);
-    if (data.can_connect) {
+    if (data.can_connect && !poll) {
       const results = await Promise.allSettled([api(BASE + "/connections"), api("/api/agents")]);
       if (results[0].status === "fulfilled") connections = results[0].value;
       if (results[1].status === "fulfilled") agents = results[1].value;
@@ -82,16 +84,30 @@ export async function render(container) {
     if (disposed) return;
     if (selected?.id) selected = data.tasks.find((t) => t.id === selected.id) || null;
     if (!poll) editing = false;
-    if (!poll || !editing) draw();
+    const changed = previousTasks !== JSON.stringify([data.tasks, data.sources, data.runs, data.scanning]);
+    if (!poll || (changed && !editing && !content.contains(document.activeElement) && !content.querySelector('.crm-chat'))) draw();
     else {
       scanButton.textContent = data.scanning ? "Scanning…" : "Scan now";
-      scanButton.disabled = data.scanning;
+      scanButton.disabled = data.scanning || !data.settings.endpoint_id || !data.sources.some((s) => s.enabled);
+      scanButton.hidden = !data.can_connect;
       scanButton.setAttribute("aria-busy", String(data.scanning));
+      if (changed) {
+        refreshList();
+        if (selected?.id) refreshDetailStatus(selected);
+        const open = data.tasks.filter((task) => !closed(task));
+        const counts = [open.filter((task) => dueDay(task.due_date) === todayKey()).length,
+          open.filter(overdue).length, open.filter((task) => task.status === "waiting").length,
+          open.filter((task) => task.status === "needs_review" || task.proposal).length];
+        content.querySelectorAll('.crm-stat strong').forEach((node, index) => { node.textContent = String(counts[index]); });
+      }
     }
-    if (data.scanning) pollTimer = setTimeout(() => load(true).catch((error) => toast(error.message, "error")), 3000);
+    pollTimer = setTimeout(() => load(true).catch((error) => {
+      if (!disposed) { toast(error.message, "error"); pollTimer = setTimeout(() => load(true).catch(() => {}), 10000); }
+    }), data.scanning ? 3000 : 5000);
   }
 
   function draw() {
+    refreshList = () => {}; refreshDetailStatus = () => {};
     tabs.replaceChildren();
     for (const [id, text] of [["tasks", "Tasks"], ["contacts", "Contacts"], ["sources", "Sources"]]) {
       tabs.append(button(text, () => { mode = id; draw(); }, mode === id ? "primary" : "quiet"));
@@ -178,6 +194,7 @@ export async function render(container) {
       node.addEventListener("change", () => { setter(node.value); fillList(); });
     }
     fillList();
+    refreshList = fillList;
     if (selected) drawDetail(detail, selected);
   }
 
@@ -213,12 +230,37 @@ export async function render(container) {
       toast("Task saved", "success");
     }, "primary");
     const actions = el("div", { class: "crm-actions" }, [save]);
+    let doneButton;
     if (task.id) {
-      actions.append(button(closed(task) ? "Reopen" : "Mark done", () => mutateTask(task, { status: closed(task) ? "active" : "done" })));
+      doneButton = button(closed(task) ? "Reopen" : "Mark done", () => mutateTask(task, { status: closed(task) ? "active" : "done" }));
+      actions.append(doneButton);
       actions.append(button(task.status === "dismissed" ? "Restore" : "Dismiss", () => mutateTask(task, { status: task.status === "dismissed" ? "active" : "dismissed" }), "quiet"));
     }
     host.append(actions);
     if (!task.id) return;
+    const completionNote = el("p", { class: "meta crm-completion", role: "status", "aria-live": "polite" });
+    host.append(completionNote);
+    const completionLink = button("View completion email", async () => {
+      const url = new URL(task.completion?.url);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid completion email link");
+      if (window.jarvis?.browser?.openExternal) {
+        const result = await window.jarvis.browser.openExternal(url.href);
+        if (result?.error) throw new Error(result.error);
+      } else window.open(url.href, "_blank", "noopener,noreferrer");
+    }, "quiet");
+    host.append(completionLink);
+    refreshDetailStatus = (updated) => {
+      task.status = updated.status; task.completion = updated.completion;
+      status.value = updated.status;
+      doneButton.textContent = closed(updated) ? "Reopen" : "Mark done";
+      const receipt = updated.completion;
+      completionNote.hidden = !receipt || updated.status !== "done";
+      const completionText = receipt && updated.status === "done"
+        ? (receipt.kind === "manual" ? "Marked done by you." : `Completed automatically from ${receipt.kind === "sent_email" ? "the daily Sent-mail check" : receipt.kind === "assignment" ? "the linked assignment" : receipt.kind === "source" ? "a source confirmation" : receipt.kind === "reply" ? "a sent reply" : "chat"}. ${receipt.quote || ""}`) : "";
+      completionLink.hidden = updated.status !== "done" || receipt?.kind !== "sent_email" || !receipt?.url;
+      if (completionNote.textContent !== completionText) completionNote.textContent = completionText;
+    };
+    refreshDetailStatus(task);
     const snooze = el("input", { type: "date", value: task.snoozed_until?.slice(0, 10) || "" });
     host.append(el("div", { class: "crm-pair" }, [field("Snooze until", snooze),
       button("Set snooze", () => mutateTask(task, { snoozed_until: snooze.value || null }))]));
@@ -235,7 +277,9 @@ export async function render(container) {
     if (!task.evidence.length) host.append(el("p", { class: "meta", text: "Added manually. No source message is attached." }));
     for (const evidence of task.evidence) {
       host.append(el("div", { class: "crm-evidence" }, [el("div", { class: "meta", text: evidence.label + (evidence.sent_at ? " · " + dueLabel(evidence.sent_at) : "") }),
-        el("blockquote", { text: evidence.quote }), button("Open source", () => showSource(evidence), "quiet")]));
+        el("blockquote", { text: evidence.quote }), el("div", { class: "crm-actions" }, [
+          button("Open source", () => openOriginal(evidence), "quiet"),
+          button("View captured text", () => showSource(evidence), "quiet")])]));
     }
     host.append(workPanel(task, "draft", "Draft a reply", drawReply), workPanel(task, "chat", "Chat about this task", drawChat));
     if (data.can_connect && agents.length && !closed(task)) {
@@ -313,7 +357,8 @@ export async function render(container) {
     const host = el("div", { class: "crm-chat" });
     body.replaceChildren(el("p", { class: "meta", text: "A Kairos chat that starts with this task's context. Its source messages are untrusted, so shell commands ask you first." }), host);
     closeChat = await mountSessionChat(host, { sessionId, title: "CRM: " + task.title, placeholder: "Ask Kairos about this task",
-      emptyTitle: "Work on this task", emptyText: "Ask for a plan, a reply, research or a summary.", modelPicker: true, openInChats: true });
+      emptyTitle: "Work on this task", emptyText: "Ask for a plan, a reply, research or a summary.", modelPicker: true, openInChats: true,
+      onTurnEnd: () => { if (!disposed) return load(true); } });
   }
 
   async function mutateTask(task, fields) {
@@ -324,6 +369,32 @@ export async function render(container) {
     await api(BASE + `/tasks/${task.id}/review`, { method: "POST", body: JSON.stringify({ accept }) });
     await load();
   }
+  async function openOriginal(evidence) {
+    const nativeBrowser = window.jarvis?.browser;
+    // Reserve a tab during the click so a slow mailbox lookup cannot cause
+    // browser popup blocking. Desktop uses the existing validated IPC bridge.
+    const target = nativeBrowser?.openExternal ? null : window.open("about:blank", "_blank");
+    if (!nativeBrowser?.openExternal && !target) throw new Error("Allow this page to open a browser tab, then try again.");
+    if (target) target.opener = null;
+    try {
+      const link = await api(BASE + `/messages/${evidence.message_id}/original`);
+      if (disposed) { target?.close(); return; }
+      if (!link.url) {
+        target?.close();
+        await showSource(evidence);
+        toast("This source has no webmail link. Showing the captured text instead.");
+        return;
+      }
+      const url = new URL(link.url);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error("The original message link is invalid.");
+      if (nativeBrowser?.openExternal) {
+        const result = await nativeBrowser.openExternal(url.href);
+        if (!result?.ok) throw new Error("The browser could not open this message. Try View captured text.");
+      } else target.location.replace(url.href);
+      if (link.direct === false) toast("The message moved or could not be resolved. Gmail will search for its exact Message-ID.");
+    } catch (error) { target?.close(); throw error; }
+  }
+
   async function showSource(evidence) {
     const message = await api(BASE + "/messages/" + evidence.message_id);
     if (disposed) return;
@@ -333,7 +404,7 @@ export async function render(container) {
       el("div", { class: "meta", text: [message.sender, message.account, message.folder, message.sent_at && dueLabel(message.sent_at)].filter(Boolean).join(" · ") }),
       el("p", { class: "meta", text: "Captured source text. Links and embedded content were not loaded." }),
     ]);
-    if (message.url && /^https:\/\//i.test(message.url)) panel.append(el("a", { href: message.url, target: "_blank", rel: "noopener noreferrer", class: "btn", text: "Open original message" }));
+    if (message.url && /^https:\/\//i.test(message.url)) panel.append(button("Open original message", () => openOriginal(evidence)));
     if (message.context) panel.append(el("details", {}, [el("summary", { text: "Earlier thread context" }), el("pre", { text: message.context })]));
     panel.append(el("pre", { class: "crm-source-text", text: message.body }));
     if (message.truncated || message.context_incomplete) panel.append(el("p", { class: "crm-review", text: "The captured text is incomplete. Check the original before relying on it." }));
@@ -412,6 +483,8 @@ export async function render(container) {
       const cadence = el("input", { type: "number", min: "5", max: "1440", value: String(data.settings.interval_minutes) });
       const review = el("input", { type: "checkbox", checked: data.settings.review_all });
       const auto = el("input", { type: "checkbox", checked: data.settings.auto_scan });
+      const dailyCompletion = el("input", { type: "checkbox", checked: data.settings.daily_completion !== false });
+      const dailyStatus = data.daily_completion_status || {};
       let scheduleMode = data.settings.schedule_mode || "interval";
       let scheduleTimes = [...(data.settings.schedule_times || ["09:00"])];
       const scheduleDays = new Set(data.settings.schedule_days || [0, 1, 2, 3, 4, 5, 6]);
@@ -473,7 +546,11 @@ export async function render(container) {
         el("div", { class: "crm-pair" }, [field("Extraction model", model), modelField, field("Timezone", timezone), field("Email lookback (days)", lookback)]),
         el("label", { class: "crm-check" }, [auto, "Auto scan"]), schedule, scheduleSummary,
         el("label", { class: "crm-check" }, [review, "Review every extracted task before adding it to active work"]),
-        el("p", { class: "meta", text: "Scanning uses your selected model. Claude CLI and local/API models run without action tools. Codex CLI is not offered for unattended extraction." }),
+        el("label", { class: "crm-check" }, [dailyCompletion, "Check Sent mail daily for completed tasks"]),
+        el("p", { class: "meta", text: "At 9:00 AM in the timezone above, reviews Sent mail from your selected email accounts within Email lookback. Catches up when Kairos next runs. Only clear matches close a task; uncertain work stays open. This runs independently of Auto scan." }),
+        el("p", { class: "meta", role: "status", text: dailyStatus.running ? "Daily completion check is running." : dailyStatus.last_success ? `Last daily check: ${new Date(dailyStatus.last_success * 1000).toLocaleString()} · ${dailyStatus.completed || 0} tasks completed.` : "No successful daily completion check yet. Select an email source and extraction model to begin." }),
+        dailyStatus.error && el("p", { class: "crm-review", role: "alert", text: dailyStatus.error + " Retries in an hour while enabled." }),
+        el("p", { class: "meta", text: "Your selected model scans sources and checks matching chat and assignment results for completed work without action tools. Other work completed outside connected sources needs a report in chat or a manual status change. Codex CLI is not offered for unattended extraction." }),
         settingsError, button("Save scanning settings", async () => {
           settingsError.textContent = "";
           if (scheduleMode === "times" && (!scheduleDays.size || scheduleTimes.length < 1 || scheduleTimes.length > 6 ||
@@ -483,7 +560,7 @@ export async function render(container) {
           }
           try {
             await api(BASE + "/settings", { method: "PUT", body: JSON.stringify({ endpoint_id: model.value || null, model: specificModel.value || null,
-              timezone: timezone.value, lookback_days: Number(lookback.value), interval_minutes: Number(cadence.value), auto_scan: auto.checked, review_all: review.checked,
+              timezone: timezone.value, lookback_days: Number(lookback.value), interval_minutes: Number(cadence.value), auto_scan: auto.checked, review_all: review.checked, daily_completion: dailyCompletion.checked,
               schedule_mode: scheduleMode, schedule_times: [...scheduleTimes].sort(), schedule_days: [...scheduleDays].sort() }) });
             await load(); toast("Scanning settings saved", "success");
           } catch (error) { settingsError.textContent = error.message; }

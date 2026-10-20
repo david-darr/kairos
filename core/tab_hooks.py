@@ -194,6 +194,29 @@ def emit_message(source, message):
         logger.exception("tab message dispatch could not be scheduled")
 
 
+def emit_chat_turn(session, message, reply):
+    """Passive, owner-scoped receipts for successful completed chat runs."""
+    from core.auth import auth_enabled, SINGLE_USER
+    from core import session_manager_store
+    owner = session.get("owner_user") if auth_enabled() else SINGLE_USER
+    latest = (session.get("messages") or [{}])[-1]
+    run_id = latest.get("run_id")
+    run = session_manager_store.get_run(run_id) if run_id else None
+    if not owner or not run or run.get("outcome") != "finished":
+        return
+    turn = {"id": run_id, "session_id": session["id"], "message": message,
+            "reply": reply, "at": run["ended_at"],
+            "actions": [step for step in session_manager_store.run_events(run_id)
+                        if step.get("kind") == "tool_finished"]}
+    async def dispatch():
+        await asyncio.gather(*(_declared(entry, "on_chat_turn", owner, copy.deepcopy(turn))
+                               for entry in list(tab_folders._registered.values())))
+    try:
+        _track(asyncio.get_running_loop().create_task(dispatch()))
+    except Exception:
+        logger.exception("tab chat receipt dispatch could not be scheduled")
+
+
 async def calendar_items(user, start, end):
     results = await asyncio.gather(*(_declared(entry, "calendar_items", user, start, end)
                                     for entry in list(tab_folders._registered.values())))
