@@ -52,7 +52,7 @@ class Surface {
     } }, './brand.js': { ICON: '' }, './icons.js': { ICONS: {} },
     './mobileHistory.js': { mountHistory() {} },
     './mobileTabSheet.js': { openTabSheet() {}, initTabSheet() {} },
-    './mobileActivity.js': { initActivity() {}, attachActivity() {}, activityMetadata() {} },
+    './mobileActivity.js': { initActivity() {}, attachActivity() {}, activityMetadata() {}, refreshActivity() {} },
   };
   const cache = new Map();
   async function load(name) {
