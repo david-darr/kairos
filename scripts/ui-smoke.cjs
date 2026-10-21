@@ -2299,10 +2299,17 @@ app.whenReady().then(async () => {
       assert.ok(await inDemo("!!d.querySelector('.demo-badge')"), label + " the demo says it is a demo");
       for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "agents", "cookbook", "school", "home"]) {
         await inDemo("d.querySelector('.nav-item[data-tab=" + tab + "]').click()");
-        await waitDemo("d.getElementById('view-content')?.dataset.view === '" + tab + "' && !d.querySelector('#view-content .empty-state[role=status]')", tab + " opens in the demo");
+        // On a phone the Chat tab is the mobile launch page, which lives on Home.
+        const shown = label === "mobile" && tab === "chat" ? "home" : tab;
+        await waitDemo("d.getElementById('view-content')?.dataset.view === '" + shown + "' && !d.querySelector('#view-content .empty-state[role=status]')", tab + " opens in the demo");
         assert.ok(await inDemo("!d.getElementById('view-content').textContent.includes(\"couldn't load\")"), label + " demo " + tab + " renders");
       }
       await inDemo("d.querySelector('.nav-item[data-tab=chat]').click()");
+      // The phone's launch page opens the full conversation from its + button.
+      if (label === "mobile") {
+        await waitDemo("!!d.querySelector('.ms-launch-composer button[aria-label^=\"Open full composer\"]')", "the phone launch composer");
+        await inDemo("d.querySelector('.ms-launch-composer button[aria-label^=\"Open full composer\"]').click()");
+      }
       await waitDemo("!!d.getElementById('chat-input')", "the demo composer");
       await inDemo("(() => { const i = d.getElementById('chat-input'); i.value = 'What can you do?'; i.dispatchEvent(new Event('input', { bubbles: true })); d.getElementById('chat-send').click(); return true; })()");
       await waitDemo("[...d.querySelectorAll('.msg.assistant')].some(m => m.textContent.includes('Demo reply') && m.textContent.includes('download Kairos'))", "the demo's scripted reply");

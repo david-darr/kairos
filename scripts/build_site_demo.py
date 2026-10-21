@@ -105,6 +105,9 @@ def bundle(target):
     stage.mkdir(parents=True)
     try:
         shutil.copytree(STATIC / "js", stage / "static" / "js")
+        # The background effects import the vendored art (static/vendor/ascii-magic) by relative
+        # path, including a per-piece dynamic import esbuild expands into a glob; both need the files staged.
+        shutil.copytree(STATIC / "vendor", stage / "static" / "vendor")
         for original in (REPO / "tabs").rglob("*.js"):
             copied = stage / original.relative_to(REPO)
             copied.parent.mkdir(parents=True, exist_ok=True)
