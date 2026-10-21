@@ -123,9 +123,12 @@ def bundle(target):
         arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
         package = esbuild().parent / "@esbuild" / (system + "-" + arch)
         binary = package / ("esbuild.exe" if system == "win32" else "bin/esbuild")
+        # Add-on UI is served by the backend at /api/addons/... and is only loaded once an
+        # add-on is enabled; the demo lists none (fixtures: /api/addons is []), so leave
+        # those imports unresolved at build time.
         found = subprocess.run([str(binary), str(entry), "--bundle", "--format=iife", "--minify",
                                 "--legal-comments=none", "--target=es2022", "--log-level=error",
-                                "--external:./vendor/pdf.mjs", "--outfile=" + str(target)], cwd=REPO)
+                                "--external:./vendor/pdf.mjs", "--external:/api/*", "--outfile=" + str(target)], cwd=REPO)
         if found.returncode:
             sys.exit("bundling the app for the demo failed")
     finally:
