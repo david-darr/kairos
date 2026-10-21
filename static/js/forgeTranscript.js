@@ -1,6 +1,6 @@
 import { mountMobileDictation } from './mobileDictation.js';
 import { openMobileSheet } from './mobileSheet.js';
-import { mobileOn, phone, button } from './mobileShared.js';
+import { mobileOn, phone, button, PLUS_ICON } from './mobileShared.js';
 import { mountMobileComposer } from './mobileComposer.js';
 import { api, el, confirmDialog } from './api.js';
 import { mountSessionChat } from './sessionChat.js';
@@ -101,7 +101,7 @@ function createTranscript(options) {
       const anchor = document.createComment('Session tools home'); tools.before(anchor);
       toolsSheet = openMobileSheet({ title: 'Session tools', content: tools, opener: add, onClose: () => { anchor.after(tools); anchor.remove(); toolsSheet = null; } });
     }, 'ms-forge-add');
-    add.setAttribute('aria-label', 'Session tools'); footer.prepend(add);
+    add.innerHTML = PLUS_ICON; add.setAttribute('aria-label', 'Session tools'); footer.prepend(add);
     const gate = () => { add.hidden = !mobileOn(); }; gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
     const dictation = mountMobileDictation(composer, input, footer);
     disposePhoneControls = () => { toolsSheet?.close(); dictation(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); add.remove(); };

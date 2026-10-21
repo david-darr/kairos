@@ -9,6 +9,12 @@ export function mountMobileChrome(avatar) {
     const on = mobileOn();
     avatar.classList.toggle('ms-avatar', on); avatar.classList.toggle('ms-glass', on);
     avatar.textContent = on ? document.querySelector('.sidebar-avatar')?.textContent || 'K' : '';
+    // The launch header keeps its own avatar; its initial follows the account too.
+    const initial = document.querySelector('.sidebar-avatar')?.textContent;
+    for (const own of document.querySelectorAll('.ms-header .ms-avatar')) {
+      const text = [...own.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
+      if (initial && text && text.data !== initial) text.data = initial;
+    }
     avatar.setAttribute('aria-label', 'Open workspace tabs');
     avatar.setAttribute('aria-haspopup', 'dialog'); avatar.removeAttribute('aria-expanded');
     avatar.setAttribute('aria-controls', 'ms-workspace-sheet'); frost.hidden = !on;

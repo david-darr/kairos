@@ -44,7 +44,7 @@ export function openTabSheet(from) {
   for (const group of sidebarLayout(sources.map(n => n.dataset.tab))) {
     if (!group.ids.length) continue;
     const section = document.createElement('section'); section.className = 'ms-tab-group'; section.dataset.group = group.id;
-    const label = document.createElement('h3'); label.className = 'ms-group-label'; label.textContent = group.label || 'Top';
+    const label = document.createElement('h3'); label.className = 'ms-group-label'; label.textContent = document.documentElement.dataset.appMode === 'forge' ? 'Forge' : group.label || 'Top';
     const grid = document.createElement('div'); grid.className = 'ms-tab-grid';
     section.append(label, grid); groups.append(section);
     for (const id of group.ids) grids.set(id, grid);

@@ -51,12 +51,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
 
   assert.equal((await rect('.ms-global-frost')).y, 0, 'Frost starts at screen y=0');
   assert.equal(await js("!!document.querySelector('.ms-your-day')"), false, 'No Your day button');
-  const centered = async () => assert.equal(await js(`(() => {
+  const centered = async () => {
+    const m = await js(`(() => {
     const bar = document.querySelector('.ms-composer'), input = bar.querySelector('textarea');
     const r = n => n.getBoundingClientRect(), cy = n => { const b = r(n); return (b.top + b.bottom) / 2; };
     const controls = ['#overflow-plus-btn', '#chat-mic'].map(s => bar.querySelector(s));
-    return controls.every(n => Math.abs(cy(n) - cy(input)) <= 1) && getComputedStyle(input).lineHeight === '24px';
-  })()`), true, 'Resting composer controls and text line are centered within 1px');
+    return { gaps: controls.map(n => cy(n) - cy(input)), bar: cy(bar) - cy(input), lineHeight: getComputedStyle(input).lineHeight };
+  })()`);
+    assert.ok(m.gaps.every(g => Math.abs(g) <= 1) && Math.abs(m.bar) <= 1 && m.lineHeight === '24px', 'Resting composer controls and text line are centered within 1px: ' + JSON.stringify(m));
+  };
   await centered();
 
   // ---- A1/A2: New / Chats pager

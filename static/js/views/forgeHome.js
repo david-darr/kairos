@@ -2,7 +2,7 @@ import { mountMobileModelSheet, renderMobileCatalogMenu } from '../mobileModelSh
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileDictation } from '../mobileDictation.js';
 import { openMobileSheet } from '../mobileSheet.js';
-import { mobileOn, phone, button } from '../mobileShared.js';
+import { mobileOn, phone, button, PLUS_ICON } from '../mobileShared.js';
 import { api, el, customSelect, openPanelDialog, toast } from '../api.js';
 import { shouldSendOnEnter } from '../composerKeyboard.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
@@ -85,7 +85,7 @@ export function render(container, tabId, options = {}) {
     const anchor = document.createComment('Forge location controls'); inputLeft.before(anchor);
     locationSheet = openMobileSheet({ title: 'Session context', content: inputLeft, opener: phoneAdd, onClose: () => { anchor.after(inputLeft); anchor.remove(); locationSheet = null; } });
   }, 'ms-forge-add');
-  phoneAdd.setAttribute('aria-label', 'Session context'); pickers.prepend(phoneAdd);
+  phoneAdd.innerHTML = PLUS_ICON; phoneAdd.setAttribute('aria-label', 'Session context'); pickers.prepend(phoneAdd);
   const gatePhone = () => { phoneAdd.hidden = phoneModel.hidden = !mobileOn(); }; gatePhone(); phone.addEventListener('change', gatePhone); document.addEventListener('kairos:appearance', gatePhone);
   const disposeDictation = mountMobileDictation(composer, message, inputRight);
   const disposeComposer = mountMobileComposer({ composer, input: message, context: () => projects.find(item => item.id === projectSelect?.value)?.name || 'Choose a project', busy: () => starting, recording: () => composer.classList.contains('ms-dictating') });

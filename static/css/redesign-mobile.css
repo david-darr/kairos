@@ -367,9 +367,10 @@
 @media (max-width: 768px) {
   .kairos-redesign #sidebar { display: none !important; }
   .kairos-redesign #mobile-menu-btn.ms-avatar {
+    position: fixed;
     top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: max(16px, env(safe-area-inset-left, 0px));
     width: 44px; height: 44px; min-width: 44px; min-height: 44px; z-index: 1100;
-    display: grid; place-items: center; transform: none; line-height: 1; font: 600 16px var(--rd-font-ui);
+    display: grid; place-items: center; transform: none; line-height: 1; font: 400 14px var(--rd-font-ui);
   }
   .kairos-redesign .ms-global-frost {
     position: fixed; top: 0; left: 0; right: 0; height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 88px);
@@ -404,13 +405,18 @@
   .kairos-redesign .ms-composer :is(.input-icon-btn, #chat-mic, #overflow-plus-btn, .ms-forge-add, .ms-forge-mic) {
     display: inline-grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; line-height: 1; flex-shrink: 0;
   }
-  .kairos-redesign .ms-composer:not(.ms-composer-expanded) :is(.overflow-wrapper:has(#overflow-plus-btn), #chat-mic, .ms-forge-add, .ms-forge-mic) {
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) :is(.overflow-wrapper:has(#overflow-plus-btn), #chat-mic),
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) :is(.ms-forge-add, .ms-forge-mic) {
     top: 50%; bottom: auto; transform: translateY(-50%);
   }
   .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) .forge-transcript-footer {
-    top: 0; bottom: 0; align-items: center;
+    top: 0; bottom: 0; align-items: center; padding: 0;
   }
-  .kairos-redesign .forge-transcript-footer :is(.ms-forge-add, .ms-forge-mic) { position: static; transform: none; }
+  .kairos-redesign .forge-transcript-composer.ms-composer .forge-transcript-footer :is(.ms-forge-add, .ms-forge-mic) { position: static; top: auto; bottom: auto; transform: none; }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) { padding-block: 2px; }
+  /* The shared control reset (font: inherit) outranks one-class rules, so the line box is pinned here. */
+  .kairos-redesign .ms-composer.ms-composer.ms-composer textarea,
+  .kairos-redesign .ms-composer #chat-input { line-height: 24px; font-size: 16px; padding-block: 10px; }
   .kairos-redesign .ms-composer-expanded :is(.chat-input-bottom, .forge-transcript-footer, .chat-input-left, .chat-input-right) { align-items: center; }
 }
 
@@ -423,4 +429,14 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-sheet-projects .ms-account-row { width: auto; flex: 0 0 auto; padding-inline: 12px; }
   .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
+}
+
+/* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
+@media (max-width: 768px) {
+  .kairos-redesign .tool-store-view .tool-store-top { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 4px); z-index: 56; }
+}
+
+/* Forge session: the page already clears the safe area, so the panes do not add it a second time. */
+@media (max-width: 768px) {
+  .kairos-redesign .forge-shell-view #chat-main.forge-panes { padding-top: 0; }
 }

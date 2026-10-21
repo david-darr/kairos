@@ -134,7 +134,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-settings`);
     assert.deepEqual(await overflow(), [], `${label} Settings fits`);
     if (width <= 768) {
-      assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect();return r.top<=1 && r.height<=72;})()"), true, 'Settings owns one compact header without inherited page padding');
+      assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect(), a=document.getElementById('mobile-menu-btn').getBoundingClientRect();return r.top<=1 && r.height<=a.bottom + 72 && r.top <= a.top;})()"), true, 'Settings owns one compact header without inherited page padding');
       // Phone Settings is an inset-grouped list: 22px bordered groups, rows of at least 52px, all inside the search field's width.
       assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return r.left>=s.left-1 && r.right<=s.right+1 && p.borderTopWidth==='1px' && parseFloat(p.borderTopLeftRadius)===22 && r.height>=52;});})()`), true, 'Settings rows sit in inset groups within the search width');
       await js("document.querySelector('.settings-nav-item[data-section=notifications]').click()");

@@ -40,19 +40,27 @@ async function run(ctx) {
     const avatar = await rect('#mobile-menu-btn');
     ok(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('#mobile-menu-btn .menu-stroke')"), tab + ' has workspace avatar');
     ok(avatar && avatar.l <= 44 && avatar.t <= 16 && avatar.w === 44 && avatar.h === 44, tab + ' avatar stays top-left');
-    ok(await js("[...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].filter(n => n.getClientRects().length).every(n => n.getBoundingClientRect().top >= document.getElementById('mobile-menu-btn').getBoundingClientRect().bottom)"), tab + ' headers clear avatar');
+    // The avatar floats: it must not take a column from the page, and the top frost is a light, masked blur from y=0.
+    ok(await js("document.getElementById('mobile-menu-btn').getBoundingClientRect().width === 44 && getComputedStyle(document.getElementById('mobile-menu-btn')).position === 'fixed' && document.getElementById('view-content').getBoundingClientRect().left === 0"), tab + ' avatar floats and leaves the page full width');
+    const frost = await js("(() => { const n = document.querySelector('.ms-global-frost'); const i = n.querySelector('i'); const s = getComputedStyle(i); return { top: n.getBoundingClientRect().top, bg: s.backgroundColor, blur: parseFloat((s.backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), mask: s.maskImage.includes('linear-gradient'), shown: getComputedStyle(n).visibility !== 'hidden' }; })()");
+    ok(frost.top === 0 && frost.shown && frost.mask && frost.blur <= 8 && /rgba\(0, 0, 0, 0\)|transparent/.test(frost.bg), tab + ' frost starts at y=0 as a light, masked, untinted blur: ' + JSON.stringify(frost));
+    // No header control or title may sit under the avatar (a title may share its row, beside it).
+    ok(await js("(() => { const a = document.getElementById('mobile-menu-btn').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, p, button, input, a, small, span')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.textContent.trim() + n.getAttribute('aria-label') !== '').every(n => { const r = n.getBoundingClientRect(); return r.width === 0 || r.height === 0 || r.right <= a.left + 0.5 || r.left >= a.right - 0.5 || r.bottom <= a.top + 0.5 || r.top >= a.bottom - 0.5; }); })()"), tab + ' headers clear avatar');
   };
   for (const tab of ['home', 'agents', 'tool-store', 'school', 'forgeHome']) {
     await navigate(tab); await delay(500); await checkAvatar(tab);
   }
   const centeredComposer = async (selector, expanded = false) => {
-    ok(await js(`(() => {
+    await delay(450); // the composer morph settles before its geometry is read
+    await waitFor(`document.querySelector('${selector}').classList.contains('ms-composer-expanded') === ${expanded}`);
+    const measured = await js(`(() => {
       const bar = document.querySelector('${selector}');
-      const nodes = expanded ? [...bar.querySelectorAll('.ms-forge-add, .ms-forge-mic, .ms-embedded-model-trigger')].filter(n => n.getClientRects().length)
+      const nodes = ${expanded} ? [...bar.querySelectorAll('.ms-forge-add, .ms-forge-mic, .ms-embedded-model-trigger')].filter(n => n.getClientRects().length)
         : [bar.querySelector('textarea'), bar.querySelector('.ms-forge-add'), bar.querySelector('.ms-forge-mic')];
       const centers = nodes.map(n => { const r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
-      return centers.length >= 3 && Math.max(...centers) - Math.min(...centers) <= 1;
-    })()`), selector + (expanded ? ' bottom row' : ' resting controls and text') + ' centered within 1px');
+      return { centers, spread: Math.max(...centers) - Math.min(...centers) };
+    })()`);
+    ok(measured.centers.length >= 3 && measured.spread <= 1, selector + (expanded ? ' bottom row' : ' resting controls and text') + ' centered within 1px: ' + JSON.stringify(measured));
   };
 
   // ---- A. Every dock tab: geometry, controls, content clearance -------------------------
