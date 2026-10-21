@@ -20,12 +20,11 @@
   }
   .kairos-redesign #chat-progress-host,
   .kairos-redesign #rd-needs { display: none !important; }
-  .kairos-redesign[data-view="home"]:not(.mobile-menu-open) #mobile-menu-btn,
+  .kairos-redesign:has(.ms-shell:not([hidden])) #mobile-menu-btn,
   .kairos-redesign:has(.ms-conversation):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign #view-content.ms-home { padding: 0; overflow-x: hidden; }
   .kairos-redesign .ms-home .dashboard-content { width: 100%; max-width: none; gap: 0; }
-  .kairos-redesign .ms-home:not(.ms-show-day) .dashboard-content > :not(.ms-shell) { display: none; }
-  .kairos-redesign .ms-home.ms-show-day .dashboard-content > :not(.ms-shell) { margin: 16px; }
+  .kairos-redesign .ms-home .dashboard-content > :not(.ms-shell) { display: none; }
   .kairos-redesign .ms-home .dashboard-hero { min-height: 0; padding: 16px; }
   .kairos-redesign .ms-shell {
     --ms-page: 0; position: relative; isolation: isolate; display: flex; flex-direction: column;
@@ -54,11 +53,10 @@
   .kairos-redesign .ms-mark svg { width: 100%; height: 100%; }
   .kairos-redesign .ms-intro h1 { margin: 0; font: 500 30px/1.1 var(--rd-font-title); }
   .kairos-redesign .ms-launch-bottom { position: relative; padding: 0 16px max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px); }
-  .kairos-redesign .ms-launch-composer { position: relative; display: flex; align-items: flex-end; gap: 4px; padding: 5px; border-radius: 28px; }
+  .kairos-redesign .ms-launch-composer { position: relative; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 28px; }
   .kairos-redesign .ms-launch-composer button { border: 0; border-radius: 999px; background: transparent; padding: 0 10px; }
   .kairos-redesign .ms-launch-composer button:last-child { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
   .kairos-redesign .ms-launch-composer textarea { flex: 1; width: 0; resize: none; max-height: 160px; border: 0; background: transparent; padding: 11px 2px; line-height: 22px; font-size: 16px; box-shadow: none; }
-  .kairos-redesign .ms-your-day { position: relative; display: block; margin: 0 auto; background: transparent; border: 0; font-size: 13px; text-decoration: underline; }
   .kairos-redesign .ms-blur { position: absolute; left: 0; right: 0; pointer-events: none; z-index: -1; height: 140px; }
   .kairos-redesign .ms-blur-top { top: 0; }
   .kairos-redesign .ms-blur-bottom { bottom: 0; height: calc(100% + 40px); }
@@ -280,7 +278,7 @@
   .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) #chat-main { display: block; padding: 0; overflow: visible; }
   .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) #chat-main > :not(.chat-composer-dock) { display: none !important; }
   .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) .chat-composer-dock { position: relative; inset: auto; transform: none; width: 100%; margin: 0; padding: 0; }
-  .kairos-redesign .ms-live-chat > .ms-header, .kairos-redesign .ms-live-chat .ms-intro, .kairos-redesign .ms-live-chat .ms-your-day, .kairos-redesign .ms-live-chat .ms-activity-slot { display: none; }
+  .kairos-redesign .ms-live-chat > .ms-header, .kairos-redesign .ms-live-chat .ms-intro, .kairos-redesign .ms-live-chat .ms-activity-slot { display: none; }
   .kairos-redesign .ms-live-chat .ms-launch-bottom { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; }
   .kairos-redesign .ms-live-chat .ms-launch-chat-open { flex: 1; height: 100%; min-height: 0; }
   .kairos-redesign .ms-live-chat .ms-launch-chat-open #chat-main { min-height: 0; height: 100%; }
@@ -362,4 +360,83 @@
   /* The Forge "+" matches the chat composer "+": the same tinted circle. */
   .kairos-redesign .ms-forge-add { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--hairline-soft); }
   .kairos-redesign .ms-tab-sheet:focus { outline: none; }
+}
+
+/* Follow-up phone chrome: the frost begins at screen y=0, including the safe area.
+   A single light, untinted layer avoids compounded blur and colored bands. */
+@media (max-width: 768px) {
+  .kairos-redesign #sidebar { display: none !important; }
+  .kairos-redesign #mobile-menu-btn.ms-avatar {
+    position: fixed;
+    top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: max(16px, env(safe-area-inset-left, 0px));
+    width: 44px; height: 44px; min-width: 44px; min-height: 44px; z-index: 1100;
+    display: grid; place-items: center; transform: none; line-height: 1; font: 400 14px var(--rd-font-ui);
+  }
+  .kairos-redesign .ms-global-frost {
+    position: fixed; top: 0; left: 0; right: 0; height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 88px);
+    z-index: 54; background: transparent;
+  }
+  .kairos-redesign .ms-blur-top i {
+    height: 100%; background: transparent; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, color-mix(in srgb, var(--rd-ink) 65%, transparent) 45%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 100%);
+  }
+  .kairos-redesign .ms-blur-top i:not(:first-child) { display: none; }
+  .kairos-redesign .ms-blur-top { height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 88px); }
+  .kairos-redesign:has(.ms-shell:not([hidden])) .ms-global-frost,
+  .kairos-redesign:has(.ms-conversation:not(.ms-launch-chat)) .ms-global-frost { visibility: hidden; }
+  .kairos-redesign .ms-conversation #chat-main { padding-top: 0; }
+  .kairos-redesign .dashboard:not(.ms-home) { padding-inline: 16px; }
+  .kairos-redesign .dashboard:not(.ms-home) .dashboard-hero { min-height: 360px; padding: 20px; }
+  .kairos-redesign .dashboard .hm-customize { min-height: 44px; min-width: 44px; }
+  .kairos-redesign .dashboard-actions { flex-wrap: wrap; }
+  .kairos-redesign .dashboard :is(button.dashboard-row, .dashboard-section-header .btn) { min-height: 44px; }
+  .kairos-redesign #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) {
+    padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 72px);
+  }
+  .kairos-redesign .view:not(.chat-layout) .view-header:first-child > div > h2 { padding-left: 0; }
+  .kairos-redesign .settings-mobile-page .settings-titlebar { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 60px); padding-left: 16px; }
+  .kairos-redesign .dashboard-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .kairos-redesign .dashboard-grid > * { grid-column: 1 / -1 !important; min-width: 0; }
+  .kairos-redesign .ms-tab-group { margin-bottom: 20px; }
+  .kairos-redesign .ms-group-label { margin: 16px 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-mode-row [aria-pressed=true] { font-weight: 600; color: var(--rd-focus); }
+  .kairos-redesign .ms-composer textarea { display: block; margin: 0; box-sizing: border-box; line-height: 24px; padding-block: 10px; }
+  .kairos-redesign .ms-composer :is(.input-icon-btn, #chat-mic, #overflow-plus-btn, .ms-forge-add, .ms-forge-mic) {
+    display: inline-grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; line-height: 1; flex-shrink: 0;
+  }
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) :is(.overflow-wrapper:has(#overflow-plus-btn), #chat-mic),
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) :is(.ms-forge-add, .ms-forge-mic) {
+    top: 50%; bottom: auto; transform: translateY(-50%);
+  }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) .forge-transcript-footer {
+    top: 0; bottom: 0; align-items: center; padding: 0;
+  }
+  .kairos-redesign .forge-transcript-composer.ms-composer .forge-transcript-footer :is(.ms-forge-add, .ms-forge-mic) { position: static; top: auto; bottom: auto; transform: none; }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) { padding-block: 2px; }
+  /* The shared control reset (font: inherit) outranks one-class rules, so the line box is pinned here. */
+  .kairos-redesign .ms-composer.ms-composer.ms-composer textarea,
+  .kairos-redesign .ms-composer #chat-input { line-height: 24px; font-size: 16px; padding-block: 10px; }
+  .kairos-redesign .ms-composer-expanded :is(.chat-input-bottom, .forge-transcript-footer, .chat-input-left, .chat-input-right) { align-items: center; }
+}
+
+@media (max-width: 768px) {
+  html.kairos-redesign::after { display: none; }
+  .kairos-redesign .ms-header, .kairos-redesign .ms-conversation .chat-mobile-header,
+  .kairos-redesign .settings-mobile-page .settings-titlebar { z-index: 55; }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign .ms-sheet-projects .ms-account-row { width: auto; flex: 0 0 auto; padding-inline: 12px; }
+  .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
+}
+
+/* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
+@media (max-width: 768px) {
+  .kairos-redesign .tool-store-view .tool-store-top { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 4px); z-index: 56; }
+}
+
+/* Forge session: the page already clears the safe area, so the panes do not add it a second time. */
+@media (max-width: 768px) {
+  .kairos-redesign .forge-shell-view #chat-main.forge-panes { padding-top: 0; }
 }
