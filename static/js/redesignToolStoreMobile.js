@@ -100,6 +100,18 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     card.append(el("span", { class: "ts-row-chev", "aria-hidden": "true" }, [markup(CHEVRON)]), hit);
   }
 
+  // Keep the active chip in view and fade the right edge while more chips scroll.
+  function syncChips() {
+    const target = installed.querySelector("input")?.checked ? installed : filters.querySelector(".active");
+    if (target && chips.scrollWidth > chips.clientWidth) {
+      const box = chips.getBoundingClientRect(), at = target.getBoundingClientRect();
+      if (at.right > box.right - 12) chips.scrollLeft += at.right - box.right + 24;
+      else if (at.left < box.left + 12) chips.scrollLeft -= box.left - at.left + 24;
+    }
+    chips.toggleAttribute("data-more", chips.scrollLeft + chips.clientWidth < chips.scrollWidth - 4);
+  }
+  chips.addEventListener("scroll", () => chips.toggleAttribute("data-more", chips.scrollLeft + chips.clientWidth < chips.scrollWidth - 4), { passive: true });
+
   // The sticky header bleeds out over the page's own padding, whatever it is here.
   function measurePad() {
     const scroller = view.parentElement;
@@ -113,6 +125,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     if (!view.isConnected) { closeSheet(false); return; }
     if (!redesignOn()) return;
     measurePad();
+    syncChips();
     let section = null;
     for (const node of results.children) {
       if (node.matches(".tool-store-heading")) {
@@ -146,6 +159,12 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     card.classList.add("ts-in-sheet");
     const heading = card.querySelector("h4");
     if (heading) { heading.id = "ts-sheet-title"; open.sheet.setAttribute("aria-labelledby", "ts-sheet-title"); }
+    // An odd last button takes the full row.
+    for (const foot of card.querySelectorAll(".tool-store-card-foot")) {
+      const buttons = [...foot.children].filter(node => node.matches(".btn") && !node.hidden);
+      foot.querySelectorAll(".ts-wide").forEach(node => node.classList.remove("ts-wide"));
+      if (buttons.length % 2) buttons.at(-1).classList.add("ts-wide");
+    }
     open.body.replaceChildren(card);
     open.body.scrollTop = 0;
   }

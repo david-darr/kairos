@@ -344,6 +344,7 @@
     display: flex; align-items: center; gap: 8px; margin: 6px -12px 0; padding: 4px 12px; overflow-x: auto; scrollbar-width: none;
   }
   .kairos-redesign .ts-chips::-webkit-scrollbar { display: none; }
+  .kairos-redesign .ts-chips[data-more] { -webkit-mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); }
   .kairos-redesign .tool-store-filters { display: flex; flex-wrap: nowrap; gap: 8px; padding: 0; width: auto; overflow: visible; background: none; flex: none; }
   .kairos-redesign .tool-store-filters .segmented-tab,
   .kairos-redesign .tool-store-installed {
@@ -467,6 +468,7 @@
   .kairos-redesign .ts-sheet .tool-store-card-foot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
   .kairos-redesign .ts-sheet .tool-store-card-foot > :not(.btn) { grid-column: 1 / -1; }
   .kairos-redesign .ts-sheet .tool-store-card-foot > .tool-store-action { display: grid; }
+  .kairos-redesign .ts-sheet .tool-store-card-foot > .btn.ts-wide { grid-column: 1 / -1; }
   .kairos-redesign .ts-sheet .tool-store-card .btn,
   .kairos-redesign .ts-sheet .tool-store-card .tool-store-action .btn { min-height: 44px; width: 100%; font-size: 14px; justify-content: center; }
   .kairos-redesign .ts-sheet .tool-store-card > .btn { align-self: stretch; margin-bottom: 8px; }
