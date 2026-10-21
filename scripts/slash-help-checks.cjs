@@ -21,13 +21,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       const writeIndex = writes.length;
       demoState.empty = false; demoState.isAdmin = true; demoState.sessionFields = {};
       win.setContentSize(width, height); await delay(100);
-      await navigate('chat');
+      // A phone navigate('chat') lands on New/Chats; the full conversation composer is requested explicitly.
+      await navigate('chat', { mobileConversation: true });
       await waitFor("!!document.getElementById('chat-input')");
       await draft('/');
       await waitFor(`${picker}?.hidden === false`);
       assert.equal(await js(`${picker}.getAttribute('role')`), 'listbox');
       assert.ok(await js("document.getElementById(document.getElementById('chat-input').getAttribute('aria-activedescendant'))?.getAttribute('role') === 'option'"), label + ' active option is accessible');
-      assert.ok(await js(`(() => {const r=${picker}.getBoundingClientRect(); const m=document.querySelector('.mobile-menu-btn'); const mb=m && getComputedStyle(m).display!=='none' ? m.getBoundingClientRect().bottom : 0; return r.left>=0 && r.right<=innerWidth && r.top>=mb && r.bottom<=innerHeight;})()`), label + ' suggestions fit below the menu button');
+      assert.ok(await js(`(() => {const r=${picker}.getBoundingClientRect(); const m=document.querySelector('.mobile-menu-btn'); const mb=m && getComputedStyle(m).display!=='none' && getComputedStyle(m).visibility!=='hidden' ? m.getBoundingClientRect().bottom : 0; return r.left>=0 && r.right<=innerWidth && r.top>=mb && r.bottom<=innerHeight;})()`), label + ' suggestions fit below the menu button');
       await capture(label + '-slash-suggestions');
       await key('ArrowDown'); await key('Enter');
       assert.equal(await js("document.getElementById('chat-input').value"), '/demo ', label + ' arrows and Enter insert without running');

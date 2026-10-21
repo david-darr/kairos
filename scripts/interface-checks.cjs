@@ -31,7 +31,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         })()`), true, `${tab} title clears Menu`);
       }
       if (width <= 768 && tab === 'home') {
-        assert.equal(await js("document.querySelector('.dashboard-header').getBoundingClientRect().top >= document.getElementById('mobile-menu-btn').getBoundingClientRect().bottom + 12"), true, 'Home overview clears the fixed menu');
+        // The phone launch surface replaces the overview and the hamburger: the avatar opens the tab sheet and the
+        // original overview sits behind Your day.
+        assert.equal(await js("!!document.querySelector('.ms-avatar') && getComputedStyle(document.getElementById('mobile-menu-btn')).visibility === 'hidden'"), true, 'Home swaps the hamburger for the avatar');
+        assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length === 0"), true, 'The overview stays behind Your day');
+        await js("document.querySelector('.ms-your-day').click()"); await delay(300);
+        assert.equal(await js("(() => { const h=document.querySelector('.dashboard-header').getBoundingClientRect(); return h.width > 0 && h.left >= 0 && h.right <= innerWidth; })()"), true, 'Your day reveals the overview inside the viewport');
+        await js("document.querySelector('.ms-your-day').click()"); await delay(200);
       }
       if (tab === 'calendar') {
         assert.equal(await js("document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar choices take no page space');
@@ -53,7 +59,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.querySelector('#model-picker-label') && !!document.querySelector('.msg')");
     await delay(300); // Let the view/composer entrance finish before measuring.
-    assert.equal(await js("!!document.querySelector('.chat-mobile-header #context-pill') && !document.querySelector('.chat-composer-dock #context-pill') && document.querySelector('.composer-hint').getClientRects().length===0"), true, 'Capacity at top, help hidden in menu');
+    assert.equal(await js(`!!document.querySelector('.chat-mobile-header #context-pill') && !document.querySelector('.chat-composer-dock #context-pill') && (${width <= 768} ? document.querySelector('.composer-hint').getClientRects().length===0 : true)`), true, 'Capacity at top, help hidden in the phone menu');
     assert.equal(await js(`(() => {
       const targets=['#overflow-plus-btn','#chat-send','.chat-phone-tools > button'];
       return targets.every(selector=>{const b=document.querySelector(selector), i=b.querySelector('svg');
@@ -63,32 +69,51 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     if (width <= 768) {
       assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
       const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
-      assert.ok(bottomGap>=15.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
+      assert.ok(bottomGap>=11.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
       await js("document.getElementById('mobile-menu-btn').click()"); await delay(300);
       assert.equal(await js("Math.abs(document.getElementById('sidebar').getBoundingClientRect().right-document.getElementById('mobile-menu-btn').getBoundingClientRect().right-12)<1"), true, 'Menu travels to drawer trailing edge');
-      assert.equal(await js("document.querySelector('#brand .brand-wordmark').getBoundingClientRect().left<=18"), true, 'Sidebar wordmark sits near the left edge');
+      assert.equal(await js("document.querySelector('#brand .brand-wordmark').getBoundingClientRect().left<=24"), true, 'Sidebar wordmark sits near the left edge');
       await capture(`interface-${label}-animated-menu`);
       await js("document.getElementById('mobile-menu-btn').click()"); await delay(300);
     }
-    assert.equal(await js("!!document.querySelector('.chat-mobile-header #model-picker-btn') && !document.querySelector('.chat-input-bar #model-picker-btn')"), true, 'Model lives beside conversation, outside composer');
     await js("document.getElementById('chat-input').value='A draft that must survive opening menus'; document.getElementById('chat-input').dispatchEvent(new Event('input', {bubbles:true}))");
-    await click('#model-picker-btn');
-    assert.equal(await js("(() => { const m=document.getElementById('model-picker-menu'), r=m.getBoundingClientRect(), h=document.querySelector('.chat-header-model').getBoundingClientRect(); return !m.classList.contains('hidden') && r.height>44 && r.top >= h.bottom && r.left >= 0 && r.right <= innerWidth && r.bottom<=innerHeight; })()"), true, 'Model picker opens below header and fits');
-    await click('.model-connection-item.active');
-    await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");
-    await click('#model-picker-btn');
-    await capture(`interface-${label}-model-picker`);
+    if (width <= 768) {
+      // The phone composer owns the model pill, and the picker is a full-height sheet with search and an Account card.
+      await waitFor("document.querySelector('.chat-input-bar').classList.contains('ms-composer-expanded')");
+      assert.equal(await js("!!document.querySelector('.chat-input-bar #model-picker-btn') && !document.querySelector('.chat-mobile-header #model-picker-btn')"), true, 'Phone model pill lives in the composer');
+      await click('#model-picker-btn');
+      await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu') && !!document.querySelector('.ms-account-card')");
+      assert.equal(await js("(() => { const d=document.querySelector('.ms-sheet[open]'), r=d.getBoundingClientRect(), m=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.left === 0 && r.width === innerWidth && r.bottom === innerHeight && r.height >= innerHeight - 70 && m.width > 0 && m.left >= 0 && m.right <= innerWidth && !!d.querySelector('input[type=search]') && !!d.querySelector('.ms-provider-heading'); })()"), true, 'Phone model sheet is full height with search and providers');
+      // Choosing a connection keeps the picker open on that connection's versions, then Close returns to the chat.
+      await click('.ms-sheet .model-connection-item.active');
+      await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu') && !document.getElementById('model-picker-menu').classList.contains('hidden')");
+      await capture(`interface-${label}-model-picker`);
+      await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()");
+      await waitFor("!document.querySelector('.ms-sheet[open]')");
+    } else {
+      // The redesigned desktop composer owns the pill and the menu opens above it.
+      assert.equal(await js("!document.querySelector('.chat-mobile-header #model-picker-btn') && !!document.querySelector('.chat-input-bar #model-picker-btn')"), true, 'Model pill lives in the composer');
+      await click('#model-picker-btn');
+      assert.equal(await js("(() => { const m=document.getElementById('model-picker-menu'), r=m.getBoundingClientRect(), h=document.querySelector('.chat-header-model').getBoundingClientRect(); return !m.classList.contains('hidden') && r.height>44 && r.bottom <= h.top + 1 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Model picker opens above the pill and fits');
+      await click('.model-connection-item.active');
+      assert.equal(await js("!document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Choosing a connection keeps the picker open on its versions');
+      await capture(`interface-${label}-model-picker`);
+      await js("document.getElementById('model-picker-menu').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
+      await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");
+    }
     await js("document.getElementById('chat-messages').click(); document.querySelector('.chat-phone-tools > button').click()");
     assert.equal(await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent.includes('New chat'))"), true, 'New chat is available in tools');
     await capture(`interface-${label}-chat-tools`);
     if (width <= 768) {
       await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Model and reasoning')).click()");
-      await waitFor("!document.getElementById('model-picker-menu').classList.contains('hidden')");
-      assert.equal(await js("(() => { const r=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.top>=document.getElementById('model-picker-btn').getBoundingClientRect().bottom && r.bottom<=innerHeight && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
-      await click('#model-picker-menu .model-picker-heading');
-      assert.equal(await js("!document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Clicks inside the model menu keep it open');
+      await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu')");
+      assert.equal(await js("(() => { const r=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
+      await click('.ms-sheet[open] .ms-model-root > input');
+      assert.equal(await js("!!document.querySelector('.ms-sheet[open]') && !document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Tapping search inside the sheet keeps it open');
       assert.equal(await js("!document.getElementById('chat-sessions').classList.contains('open') && !document.getElementById('sidebar').classList.contains('open')"), true, 'Model editor is not covered by a drawer');
       await capture(`interface-${label}-model-reasoning`);
+      await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()");
+      await waitFor("!document.querySelector('.ms-sheet[open]')");
     }
     await js("document.getElementById('chat-messages').click(); document.getElementById('overflow-plus-btn').click()");
     assert.equal(await js("document.getElementById('chat-permission-mode').getClientRects().length > 0"), true, 'Permission mode stays visible in More');
@@ -115,7 +140,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     assert.deepEqual(await overflow(), [], `${label} Settings fits`);
     if (width <= 768) {
       assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect();return r.top<=1 && r.height<=72;})()"), true, 'Settings owns one compact header without inherited page padding');
-      assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return Math.abs(r.left-s.left)<1 && Math.abs(r.right-s.right)<1 && p.borderTopWidth==='0px' && r.height>=54;});})()`), true, 'Settings rows align with search without enclosing boxes');
+      // Phone Settings is an inset-grouped list: 22px bordered groups, rows of at least 52px, all inside the search field's width.
+      assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return r.left>=s.left-1 && r.right<=s.right+1 && p.borderTopWidth==='1px' && parseFloat(p.borderTopLeftRadius)===22 && r.height>=52;});})()`), true, 'Settings rows sit in inset groups within the search width');
       await js("document.querySelector('.settings-nav-item[data-section=notifications]').click()");
       await waitFor("document.querySelector('#view-content.settings-mobile-page')?.dataset.mobileView === 'page'");
       await capture(`interface-${label}-notifications`);

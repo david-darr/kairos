@@ -5,7 +5,7 @@ import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
 import { openTabSheet, initTabSheet } from './mobileTabSheet.js';
-import { initActivity, attachActivity, activityMetadata } from './mobileActivity.js';
+import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
@@ -142,7 +142,7 @@ export function mountMobileChat(container, actions) {
   if (!header || !menu || !title) return () => {};
   const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('home', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to workspace');
   const heading = el('div', { class: 'ms-chat-heading' }, [el('strong', { text: title.textContent }), el('small', { text: 'All chats' })]);
-  const blur = edgeBlur('top'); header.prepend(blur, back, heading);
+  const blur = edgeBlur('top'); header.prepend(blur, back, heading); refreshActivity();
   const extras = Object.entries(actions).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
   menu.append(...extras);
   let projects = [];

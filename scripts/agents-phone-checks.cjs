@@ -46,6 +46,10 @@ module.exports = async ({ js, waitFor, delay, navigate, win, report = false }) =
     await navigate('agents');
     await waitFor("!!document.querySelector('.agents-messenger-welcome')");
     await check(`${at} agents`, '#content');
+    // With updates present, the floating updates control is measured too and must not cover any control in the view.
+    await check(`${at} agents updates`, '.ms-activity');
+    const covered = await js(`(() => { const f = document.querySelector('.ms-activity-floating'); if (!f || f.hidden || !f.getClientRects().length) return []; const a = f.getBoundingClientRect(); return [...document.querySelectorAll('#content button, #content input, #content a[href]')].filter(n => n.getClientRects().length).filter(n => { const r = n.getBoundingClientRect(); return r.left < a.right && r.right > a.left && r.top < a.bottom && r.bottom > a.top; }).map(n => (n.className || n.tagName).toString().slice(0, 30)); })()`);
+    for (const name of covered) found.push(`${at} agents: updates control covers ${name}`);
     await js("document.querySelector('.agents-chats-open').click()");
     await check(`${at} chats drawer`, '.agents-chat-rail');
     await js("document.querySelector('.agents-rail-toggle').click()");

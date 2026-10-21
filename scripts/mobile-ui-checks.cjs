@@ -8,7 +8,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     input.dispatchEvent(event); return event.defaultPrevented;
   })()`);
   const setDraft = (selector, text) => js(`(() => { const i = document.querySelector(${JSON.stringify(selector)}); i.focus(); i.value = ${JSON.stringify(text)}; i.setSelectionRange(i.value.length, i.value.length); i.dispatchEvent(new Event('input', {bubbles:true})); })()`);
-  await navigate('chat');
+  // The phone shell hides the hamburger on the launch surface and inside a conversation (the avatar opens the tab sheet
+  // and the swipe drawer is a shortcut), so the hamburger's own focus contract is exercised on a tab that shows it.
+  await navigate('notes');
   await resize(390, 844);
   assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('sidebar').getAttribute('aria-hidden') === 'true'"), 'Closed phone menu is removed from focus and accessibility navigation');
   await js("document.getElementById('mobile-menu-btn').click()");
@@ -31,16 +33,25 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js('document.activeElement.id'), 'mobile-menu-btn');
   await js("document.getElementById('mobile-menu-btn').click(); document.getElementById('mobile-backdrop').click()");
   assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.id === 'mobile-menu-btn'"), 'Backdrop dismisses and returns focus');
-  await js("document.getElementById('chat-history-toggle').click(); document.getElementById('mobile-menu-btn').click()");
+  // Drawer coordination, from a phone conversation (a plain phone navigate('chat') now lands on New/Chats).
+  await navigate('chat', { mobileConversation: true, sessionId: 's1' });
+  await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
+  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'hidden', 'A conversation replaces the hamburger with back and the tools capsule');
+  await js("document.querySelector('.chat-phone-tools > button').click()");
+  await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Conversations and projects')).click()");
+  assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('chat-sessions').contains(document.activeElement)"), 'The tools menu opens the history drawer with focus inside');
+  await js("document.getElementById('mobile-menu-btn').click()");
   assert.ok(await js("document.getElementById('sidebar').classList.contains('open') && document.getElementById('chat-sessions').inert && !document.getElementById('chat-sessions').classList.contains('open')"), 'Menu replaces history');
   await js("document.getElementById('chat-history-toggle').click()");
   assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('chat-sessions').contains(document.activeElement)"), 'History replaces menu and takes focus');
-  await js("document.querySelector('.chat-history-close').click(); document.getElementById('mobile-menu-btn').click()");
+  await js("document.querySelector('.chat-history-close').click()");
+  assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Closing history returns focus to the tools capsule, not the hidden title button');
+  await js("document.getElementById('mobile-menu-btn').click()");
   await resize(1440, 900);
   assert.ok(await js("!document.getElementById('sidebar').inert && !document.getElementById('sidebar').hasAttribute('aria-hidden') && !document.getElementById('sidebar').classList.contains('open') && document.getElementById('mobile-backdrop').classList.contains('hidden')"), 'Desktop restores accessible navigation and clears drawer overlay');
   await js("document.querySelector('#nav .nav-item').focus()");
   await resize(390, 844);
-  assert.equal(await js('document.activeElement.id'), 'mobile-menu-btn', 'Shrinking does not leave focus in the closed menu');
+  assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Shrinking moves focus out of the closed menu to a visible control');
 
   const swipe = (selector, x, y, dx, dy = 0, cancel = false) => js(`(() => {
     document.activeElement?.blur(); window.getSelection()?.removeAllRanges();
@@ -55,9 +66,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await swipe('#chat-messages', 40, 160, 120), true, 'Horizontal menu drag takes ownership');
   assert.ok(await js("document.getElementById('sidebar').classList.contains('open') && document.getElementById('sidebar').contains(document.activeElement)"), 'Right swipe opens menu with focus');
   await swipe('#sidebar .nav-item', 160, 110, -130);
-  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.id === 'mobile-menu-btn'"), 'Left swipe dismisses and restores focus');
+  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Left swipe dismisses and restores focus to a visible control');
   assert.equal(await swipe('#chat-messages', 40, 160, 15, 90), false, 'Vertical scroll stays native');
-  assert.equal(await swipe('#chat-messages', 10, 160, 120), false, 'System edge is reserved');
+  // The outermost 16px is reserved: it never opens the drawer. In a phone conversation it is the back gesture instead.
+  assert.equal(await swipe('#chat-messages', 10, 160, 120), true, 'System edge starts the back gesture');
+  assert.ok(await js("!document.getElementById('sidebar').classList.contains('open')"), 'System edge never opens the drawer');
+  await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-conversation .chat-mobile-header')");
+  await navigate('chat', { mobileConversation: true, sessionId: 's1' });
+  await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools') && !!document.querySelector('.msg')");
   await swipe('#chat-messages', 40, 160, 20);
   assert.ok(await js("!document.getElementById('sidebar').classList.contains('open')"), 'Short swipe snaps closed');
   await swipe('#chat-messages', 40, 160, 120, 0, true);
@@ -66,7 +82,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('sidebar').inert"), 'Header swipe opens history alone');
   await capture('mobile-swipe-history');
   await swipe('.mobile-drawer-heading', 160, 120, -130);
-  assert.ok(await js("document.getElementById('chat-sessions').inert && document.activeElement.id === 'chat-history-toggle'"), 'History swipe dismissal restores focus');
+  assert.ok(await js("document.getElementById('chat-sessions').inert && document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'History swipe dismissal restores focus to the tools capsule');
   assert.equal(await swipe('#chat-input', 40, 650, 120), false, 'Editing never starts a drawer');
   await js("document.querySelector('.chat-phone-tools > button').click()");
   assert.ok(await js("document.querySelector('.chat-phone-tools > button').getAttribute('aria-expanded') === 'true' && [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent.includes('Files'))"), 'Phone chat tools remain accessible');
@@ -79,10 +95,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     await resize(width, height);
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.querySelector('.msg')");
+    // The phone composer rests as a pill with Send tucked away; focusing it expands the card the way a tap does.
+    if (width <= 768) { await js("document.getElementById('chat-input').focus()"); await delay(450); }
     assert.deepEqual(await overflow(), [], name + ' no horizontal overflow');
     assert.ok(await js("(() => { const r = document.getElementById('chat-send').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()"), name + ' Send stays in the viewport');
     if (width <= 768) {
-      assert.deepEqual(await js(`Array.from(document.querySelectorAll('#mobile-menu-btn, #chat-history-toggle, #chat-send, #chat-mic, #chat-openmic, #overflow-plus-btn, .chat-summary-trigger, .chat-header-model #model-picker-btn')).filter(n => !n.hidden && n.getClientRects().length).filter(n => { const r=n.getBoundingClientRect(); return r.width < 43.99 || r.height < 43.99; }).map(n => ({id:n.id, width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height}))`), [], name + ' touch actions have 44px targets (allowing subpixel rounding)');
+      assert.deepEqual(await js(`Array.from(document.querySelectorAll('#mobile-menu-btn, #chat-history-toggle, .ms-chat-back, .chat-phone-tools > button, .ms-chat-capsule button, #chat-send, #chat-mic, #chat-openmic, #overflow-plus-btn, .chat-summary-trigger, .chat-header-model #model-picker-btn')).filter(n => !n.hidden && n.getClientRects().length).filter(n => { const r=n.getBoundingClientRect(); return r.width < 43.99 || r.height < 43.99; }).map(n => ({id:n.id, width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height}))`), [], name + ' touch actions have 44px targets (allowing subpixel rounding)');
       assert.ok(await js("document.querySelector('.composer-hint').textContent.includes('Return for a new line')"));
     } else assert.ok(await js("document.querySelector('.composer-hint').textContent.includes('Enter to send')"));
     await capture('mobile-pass-' + name);
@@ -107,7 +125,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await setDraft('#chat-input', 'Desktop keyboard send');
   assert.equal(await key('#chat-input', { key: 'Enter' }), true);
   await waitFor("document.getElementById('chat-send').dataset.mode === 'send'");
-  assert.ok(writes.some(w => w.path === '/api/chat/stream' && JSON.parse(w.body).message === 'Desktop keyboard send'), 'Desktop Enter sends through the existing API');
+  assert.ok(writes.some(w => w.path === '/api/chat/live' && JSON.parse(w.body).message === 'Desktop keyboard send'), 'Desktop Enter sends through the existing API');
 
   await resize(390, 844);
   await setDraft('#chat-input', 'First line');
@@ -119,7 +137,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(writes.length, beforePhoneReturn, 'Phone Return inserts a line without sending');
   await js("document.getElementById('chat-send').click()");
   await waitFor("document.getElementById('chat-send').dataset.mode === 'send'");
-  assert.ok(writes.some(w => w.path === '/api/chat/stream' && JSON.parse(w.body).message === 'First line'), 'Phone Send submits');
+  assert.ok(writes.some(w => w.path === '/api/chat/live' && JSON.parse(w.body).message === 'First line'), 'Phone Send submits');
 
   // Test the shared policy on the side and embedded chat surfaces as mounted.
   await resize(1440, 900);

@@ -38,6 +38,14 @@ async function stopAgent(item) {
     document.dispatchEvent(new CustomEvent('jarvis:agents-changed'));
   } catch (error) { toast(error.message || 'Could not stop work', 'error'); }
 }
+// Rows for the tab sheet: what is running or waiting, and what just finished.
+export function activityItems() {
+  const live = [...snapshot.need.filter(i => !i.finished && !(i.kind === 'chat' && i.status !== 'processing')), ...snapshot.work]
+    .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i);
+  return { live: live.map(i => ({ title: i.title, detail: modelFor(i.sessionId, i) || i.detail || '', needsYou: !!(i.needsYou || snapshot.need.some(n => n.key === i.key)), go: i.go, stop: i.stop })),
+    done: [...finished.values()].sort((a, b) => b.at - a.at).map(i => ({ title: i.title, status: i.status, go: () => { dismiss(i.key); i.go ? i.go() : openChat(i.sessionId); } })) };
+}
+export const refreshActivity = () => { signature = ''; render(); };
 export function attachActivity(slot) {
   homeSlot = slot; signature = ''; render();
   return () => { if (homeSlot === slot) homeSlot = null; signature = ''; render(); };
@@ -48,18 +56,21 @@ function render() {
   const live = [...snapshot.need.filter(i => !i.finished && !(i.kind === 'chat' && i.status !== 'processing')), ...snapshot.work]
     .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i);
   const done = [...finished.values()].sort((a, b) => b.at - a.at);
-  const avatar = document.querySelector('.ms-avatar');
-  if (avatar) {
-    let badge = avatar.querySelector('.ms-avatar-badge');
-    const count = attentionCount();
-    if (count && !badge) { badge = document.createElement('span'); badge.className = 'ms-avatar-badge'; avatar.append(badge); }
-    if (badge) { badge.textContent = count > 99 ? '99+' : String(count); badge.hidden = count === 0; }
-    avatar.setAttribute('aria-label', `Open workspace tabs${count ? `, ${count} need you` : ''}`);
+  // Status outside the launch surface never floats over content: it shows as a badge on whichever entry control is
+  // on screen (avatar, hamburger or the conversation's back button) and as rows inside the tab sheet.
+  const count = attentionCount(), total = live.length;
+  for (const anchor of document.querySelectorAll('.ms-avatar, #mobile-menu-btn, .ms-chat-back')) {
+    let badge = anchor.querySelector(':scope > .ms-avatar-badge');
+    const shown = anchor.classList.contains('ms-avatar') ? count : total;
+    if (shown && !badge) { badge = document.createElement('span'); badge.className = 'ms-avatar-badge'; badge.setAttribute('aria-hidden', 'true'); anchor.append(badge); }
+    if (badge) { badge.textContent = shown > 99 ? '99+' : String(shown); badge.hidden = shown === 0; }
   }
-  host.hidden = !mobileOn() || (!live.length && !done.length);
+  const avatar = document.querySelector('.ms-avatar');
+  if (avatar) avatar.setAttribute('aria-label', `Open workspace tabs${count ? `, ${count} need you` : ''}`);
   const atHome = !!homeSlot?.isConnected;
-  host.classList.toggle('ms-activity-floating', !atHome);
-  if (host.parentNode !== (atHome ? homeSlot : document.body)) (atHome ? homeSlot : document.body).append(host);
+  host.hidden = !mobileOn() || !atHome || (!live.length && !done.length);
+  if (!atHome) { signature = ''; return; }
+  if (host.parentNode !== homeSlot) homeSlot.append(host);
   active = Math.min(active, Math.max(0, live.length - 1));
   // Tokens do not rebuild controls or interrupt keyboard focus.
   const next = JSON.stringify([atHome, expanded, spread, active, live.map(i => [i.key, i.title, i.detail, modelFor(i.sessionId, i)]), done.map(i => [i.key, i.title])]);
@@ -70,11 +81,6 @@ function render() {
   const control = (label, action, key, cls = 'ms-glass') => {
     const node = button(label, action, cls); node.dataset.focus = key; return node;
   };
-  if (!atHome && !expanded) {
-    host.append(control(`${live.length ? live.length + ' working / waiting' : done.length + ' finished'}`, () => { expanded = true; render(); }, 'summary'));
-    return;
-  }
-  if (!atHome) host.append(control('Close updates', () => { expanded = false; render(); }, 'summary'));
   if (done.length) {
     const deck = document.createElement('div'); deck.className = 'ms-finished-deck'; deck.classList.toggle('ms-spread', spread);
     deck.append(control(spread ? 'Stack finished' : `Finished (${done.length})`, () => { spread = !spread; haptic(); render(); }, 'spread'),

@@ -228,6 +228,7 @@ function syncMobileMenu() {
   document.getElementById('mobile-menu-btn').setAttribute('aria-expanded', String(open));
   document.getElementById('mobile-menu-btn').setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
 }
+const visiblePhoneAnchor = () => [...document.querySelectorAll('.ms-avatar, .chat-phone-tools > button')].find(n => n.getClientRects().length);
 function openMobileMenu(opener = document.getElementById('mobile-menu-btn')) {
   if (!mobileMenuMedia.matches) return;
   mobileMenuOpener = opener;
@@ -241,11 +242,13 @@ function closeMobileMenu(restoreFocus = true) {
   const wasOpen = document.getElementById('sidebar').classList.contains('open');
   document.getElementById("sidebar").classList.remove("open");
   document.getElementById("mobile-backdrop").classList.add("hidden");
+  syncMobileMenu();
   if (wasOpen && restoreFocus && mobileMenuMedia.matches) {
-    const target = mobileMenuOpener?.isConnected && mobileMenuOpener.getClientRects().length ? mobileMenuOpener : document.getElementById('mobile-menu-btn');
+    let target = mobileMenuOpener?.isConnected && mobileMenuOpener.getClientRects().length ? mobileMenuOpener : document.getElementById('mobile-menu-btn');
+    // The phone shell hides the hamburger on the launch surface and in a conversation: focus a visible control there.
+    if (getComputedStyle(target).visibility === 'hidden') target = visiblePhoneAnchor() || target;
     target.focus({ preventScroll: true });
   }
-  syncMobileMenu();
 }
 function setupMobileMenu() {
   const btn = document.getElementById("mobile-menu-btn");
@@ -285,7 +288,12 @@ function setupMobileMenu() {
   mobileMenuMedia.addEventListener('change', () => {
     const hiddenFocus = mobileMenuMedia.matches && sidebar.contains(document.activeElement);
     closeMobileMenu(false);
-    if (hiddenFocus) btn.focus({ preventScroll: true });
+    if (hiddenFocus) {
+      const refocus = () => (getComputedStyle(btn).visibility === 'hidden' ? visiblePhoneAnchor() || btn : btn).focus({ preventScroll: true });
+      refocus();
+      // The phone shell applies its header a frame after the breakpoint changes.
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) refocus(); }));
+    }
   });
   document.addEventListener('keydown', event => {
     if (!mobileMenuMedia.matches || !sidebar.classList.contains('open') || event.defaultPrevented) return;

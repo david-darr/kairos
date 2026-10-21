@@ -1,7 +1,9 @@
 import { button, mobileOn, haptic } from './mobileShared.js';
-import { attentionCount } from './mobileActivity.js';
+import { attentionCount, activityItems } from './mobileActivity.js';
+import { ICONS } from './icons.js';
 
 let sheet, opener, startY;
+const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
 export function closeTabSheet() {
   if (!sheet?.open) return;
   sheet.close(); sheet.removeAttribute('aria-modal'); opener?.isConnected && opener.focus({ preventScroll: true });
@@ -39,6 +41,8 @@ export function openTabSheet(from) {
   for (const source of document.querySelectorAll('#nav .nav-item')) {
     const tile = button('', () => { closeTabSheet(); source.click(); }, 'ms-tab-tile ms-glass');
     tile.innerHTML = source.innerHTML; tile.dataset.tab = source.dataset.tab;
+    // A custom tab without its own icon falls back to the Library glyph; give it a distinct generic one here.
+    if (source.dataset.tab !== 'library' && source.querySelector('svg')?.innerHTML === libraryGlyph()) tile.querySelector('svg').outerHTML = ICONS.tabGeneric;
     tile.setAttribute('aria-label', source.getAttribute('aria-label') || source.textContent.trim());
     if (source.hasAttribute('aria-current')) tile.setAttribute('aria-current', 'page');
     if (source.dataset.tab === 'home' && attentionCount()) {
@@ -49,7 +53,8 @@ export function openTabSheet(from) {
   }
   const mode = document.querySelector('#forge-mode-switch [data-mode="forge"]');
   if (mode && document.documentElement.dataset.appMode !== 'forge') {
-    grid.append(button('Forge', () => { closeTabSheet(); mode.click(); }, 'ms-tab-tile ms-glass'));
+    const forge = button('', () => { closeTabSheet(); mode.click(); }, 'ms-tab-tile ms-glass');
+    forge.innerHTML = `${ICONS.code}<span>Forge</span>`; forge.setAttribute('aria-label', 'Forge'); grid.append(forge);
   }
   // Retain the mode switch/project rail shortcut in Forge via the existing drawer.
   const footer = document.createElement('div'); footer.className = 'ms-sheet-footer';
@@ -67,7 +72,22 @@ export function openTabSheet(from) {
   footer.append(account, accountActions, button('Settings', () => { closeTabSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row'));
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(native.cloneNode(true));
-  panel.append(grab, heading, grid, footer); sheet.replaceChildren(panel);
+  const { live, done } = activityItems();
+  const work = document.createElement('section'); work.className = 'ms-sheet-activity'; work.setAttribute('aria-label', 'Work and updates');
+  if (live.length || done.length) {
+    const title = document.createElement('h3'); title.textContent = 'Working and waiting'; work.append(title);
+    for (const item of live) {
+      const row = document.createElement('div'); row.className = 'ms-sheet-activity-row' + (item.needsYou ? ' ms-needs-you' : '');
+      row.append(button(`${item.title}${item.detail ? ' · ' + item.detail : ''}`, () => { closeTabSheet(); item.go?.(); }, 'ms-sheet-activity-main'));
+      if (item.stop) row.append(button('Stop', () => item.stop(), 'ms-sheet-activity-stop'));
+      work.append(row);
+    }
+    for (const item of done) {
+      const row = document.createElement('div'); row.className = 'ms-sheet-activity-row';
+      row.append(button(`${item.title} · ${item.status}`, () => { closeTabSheet(); item.go(); }, 'ms-sheet-activity-main')); work.append(row);
+    }
+  }
+  panel.append(grab, heading, grid, work, footer); sheet.replaceChildren(panel);
   sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); grab.focus();
 }
 

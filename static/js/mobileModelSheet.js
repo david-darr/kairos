@@ -35,24 +35,30 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
   menu.replaceChildren(fragment); menu.dispatchEvent(new Event('kairos:model-menu-updated'));
 }
 
+// Folded by default so the model list stays in reach: the summary reads both providers' headline usage, the
+// full meters sit in the body (Monocode's account card works the same way).
 async function loadAccount(card) {
-  card.textContent = 'Loading account usage...';
+  card.replaceChildren(el('summary', { text: 'Account: loading usage...' }));
   let data;
   try { data = await api('/api/models/quotas'); } catch { data = { providers: [] }; }
   if (!card.isConnected) return;
-  card.replaceChildren(el('h3', { text: 'Account' }));
+  const summary = el('summary'), body = el('div', { class: 'ms-account-body' }), brief = [];
+  summary.append(el('strong', { text: 'Account' }));
+  card.replaceChildren(summary, body);
   for (const id of ['claude', 'codex']) {
     const raw = data.providers?.find(provider => provider.provider === id);
     const name = id === 'claude' ? 'Claude' : 'Codex';
     const section = el('section', { class: 'ms-account-provider' }, [el('strong', { text: name })]);
-    card.append(section);
-    if (!raw) { section.append(el('p', { text: 'Usage unknown' })); continue; }
+    body.append(section);
+    if (!raw) { section.append(el('p', { text: 'Usage unknown' })); brief.push(`${name} unknown`); continue; }
     const snap = toSnap(raw), stale = staleOf(snap);
-    if (snap.status === 'needsAuth') { section.append(el('p', { text: SIGN_IN[id] })); continue; }
+    if (snap.status === 'needsAuth') { section.append(el('p', { text: SIGN_IN[id] })); brief.push(`${name} sign in`); continue; }
     if (stale) section.append(el('small', { text: 'Stale reading', role: 'status' }));
     if (!snap.windows.length) section.append(el('p', { text: raw.note || 'Usage unknown' }));
+    let worst = null;
     snap.windows.forEach((window, index) => {
       const valid = knownQuota(raw.windows[index]?.used_percent);
+      if (valid) worst = Math.max(worst ?? 0, window.used * 100);
       const label = `${window.label}: ${valid ? pctText(window.used) + '% used' : 'Unknown'}`;
       const row = el('div', { class: 'ms-quota', 'data-tone': valid ? quotaTone(window.used * 100) : 'unknown' }, [el('span', { text: label })]);
       if (valid) {
@@ -61,8 +67,12 @@ async function loadAccount(card) {
       }
       row.append(el('small', { text: resetCopy(window.resets_at) })); section.append(row);
     });
+    brief.push(worst === null ? `${name} unknown` : `${name} ${Math.round(worst)}%`);
+    if (worst !== null) section.dataset.tone = quotaTone(worst);
     if (raw.note) section.append(el('small', { text: raw.note }));
   }
+  summary.append(el('span', { class: 'ms-account-brief', text: brief.join(' · ') }));
+  if (body.querySelector('[data-tone=danger]')) card.dataset.tone = 'danger'; else if (body.querySelector('[data-tone=warning]')) card.dataset.tone = 'warning';
 }
 
 // The live desktop picker remains the source of truth. Its buttons still run
@@ -84,6 +94,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     const items = [...menu.querySelectorAll('.model-connection-item, .model-catalog-item')];
     for (const item of items) item.hidden = !`${item.dataset.provider || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
     empty.hidden = !query || items.some(item => !item.hidden);
+    if (account) account.hidden = !!query;
     for (const heading of menu.querySelectorAll('.ms-provider-heading')) {
       let node = heading.nextElementSibling, visible = false;
       while (node?.matches('.model-connection-item')) { visible ||= !node.hidden; node = node.nextElementSibling; }
@@ -128,12 +139,13 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     if (sheet) return true;
     root = el('div', { class: 'ms-model-root' });
     search = el('input', { type: 'search', placeholder: 'Search models', 'aria-label': 'Search models' });
-    optionsButton = button('Options', options); account = el('section', { class: 'ms-account-card', 'aria-label': 'Account usage' });
+    optionsButton = button('Options', options); account = el('details', { class: 'ms-account-card' });
     empty = el('p', { text: 'No models match that search.', hidden: true, role: 'status' });
     home = document.createComment('Model menu home'); menu.before(home);
     root.append(search, optionsButton, account, empty, menu); menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
     menu.removeAttribute('role');
     trigger.setAttribute('aria-expanded', 'true');
+    arming = true; setTimeout(() => { arming = false; }, 0);
     sheet = openMobileSheet({ title: 'Model and effort', content: root, opener: trigger, fullHeight: true, onClose: () => {
       restoreOptions();
       menu.querySelectorAll('[hidden]').forEach(node => { if (node.matches('.model-connection-item, .model-catalog-item')) node.hidden = false; });
@@ -144,12 +156,18 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
       if (originalControls) trigger.setAttribute('aria-controls', originalControls); else trigger.removeAttribute('aria-controls');
     } });
     trigger.setAttribute('aria-controls', sheet.dialog.id);
-    search.addEventListener('input', filter); decorate(); loadAccount(account); search.focus(); return true;
+    search.addEventListener('input', filter); decorate(); loadAccount(account); return true;
   };
   const click = event => { if (mobileOn() && !trigger.disabled) { event.preventDefault(); event.stopImmediatePropagation(); open(); } };
   const key = event => { if (mobileOn() && event.key === 'ArrowDown') { event.preventDefault(); event.stopImmediatePropagation(); open(); } };
   trigger.addEventListener('click', click, true); trigger.addEventListener('keydown', key, true);
-  const observer = new MutationObserver(() => { if (sheet && menu.classList.contains('hidden')) sheet.close(); });
+  // Opening from the tools menu lets the same click reach the page's close-menus handler, which hides the menu
+  // the sheet just adopted. For that one turn the sheet restores the menu instead of closing.
+  let arming = false;
+  const observer = new MutationObserver(() => {
+    if (!sheet || !menu.classList.contains('hidden')) return;
+    if (arming) menu.classList.remove('hidden'); else sheet.close();
+  });
   observer.observe(menu, { attributes: true, attributeFilter: ['class'] });
   menu.addEventListener('kairos:model-menu-updated', decorate);
   return { open, dispose() { sheet?.close(); observer.disconnect(); menu.removeEventListener('kairos:model-menu-updated', decorate); trigger.removeEventListener('click', click, true); trigger.removeEventListener('keydown', key, true); } };

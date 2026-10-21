@@ -38,5 +38,7 @@ export const ICONS = {
   play: `<svg viewBox="0 0 24 24" ${S}><path d="M7 4l12 8-12 8V4z"/></svg>`,
   check: `<svg viewBox="0 0 24 24" ${S}><path d="M20 6L9 17l-5-5"/></svg>`,
   warning: `<svg viewBox="0 0 24 24" ${S}><path d="M12 3l9 17H3l9-17z"/><path d="M12 9v5M12 17v.5"/></svg>`,
+  code: `<svg viewBox="0 0 24 24" ${S}><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>`,
+  tabGeneric: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg>`,
   inbox: `<svg viewBox="0 0 24 24" ${S}><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M4 13l2-8h12l2 8v6H4v-6z"/></svg>`,
 };

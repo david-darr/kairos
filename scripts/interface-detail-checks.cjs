@@ -5,6 +5,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await js("import('/static/js/app.js').then(m => m.switchMode('forge'))");
     await waitFor("!!document.querySelector('.forge-composer')");
     assert.deepEqual(await overflow(), [], `${label} Forge Home fits`);
+    // The phone composer rests as a 50px pill; focusing it morphs it into the full card with Send.
+    if (w <= 768) { await js("document.querySelector('.forge-composer textarea').focus()"); await waitFor("document.querySelector('.forge-composer').classList.contains('ms-composer-expanded')"); await delay(350); }
     assert.equal(await js("(() => {const c=document.querySelector('.forge-composer'), t=c.querySelector('textarea'); return t.getBoundingClientRect().width >= c.clientWidth * .7 && t.getBoundingClientRect().height >= 60;})()"), true, `${label} Forge prompt has useful editing space`);
     assert.equal(await js(`(() => {
       const b=document.querySelector('.forge-composer-send'), r=b.getBoundingClientRect(), c=getComputedStyle(b);
@@ -28,7 +30,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     assert.deepEqual(await overflow(), [], `${label} dark custom appearance fits`);
     assert.equal(await js(`(() => {
       const c=getComputedStyle(document.getElementById('model-picker-btn'));
-      const bg=getComputedStyle(document.querySelector('.chat-header-model')).backgroundColor;
+      // The pill is transparent in the redesigned composer: measure against the first mostly opaque surface behind it.
+      const surface=node => { for (let n=node; n; n=n.parentElement) { const v=getComputedStyle(n).backgroundColor, m=v.match(/rgba?\\(([^)]+)\\)/); if (m) { const p=m[1].split(',').map(parseFloat); if (p.length<4 || p[3]>.5) return v; } } return getComputedStyle(document.body).backgroundColor; };
+      const bg=surface(document.querySelector('.chat-header-model'));
       const canvas=document.createElement('canvas'); canvas.width=canvas.height=1;
       const ctx=canvas.getContext('2d');
       const luminance=color => {ctx.clearRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data].slice(0,3).map(n=>n/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((a,n,i)=>a+n*[.2126,.7152,.0722][i],0)};

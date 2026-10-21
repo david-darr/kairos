@@ -377,6 +377,14 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['mobile UI'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--mobile-shell-only')) {
+      await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
+      assert.deepEqual(errors, []);
+      console.log('PASS: phone launch surface, New/Chats pager, history gestures, tab sheet, player and deck, morphing composer, dictation row, reduced motion, sizes and breakpoints.');
+      console.log('Screenshots: ' + output);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['phone shell'], errors }, null, 2));
+      return;
+    }
     await require('./chat-reference-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
     if (process.argv.includes('--chat-references-only')) {
       assert.deepEqual(errors, []);
@@ -2423,6 +2431,10 @@ app.whenReady().then(async () => {
     assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
     // Every bot surface on a phone: no sideways scroll, 44px targets.
     const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
+    await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
+    console.log('PASS: phone shell.');
+    await require('./mobile-tabs-checks.cjs').run({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState, liveRuns, liveChunk, liveEvent, liveFinish, liveChange, calendarFixtures });
+    console.log('PASS: phone tabs.');
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');

@@ -19,7 +19,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         && (s.backdropFilter || s.webkitBackdropFilter).includes('blur');})()`), true, name + ' status scrim covers the inset without blocking taps');
     for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'agents']) {
       await navigate(tab); await delay(300);
-      await visibleBelow('#mobile-menu-btn', top + 10, tab + ' menu clears status area');
+      // The launch surface has no hamburger: its avatar and Settings controls sit in the inset-aware header row.
+      if (tab === 'home') {
+        await visibleBelow('.ms-avatar', top + 5, 'Home avatar clears status area');
+        await visibleBelow('.ms-settings', top + 5, 'Home Settings clears status area');
+        await visibleBelow('.ms-switch', top + 5, 'Home New/Chats switch clears status area');
+      } else await visibleBelow('#mobile-menu-btn', top + 10, tab + ' menu clears status area');
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
@@ -32,7 +37,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(name + '-document-safe-area');
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.getElementById('chat-messages')");
-    await visibleBelow('#model-picker-btn', top + 8, name + ' chat model clears status area');
+    // A conversation's header is back, title and the actions capsule; the model pill moved into the composer.
+    await visibleBelow('.ms-chat-back', top + 5, name + ' chat back clears status area');
+    await visibleBelow('.ms-chat-heading', top + 5, name + ' chat title clears status area');
+    await visibleBelow('.ms-chat-capsule', top + 5, name + ' chat actions clear status area');
+    await js("document.getElementById('chat-input').focus()"); await delay(450);
+    await visibleBelow('#model-picker-btn', 0, name + ' composer model pill is on screen');
+    assert.equal(await js(`document.querySelector('.chat-input-bar').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' composer clears the home indicator inset');
+    await js('document.activeElement.blur()');
     assert.equal(await js("getComputedStyle(document.getElementById('chat-messages')).scrollbarWidth"), 'thin', 'Chat retains its scrollbar');
     await capture(name + '-chat-safe-area');
     await js("import('/static/js/chatFilesPane.js').then(m=>m.openChatFiles('s1'))");
@@ -60,9 +72,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
   await js("['top','bottom','left','right'].forEach(s=>document.documentElement.style.removeProperty('--native-safe-'+s))");
   // Hiding the scrollbar must not disable scrolling or hold a page below the scrim.
   await navigate('home'); await delay(300);
+  // Your day is the scrolling overview beneath the launch surface.
+  await js("document.querySelector('.ms-your-day').click()"); await delay(300);
   assert.equal(await js(`(() => {const v=document.getElementById('view-content');
     const spacer=document.createElement('div');spacer.style.cssText='height:1600px;flex:none';v.append(spacer);
-    const heading=v.querySelector('.dashboard-header'), before=heading.getBoundingClientRect().top;
+    v.scrollTop=0;const heading=v.querySelector('.dashboard-header'), before=heading.getBoundingClientRect().top;
     v.scrollTop=180;const after=heading.getBoundingClientRect().top;
     const ok=v.scrollTop>0 && after<before;spacer.remove();v.scrollTop=0;return ok;})()`), true, 'Page still scrolls beneath the fixed scrim');
 };

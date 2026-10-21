@@ -3,7 +3,8 @@ export const phone = matchMedia('(max-width: 768px)');
 export const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 export const mobileOn = () => phone.matches && document.documentElement.classList.contains('kairos-redesign');
 export const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
-export function haptic() { if (!reduced.matches) { try { navigator.vibrate?.(8); } catch { /* Optional capability. */ } } }
+// Browsers refuse (and log an error for) vibration before the first tap, so it is gated on user activation.
+export function haptic() { if (!reduced.matches && navigator.userActivation?.hasBeenActive !== false) { try { navigator.vibrate?.(8); } catch { /* Optional capability. */ } } }
 export function button(label, action, className = 'ms-glass') {
   const node = document.createElement('button');
   node.type = 'button'; node.className = className; node.textContent = label;
