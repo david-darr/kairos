@@ -89,7 +89,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js("window.__callAppearance=import('/static/js/appearance.js').then(m=>({mode:m.getAppearance().mode,color:m.getAppearance().color}))");
   await js("import('/static/js/appearance.js').then(m=>m.updateAppearance({mode:'color',color:'#192331'}))");
   await capture('agents-call-dark');
-  assert.ok(await js("getComputedStyle(document.querySelector('.agent-call')).backgroundColor===getComputedStyle(document.querySelector('.agents-chat-rail')).backgroundColor"),'Call surfaces follow the active Kairos theme');
+  assert.ok(await js("(() => { const probe = document.createElement('i'); probe.style.background = document.documentElement.classList.contains('kairos-redesign') ? 'var(--rd-surface-solid)' : 'var(--ui-wash)'; document.body.append(probe); const expected = getComputedStyle(probe).backgroundColor; probe.remove(); return getComputedStyle(document.querySelector('.agent-call')).backgroundColor === expected && expected !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.agent-call')).backgroundColor !== getComputedStyle(document.documentElement).backgroundColor; })()"),'Call surfaces follow the active Kairos theme');
   await js("window.__callAppearance.then(a=>import('/static/js/appearance.js').then(m=>m.updateAppearance(a)))");
   win.setContentSize(812,375);await delay(150);await capture('agents-call-landscape');
   assert.ok(await js("(()=>{const r=document.querySelector('.agent-call .is-end').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()"),'Hangup stays visible in landscape');
