@@ -1,2 +1,6 @@
-# Preserve exact upstream bytes used by the bundled skill's SHA256 manifest.
-skill_templates/ui-ux-pro-max/** -text
+# Files whose SHA256 is recorded in a manifest must keep their exact bytes on
+# every machine, whatever core.autocrlf says. Never convert line endings here.
+# addon_packages: hashes in each addon.json (scripts/build_addon_manifests.py).
+# skill_templates: hashes in each skill's UPSTREAM.json.
+addon_packages/** -text
+skill_templates/** -text

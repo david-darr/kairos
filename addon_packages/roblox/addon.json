@@ -9,9 +9,9 @@
     "roblox-asset-pipeline"
   ],
   "files": {
-    "runtime/roblox_assets.py": "1dbbe630b837a0e86e5da504ef8ef1b583054cf056e4b8f90022f2a7b7fbd7e4",
-    "runtime/roblox_style.py": "bfc68f4abc390c4a66d85e043f9ee9521db91e6d223dae90a42ea05b2f65367b",
-    "runtime/roblox_workspace.py": "f7c3ebb6ccc7897af8ca57b1ccd457b493f2122889d773dbc1585b4df17ffbe3",
+    "runtime/roblox_assets.py": "8031dff645ee8e0b9584ba327f3e5549fd5a35a3f7b080092dd26231a845669d",
+    "runtime/roblox_style.py": "a5a38b53b661425b1d7f4bb4cafd7191cdba88af880c2a3ae06db1c9ac74aeb3",
+    "runtime/roblox_workspace.py": "3f683e0cb913f74077a61255bb0308204117354200938a67ccf28a2574d0f6b3",
     "skills/roblox-asset-pipeline/SKILL.md": "40db083f32f4ae2a4b93265bb55fd9b707abc1b274fa3a37542bcbf6fa21c286",
     "skills/roblox-dev-skill/.gitattributes": "553e47fdb70fffb42eac726446ad2c7b61ccaf42bfa71373ec12a92ea9ab0995",
     "skills/roblox-dev-skill/LICENSE": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
@@ -30,15 +30,15 @@
     "skills/roblox-dev-skill/references/ui-systems.md": "31e6831d2bcbcb11c0ff91936fb7b8c99fb15cbc2b503297bcdeb1bf3379051a",
     "skills/roblox-dev-skill/references/worked-examples.md": "f1819581d303a96748aba3ff763f5a36ae98f871b881c98e752f7110683ce6c8",
     "skills/roblox-dev-skill/SKILL.md": "1173392be4781934f073fc28ace3b3febba3e89d2e50969e6a8d786da8a10886",
-    "skills/roblox-dev-skill/UPSTREAM.json": "9a70ccf00c6afd0c7a78c41255632bb1c3e45e6d5f18835de912d3d772d61c73",
+    "skills/roblox-dev-skill/UPSTREAM.json": "2ebd42a0ad9ef5c2156230be406fd2ccab4462b431e4c6343c516e8d26ed86a7",
     "skills/roblox-ui-design/SKILL.md": "6bf31255ee636b4d8432a69555e6719d0af015e19d3f89c8f8efc54382d34287",
     "static/robloxStylePanel.js": "ad1e076e7fa0231b45112fd5d4410b6f91803ded438e7d00475ce589f2b81177",
     "tabs/roblox/accounts.py": "df3eb25916cab27e136265f88fe3e2c3fce73d3a6bff47a97157db70c06a8278",
     "tabs/roblox/hooks.py": "439ace0538e8aa46acdd4fc806426e18b20d461e24ec6032dd3e76cbfa97d138",
     "tabs/roblox/README.md": "0635a56ffa0368e51aab1c81a8ab123aa5afa64208ff614e60bdf40a9e09c89e",
-    "tabs/roblox/routes.py": "138de15cfab58928ac624ca143fe633536d065e3473d424bd567f9fea7604976",
+    "tabs/roblox/routes.py": "1f91144b88e27d9699c77e55c88dbb587dc80af66f05c12cc3147d41c06336f5",
     "tabs/roblox/tab.json": "9a0d3224bd550e860ddbff159cb70beb8e892d18b255c0ed1b5d75ac1499bea1",
-    "tabs/roblox/view.css": "e3bdf56a0c074c66621cfc2d2fc308ffbea97d257811d5a4d1aec5004a44c171",
-    "tabs/roblox/view.js": "3e3ef9b26a0c454eafcc381da978c64271eb481ebfef6e5b2e970e4dd5374128"
+    "tabs/roblox/view.css": "383ba16ff2226a733ad5b47c10d1e13b0b6da493ca0e31fdf1dede0b38a052db",
+    "tabs/roblox/view.js": "041a551884abdc31c2d4c343175f6b378ac191db8ff127e2f01f64652225670a"
   }
 }

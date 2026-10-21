@@ -1,4 +1,8 @@
-"""Refresh the hashes of local first-party Tool Store payloads after editing."""
+"""Refresh the hashes of local first-party Tool Store payloads after editing.
+
+Payload files are hashed as raw bytes and .gitattributes marks addon_packages
+`-text`, so every checkout holds the exact committed (LF) bytes.
+"""
 import hashlib
 import json
 from pathlib import Path
@@ -10,4 +14,5 @@ for folder in sorted(ROOT.iterdir()):
     meta['files'] = {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in sorted(folder.rglob('*')) if p.is_file() and p.name != 'addon.json'
                      and '__pycache__' not in p.parts and p.suffix != '.pyc'}
-    (folder / 'addon.json').write_text(json.dumps(meta, indent=2) + '\n', encoding='utf-8')
+    # Bytes, not write_text: Windows text mode would write CRLF into the manifest.
+    (folder / 'addon.json').write_bytes((json.dumps(meta, indent=2) + chr(10)).encode('utf-8'))
