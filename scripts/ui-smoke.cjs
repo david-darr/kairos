@@ -855,11 +855,17 @@ app.whenReady().then(async () => {
     const nearWidth = (actual, nominal, message) => assert.ok(Math.abs(actual - nominal) <= 1, `${message || 'Sidebar width'}: expected ${nominal}, got ${actual}`);
     const railWidth = () => js("Math.round(document.querySelector('#sidebar').getBoundingClientRect().width)");
     nearWidth(await railWidth(), 204);
-    await js("document.querySelector('#sidebar-toggle').click()");
-    await delay(80);
-    const movingWidth = await railWidth();
-    assert.ok(movingWidth > 52 && movingWidth < 204, "Sidebar animates between widths");
-    await delay(300);
+    // Sample every animation frame instead of one fixed 80ms read, which
+    // missed the transition when the GPU was busy (2026-10-21).
+    const movingWidths = await js(`new Promise(resolve => {
+      const rail = document.querySelector('#sidebar'), seen = [], start = performance.now();
+      document.querySelector('#sidebar-toggle').click();
+      const tick = () => { seen.push(Math.round(rail.getBoundingClientRect().width));
+        performance.now() - start < 600 ? requestAnimationFrame(tick) : resolve(seen); };
+      requestAnimationFrame(tick);
+    })`);
+    assert.ok(movingWidths.some(width => width > 53 && width < 203), `Sidebar animates between widths: ${movingWidths.join(',')}`);
+    await delay(100);
     nearWidth(await railWidth(), 52);
     assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item svg')].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=52})"), 'Icons fit the slim rail');
     assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item > span, #sidebar .sidebar-user-name')].every(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return (r.width===0||s.opacity==='0'||s.display==='none')&&r.right<=52})"), 'Labels are hidden in the slim rail');

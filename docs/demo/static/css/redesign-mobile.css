@@ -440,3 +440,23 @@
 @media (max-width: 768px) {
   .kairos-redesign .forge-shell-view #chat-main.forge-panes { padding-top: 0; }
 }
+
+/* 2026-10-21 (David, on-device): edge to edge on iPhone.
+   Top: one light frost that covers only the status bar area and fades out just
+   below it, replacing the older tinted html::after strip and the 88px band.
+   Bottom: in a home-screen app drawn under the status bar, iOS sizes 100dvh
+   short by the status bar height and leaves a solid strip above the home
+   indicator, so the page is pinned to the full screen instead. */
+@media (max-width: 768px) {
+  .kairos-redesign::after { display: none; }
+  .kairos-redesign .ms-global-frost,
+  .kairos-redesign .ms-blur-top { height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 14px); }
+  .kairos-redesign .ms-blur-top i {
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 55%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 55%, transparent 100%);
+  }
+}
+@media (max-width: 768px) and (display-mode: standalone) {
+  html.kairos-redesign, .kairos-redesign body { position: fixed; inset: 0; height: auto; width: auto; }
+}
