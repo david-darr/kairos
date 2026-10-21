@@ -34,7 +34,7 @@ export function mountMobileDock(container, tab) {
     const empty = !!q && total > 0 && !shown;
     if (empty && !note) {
       note = document.createElement('div'); note.className = 'ms-dock-note ms-glass'; note.setAttribute('role', 'status');
-      container.append(note);
+      document.body.append(note);
     }
     if (note) { note.textContent = `No matches for "${query.trim()}"`; if (!empty) { note.remove(); note = null; } }
   };
@@ -51,7 +51,8 @@ export function mountMobileDock(container, tab) {
   const update = () => {
     observer.disconnect();
     const enabled = mobileOn();
-    const candidates = [...container.querySelectorAll('[data-mobile-dock]')].filter(node => !node.hidden && !node.closest('[hidden]'));
+    // The dock lives outside the view, so the search it holds is looked up there too.
+    const candidates = [...(anchor?.isConnected ? dock.querySelectorAll('[data-mobile-dock]') : []), ...container.querySelectorAll('[data-mobile-dock]')].filter(node => !node.hidden && !node.closest('[hidden]'));
     const same = signature.length === candidates.length && signature.every(node => candidates.includes(node));
     if (!enabled || !same || !dock.isConnected) {
       restore(); dock.replaceChildren(); filterHost = null; clearFilter();
@@ -73,7 +74,8 @@ export function mountMobileDock(container, tab) {
           if (target.hasAttribute('aria-pressed')) proxy.setAttribute('aria-pressed', target.getAttribute('aria-pressed'));
           dock.append(proxy);
         }
-        if (dock.childElementCount) container.append(dock);
+        // The dock lives on the body, outside the view that animates in, so it never rides that entrance.
+        if (dock.childElementCount) document.body.append(dock);
       }
       signature = candidates;
     } else {

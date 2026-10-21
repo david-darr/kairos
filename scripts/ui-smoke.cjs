@@ -255,7 +255,8 @@ app.whenReady().then(async () => {
     // Home to Chat animates (a view transition); captures wait for it to end.
     await waitFor("!document.documentElement.classList.contains('tab-transition')");
   };
-  const overflow = async () => js(`Array.from(document.querySelectorAll('#view-content, #view-content .view-constrained, .chat-input-bar, .settings-content, .cal-left, .panel-dialog, .panel-dialog .modal-body, .forge-project-sidebar, .forge-workspace, .forge-pane, .forge-composer')).filter(e => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2).map(e => ({class: e.className, width:e.clientWidth, scroll:e.scrollWidth}))`);
+  // A phone Settings page pushes in over 280ms; its width is only meaningful once it has settled.
+  const overflow = async () => { await waitFor("document.getAnimations().filter(a => a.effect?.target?.closest?.('.settings-mobile-page')).length === 0"); return js(`Array.from(document.querySelectorAll('#view-content, #view-content .view-constrained, .chat-input-bar, .settings-content, .cal-left, .panel-dialog, .panel-dialog .modal-body, .forge-project-sidebar, .forge-workspace, .forge-pane, .forge-composer')).filter(e => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2).map(e => ({class: e.className, width:e.clientWidth, scroll:e.scrollWidth}))`); };
   const openPopup = async (opener, ready, label) => {
     // The open dialog, not the first .modal-panel: hidden panels (the Calendar
     // Archive) stay in the page after closing.
@@ -547,7 +548,7 @@ app.whenReady().then(async () => {
       assert.equal(await js("document.querySelector('[aria-label=\"Project\"]').parentElement.value"), 'fp1', label + ' Open on Home selects project');
       assert.equal(await js("document.querySelector('[aria-label=\"Where it runs\"]').parentElement.value"), 'new_worktree', label + ' isolated worktree is the default');
       assert.ok(await js("document.querySelector('.forge-composer [aria-label=\"Start session\"]').disabled"), label + ' empty task disables start');
-      assert.ok(await js("document.querySelector('#forge-message').placeholder === 'Describe the task...' && !document.querySelector('.forge-composer [id^=chat-], .forge-composer select, .forge-picker-field, .forge-location-note')"), label + ' Forge owns its composer controls');
+      assert.ok(await js("['Describe the task...', 'Plan, ask, build…'].includes(document.querySelector('#forge-message').placeholder) && !document.querySelector('.forge-composer [id^=chat-], .forge-composer select, .forge-picker-field, .forge-location-note')"), label + ' Forge owns its composer controls');
       assert.ok(await js("['Project', 'Where it runs', 'Mode', 'Agent'].every(label => document.querySelector('.forge-composer button[aria-label=\"' + label + '\"]').classList.contains('model-picker-btn'))"), label + ' shared picker pills');
       assert.ok(await js("document.querySelector('.forge-composer-hint').textContent === 'New worktree keeps your project folder untouched · Enter to start · Shift + Enter for a new line'"), label + ' location and keyboard hint');
       const branchStart = writes.length;
@@ -936,9 +937,13 @@ app.whenReady().then(async () => {
       for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "agents", "cookbook", "school"]) {
         await navigate(tab);
         if (tab === "chat") {
-          // A new chat lands on the halftone figure (static/js/chatBackdrop.js).
-          await waitFor("document.querySelector('.chat-layout > .chat-backdrop')?.dataset.scene === 'figure' && document.querySelector('.chat-layout > .chat-backdrop').dataset.drawMs !== undefined");
-          assert.ok(await js("document.querySelector('.chat-layout > .chat-backdrop').clientWidth > 0"), label + " default Chat draws the halftone background");
+          // A new chat lands on the halftone figure (static/js/chatBackdrop.js). On a phone the plain
+          // Chat route is the Chats page: its backdrop is a scene, drawn when its host is shown.
+          await waitFor(width <= 768
+            ? "['sky', 'figure'].includes(document.querySelector('.chat-layout > .chat-backdrop')?.dataset.scene)"
+            : "document.querySelector('.chat-layout > .chat-backdrop')?.dataset.scene === 'figure' && document.querySelector('.chat-layout > .chat-backdrop').dataset.drawMs !== undefined");
+          // The phone's Chats page draws its own backdrop and hides the conversation one.
+          if (width > 768) assert.ok(await js("document.querySelector('.chat-layout > .chat-backdrop').clientWidth > 0"), label + " default Chat draws the halftone background");
           await waitFor("!!document.querySelector('.session-item[data-session-id=s1]')");
           await js("document.querySelector('.session-item[data-session-id=s1]').click()");
           await waitFor("!!document.querySelector('#overflow-menu .chat-computer-toggle:not([hidden])')");
@@ -1445,6 +1450,8 @@ app.whenReady().then(async () => {
       assert.equal(await js("document.querySelector('#settings-content .set-title').textContent"),
         await js("document.querySelector('.settings-nav-item.active').textContent"), label + " page header names the page");
       assert.equal(await js("document.querySelectorAll('.settings-nav-item svg').length === document.querySelectorAll('.settings-nav-item').length"), true, label + " every nav item has an icon");
+      // A phone page pushes in over 280ms; measure it once it has settled.
+      await waitFor("document.getAnimations().filter(a => a.effect?.target?.closest?.('.settings-mobile-page')).length === 0");
       assert.deepEqual(await overflow(), [], label + " settings overflow");
       if (label === "mobile") {
         assert.ok(await js("[...document.querySelectorAll('#settings-content input')].filter(e=>e.offsetWidth).every(e=>e.offsetWidth>=170)"), "Mobile model fields do not collapse");
@@ -1695,6 +1702,8 @@ app.whenReady().then(async () => {
       // list is long enough to scroll.
       await js("document.querySelector('[data-section=\"add-models\"]').click()");
       await waitFor("document.querySelectorAll('.set-page[data-page=\"add-models\"] .custom-select').length > 0");
+      // A phone page pushes in over 280ms; open the list on the settled page.
+      await waitFor("document.getAnimations().filter(a => a.effect?.target?.closest?.('.settings-mobile-page')).length === 0");
       await js("document.querySelector('.set-page .custom-select .custom-select-btn').scrollIntoView({ block: 'end' })");
       await delay(200);
       await js("document.querySelector('.set-page .custom-select .custom-select-btn').click()");
@@ -1983,7 +1992,7 @@ app.whenReady().then(async () => {
     // (a moved card is an arrangement of your own, so the default is not re-applied).
     await js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); l.home = ['activity', ...m.HOME_SECTIONS.map(s => s.id).filter(id => id !== 'activity')]; l.hiddenHome = []; m.saveLayout(l); })`);
     await navigate("home");
-    await waitFor("!document.querySelector('[data-home-section=agents]').hidden && document.querySelectorAll('[data-home-section=agents] .dashboard-agent-dot').length > 0");
+    await waitFor("document.querySelector('[data-home-section=agents]')?.hidden === false && document.querySelectorAll('[data-home-section=agents] .dashboard-agent-dot').length > 0");
     assert.ok(await js("[...document.querySelectorAll('[data-home-section=store] .dashboard-row-title')].some(t => t.textContent === 'Installed') && !document.querySelector('.dashboard-stat[data-stat=waiting]').hidden"), "Admins see Agents, Tool Store and waiting on you");
     const catalogReads = reads.filter(r => r.path === '/api/store/catalog');
     assert.ok(catalogReads.some(r => r.query.cache_only === 'true'), "Home reads the store catalog from cache only");
@@ -2080,7 +2089,8 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('#chat-sessions').inert"), false);
     await capture('mobile-chat-history');
     await js("document.querySelector('.chat-history-close').click()");
-    assert.equal(await js("document.activeElement.id"), 'chat-history-toggle');
+    // The phone conversation hides its title button; focus returns to the tools capsule that opened history.
+    assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"));
     assert.equal(await js("document.querySelector('#chat-sessions').inert"), true);
     win.setContentSize(1440, 900);
     await navigate("notes");

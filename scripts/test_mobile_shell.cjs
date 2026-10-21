@@ -181,7 +181,7 @@ class Surface {
   searchInput.dataset.mobileDock = 'search'; searchInput.value = 'retained query'; create.dataset.mobileDock = 'create';
   let creates = 0, searches = 0; create.addEventListener('click', () => creates++); searchInput.addEventListener('input', () => searches++);
   const disposeDock = mountMobileDock(view, 'library');
-  const dock = view.querySelector('.ms-dock');
+  const dock = doc.body.querySelector('.ms-dock');
   assert.equal(dock.querySelector('input'), searchInput, 'The live search node moves without cloning');
   assert.equal(searchInput.value, 'retained query'); searchInput.emit('input'); assert.equal(searches, 1);
   dock.querySelector('button').click(); assert.equal(creates, 1, 'Dock create delegates exactly once');
@@ -192,7 +192,7 @@ class Surface {
   disposeDock(); assert.equal(searchInput.parentNode, toolbar); assert.equal(dock.isConnected, false);
   assert.equal(mountMobileDock(view, 'agents')(), undefined);
   const noSearch = new Element('section'), createOnly = new Element('button'); createOnly.dataset.mobileDock = 'create'; noSearch.append(createOnly); doc.body.append(noSearch);
-  const disposeCreateOnly = mountMobileDock(noSearch, 'notes'); assert.equal(noSearch.querySelector('.ms-dock').children.length, 1); disposeCreateOnly();
+  const disposeCreateOnly = mountMobileDock(noSearch, 'notes'); assert.equal(doc.body.querySelector('.ms-dock').children.length, 1); disposeCreateOnly();
   const { composerExpanded, mountMobileComposer } = (await load('./mobileComposer.js')).namespace;
   for (const reason of ['focused', 'draft', 'attachments', 'recording', 'busy']) assert.equal(composerExpanded({ [reason]: true }), true);
   assert.equal(composerExpanded({}), false);

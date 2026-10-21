@@ -51,6 +51,8 @@ async function run(ctx) {
     await delay(250);
     const label = tab + ' dock';
     eq(await docks(), 1, label + ' mounts exactly once');
+    ok(await js("document.querySelector('.ms-dock').parentElement === document.body"), label + ' lives outside the animating view');
+    const early = await rect('.ms-dock'); ok(early && early.b >= 844 - 14 && early.b <= 844 - 11, label + ' is already in place on arrival: ' + JSON.stringify(early));
     const info = await dockInfo();
     if (want.input instanceof RegExp) ok(want.input.test(info.input), label + ' search is the page search: ' + info.input);
     else if (want.input) eq(info.input, want.input, label + ' search placeholder');
@@ -229,6 +231,8 @@ async function run(ctx) {
   eq(await docks(), 1, 'The dock returns once after Back');
   await libTab('Vault');
   await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.ms-dock input')");
+  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");
+  await delay(400);
   eq((await dockInfo()).buttons, [], 'Vault dock is search only, no invented create');
   eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Find a note or folder', 'Vault Browse search lives in the dock');
   await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");

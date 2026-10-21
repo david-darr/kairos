@@ -12,7 +12,10 @@ export async function startBuilderChat(message, modelEndpointId, { signal, onSta
   if (signal?.aborted) return;
   onStarted?.();
   sessionStorage.setItem("jarvis:pendingChatHandoff", JSON.stringify({ sessionId: session.id, message }));
-  document.querySelector('.nav-item[data-tab="chat"]')?.click();
+  // A phone's plain Chat route is the New/Chats launch page, which would leave the brief unsent;
+  // ask for the conversation itself, where the handoff is consumed.
+  if (window.matchMedia('(max-width: 768px)').matches) document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'chat', mobileConversation: true } }));
+  else document.querySelector('.nav-item[data-tab="chat"]')?.click();
 }
 
 const BRIEFS = {
