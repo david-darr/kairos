@@ -2,7 +2,7 @@
  "built": {
   "app.js": "7a60fd6830a2d20063481f0a108844d589cc18580020dc7229c3c9cddf2380ce",
   "fixtures.js": "8db94db9f27b7bcf54ba8dd654932c6aaf557f6d07257f303b7153804e72e2b4",
-  "index.html": "a0c8de5dc70108657698df0d0162588bb7f7cbb3e6efb0b327beaa6382dbdb86",
+  "index.html": "a8b53b2f2feb9ddf2b8a6ad50564534e76da301bdcf9058cdf14d17603c4d1bc",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/bot-window.html": "563398340acc54ce5948a0bba6c01982ac36f90d6920a82b7fb47ce865ec3b92",
   "static/css/agent-ecosystem.css": "873361b4f69157ffaaf8a9978507546f77bb4189d10628fcfb6bbeb5507906bf",
@@ -362,7 +362,7 @@
   "static/img/model-marks/qwen.svg": "dcb3ba2f2b55ccbacbade0ca0bf98921fbaf8a07848972974b4a9bf8077376cf",
   "static/img/model-marks/together.svg": "b3ec218e7e0b0432a2ce07f5ec98a1dcd24f808c74d5fee624ab31e4947feef3",
   "static/img/model-marks/zhipu.svg": "d4c3fe5ff92820b2ae5e3ddaaa30e6fc622cb746b75baad97f4bb2428fa25c5d",
-  "static/index.html": "25965a81bfe05fa05a7aaab1ba9ca2f1fce4e8040fa49f77a4f638405193eca3",
+  "static/index.html": "2bc57647037c12331adad595c6c28fa350ffcf11f4a86cc467f5d53629d25503",
   "static/js/agentAvatar.js": "0b2229326be78a0f4292a87bf70ab426585a6dc3d479bfe3a8a3688492e29af8",
   "static/js/agentCall.js": "fe6076d6f33c1e306416d7a093b87147cf47f0a2d579e49598ff6409ecfb2e73",
   "static/js/agentChat.js": "9b536965b82e4a80bddb63286340b0d59682e6252985d1b57282b9addf402a96",
