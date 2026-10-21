@@ -183,7 +183,7 @@
 /* -- Phones ------------------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .kairos-redesign #view-content[data-view="library"] .view-header h2 { font-size: 36px; }
-  .kairos-redesign #view-content[data-view="library"] .segmented-tab { min-height: 40px; }
+  .kairos-redesign #view-content[data-view="library"] .segmented-tab { min-height: 44px; }
   .kairos-redesign .library-section-summary { padding: 12px 14px; }
   .kairos-redesign .document-grid { padding: 10px 12px 14px; }
   .kairos-redesign .library-chat-files { padding: 10px 12px 14px; }
@@ -191,4 +191,16 @@
   .kairos-redesign .library-vault-reader-head { padding: 14px 16px 10px; }
   .kairos-redesign .library-vault-reader-title h3 { font-size: 26px; }
   .kairos-redesign .google-rail .google-section { flex: 1 1 auto; justify-content: center; border: 1px solid var(--rd-line); }
+  /* Polish: 44px touch targets on a phone. */
+  .kairos-redesign .library-vault-note,
+  .kairos-redesign .library-vault-folder-summary { min-height: 44px !important; }
+  .kairos-redesign .library-vault-search,
+  .kairos-redesign input.vault-search,
+  .kairos-redesign #view-content[data-view="library"] .google-toolbar input,
+  .kairos-redesign #view-content[data-view="library"] .google-toolbar select,
+  .kairos-redesign #view-content[data-view="library"] input[type="search"],
+  .kairos-redesign #view-content[data-view="library"] select { min-height: 44px !important; }
+  .kairos-redesign #view-content[data-view="library"] details > summary { min-height: 44px !important; display: flex; align-items: center; }
+  .kairos-redesign .vault-breadcrumb-crumb { min-height: 44px !important; display: inline-flex; align-items: center; }
+  .kairos-redesign #view-content[data-view="library"] input[placeholder^="Search documents"] { flex: 1 1 100% !important; min-width: 0; }
 }

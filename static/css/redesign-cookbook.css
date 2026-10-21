@@ -73,6 +73,8 @@
   .kairos-redesign[data-view="cookbook"] .view-constrained .segmented-tabs { display: flex; }
   .kairos-redesign[data-view="cookbook"] .view-constrained .segmented-tab { flex: 1; min-height: 44px; }
   .kairos-redesign[data-view="cookbook"] .card-row > div:last-child:not(:first-child) { width: 100%; }
+  .kairos-redesign[data-view="cookbook"] .btn, .kairos-redesign[data-view="cookbook"] select, .kairos-redesign[data-view="cookbook"] input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px !important; }
+  .kairos-redesign[data-view="cookbook"] details > summary { min-height: 44px !important; display: flex; align-items: center; }
 }
 
 /* -- Model setup guide ("Choose how Kairos thinks") ----------------------------------- */
@@ -110,6 +112,7 @@
 .kairos-redesign .model-setup-empty {
   padding: 16px 18px; border-radius: 16px; background-color: var(--rd-surface); border-color: var(--rd-line); box-shadow: var(--rd-shadow);
 }
-@media (max-width: 600px) {
-  .kairos-redesign .model-setup .btn { min-height: 44px; }
+@media (max-width: 768px) {
+  .kairos-redesign .model-setup .btn, .kairos-redesign .model-setup-screen input, .kairos-redesign .model-setup-screen select { min-height: 44px !important; }
+  .kairos-redesign .model-setup-words summary { min-height: 44px !important; display: flex; align-items: center; }
 }

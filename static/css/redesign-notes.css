@@ -121,4 +121,8 @@
   .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar { margin-left: 0; }
   .kairos-redesign #view-content[data-view="notes"] #notes-list .row-action-btn { width: 44px; height: 44px; }
   .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { font-size: 11px; padding: 2px 8px; }
+  /* Polish: the due pill keeps its full text; the title gives way. Clear finished meets the 44px touch size. */
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { flex: none; max-width: none; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar .btn { height: 44px; padding: 0 18px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) input { height: 44px; }
 }

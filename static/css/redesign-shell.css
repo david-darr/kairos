@@ -209,3 +209,11 @@
 @media (prefers-reduced-motion: reduce) {
   .kairos-redesign .rd-flyout, .kairos-redesign .rd-needs, .kairos-redesign #sidebar .nav-item { transition: none; }
 }
+
+/* -- Phone polish: a 44px floor in the drawer ------------------------------------------------ */
+@media (max-width: 768px) {
+  .kairos-redesign #sidebar .forge-mode-switch .segmented-tab { min-height: 44px; }
+  .kairos-redesign .sidebar-settings-btn { width: 44px; height: 44px; }
+  .kairos-redesign .sidebar-user-card { min-height: 44px; }
+  .kairos-redesign .rd-item-done { min-height: 44px; }
+}

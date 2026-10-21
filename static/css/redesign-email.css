@@ -130,5 +130,7 @@
   .kairos-redesign .email-view.email-view > details.disclosure-panel > summary { min-height: 44px; }
   .kairos-redesign .email-view.email-view > details.disclosure-panel :is(input:not([type=checkbox]), select) { min-height: 44px; font-size: 16px; }
   .kairos-redesign .email-view.email-view > details.disclosure-panel .form-grid > button.btn.btn.btn.btn { min-height: 44px; }
-  .kairos-redesign .email-account .btn { min-height: 40px; }
+  .kairos-redesign .email-view .btn, .kairos-redesign .email-account .btn { min-height: 44px !important; }
+  .kairos-redesign .email-account .row-action-btn { min-width: 44px; min-height: 44px; }
+  .kairos-redesign .email-view.email-view > details.disclosure-panel .btn { min-height: 44px; }
 }

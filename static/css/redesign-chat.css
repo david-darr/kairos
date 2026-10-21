@@ -71,3 +71,11 @@
     background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
   }
 }
+
+/* -- Phone polish: a 44px floor for the controls under a message and in the drawer ------------ */
+@media (max-width: 768px) {
+  .kairos-redesign .msg-actions .msg-action-btn { min-height: 44px; min-width: 44px; }
+  .kairos-redesign .chat-code-header button { min-height: 44px; padding-inline: 10px; }
+  .kairos-redesign .model-picker-btn { min-height: 44px; }
+  .kairos-redesign :is(#chat-main, #model-picker-menu) summary { padding-block: 11px; }
+}

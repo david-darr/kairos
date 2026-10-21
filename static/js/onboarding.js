@@ -18,10 +18,18 @@ export async function run(overlay, onComplete) {
     disposeGuide?.(); disposeGuide = null;
     overlay.innerHTML = "";
     const card = el("div", { class: "glass bracket card onboarding-card" });
+    card.classList.add('welcome-wizard-card');
+    card.dataset.step = STEPS[step];
     const dots = el("div", { class: "onboarding-steps" });
+    dots.setAttribute('aria-label', `Step ${step + 1} of ${STEPS.length}`);
     STEPS.forEach((_, i) => dots.appendChild(el("div", { class: "dot" + (i === step ? " active" : "") })));
     card.appendChild(dots);
     card.appendChild(STEP_RENDERERS[STEPS[step]](card));
+    for (const input of card.querySelectorAll('input[placeholder], textarea[placeholder]')) {
+      if (card.classList.contains('onboarding-model-card')) continue; // modelSetup owns its fields.
+      input.setAttribute('aria-label', input.placeholder);
+      input.before(el('span', { class: 'welcome-field-label', hidden: true, text: input.type === 'password' ? 'Bot token' : input.tagName === 'TEXTAREA' ? 'About you' : input.placeholder }));
+    }
     overlay.appendChild(card);
   }
 

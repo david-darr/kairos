@@ -236,4 +236,21 @@
   .kairos-redesign[data-view="tasks"] .triggers-head > .btn { width: 100%; min-height: 44px; }
   .kairos-redesign[data-view="tasks"] .board-card-actions .btn { min-height: 36px; }
   .kairos-redesign[data-view="tasks"] .automation-card { padding: 14px 16px; }
+
+  /* Polish: every control on the Tasks tab is at least 44px tall on a phone. */
+  .kairos-redesign[data-view="tasks"] .btn,
+  .kairos-redesign[data-view="tasks"] .custom-select-btn,
+  .kairos-redesign[data-view="tasks"] .row-action-btn,
+  .kairos-redesign[data-view="tasks"] .board-card-actions .btn,
+  .kairos-redesign[data-view="tasks"] details.disclosure-panel > summary { min-height: 44px !important; }
+  .kairos-redesign[data-view="tasks"] .row-action-btn { min-width: 44px !important; }
+  .kairos-redesign[data-view="tasks"] input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px !important; }
+  .kairos-redesign[data-view="tasks"] .run-history-panel > summary,
+  .kairos-redesign[data-view="tasks"] .board-card-output > summary,
+  .kairos-redesign[data-view="tasks"] .run-row > summary,
+  .kairos-redesign[data-view="tasks"] .board-card details > summary { min-height: 44px !important; display: flex; align-items: center; }
+  /* A 44px touch area around each switch, without changing how it looks. */
+  .kairos-redesign[data-view="tasks"] .set-switch { position: relative; }
+  .kairos-redesign[data-view="tasks"] .set-switch::before { content: ""; position: absolute; inset: -9px -4px; }
+  .kairos-redesign[data-view="tasks"] .task-board-card details.disclosure-panel .btn.primary { min-height: 44px !important; }
 }

@@ -181,6 +181,14 @@ export function updateAppearance(patch) {
   apply();
 }
 
+// Signed-out screens use only the last device palette, never an account identity.
+export function restoreWelcomeAppearance() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('jarvis:welcome-appearance:v1') || '{}');
+    if (saved.redesign === true) { settings = normalize(saved); apply(); }
+  } catch { /* Missing or unavailable storage keeps the original sign-in. */ }
+}
+
 // Validate, decode and downsample a picture (shared by the Image background
 // and the halftone slots): PNG/JPEG/WebP, up to 12 MB, long edge capped at
 // 2560px, re-encoded to WebP. Never uploaded - the blob this returns only
@@ -293,6 +301,7 @@ function apply() {
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   syncRedesign(root);
+  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ redesign: settings.redesign, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');

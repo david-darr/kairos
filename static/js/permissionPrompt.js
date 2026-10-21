@@ -53,6 +53,8 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
       el("pre", { text: typeof request.arguments === "string" ? request.arguments : JSON.stringify(request.arguments, null, 2) }),
     ]),
     status, buttons,
+    // Redesign only: shown by redesign-overlays.css, hidden (attribute) otherwise.
+    inline ? null : el("p", { class: "permission-note", hidden: "", text: "Closing this window rejects the request." }),
   ]);
   // 2026-10-14: bot requests use the same choices and route in their stream.
   if (inline) {
@@ -71,6 +73,7 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
   async function answer(choice) {
     if (answered) return;
     answered = true;
+    delete status.dataset.kind;
     for (const node of buttons.children) node.disabled = true;
     try {
       await api(`/api/permissions/${encodeURIComponent(request.id)}/answer`,
@@ -80,6 +83,7 @@ export function showPermissionPrompt(request, onAnswered, { mount = document.bod
     } catch (problem) {
       answered = false;
       for (const node of buttons.children) node.disabled = false;
+      status.dataset.kind = 'error';
       status.textContent = problem.message;
     }
   }

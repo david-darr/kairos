@@ -1,4 +1,5 @@
 import { api, el } from "./api.js";
+import { restoreWelcomeAppearance } from "./appearance.js";
 
 // Real gap found live, 2026-08-31: AUTH_ENABLED=true (the Tailscale remote
 // listener - see scripts/run_remote.py) left the whole app blank on first
@@ -18,8 +19,12 @@ import { api, el } from "./api.js";
 // A development copy (scripts/dev_instance.py) names itself on the sign-in
 // card too, so a password is never typed into the wrong window by mistake.
 let appName = "Kairos";
+document.addEventListener('kairos:appearance', () => {
+  for (const link of document.querySelectorAll('.welcome-back-link')) link.tabIndex = document.documentElement.classList.contains('kairos-redesign') ? 0 : -1;
+});
 
 export async function run(overlay) {
+  restoreWelcomeAppearance();
   const status = await api("/api/auth/status");
   if (status.instance) appName = `Kairos (${status.instance})`;
   if (status.local_access_locked) {
@@ -48,11 +53,20 @@ function renderLocalAccessLocked(overlay) {
 }
 
 function backLink(text, onclick) {
-  return el("div", { class: "sub", style: "margin-top:10px;text-align:center;cursor:pointer;text-decoration:underline;", text, onclick });
+  return el("div", { class: "sub welcome-back-link", role: "button", tabindex: document.documentElement.classList.contains('kairos-redesign') ? "0" : "-1", onkeydown: (e) => { if (document.documentElement.classList.contains('kairos-redesign') && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onclick(); } }, style: "margin-top:10px;text-align:center;cursor:pointer;text-decoration:underline;", text, onclick });
 }
 
 function card(children) {
-  return el("div", { class: "glass bracket card onboarding-card" }, children);
+  const host = el("div", { class: "glass bracket card onboarding-card welcome-auth-card" }, children);
+  const heading = host.querySelector('h2');
+  const title = !heading ? '' : heading.textContent === appName ? 'Welcome back' : heading.textContent === 'Set up Kairos' ? 'Create the first account' : '';
+  if (heading && title) { heading.replaceChildren(el('span', { class: 'welcome-original-title', text: heading.textContent }), el('span', { class: 'welcome-preview-title', hidden: true, text: title })); }
+  if (appName !== 'Kairos') host.dataset.instance = appName;
+  for (const input of host.querySelectorAll('input')) {
+    input.setAttribute('aria-label', input.placeholder);
+    input.before(el('span', { class: 'welcome-field-label', hidden: true, text: input.placeholder }));
+  }
+  return host;
 }
 
 function renderSetup(overlay, onDone) {

@@ -248,7 +248,7 @@
   .kairos-redesign .cal-nav > .btn { min-height: 44px; height: 44px; }
   .kairos-redesign .cal-nav { gap: 8px; }
   .kairos-redesign .cal-month-label { flex: 1 0 100%; text-align: left; padding: 2px 4px 0; }
-  .kairos-redesign .cal-view-switch > button.btn.btn.btn.btn { height: 38px; min-height: 38px; }
+  .kairos-redesign .cal-view-switch > button.btn.btn.btn.btn { height: 44px; min-height: 44px; }
   .kairos-redesign .cal-nav > .btn:nth-child(2), .kairos-redesign .cal-nav > .btn:nth-child(4) { margin-left: -9px; }
   .kairos-redesign .cal-nav > .btn:last-child { margin-left: auto; }
   .kairos-redesign .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(6, minmax(66px, 1fr)); }
@@ -265,4 +265,11 @@
   .kairos-redesign .cal-event-dialog { border-radius: 0; padding: 20px 16px; }
   .kairos-redesign .cal-event-dialog input:not([type=checkbox]), .kairos-redesign .cal-event-dialog select { min-height: 44px; }
   .kairos-redesign .cal-event-dialog .btn { min-height: 44px; }
+  /* Polish: 44px touch targets on a phone. */
+  .kairos-redesign .cal-day-panel .btn, .kairos-redesign .cal-day-panel .row-action-btn { min-height: 44px !important; min-width: 44px; }
+  .kairos-redesign .cal-week-heading .btn { min-height: 44px !important; }
+  .kairos-redesign .cal-calendars-dialog .btn { min-height: 44px !important; }
+  .kairos-redesign .panel-dialog.cal-calendars-dialog, .kairos-redesign .panel-dialog.cal-delete-dialog { border-radius: 20px; }
+  .kairos-redesign :is(.cal-delete-dialog, .cal-calendars-dialog, .cal-archive-panel) .modal-close-btn { width: 44px; height: 44px; }
+  .kairos-redesign .cal-event-dialog .modal-close-btn { min-width: 44px; min-height: 44px !important; }
 }

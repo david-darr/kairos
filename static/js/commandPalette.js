@@ -62,6 +62,8 @@ function build() {
   const panel = el("div", { class: "glass bracket palette-panel" }, [
     el("div", { class: "palette-input-row" }, [input, el("span", { class: "palette-hint", text: "esc" })]),
     listHost,
+    // Redesign only: the key legend. Hidden (attribute) unless redesign-overlays.css shows it.
+    el("div", { class: "palette-foot", hidden: "", "aria-hidden": "true", text: "Up and Down to move · Enter to run · Esc to close" }),
   ]);
   panel.addEventListener("click", (e) => e.stopPropagation());
   backdrop = el("div", { class: "palette-backdrop hidden", onclick: close }, [panel]);

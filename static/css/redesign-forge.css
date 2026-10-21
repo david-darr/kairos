@@ -254,8 +254,24 @@
   .kairos-redesign .forge-panel { padding: 14px 16px 10px; }
   .kairos-redesign .forge-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kairos-redesign .forge-sidebar-tabs { height: 44px; }
-  .kairos-redesign .forge-sidebar-tab { height: 38px; }
+  .kairos-redesign .forge-sidebar-tab { height: 44px; }
   .kairos-redesign .forge-session-header .btn { min-height: 44px; height: 44px; }
   .kairos-redesign .forge-session-header > strong { font-size: 22px; }
   .kairos-redesign .forge-prompt { max-width: 92%; }
+  /* Polish: the floating menu button no longer sits on the project sidebar title, and controls reach 44px. */
+  .kairos-redesign .forge-project-header { padding-left: 68px; min-height: 64px; }
+  .kairos-redesign .forge-small-button, .kairos-redesign .forge-icon-button,
+  .kairos-redesign .forge-surface-tab, .kairos-redesign .forge-work-label,
+  .kairos-redesign .forge-tree-row, .kairos-redesign .forge-preview-path,
+  .kairos-redesign .forge-project-sidebar input, .kairos-redesign .forge-project-sidebar summary { min-height: 44px; }
+  .kairos-redesign .forge-small-button, .kairos-redesign .forge-icon-button { min-width: 44px; }
+  .kairos-redesign .forge-composer .custom-select-btn, .kairos-redesign .forge-hero .custom-select-btn,
+  .kairos-redesign .forge-toolbar .custom-select-btn, .kairos-redesign .forge-project-sidebar .custom-select-btn { min-height: 44px; }
+  .kairos-redesign .forge-tab-close { position: relative; }
+  .kairos-redesign .forge-tab-close::before { content: ""; position: absolute; inset: -12px; }
+  .kairos-redesign .forge-panel input:not([type="checkbox"]), .kairos-redesign .forge-panel select { min-height: 44px; }
+  .kairos-redesign :is(.forge-project-sidebar, .forge-composer, .forge-hero, .forge-panel, .forge-toolbar, .forge-preview-surface) :is(input:not([type="checkbox"]), select, .custom-select-btn, summary, .forge-change-open) { min-height: 44px !important; }
+  .kairos-redesign .forge-session-header .btn.quiet { min-height: 44px; }
+  .kairos-redesign :is(.forge-app-preview-surface, .forge-preview-toolbar) :is(.btn, input, summary) , .kairos-redesign .forge-preview-logs > summary, .kairos-redesign input.forge-preview-path { min-height: 44px !important; }
+  .kairos-redesign .panel-dialog :is(.forge-form, [data-forge-form]) input { min-height: 44px; }
 }
