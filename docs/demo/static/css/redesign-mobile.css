@@ -449,13 +449,18 @@
    indicator, so the page is pinned to the full screen instead. */
 @media (max-width: 768px) {
   .kairos-redesign::after { display: none; }
+  /* The frost lives only in the status bar area and is clear by its bottom
+     edge, so the avatar and header controls below it stay sharp. */
   .kairos-redesign .ms-global-frost,
-  .kairos-redesign .ms-blur-top { height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 14px); }
+  .kairos-redesign .ms-blur-top { height: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
   .kairos-redesign .ms-blur-top i {
+    height: 100%; background: transparent;
     backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 55%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 45%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 45%, transparent 100%);
   }
+  .kairos-redesign #mobile-menu-btn.ms-avatar { z-index: 1100; }
+  .kairos-redesign .ms-global-frost { z-index: 54; }
 }
 @media (max-width: 768px) and (display-mode: standalone) {
   /* A home-screen app drawn under the status bar still gets a viewport that is
