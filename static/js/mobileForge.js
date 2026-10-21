@@ -43,7 +43,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
       choice.setAttribute('aria-pressed', String(location?.value === value)); body.append(choice);
     }
     const worktrees = el('details', {}, [el('summary', { text: 'Existing worktrees' })]);
-    for (const s of sessions.filter(s => !s.forge.removed && s.forge.isolation !== 'in_place')) worktrees.append(button(`${s.forge.branch || s.title} ? Continue session`, () => { sheet.close(); go('forgeShell', { sessionId: s.id, closeSheet: true }); }));
+    for (const s of sessions.filter(s => !s.forge.removed && s.forge.isolation !== 'in_place')) worktrees.append(button(`Continue ${s.forge.branch || s.title}`, () => { sheet.close(); go('forgeShell', { sessionId: s.id, closeSheet: true }); }));
     if (worktrees.childElementCount === 1) worktrees.append(el('p', { text: 'No existing session worktrees.' }));
     const checkout = sessions.find(s => !s.forge.removed && s.forge.isolation === 'in_place');
     const changes = button('View changes', () => { sheet.close(); go('forgeShell', { sessionId: checkout.id, mobileChanges: true, closeSheet: true }); });

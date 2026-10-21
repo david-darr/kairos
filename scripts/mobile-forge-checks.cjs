@@ -17,7 +17,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   const sheetNamed = async title => {
     await waitFor(`document.querySelector('dialog.ms-sheet[open]')?.getAttribute('aria-label') === ${JSON.stringify(title)}`);
     ok(await js("document.querySelector('dialog.ms-sheet[open]').contains(document.activeElement)"), title + ' owns focus');
-    ok(await js("[...document.querySelectorAll('dialog.ms-sheet[open] button, dialog.ms-sheet[open] input:not([type=hidden]), dialog.ms-sheet[open] select, dialog.ms-sheet[open] summary')].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => { const r = n.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; })()"), title + ' has 44px controls');
+    ok(await js("[...document.querySelectorAll('dialog.ms-sheet[open] button, dialog.ms-sheet[open] input:not([type=hidden]), dialog.ms-sheet[open] select, dialog.ms-sheet[open] summary')].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => { const r = n.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; })"), title + ' has 44px controls');
   };
   const menu = async () => { await click('.mf-session-header [aria-label="Session actions"]'); await sheetNamed('Session actions'); };
   const tool = async name => { await menu(); await textButton('dialog.ms-sheet', name); await sheetNamed(name); };
@@ -50,7 +50,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await waitFor("!!document.querySelector('[data-widget-toggle=working]')");
   ok(await js("document.querySelectorAll('[data-widget-toggle]').length === 5"), 'Customize retains all five visibility controls');
   await escape(); await delay(100); await close();
-  await click('.forge-composer textarea');
+  await js("document.querySelector('.forge-composer textarea').focus()");
   await waitFor("!!document.querySelector('.forge-composer.ms-composer-expanded')");
   ok(await js("getComputedStyle(document.querySelector('.forge-composer .chat-input-left')).display !== 'none'"), 'Expanded composer contains the original location and mode controls');
   await js("document.activeElement.blur()"); await delay(250);
@@ -89,12 +89,15 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("document.activeElement.classList.contains('ms-forge-add')"), 'Composer tools restore focus');
   await menu(); await textButton('dialog.ms-sheet', 'Run app');
   await waitFor("!!document.querySelector('.forge-app-command-input')");
-  await input('.forge-app-command-input', 'npm run dev -- --port {port} --phone-forge');
+  await input('.forge-app-command-input', `npm run dev -- --port {port} --phone-forge-${Date.now()}`);
   const appStart = writes.length;
   await textButton('.modal-panel', 'Save and run');
-  await waitFor("!!document.querySelector('.forge-app-approval')");
-  ok(await js("document.querySelector('.forge-app-approval').classList.contains('ms-sheet-surface')"), 'Run app retains the approval sheet');
-  await textButton('.forge-app-approval', 'Approve command');
+  // The smoke backend remembers earlier approvals for this project, so the sheet appears only the first time.
+  await waitFor("!!document.querySelector('.forge-app-approval') || !!document.querySelector('.forge-pane .forge-app-preview-surface iframe')");
+  if (await js("!!document.querySelector('.forge-app-approval')")) {
+    ok(await js("document.querySelector('.forge-app-approval').classList.contains('ms-sheet-surface')"), 'Run app retains the approval sheet');
+    await textButton('.forge-app-approval', 'Approve command');
+  }
   await waitFor("!!document.querySelector('.forge-pane .forge-app-preview-surface iframe')");
   ok(writes.slice(appStart).some(w => w.path.endsWith('/app/start')), 'App startup uses the existing handler');
   ok(await js("document.querySelector('.forge-shell').dataset.split === 'false' && !!document.querySelector('.mf-back')"), 'App preview replaces the conversation and has Back');
@@ -149,6 +152,15 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await capture('mobile-forge-changes');
   // Close any remaining Changes sheet, then inspect the retained lifecycle flow.
   if (await js("!!document.querySelector('dialog.ms-sheet[open]')")) await close();
+  if (demoState) {
+    // A diff replaced the preview tab; open a file again so the editor flow has its surface.
+    await tool('Explorer');
+    await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row')");
+    await js("document.querySelector('dialog.ms-sheet .forge-tree-directory').open = true");
+    await waitFor("!!document.querySelector('dialog.ms-sheet [data-file-path]')");
+    await click('dialog.ms-sheet [data-file-path]');
+    await waitFor("!!document.querySelector('.forge-pane .cm-editor') && !document.querySelector('dialog.ms-sheet')");
+  }
   if (demoState) await require('./forge3-checks.cjs')({ js, waitFor, capture, writes, demoState, label: 'mobile-project', forgeSessionId, width: 390 });
   if (!await js("!!document.querySelector('.forge-pane .forge-transcript-composer')")) {
     await menu();

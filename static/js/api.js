@@ -102,6 +102,8 @@ export function el(tag, attrs = {}, children = []) {
 // same reason customSelect() exists (see its comment above).
 const panelDialogs = [];
 let dialogId = 0;
+// Only phone Forge sheets that stay open under a nested approval host it; other sheets close on their action.
+const FORGE_SHEET = 'dialog[open]:has(.mf-tool, .mf-commit, .mf-overview, .mf-projects, .mf-workspace-options, .mf-session-actions)';
 
 // One lifecycle for panel dialogs, including nested destructive confirmations.
 // A group replaces its previous panel; confirmations can sit above that panel.
@@ -157,7 +159,7 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
     }
   };
   const focusin = event => { if (top() && !panel.contains(event.target) && !event.target.closest(".custom-select-menu")) focus(); };
-  owner ||= opener?.closest?.(".panel-dialog") || opener?.closest?.("dialog[open]") || null;
+  owner ||= opener?.closest?.(".panel-dialog") || opener?.closest?.(FORGE_SHEET) || null;
   const observer = owner ? new MutationObserver(() => { if (!owner.isConnected || !panel.isConnected) close(); }) : null;
   const dialog = { panel, backdrop, close, opener, group, signal: controller.signal };
   const disposeSheet = mountSheetSurface(panel, close);
@@ -170,7 +172,7 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
   document.documentElement.classList.add("panel-dialog-open");
   // A permission or confirmation launched from a native phone sheet must
   // share its top layer, just like the option menus below.
-  (opener?.closest?.('dialog[open]') || owner?.closest?.('dialog[open]') || document.body).append(backdrop);
+  (opener?.closest?.(FORGE_SHEET) || owner?.closest?.(FORGE_SHEET) || document.body).append(backdrop);
   observer?.observe(document.body, { childList: true, subtree: true });
   focus();
   return dialog;
@@ -295,7 +297,8 @@ export function openOptionMenu(anchor, items, onPick) {
   // 2026-10-15: floating-menu selects use their own anchor so the list
   // cannot cover the control and swallow the opening mouseup.
   const composerNode = anchor.closest(".overflow-menu") ? null : anchor.closest(".chat-input-bar");
-  const belowComposer = composerNode?.classList.contains("forge-composer");
+  // The phone Forge composer sits at the bottom of the screen, so its pickers open above it.
+  const belowComposer = composerNode?.classList.contains("forge-composer") && !composerNode.closest(".mf-project");
   // A short window may leave no usable list below the Home composer.
   // Scroll the composer into view first, keeping the list below it.
   const scrolled = new Map();
