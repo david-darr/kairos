@@ -1,3 +1,4 @@
+import { creativeSelectionButton } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
@@ -1670,6 +1671,7 @@ async function openIntegrationsModal() {
     api("/api/integrations").catch(() => []),
     activeSessionId ? api(`/api/sessions/${activeSessionId}`) : null,
   ]);
+  modal.body.append(creativeSelectionButton(() => ({ sessionId: activeSessionId }), modal.body));
   const mcpIntegrations = allIntegrations.filter((i) => i.kind === "mcp_server");
   const enabledIds = session ? session.enabled_integration_ids : null; // null = ordinary servers, not REA
 

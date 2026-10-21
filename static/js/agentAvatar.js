@@ -5,7 +5,7 @@
 // A gradient shadow and a dot pattern draw the same look for almost nothing.
 // 2026-10-14: Agent faces are original, cached SVG data URLs. A static image
 // has no per-instance canvas or ResizeObserver, so rosters stay cheap to poll.
-export const AVATAR_FORMS = ['round', 'pill', 'triangle', 'ears', 'cloud', 'heart', 'sprout', 'scallop', 'hexagon', 'diamond', 'robot'];
+export const AVATAR_FORMS = ['round', 'pill', 'triangle', 'ears', 'cloud', 'heart', 'sprout', 'scallop', 'hexagon', 'diamond', 'robot', 'shield', 'star', 'bean', 'squircle'];
 export const AVATAR_COLORS = ['#FA70AB', '#DD6ADC', '#A25BFF', '#4778FF', '#00B1FF', '#04BB9F', '#B6D80B', '#FFCC38', '#FF8066'];
 export const AVATAR_FINISHES = ['matte', 'plush', 'glossy', 'ceramic'];
 export const AVATAR_FACES = ['smile', 'content', 'curious', 'sleepy', 'wink'];
@@ -23,7 +23,7 @@ export function defaultAvatar(id) {
   const seed = hashId(id);
   return { form: AVATAR_FORMS[seed % AVATAR_FORMS.length],
     color: AVATAR_COLORS[Math.floor(seed / 11) % AVATAR_COLORS.length], finish: 'matte',
-    face: AVATAR_FACES[Math.floor(seed / 97) % AVATAR_FACES.length], accessory: 'none' };
+    face: AVATAR_FACES[Math.floor(seed / 97) % AVATAR_FACES.length], accessory: 'none', version: 2, style: 'folded', eyes: 'oval' };
 }
 
 export function avatarSpec(agent) { return agent?.avatar || defaultAvatar(agent?.id); }
@@ -32,6 +32,10 @@ function xml(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '
 
 function shape(form) {
   const shapes = {
+    shield: '<path d="M64 12Q83 26 109 32L106 72Q104 96 64 116Q24 96 22 72L19 32Q45 26 64 12Z"/>',
+    star: '<path d="M64 11Q72 11 80 37L107 38Q119 39 106 56L91 73L98 99Q103 116 84 106L64 92L42 106Q24 116 30 98L37 73L20 54Q9 39 27 38L48 37Q56 11 64 11Z"/>',
+    bean: '<path d="M30 25Q57 5 90 25Q112 39 99 64Q83 78 104 96Q109 112 74 116Q22 117 20 77Q17 44 30 25Z"/>',
+    squircle: '<path d="M30 21Q64 7 99 22Q116 38 110 86Q107 111 80 114Q33 121 22 101Q10 78 18 43Q21 28 30 21Z"/>',
     round: '<circle cx="64" cy="62" r="43"/>',
     pill: '<rect x="26" y="12" width="76" height="99" rx="38"/>',
     triangle: '<path d="M64 13 Q71 13 76 22 L111 91 Q115 102 104 108 Q91 116 64 114 Q37 116 24 108 Q13 102 17 91 L52 22 Q57 13 64 13Z"/>',
@@ -47,7 +51,23 @@ function shape(form) {
   return shapes[form] || shapes.round;
 }
 
-function faceMarkup(face, ink) {
+function faceMarkup(face, ink, spec = {}) {
+  spec = { ...spec };
+  const customized = spec.eyes && spec.eyes !== 'auto' || spec.mouth && spec.mouth !== 'auto';
+  if (!spec.eyes || spec.eyes === 'auto') spec.eyes = ['sleepy', 'wink'].includes(face) ? face : 'dots';
+  if (!spec.mouth || spec.mouth === 'auto') spec.mouth = face === 'curious' ? 'curious' : ['content', 'sleepy'].includes(face) ? 'small' : 'smile';
+  if (customized) {
+    const eyes = ({ dots:'<circle cx="48" cy="60" r="5"/><circle cx="80" cy="60" r="5"/>',
+      oval:'<rect x="42" y="47" width="12" height="25" rx="6" transform="rotate(-12 48 60)"/><rect x="74" y="47" width="12" height="25" rx="6" transform="rotate(-12 80 60)"/>',
+      wide:'<ellipse cx="48" cy="60" rx="8" ry="12"/><ellipse cx="80" cy="60" rx="8" ry="12"/><circle cx="46" cy="56" r="2" fill="white"/><circle cx="78" cy="56" r="2" fill="white"/>',
+      happy:'<path d="M40 63q8-17 16 0m16 0q8-17 16 0" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>',
+      sleepy:'<path d="M41 61h14m18 0h14" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>',
+      wink:'<rect x="42" y="48" width="12" height="24" rx="6"/><path d="M73 61q7-8 14 0" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>' })[spec.eyes] || '<circle cx="48" cy="60" r="5"/><circle cx="80" cy="60" r="5"/>';
+    const mouth = ({ smile:'<path d="M56 81q8 9 16 0" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>',
+      grin:'<path d="M53 79h22q-11 20-22 0Z"/>', small:'<path d="M60 82h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+      curious:'<ellipse cx="64" cy="82" rx="5" ry="6" fill="none" stroke="currentColor" stroke-width="3"/>', none:'' })[spec.mouth || 'smile'] || '';
+    return `<g fill="${ink}" color="${ink}"><path d="M40 39q7-4 15-1m18 0q7-3 14 1" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".55"/>${eyes}${mouth}</g>`;
+  }
   const eyes = face === 'sleepy' ? '<path d="M43 62q7 7 14 0 M71 62q7 7 14 0" fill="none" stroke="#332C33" stroke-width="3.4" stroke-linecap="round"/>'
     : face === 'wink' ? '<circle cx="49" cy="61" r="3.8"/><path d="M72 62q7 6 14 0" fill="none" stroke="#332C33" stroke-width="3.4" stroke-linecap="round"/>'
       : '<circle cx="49" cy="61" r="3.8"/><circle cx="79" cy="61" r="3.8"/>';
@@ -79,17 +99,22 @@ export function avatarUrl(spec) {
   const plush = spec.finish === 'plush';
   const glossy = spec.finish === 'glossy';
   const ceramic = spec.finish === 'ceramic';
+  const folded = spec.style === 'folded';
+  const accent = /^#[0-9a-f]{6}$/i.test(spec.accent || '') ? spec.accent : '#FFF8EF';
   const svg = `<svg xmlns="${svgNS}" viewBox="0 0 128 128" width="128" height="128"><defs>
     <radialGradient id="body" cx="34%" cy="24%" r="80%"><stop stop-color="#fff" stop-opacity="${ceramic ? '.65' : glossy ? '.48' : '.32'}"/><stop offset=".34" stop-color="${xml(color)}"/><stop offset=".77" stop-color="${xml(color)}"/><stop offset="1" stop-color="#3B2C46" stop-opacity=".75"/></radialGradient>
     <radialGradient id="shadow"><stop stop-color="#5F493D" stop-opacity=".32"/><stop offset="1" stop-color="#5F493D" stop-opacity="0"/></radialGradient>
     <pattern id="fuzz" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="1.2" cy="1.3" r=".8" fill="#fff"/><circle cx="3.7" cy="3.6" r=".6" fill="#fff"/><circle cx="4.1" cy="0.9" r=".4" fill="#fff"/></pattern>
     <clipPath id="shape">${shape(spec.form)}</clipPath></defs>
     <ellipse cx="64" cy="115" rx="44" ry="9" fill="url(#shadow)"/>
-    <g fill="url(#body)" stroke="#47364B" stroke-opacity="${ceramic ? '.15' : '.08'}" stroke-width="1">${shape(spec.form)}</g>
+    ${folded ? `<g transform="translate(4 3)" fill="#332C33" opacity=".35">${shape(spec.form)}</g>` : ''}
+    <g fill="${folded ? xml(color) : 'url(#body)'}" stroke="#47364B" stroke-opacity="${ceramic ? '.15' : '.08'}" stroke-width="1">${shape(spec.form)}</g>
+    ${folded ? '<g clip-path="url(#shape)"><path d="M93 9Q123 56 94 115L118 122 128 20Z" fill="#332C33" opacity=".18"/><path d="M16 27Q56 3 97 25" fill="none" stroke="white" stroke-opacity=".3" stroke-width="5"/></g>' : ''}
     ${plush ? '<g clip-path="url(#shape)" opacity=".22"><rect x="10" y="10" width="108" height="108" fill="url(#fuzz)"/></g>' : ''}
     <ellipse cx="48" cy="37" rx="19" ry="9" transform="rotate(-24 48 37)" fill="#fff" opacity="${glossy ? '.38' : ceramic ? '.3' : '.15'}" clip-path="url(#shape)"/>
-    ${faceMarkup(spec.face, ink)}${accessoryMarkup(spec.accessory)}</svg>`;
+    ${faceMarkup(spec.face, ink, spec)}${[...new Set([spec.accessory, ...(spec.accessories || [])])].map(accessoryMarkup).join('').replaceAll('#FFF8EF', accent)}</svg>`;
   const url = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  if (cache.size >= 512) cache.delete(cache.keys().next().value);
   cache.set(key, url);
   return url;
 }
@@ -117,7 +142,11 @@ export function avatarPicker(initial, onChange = () => {}) {
   const groups = new Map();
   const custom = document.createElement('input'); custom.type = 'color'; custom.className = 'agent-avatar-custom-input';
   custom.setAttribute('aria-label', 'Avatar custom color');
-  const change = (key, value) => { spec = { ...spec, [key]: value }; dirty = true; sync(); paint(true); onChange({ ...spec }); };
+  const change = (key, value) => {
+    if (key === 'face') { delete spec.eyes; delete spec.mouth; }
+    spec = { ...spec, [key]: value, ...(['eyes','mouth','accent','accessories','style'].includes(key) ? { version: 2 } : {}) };
+    dirty = true; sync(); paint(true); onChange({ ...spec });
+  };
   // 2026-10-14: roving radio focus gives each visual grid one Tab stop and
   // arrow navigation; thumbnails reuse avatarUrl's cached SVG data URLs.
   const group = (key, values, kind = 'faces') => {
@@ -138,7 +167,10 @@ export function avatarPicker(initial, onChange = () => {}) {
         const image = document.createElement('img'); image.alt = ''; image.loading = 'lazy'; button.append(image);
         const label = document.createElement('span'); label.textContent = value; button.append(label);
       }
-      button.addEventListener('click', () => value === 'custom' ? custom.click() : change(key, value));
+      button.addEventListener('click', () => {
+        if (key === 'face') { delete spec.eyes; delete spec.mouth; }
+        value === 'custom' ? custom.click() : change(key, value);
+      });
       grid.append(button); return button;
     });
     grid.addEventListener('keydown', event => {
@@ -155,12 +187,37 @@ export function avatarPicker(initial, onChange = () => {}) {
   group('color', [...AVATAR_COLORS, 'custom'], 'color');
   group('form', AVATAR_FORMS); group('face', AVATAR_FACES);
   group('accessory', AVATAR_ACCESSORIES); group('finish', AVATAR_FINISHES, 'finish');
+  group('style', ['rounded', 'folded'], 'finish');
+  group('eyes', ['auto', 'dots', 'oval', 'wide', 'happy', 'sleepy', 'wink']);
+  group('mouth', ['auto', 'smile', 'grin', 'small', 'curious', 'none']);
+  const accentInput = document.createElement('input'); accentInput.type = 'color'; accentInput.value = spec.accent || '#FFF8EF';
+  accentInput.setAttribute('aria-label', 'Avatar accent color'); accentInput.oninput = () => change('accent', accentInput.value.toUpperCase());
+  const accentLabel = document.createElement('label'); accentLabel.className = 'agent-avatar-accent'; accentLabel.textContent = 'Accessory color'; accentLabel.append(accentInput); controls.append(accentLabel);
+  const layers = document.createElement('div'); layers.className = 'agent-avatar-layers'; layers.setAttribute('aria-label', 'Layered accessories');
+  for (const value of AVATAR_ACCESSORIES.slice(1)) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn quiet'; button.textContent = value;
+    button.setAttribute('aria-pressed', String((spec.accessories || []).includes(value)));
+    button.onclick = () => { const active = new Set(spec.accessories || []); active.has(value) ? active.delete(value) : active.add(value); change('accessories', [...active]); button.setAttribute('aria-pressed', String(active.has(value))); };
+    layers.append(button);
+  }
+  controls.append(layers);
+  const presetKey = 'kairos:avatar-presets';
+  const presetActions = document.createElement('div'); presetActions.className = 'agent-avatar-presets';
+  const savePreset = document.createElement('button'); savePreset.type = 'button'; savePreset.className = 'btn'; savePreset.textContent = 'Save this look';
+  const presetList = document.createElement('div'); presetList.className = 'agent-avatar-options'; presetList.setAttribute('aria-label', 'Saved looks');
+  const presetStatus = document.createElement('span'); presetStatus.className = 'meta'; presetStatus.setAttribute('role', 'status');
+  const drawPresets = () => {
+    presetList.replaceChildren(); let saved = []; try { saved = JSON.parse(localStorage.getItem(presetKey) || '[]'); } catch { /* optional storage */ }
+    for (const [index, value] of (Array.isArray(saved) ? saved : []).filter(v => v && typeof v === 'object' && typeof v.color === 'string' && (!v.accessories || Array.isArray(v.accessories))).slice(0, 8).entries()) { const button = document.createElement('button'); button.type = 'button'; button.className = 'agent-avatar-option'; button.setAttribute('aria-label', `Saved look ${index + 1}`); button.append(agentAvatar({ avatar: value }, 44)); button.onclick = () => { spec = { ...value }; dirty = true; sync(); paint(); onChange({ ...spec }); }; presetList.append(button); }
+  };
+  savePreset.onclick = () => { try { const raw = JSON.parse(localStorage.getItem(presetKey) || '[]'); const saved = Array.isArray(raw) ? raw : []; saved.unshift({ ...spec }); localStorage.setItem(presetKey, JSON.stringify(saved.slice(0, 8))); drawPresets(); presetStatus.textContent = 'Look saved on this device.'; } catch { presetStatus.textContent = 'Could not save this look on this device.'; } };
+  presetActions.append(savePreset, presetStatus, presetList); controls.append(presetActions); drawPresets();
   custom.value = /^#[0-9a-f]{6}$/i.test(spec.color) ? spec.color : AVATAR_COLORS[0];
   custom.oninput = () => change('color', custom.value.toUpperCase());
   const shuffle = document.createElement('button'); shuffle.type = 'button'; shuffle.className = 'btn agent-avatar-shuffle'; shuffle.textContent = 'Shuffle';
   shuffle.onclick = () => { const choose = values => values[Math.floor(Math.random() * values.length)];
     let next; do { next = { form: choose(AVATAR_FORMS), color: choose(AVATAR_COLORS), finish: choose(AVATAR_FINISHES),
-      face: choose(AVATAR_FACES), accessory: choose(AVATAR_ACCESSORIES) }; } while (JSON.stringify(next) === JSON.stringify(spec));
+      face: choose(AVATAR_FACES), accessory: choose(AVATAR_ACCESSORIES), version: 2, style: 'folded', eyes: choose(['oval','dots','wide','happy','wink']) }; } while (JSON.stringify(next) === JSON.stringify(spec));
     spec = next; dirty = true; sync(); paint(false);
     if (!matchMedia('(prefers-reduced-motion: reduce)').matches) preview.animate([
       { transform: 'rotate(-9deg) scale(.9)', opacity: .65 }, { transform: 'rotate(8deg) scale(1.06)', opacity: 1 },
@@ -170,16 +227,18 @@ export function avatarPicker(initial, onChange = () => {}) {
   controls.append(shuffle, custom); root.append(preview, controls);
   function sync() {
     for (const [key, buttons] of groups) {
-      const selected = key === 'color' && !AVATAR_COLORS.includes(spec.color) ? 'custom' : spec[key];
+      const selected = key === 'color' && !AVATAR_COLORS.includes(spec.color) ? 'custom' : spec[key] || (['eyes','mouth'].includes(key) ? 'auto' : key === 'style' ? 'rounded' : '');
       for (const button of buttons) {
         const active = button.dataset.value === selected;
         button.setAttribute('aria-checked', String(active)); button.tabIndex = active ? 0 : -1;
         if (button.dataset.value === 'custom') button.style.setProperty('--swatch', spec.color);
         const image = button.querySelector('img');
-        if (image) image.src = avatarUrl({ ...spec, [key]: button.dataset.value });
+        if (image) image.src = avatarUrl({ ...spec, ...(key === 'face' ? { eyes: 'auto', mouth: 'auto' } : {}), [key]: button.dataset.value });
       }
     }
     custom.value = spec.color;
+    accentInput.value = spec.accent || '#FFF8EF';
+    [...layers.children].forEach(button => button.setAttribute('aria-pressed', String((spec.accessories || []).includes(button.textContent))));
   }
   function paint(animate = false) {
     preview.getAnimations().forEach(animation => animation.cancel());

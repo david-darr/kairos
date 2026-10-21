@@ -1,4 +1,5 @@
-import { api, el, modelMark } from "../api.js";
+import { api, el, modelMark, openPanelDialog } from "../api.js";
+import { agentAvatar } from "../agentAvatar.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
 import { mountDither } from "../dither.js";
@@ -32,7 +33,16 @@ function section(title, link, tab, tabIcon = null) {
   return { panel, body };
 }
 function empty(body, message, failed = false) {
-  body.replaceChildren(el("div", { class: "dashboard-empty", text: failed ? "Couldn't load this section. Try opening it again." : message }));
+  body.replaceChildren(el("div", { class: "dashboard-empty" }, [icon(failed ? 'warning' : 'inbox'),
+    el('span', { text: failed ? 'Unavailable' : message })]));
+}
+function figure(value, label, mark = null) {
+  return el('div', { class: 'dashboard-figure' }, [
+    ...(mark ? [icon(mark)] : []), el('strong', { text: String(value) }), el('span', { text: label }),
+  ]);
+}
+function badge(text, tone = '') {
+  return el('span', { class: 'dashboard-badge ' + tone, text });
 }
 function row(title, detail, onclick) {
   return el(onclick ? "button" : "div", { class: "dashboard-row", ...(onclick ? { type: "button", onclick } : {}) }, [
@@ -74,21 +84,22 @@ function quotaBlock(providerId, reading) {
   const block = el("div", { class: "dashboard-quota", "data-provider": providerId });
   if (staleOf(snap) && snap.fetched_at) block.append(el("span", { class: "dashboard-quota-note", text: "Updated " + ago(snap.fetched_at) }));
   if (snap.status === "needsAuth") {
-    block.append(el("span", { class: "dashboard-quota-note", text: [SIGN_IN[providerId], snap.note].filter(Boolean).join(" ") }));
+    block.append(snap.note ? el('details',{class:'dashboard-quota-note'},[el('summary',{text:SIGN_IN[providerId]}),el('p',{text:snap.note})]) : el('span',{class:'dashboard-quota-note',text:SIGN_IN[providerId]}));
     return block;
   }
   if (!snap.windows.length) {
-    block.append(el("span", { class: "dashboard-quota-note", text: snap.note || "Waiting for the first reading…" }));
+    block.append(snap.note ? el('details',{class:'dashboard-quota-note'},[el('summary',{text:'Usage unavailable'}),el('p',{text:snap.note})]) : el('span',{class:'dashboard-quota-note',text:'Waiting for usage'}));
     return block;
   }
   for (const w of snap.windows) {
     const percent = Math.min(w.used, 1) * 100;
-    block.append(el("div", { class: "dashboard-quota-window" }, [
-      el("div", { class: "dashboard-quota-head", title: usedCopy(w) }, [el("span", { text: `${w.id === "session" ? "5h" : w.id === "weekly" ? "Week" : w.label} · ${pctText(w.used)}%` }), el("span", { class: "dashboard-quota-reset", text: resetCopy(w.resets_at).replace(/^Resets at /, "resets ").replace(/^Resets/, "resets") })]),
-      el("div", { class: "dashboard-quota-track", role: "meter", "aria-label": w.label, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(percent)) }, [
-        el("span", { class: "dashboard-quota-fill tone-" + toneOf(w.used), style: `width:${percent.toFixed(0)}%` }),
-      ]),
-    ]));
+    const gauge = el('div', { class: 'dashboard-quota-ring tone-' + toneOf(w.used), style: `--quota-used:${percent}%`,
+      role: 'meter', 'aria-label': `${w.label}: ${usedCopy(w)}`, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(percent) }, [
+      el('span', { text: `${pctText(w.used)}%`, 'aria-hidden': 'true' }),
+    ]);
+    block.append(el("div", { class: "dashboard-quota-window" }, [gauge, el('div', { class: 'dashboard-quota-copy' }, [
+      el("div", { class: "dashboard-quota-head", title: usedCopy(w) }, [el("span", { text: w.id === "session" ? "5h" : w.id === "weekly" ? "Week" : w.label }), el("span", { class: "dashboard-quota-reset", text: resetCopy(w.resets_at).replace(/^Resets at /, "resets ").replace(/^Resets/, "resets") })]),
+    ])]));
   }
   return block;
 }
@@ -149,14 +160,14 @@ export function render(container, tabId, options = {}) {
     ]),
   ]);
   const stats = el("div", { class: "dashboard-stats" });
-  const chats = section("Recent chats", "All chats", "chat");
-  const schedule = section("Upcoming", "Calendar", "calendar");
-  const projects = section("Projects", "Open projects", "chat");
-  const activity = section("Activity", "Tasks", "tasks");
-  const system = section("Systems", "Settings", "settings");
-  const models = section("Models", "Manage models", "settings");
-  const agents = section("Agents", "Agents", "agents");
-  const store = section("Tool Store", "Tool Store", "tool-store");
+  const chats = section("Recent chats", "All chats", "chat", ICONS.chats);
+  const schedule = section("Upcoming", "Calendar", "calendar", ICONS.calendar);
+  const projects = section("Projects", "Open projects", "chat", ICONS.library);
+  const activity = section("Activity", "Tasks", "tasks", ICONS.tasks);
+  const system = section("Systems", "Settings", "settings", ICONS.settings);
+  const models = section("Models", "Manage models", "settings", ICONS.brain);
+  const agents = section("Agents", "Agents", "agents", ICONS.agents);
+  const store = section("Tool Store", "Tool Store", "tool-store", ICONS.store);
   agents.panel.hidden = store.panel.hidden = true;
   system.panel.classList.add("dashboard-wide");
   // Order and visibility below the card: Settings > Layout (layout.js). The
@@ -223,7 +234,7 @@ export function render(container, tabId, options = {}) {
     const value = el("span", { class: "dashboard-stat-value", text: "…" });
     statValues.set(key, value);
     stats.append(el("button", { type: "button", class: "dashboard-stat", "data-stat": key, onclick: () => navigate(tab) }, [
-      value, el("span", { class: "dashboard-stat-label", text: label }),
+      icon(({sessions:'chats',notes:'notes',tasks:'tasks',events:'calendar'})[key]), value, el("span", { class: "dashboard-stat-label", text: label }),
     ]));
   }
   const waiting = el("button", { type: "button", class: "dashboard-stat dashboard-attention", "data-stat": "waiting", hidden: true, onclick: () => navigate("agents") });
@@ -234,7 +245,7 @@ export function render(container, tabId, options = {}) {
     const { endpoints, usage, quotas } = data;
     models.body.replaceChildren();
     if (endpoints && !endpoints.length) models.body.append(el("div", { class: "model-setup-empty" }, [
-      el("h3", { text: "Set up a model" }), el("p", { text: "Choose how Kairos thinks. We'll help you connect it." }),
+      icon('brain'),
       el("button", { class: "btn", text: "Set up a model", onclick: () => openModelSetup() }),
     ]));
     else if (endpoints === null) empty(models.body, "", true);
@@ -268,7 +279,7 @@ export function render(container, tabId, options = {}) {
     const { status, settings } = data;
     system.body.replaceChildren();
     if (!status) return empty(system.body, "", true);
-    const chips = el("div", { class: "dashboard-system-chips" });
+    const chips = el("div", { class: "dashboard-system-grid" });
     const values = [
       ["Vault", status.vault_ok ? "connected" : "unavailable", status.vault_ok ? "ok" : "err"],
       ["Scheduler", status.scheduler_running ? status.enabled_task_count + (status.enabled_task_count === 1 ? " task" : " tasks") : "stopped", status.scheduler_running ? "ok" : "err"],
@@ -278,28 +289,37 @@ export function render(container, tabId, options = {}) {
     if (settings?.computer_use && typeof settings.computer_use.enabled === "boolean") {
       values.push(["Computer use", settings.computer_use.enabled ? "on" : "off", settings.computer_use.enabled ? "ok" : "warn"]);
     }
-    for (const [name, value, state] of values) chips.append(el("span", { class: "dashboard-system-chip" }, [
-      el("span", { class: "status-dot " + state }), el("span", { text: name }), el("span", { class: "meta", text: value }),
-    ]));
+    for (const [name, value, state] of values) {
+      const mark = ({Vault:'library',Scheduler:'calendar',Discord:'agents',Models:'brain','Computer use':'computer'})[name];
+      chips.append(el('button', { type: 'button', class: 'dashboard-system-tile', 'aria-label': `${name}: ${value}`, onclick: () => navigate('settings') }, [
+        el('span', { class: 'dashboard-system-symbol' }, [icon(mark), el('span', { class: 'status-dot ' + state })]),
+        el('span', { text: name }), el('span', { class: 'meta', text: value }),
+      ]));
+    }
     system.body.append(chips);
   }
 
   function drawStore() {
     if (!data.auth?.is_admin) return;
-    const { skills, integrations, tabs, catalog } = data;
+    const { skills, integrations, tabs, catalog, addons } = data;
     store.body.replaceChildren();
-    const add = (title, detail) => store.body.append(row(title, detail, () => navigate("tool-store")));
     if (Array.isArray(skills) && Array.isArray(integrations) && Array.isArray(tabs)) {
       // Match Tool Store's installed entries: MCP servers, configured services,
       // and installed user tabs or enabled built-in templates.
       const tools = integrations.filter((i) => i.kind === "mcp_server" || i.configured);
-      const installedTabs = tabs.filter((t) => t.kind === "user" || t.enabled);
-      add("Installed", `${skills.length} skills · ${tools.length} tools · ${installedTabs.length} tabs`);
+      const installedTabs = tabs.filter((t) => !addons?.some(addon => addon.id === t.slug) && (t.kind === "user" || t.enabled));
+      const categories = el('div', { class: 'dashboard-store-categories', 'aria-label': 'Installed' });
+      for (const [name, count, mark] of [['Skills',skills.length,'brain'],['Tools',tools.length + (addons?.filter(a=>a.installed).length || 0),'store'],['Tabs',installedTabs.length,'library']]) {
+        categories.append(el('button', { type:'button', 'aria-label': `${count} installed ${name.toLowerCase()}`, onclick:()=>navigate('tool-store') }, [icon(mark), el('strong',{text:String(count)}), el('span',{text:name})]));
+      }
+      store.body.append(categories);
     }
     if (Array.isArray(catalog?.items)) {
       const updates = catalog.items.filter((i) => i.installed && i.update_available);
-      if (updates.length) add("Update available", updates.length <= 2 ? updates.map((i) => i.name).join(", ") : `${updates.length} items`);
-      add("New in the store", `${catalog.items.filter((i) => !i.installed && !i.install_blocked).length} items`);
+      const shelf = el('button', { type:'button', class:'dashboard-store-shelf', onclick:()=>navigate('tool-store') }, [
+        icon(updates.length ? 'warning' : 'plus'), el('span',{text: updates.length ? `${updates.length} ${updates.length === 1 ? 'update' : 'updates'}` : `${catalog.items.filter((i) => !i.installed && !i.install_blocked).length} to explore`}),
+      ]);
+      store.body.append(shelf);
     }
     // Shares require GitHub and have no local cache. Home never requests them.
     if (!store.body.childElementCount) {
@@ -325,9 +345,10 @@ export function render(container, tabId, options = {}) {
         panel.dataset.homeSection = card.id;
         panel.dataset.tabName = card.tab_name;
         if (card.kind === "list") {
-          if (!card.rows.length) empty(body, card.empty_text || "Nothing here yet.");
+          if (!card.rows.length) empty(body, card.empty_text || "All clear");
           for (const entry of card.rows) {
             const item = row(entry.title, entry.meta || "", () => navigate(card.slug));
+            item.prepend(icon('notes'));
             if (entry.badge) item.append(el("span", { class: "dashboard-tab-badge tone-" + (entry.tone || "default"), text: entry.badge }));
             body.append(item);
           }
@@ -341,7 +362,7 @@ export function render(container, tabId, options = {}) {
             "aria-valuemin": "0", "aria-valuemax": String(card.total), "aria-valuenow": String(Math.min(card.value, card.total)) }, [
             el("span", { class: "dashboard-quota-fill tone-ample", style: `width:${Math.min(1, card.value / card.total) * 100}%` }),
           ]));
-          if (card.detail) body.append(el("p", { class: "dashboard-quota-note", text: card.detail }));
+          if (card.detail) body.append(el('details', { class: 'dashboard-card-detail' }, [el('summary',{text:'Details'}),el('p',{text:card.detail})]));
         }
         parts[card.id] = panel;
       }
@@ -357,34 +378,49 @@ export function render(container, tabId, options = {}) {
     }
     if (key === "sessions") {
       chats.body.replaceChildren();
-      if (!value?.length) empty(chats.body, "Your next conversation starts here.", value === null);
-      else [...value].sort((a, b) => b.updated_at - a.updated_at).slice(0, 4).forEach((s) => chats.body.append(row(s.title || "Untitled conversation", relativeTime(s.updated_at), () => navigate("chat", { sessionId: s.id }))));
+      if (!value?.length) empty(chats.body, "Start a conversation", value === null);
+      else [...value].sort((a, b) => b.updated_at - a.updated_at).slice(0, 3).forEach((s) => {
+        const item = row(s.title || 'Untitled conversation', relativeTime(s.updated_at), () => navigate('chat', {sessionId:s.id}));
+        item.classList.add('dashboard-chat-tile'); item.prepend(icon('chats')); chats.body.append(item);
+      });
     }
     if (key === "events") {
       schedule.body.replaceChildren();
       const upcoming = value?.filter((e) => !e.completed && eventDate(e.end || e.start) >= (e.all_day ? start : new Date())).sort((a, b) => eventDate(a.start) - eventDate(b.start)).slice(0, 4);
-      if (!upcoming?.length) empty(schedule.body, "A little breathing room. No upcoming events this week.", value === null);
+      if (!upcoming?.length) empty(schedule.body, "Your week is clear", value === null);
       else upcoming.forEach((event) => {
         const date = eventDate(event.start);
-        const short = date.toLocaleDateString([], { weekday: "short" }) + (event.all_day ? "" : " " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
-        const item = row(event.title, "", () => navigate("calendar"));
-        item.lastElementChild.remove();
-        item.prepend(el("time", { class: "dashboard-event-date", datetime: event.start, text: short, title: date.toLocaleString() }));
+        const time = event.all_day ? 'All day' : date.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+        const item = el('button', {type:'button',class:'dashboard-event',onclick:()=>navigate('calendar'), 'aria-label':`${event.title}, ${date.toLocaleDateString()}, ${time}`},[
+          el('time',{class:'dashboard-date-block',datetime:event.start},[el('small',{text:date.toLocaleDateString([],{weekday:'short'})}),el('strong',{text:String(date.getDate())})]),
+          el('span',{class:'dashboard-event-copy'},[el('span',{text:event.title}),el('small',{text:time})]),
+        ]);
         schedule.body.append(item);
       });
     }
     if (key === "projects") {
       projects.body.replaceChildren();
-      if (!value?.length) empty(projects.body, "Group your chats and shared knowledge into a project.", value === null);
-      else value.slice(0, 3).forEach((p) => projects.body.append(row(p.name, (p.document_ids?.length || 0) + " docs", () => navigate("chat", { projectId: p.id }))));
+      if (!value?.length) empty(projects.body, "Create a project", value === null);
+      else {
+        const shelf = el('div',{class:'dashboard-project-shelf'});
+        value.slice(0,3).forEach(p=>{
+          const count = p.document_ids?.length || 0;
+          shelf.append(el('button',{type:'button',class:'dashboard-project-tile', title:p.name,'aria-label':`${p.name}, ${count} documents`,onclick:()=>navigate('chat',{projectId:p.id})},[
+            el('span',{class:'dashboard-folder','aria-hidden':'true'},[icon('notes'),el('span',{text:String(count)})]),el('span',{class:'dashboard-project-name',text:p.name}),
+          ]));
+        });
+        projects.body.append(shelf);
+      }
     }
     if (["endpoints", "usage", "quotas"].includes(key)) drawModels();
     if (key === "feed") {
       activity.body.replaceChildren();
-      if (!value?.length) empty(activity.body, "Task runs and channel activity will appear here.", value === null);
+      if (!value?.length) empty(activity.body, "No recent activity", value === null);
       else value.forEach((e) => {
-        const item = row(e.message, relativeTime(e.ts));
+        const item = row(e.message, relativeTime(e.ts), () => openPanelDialog({title:'Activity',owner:container,opener:item,body:el('div',{},[badge(e.level),el('p',{text:e.message}),el('small',{text:new Date(e.ts*1000).toLocaleString()})])}));
         item.classList.add("dashboard-activity");
+        item.prepend(icon(e.level === 'error' ? 'warning' : e.level === 'warning' ? 'warning' : 'check'));
+        item.dataset.level = e.level;
         item.title = e.level + ": " + e.message;
         activity.body.append(item);
       });
@@ -403,19 +439,27 @@ export function render(container, tabId, options = {}) {
       if (value === null) empty(agents.body, "", true);
       else {
         const order = ["needs_you", "working", "idle", "capped", "off"];
+        agents.body.append(el('div',{class:'dashboard-agent-summary'},[
+          figure(value.filter(a=>a.status==='working').length,'working'),
+          figure(value.filter(a=>a.status==='needs_you').length,'need you'),
+        ]));
+        const roster = el('div',{class:'dashboard-agent-roster'});
         [...value].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)).slice(0, 5).forEach((agent) => {
           const detail = agent.status === "working" ? agent.status_detail : agent.status === "needs_you" ? `${agent.needs_you} waiting on you` : agent.status === "idle" ? `Idle · ${agent.runs_today} runs today` : agent.status === "capped" ? `Paused: ${agent.status_detail}` : "Off";
-          const item = row(agent.name, detail, () => navigate("agents", { agentId: agent.id }));
-          item.prepend(el("span", { class: "dashboard-agent-dot " + agent.status, "aria-label": agent.status.replaceAll("_", " ") }));
-          agents.body.append(item);
+          const item = el('button',{type:'button',class:'dashboard-agent-tile',title:`${agent.name}: ${detail}`,'aria-label':`${agent.name}: ${detail}`,onclick:()=>navigate('agents',{agentId:agent.id})},[
+            el('span',{class:'dashboard-agent-face'},[agentAvatar(agent,48),el('span',{class:'dashboard-agent-dot '+agent.status,'aria-label':agent.status.replaceAll('_',' ')})]),
+            el('span',{text:agent.name}),
+          ]);
+          roster.append(item);
         });
+        agents.body.append(roster);
       }
     }
     if (key === "inbox") {
       waiting.hidden = !data.auth?.is_admin || !(value?.count > 0);
       waiting.replaceChildren(el("span", { class: "dashboard-stat-value", text: String(value?.count || 0) }), el("span", { class: "dashboard-stat-label", text: "waiting on you" }));
     }
-    if (["skills", "integrations", "tabs", "catalog"].includes(key)) drawStore();
+    if (["skills", "integrations", "tabs", "catalog", "addons"].includes(key)) drawStore();
     content.classList.add("is-filled");
   }
 
@@ -452,6 +496,7 @@ export function render(container, tabId, options = {}) {
         ["agents", "/api/agents"], ["inbox", "/api/agents/inbox"], ["skills", "/api/skills"],
         ["integrations", "/api/integrations"], ["tabs", "/api/system/tabs"],
         ["catalog", "/api/store/catalog?cache_only=true"], ["settings", "/api/settings"],
+        ["addons", "/api/addons"],
       ].map(([key, path]) => request(key, path)));
     })();
     await Promise.allSettled([...publicReads, adminReads]);

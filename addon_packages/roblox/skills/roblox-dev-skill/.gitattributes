@@ -1,0 +1,3 @@
+# Preserve the exact upstream bytes recorded in UPSTREAM.json on Windows too.
+references/*.md -text
+LICENSE -text

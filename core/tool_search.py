@@ -1,4 +1,4 @@
-"""Small, stable search bridge for a local/API chat's less-used tools: the
+"""Small, stable search bridge for a chat's connected and less-used tools: the
 MCP tools discovered for that connection, and on a small window Kairos's own
 non-core tools (core/tool_registry.py deferred_tools, 2026-10-06).
 
@@ -10,9 +10,12 @@ import json
 import re
 
 
-SEARCH = "jarvis_tool_search"
-DESCRIBE = "jarvis_tool_describe"
-CALL = "jarvis_tool_call"
+SEARCH = "kairos_tool_search"
+DESCRIBE = "kairos_tool_describe"
+CALL = "kairos_tool_call"
+# The names before the Kairos rename. Chats from then still show the model
+# calling them, and it may again; they run as the current ones (2026-10-15).
+LEGACY = {"jarvis_tool_search": SEARCH, "jarvis_tool_describe": DESCRIBE, "jarvis_tool_call": CALL}
 _WORDS = re.compile(r"[a-z0-9]+")
 
 
@@ -28,9 +31,9 @@ def bridge_schemas() -> list[dict]:
                   {"query": {"type": "string", "description": "Service, action, or topic to find"},
                    "limit": {"type": "integer", "description": "Results to return, 1 to 10 (default 5)"}},
                   ["query"]),
-        _function(DESCRIBE, "Get the full argument schema for one tool found by jarvis_tool_search.",
+        _function(DESCRIBE, f"Get the full argument schema for one tool found by {SEARCH}.",
                   {"name": {"type": "string", "description": "Exact tool name returned by search"}}, ["name"]),
-        _function(CALL, "Use one tool found by jarvis_tool_search. The usual permission decision still applies.",
+        _function(CALL, f"Use one tool found by {SEARCH}. The usual permission decision still applies.",
                   {"name": {"type": "string", "description": "Exact tool name returned by search"},
                    "arguments": {"type": "object", "description": "Arguments matching its schema"}},
                   ["name", "arguments"]),

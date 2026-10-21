@@ -517,7 +517,11 @@ async def main():
             elif action == 'person_type': await page.keyboard.insert_text(cmd['text'])
             elif action == 'person_key': await page.keyboard.press(cmd['key'])
             elif action == 'person_scroll': await page.mouse.wheel(cmd.get('dx',0), cmd.get('dy',0))
-            elif action == 'open': await page.goto(cmd['url'], wait_until='domcontentloaded', timeout=30000)
+            elif action == 'open':
+                response = await page.goto(cmd['url'], wait_until='domcontentloaded', timeout=30000)
+                # 2026-10-16: surface the proxy's local-preview error to the model.
+                if response and response.headers.get('x-kairos-egress-error') == '1':
+                    raise ValueError(await response.text())
             elif action == 'click':
                 h, opaque = await element(cmd)
                 if opaque: raise ValueError('embedded frame needs the person to take over')

@@ -132,6 +132,10 @@ class PersistentClient:
             return await self._client.call_tool(tool, arguments or {})
         return _tool_text(await self._submit(call(), CALL_TIMEOUT_SECONDS))
 
+    async def call_result(self, tool: str, arguments: dict):
+        """Keep typed content for integrations that return viewport images."""
+        return await self._submit(self._client.call_tool(tool, arguments or {}), CALL_TIMEOUT_SECONDS)
+
     async def close(self) -> None:
         self._close_requested = True
         if self._loop is not None and self._stop is not None and self._thread.is_alive():

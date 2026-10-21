@@ -1,0 +1,2 @@
+# Preserve exact upstream bytes used by the bundled skill's SHA256 manifest.
+skill_templates/ui-ux-pro-max/** -text

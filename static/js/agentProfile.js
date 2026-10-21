@@ -1,3 +1,4 @@
+import { creativeSelectionButton } from './creativeConnections.js';
 import { api, el, toast, confirmDialog } from './api.js';
 import { agentAvatar, avatarPicker, avatarSpec } from './agentAvatar.js';
 import { routinesPanel } from './routinesPanel.js';
@@ -196,7 +197,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   sections.get('Soul').content.append(soulDrift, soul, sectionSave());
   sections.get('Memory').content.append(memory, upkeep, sectionSave());
   sections.get('Routines').content.replaceChildren(routines, cap, sectionSave());
-  sections.get('Access').content.append(access, peersField, keep, sectionSave(), forget, remove);
+  sections.get('Access').content.append(creativeSelectionButton(() => ({ agentId: detail.agent.id }), root), access, peersField, keep, sectionSave(), forget, remove);
   sections.get('Voice & alerts').content.replaceChildren(channel, sectionSave());
   sections.get('Usage').content.replaceChildren(row({ title: 'Daily runs', description: 'Used today against this bot’s cap.', control: usage }));
   // Changes the bot made to itself through /setup, each with its Undo

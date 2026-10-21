@@ -105,6 +105,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   win.setSize(390, 844);
   await js("document.querySelector('.agent-profile-open').click()");
   await waitFor("innerWidth <= 768 && !document.querySelector('.agent-profile-sheet').hidden");
+  await delay(300); // Measure after the profile opening transition settles.
   assert.ok(await js("(() => { const r = document.querySelector('.agent-profile-sheet').getBoundingClientRect(); return r.width === innerWidth && r.left === 0; })()"), 'sheet covers phone content');
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true }))");
   win.setSize(1440, 900);
@@ -124,6 +125,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   }
 
   await navigate('agents');
+  await js("document.querySelector('.agents-rail-inbox').click()");
+  await waitFor("!!document.querySelector('.agent-inbox-question')");
   const answerStart = writes.length;
   await js("(() => { const item = document.querySelector('.agent-inbox-question'); [...item.querySelectorAll('button')].find(b => b.textContent === 'Reply').click(); item.querySelector('input').value = 'Go ahead'; [...item.querySelectorAll('button')].find(b => b.textContent === 'Send').click(); })()");
   await waitFor("!document.querySelector('.agent-inbox-question')");

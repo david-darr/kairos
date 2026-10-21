@@ -29,6 +29,14 @@ from core.mail_utils import message_time
 from core.untrusted import wrap_untrusted as _wrap_untrusted
 
 API_VERSION = 1
+
+
+def __getattr__(name):
+    # Optional native bridge retained as an additive part of the v1 contract.
+    if name in {'roblox_workspace', 'roblox_style', 'roblox_assets'}:
+        from core import addons
+        return addons.module(name)
+    raise AttributeError(name)
 # A tab with a name colliding with an app store must not adopt credentials.
 _APP_STORES = {"auth.json", "sessions.json", "password_resets.json", "settings.json",
     "model_endpoints.json", "email_accounts.json", "connectors.json", "discord_bots.json",

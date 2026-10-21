@@ -378,6 +378,24 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proc.payload, computer_image.DOCKERFILE.encode())
 
 
+class LocalPreviewPermissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_chat_and_agent_still_prompt(self):
+        for surface in ("chat:preview-auto", "agent:preview-auto"):
+            queue = permissions.open_channel(surface)
+            try:
+                with patch("core.session_manager.session_manager.get_session", return_value={"permission_mode": "auto"}):
+                    task = asyncio.create_task(permissions.decide(surface=surface, tool="computer_local_app",
+                        arguments={"url": "http://localhost:8082"}, target="localhost:8082", is_admin=True,
+                        force_prompt=True, choices=computer.LOCAL_CHOICES))
+                    payload = await asyncio.wait_for(queue.get(), 2)
+                    self.assertFalse(task.done())
+                    self.assertFalse(permissions.answer(payload["id"], "forever", "david"))
+                    self.assertTrue(permissions.answer(payload["id"], "reject", "david"))
+                    self.assertEqual((await task).behavior, "deny")
+            finally:
+                permissions.close_channel(surface)
+
+
 class EngineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.now = 100.0
@@ -409,6 +427,73 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.computer._desktop_enabled", return_value=True):
             await self.open()
         return self.manager._computers["chat:s1"]
+
+    async def test_local_preview_approval_revoke_and_stop(self):
+        with patch.object(computer.sandbox_egress, "container_ip", AsyncMock(return_value="172.22.0.7")), \
+             patch.object(computer.sandbox_egress, "set_grants", AsyncMock()) as grants:
+            result = await self.manager.act("chat:s1", "open", {"url": "http://127.0.0.1:8082/"}, self.ctx)
+            self.assertIn("open completed", result["text"])
+            self.assertEqual(self.ask.call_args.kwargs["tool"], "computer_local_app")
+            self.assertTrue(self.ask.call_args.kwargs["force_prompt"])
+            self.assertEqual({c["scope"] for c in self.ask.call_args.kwargs["choices"]}, {"once"})
+            grants.assert_awaited_with("172.22.0.7", {8082})
+            await self.manager.revoke_local_apps("chat:s1")
+            grants.assert_awaited_with("172.22.0.7", set())
+            result = await self.manager.act("chat:s1", "read", {}, self.ctx)
+            self.assertIn("revoked", result["text"])
+            await self.manager.act("chat:s1", "open", {"url": "http://localhost:8082/"}, self.ctx)
+            await self.manager.stop("chat:s1")
+            grants.assert_awaited_with("172.22.0.7", set())
+
+    async def test_local_preview_denied_and_backend_ports(self):
+        self.ask.return_value = permissions.Decision("deny", "No")
+        result = await self.manager.act("chat:s1", "open", {"url": "http://localhost:8082/"}, self.ctx)
+        self.assertIn("not approved", result["text"])
+        self.assertFalse(self.procs[0].calls)
+        self.ask.reset_mock()
+        with patch("core.middleware.local_api_base", return_value="http://127.0.0.1:9991/api"), \
+             patch("core.settings.get_setting", return_value=9992), \
+             patch.dict(os.environ, {"JARVIS_PORT": "9993"}):
+            for port in (8420, 8421, 8422, 8430, 8431, 8888, 8889, 9991, 9992, 9993):
+                result = await self.manager.act("chat:s1", "open", {"url": f"http://localhost:{port}/"}, self.ctx)
+                self.assertIn("cannot be granted", result["text"])
+        self.ask.assert_not_called()
+
+    async def test_local_redirect_does_not_prompt_or_grant_another_port(self):
+        await self.open()
+        self.procs[0].next_url = "http://localhost:8083/"
+        self.ask.reset_mock()
+        result = await self.manager.act("chat:s1", "click", {"ref": "1"}, self.ctx)
+        self.assertIn("not approved", result["text"])
+        self.ask.assert_not_called()
+
+    async def test_stop_and_revoke_invalidate_pending_local_approval(self):
+        for stop in (False, True):
+            await self.open()
+            waiting, answer = asyncio.Event(), asyncio.Event()
+            async def decide(**kwargs):
+                waiting.set()
+                await answer.wait()
+                return permissions.Decision("allow")
+            with patch.object(computer.permissions, "decide", AsyncMock(side_effect=decide)), \
+                 patch.object(computer.sandbox_egress, "set_grants", AsyncMock()) as grants:
+                request = asyncio.create_task(self.manager.act("chat:s1", "open", {"url": "http://localhost:8082"}, self.ctx))
+                await waiting.wait()
+                if stop:
+                    await asyncio.wait_for(self.manager.stop("chat:s1"), 1)
+                else:
+                    await asyncio.wait_for(self.manager.revoke_local_apps("chat:s1"), 1)
+                answer.set()
+                self.assertIn("while waiting", (await request)["text"])
+                grants.assert_not_awaited()
+
+    async def test_revoke_route_checks_owner_and_clears_grants(self):
+        with patch.object(computer_routes, "_access") as access, \
+             patch.object(computer_routes, "_running"), \
+             patch.object(computer.manager, "revoke_local_apps", AsyncMock()) as revoke:
+            self.assertEqual(await computer_routes.revoke_local_apps("chat:s1", "david"), {"ok": True})
+            access.assert_called_once_with("chat:s1", "david")
+            revoke.assert_awaited_once_with("chat:s1")
 
     async def push_steps(self, steps, ident=None):
         c = self.manager._computers["chat:s1"]

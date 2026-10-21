@@ -307,6 +307,9 @@ def approved_view_bytes(slug: str) -> bytes | None:
 
 def _folder_entries() -> list[dict]:
     entries = tab_folders.scan(PREBUILT_TABS_DIR, user=False, api_version=TAB_API_VERSION)
+    from core import addons
+    if addons.enabled('roblox'):
+        entries += tab_folders.scan(str(addons.ROOT / 'roblox' / 'tabs'), user=False, api_version=TAB_API_VERSION)
     entries += tab_folders.scan(USER_TABS_DIR, user=True, api_version=TAB_API_VERSION)
     for entry in entries:
         _apply_folder_policy(entry)
@@ -316,7 +319,7 @@ def _folder_entries() -> list[dict]:
 def _folder_entry(slug: str, *, user: bool) -> dict | None:
     if not tab_folders.SLUG.fullmatch(slug):
         return None
-    path = os.path.join(USER_TABS_DIR if user else PREBUILT_TABS_DIR, slug)
+    path = os.path.join(USER_TABS_DIR, slug) if user else _prebuilt_path(slug)
     if not os.path.lexists(path):
         return None
     entry = tab_folders.inspect_folder(path, user=user, api_version=TAB_API_VERSION)
@@ -340,9 +343,12 @@ def _folder_allowed(entry: dict) -> bool:
     # Check only this tab. Overrides are policy, even before approval.
     slug = entry["slug"]
     user = entry["kind"] == "user"
+    from core import addons
+    if not user and not addons.verify_tab(slug):
+        return False
     snapshot = entry.get("_snapshot")
     if (entry["status"] != "on" or not snapshot
-            or entry["_path"] != os.path.join(USER_TABS_DIR if user else PREBUILT_TABS_DIR, slug)):
+            or entry["_path"] != (os.path.join(USER_TABS_DIR, slug) if user else _prebuilt_path(slug))):
         return False
     if user:
         if slug in (settings_store.get_setting("disabled_user_tabs") or []):
@@ -360,6 +366,13 @@ def _folder_allowed(entry: dict) -> bool:
         return tab_folders.fingerprint(entry["_path"], user=user)[0] == snapshot
     except (OSError, ValueError):
         return False
+
+
+def _prebuilt_path(slug):
+    from core import addons
+    if slug == 'roblox' and addons.enabled('roblox'):
+        return str(addons.ROOT / 'roblox' / 'tabs' / slug)
+    return os.path.join(PREBUILT_TABS_DIR, slug)
 
 
 def _entry_allowed(entry: dict) -> bool:

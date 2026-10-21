@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import shutil
+from pathlib import Path
 from typing import Optional
 
 from core.constants import BASE_DIR, DATA_DIR
@@ -37,6 +38,7 @@ _LEGACY_SEED_HASHES = {
     # the pre-bundling 2026-09-07 draft that early installs already had under
     # this slug, which seeding then refused to overwrite.
     "build-custom-tab": {"9208f6c1ecd88727c39e4da118b643adda15ab4d6b9fcff5be2ffe91c678ac50",
+                         "b3099ef75916ad7fcb0ad94ede4e39f268db52d6bb6ea261172dc60c38940a60",
                          "3a9fe0fa1ecda46b4c6a9ef85249d97656896d04148959b52adb7578af88d1d9",
                          "e60c90b88115d35ce33364de4bc943dfdd2adf83ad80556a5fcd3a7065513319",
                          "c12313f03035060c100ceac976653c6c1ccbe8f759285a44925b700009141cb2",
@@ -190,12 +192,19 @@ def seed_default_skills() -> list[str]:
                     hashes[slug] = template_hash
                 continue
             os.makedirs(target_dir, exist_ok=True)
-            for filename in os.listdir(template_dir):
-                src = os.path.join(template_dir, filename)
-                dst = os.path.join(target_dir, filename)
-                # Never clobber a skill the user already has under this name.
-                if os.path.isfile(src) and not os.path.exists(dst):
-                    shutil.copy2(src, dst)
+            for source_dir, dirs, filenames in os.walk(template_dir, followlinks=False):
+                dirs[:] = [name for name in dirs if name != "__pycache__"
+                           and not _linked(Path(source_dir) / name)]
+                for filename in filenames:
+                    src = Path(source_dir) / filename
+                    relative = src.relative_to(template_dir)
+                    dst = Path(target_dir) / relative
+                    # Never follow links or clobber user files, including guides.
+                    if _linked(src) or any(_linked(part) for part in [dst, *dst.parents]):
+                        continue
+                    if not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
             seeded.append(slug)
             if _seed_hash(dst_skill) == template_hash:
                 hashes[slug] = template_hash
@@ -211,14 +220,36 @@ def seed_default_skills() -> list[str]:
     return seeded
 
 
+def _linked(path):
+    return path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+
+
+def read_supporting_file(slug: str, relative: str) -> str:
+    """Read one text reference inside an approved skill, without link escapes."""
+    skill_root = Path(_skill_path(slug)).parent
+    if (not isinstance(relative, str) or not relative or "\\" in relative
+            or relative.startswith("/") or ":" in relative
+            or any(part in {"", ".", ".."} for part in relative.split("/"))):
+        raise ValueError("Use a relative path inside the skill")
+    target = skill_root / relative
+    if target.suffix.lower() not in {".md", ".txt", ".json"}:
+        raise ValueError("Only text reference files can be read with read_skill")
+    if any(_linked(part) for part in [target, *target.parents]) or not target.resolve().is_relative_to(skill_root.resolve()):
+        raise ValueError("Skill references cannot contain links or escape their folder")
+    if not target.is_file() or target.stat().st_size > 400000:
+        raise ValueError("Skill reference is missing or exceeds the text limit")
+    return _read(str(target))
+
+
 def list_skills() -> list[dict]:
+    from core import addons
     if not os.path.isdir(SKILLS_DIR):
         return []
     skills = []
     for slug in sorted(os.listdir(SKILLS_DIR)):
         # A folder the app could not have created (dotfiles, hand-made names)
         # is skipped rather than failing the whole listing.
-        if not _VALID_SLUG_RE.fullmatch(slug):
+        if not _VALID_SLUG_RE.fullmatch(slug) or not addons.skill_available(slug):
             continue
         path = _skill_path(slug)
         if os.path.exists(path):

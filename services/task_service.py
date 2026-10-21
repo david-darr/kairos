@@ -95,6 +95,14 @@ class TaskService:
     def __init__(self) -> None:
         self._tasks: dict = read_json(TASKS_FILE, {})
         self._runs: list = read_json(TASK_RUNS_FILE, [])
+        # Builds through 1.15 wrote run records without an id; everything
+        # since looks records up by it, so one left over stopped startup
+        # (2.1.0, 2026-10-15). Give each one an id once, on load.
+        legacy = [r for r in self._runs if "id" not in r]
+        for run in legacy:
+            run["id"] = uuid.uuid4().hex[:12]
+        if legacy:
+            write_json_atomic(TASK_RUNS_FILE, self._runs)
 
     def _save_tasks(self) -> None:
         write_json_atomic(TASKS_FILE, self._tasks)

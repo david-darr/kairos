@@ -44,8 +44,11 @@ module.exports = async ({ js, waitFor, delay, navigate, win, report = false }) =
     await delay(300);
     const at = `${width}x${height}`;
     await navigate('agents');
-    await waitFor("!!document.querySelector('.agent-roster-title')");
+    await waitFor("!!document.querySelector('.agents-messenger-welcome')");
     await check(`${at} agents`, '#content');
+    await js("document.querySelector('.agents-chats-open').click()");
+    await check(`${at} chats drawer`, '.agents-chat-rail');
+    await js("document.querySelector('.agents-rail-toggle').click()");
     for (const tab of ['chat', 'work', 'routines', 'memory']) {
       await navigate('agents', { agentId: 'a1', agentTab: tab });
       await waitFor("!!document.querySelector('#content .agent-header-blurb, #content h1, #content h2')");
@@ -56,8 +59,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, report = false }) =
     await check(`${at} profile`, '.agent-profile-sheet');
     await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"], .agent-profile-sheet .agent-profile-close')?.click()");
     await navigate('agents');
-    await waitFor("[...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+ New agent')");
-    await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '+ New agent').click()");
+    await waitFor("!!document.querySelector('.agents-welcome-actions .primary')");
+    await js("document.querySelector('.agents-welcome-actions .primary').click()");
     await waitFor("!!document.querySelector('.agent-create-dialog')");
     await check(`${at} new bot`, '.agent-create-dialog');
     await js("document.querySelector('.agent-create-dialog [aria-label=\"Close\"], .agent-create-dialog .modal-close')?.click()");

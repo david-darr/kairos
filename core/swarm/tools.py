@@ -245,6 +245,12 @@ class ToolService:
     @property
     def definitions(self) -> dict:
         definitions = dict(_LEAD if self.is_lead else _SPECIALIST)
+        definitions['ui_design'] = {
+            'description': 'Read the built-in UI/UX guide (action=guide) before interface work, then search local design guidance. Read-only; no file, shell or private-memory access.',
+            'parameters': {'type':'object','properties':{
+                'action':{'type':'string','enum':['guide','search','design_system']},
+                'query':{'type':'string'},'domain':{'type':'string'},'stack':{'type':'string'},
+                'reference':{'type':'string','enum':['references/quick-reference.md','references/pro-rules.md']}},'required':['action']}}
         if self.memory and self.memory.enabled:
             definitions.update(_MEMORY)
         if self.jarvis_agent_id:
@@ -287,6 +293,16 @@ class ToolService:
             raise ToolRejected(str(exc)) from exc
 
     # -- individual tools -------------------------------------------------
+
+    def _ui_design(self, arguments):
+        from core import memory_tools, ui_design
+        if arguments.get('action') == 'guide':
+            reference = arguments.get('reference')
+            if reference not in {None, 'references/quick-reference.md', 'references/pro-rules.md'}:
+                raise ToolRejected('Choose a built-in UI/UX reference')
+            return memory_tools.read_skill('ui-ux-pro-max', reference)
+        return ui_design.search_sync(arguments.get('query'), action=arguments.get('action'),
+            domain=arguments.get('domain') or '', stack=arguments.get('stack') or '')
 
     def _get_assigned_work(self, _arguments):
         assignment = self.assignment

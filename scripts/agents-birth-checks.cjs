@@ -25,7 +25,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   // a typed draft asks before Escape can discard it.
   await navigate('agents');
   const before = writes.length;
-  await js("document.querySelector('.agents-view .agent-new-card').click()");
+  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   await capture?.('desktop-agent-create');
   assert.ok(await js("!!document.querySelector('.agent-create-dialog .agent-dot-avatar') && !document.querySelector('.agent-create-dialog .agent-portrait')"), 'creation leads with a dot face');
@@ -37,8 +37,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   // 2026-10-14: the sidebar's New bot button went with its bot sections;
   // the Agents tab's own button opens the same modal.
   await navigate('agents');
-  await waitFor("[...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+ New agent')");
-  await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '+ New agent').click()");
+  await waitFor("!!document.querySelector('.agents-welcome-actions .primary')");
+  await js("document.querySelector('.agents-welcome-actions .primary').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   await fill('[aria-label="Bot name"]', 'Temporary');
   await pressEscape();
@@ -57,7 +57,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   // 3-4. Name gates creation. Presets fill editable, visible fields and a
   // successful create opens the new profile sheet.
   await navigate('agents');
-  await js("document.querySelector('.agents-view .agent-new-card').click()");
+  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   assert.ok(await js("document.querySelector('.agent-create-footer .btn.primary').disabled && document.querySelector('.agent-create-validity').textContent.includes('name')"));
   await js("[...document.querySelectorAll('.agent-create-presets button')].find(n => n.querySelector('strong')?.textContent === 'Researcher').click()");
@@ -103,7 +103,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   // list and its profile opens. The fixture deliberately does not roll back.
   demoState.failFirstRoutine = true;
   await navigate('agents');
-  await js("document.querySelector('.agents-view .agent-new-card').click()");
+  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
   await waitFor(`!!document.querySelector('${modal}')`);
   await fill('.agent-create-dialog [aria-label="Bot name"]', 'Routine Survivor');
   await fill('.agent-create-dialog [aria-label="Routine name"]', 'Daily watch');

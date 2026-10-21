@@ -253,7 +253,7 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
                      resume_session_id=(session or {}).get("claude_session_id"), agent_id=agent_id,
                      agent_prompt=agent_prompt, **forge_options)
     if endpoint["kind"] == "codex_cli":
-        return CodexBrain(cwd_override=workspace_dir, session_id=session_id,
+        return CodexBrain(cwd_override=workspace_dir, session_id=session_id, integration_ids=integration_ids,
                           model=cli_model or None, is_admin=is_admin, project_id=project_id,
                           effort=effort, agent_prompt=agent_prompt,
                           agent_auto=bool(agent_id and session is None), agent_id=agent_id, **forge_options)
@@ -491,6 +491,9 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
     if (session_manager.get_session(session_id) or {}).get('forge'):
         from services.forge_sessions import forge_sessions
         sent += forge_sessions.repo_context(session_id)
+    from core import addons
+    if addons.enabled('roblox'):
+        sent += addons.module('roblox_style').context(session_id, text)
     session_manager.record_sent_text(session_id, index, text, sent)
     if (session_manager.get_session(session_id) or {}).get('forge'):
         forge_sessions.mark_repo_context_loaded(session_id)

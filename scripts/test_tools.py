@@ -31,7 +31,9 @@ import httpx  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core import permissions, system_prompt, tool_access, tool_registry  # noqa: E402
+from core import addons
+for ident in addons.IDS: addons.change(ident, "install")
+from core import permissions, system_prompt, tool_access, tool_registry, tool_search  # noqa: E402
 from core.codex_brain import CodexBrain  # noqa: E402
 from core.external_brain import ExternalBrain  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
@@ -53,7 +55,7 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     "hand_to_agent save_skill add_mcp_server forge_app_logs "
     # Reviewed 2026-10-15: own-topic reads (decb912); peer-scoped, capped
     # assignments and requester-owned question answers (5421f76).
-    "agent_read_topic agent_assign agent_answer_assignment").split()}
+    "agent_read_topic agent_assign agent_answer_assignment roblox_studio creative_tools roblox_style roblox_assets ui_design").split()}
 
 
 def load_cli():
@@ -79,7 +81,8 @@ class SurfaceTests(unittest.TestCase):
                 self.assertEqual(f"\n  {spec.name}" in prompt, spec.name in offered, (spec.name, admin, agent))
         cli = load_cli()
         commands = cli.parser()._subparsers._group_actions[0].choices
-        self.assertEqual(list(commands), names(tool_registry.specs(tool_registry.CODEX, True, True)))
+        self.assertEqual(list(commands), names(tool_registry.specs(tool_registry.CODEX, True, True))
+                         + [s["function"]["name"] for s in tool_search.bridge_schemas()])
 
     def test_codex_gets_claudes_tools_but_neither_file_tools_nor_the_sandbox(self):
         codex = set(names(tool_registry.specs(tool_registry.CODEX, True, True)))
@@ -189,8 +192,8 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
     the bridge and run exactly as before (2026-10-06, vault note "Local
     Model Fit (Build Spec)")."""
     CORE = {"search_sessions", "search_vault", "read_vault_file", "list_notes", "create_note", "update_note",
-            "list_tasks", "list_upcoming_events", "search_skills", "read_skill"}
-    BRIDGE = {"jarvis_tool_search", "jarvis_tool_describe", "jarvis_tool_call"}
+            "list_tasks", "list_upcoming_events", "search_skills", "read_skill", "ui_design"}
+    BRIDGE = {"kairos_tool_search", "kairos_tool_describe", "kairos_tool_call"}
 
     def brain(self, window, **kw):
         return ExternalBrain("http://fake", "m", None, session_id=self.sid, window=window, **kw)
@@ -208,7 +211,7 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
         for big in (None, tool_registry.SMALL_WINDOW + 1, 200000):
             full = self.brain(big, is_admin=True)
             self.assertEqual(shown(full), set(names(tool_registry.specs(tool_registry.OPENAI, True, session_id=self.sid))), big)
-            self.assertNotIn("jarvis_tool_search", shown(full))
+            self.assertNotIn("kairos_tool_search", shown(full))
             self.assertNotIn("only your most-used tools are listed", full._messages[0]["content"])
         small = self.brain(8192, is_admin=True)
         self.assertIn("only your most-used tools are listed", small._messages[0]["content"],
@@ -216,11 +219,11 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_hidden_tool_is_found_and_runs_with_hooks_and_audit(self):
         brain = self.brain(8192)
-        found = await brain._execute_tool("jarvis_tool_search", {"query": "create task"})
+        found = await brain._execute_tool("kairos_tool_search", {"query": "create task"})
         self.assertIn('"create_task"', found)
-        described = json.loads(await brain._execute_tool("jarvis_tool_describe", {"name": "create_task"}))
+        described = json.loads(await brain._execute_tool("kairos_tool_describe", {"name": "create_task"}))
         self.assertIn("schedule_kind", described["parameters"]["properties"])
-        made = await brain._execute_tool("jarvis_tool_call", {"name": "create_task", "arguments": {
+        made = await brain._execute_tool("kairos_tool_call", {"name": "create_task", "arguments": {
             "name": "Water the plants", "prompt": "remind me", "schedule_kind": "card"}})
         self.assertTrue(made.startswith("Created task "), made)
         self.assertEqual((permissions.audit()[-1]["tool"], permissions.audit()[-1]["decision"]), ("create_task", "tool used"))
@@ -228,17 +231,27 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
         script.write_text("import json, sys\njson.load(sys.stdin)\nsys.stderr.write('no new tasks')\nsys.exit(2)\n")
         hook = hook_service.create("No tasks", event="tool.before", action="command", tool_pattern="create_task",
                                    config={"command": f'"{sys.executable}" "{script}"'})
-        blocked = await brain._execute_tool("jarvis_tool_call", {"name": "create_task", "arguments": {
+        blocked = await brain._execute_tool("kairos_tool_call", {"name": "create_task", "arguments": {
             "name": "x", "prompt": "y", "schedule_kind": "card"}})
         if any("WinError 5" in entry.get("detail", "") for entry in hook_service.get(hook["id"])["log"]):
             self.skipTest("this sandbox cannot start the hook subprocess")
         self.assertEqual(blocked, "Not run: blocked by a hook: no new tasks", "hooks see the real tool behind the bridge")
         self.assertFalse(brain.turn_taint.tainted, "JARVIS's own tool list is not untrusted text")
 
+    async def test_the_names_from_before_the_rename_still_run(self):
+        # Chats from before the Kairos rename show the model calling
+        # jarvis_tool_*; it may call them again (2026-10-15).
+        brain = self.brain(8192)
+        self.assertNotIn("jarvis_tool_search", {t["function"]["name"] for t in brain.tools})
+        self.assertIn('"create_task"', await brain._execute_tool("jarvis_tool_search", {"query": "create task"}))
+        made = await brain._execute_tool("jarvis_tool_call", {"name": "create_task", "arguments": {
+            "name": "Old name", "prompt": "still works", "schedule_kind": "card"}})
+        self.assertTrue(made.startswith("Created task "), made)
+
     async def test_the_list_never_changes_within_a_chat(self):
         brain = self.brain(8192)
         before = json.dumps(brain.tools)
-        await brain._execute_tool("jarvis_tool_search", {"query": "calendar"})
+        await brain._execute_tool("kairos_tool_search", {"query": "calendar"})
         await brain.connect()
         self.assertEqual(json.dumps(brain.tools), before, "the cached prompt stays the same")
         mcp = {"github__create_issue": {"server": "github", "name": "create_issue", "description": "Open an issue",
@@ -248,8 +261,8 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
             with_mcp = self.brain(8192)
             await with_mcp.connect()
         listed = [t["function"]["name"] for t in with_mcp.tools]
-        self.assertEqual(listed.count("jarvis_tool_search"), 1, "one bridge serves both")
-        found = await with_mcp._execute_tool("jarvis_tool_search", {"query": "create issue"})
+        self.assertEqual(listed.count("kairos_tool_search"), 1, "one bridge serves both")
+        found = await with_mcp._execute_tool("kairos_tool_search", {"query": "create issue"})
         self.assertIn("github__create_issue", found)
         self.assertTrue(with_mcp.turn_taint.tainted, "a third-party tool's description is still untrusted")
 
@@ -315,6 +328,17 @@ class CliTests(unittest.TestCase):
         spec = next(s for s in tool_registry.specs(tool_registry.CODEX, True) if s.name == "google_sheets")
         self.assertEqual(cli.arguments(spec, parsed), {"action": "update", "values": [[1, 2]], "title": "T"})
 
+    def test_json_file_arguments_preserve_multiline_luau_without_shell_escaping(self):
+        cli = load_cli()
+        path = environment / 'studio args.json'
+        code = 'print("a quoted value")\nlocal value = [[line one\nline two]]\nreturn value'
+        path.write_text(json.dumps({'datamodel_type':'Edit','code':code}),encoding='utf-8-sig')
+        parsed = cli.parser().parse_args(['roblox_studio','--action','call','--name','execute_luau','--arguments_file',str(path)])
+        spec = next(s for s in tool_registry.specs(tool_registry.CODEX,True) if s.name == 'roblox_studio')
+        self.assertEqual(cli.arguments(spec,parsed)['arguments']['code'],code)
+        path.write_text('[]',encoding='utf-8')
+        with self.assertRaises(ValueError): cli.arguments(spec,parsed)
+
     def test_it_posts_to_the_address_it_was_given_with_its_token(self):
         cli = load_cli()
         seen = {}
@@ -369,14 +393,191 @@ class CodexTurnTests(unittest.TestCase):
                   patch.object(CodexBrain, "_codex_path", return_value="codex"),
                   patch("core.codex_brain._kill_process_tree", new=AsyncMock(return_value=True))):
                 with self.assertRaises(RuntimeError):
-                    _ = [c async for c in CodexBrain(session_id=sid, agent_id="a1").run_turn_stream("hi")]
+                    _ = [c async for c in CodexBrain(session_id=sid, agent_id="a1", integration_ids=["github"]).run_turn_stream("hi")]
         with patch.dict(os.environ, {"JARVIS_INTERNAL_TOKEN": "leftover"}):
             asyncio.run(run())
         grant = seen["grant"]
         self.assertEqual((grant.session_id, grant.is_admin, grant.agent_id), (sid, False, "a1"))
         self.assertIsNone(tool_access.resolve(seen["JARVIS_TOOL_TOKEN"]), "revoked when the turn ends")
+        self.assertEqual(grant.integration_ids, ("github",))
         self.assertNotIn("JARVIS_CODEX_SESSION_ID", seen)
         self.assertNotIn("JARVIS_GOOGLE_CHAT_TOKEN", seen)
+
+
+class CodexMCPTests(unittest.TestCase):
+    """Backend-only integration access for Codex (2026-10-15)."""
+    def setUp(self):
+        app = FastAPI()
+        app.include_router(tool_routes.router)
+        self.client = TestClient(app, client=("127.0.0.1", 50000))
+        self.sid = session_manager.create_session("codex MCP")["id"]
+        self.config = {"type": "http", "url": "http://fake/github"}
+        self.servers = {"github": self.config, "other": {"type": "http", "url": "http://fake/other"},
+                        "REA": {"type": "stdio", "command": "never-run"}}
+        self.tool = "mcp__github__create_issue"
+        self.schema = {"type": "object", "properties": {"title": {"type": "string"}}}
+        self.tokens = []
+        self.runtime = self.enterContext(patch("core.integrations.list_mcp_servers_runtime",
+            side_effect=lambda ids: {k: v for k, v in self.servers.items() if ids is None or k in ids}))
+        self.refresh = self.enterContext(patch("core.mcp_oauth.refresh_due", new=AsyncMock()))
+
+        async def discover(servers):
+            return {f"mcp__{name}__create_issue": {"server": name, "name": "create_issue", "config": config,
+                    "description": "Create an issue", "schema": self.schema} for name, config in servers.items()}
+        self.discovery = self.enterContext(patch("core.mcp_client.discover", new=AsyncMock(side_effect=discover)))
+        self.mcp_call = self.enterContext(patch("core.mcp_client.call_tool", new=AsyncMock(return_value="issue created")))
+        self.decision = self.enterContext(patch("core.permissions.decide", new=AsyncMock(
+            return_value=permissions.Decision("allow", "allowed"))))
+        for hook in hook_service.hooks():
+            hook_service.delete(hook["id"])
+
+    def tearDown(self):
+        for token in self.tokens:
+            tool_access.revoke(token)
+
+    def token(self, **kwargs):
+        token = tool_access.issue(self.sid, False, integration_ids=["github", "REA"], **kwargs)
+        self.tokens.append(token)
+        return token
+
+    def call(self, token, command, **arguments):
+        return self.client.post(f"/api/tools/kairos_tool_{command}", json={"arguments": arguments},
+                                headers={"X-JARVIS-Tool-Token": token})
+
+    def result(self, token, command, **arguments):
+        response = self.call(token, command, **arguments)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["result"]
+
+    def test_search_describe_call_scope_permissions_hooks_and_cache(self):
+        token = self.token()
+        found = json.loads(self.result(token, "search", query="github issue"))
+        self.assertEqual([t["name"] for t in found], [self.tool])
+        grant = tool_access.resolve(token)
+        self.assertTrue(grant.turn_taint.tainted)
+        described = json.loads(self.result(token, "describe", name=self.tool))
+        self.assertEqual(described["parameters"], self.schema)
+        self.assertEqual(self.result(token, "call", name=self.tool, arguments={"title": "test"}), "issue created")
+        self.decision.assert_awaited_once()
+        self.assertEqual(self.decision.call_args.kwargs["surface"], f"chat:{self.sid}")
+        self.assertEqual(self.decision.call_args.kwargs["tool"], self.tool)
+        self.mcp_call.assert_awaited_once_with(self.config, "create_issue", {"title": "test"})
+        self.assertIn(f"MCP result: {self.tool}", grant.turn_taint.sources)
+        self.discovery.assert_awaited_once()
+        self.assertNotIn("REA", self.discovery.call_args.args[0])
+        self.assertEqual(self.result(token, "search", query="other"), "No matching tools.")
+        self.assertIn("not available", self.result(token, "describe", name="mcp__other__create_issue"))
+        self.assertIn("not available", self.result(token, "call", name="mcp__other__create_issue", arguments={}))
+        self.assertIn("must be an object", self.result(token, "call", name=self.tool, arguments=[]))
+        self.decision.return_value = permissions.Decision("deny", "person said no")
+        self.assertEqual(self.result(token, "call", name=self.tool, arguments={}), "Not run: person said no")
+        self.assertEqual(self.mcp_call.await_count, 1)
+        seen = {}
+        async def around(name, args, run, **ctx):
+            seen.update(name=name, args=args, **ctx)
+            return "Not run: blocked by a hook: test"
+        with patch.object(hook_service, "around_tool", new=around):
+            self.assertIn("blocked by a hook", self.result(token, "call", name=self.tool, arguments={"title": "hook"}))
+        self.assertEqual((seen["name"], seen["args"], seen["session_id"]), (self.tool, {"title": "hook"}, self.sid))
+        self.assertEqual(self.mcp_call.await_count, 1)
+        tool_access.revoke(token)
+        self.assertEqual(grant.mcp_catalog, {})
+
+    def test_disabled_replaced_and_disabled_while_permission_pending(self):
+        token = self.token()
+        self.result(token, "search", query="github")
+        self.servers.pop("github")
+        self.assertIn("no longer enabled", self.result(token, "call", name=self.tool, arguments={}))
+        self.decision.assert_not_awaited()
+        self.servers["github"] = {**self.config, "url": "http://fake/replaced"}
+        self.assertIn("no longer enabled", self.result(token, "call", name=self.tool, arguments={}))
+        self.servers["github"] = self.config
+        async def disable(**kwargs):
+            self.servers.pop("github")
+            return permissions.Decision("allow", "allowed")
+        self.decision.side_effect = disable
+        self.assertIn("no longer enabled", self.result(token, "call", name=self.tool, arguments={}))
+        self.mcp_call.assert_not_awaited()
+
+    def test_expired_and_revoked_tokens_cannot_use_any_bridge_command(self):
+        token = self.token()
+        self.result(token, "search", query="github")
+        grant = tool_access.resolve(token)
+        with patch("core.tool_access.time.time", return_value=time.time() + tool_access.TOKEN_LIFETIME_SECONDS + 1):
+            for command in ("search", "describe", "call"):
+                self.assertEqual(self.call(token, command, name=self.tool, query="github", arguments={}).status_code, 403)
+        self.assertEqual(grant.mcp_catalog, {})
+        token = self.token()
+        tool_access.revoke(token)
+        for command in ("search", "describe", "call"):
+            self.assertEqual(self.call(token, command, name=self.tool, arguments={}).status_code, 403)
+
+    def test_revocation_while_permission_pending_prevents_execution(self):
+        token = self.token()
+        async def revoke(**kwargs):
+            tool_access.revoke(token)
+            return permissions.Decision("allow", "allowed")
+        self.decision.side_effect = revoke
+        self.assertIn("expired", self.result(token, "call", name=self.tool, arguments={}))
+        self.mcp_call.assert_not_awaited()
+
+    def test_external_brain_uses_the_same_checks_and_error_text(self):
+        async def run():
+            brain = ExternalBrain("http://fake", "m", None, session_id=self.sid, integration_ids=["github"])
+            await brain.connect()
+            self.assertIn(self.tool, brain._mcp_tools)
+            result = await brain._execute_tool(tool_search.CALL, {"name": self.tool, "arguments": {"title": "external"}})
+            self.assertEqual(result, "issue created")
+            self.assertIn(f"MCP result: {self.tool}", brain.turn_taint.sources)
+            self.mcp_call.side_effect = RuntimeError("offline")
+            self.assertEqual(await brain._call_mcp(self.tool, {}), "Tool error: offline")
+            self.decision.return_value = permissions.Decision("deny", "person said no")
+            self.assertEqual(await brain._call_mcp(self.tool, {}), "Not run: person said no")
+            self.servers.pop("github")
+            self.assertIn("no longer enabled", await brain._call_mcp(self.tool, {}))
+        asyncio.run(run())
+
+    def test_each_turn_discovers_its_own_catalog_and_uses_refreshed_headers(self):
+        first = self.token()
+        self.result(first, "search", query="github")
+        self.servers["github"] = {**self.config, "headers": {"Authorization": "Bearer refreshed"}}
+        self.assertEqual(self.result(first, "call", name=self.tool, arguments={}), "issue created")
+        self.assertEqual(self.mcp_call.call_args.args[0]["headers"], {"Authorization": "Bearer refreshed"})
+        second = self.token()
+        self.result(second, "search", query="github")
+        self.assertEqual(self.discovery.await_count, 2)
+
+    def test_rea_and_read_only_are_refused(self):
+        token = self.token()
+        self.assertEqual(self.result(token, "search", query="REA"), "No matching tools.")
+        self.assertEqual(self.result(token, "call", name="mcp__REA__investigate", arguments={}),
+                         "Not run: REA is not available in Codex chats.")
+        readonly = self.token(read_only=True)
+        self.assertEqual(self.result(readonly, "call", name=self.tool, arguments={}),
+                         "Not run: Forge Plan mode is read-only.")
+        with patch("core.tool_registry.session_read_only", return_value=True):
+            self.assertIn("read-only", self.result(token, "call", name=self.tool, arguments={}))
+        self.decision.assert_not_awaited()
+        self.mcp_call.assert_not_awaited()
+
+    def test_prompt_addendum_is_conditional_and_cli_posts_nested_arguments(self):
+        old = (system_prompt._codex_core("py", "cli.py") + system_prompt.UI_DESIGN_DISCIPLINE + system_prompt._computer_addendum(False, True))
+        with patch("core.integrations.list_mcp_servers_runtime", return_value={}):
+            self.assertEqual(system_prompt.for_codex("py", "cli.py"), old)
+        self.assertEqual(system_prompt.for_codex("py", "cli.py", integration_ids=[]), old)
+        prompt = system_prompt.for_codex("py", "cli.py", integration_ids=["github"])
+        self.assertEqual(system_prompt.for_codex("py", "cli.py"), prompt)
+        self.assertIn('& "py" "cli.py" kairos_tool_search --query', prompt)
+        self.assertIn('kairos_tool_describe --name', prompt)
+        self.assertIn('kairos_tool_call --name', prompt)
+        cli = load_cli()
+        for argv, expected in [(["kairos_tool_search", "--query", "issue", "--limit", "3"], {"query": "issue", "limit": 3}),
+                               (["kairos_tool_describe", "--name", self.tool], {"name": self.tool}),
+                               (["kairos_tool_call", "--name", self.tool, "--args_json", '{"title":"x"}'],
+                                {"name": self.tool, "arguments": {"title": "x"}})]:
+            with patch.object(sys, "argv", ["cli.py"] + argv), patch.object(cli, "call", return_value="ok") as call, patch("builtins.print"):
+                cli.main()
+            call.assert_called_once_with(argv[0], expected)
 
 
 def tearDownModule():

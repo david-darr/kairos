@@ -174,6 +174,7 @@ def approve(slug: str) -> dict:
 
 def describe(slug: str) -> Optional[dict]:
     """Provenance, scan and lint for one skill, as Tool Store shows it."""
+    from core import addons
     with _LOCK:
         data = _load()
         before = repr(data.get(slug))
@@ -188,7 +189,7 @@ def describe(slug: str) -> Optional[dict]:
         "source": rec["source"],
         "origin": rec.get("origin"),
         "scan": None if scan is None else {k: scan[k] for k in ("verdict", "summary", "findings", "scanner_version", "scanned_at")},
-        "blocked_for_models": _blocked(rec),
+        "blocked_for_models": _blocked(rec) or not addons.skill_available(slug),
         "approved": bool(rec.get("approved_hash")) and rec.get("approved_hash") == rec.get("content_hash"),
         "lint": [f.to_dict() for f in skill_linter.lint(skill.get("description", ""), skill.get("body", ""), _skill_dir(slug))],
     }
@@ -196,6 +197,9 @@ def describe(slug: str) -> Optional[dict]:
 
 def model_visible(slug: str) -> bool:
     """Whether any model may list or read this skill."""
+    from core import addons
+    if not addons.skill_available(slug):
+        return False
     with _LOCK:
         data = _load()
         before = repr(data.get(slug))

@@ -20,13 +20,143 @@ import time
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 os.environ["JARVIS_DATA_DIR"] = tempfile.mkdtemp(prefix="jarvis-sbx-test-data-")  # never the real data
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import sandbox, tool_registry  # noqa: E402
 
 DOCKER_UP = asyncio.run(sandbox.available())[0]
+
+
+class LocalPreviewProxyTests(unittest.IsolatedAsyncioTestCase):
+    """2026-10-16: exercise the shipped proxy source without Docker or sockets."""
+    async def asyncSetUp(self):
+        from core import sandbox_egress
+        self.egress = sandbox_egress
+        self.ns = {}
+        exec(sandbox_egress.PROXY_SOURCE.rsplit("asyncio.run(main())", 1)[0], self.ns)
+        self.ns["grants"]["172.22.0.7"] = {8082}
+
+    class Writer:
+        def __init__(self, ip="172.22.0.7"):
+            self.ip, self.data, self.closed = ip, b"", False
+        def get_extra_info(self, name): return (self.ip, 12345)
+        def write(self, data): self.data += data
+        async def drain(self): pass
+        def close(self): self.closed = True
+
+    def reader(self, data):
+        reader = asyncio.StreamReader()
+        reader.feed_data(data)
+        reader.feed_eof()
+        return reader
+
+    async def request(self, target, ip="172.22.0.7", connect=False, response=b"HTTP/1.1 200 OK\r\n\r\npreview"):
+        raw = (f"{'CONNECT' if connect else 'GET'} {target} HTTP/1.1\r\n"
+               "Host: 127.0.0.1:8082\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n").encode()
+        downstream, upstream = self.Writer(ip), self.Writer()
+        infos = [(None, None, None, None, ("192.168.65.254", 8082))]
+        with patch.object(asyncio.get_running_loop(), "getaddrinfo", AsyncMock(return_value=infos)) as resolve, \
+             patch.object(asyncio, "open_connection", AsyncMock(return_value=(self.reader(response), upstream))) as opened:
+            await self.ns["handle"](self.reader(raw), downstream)
+        return downstream, upstream, raw, resolve, opened
+
+    async def test_approved_loopback_keeps_host_and_closes_after_one_response(self):
+        # The app answers 400 without the browser's Host. Keep-alive is not
+        # kept: a reused proxy connection could carry another origin's
+        # request into the app unchecked (2026-10-16).
+        for host in ("127.0.0.1", "localhost", "[::1]"):
+            down, up, raw, resolve, opened = await self.request(f"http://{host}:8082/path")
+            self.assertIn(b"200 OK", down.data)
+            self.assertTrue(up.data.startswith(b"GET /path HTTP/1.1\r\n"), up.data)
+            self.assertIn(b"\r\nHost: 127.0.0.1:8082\r\n", up.data)
+            self.assertIn(b"\r\nConnection: close\r\n", up.data)
+            self.assertEqual(resolve.call_args.args[:2], ("host.docker.internal", 8082))
+            opened.assert_awaited_once_with("192.168.65.254", 8082)
+
+    async def test_an_approved_websocket_tunnel_passes_its_bytes_through(self):
+        down, up, _, _, opened = await self.request("127.0.0.1:8082", connect=True, response=b"ws-frames")
+        self.assertIn(b"200 Connection established", down.data)
+        self.assertIn(b"ws-frames", down.data)
+        opened.assert_awaited_once_with("192.168.65.254", 8082)
+
+    async def test_ungranted_ports_private_hosts_and_other_peers_refused(self):
+        for target, ip in (("http://localhost:8083/", "172.22.0.7"),
+                           ("http://localhost:8082/", "172.22.0.8"),
+                           ("http://192.168.65.254:8082/", "172.22.0.7"),
+                           ("http://private.example:80/", "172.22.0.7"),
+                           ("http://host.docker.internal:80/", "172.22.0.7")):
+            down, _, _, _, opened = await self.request(target, ip)
+            self.assertIn(b"403 Forbidden", down.data)
+            opened.assert_not_awaited()
+
+    async def test_redirect_is_checked_as_new_request(self):
+        down, _, _, _, _ = await self.request("http://localhost:8082/",
+            response=b"HTTP/1.1 302 Found\r\nLocation: http://localhost:8083/\r\n\r\n")
+        self.assertIn(b"Location: http://localhost:8083/", down.data)
+        down, _, _, _, opened = await self.request("http://localhost:8083/")
+        self.assertIn(b"403 Forbidden", down.data)
+        opened.assert_not_awaited()
+
+    async def test_connect_and_revoke_close_active_pipes(self):
+        down, up, _, _, _ = await self.request("localhost:8082", connect=True)
+        self.assertIn(b"200 Connection established", down.data)
+        live_down, live_up = self.Writer(), self.Writer()
+        self.ns["connections"]["172.22.0.7"] = {"live": (8082, (live_down, live_up))}
+        control = self.Writer()
+        await self.ns["control"](self.reader(b'{"ip":"172.22.0.7","ports":[]}\n'), control)
+        self.assertEqual(control.data, b"ok\n")
+        self.assertTrue(live_down.closed and live_up.closed)
+        down, _, _, _, opened = await self.request("localhost:8082", connect=True)
+        self.assertIn(b"revoked", down.data)
+        opened.assert_not_awaited()
+
+    async def test_app_not_running_explained(self):
+        infos = [(None, None, None, None, ("192.168.65.254", 8082))]
+        writer = self.Writer()
+        with patch.object(asyncio.get_running_loop(), "getaddrinfo", AsyncMock(return_value=infos)), \
+             patch.object(asyncio, "open_connection", AsyncMock(side_effect=OSError("refused"))):
+            await self.ns["handle"](self.reader(b"GET http://127.0.0.1:8082/ HTTP/1.1\r\nHost: 127.0.0.1:8082\r\n\r\n"), writer)
+        self.assertIn(b"nothing is answering at http://127.0.0.1:8082 on this computer", writer.data)
+
+    async def test_proxy_restart_reapplies_grants(self):
+        async def docker(*args, **kwargs):
+            if args[:2] == ("network", "inspect"): return 0, "true", ""
+            if args[0] == "inspect": return 1, "", "missing"
+            if args[0] == "logs": return 0, "egress filter listening", ""
+            return 0, "", ""
+        with patch.object(self.egress, "_docker", AsyncMock(side_effect=docker)), \
+             patch.object(self.egress, "_grants", {"172.22.0.7": {8082}}), \
+             patch.object(self.egress, "_apply", AsyncMock()) as apply:
+            await self.egress.ensure("fake-image")
+            apply.assert_awaited_once_with("172.22.0.7", {8082})
+
+    async def test_control_is_loopback_only_and_uses_exec(self):
+        self.assertIn('start_server(control, "127.0.0.1",', self.egress.PROXY_SOURCE)
+        with patch.object(self.egress, "_docker", AsyncMock(return_value=(0, "", ""))) as docker:
+            await self.egress._apply("172.22.0.7", {8082})
+            self.assertEqual(docker.call_args.args[:4], ("exec", self.egress.PROXY_NAME, "python", "-c"))
+            from types import SimpleNamespace
+            from unittest.mock import Mock
+            connection = SimpleNamespace(sendall=Mock(), recv=Mock(return_value=b"ok\n"), close=Mock())
+            with patch.object(socket, "create_connection", return_value=connection):
+                exec(docker.call_args.args[4], {})
+            self.assertEqual(connection.sendall.call_args.args[0], b'{"ip": "172.22.0.7", "ports": [8082]}\n')
+
+    async def test_failed_clear_is_retried_before_another_run(self):
+        async def docker(*args, **kwargs):
+            return (0, "true", "")
+        with patch.object(self.egress, "_grants", {"172.22.0.7": {8082}}), \
+             patch.object(self.egress, "_apply", AsyncMock(side_effect=RuntimeError("offline"))):
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                await self.egress.set_grants("172.22.0.7", set())
+            self.assertEqual(self.egress._grants, {"172.22.0.7": set()})
+            with patch.object(self.egress, "_docker", AsyncMock(side_effect=docker)), \
+                 patch.object(self.egress, "_apply", AsyncMock()) as apply:
+                await self.egress.ensure("fake-image")
+                apply.assert_awaited_once_with("172.22.0.7", set())
+            self.assertEqual(self.egress._grants, {})
 
 
 def run(command, **kw):

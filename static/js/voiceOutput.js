@@ -36,7 +36,7 @@ function forSpeech(text) {
 // Sentence chunking, shared by the speaker and its tests. Duplicating this for
 // testability would let the tested rule and the spoken rule drift apart, which
 // defeats the point of testing it.
-function createChunker(onFlush) {
+export function createChunker(onFlush) {
   let buffer = '';
   let pending = [];
   let flushedFirst = false;
@@ -62,6 +62,11 @@ function createChunker(onFlush) {
       buffer = '';
       if (leftover) emit(leftover);
       if (pending.length) { onFlush(pending.join(' ')); pending = []; }
+    },
+    flushSentence() {
+      if (/[.!?]["')\]]?\s*$/.test(buffer) && !/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|e\.g|i\.e)\.\s*$/i.test(buffer)) {
+        const sentence=buffer.trim();buffer='';emit(sentence);
+      }
     },
     reset() { buffer = ''; pending = []; flushedFirst = false; },
   };
@@ -158,23 +163,28 @@ function pickVoice() {
 
 // One speaker per conversation. Holds the sentence buffer and the queue so a
 // barge-in can silence everything at once.
-export function createSpeaker({ onStart, onEnd } = {}) {
+export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice } = {}) {
   let cancelled = false;
   let speaking = false;
   let queued = 0;
+  let generation = 0;
 
   const enqueue = (text) => {
     const clean = forSpeech(text);
     if (!clean || cancelled || !isSpeechOutputSupported()) return;
     queued += 1;
     const utterance = new SpeechSynthesisUtterance(clean);
-    const voice = pickVoice();
+    const mine = generation;
+    const voice = getVoice ? getVoice() : pickVoice();
     if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
     utterance.rate = 1.02;
     utterance.addEventListener('start', () => {
+      if (cancelled || mine !== generation) return;
       if (!speaking) { speaking = true; onStart?.(); }
     });
+    utterance.addEventListener('boundary', event => { if (!cancelled && mine === generation) onBoundary?.(event); });
     const settle = () => {
+      if (cancelled || mine !== generation) return;
       queued = Math.max(0, queued - 1);
       // Finished means the whole queue drained, not that one utterance ended.
       // Reporting per-utterance would make the Open Mic loop start listening
@@ -185,7 +195,10 @@ export function createSpeaker({ onStart, onEnd } = {}) {
       }
     };
     utterance.addEventListener('end', settle);
-    utterance.addEventListener('error', settle);
+    utterance.addEventListener('error', event => {
+      if (!cancelled && mine === generation) onError?.(event.error || 'Speech playback failed.');
+      settle();
+    });
     window.speechSynthesis.speak(utterance);
   };
 
@@ -194,6 +207,7 @@ export function createSpeaker({ onStart, onEnd } = {}) {
   return {
     get speaking() { return speaking; },
     feed(deltaText) { if (!cancelled) chunker.feed(deltaText); },
+    flushSentence() { if (!cancelled) chunker.flushSentence(); },
     finish() {
       if (cancelled) return;
       chunker.finish();
@@ -210,12 +224,14 @@ export function createSpeaker({ onStart, onEnd } = {}) {
     // the fix is to clear it deliberately when the next turn begins rather
     // than to drop it.
     reset() {
+      generation++;
       cancelled = false;
       chunker.reset();
       queued = 0;
       speaking = false;
     },
     cancel() {
+      generation++;
       cancelled = true;
       chunker.reset();
       queued = 0;

@@ -12,11 +12,12 @@ This replaced two older credentials: the process-wide internal token, which
 every Codex process held whoever was chatting, and a separate Google-only
 chat token.
 """
+import asyncio
 import secrets
 import re
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -41,13 +42,18 @@ class Grant:
     screenshot_dir: str | None = None
     assignment_run_id: str | None = None
     source_card_id: str | None = None
+    # 2026-10-15: one scoped MCP catalog per turn, discarded with its grant.
+    integration_ids: tuple[str, ...] | None = None
+    read_only: bool = False
+    mcp_catalog: dict = field(default_factory=dict, compare=False)
+    mcp_lock: asyncio.Lock = field(default_factory=asyncio.Lock, compare=False)
 
 
 _grants: dict[str, Grant] = {}
 
 
 def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = None,
-          model: Optional[str] = None) -> str:
+          model: Optional[str] = None, integration_ids=None, read_only: bool = False) -> str:
     from core import runs
     from services.agent_service import agent_service
     context = runs.current_for(session_id)
@@ -58,19 +64,23 @@ def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = N
     token = secrets.token_urlsafe(32)
     folder = str(SCREEN_ROOT / secrets.token_hex(8))
     _grants[token] = Grant(session_id, bool(is_admin), agent_id, model, now + TOKEN_LIFETIME_SECONDS,
-                           TurnTaint(), folder, context.run_id if context else None, active.get("card_id"))
+                           TurnTaint(), folder, context.run_id if context else None, active.get("card_id"),
+                           tuple(integration_ids) if integration_ids is not None else None, read_only)
     return token
 
 
 def resolve(token: str) -> Optional[Grant]:
     grant = _grants.get(token or "")
     if grant is None or grant.expires_at < time.time():
+        revoke(token)
         return None
     return grant
 
 
 def revoke(token: str) -> None:
     grant = _grants.pop(token or "", None)
+    if grant:
+        grant.mcp_catalog.clear()
     if grant and grant.screenshot_dir:
         folder = safe_screenshot_dir(grant)
         if folder is None:

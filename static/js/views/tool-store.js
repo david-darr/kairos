@@ -1,3 +1,4 @@
+import { openCreativeConnection } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, customSelect, openPanelDialog } from "../api.js";
 import { ICONS } from "../icons.js";
 import { pill } from "../settingsKit.js";
@@ -9,7 +10,7 @@ import { addReaIntegration } from "../reaSetup.js";
 // behind their own read/describe calls; this view only loads catalog metadata.
 export async function render(container) {
   container.innerHTML = "";
-  const state = { query: "", kind: "all", installed: false, skills: [], servers: [], integrations: [], skillsError: "", catalogError: "", tabs: [], tabsError: "", admin: false, community: [], communityError: "" };
+  const state = { query: "", kind: "all", installed: false, skills: [], servers: [], addons: [], integrations: [], skillsError: "", catalogError: "", tabs: [], tabsError: "", admin: false, community: [], communityError: "" };
   const search = el("input", { type: "search", class: "tool-store-search", placeholder: "Search skills, tools and tabs", "aria-label": "Search skills, tools and tabs" });
   const filters = el("div", { class: "segmented-tabs tool-store-filters", role: "group", "aria-label": "Store category" });
   const installed = el("label", { class: "tool-store-installed" }, [
@@ -75,7 +76,7 @@ export async function render(container) {
     draw();
   });
   const loaded = await Promise.allSettled([
-    api("/api/skills"), api("/api/integrations/catalog"), api("/api/integrations"), api("/api/system/tabs"), api("/api/auth/status"), api("/api/store/catalog"),
+    api("/api/skills"), api("/api/integrations/catalog"), api("/api/integrations"), api("/api/system/tabs"), api("/api/auth/status"), api("/api/store/catalog"), api("/api/addons"),
   ]);
   if (!view.isConnected) return;
   if (loaded[0].status === "fulfilled") state.skills = loaded[0].value;
@@ -95,6 +96,7 @@ export async function render(container) {
   if (loaded[5].status === "fulfilled") setCommunity(loaded[5].value);
   else if (state.admin) state.communityError = loaded[5].reason?.message || "The community catalog is unavailable right now.";
   refreshCommunity.hidden = !state.admin;
+  if (loaded[6]?.status === "fulfilled") state.addons = loaded[6].value;
   draw();
   if (state.admin) githubStrip(githubHost);
 
@@ -207,7 +209,7 @@ export async function render(container) {
         });
         if (!customServer.isConnected) return;
         state.integrations.push(item);
-        const catalogMatch = state.servers.find((server) => server.url.replace(/\/$/, "") === item.url.replace(/\/$/, ""));
+        const catalogMatch = state.servers.find((server) => (server.url || "").replace(/\/$/, "") === item.url.replace(/\/$/, ""));
         if (catalogMatch) catalogMatch.added = true;
         serverName.value = ""; serverUrl.value = ""; serverKey.value = "";
         if (item.auth === "oauth") await signIn(item.id, item.name, serverStatus, dialog);
@@ -246,7 +248,7 @@ export async function render(container) {
     const custom = !["all", "tools"].includes(state.kind) ? [] : state.integrations.filter((item) => item.kind === "mcp_server" &&
       !state.servers.some((server) => matchesCatalogServer(server, item)) &&
       (!q || `${item.name} ${item.url || ""}`.toLowerCase().includes(q)));
-    const tabs = ["all", "tabs"].includes(state.kind) ? state.tabs.filter((item) =>
+    const tabs = ["all", "tabs"].includes(state.kind) ? state.tabs.filter((item) => item.slug !== 'roblox' &&
       (!q || `${item.slug} ${item.name} ${item.blurb || ""} ${item.description} ${item.detail || ""} ${item.reads || ""} ${item.status} ${item.reason || ""}`.toLowerCase().includes(q)) &&
       (!state.installed || item.kind === "user" || item.enabled)) : [];
     const kindFilter = { skill: "skills", tool: "tools", tab: "tabs", automation: "automations" };
@@ -254,7 +256,9 @@ export async function render(container) {
       (state.kind === "all" || state.kind === kindFilter[item.kind]) &&
       (!state.installed || item.installed) &&
       (!q || `${item.name} ${item.description} ${item.author} ${item.kind}`.toLowerCase().includes(q)));
-    const total = skills.length + tools.length + custom.length + tabs.length + community.length;
+    const addons = state.addons.filter(item => ['all', 'tools'].includes(state.kind) &&
+      (!state.installed || item.installed) && (!q || `${item.name} ${item.description} ${(item.skills || []).join(' ')}`.toLowerCase().includes(q)));
+    const total = skills.length + tools.length + custom.length + tabs.length + community.length + addons.length;
     count.textContent = `${total} result${total === 1 ? "" : "s"}`;
     if (skills.length) {
       results.append(el("h3", { class: "tool-store-heading", text: `Skills · ${skills.length}` }));
@@ -262,9 +266,10 @@ export async function render(container) {
       for (const item of skills) grid.append(skillCard(item));
       results.append(grid);
     }
-    if (tools.length || custom.length) {
-      results.append(el("h3", { class: "tool-store-heading", text: `Tools · ${tools.length + custom.length}` }));
+    if (tools.length || custom.length || addons.length) {
+      results.append(el("h3", { class: "tool-store-heading", text: `Tools · ${tools.length + custom.length + addons.length}` }));
       const grid = el("div", { class: "tool-store-grid" });
+      for (const item of addons) grid.append(addonCard(item));
       for (const item of tools) grid.append(toolCard(item));
       for (const item of custom) grid.append(customToolCard(item));
       results.append(grid);
@@ -652,7 +657,7 @@ export async function render(container) {
     const origin = item.curation?.origin || "";
     const sourceLabel = origin.startsWith("https://raw.githubusercontent.com/")
       ? el("a", { href: origin, target: "_blank", rel: "noopener", text: "GitHub source" })
-      : el("span", { class: "meta", text: source === "bundled" ? "Built into Kairos" : source === "imported" ? "Imported skill"
+      : el("span", { class: "meta", text: state.addons.some(addon => addon.skills?.includes(item.slug)) ? "Tool Store add-on" : source === "bundled" ? "Built into Kairos" : source === "imported" ? "Imported skill"
         : source === "recorded" ? "Recorded skill" : "Local skill" });
     return el("article", { class: "tool-store-card" }, [
       el("div", { class: "tool-store-card-top" }, [
@@ -669,7 +674,76 @@ export async function render(container) {
     ]);
   }
 
+  function addonCard(item) {
+    const actions = el('div', { class: 'tool-store-card-foot' });
+    const change = (label, action) => el('button', { type: 'button', class: 'btn', text: label, disabled: !state.admin, onclick: async event => {
+      const button = event.currentTarget; button.disabled = true;
+      try {
+        const result = await api(`/api/addons/${item.id}`, { method: 'POST', body: JSON.stringify({ action }) });
+        state.addons = await api('/api/addons'); state.skills = await api('/api/skills');
+        await refreshTabs();
+        document.dispatchEvent(new CustomEvent('kairos:addons-changed'));
+        toast(result.restart_required ? 'Add-on installed. Restart Kairos to load its workspace.' : `${item.name}: ${action === 'remove' ? 'removed; saved data kept' : action === 'disable' ? 'disabled' : 'enabled'}.`);
+        draw();
+      } catch (error) { toast(error.message, 'error'); }
+      finally { if (button.isConnected) button.disabled = !state.admin; }
+    } });
+    if (!item.installed) actions.append(change('Install add-on', 'install'));
+    else {
+      actions.append(change(item.enabled ? 'Disable' : 'Enable', item.enabled ? 'disable' : 'enable'), change('Reinstall', 'install'), change('Remove add-on', 'remove'));
+      if (item.enabled) {
+        const open = el('button', { type: 'button', class: 'btn', text: item.id === 'roblox' ? 'Open workspace' : 'Manage connection', onclick: () => {
+          if (item.id === 'roblox') navigate('roblox');
+          else openCreativeConnection(item.id, open, view);
+        } });
+        actions.prepend(open);
+      }
+    }
+    return el('article', { class: 'tool-store-card', 'data-addon': item.id }, [
+      el('span', { class: 'tool-store-badge', text: item.enabled ? 'Enabled add-on' : item.installed ? 'Disabled add-on' : 'Optional add-on' }),
+      el('h4', { text: item.name }), el('p', { text: item.description }),
+      el('p', { class: 'meta', text: `Includes: ${(item.skills || []).join(', ')}. Installs separately from base Kairos.` }),
+      item.installed ? el('p', { class: 'meta', text: 'Disabling or removing keeps saved projects, styles and connections.' }) : null,
+      actions,
+    ]);
+  }
+
   function toolCard(server) {
+    if (server.transport === 'managed-creative') {
+      const manage = el('button', { type: 'button', class: 'btn', text: server.connected ? 'Manage connection' : 'Connect' });
+      manage.onclick = () => openCreativeConnection(server.id, manage, view, async () => {
+        try {
+          const next = await api('/api/creative');
+          state.servers = [...state.servers.filter(s => s.transport !== 'managed-creative'), ...next]; draw();
+        } catch (error) { toast(error.message, 'error'); }
+      });
+      return el('article', { class: 'tool-store-card' }, [el('span', { class: 'tool-store-badge', text: server.connected ? 'Connected privately' : 'Creative tool' }),
+        el('h4', { text: server.name }), el('p', { text: server.description }), el('p', { class: 'meta', text: server.status || 'Available across Kairos chats, Forge, bots and Roblox.' }), manage]);
+    }
+    if (server.id === "roblox-studio") {
+      return el("article", { class: "tool-store-card" }, [
+        el("span", { class: "tool-store-badge", text: server.added ? "Added" : "Built into Kairos" }),
+        el("h4", { text: server.name }), el("p", { text: server.description }),
+        el("p", { class: "meta", text: "Uses the Roblox workspace to keep each project connected to its chosen Studio window." }),
+        el("button", { type: "button", class: "btn", text: server.added ? "Open workspace" : "Add Roblox workspace", onclick: async event => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          try {
+            if (!server.added) {
+              const result = await api('/api/system/tab-templates/roblox', { method: 'POST', body: JSON.stringify({ enabled: true }) });
+              if (result.restart_required) { toast('Restart Kairos to load Roblox.', 'info'); return; }
+              server.added = true;
+              await refreshTabs();
+              toast('Roblox added. Open it from the sidebar or this tool card.', 'success');
+              draw();
+              return;
+            }
+            navigate('roblox');
+          } catch (problem) { toast(problem.message, 'error'); }
+          finally { button.disabled = false; }
+        } }),
+      ]);
+    }
     const integration = state.integrations.find((item) => item.kind === "mcp_server" &&
       matchesCatalogServer(server, item));
     const connected = server.added && (server.auth !== "oauth" || !!integration?.signed_in);
@@ -718,6 +792,7 @@ export async function render(container) {
   }
 
   function matchesCatalogServer(server, item) {
+    if (server.transport === 'managed-creative') return false;
     if (server.id === "rea") return item.rea_managed === true;
     return (server.url || "").replace(/\/$/, "") === (item.url || "").replace(/\/$/, "");
   }

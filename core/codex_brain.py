@@ -39,7 +39,8 @@ Verified live, not guessed:
 Tools: Codex reaches Kairos's tools - the same registry every model uses
 (core/tool_registry.py) - by running mcp_servers/hive_mind_cli.py through its
 own shell, with this turn's own token (core/tool_access.py); see that file
-for why a command line and not an MCP server.
+for why a command line and not an MCP server. Connected integrations use
+the same CLI through the backend MCP bridge (2026-10-15).
 """
 import asyncio
 import contextlib
@@ -237,7 +238,8 @@ class CodexBrain:
     def __init__(self, vault_dir: str | None = None, cwd_override: str | None = None,
                  session_id: str | None = None, model: str | None = None, is_admin: bool = False,
                  project_id: str | None = None, effort: str | None = None, agent_prompt: str = "",
-                 agent_auto: bool = False, agent_id: str | None = None, read_only: bool = False):
+                 agent_auto: bool = False, agent_id: str | None = None, read_only: bool = False,
+                 integration_ids: list[str] | None = None):
         self.cwd = cwd_override or vault_dir or resolve_vault_dir()
         # A chat with an agent (services/agent_service.py): its frozen
         # identity and notes. Codex reaches Kairos through its CLI, which has
@@ -271,6 +273,8 @@ class CodexBrain:
         # phase 7, 2026-10-06, David: "go with what you recommend"; before
         # this it was approve-all with the sandbox off, his 2026-10-05 call).
         self.agent_auto = agent_auto
+        # 2026-10-15: integrations stay behind the backend permission broker.
+        self.integration_ids = integration_ids
         self.read_only = read_only
         if read_only:
             self.permission_mode = 'base'
@@ -460,7 +464,7 @@ class CodexBrain:
         if is_fresh_thread:
             prompt_text = system_prompt.for_codex(sys.executable, HIVE_MIND_CLI_PATH, self.is_admin,
                                                   full_access=self.permission_mode == "auto" and not self.agent_auto,
-                                                  agent=bool(self.agent_id), computer_available=bool(self.session_id or self.agent_id), session_id=self.session_id or '') + projects.project_addendum(self.project_id) \
+                                                  agent=bool(self.agent_id), computer_available=bool(self.session_id or self.agent_id), session_id=self.session_id or '', integration_ids=self.integration_ids) + projects.project_addendum(self.project_id) \
                 + (f"\n\n{self.agent_prompt}" if self.agent_prompt else "")
             prior = session_manager.effective_messages(self.session_id, exclude_last=True)
             if prior:
@@ -491,7 +495,8 @@ class CodexBrain:
         # port its local listener actually serves on (core/middleware.py's
         # local_api_base), because a global default once sent the calls to
         # whatever was on 8420. The token is revoked when the turn ends.
-        tool_token = tool_access.issue(self.session_id, self.is_admin, self.agent_id, self.model)
+        tool_token = tool_access.issue(self.session_id, self.is_admin, self.agent_id, self.model,
+                                       integration_ids=self.integration_ids, read_only=self.read_only)
         env = {**os.environ, "JARVIS_TOOL_TOKEN": tool_token, "JARVIS_API_BASE": local_api_base()}
 
         try:

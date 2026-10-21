@@ -136,6 +136,10 @@ def role_prompt(context: WorkerContext) -> str:
     # never widens the tools above.
     if agent.get("identity"):
         lines += ["", agent["identity"]]
+    lines += ['', 'For any UI/UX design, implementation or review, first call ui_design with action=guide '
+              'for the built-in ui-ux-pro-max skill, then search relevant UX/design guidance. '
+              'Preserve the user\'s reference, current branding and scope. This grants no file or shell access. '
+              'Pure backend/nonvisual work does not require it.']
     return "\n".join(lines)
 
 
