@@ -455,17 +455,16 @@
   .kairos-redesign .ms-blur-top { height: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
   .kairos-redesign .ms-blur-top i {
     height: 100%; background: transparent;
-    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 45%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, var(--rd-ink) 45%, transparent 100%);
+    backdrop-filter: blur(1.5px); -webkit-backdrop-filter: blur(1.5px);
+    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 70%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 70%);
   }
   .kairos-redesign #mobile-menu-btn.ms-avatar { z-index: 1100; }
   .kairos-redesign .ms-global-frost { z-index: 54; }
 }
 @media (max-width: 768px) and (display-mode: standalone) {
-  /* A home-screen app drawn under the status bar still gets a viewport that is
-     short by the status bar height (100%, 100dvh and innerHeight alike), so the
-     page and the launch view add that height back to reach the home indicator. */
-  html.kairos-redesign, .kairos-redesign body { height: calc(100% + env(safe-area-inset-top, 0px)); min-height: calc(100% + env(safe-area-inset-top, 0px)); }
-  .kairos-redesign .ms-shell { height: calc(var(--ms-viewport-height, 100dvh) + env(safe-area-inset-top, 0px)); }
+  /* In a home-screen app drawn under the status bar, 100dvh comes out short and
+     left a strip above the home indicator, while window.innerHeight is the true
+     screen height. mobileChrome.js publishes it as --app-height. */
+  html.kairos-redesign, .kairos-redesign body { height: var(--app-height, 100%); min-height: 0; }
 }
