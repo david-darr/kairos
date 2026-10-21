@@ -92,6 +92,9 @@
 .kairos-redesign .hm-ring.tone-watch { background: conic-gradient(var(--warn) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
 .kairos-redesign .hm-ring.tone-crit { background: conic-gradient(var(--danger) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
 
+/* The visual-cards ring (percentage inside) sits on the card's own surface. */
+.kairos-redesign .dashboard-quota-ring::before { background: var(--rd-surface-solid); }
+
 /* Systems: one row per system */
 .kairos-redesign .dashboard-system-chips { flex-direction: column; flex-wrap: nowrap; gap: 0; }
 .kairos-redesign .dashboard-system-chip {

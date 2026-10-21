@@ -42,9 +42,161 @@
   --k-font-serif: "Cormorant Garamond", "Garamond", "Times New Roman", serif;
 }
 
+/* The Agent village's illustration palette (the pixel-art buildings, trees,
+   lakes, roads and its signs and status lights). Like the avatar faces, the
+   village paints its own scene, so these stay fixed across Appearance
+   changes. js/ecosystemArt.js and css/agent-ecosystem.css use them by name
+   (--eco-<hex>), never as raw values. */
+:root {
+  --eco-222e40: #222e40;
+  --eco-244d40: #244d40;
+  --eco-253f37: #253f37;
+  --eco-254e40: #254e40;
+  --eco-33453c: #33453c;
+  --eco-34455c: #34455c;
+  --eco-346451: #346451;
+  --eco-347b80: #347b80;
+  --eco-354050: #354050;
+  --eco-354c64: #354c64;
+  --eco-364458: #364458;
+  --eco-386c4f: #386c4f;
+  --eco-3f576b: #3f576b;
+  --eco-3f7b7c: #3f7b7c;
+  --eco-426e48: #426e48;
+  --eco-43677a: #43677a;
+  --eco-443a39: #443a39;
+  --eco-443d51: #443d51;
+  --eco-447353: #447353;
+  --eco-455e6b: #455e6b;
+  --eco-473b50: #473b50;
+  --eco-484656: #484656;
+  --eco-48674c: #48674c;
+  --eco-493a4c: #493a4c;
+  --eco-49724b: #49724b;
+  --eco-4a576f: #4a576f;
+  --eco-4c465a: #4c465a;
+  --eco-4f495c: #4f495c;
+  --eco-516ba5: #516ba5;
+  --eco-527c82: #527c82;
+  --eco-54806a: #54806a;
+  --eco-568568: #568568;
+  --eco-594b50: #594b50;
+  --eco-5b5366: #5b5366;
+  --eco-5d5167: #5d5167;
+  --eco-5d8b55: #5d8b55;
+  --eco-5e4145: #5e4145;
+  --eco-604d42: #604d42;
+  --eco-617187: #617187;
+  --eco-637e83: #637e83;
+  --eco-64a2a7: #64a2a7;
+  --eco-655348: #655348;
+  --eco-68545b: #68545b;
+  --eco-69995e: #69995e;
+  --eco-6a975c: #6a975c;
+  --eco-6b5868: #6b5868;
+  --eco-6d5e70: #6d5e70;
+  --eco-6eadd1: #6eadd1;
+  --eco-708692: #708692;
+  --eco-755747: #755747;
+  --eco-765167: #765167;
+  --eco-765c51: #765c51;
+  --eco-765d49: #765d49;
+  --eco-775440: #775440;
+  --eco-779b5f: #779b5f;
+  --eco-7e654b: #7e654b;
+  --eco-7f634d: #7f634d;
+  --eco-825aa7: #825aa7;
+  --eco-82654a: #82654a;
+  --eco-84949b: #84949b;
+  --eco-86713b: #86713b;
+  --eco-89ac68: #89ac68;
+  --eco-91be89: #91be89;
+  --eco-94b778: #94b778;
+  --eco-9ad0c9: #9ad0c9;
+  --eco-9bbcc5: #9bbcc5;
+  --eco-9bdbc6: #9bdbc6;
+  --eco-9d7656: #9d7656;
+  --eco-9e6382: #9e6382;
+  --eco-a15e24: #a15e24;
+  --eco-a18a64: #a18a64;
+  --eco-a28472: #a28472;
+  --eco-a4b88c: #a4b88c;
+  --eco-a6a5b4: #a6a5b4;
+  --eco-a7bb79: #a7bb79;
+  --eco-a88846: #a88846;
+  --eco-a8bf78: #a8bf78;
+  --eco-a9d0c6: #a9d0c6;
+  --eco-aab8b8: #aab8b8;
+  --eco-ad7c63: #ad7c63;
+  --eco-b18a60: #b18a60;
+  --eco-b2b580: #b2b580;
+  --eco-b2c7c7: #b2c7c7;
+  --eco-b3c691: #b3c691;
+  --eco-b48e74: #b48e74;
+  --eco-b7ded9: #b7ded9;
+  --eco-b87d62: #b87d62;
+  --eco-b8d8c7: #b8d8c7;
+  --eco-b9b48b: #b9b48b;
+  --eco-b9d8ce: #b9d8ce;
+  --eco-ba6d58: #ba6d58;
+  --eco-bce2db: #bce2db;
+  --eco-bd6359: #bd6359;
+  --eco-bd735e: #bd735e;
+  --eco-c0cdbb: #c0cdbb;
+  --eco-c18da3: #c18da3;
+  --eco-c1a078: #c1a078;
+  --eco-c3a987: #c3a987;
+  --eco-c4a0df: #c4a0df;
+  --eco-c4b48b: #c4b48b;
+  --eco-c5e5dc: #c5e5dc;
+  --eco-c9a3dc: #c9a3dc;
+  --eco-c9b48a: #c9b48a;
+  --eco-cfad59: #cfad59;
+  --eco-d1ab74: #d1ab74;
+  --eco-d1d6c2: #d1d6c2;
+  --eco-d2a977: #d2a977;
+  --eco-d2e3cc: #d2e3cc;
+  --eco-d3a16c: #d3a16c;
+  --eco-d3bc8c: #d3bc8c;
+  --eco-d6b07a: #d6b07a;
+  --eco-d79088: #d79088;
+  --eco-d79b78: #d79b78;
+  --eco-dbc39e: #dbc39e;
+  --eco-dca0ad: #dca0ad;
+  --eco-ddc39c: #ddc39c;
+  --eco-dec49a: #dec49a;
+  --eco-e1b78a: #e1b78a;
+  --eco-e2c49c: #e2c49c;
+  --eco-e3d6ae: #e3d6ae;
+  --eco-e4bf8a: #e4bf8a;
+  --eco-e4c878: #e4c878;
+  --eco-e5c5a4: #e5c5a4;
+  --eco-e6c7a0: #e6c7a0;
+  --eco-e8b6a9: #e8b6a9;
+  --eco-e9ba68: #e9ba68;
+  --eco-ead0a1: #ead0a1;
+  --eco-ebcda4: #ebcda4;
+  --eco-edb85d: #edb85d;
+  --eco-eeddb8: #eeddb8;
+  --eco-f0d5ad: #f0d5ad;
+  --eco-f2d7b5: #f2d7b5;
+  --eco-f6e8bf: #f6e8bf;
+  --eco-f7e1ac: #f7e1ac;
+  --eco-f7ecd7: #f7ecd7;
+  --eco-f9e4b5: #f9e4b5;
+  --eco-f9e8c5: #f9e8c5;
+  --eco-fcf0d8: #fcf0d8;
+  --eco-ffe1a6: #ffe1a6;
+  --eco-fff: #fff;
+  --eco-fff0c522: #fff0c522;
+  --eco-fff0ce: #fff0ce;
+}
+
 /* Display type: headlines, empty states, the tagline. Never body copy,
    labels, buttons or data. Sentence case, no trailing period. */
 .k-display { font-family: var(--k-font-serif); font-style: italic; font-weight: 500; letter-spacing: 0; }
 
 /* The one ornament: a gilded hairline. Hero panels and featured cards only. */
 .k-frame { border: 1px solid var(--k-hairline); }
+
+/* probe */
