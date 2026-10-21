@@ -74,6 +74,8 @@
 .kairos-redesign .tool-store-card-top { order: 0; position: absolute; top: 14px; right: 16px; }
 .kairos-redesign .tool-store-card { position: relative; }
 .kairos-redesign .tool-store-mark { display: none; }
+/* Add-on, creative-tool and Roblox cards put the status pill straight in the card; seat it top right like the rest. */
+.kairos-redesign .tool-store-card > .tool-store-badge { position: absolute; top: 14px; right: 16px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 .kairos-redesign .tool-store-card h4 { margin: 0 0 6px; padding-right: 110px; font-size: 14px; font-weight: 500; color: var(--rd-ink); }
 .kairos-redesign .tool-store-card[data-skill] h4,
 .kairos-redesign .tool-store-card:has(.tool-store-version, .tool-store-card-foot > .meta) h4 { font-family: var(--font-mono, "Cascadia Code", Consolas, monospace); font-size: 13.5px; }
