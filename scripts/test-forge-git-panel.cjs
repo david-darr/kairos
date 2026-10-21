@@ -32,6 +32,8 @@ async function harness({ staged = false, failCommit = false } = {}) {
   const state = { branch: 'topic', branches: ['topic'], ahead: 0, behind: 0, files: [{ path: 'app.js', staged, unstaged: !staged }] };
   const context = vm.createContext({ document, AbortController, setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval() {},
     forgeRunning: () => false,
+    // The phone dock (mobileDock.js) is covered by mobile-tabs-checks.cjs; here it only has to mount and release.
+    mountGitDock: () => () => {},
     customSelect: () => { const select = new Element('div'); select.appendChild(new Element('button')); return select; },
     permissionAction: async (url, options) => { approvals.push({ url, body: options.body }); },
     api: async (url, options = {}) => {

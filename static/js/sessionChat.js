@@ -318,7 +318,7 @@ export async function mountSessionChat(host, options = {}) {
     const refreshPhoneMenu = () => {
       if (!phoneMenu) return;
       const endpoint = endpoints.find(item => item.id === connection.value);
-      phoneTrigger.textContent = [endpoint?.name || 'Choose model', current.model_override || endpoint?.model, current.model_effort].filter(Boolean).join(' ? ');
+      phoneTrigger.textContent = [endpoint?.name || 'Choose model', current.model_override || endpoint?.model, current.model_effort].filter(Boolean).join(' · ');
       renderMobileCatalogMenu(phoneMenu, {
         endpoints, endpointId: connection.value, model: current.model_override, effort: current.model_effort, catalog: phoneCatalog,
         onConnection: value => { if (phoneTrigger.disabled) return; connection.value = value; connection.dispatchEvent(new Event('change')); },

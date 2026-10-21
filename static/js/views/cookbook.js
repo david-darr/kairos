@@ -99,7 +99,9 @@ export async function render(container) {
     else await renderEngineSection(body);
   }
 
-  container.append(el("div", { class: "view-constrained" }, [header, tabs, body]));
+  const wrap = el("div", { class: "view-constrained" }, [header, tabs, body]);
+  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search models";  // phone dock search (mobileDock.js)
+  container.append(wrap);
   await switchSection(activeSection);
 
   return clearPolls;
@@ -172,7 +174,7 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
       await api("/api/cookbook/register", { method: "POST", body: JSON.stringify({ name: m.name }) });
       registerBtn.textContent = "Added — see Settings";
     }});
-    const card = el("div", { class: "glass bracket card", style: "margin-bottom:8px;" }, [
+    const card = el("div", { class: "glass bracket card", style: "margin-bottom:8px;", "data-mobile-row": "" }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", style: "font-size:12.5px;", text: m.name + (runningNames.has(m.name) ? " · running" : "") }),
@@ -205,7 +207,7 @@ async function renderOllamaCatalog(catalogSection, installedSection) {
       await api(`/api/cookbook/pull/${encodeURIComponent(item.name)}`, { method: "POST" });
       watchOllamaPull(item.name, statusEl, pullBtn, installedSection, catalogSection);
     });
-    const card = el("div", { class: "glass bracket card" }, [
+    const card = el("div", { class: "glass bracket card", "data-mobile-row": "" }, [
       el("div", { class: "title", style: "font-size:12.5px;", text: `${item.label} (${item.params})` }),
       el("div", { class: "meta", style: "margin:4px 0 8px;", text: item.description }),
       el("div", { class: "card-row" }, [statusEl, pullBtn]),
@@ -318,7 +320,7 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
       await refreshEngineDownloaded(downloadedSection, catalogSection, statusRow);
       toast(`${m.name} deleted`, "success");
     }});
-    const card = el("div", { class: "glass bracket card", style: "margin-bottom:8px;" }, [
+    const card = el("div", { class: "glass bracket card", style: "margin-bottom:8px;", "data-mobile-row": "" }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", style: "font-size:12.5px;", text: m.name + (isRunning ? " · running" : "") }),
@@ -350,7 +352,7 @@ async function renderEngineCatalog(catalogSection, downloadedSection, statusRow)
       await api(`/api/cookbook/engine/download/${encodeURIComponent(item.name)}`, { method: "POST" });
       watchEngineDownload(item.name, statusEl, downloadBtn, downloadedSection, catalogSection, statusRow);
     });
-    const card = el("div", { class: "glass bracket card" }, [
+    const card = el("div", { class: "glass bracket card", "data-mobile-row": "" }, [
       el("div", { class: "title", style: "font-size:12.5px;", text: `${item.label} (${item.params})` }),
       el("div", { class: "meta", style: "margin:4px 0 8px;", text: item.description }),
       el("div", { class: "card-row" }, [statusEl, downloadBtn]),

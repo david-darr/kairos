@@ -127,7 +127,7 @@ function cardEl(columns, card, byId, modelName) {
     card.trigger ? `from trigger ${card.trigger.name}` : "",
   ].filter(Boolean).join(" · ");
 
-  const node = el("div", { class: `board-card board-card-${card.status}`, "data-card": card.id }, [
+  const node = el("div", { class: `board-card board-card-${card.status}`, "data-card": card.id, "data-mobile-row": "" }, [
     el("div", { class: "board-card-name", text: card.name }),
     el("div", { class: "meta", text: meta }),
   ]);

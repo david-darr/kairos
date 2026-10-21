@@ -5,6 +5,7 @@ export async function render(container) {
   container.innerHTML = "";
 
   const wrap = el("div", { class: "view-constrained email-view" });
+  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search mail and accounts";  // phone dock search (mobileDock.js)
 
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
@@ -114,7 +115,7 @@ async function refreshTriage(host) {
     for (const it of data.items) {
       // Class hooks and the sender's initial are for the redesign look; the
       // initial stays hidden (redesign-email.css) unless the redesign preview is on.
-      body.push(el("div", { class: "email-item", style: "padding:9px 0;border-top:1px solid var(--border);" }, [
+      body.push(el("div", { class: "email-item", "data-mobile-row": "", style: "padding:9px 0;border-top:1px solid var(--border);" }, [
         el("span", { class: "email-item-avatar", "aria-hidden": "true", text: (String(it.from || "").match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
         el("div", { class: "email-item-body" }, [
           el("div", { class: "title", style: "font-size:12.5px;", text: it.subject || "(no subject)" }),
@@ -183,7 +184,7 @@ async function refresh(list, focusTarget) {
       toast("Account removed", "success");
     }, { danger: true });
 
-    const card = el("div", { class: "glass bracket card has-row-actions email-account" }, [
+    const card = el("div", { class: "glass bracket card has-row-actions email-account", "data-mobile-row": "" }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", text: account.email }),

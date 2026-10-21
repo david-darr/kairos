@@ -295,7 +295,7 @@ export async function renderMobilePage(container, section, onExit) {
 
   mobile = {
     container, barTitle, subBack: null, listScroll: 0,
-    showList() {
+    showList(restoreFocus = false) {
       renderVersion++; // a page still loading must not take the screen back
       container.dataset.mobileView = "list";
       barTitle.textContent = "Settings";
@@ -303,7 +303,8 @@ export async function renderMobilePage(container, section, onExit) {
       content.replaceChildren();
       if (mobileOn()) {
         nav.scrollTop = this.listScroll;
-        nav.querySelector(`[data-section="${activeSectionId}"]`)?.focus({ preventScroll: true });
+        // Only coming back from a page returns focus to its row; a fresh list shows no focus ring.
+        if (restoreFocus) nav.querySelector(`[data-section="${activeSectionId}"]`)?.focus({ preventScroll: true });
       }
     },
     showPage(title) {
@@ -315,7 +316,7 @@ export async function renderMobilePage(container, section, onExit) {
   backBtn.addEventListener("click", () => {
     if (container.dataset.mobileView !== "page") { mobile = null; onExit?.(); return; }
     if (mobile.subBack) mobile.subBack();
-    else mobile.showList();
+    else mobile.showList(true);
   });
 
   buildNav();

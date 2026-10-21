@@ -262,6 +262,13 @@
   .kairos-redesign :is(.ms-forge-add, .ms-forge-mic):hover { background: var(--rd-surface-2); }
   .kairos-redesign .ms-forge-mic.recording { color: var(--point); }
   .kairos-redesign .forge-composer.ms-composer .chat-input-left { display: none; }
+  /* Forge Home composer: fit its column, a clean 50px pill at rest, + / model / mic in one row when open. */
+  .kairos-redesign .forge-composer.ms-composer { width: auto; max-width: 100%; box-sizing: border-box; margin-inline: 0; }
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) { padding: 2px 54px; }
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) .ms-embedded-model-trigger { display: none; }
+  .kairos-redesign .forge-composer.ms-composer.ms-composer-expanded .chat-input-bottom { display: flex; align-items: center; gap: 4px; }
+  .kairos-redesign .forge-composer.ms-composer.ms-composer-expanded :is(.ms-forge-add, .ms-forge-mic) { position: static; flex: 0 0 44px; }
+  .kairos-redesign .forge-composer.ms-composer.ms-composer-expanded .ms-embedded-model-trigger { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) > .chat-input-bottom > .ms-forge-add { position: absolute; left: 3px; bottom: 3px; }
   .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) :is(.chat-input-left, .model-pill, .forge-composer-send) { display: none; }
   .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) .ms-forge-mic { position: absolute; right: 3px; bottom: 3px; }
@@ -289,6 +296,7 @@
   .kairos-redesign .settings-mobile-page :is(.settings-search, .set-row-control .btn, .set-header-actions .btn) { min-height: 44px; }
   /* Every control a Settings page draws is a 44px target; the switches already extend theirs (redesign-settings.css). */
   .kairos-redesign .settings-mobile-page .set-page :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]), select) { min-height: 44px; box-sizing: border-box; }
+  .kairos-redesign .settings-mobile-page .set-page input[type=color] { min-width: 44px; }
   .kairos-redesign .settings-mobile-page .set-page .layout-move { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .kairos-redesign .settings-mobile-page .set-page :is(a.set-link, .appearance-effect-credit a) { display: inline-flex; align-items: center; min-height: 44px; }
   .kairos-redesign .settings-mobile-page[data-mobile-view=page] .set-page { animation: ms-chat-in 280ms ease-out; padding-bottom: calc(56px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }

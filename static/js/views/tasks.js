@@ -91,7 +91,9 @@ export async function render(container) {
   const boardCard = el("div", { class: "glass card task-board-card" });
   // Webhook triggers (2026-10-05): outside events that start work.
   const triggersCard = el("div", { class: "glass card triggers-card" });
-  container.append(el("div", { class: "view-constrained" }, [header, boardCard, form, list, triggersCard, builtinCard]));
+  const wrap = el("div", { class: "view-constrained" }, [header, boardCard, form, list, triggersCard, builtinCard]);
+  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search tasks and cards";  // phone dock search (mobileDock.js)
+  container.append(wrap);
   await renderBoard(boardCard);
   await renderTriggers(triggersCard).catch(() => triggersCard.remove()); // admin only
 
@@ -163,7 +165,7 @@ async function refreshBuiltins(card) {
         toast(error.message, "error"); toggleBtn.disabled = false;
       }
     });
-    grid.appendChild(el("div", { class: "automation-card" }, [
+    grid.appendChild(el("div", { class: "automation-card", "data-mobile-row": "" }, [
       el("div", {}, [
         el("div", { class: "title", style: "font-size:12.5px;", text: b.label }),
         el("div", { class: "meta", style: "margin-top:3px;", text: b.description }),
@@ -286,7 +288,7 @@ async function refresh(list) {
     // most recent run's output/error directly in the card.
     const runsHost = el("div", { style: "margin-top:8px;" });
 
-    const card = el("div", { class: "glass bracket card has-row-actions", "data-task": task.id, "data-enabled": String(Boolean(task.enabled)) }, [
+    const card = el("div", { class: "glass bracket card has-row-actions", "data-task": task.id, "data-enabled": String(Boolean(task.enabled)), "data-mobile-row": "" }, [
       el("div", { class: "card-row" }, [
         el("div", {}, [
           el("div", { class: "title", text: task.name + (task.builtin_action ? " · built-in" : "") }), // off ones sit under "Turned off"

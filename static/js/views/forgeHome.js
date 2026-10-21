@@ -74,7 +74,7 @@ export function render(container, tabId, options = {}) {
   const phonePicker = mountMobileModelSheet({ trigger: phoneModel, menu: phoneMenu, permission: () => modeSelect });
   const refreshPhoneMenu = () => {
     const endpoint = models.find(item => item.id === modelSelect?.value);
-    phoneModel.textContent = [endpoint?.name || 'Choose model', variantSelect?.value || endpoint?.model, launchEffort].filter(Boolean).join(' ? ');
+    phoneModel.textContent = [endpoint?.name || 'Choose model', variantSelect?.value || endpoint?.model, launchEffort].filter(Boolean).join(' · ');
     renderMobileCatalogMenu(phoneMenu, { endpoints: models, endpointId: modelSelect?.value, model: variantSelect?.value || null, effort: launchEffort, catalog: mobileCatalog,
       onConnection: value => { if (starting) return; launchEffort = null; modelSelect.value = value; modelSelect.dispatchEvent(new Event('change')); },
       onModel: value => { if (starting || !variantSelect) return; launchEffort = null; variantSelect.value = value || ''; variantSelect.dispatchEvent(new Event('change')); refreshPhoneMenu(); },

@@ -5,6 +5,7 @@ export async function render(container) {
   container.innerHTML = "";
 
   const wrap = el("div", { class: "view-constrained" });
+  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search notes";  // phone dock search (mobileDock.js)
 
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
@@ -151,7 +152,7 @@ async function refresh(list, focusTarget) {
       toast("Note deleted", "success");
     }, { danger: true });
 
-    const card = el("div", { class: "glass bracket card has-row-actions" }, [
+    const card = el("div", { class: "glass bracket card has-row-actions", "data-mobile-row": "" }, [
       el("div", { class: "card-row" }, [
         el("div", { class: "card-row", style: "gap:10px;" }, [
           checkbox,
