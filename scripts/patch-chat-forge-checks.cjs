@@ -147,7 +147,10 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
     await js("document.documentElement.classList.add('electron-shell')");
     for (const [width, height] of [[1440, 900], [390, 420]]) {
       win.setContentSize(width, height); await delay(250);
-      assert.ok(await js("(() => { const r=document.querySelector('#chat-progress-host').getBoundingClientRect(); return r.top >= parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')) + 12 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()"), 'Progress card clears titlebar and fits window');
+      // The redesign retires the floating pill: its information lives in the sidebar row
+      // (redesignShell.js), so the host is gone from the window. The pill's titlebar and
+      // window fit is still checked on the classic look (classic-look-checks.cjs).
+      assert.equal(await js("getComputedStyle(document.querySelector('#chat-progress-host')).display"), 'none', 'The redesign hides the floating progress pill');
       await capture(`patch-chat-progress-${width}`);
     }
   } finally {
