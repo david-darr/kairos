@@ -23,35 +23,35 @@
 .ecosystem-more>summary::-webkit-details-marker{display:none}
 .ecosystem-extra-tools{position:absolute;right:0;top:50px;width:240px;padding:12px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:8px;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:16px;box-shadow:var(--ui-shadow)}
 .ecosystem-extra-tools p{margin:0;font-size:12px;line-height:1.5}
-.ecosystem-viewport{position:relative;flex:1;min-height:100px;overflow:auto;overscroll-behavior:contain;background:#5d8b55;cursor:grab;scrollbar-color:#b9b48b #49724b}
+.ecosystem-viewport{position:relative;flex:1;min-height:100px;overflow:auto;overscroll-behavior:contain;background:var(--eco-5d8b55);cursor:grab;scrollbar-color:var(--eco-b9b48b) var(--eco-49724b)}
 .ecosystem-viewport.is-dragging{cursor:grabbing;user-select:none}
 .ecosystem-extent{position:relative;overflow:hidden}
 .ecosystem-world{position:absolute;top:0;transform-origin:0 0}
 .ecosystem-ground,.ecosystem-structures,.ecosystem-actors{position:absolute;inset:0;pointer-events:none}
 .ecosystem-ground svg{width:100%;height:100%;display:block}
 .ecosystem-building,.ecosystem-character{pointer-events:auto}
-.ecosystem-sign{display:block;box-sizing:border-box;padding:4px 8px;width:max-content;max-width:100%;margin:0 auto;font:600 13px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.025em;border:2px solid #765d49;color:#443a39;background:#f9e8c5;box-shadow:0 3px 0 #765d49;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ecosystem-character{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;width:150px;min-height:100px;padding:4px;border:2px solid transparent;border-radius:8px;background:transparent;cursor:pointer;color:#253f37;will-change:transform}
-.ecosystem-character:hover,.ecosystem-building:hover{background:#fff0c522;border-color:#f9e8c5}
+.ecosystem-sign{display:block;box-sizing:border-box;padding:4px 8px;width:max-content;max-width:100%;margin:0 auto;font:600 13px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.025em;border:2px solid var(--eco-765d49);color:var(--eco-443a39);background:var(--eco-f9e8c5);box-shadow:0 3px 0 var(--eco-765d49);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ecosystem-character{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;width:150px;min-height:100px;padding:4px;border:2px solid transparent;border-radius:8px;background:transparent;cursor:pointer;color:var(--eco-253f37);will-change:transform}
+.ecosystem-character:hover,.ecosystem-building:hover{background:var(--eco-fff0c522);border-color:var(--eco-f9e8c5)}
 .ecosystem-sprite{position:relative;display:block;width:64px;height:64px}
 .ecosystem-profile-pixels{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated;pointer-events:none}
-.ecosystem-sprite::after{content:'';position:absolute;left:22px;bottom:0;width:8px;height:5px;background:#354050;box-shadow:12px 0 #354050}
+.ecosystem-sprite::after{content:'';position:absolute;left:22px;bottom:0;width:8px;height:5px;background:var(--eco-354050);box-shadow:12px 0 var(--eco-354050)}
 .ecosystem-character[data-motion=walking] .ecosystem-profile-pixels,.ecosystem-character[data-motion=returning] .ecosystem-profile-pixels{animation:ecosystem-step .35s steps(2,end) infinite}
-.ecosystem-agent-status,.ecosystem-team-status{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 6px;font:600 11px/1.25 ui-monospace,Consolas,monospace;background:#fcf0d8;color:#33453c;border:1px solid #48674c}
-.ecosystem-agent-status::before{content:'';display:inline-block;width:7px;height:7px;background:var(--eco-state,#a6a5b4);border:1px solid #33453c;margin-right:5px}
-.ecosystem-state-working{--eco-state:#6eadd1}.ecosystem-state-idle{--eco-state:#91be89}.ecosystem-state-needs_you{--eco-state:#edb85d}.ecosystem-state-off,.ecosystem-state-unknown{--eco-state:#a6a5b4}
-.ecosystem-state-needs_you .ecosystem-sign{border-color:#a15e24;background:#ffe1a6}
-.ecosystem-building{position:absolute;transform:translateX(-50%);width:224px;padding:5px 12px;border:2px solid transparent;border-radius:8px;background:transparent;color:#33453c;cursor:pointer;text-align:center}
+.ecosystem-agent-status,.ecosystem-team-status{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 6px;font:600 11px/1.25 ui-monospace,Consolas,monospace;background:var(--eco-fcf0d8);color:var(--eco-33453c);border:1px solid var(--eco-48674c)}
+.ecosystem-agent-status::before{content:'';display:inline-block;width:7px;height:7px;background:var(--eco-state,var(--eco-a6a5b4));border:1px solid var(--eco-33453c);margin-right:5px}
+.ecosystem-state-working{--eco-state:var(--eco-6eadd1)}.ecosystem-state-idle{--eco-state:var(--eco-91be89)}.ecosystem-state-needs_you{--eco-state:var(--eco-edb85d)}.ecosystem-state-off,.ecosystem-state-unknown{--eco-state:var(--eco-a6a5b4)}
+.ecosystem-state-needs_you .ecosystem-sign{border-color:var(--eco-a15e24);background:var(--eco-ffe1a6)}
+.ecosystem-building{position:absolute;transform:translateX(-50%);width:224px;padding:5px 12px;border:2px solid transparent;border-radius:8px;background:transparent;color:var(--eco-33453c);cursor:pointer;text-align:center}
 .ecosystem-house{display:block;width:196px;height:146px}
 .ecosystem-house svg{width:100%;height:100%}
 .ecosystem-team-status{display:inline-block;margin-top:3px;max-width:190px}
-.ecosystem-home-resident{position:absolute;left:40px;top:97px;width:28px;height:28px;background:#f7e1ac;border:2px solid #527c82;box-shadow:0 0 0 2px #ead0a1;pointer-events:none}
-.ecosystem-home-occupied .ecosystem-team-status{background:#f9e4b5}
+.ecosystem-home-resident{position:absolute;left:40px;top:97px;width:28px;height:28px;background:var(--eco-f7e1ac);border:2px solid var(--eco-527c82);box-shadow:0 0 0 2px var(--eco-ead0a1);pointer-events:none}
+.ecosystem-home-occupied .ecosystem-team-status{background:var(--eco-f9e4b5)}
 .ecosystem-overview .ecosystem-agent-status{display:none}
 .ecosystem-overview .ecosystem-sign{font-size:17px}
 .ecosystem-overview .ecosystem-building,.ecosystem-overview .ecosystem-character{border-width:3px}
 .ecosystem-overview .ecosystem-team-status{font-size:14px}
-.ecosystem-empty{position:absolute;left:420px;top:380px;width:440px;padding:20px;box-sizing:border-box;background:#fcf0d8;color:#33453c;border:2px solid #765d49;text-align:center;font:15px/1.6 ui-monospace,Consolas,monospace}
+.ecosystem-empty{position:absolute;left:420px;top:380px;width:440px;padding:20px;box-sizing:border-box;background:var(--eco-fcf0d8);color:var(--eco-33453c);border:2px solid var(--eco-765d49);text-align:center;font:15px/1.6 ui-monospace,Consolas,monospace}
 .ecosystem-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;font-size:11px;line-height:1.4}
 .ecosystem-sync{margin:0}.ecosystem-stale .ecosystem-sync{font-weight:600}
 .ecosystem-detail{position:absolute;z-index:5;bottom:8px;right:8px;width:min(360px,calc(100% - 16px));max-height:55%;box-sizing:border-box;overflow:auto;border:1px solid var(--ui-line);border-radius:18px;background:var(--ui-surface);color:var(--text);padding:12px;box-shadow:var(--ui-shadow)}

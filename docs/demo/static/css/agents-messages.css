@@ -18,7 +18,7 @@
 .agents-chat-actions { padding: 24px; border: 1px solid var(--ui-line); border-radius: 24px; color: var(--text); background: var(--ui-surface); width: min(340px, calc(100vw - 32px)); box-shadow: var(--ui-shadow); }
 .agents-chat-actions h2 { font-size: 18px; margin: 0 0 16px; }
 .agents-chat-actions .btn { display: block; width: 100%; min-height: 44px; margin: 8px 0; }
-.agents-chat-actions::backdrop { background: #0007; }
+.agents-chat-actions::backdrop { background: var(--scrim); }
 .is-messages .agent-conversation-page { padding: 16px 20px 12px; gap: 12px; overflow: hidden; }
 .is-messages .agent-conversation-topbar { flex: none; flex-wrap: nowrap; min-height: 48px; }
 .is-messages .agent-topbar-tools { display: flex; align-items: center; gap: 8px; width: 100%; }
@@ -33,7 +33,7 @@
 .is-messages .agent-chat-host { flex: 1; min-width: 0; }
 .is-messages .agent-live-panels { display: none; }
 .is-messages .is-info-open .agent-live-panels:not([hidden]) { display: flex; flex: 0 0 260px; }
-.is-messages .is-info-open .agent-tabs { display: flex; flex: none; width: 100%; max-width: none; order: 2; }
+.is-messages .is-info-open .agent-tabs { display: grid; flex: none; width: 100%; max-width: none; order: 2; }
 .is-messages .is-info-open .agent-conversation-topbar { flex-wrap: wrap; }
 .is-messages .agent-chat, .is-messages .agent-chat-main, .is-messages .session-chat { min-height: 0; height: 100%; }
 .is-messages .session-chat { display: flex; flex-direction: column; gap: 0; }
@@ -87,7 +87,7 @@
 .agent-avatar-accent { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; margin: 16px 0; }
 .agent-avatar-accent input { width: 56px; height: 44px; padding: 4px; }
 .agent-avatar-layers { display: flex; gap: 6px; flex-wrap: wrap; }
-.agent-avatar-layers .btn { min-height: 44px; }
+.agent-avatar-layers .btn { min-height: 44px; min-width: 44px; }
 .agent-avatar-layers [aria-pressed=true] { background: var(--accent-dim); border-color: var(--accent); }
 .agent-avatar-presets { display: grid; gap: 12px; padding: 16px 0; }
 .agent-avatar-presets .btn { min-height: 44px; }
