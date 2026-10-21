@@ -50,7 +50,7 @@ async function run(ctx) {
     // No header control or title may sit under the avatar (a title may share its row, beside it).
     ok(await js("(() => { const a = document.getElementById('mobile-menu-btn').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, p, button, input, a, small, span')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.textContent.trim() + n.getAttribute('aria-label') !== '').every(n => { const r = n.getBoundingClientRect(); return r.width === 0 || r.height === 0 || r.right <= a.left + 0.5 || r.left >= a.right - 0.5 || r.bottom <= a.top + 0.5 || r.top >= a.bottom - 0.5; }); })()"), tab + ' headers clear avatar');
   };
-  for (const tab of ['home', 'agents', 'tool-store', 'school', 'forgeHome']) {
+  for (const tab of ['home', 'agents', 'tool-store', 'school']) {
     await navigate(tab); await delay(500); await checkAvatar(tab);
   }
   const centeredComposer = async (selector, expanded = false) => {
@@ -323,144 +323,9 @@ async function run(ctx) {
   ok(await js("!!document.querySelector('.agents-chat-rail input[type=search], .agents-chat-rail input')"), 'The rail keeps its own search');
   eq(await docks(), 0, 'No dock over the rail');
 
-  // ---- G. Forge: session composer, changes view, sticky Git action pill ---------------------
-  const openForgeSession = async () => {
-    await navigate('forgeHome'); await delay(500);
-    await js("document.querySelector('[data-forge-project=fp1]').click()");
-    await waitFor("document.querySelectorAll('.forge-session-card').length >= 1");
-    await js("document.querySelector('.forge-session-card').click()");
-    await waitFor("!!document.querySelector('.forge-transcript-composer') && !!document.querySelector('.ms-forge-add')");
-    await delay(500);
-  };
-  await openForgeSession();
-  await checkAvatar('forgeShell');
-  await js("document.getElementById('mobile-menu-btn').click()"); await waitFor("document.querySelector('.ms-tab-sheet[open]')");
-  eq(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent)"), ['Kairos', 'Forge Preview'], 'Sheet offers both modes in Forge');
-  eq(await js("document.querySelectorAll('.ms-sheet-projects .ms-sheet-activity-main').length"), await js("document.querySelectorAll('.forge-project-row').length"), 'Sheet carries every Forge project');
-  await js("document.querySelector('.ms-sheet-projects > button').click()");
-  ok(await js("!document.querySelector('.ms-tab-sheet[open]') && ['Open folder', 'Clone repo', 'New repo'].every(text => [...document.querySelectorAll('button')].some(n => n.textContent === text && n.getClientRects().length))"), 'Add project delegates all existing actions outside the dismissed sheet');
-  await press('Escape');
-
-  await centeredComposer('.forge-transcript-composer');
-  await js("document.querySelector('.forge-transcript-composer textarea').focus()"); await delay(400);
-  await centeredComposer('.forge-transcript-composer', true);
-  await js("document.activeElement.blur()"); await delay(400);
-  eq(await docks(), 0, 'A Forge session mounts no tab dock');
-  const fc = await rect('.forge-transcript-composer'), fadd = await rect('.ms-forge-add');
-  ok(fc && fc.b <= 844 && fc.h >= 50 && fc.t > 500, 'The session composer rests at the bottom: ' + JSON.stringify(fc));
-  ok(fadd && fadd.w >= 43.5 && fadd.h >= 43.5, 'The composer + is a 44px target');
-  ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-forge-add')); const chat = document.querySelector('#overflow-plus-btn'); return s.backgroundColor !== 'rgba(0, 0, 0, 0)' && parseFloat(s.borderRadius) >= 20 && (!chat || getComputedStyle(chat).backgroundColor === s.backgroundColor); })()"), 'The composer + is the tinted circle, like the chat composer +');
-  const fpill = await rect('.ms-activity-floating');
-  ok(!fpill || !hit(fpill, fc), 'The activity pill clears the Forge composer');
-  eq(await overflow(), [], 'Forge session no overflow');
-  await shot('forge-session');
-  // Tools sheet from the composer "+": the shared sheet and every way out.
-  const toolsOpen = async () => {
-    await js("document.querySelector('.ms-forge-add').focus(); document.querySelector('.ms-forge-add').click()");
-    await waitFor("!!document.querySelector('dialog.ms-sheet[open]')");
-    await delay(150);
-  };
-  const toolsGone = () => waitFor("!document.querySelector('dialog.ms-sheet')");
-  const backOnPlus = async how => ok(await js("document.activeElement === document.querySelector('.ms-forge-add')"), 'Focus returns to the composer + after ' + how);
-  await toolsOpen();
-  await shot('forge-tools-sheet');
-  eq(await js("document.querySelector('dialog.ms-sheet').getAttribute('aria-label')"), 'Session tools', 'The sheet is named');
-  ok(await js("document.querySelector('dialog.ms-sheet').contains(document.activeElement)"), 'Focus moves into the sheet');
-  const sheet = await rect('dialog.ms-sheet'), grabber = await rect('dialog.ms-sheet .ms-sheet-grabber');
-  ok(sheet.l === 0 && sheet.w === 390 && sheet.b === 844, 'The sheet is anchored to the bottom edge: ' + JSON.stringify(sheet));
-  ok(grabber.h >= 43.5 && grabber.w >= 43.5, 'The sheet grabber is a 44px target');
-  eq(await small('dialog.ms-sheet button, dialog.ms-sheet input, dialog.ms-sheet select'), [], 'Sheet controls are 44px');
-  // Tab traps both ways (real key events).
-  await js("(() => { const list = [...document.querySelector('dialog.ms-sheet').querySelectorAll('button, input, select, textarea, a[href], summary')].filter(n => !n.disabled && n.getClientRects().length); window.__first = list[0]; window.__last = list.at(-1); window.__last.focus(); })()");
-  await press('Tab');
-  ok(await js("document.activeElement === window.__first"), 'Tab from the last control wraps to the first');
-  await pressShiftTab();
-  ok(await js("document.activeElement === window.__last"), 'Shift+Tab from the first control wraps to the last');
-  await press('Escape'); await toolsGone(); await backOnPlus('Escape');
-  await toolsOpen(); await js("document.querySelector('dialog.ms-sheet .ms-sheet-header button').click()"); await toolsGone(); await backOnPlus('Close');
-  await toolsOpen();
-  await drag({ x: 200, y: 60 }, { x: 200, y: 62 });  // backdrop tap
-  await toolsGone(); await backOnPlus('a backdrop tap');
-  await toolsOpen();
-  const g2 = await rect('dialog.ms-sheet .ms-sheet-grabber');
-  await drag({ x: g2.l + g2.w / 2, y: g2.t + 20 }, { x: g2.l + g2.w / 2, y: g2.t + 20 + 150 });
-  await toolsGone(); await backOnPlus('a swipe down');
-  await toolsOpen();
-  await resize(1440, 900);
-  await waitFor("!document.querySelector('dialog.ms-sheet')");
-  ok(await js("getComputedStyle(document.querySelector('.ms-forge-add')).display === 'none' || document.querySelector('.ms-forge-add').hidden"), 'The phone + is gone on desktop');
-  await resize(390, 844);
-  // The composer morphs, and the pill steps aside while drafting.
-  await js("document.querySelector('.forge-transcript-input').focus()");
-  await waitFor("!!document.querySelector('.forge-transcript-composer.ms-composer-expanded')");
-  ok(!(await rect('.ms-activity-floating')), 'The activity pill steps aside while the composer is open');
-  await js("document.querySelector('.forge-transcript-input').blur()");
-  // Changes and Git in the project sidebar.
-  await js("document.querySelector('[aria-label=\"Open project sidebar\"]').click()");
-  await waitFor("!!document.querySelector('[data-sidebar-tab=git]')");
-  await js("document.querySelector('[data-sidebar-tab=changes]')?.click()");
-  await delay(600);
-  eq(await overflow(), [], 'Forge changes view no overflow');
-  await shot('forge-changes');
-  await js("document.querySelector('[data-sidebar-tab=git]').click()");
-  await waitFor("!!document.querySelector('.ms-git-dock')");
-  await delay(300);
-  const gitTexts = await js("[...document.querySelectorAll('.ms-git-dock button')].map(b => b.textContent.trim())");
-  eq(gitTexts, ['Commit 1', 'Sync: Push', 'Sync: Pull'], 'The Git pill offers Commit with its count and the two Sync actions');
-  ok(await js("getComputedStyle(document.querySelector('.ms-git-dock')).position === 'sticky'"), 'The Git pill is sticky');
-  const gd = await rect('.ms-git-dock'), gpill = await rect('.ms-activity-floating');
-  ok(gd.h >= 50 && gd.b <= 844 - 8, 'The Git pill sits above the bottom edge: ' + JSON.stringify(gd));
-  ok(!gpill || !hit(gpill, gd), 'The activity pill clears the Git pill');
-  eq(await small('.ms-git-dock button'), [], 'Git pill buttons are 44px');
-  await shot('forge-git');
-  const gitUrl = /\/api\/forge\/sessions\/[^/]+\/git$/;
-  const gitWrites = () => writes.filter(w => gitUrl.test(w.path) && w.method === 'POST');
-  const gitBefore = gitWrites().length;
-  await js("document.querySelector('.ms-git-dock button').focus(); document.querySelector('.ms-git-dock button').click()");
-  ok(await js("document.activeElement.getAttribute('aria-label') === 'Commit message'"), 'Commit with no message reveals and focuses the message field');
-  eq(gitWrites().length, gitBefore, 'Commit with no message sends nothing');
-  await js("(() => { const t = document.querySelector('[aria-label=\"Commit message\"]'); t.value = 'Dock commit'; t.dispatchEvent(new Event('input', { bubbles: true })); })()");
-  await js("document.querySelector('.ms-git-dock button').focus(); document.querySelector('.ms-git-dock button').click()");
-  for (let i = 0; i < 40 && gitWrites().length === gitBefore; i++) await delay(50);
-  ok(gitWrites().slice(gitBefore).some(w => JSON.parse(w.body).action === 'commit' && JSON.parse(w.body).message === 'Dock commit'), 'Commit with a message uses the original commit action');
-  await waitFor("!!document.querySelector('.ms-git-dock')");
-  await delay(400);
-  for (const [action, title] of [['Sync: Push', 'Push branch?'], ['Sync: Pull', null]]) {
-    const before = writes.length;
-    await waitFor(`[...document.querySelectorAll('.ms-git-dock button')].filter(b => /Sync/.test(b.textContent)).every(b => !b.disabled)`);
-    await js(`[...document.querySelectorAll('.ms-git-dock button')].find(b => b.textContent.trim() === ${JSON.stringify(action)}).click()`);
-    if (title) {
-      await waitFor(`[...document.querySelectorAll('.panel-dialog')].some(n => n.textContent.includes(${JSON.stringify(title)}))`);
-      ok(await js("!!document.querySelector('.panel-dialog.ms-sheet-surface, .ms-sheet-surface.panel-dialog, .ms-sheet-surface')"), action + ' approval opens as a sheet');
-      eq(writes.slice(before).filter(w => /\/api\/permissions\//.test(w.path)).length, 0, action + ' asks before anything is sent');
-      await js("[...document.querySelectorAll('.panel-dialog button')].find(b => b.textContent.trim() === 'Approve').click()");
-      await waitFor("!document.querySelector('.panel-dialog')");
-    }
-    for (let i = 0; i < 40 && !writes.slice(before).some(w => gitUrl.test(w.path) && JSON.parse(w.body).action === action.slice(6).toLowerCase()); i++) await delay(50);
-    ok(writes.slice(before).some(w => gitUrl.test(w.path) && JSON.parse(w.body).action === action.slice(6).toLowerCase()), action + ' uses the original Git action');
-    await delay(400);
-  }
-  await js("document.querySelector('[aria-label=\"Close project sidebar\"]')?.click()");
-  await resize(1440, 900);
-  ok(await js("![...document.querySelectorAll('.ms-git-dock')].some(d => d.getClientRects().length)"), 'The Git pill is hidden on desktop');
-  await resize(390, 844);
-
-  // Forge Home composer: fits its column, a 50px pill at rest, one row of controls when open.
-  await navigate('forgeHome'); await waitFor("!!document.querySelector('.forge-composer .ms-forge-add')"); await delay(500);
-  eq(await overflow(), [], 'Forge Home composer does not overflow');
-  const home = await js("(() => { const f = document.querySelector('.forge-composer').getBoundingClientRect(), p = document.querySelector('.forge-home').getBoundingClientRect(); return { fl: f.left, fr: f.right, pl: p.left, pr: p.right, fh: f.height }; })()");
-  ok(home.fl >= home.pl - 1 && home.fr <= home.pr + 1 && home.fh <= 64, 'Forge Home composer sits inside its column as a pill: ' + JSON.stringify(home));
-  ok(await js("[...document.querySelectorAll('.forge-composer .ms-embedded-model-trigger')].every(n => !n.getClientRects().length)"), 'The model chip stays out of the resting pill');
-  await shot('forge-home-rest');
-  await centeredComposer('.forge-composer');
-  await js("document.querySelector('.forge-composer textarea').focus()");
-  await waitFor("!!document.querySelector('.forge-composer.ms-composer-expanded')");
-  await delay(400);
-  eq(await overflow(), [], 'Forge Home open composer does not overflow');
-  ok(await js("(() => { const r = n => document.querySelector(n).getBoundingClientRect(); const a = r('.forge-composer .ms-forge-add'), m = r('.forge-composer .ms-embedded-model-trigger'); return a.right <= m.left + 1 && a.width >= 43.5 && m.height >= 43.5; })()"), 'Forge Home + and model chip sit side by side');
-  await centeredComposer('.forge-composer', true);
-  await shot('forge-home-open');
-  await js("document.querySelector('.forge-composer textarea').blur()");
+  // ---- G. Forge project pager, pushed tools, Changes and commit sheet ---------------------
+  const forgeResult = await require('./mobile-forge-checks.cjs')(ctx);
+  assertions += forgeResult.assertions;
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(600);

@@ -1,20 +1,23 @@
-import { mountGitDock } from './mobileDock.js';
+import { mountMobileForgeChanges } from './mobileForgeChanges.js';
 import { api, el, customSelect } from './api.js';
 import { permissionAction } from './forgeAppPreview.js';
 import { forgeRunning } from './forgeUi.js';
 
-export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
+export function mountGitPanel(panel, id, { onChanged, onMerged, onDiff } = {}) {
   const base = `/api/forge/sessions/${encodeURIComponent(id)}/git`;
   const controller = new AbortController();
   let disposed = false, busy = false, version = 0, commitDraft = '', branchDraft = '';
   let disposeDock = () => {};
+  let commitControl, messageControl;
   const status = el('p', { class: 'meta', role: 'status' });
   const content = el('div', { class: 'forge-git-content' });
   panel.replaceChildren(status, content);
   const button = (text, action, extra = {}) => el('button', { class: 'forge-small-button', text, disabled: busy || forgeRunning(id), onclick: () => typeof action === 'function' ? action() : run(action, typeof extra === 'function' ? extra() : extra) });
   async function run(action, extra) {
     if (busy || disposed || forgeRunning(id)) return;
+    const phoneCommit = !!messageControl?.closest?.('.mf-commit');
     busy = true; content.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    if (phoneCommit) { commitControl.disabled = true; messageControl.disabled = true; }
     try {
       if (['push', 'merge'].includes(action)) await permissionAction(base, { body: { action, ...extra }, signal: controller.signal, owner: panel });
       else await api(base, { method: 'POST', body: JSON.stringify({ action, ...extra }) });
@@ -24,11 +27,11 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
       status.textContent = action === 'merge' ? 'Merged back. You can now end the session and remove its worktree.' : 'Git updated.';
       onChanged?.(); if (action === 'merge') onMerged?.();
     } catch (error) { if (!disposed) status.textContent = error.message.replace(/^\d+: /, ''); }
-    finally { busy = false; if (!disposed) refresh(); }
+    finally { busy = false; if (!disposed) refresh(phoneCommit); }
   }
-  async function refresh() {
+  async function refresh(force = false) {
     if (disposed || busy) return;
-    if (content.contains(document.activeElement) && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (force !== true && (content.contains(document.activeElement) || document.activeElement === messageControl) && ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
     const current = ++version;
     try {
       const state = await api(base);
@@ -38,8 +41,9 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
           el('code', { text: f.path }), button(title === 'Staged' ? 'Unstage' : 'Stage', title === 'Staged' ? 'unstage' : 'stage', { path: f.path }),
         ]))]);
       const message = el('textarea', { placeholder: 'Commit message', 'aria-label': 'Commit message', rows: '3' });
-      message.value = commitDraft;
+      message.value = commitDraft; messageControl = message;
       const commit = button(state.files.some(f => f.staged) ? 'Commit staged files' : 'Commit all changes', 'commit', () => ({ message: message.value }));
+      commitControl = commit;
       commit.disabled = !commitDraft.trim() || !state.files.length || busy || forgeRunning(id);
       message.oninput = () => { commitDraft = message.value; commit.disabled = !message.value.trim() || !state.files.length || busy || forgeRunning(id); };
       const branches = customSelect({}, state.branches.map(name => el('option', { value: name, text: name })));
@@ -55,7 +59,7 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
         files('Staged'), files('Unstaged'), message, commit,
         el('div', { class: 'forge-git-actions' }, [push, pull, button('Merge back', 'merge')]),
         branches, branch, create);
-      disposeDock = mountGitDock(content, { files: state.files, message, commit, push, pull });
+      disposeDock = mountMobileForgeChanges(content, { state, message, commit, push, pull, onDiff });
     } catch (error) { if (!disposed && current === version) status.textContent = error.message; }
   }
   document.addEventListener('kairos:forge-review', refresh);

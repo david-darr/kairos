@@ -11,6 +11,7 @@ let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
 export const isPhoneShell = mobileOn;
 export function phoneRoute(tab, options) {
+  if (mobileOn() && ['forgeShell', 'forgeProjects', 'forgeSessions'].includes(tab) && !options.sessionId && !options.mobileTool) return { tab: 'forgeHome', options: { ...options, mobilePage: 1 } };
   if (!mobileOn() || tab !== 'chat' || options.mobileConversation || options.sessionId || options.projectId) return { tab, options };
   return { tab: 'mobileLaunch', options: { ...options, mobilePage: options.mobilePage ?? 0 } };
 }

@@ -57,6 +57,7 @@ export function openMobileSheet({ title, content, opener = document.activeElemen
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
   });
   dialog.addEventListener('keydown', event => {
+    if (event.target?.closest?.('.panel-dialog')) return;
     if (event.key !== 'Tab') return;
     const list = [...dialog.querySelectorAll('button, input, select, textarea, a[href], summary, [tabindex]')]
       .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length && !node.closest('[hidden], [inert]'));

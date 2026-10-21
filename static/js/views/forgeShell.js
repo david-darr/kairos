@@ -1,3 +1,5 @@
+import { mountMobileForgeSession } from '../mobileForgeSession.js';
+import { mobileOn } from '../mobileShared.js';
 import { api, el, modelMark, confirmDialog, toast } from '../api.js';
 import { subscribeAll } from '../chatStream.js';
 import { navigateForge, sessionStatus, changeTotals, diffCounts, forgeRunning } from '../forgeUi.js';
@@ -68,7 +70,7 @@ export async function render(container, tabId, options = {}) {
   const tabButtons = new Map();
   const cleanupPanels = () => { for (const panel of panels.values()) { panel._cleanup?.(); panel.remove(); } panels.clear(); };
   const cleanup = () => {
-    disposed = true; gitCleanup(); ++navigation; ++reviewsVersion; ++explorerVersion; cancelResize?.(); cleanupPanels(); unsubscribe(); clearInterval(timer); hideArtifact({ navigation: true });
+    disposed = true; phoneShell.dispose(); gitCleanup(); ++navigation; ++reviewsVersion; ++explorerVersion; cancelResize?.(); cleanupPanels(); unsubscribe(); clearInterval(timer); hideArtifact({ navigation: true });
     document.removeEventListener('keydown', onKey); window.removeEventListener('resize', viewportChanged);
     document.removeEventListener('kairos:forge-projects', projectsChanged); if (controller === instance) controller = null;
     document.removeEventListener('kairos:forge-apps', refreshApps); clearInterval(appTimer);
@@ -136,6 +138,13 @@ export async function render(container, tabId, options = {}) {
   strip.onwheel = event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } };
   const appTimer = setInterval(refreshApps, 5000);
   document.addEventListener('kairos:forge-apps', refreshApps);
+  const phoneShell = mountMobileForgeSession(shell, {
+    status, state: () => ({ project, session: sessions.find(s => s.id === layout?.sessionId), tabs: layout?.tabs || [], surface: layout?.tabs.find(t => t.id === layout.left), count: (reviews.get(layout?.sessionId) || []).length }),
+    select: selectSidebarTab, panel: key => ({ git: gitPanel, changes: changesPanel, explorer: explorerPanel })[key],
+    sessionPanel: () => panels.get(`session:${layout?.sessionId}`), activate, close: closeTab,
+    pin: id => { const tab = layout.tabs.find(t => t.id === id); if (tab) { tab.preview = false; drawTabs(); } },
+    reload: () => openContext({ sessionId: layout.sessionId, closeSheet: true }),
+  });
   try {
     ready = Promise.all([api('/api/forge/projects'), api('/api/models/choices').catch(() => [])]).then(values => { [projects, models] = values; });
     await ready;
@@ -184,9 +193,12 @@ export async function render(container, tabId, options = {}) {
       await mountArtifactPane(artifactHost);
       if (session && phone() && next.closeSheet) showSidebar(false);
       if (next.previewSessionId) openPreview(next.previewSessionId);
+      if (mobileOn() && next.mobileChanges) phoneShell.changes();
+      if (mobileOn() && next.mobileTool === 'explorer') phoneShell.tool('explorer');
     } catch (error) { if (!disposed && version === navigation) status.textContent = error.message; }
   }
   function showSidebar(show) {
+    if (mobileOn()) { sidebar.hidden = true; sidebar.removeAttribute('role'); sidebar.removeAttribute('aria-modal'); workspace.inert = false; return; }
     sidebar.hidden = !show; reopen.hidden = show && !phone();
     if (phone()) {
       sidebar.setAttribute('role', 'dialog'); sidebar.setAttribute('aria-modal', 'true');
@@ -215,7 +227,7 @@ export async function render(container, tabId, options = {}) {
     gitPanel.hidden = key !== 'git';
     gitCleanup(); gitCleanup = () => {};
     if (key === 'git') {
-      if (layout.sessionId && !sessions.find(s => s.id === layout.sessionId)?.forge.removed) gitCleanup = mountGitPanel(gitPanel, layout.sessionId, { onChanged: refreshReviews });
+      if (layout.sessionId && !sessions.find(s => s.id === layout.sessionId)?.forge.removed) gitCleanup = mountGitPanel(gitPanel, layout.sessionId, { onChanged: refreshReviews, onDiff: path => openSurface('diff', path, true) });
       else gitPanel.textContent = 'Select an active session to use Git.';
     }
     if (key === 'explorer') loadExplorer();
@@ -344,6 +356,7 @@ export async function render(container, tabId, options = {}) {
     const changesTab = tabButtons.get('changes');
     changesTab.replaceChildren(totals.added || totals.removed ? diffCounts(totals) : el('span', { text: 'Changes' }));
     changesTab.setAttribute('aria-label', `Changes${totals.added || totals.removed ? ` +${totals.added} -${totals.removed}` : ''}`);
+    phoneShell.update();
     changesList.replaceChildren(...files.map(file => {
       const id = layout.sessionId;
       const revert = el('button', { class: 'forge-small-button forge-revert', text: 'Revert', 'aria-label': `Revert ${file.path}`, disabled: reviewDisabled(id, file),
@@ -454,6 +467,7 @@ export async function render(container, tabId, options = {}) {
       row.ondragstart = event => { tabDrag = tab.id; event.dataTransfer.setData('text/plain', tab.id); event.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); };
       row.ondragend = cancelDrag; return row;
     }));
+    phoneShell.update();
     strip.querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   function drawPanes() {
@@ -487,8 +501,8 @@ export async function render(container, tabId, options = {}) {
             onPreview: openPreview,
             onTerminal: openTerminal,
             onDiff: path => { layout.sessionId = tab.sessionId; activePane = tab.pane || 'left'; openSurface('diff', path, true); },
-            onChanges: () => { layout.sessionId = tab.sessionId; showSidebar(true); selectSidebarTab('changes'); refreshReviews(); },
-            onLeave: () => { closeTab(tab.id); selectSidebarTab('sessions'); openContext({ projectId: project.id }); } });
+            onChanges: () => { layout.sessionId = tab.sessionId; if (mobileOn()) { phoneShell.changes(); refreshReviews(); return; } showSidebar(true); selectSidebarTab('changes'); refreshReviews(); },
+            onLeave: () => { closeTab(tab.id); if (mobileOn()) { navigateForge('forgeHome', { projectId: project.id, mobilePage: 1 }); return; } selectSidebarTab('sessions'); openContext({ projectId: project.id }); } });
         } else if (tab.type === 'app-preview') {
           await mountAppPreview(panel, tab.sessionId);
         } else if (tab.type === 'terminal') {
