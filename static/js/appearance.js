@@ -1,7 +1,7 @@
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, redesign: false });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, classic: false });
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -44,7 +44,10 @@ function normalize(raw = {}) {
   }
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
-  if (typeof raw.redesign === 'boolean') value.redesign = raw.redesign;
+  // The redesign is the default look. `classic` is the opt-out. The old
+  // opt-in `redesign` field is ignored on read (most stored copies say false
+  // without the user ever choosing it) and is dropped by the next save.
+  if (typeof raw.classic === 'boolean') value.classic = raw.classic;
   // Terminal chat style (David's ask 2026-09-25): chats look and read like a
   // terminal harness. Presentation only; see the [data-chat-style] rules.
   if (['standard', 'terminal'].includes(raw.chatStyle)) value.chatStyle = raw.chatStyle;
@@ -185,8 +188,8 @@ export function updateAppearance(patch) {
 export function restoreWelcomeAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem('jarvis:welcome-appearance:v1') || '{}');
-    if (saved.redesign === true) { settings = normalize(saved); apply(); }
-  } catch { /* Missing or unavailable storage keeps the original sign-in. */ }
+    settings = normalize(saved && typeof saved === 'object' ? saved : {}); apply();
+  } catch { settings = { ...DEFAULTS }; apply(); }
 }
 
 // Validate, decode and downsample a picture (shared by the Image background
@@ -301,7 +304,7 @@ function apply() {
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   syncRedesign(root);
-  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ redesign: settings.redesign, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone })); } catch { /* Appearance still works without storage. */ }
+  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ classic: settings.classic, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');
@@ -342,16 +345,16 @@ function apply() {
   document.dispatchEvent(new CustomEvent('kairos:appearance'));
 }
 
-// Redesign preview (step 1 of the visual refresh): an opt-in class on the root
+// The redesign (step 1 of the visual refresh): the default look, an opt-out class on the root
 // that static/css/redesign.css keys off, plus one washed halftone backdrop
 // behind every tab except Chat and Forge. It reuses chatBackdrop.js's sky
 // scene (same renderer, cache and halftone/color palette) in a host inside
 // #content, so no image is shipped and no existing view is touched. The host
-// exists only while the switch is on.
+// exists only while the classic look is off.
 let redesignBackdrop = null;
 function syncRedesign(root) {
-  root.classList.toggle('kairos-redesign', settings.redesign);
-  if (!settings.redesign) {
+  root.classList.toggle('kairos-redesign', !settings.classic);
+  if (settings.classic) {
     redesignBackdrop?.dispose(); redesignBackdrop?.host.remove(); redesignBackdrop = null;
     return;
   }
