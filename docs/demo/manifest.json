@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "c412bd288431c0ae762ee5ff988d5751f86daf66397b00bb64250b92fb5da44f",
+  "app.js": "63b9577ac647f0d4ad5310a13df830a67700e7a0848cdec831650a4876da1569",
   "fixtures.js": "8db94db9f27b7bcf54ba8dd654932c6aaf557f6d07257f303b7153804e72e2b4",
   "index.html": "a8b53b2f2feb9ddf2b8a6ad50564534e76da301bdcf9058cdf14d17603c4d1bc",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -442,7 +442,7 @@
   "static/js/mobileShared.js": "99fe377885d78e0cf61860ffa52eb42987e524dd5b5d75f549393e14d4295be3",
   "static/js/mobileSheet.js": "a66742065fe3322bafaa7a3219e9472e3062b978b5f8fa0057f7e0cdda19fa23",
   "static/js/mobileShell.js": "b959393b495c81aeb588a58b0a743b6c52ceba7c46ce37f98d78ed8ccfe69591",
-  "static/js/mobileTabSheet.js": "b294f3ab52a9eefd1f38f47091e262c4538c7c9e69ba2d4b93af038d24abb393",
+  "static/js/mobileTabSheet.js": "f2fa740ff3ef0d1a270327b3872a7d703c92e2b20c049dcbb4ad25245a9ef43e",
   "static/js/mobileVoiceRow.js": "7d9af569ad51e07f6829492688569977d567f3c6a73720900f5efb85459ed9ea",
   "static/js/modelSetup.js": "baee8e3110b8d3f6507461aae8b1f10c062a25727df760ed27759e643c6e8ff3",
   "static/js/onboarding.js": "5db93cf40e6bd84998a4cbb6eb0bd9f68f9e1df1207b8a62727b001c3b625a63",
@@ -681,6 +681,7 @@
   "static/js/vendor/pdf.mjs": "91e29f812c593904e8d48d022db5ddf93e3443575d4765ac9bfbb42494cfbd8d",
   "static/js/vendor/pdf.worker.mjs": "df3bf6bf6b8b8dac8a4042d8c4ecf1cf21e1d197e0fe231c192122409eba656b",
   "static/js/vendor/xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+  "static/js/viewportDiagnostics.js": "65c9fef027332447ffb356f02059a2a6897f04a97d8c74bca274ec99cc268547",
   "static/js/views/agents.js": "bbf27d37d88f5b3f8f6962ad548343d2240b4f69e094445333337354fb9a978c",
   "static/js/views/appearancePanel.js": "e433fd7fb8c98947e366480465235fd7ca5abfdd56c4709d74f570ef11443fc2",
   "static/js/views/calendar.js": "188cb76b15ab0e81924dbc5fbac3e66231b978c87f9c3f472896c8b630184463",
