@@ -33,7 +33,7 @@
 .is-messages .agent-chat-host { flex: 1; min-width: 0; }
 .is-messages .agent-live-panels { display: none; }
 .is-messages .is-info-open .agent-live-panels:not([hidden]) { display: flex; flex: 0 0 260px; }
-.is-messages .is-info-open .agent-tabs { display: flex; flex: none; width: 100%; max-width: none; order: 2; }
+.is-messages .is-info-open .agent-tabs { display: grid; flex: none; width: 100%; max-width: none; order: 2; }
 .is-messages .is-info-open .agent-conversation-topbar { flex-wrap: wrap; }
 .is-messages .agent-chat, .is-messages .agent-chat-main, .is-messages .session-chat { min-height: 0; height: 100%; }
 .is-messages .session-chat { display: flex; flex-direction: column; gap: 0; }
