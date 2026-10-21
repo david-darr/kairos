@@ -1348,17 +1348,7 @@ function toggleMenu(menu, headerAnchor = null) {
     fitMenu(menu, headerAnchor.closest('.chat-header-model') || headerAnchor, { prefer: 'below', fixed: true, gap: 8 });
     return;
   }
-  const anchor = menu.parentElement.getBoundingClientRect();
-  const above = anchor.top - 12;
-  const below = innerHeight - anchor.bottom - 12;
-  const opensBelow = menu.classList.contains('below') || (above < 260 && below > above);
-  menu.style.top = opensBelow ? 'calc(100% + 8px)' : 'auto';
-  menu.style.bottom = opensBelow ? 'auto' : 'calc(100% + 8px)';
-  menu.style.maxHeight = `${Math.max(0, Math.min(320, opensBelow ? below : above))}px`;
-  menu.style.maxWidth = 'calc(100vw - 24px)';
-  const rect = menu.getBoundingClientRect();
-  const offset = rect.left < 12 ? 12 - rect.left : Math.min(0, innerWidth - 12 - rect.right);
-  menu.style.transform = `translateX(${offset}px)`;
+  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: 320, keepSide: true });
 }
 function closeMenu(menu) { menu.classList.add("hidden"); }
 
