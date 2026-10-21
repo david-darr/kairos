@@ -67,7 +67,7 @@
   .kairos-redesign .rd-in-composer .model-picker-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign .rd-in-composer .model-picker-btn:disabled { opacity: .55; }
   .kairos-redesign .rd-in-composer .model-picker-menu {
-    z-index: 90; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-field);
+    z-index: 90; border: 1px solid var(--rd-line-strong);
     background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
   }
 }
@@ -79,3 +79,11 @@
   .kairos-redesign .model-picker-btn { min-height: 44px; }
   .kairos-redesign :is(#chat-main, #model-picker-menu) summary { padding-block: 11px; }
 }
+
+/* -- Page and slide thumbnails (PDF, PPTX): a page is a rectangle ------------------------------
+   The thumbnails are .btn buttons, and the redesign's pill radius on .btn out-ranks
+   .artifact-thumbnail, so the selected-page outline (which follows the border radius)
+   turned into an oval around a portrait or landscape page. Keep the small radius. */
+.kairos-redesign .btn.artifact-thumbnail { border-radius: 8px; }
+.kairos-redesign .btn.artifact-thumbnail.active { outline-offset: -2px; }
+.kairos-redesign .btn.artifact-thumbnail:focus-visible { outline-offset: -2px; }

@@ -276,7 +276,10 @@ export function openOptionMenu(anchor, items, onPick) {
     else row.addEventListener("click", (e) => { e.stopPropagation(); closeOptionMenu(); anchor.focus?.({ focusVisible: false }); onPick(item.value); });
     menu.append(row);
   }
-  (anchor.closest('dialog[open]') || document.body).append(menu);
+  // A modal <dialog> sits in the browser's top layer, above everything on
+  // <body> whatever the z-index, so a menu for a control inside one lives in
+  // that dialog (still `fixed`, so its overflow cannot clip it).
+  (anchor.closest?.("dialog[open]") || document.body).append(menu);
 
   // Below the control, or above it when there is more room there, never
   // taller than the space on that side (2026-10-05: a long list near the

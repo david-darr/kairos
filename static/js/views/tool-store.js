@@ -5,6 +5,7 @@ import { pill } from "../settingsKit.js";
 import { shareButton, githubStrip } from "../storePublish.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
+import { initToolStoreMobile } from "../redesignToolStoreMobile.js";
 
 // Redesign hook: tag confirmation panels so the Tool Store sheet can style them.
 function confirmDialog(options) {
@@ -76,6 +77,9 @@ export async function render(container) {
     results,
   ]));
   const view = container.firstElementChild;
+  // Phone redesign: rows, bottom sheet and the "+" menu wrap the same cards and buttons.
+  const mobile = initToolStoreMobile({ view, results, toolbar: view.querySelector(".tool-store-toolbar"), filters, installed,
+    menu: view.querySelector(".tool-store-manage"), header: view.querySelector(".view-header") });
   results.append(el("div", { class: "tool-store-empty", role: "status", text: "Loading skills and tools…" }));
 
   search.addEventListener("input", () => { state.query = search.value.trim().toLowerCase(); draw(); });
@@ -333,6 +337,7 @@ export async function render(container) {
     if (!total && !state.tabsError && !(["all", "tools"].includes(state.kind) && state.catalogError) && !(["all", "skills"].includes(state.kind) && state.skillsError)) {
       results.append(el("div", { class: "tool-store-empty", text: q ? "No matches. Try another search." : "Nothing in this view yet." }));
     }
+    mobile.sync();
   }
 
   async function refreshTabs(signal) {

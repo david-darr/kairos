@@ -5,8 +5,9 @@
 // order, so the picture re-forms rather than crossfading. Each scene is
 // drawn once per size and kept between visits to the tab (drawing the whole
 // area takes 100-200 ms).
-import { ditherCell, dissolveCells, drawDither, loadDitherImage } from "./dither.js";
-import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion, halftoneSharedChatPicture } from "./appearance.js";
+import { ditherCell, dissolveCells, loadDitherImage } from "./dither.js";
+import { mountBackgroundEffect, backgroundEffectKey, drawSceneDither } from "./backgroundEffects.js";
+import { getAppearance, halftonePalette, halftoneSource, halftoneFocus, halftoneVersion, halftoneSharedChatPicture } from "./appearance.js";
 
 // Each scene's cell size and its built-in anchor - used until a custom
 // picture (appearance.js's halftone slots) brings its own, centred by default.
@@ -27,13 +28,14 @@ function sourceKey(name) { const focus = sceneFocus(name); return `${halftoneSou
 
 async function sceneCanvas(name, W, H) {
   const palette = halftonePalette();
-  const key = `${name} ${W}x${H} ${JSON.stringify(palette)} ${sourceKey(name)}`;
+  const key = `${name} ${W}x${H} ${JSON.stringify(palette)} ${sourceKey(name)} ${backgroundEffectKey()}`;
   if (cache.has(key)) { const hit = cache.get(key); cache.delete(key); cache.set(key, hit); return hit; }
   const scene = SCENES[name];
   const focus = sceneFocus(name);
   const img = await loadDitherImage(halftoneSource(name), halftoneVersion(name));
+  if (document.hidden) throw new Error('Backdrop paused');
   const canvas = document.createElement("canvas");
-  const ms = drawDither(canvas, img, W, H, { cell: scene.cell, focusX: focus.x, focusY: focus.y, palette });
+  const ms = drawSceneDither(canvas, img, W, H, { cell: scene.cell, focusX: focus.x, focusY: focus.y, palette });
   canvas.dataset.drawMs = String(Math.round(ms));
   cache.set(key, canvas);
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value);
@@ -55,6 +57,7 @@ export function mountChatBackdrop(host) {
   el.append(under, over);
   host.prepend(el);
 
+  let disposeEffect = null;
   let scene = null, size = "", run = 0, disposed = false, resizeTimer = 0;
   let markReady;
   const ready = new Promise((resolve) => { markReady = resolve; });
@@ -69,28 +72,43 @@ export function mountChatBackdrop(host) {
   // dissolve too: there's nothing to reveal, it's the same picture underneath.
   async function show(name, { animate = false } = {}) {
     if (disposed || (name === scene && size)) return;
+    disposeEffect?.(); disposeEffect = null;
     const from = scene;
     scene = name;
     el.dataset.scene = name;
     el.dataset.halftoneSrc = halftoneSource(name);  // read by scripts/ui-smoke.cjs
     shownKey = sourceKey(name);
     const token = ++run;
+    size = '';
     // Hidden (another appearance has its own background): nothing to draw
     // until it shows, when the resize observer below draws it.
-    if (!el.clientWidth) { size = ""; markReady(); return; }
+    if (!el.clientWidth || document.hidden) { size = ""; markReady(); return; }
     const [W, H] = measure();
+    const appearance = getAppearance();
+    const isDither = appearance.backgroundEffect === 'dithered';
+    under.hidden = over.hidden = !isDither;
+    if (!isDither) {
+      const focus = sceneFocus(name);
+      disposeEffect = mountBackgroundEffect(el, halftoneSource(name), { focusX: focus.x, focusY: focus.y,
+        version: halftoneVersion(name), onReady: markReady });
+      size = `${W}x${H}`;
+      return;
+    }
     let target;
     try { target = await sceneCanvas(name, W, H); } catch (_) { markReady(); return; }  // the parchment stays
-    if (disposed || token !== run) return;
+    if (disposed || token !== run || document.hidden) return;
     size = `${W}x${H}`;
     el.dataset.drawMs = target.dataset.drawMs;  // read by scripts/ui-smoke.cjs
     const samePicture = from && from !== name && halftoneSharedChatPicture();
-    if (!animate || !from || reduced() || samePicture) { copy(over, target); markReady(); prepareOther(name, W, H); return; }
+    if (!animate || !from || reduced() || !appearance.effectOptions.dithered.motion || samePicture) { copy(over, target); markReady(); prepareOther(name, W, H); return; }
     copy(under, target);
     el.classList.add("is-dissolving");
-    await dissolveCells(over.getContext("2d"), ditherCell(SCENES[name].cell), DISSOLVE_MS, () => disposed || token !== run);
+    await dissolveCells(over.getContext("2d"), ditherCell(appearance.effectOptions.dithered.density), DISSOLVE_MS, () => disposed || token !== run || document.hidden || !el.isConnected || !el.clientWidth);
     el.classList.remove("is-dissolving");
-    if (!disposed && token === run) copy(over, target);
+    if (!disposed && token === run) {
+      if (!document.hidden && el.isConnected && el.clientWidth) copy(over, target);
+      else size = '';
+    }
   }
 
   // The other scene is drawn while the app is idle, so the first message's
@@ -98,12 +116,13 @@ export function mountChatBackdrop(host) {
   function prepareOther(name, W, H) {
     const other = name === "figure" ? "sky" : "figure";
     const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
-    idle(() => { if (!disposed && size === `${W}x${H}`) sceneCanvas(other, W, H).catch(() => {}); });
+    idle(() => { if (!document.hidden && el.isConnected && el.clientWidth && !disposed && size === `${W}x${H}`) sceneCanvas(other, W, H).catch(() => {}); });
   }
 
   // A new size redraws the scene on show, without a dissolve. Until then the
   // canvas stretches, which is only seen while dragging the window edge.
   const observer = new ResizeObserver(() => {
+    if (disposeEffect) return; // The engine owns resize and visibility for other effects.
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const [W, H] = measure();
@@ -114,20 +133,24 @@ export function mountChatBackdrop(host) {
   // A new appearance redraws the scene on show in its colors (or the
   // painting's) or picture (a halftone slot replaced, reset or re-anchored),
   // without a dissolve.
-  let paletteKey = JSON.stringify(halftonePalette());
+  let paletteKey = JSON.stringify([halftonePalette(), backgroundEffectKey()]);
   let shownKey = scene ? sourceKey(scene) : "";
   const onAppearance = () => {
-    const nextPalette = JSON.stringify(halftonePalette());
+    const nextPalette = JSON.stringify([halftonePalette(), backgroundEffectKey()]);
     const nextShown = scene ? sourceKey(scene) : "";
     if (nextPalette === paletteKey && nextShown === shownKey) return;
     paletteKey = nextPalette; shownKey = nextShown;
     if (scene) { const name = scene; scene = null; size = ""; show(name); }
   };
   document.addEventListener("kairos:appearance", onAppearance);
+  const onVisible = () => {
+    if (!document.hidden && scene && !size) { const name = scene; scene = null; show(name); }
+  };
+  document.addEventListener('visibilitychange', onVisible);
 
   return {
     show,
     ready,
-    dispose() { disposed = true; clearTimeout(resizeTimer); observer.disconnect(); document.removeEventListener("kairos:appearance", onAppearance); el.remove(); },
+    dispose() { disposed = true; disposeEffect?.(); document.removeEventListener('visibilitychange', onVisible); clearTimeout(resizeTimer); observer.disconnect(); document.removeEventListener("kairos:appearance", onAppearance); el.remove(); },
   };
 }

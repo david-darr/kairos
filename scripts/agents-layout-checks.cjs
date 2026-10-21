@@ -164,16 +164,21 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await js("document.querySelector('.agent-inline-permission [data-choice=once]').click()");
     await delay(150);
     ok(writes.slice(start).some(w => w.path === '/api/permissions/ui3-permission/answer' && JSON.parse(w.body).choice === 'once'), 'permission uses existing route');
-    // Paint is opaque and token-derived: check computed surfaces and contrast.
+    // Paint is token-derived: check the computed surfaces (translucent ones composited over what sits behind
+    // them) and contrast. The classic look is a dark conversation; the redesign is a light one, so the
+    // dark-surface rule applies to the classic look only and the contrast rule to both.
     const contrast = await js(`(() => {
-      const rgb = value => (value.match(/[\\d.]+/g)||[]).slice(0,3).map(Number).map(n => value.startsWith('color(srgb') ? n : n/255);
-      const light = value => rgb(value).map(n => n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((sum,n,i)=>sum+n*[.2126,.7152,.0722][i],0);
+      const parse = value => { const n = (value.match(/[\\d.]+/g)||[]).map(Number); return { c: n.slice(0,3).map(v => value.startsWith('color(srgb') ? v : v/255), a: n.length > 3 ? n[3] : 1 }; };
+      const effective = el => { const stack = []; for (let n = el; n; n = n.parentElement) { const p = parse(getComputedStyle(n).backgroundColor); stack.push(p); if (p.a >= 1) break; }
+        return stack.reduceRight((under, p) => under.map((u, i) => p.c[i] * p.a + u * (1 - p.a)), [1, 1, 1]); };
+      const light = rgb => rgb.map(n => n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((sum,n,i)=>sum+n*[.2126,.7152,.0722][i],0);
       return ['.msg.assistant .msg-body','.msg.user .msg-body','.agent-live-panel','.agent-approval-card'].map(selector => {
-        const s=getComputedStyle(document.querySelector(selector)), b=light(s.backgroundColor), f=light(s.color);
+        const node = document.querySelector(selector), b = light(effective(node)), f = light(parse(getComputedStyle(node).color).c);
         return {selector,dark:b<.22,ratio:(Math.max(b,f)+.05)/(Math.min(b,f)+.05)};
       });
     })()`);
-    for (const c of contrast) ok(c.dark && c.ratio >= 4.5, `${c.selector} dark surface, contrast ${c.ratio}`);
+    const classic = await js("!document.documentElement.classList.contains('kairos-redesign')");
+    for (const c of contrast) ok((c.dark || !classic) && c.ratio >= 4.5, `${c.selector} ${classic ? 'dark surface, ' : ''}contrast ${c.ratio}`);
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     await navigate('agents', {agentId:'a1'});
     await waitFor("!!document.querySelector('.agent-composer-orb')");

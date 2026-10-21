@@ -2,7 +2,7 @@ import { api, el, modelMark, openPanelDialog } from "../api.js";
 import { agentAvatar } from "../agentAvatar.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
-import { mountDither } from "../dither.js";
+import { mountBackgroundEffect } from "../backgroundEffects.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { mountRedesignHome } from "../redesignHome.js";
@@ -107,7 +107,7 @@ function quotaBlock(providerId, reading) {
       // A plain meter; redesignHome.js draws the usage ring from it.
       block.append(el("div", { class: "dashboard-quota-window" }, [
         el("div", { class: "dashboard-quota-head", title: usedCopy(w) }, [el("span", { text: `${w.id === "session" ? "5h" : w.id === "weekly" ? "Week" : w.label} · ${pctText(w.used)}%` }), el("span", { class: "dashboard-quota-reset", text: resetCopy(w.resets_at).replace(/^Resets at /, "resets ").replace(/^Resets/, "resets") })]),
-        el("div", { class: "dashboard-quota-track", role: "meter", "aria-label": `${w.label}: ${usedCopy(w)}`, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(percent)) }, [
+        el("div", { class: "dashboard-quota-track", role: "meter", "aria-label": `${w.label}: ${usedCopy(w)}`, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(percent) }, [
           el("span", { class: "dashboard-quota-fill tone-" + toneOf(w.used), style: `width:${percent.toFixed(0)}%` }),
         ]),
       ]));
@@ -228,7 +228,7 @@ export function render(container, tabId, options = {}) {
   };
   let bannerState = bannerKey();
   banner.dataset.halftoneSrc = halftoneSource("home");  // read by scripts/ui-smoke.cjs
-  let disposeBanner = mountDither(banner, halftoneSource("home"), { ...bannerOptions(), onReady: options.transitionReady });
+  let disposeBanner = mountBackgroundEffect(banner, halftoneSource("home"), { ...bannerOptions(), onReady: options.transitionReady });
   // The cards draw differently with the redesign on, so flipping it redraws them.
   let drewQuiet = rd();
   const onAppearance = () => {
@@ -242,7 +242,7 @@ export function render(container, tabId, options = {}) {
     bannerState = next;
     banner.dataset.halftoneSrc = halftoneSource("home");
     disposeBanner();
-    disposeBanner = mountDither(banner, halftoneSource("home"), bannerOptions());
+    disposeBanner = mountBackgroundEffect(banner, halftoneSource("home"), bannerOptions());
   };
   document.addEventListener("kairos:appearance", onAppearance);
   for (const item of [chats, schedule, projects, activity, system, models, agents, store]) {

@@ -3,6 +3,8 @@
 .agents-workspace>[hidden],.agent-ecosystem [hidden]{display:none!important}
 .agents-workspace-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;flex:none}
 .agents-workspace-bar h2{margin:0;font-size:18px}
+.agents-workspace-controls{display:flex;align-items:center;gap:8px;min-width:0}
+.agents-workspace-controls .agents-chats-open{display:none}
 .agents-workspace-tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--ui-line);border-radius:16px;background:var(--ui-wash)}
 .agents-workspace-tabs button{min-height:44px;padding:8px 20px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--text);font:inherit;cursor:pointer}
 .agents-workspace-tabs button[aria-selected=true]{background:var(--ui-surface);border-color:var(--ui-line);box-shadow:var(--ui-shadow)}
@@ -68,6 +70,7 @@
   .view.agents-shell-view:has(.agents-workspace){padding:58px 6px max(6px,var(--mobile-safe-bottom))}
   .agents-workspace{gap:6px}.agents-workspace-bar{padding-left:54px;flex-wrap:nowrap;gap:4px}
   .agents-workspace-bar h2{font-size:14px}.agents-workspace-tabs{padding:2px;gap:2px}
+  .agents-workspace-controls{gap:4px}.agents-workspace-controls .agents-chats-open{display:grid}.agents-workspace-controls .agents-chats-open[hidden]{display:none}
   .agents-workspace-tabs button{padding:6px 10px;font-size:12px}
   .agent-ecosystem{border-radius:16px}.ecosystem-header{padding:10px 12px 6px;gap:4px}
   .ecosystem-header h2{font-size:16px}.ecosystem-summary{font-size:10px}

@@ -1,4 +1,6 @@
 import { el } from '../api.js';
+import { EFFECTS, ART_PIECES } from '../backgroundEffectPreferences.js';
+import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { group, row, toggle } from '../settingsKit.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
   resetAppearance, setAppearancePreview, halftoneSource, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
@@ -96,17 +98,59 @@ export function renderAppearancePanel(content, _status, page) {
   }
   const halftoneCards = Object.fromEntries(HALFTONE_SLOTS.map(([slot, title, description]) => [slot, halftoneCard(slot, title, description)]));
   const halftoneSection = el('div', { class: 'appearance-halftone-setting' }, [
-    group({}, [row({ title: 'Halftone backgrounds', description: "Home's card and the chat's figure and sky, drawn in dots, with the transitions between them. In Color they're two-tone in your colors.", control: halftone })]),
+    group({}, [row({ title: 'Halftone backgrounds', description: "Home's card and the chat's figure and sky, drawn with your chosen background effect.", control: halftone })]),
     el('div', { class: 'appearance-halftone-grid' }, HALFTONE_SLOTS.map(([slot]) => halftoneCards[slot].card)),
     el('p', { class: 'meta', text: 'Replace any scene with your own picture. PNG, JPEG or WebP · Up to 12 MB · Stored only on this device.' }),
   ]);
 
-  // Redesign preview: the new look, behind a switch. Off by default, saved
-  // per user on this device like the rest, applied live (appearance.js).
-  const redesign = toggle({ label: 'Redesign preview', onChange: (on) => { updateAppearance({ redesign: on }); sync(); } });
-  redesign.id = 'appearance-redesign';
-  const redesignSection = el('div', { class: 'appearance-redesign-setting' }, [
-    group({}, [row({ title: 'Redesign preview', description: 'Try the new look: soft cards, pill buttons and a washed halftone backdrop on every tab except Chat. Changes only how Kairos looks.', control: redesign })]),
+  const effectChoices = new Map();
+  const effectGrid = el('div', { class: 'appearance-effects-grid' });
+  const effectTitles = ['Dithered', 'Halftone dots', 'ASCII', 'Numbers', 'Binary', 'Animated art'];
+  for (const [index, effect] of EFFECTS.entries()) {
+    const input = el('input', { type: 'radio', name: 'background-effect', value: effect,
+      id: `appearance-effect-${effect}` });
+    const thumb = el('span', { class: 'appearance-effect-thumb', 'aria-hidden': 'true' });
+    input.addEventListener('change', () => { if (input.checked) { updateAppearance({ backgroundEffect: effect }); sync(); } });
+    effectChoices.set(effect, { input, thumb });
+    effectGrid.append(el('label', { class: 'appearance-effect-choice', for: input.id }, [
+      thumb, el('span', { class: 'appearance-effect-label' }, [input, el('span', { text: effectTitles[index] })]),
+    ]));
+  }
+  const piece = el('select', { id: 'appearance-art-piece' }, ART_PIECES.map(([value, text]) => el('option', { value, text })));
+  piece.addEventListener('change', () => { updateAppearance({ animatedPiece: piece.value }); sync(); });
+  const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Animated piece' }), piece]);
+  const density = el('input', { type: 'range', min: '3', max: '24', step: '1', id: 'appearance-effect-density' });
+  const densityValue = el('output', { for: density.id });
+  const densityRow = el('label', { class: 'appearance-effect-control', for: density.id }, [el('span', { text: 'Density (cell size)' }), density, densityValue]);
+  const tint = el('select', { id: 'appearance-effect-tint' }, [
+    el('option', { value: 'original', text: 'Original palette' }),
+    el('option', { value: 'theme', text: 'Theme accent' }), el('option', { value: 'picture', text: 'Picture colours' }),
+  ]);
+  function saveEffect(patch) {
+    const a = getAppearance(), key = a.backgroundEffect;
+    updateAppearance({ effectOptions: { ...a.effectOptions, [key]: { ...a.effectOptions[key], ...patch } } }); sync();
+  }
+  density.addEventListener('input', () => saveEffect({ density: Number(density.value) }));
+  tint.addEventListener('change', () => saveEffect({ tint: tint.value }));
+  const effectMotion = toggle({ label: 'Animate effect', onChange: motion => saveEffect({ motion }) });
+  const effectSection = el('fieldset', { class: 'appearance-effect-section', 'aria-describedby': 'appearance-effect-note' }, [
+    el('legend', { text: 'Background effect' }), effectGrid, pieceRow,
+    densityRow,
+    el('label', { class: 'appearance-effect-control', for: tint.id }, [el('span', { text: 'Tint' }), tint]),
+    group({}, [row({ title: 'Animate effect', description: 'Motion pauses when hidden. Reduced motion shows a still frame.', control: effectMotion })]),
+    el('p', { class: 'meta', id: 'appearance-effect-note', text: 'Options are saved separately for each effect on this device. Smaller cells show more detail. Original palette preserves the existing dithered look. Dithered motion controls scene transitions. Halftone dots stay still.' }),
+    el('p', { class: 'meta appearance-effect-credit' }, [el('span', { text: 'Credits: Animated art by ' }),
+      el('a', { href: 'https://github.com/kailashsr38/ascii-magic-art', target: '_blank', rel: 'noopener noreferrer', text: 'ASCII Magic' }),
+      el('span', { text: ' (MIT). Picture colours uses the art palette for animated pieces.' })]),
+  ]);
+  let effectPreviewSource = '', effectPreviewStops = [];
+
+  // Classic look: the opt-out from the redesign, which is the default. Off by
+  // default, saved per user on this device like the rest, applied live (appearance.js).
+  const redesign = toggle({ label: 'Classic look', onChange: (on) => { updateAppearance({ classic: on }); sync(); } });
+  redesign.id = 'appearance-classic';
+  const redesignSection = el('div', { class: 'appearance-classic-setting' }, [
+    group({}, [row({ title: 'Classic look', description: 'Use the previous design instead of the current one. Changes only how Kairos looks.', control: redesign })]),
   ]);
 
   const controls = new Map();
@@ -231,7 +275,7 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  root.append(previewFrame, modes, palette, halftoneSection, imageOptions, shaderOptions, chatStyleSection, redesignSection, overlaySection, status);
+  root.append(previewFrame, modes, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, redesignSection, overlaySection, status);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
@@ -239,7 +283,20 @@ export function renderAppearancePanel(content, _status, page) {
     for (const [style, button] of styleButtons) button.setAttribute('aria-pressed', String(style === value.chatStyle));
     palette.hidden = value.mode === 'default'; imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
-    redesign.checked = value.redesign;
+    effectSection.hidden = !['default', 'color'].includes(value.mode);
+    for (const [effect, { input }] of effectChoices) input.checked = value.backgroundEffect === effect;
+    const effectPrefs = value.effectOptions[value.backgroundEffect];
+    density.value = effectPrefs.density; densityValue.textContent = `${effectPrefs.density} px`;
+    tint.options[0].hidden = value.backgroundEffect !== 'dithered';
+    tint.value = effectPrefs.tint; effectMotion.checked = effectPrefs.motion;
+    piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated';
+    const nextPreviewSource = halftoneSource('home');
+    if (nextPreviewSource !== effectPreviewSource) {
+      effectPreviewStops.forEach(stop => stop()); effectPreviewSource = nextPreviewSource;
+      effectPreviewStops = [...effectChoices].map(([effect, { thumb }]) =>
+        mountBackgroundEffect(thumb, nextPreviewSource, { effect, preview: true, focusX: .7, focusY: .4 }));
+    }
+    redesign.checked = value.classic;
     for (const [slot, { thumb, reset }] of Object.entries(halftoneCards)) {
       const info = value.halftoneSlots[slot];
       thumb.src = halftoneSource(slot);

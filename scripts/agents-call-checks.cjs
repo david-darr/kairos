@@ -66,6 +66,16 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await click('.agent-call-open'); await waitFor("document.querySelector('.agent-call').open");
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   assert.equal(await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value"),'small.en','Calls start with the Voice-line accuracy model');
+  // Dropdowns in the modal call dialog open above it, inside the viewport, and can be picked.
+  for (const label of ['Call mode','Conversation model connection','Speech recognition model','Call input mode','Speech acceleration']) {
+    const opened = await js(`(()=>{const s=document.querySelector('.agent-call [aria-label="${label}"]');s.scrollIntoView({block:'center'});s.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0}));const m=document.querySelector('.custom-select-menu');if(!m)return 'no menu';const r=m.getBoundingClientRect(),i=m.querySelector('.custom-select-item');if(!i)return 'no items';const q=i.getBoundingClientRect(),h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2);return [m.closest('dialog')===document.querySelector('.agent-call'),i.contains(h),r.top>=0&&r.left>=0&&r.bottom<=innerHeight&&r.right<=innerWidth].join()})()`);
+    assert.equal(opened,'true,true,true',`${label} menu opens above the call dialog, inside the viewport (${opened})`);
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    assert.ok(await js("!document.querySelector('.custom-select-menu') && document.querySelector('.agent-call').open"),`${label} menu closes on Escape and leaves the call dialog open`);
+  }
+  await js(`(()=>{const s=document.querySelector('.agent-call [aria-label="Call input mode"]');s.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0}));[...document.querySelectorAll('.custom-select-item')].find(b=>b.textContent.startsWith('Hold')).click()})()`);
+  assert.equal(await js("document.querySelector('.agent-call [aria-label=\"Call input mode\"]').value"),'hold','Picking from a call dropdown changes the select');
+  await js("(()=>{const s=document.querySelector('.agent-call [aria-label=\"Call input mode\"]');s.value='automatic';s.dispatchEvent(new Event('change'))})()");
   await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value='small.en';document.querySelector('[aria-label=\"Speech recognition model\"]').dispatchEvent(new Event('change'))");
   await capture('agents-call-setup');
   await js("document.querySelector('[aria-label=\"Call mode\"]').value='cloud';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");
@@ -79,7 +89,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js("window.__callAppearance=import('/static/js/appearance.js').then(m=>({mode:m.getAppearance().mode,color:m.getAppearance().color}))");
   await js("import('/static/js/appearance.js').then(m=>m.updateAppearance({mode:'color',color:'#192331'}))");
   await capture('agents-call-dark');
-  assert.ok(await js("getComputedStyle(document.querySelector('.agent-call')).backgroundColor===getComputedStyle(document.querySelector('.agents-chat-rail')).backgroundColor"),'Call surfaces follow the active Kairos theme');
+  assert.ok(await js("(() => { const probe = document.createElement('i'); probe.style.background = document.documentElement.classList.contains('kairos-redesign') ? 'var(--rd-surface-solid)' : 'var(--ui-wash)'; document.body.append(probe); const expected = getComputedStyle(probe).backgroundColor; probe.remove(); return getComputedStyle(document.querySelector('.agent-call')).backgroundColor === expected && expected !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.agent-call')).backgroundColor !== getComputedStyle(document.documentElement).backgroundColor; })()"),'Call surfaces follow the active Kairos theme');
   await js("window.__callAppearance.then(a=>import('/static/js/appearance.js').then(m=>m.updateAppearance(a)))");
   win.setContentSize(812,375);await delay(150);await capture('agents-call-landscape');
   assert.ok(await js("(()=>{const r=document.querySelector('.agent-call .is-end').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()"),'Hangup stays visible in landscape');

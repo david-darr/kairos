@@ -43,8 +43,8 @@
    appearance.js mounts chatBackdrop.js's sky scene in .kairos-redesign-backdrop
    (first child of #content). It already follows the halftone preference
    (hidden unless data-halftone="on"), the Color theme's two-tone palette and
-   custom pictures, and it is drawn once and still, so reduced motion needs no
-   special case. Chat and Forge keep their own surfaces. */
+   custom pictures. backgroundEffects.js owns playback, visibility and reduced
+   motion for the selected effect. Chat and Forge keep their own surfaces. */
 .kairos-redesign #content { position: relative; isolation: isolate; }
 .kairos-redesign #content > .view { position: relative; z-index: 1; }
 .kairos-redesign .kairos-redesign-backdrop {

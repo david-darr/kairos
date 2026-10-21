@@ -209,7 +209,18 @@
 /* -- model catalog + reasoning level (David's ask 2026-09-15) ----------- */
 .model-version-search { padding: 8px 8px 4px; position: sticky; top: -4px; z-index: 1; background: var(--bg-panel-solid); }
 .model-version-search input { width: 100%; min-width: 0; }
-.model-catalog-list { display: grid; gap: 2px; padding: 0 4px 4px; }
+.model-catalog-list { display: grid; grid-auto-rows: max-content; align-content: start; gap: 2px; padding: 0 4px 4px; }
+/* The model menu is clamped to the window (menuFit.js). Its two long lists, the
+   connections and the model versions, scroll inside the clamp, so the heading,
+   search box, reasoning buttons and footer stay in view. If even the fixed parts
+   do not fit, the whole menu scrolls as a last resort. */
+.model-picker-unified:not(.hidden) { display: flex; flex-direction: column; }
+.model-picker-unified > * { flex: 0 0 auto; }
+.model-picker-unified > .model-connection-list { flex: 0 .05 auto; min-height: 56px; overflow-y: auto; overscroll-behavior: contain; }
+.model-picker-unified > .model-version-section { flex: 1 1 auto; min-height: 196px; display: flex; flex-direction: column; }
+.model-picker-unified > .model-version-section:has(.model-effort-row) { min-height: 242px; }
+.model-picker-unified .model-version-section > * { flex: 0 0 auto; }
+.model-picker-unified .model-version-section > .model-catalog-list { flex: 1 1 auto; min-height: 72px; overflow-y: auto; overscroll-behavior: contain; }
 .model-catalog-list .muted { font-size: 12px; line-height: 1.6; margin: 0; padding: 8px 6px; }
 .model-catalog-item { display: grid; gap: 2px; padding: 8px 10px; }
 .model-catalog-name { font-size: 12.5px; font-weight: 550; }

@@ -96,6 +96,44 @@
   .appearance-halftone-card-actions { flex-direction: column; align-items: stretch; gap: 4px; }
 }
 @media(prefers-reduced-motion: reduce) { :is(.appearance-mode, .appearance-chat-style) { transition: none; } }
-/* Redesign preview switch: spacing like its siblings, and a visible keyboard focus ring. */
-.appearance-redesign-setting { margin-top: 26px; }
-#appearance-redesign:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Classic look switch: spacing like its siblings, and a visible keyboard focus ring. */
+.appearance-classic-setting { margin-top: 26px; }
+#appearance-classic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Background effects use the same quiet surfaces and hairlines as Settings. */
+.appearance-effect-section { margin: 26px 0; padding: 18px; min-width: 0; border: 1px solid var(--hairline-soft); border-radius: 20px; background: var(--bg-panel); }
+.appearance-effect-section legend { padding: 0 8px; font-family: var(--font-display); font-style: italic; font-size: 25px; color: var(--text); }
+.appearance-effects-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+.appearance-effect-choice { min-width: 0; padding: 6px; border: 1px solid var(--hairline-soft); border-radius: 14px; cursor: pointer; background: var(--bg-panel-solid); }
+.appearance-effect-choice:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.appearance-effect-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
+.appearance-effect-thumb { position: relative; display: block; height: 70px; overflow: hidden; border-radius: 9px; background: var(--surface-2); pointer-events: none; }
+.appearance-effect-thumb canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.appearance-effect-label { display: flex; align-items: center; gap: 6px; min-height: 44px; font-size: 12px; color: var(--text); }
+.appearance-effect-label input { margin: 0; accent-color: var(--accent); }
+.appearance-effect-control { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 13px; color: var(--text); }
+.appearance-effect-control > span { min-width: 135px; }
+.appearance-effect-control select { flex: 1; min-width: 120px; min-height: 44px; border: 1px solid var(--hairline); border-radius: 14px; padding: 6px 12px; background: var(--bg-panel-solid); color: var(--text); font: inherit; }
+.appearance-effect-control input[type='range'] { flex: 1; min-width: 100px; min-height: 44px; accent-color: var(--accent); }
+.appearance-effect-control output { width: 42px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.appearance-effect-control :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.appearance-effect-section > .meta { font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+.appearance-effect-credit a { color: var(--accent); text-underline-offset: 3px; }
+.background-effect-canvas { pointer-events: none; }
+:root[data-halftone='none'] .dashboard-core { display: none; }
+.chat-backdrop { pointer-events: none; }
+.chat-backdrop > canvas[hidden] { display: none; }
+.appearance-panel :is(.appearance-mode, .appearance-chat-style, .appearance-dial, .appearance-halftone-card, .appearance-preview) { border-color: var(--hairline); border-radius: 14px; background-color: var(--bg-panel); }
+.appearance-panel :is(.appearance-mode, .appearance-chat-style)[aria-pressed='true'] { border-color: var(--accent); }
+.appearance-panel :is(.appearance-mode, .appearance-chat-style) strong { font-size: 13px; }
+.appearance-panel :is(.appearance-mode, .appearance-chat-style) > span:last-child { font-size: 11px; }
+.appearance-panel .appearance-motion { min-height: 44px; }
+.appearance-panel .appearance-heading h2 { font-family: var(--font-display); font-style: italic; font-size: 30px; }
+.appearance-panel :is(.appearance-status, .appearance-palette > .meta, .appearance-chat-style-setting > .meta, .appearance-shader-options > .meta, .appearance-image-options > .meta) { font-size: 12px; line-height: 1.6; }
+.appearance-panel .appearance-dial label { font-size: 13px; }
+.appearance-panel .appearance-dial p { font-size: 11px; }
+@media (max-width: 550px) {
+  .appearance-effects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .appearance-effect-section { padding: 12px; }
+  .appearance-effect-control > span { min-width: 100%; }
+}
