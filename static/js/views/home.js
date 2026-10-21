@@ -2,7 +2,7 @@ import { api, el, modelMark, openPanelDialog } from "../api.js";
 import { agentAvatar } from "../agentAvatar.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
-import { mountDither } from "../dither.js";
+import { mountBackgroundEffect } from "../backgroundEffects.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { mountRedesignHome } from "../redesignHome.js";
@@ -226,7 +226,7 @@ export function render(container, tabId, options = {}) {
   };
   let bannerState = bannerKey();
   banner.dataset.halftoneSrc = halftoneSource("home");  // read by scripts/ui-smoke.cjs
-  let disposeBanner = mountDither(banner, halftoneSource("home"), { ...bannerOptions(), onReady: options.transitionReady });
+  let disposeBanner = mountBackgroundEffect(banner, halftoneSource("home"), { ...bannerOptions(), onReady: options.transitionReady });
   // The cards draw differently with the redesign on, so flipping it redraws them.
   let drewQuiet = rd();
   const onAppearance = () => {
@@ -240,7 +240,7 @@ export function render(container, tabId, options = {}) {
     bannerState = next;
     banner.dataset.halftoneSrc = halftoneSource("home");
     disposeBanner();
-    disposeBanner = mountDither(banner, halftoneSource("home"), bannerOptions());
+    disposeBanner = mountBackgroundEffect(banner, halftoneSource("home"), bannerOptions());
   };
   document.addEventListener("kairos:appearance", onAppearance);
   for (const item of [chats, schedule, projects, activity, system, models, agents, store]) {
