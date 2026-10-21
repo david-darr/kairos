@@ -1,0 +1,139 @@
+/* Redesign preview, step 1: the foundation. Loaded last. Every rule sits under
+   .kairos-redesign, a class appearance.js puts on the root only while
+   Settings > Appearance > Redesign preview is on, so with it off nothing here
+   applies. Tokens derive from the working theme variables (style.css,
+   kairos-theme.css, and the ones appearance.js sets for Color themes), so base
+   colors, dark themes and custom colors carry through. No raw color values live
+   here. Gold is a hairline and a detail, never text. No tab-specific
+   rules yet: this restyles the shared primitives and adds the backdrop. */
+
+.kairos-redesign {
+  /* Ground, surfaces, ink */
+  --rd-ground: var(--bg);
+  --rd-surface: color-mix(in srgb, var(--bg-panel-solid) 88%, transparent);
+  --rd-surface-solid: var(--bg-panel-solid);
+  --rd-surface-2: var(--surface-2);
+  --rd-ink: var(--text);
+  --rd-ink-dim: var(--text-dim);
+  --rd-ink-faint: var(--text-faint);
+  /* Gilded hairlines: soft (~.28 alpha) for cards, stronger for controls */
+  --rd-line: var(--hairline-soft);
+  --rd-line-strong: var(--hairline);
+  --rd-focus: var(--accent);
+  /* Shape and depth */
+  --rd-radius-card: 20px;
+  --rd-radius-field: 14px;
+  --rd-radius-pill: 999px;
+  --rd-shadow: 0 1px 2px rgba(var(--shade-rgb), .04), 0 10px 28px rgba(var(--shade-rgb), .07);
+  /* Pill buttons: ink fill with surface text, and a hairline secondary */
+  --rd-primary-bg: var(--rd-ink);
+  --rd-primary-fg: var(--rd-surface-solid);
+  --rd-primary-hover: color-mix(in srgb, var(--rd-ink) 84%, var(--rd-ground));
+  /* Type */
+  --rd-font-ui: var(--font-sans);
+  --rd-font-title: var(--font-display);
+  --rd-label-size: 11px;
+  --rd-label-tracking: .14em;
+  /* How much of the halftone sky shows on non-chat tabs, and the wash over it */
+  --rd-backdrop-strength: .55;
+  --rd-backdrop-veil: .1;
+}
+
+/* -- Backdrop ---------------------------------------------------------------
+   appearance.js mounts chatBackdrop.js's sky scene in .kairos-redesign-backdrop
+   (first child of #content). It already follows the halftone preference
+   (hidden unless data-halftone="on"), the Color theme's two-tone palette and
+   custom pictures, and it is drawn once and still, so reduced motion needs no
+   special case. Chat and Forge keep their own surfaces. */
+.kairos-redesign #content { position: relative; isolation: isolate; }
+.kairos-redesign #content > .view { position: relative; z-index: 1; }
+.kairos-redesign .kairos-redesign-backdrop {
+  position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; isolation: isolate;
+}
+.kairos-redesign .kairos-redesign-backdrop .chat-backdrop { opacity: var(--rd-backdrop-strength); }
+:root.kairos-redesign .kairos-redesign-backdrop .chat-backdrop { view-transition-name: none; }
+.kairos-redesign .kairos-redesign-backdrop::after {
+  content: ""; position: absolute; inset: 0; background: rgba(var(--wash-rgb), var(--rd-backdrop-veil));
+}
+.kairos-redesign[data-halftone="off"] .kairos-redesign-backdrop,
+.kairos-redesign[data-halftone="none"] .kairos-redesign-backdrop,
+.kairos-redesign[data-view="chat"] .kairos-redesign-backdrop,
+.kairos-redesign[data-view="forgeShell"] .kairos-redesign-backdrop,
+.kairos-redesign[data-view="forgeHome"] .kairos-redesign-backdrop { display: none; }
+
+/* -- Cards and panels -------------------------------------------------------
+   Soft surfaces: 20px radius, a gold hairline at ~.28 alpha, a quiet shadow. */
+.kairos-redesign :is(.card, .glass, .dashboard-section, .library-section, .automation-card, .agent-tile, .set-group) {
+  background-color: var(--rd-surface);
+  border: 1px solid var(--rd-line);
+  border-radius: var(--rd-radius-card);
+  box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .card:hover { border-color: var(--rd-line-strong); }
+.kairos-redesign .disclosure-panel[open] {
+  background-color: var(--rd-surface); border: 1px solid var(--rd-line);
+  border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .disclosure-panel > summary { border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .set-row + .set-row,
+.kairos-redesign .set-group > * + .set-row,
+.kairos-redesign .set-group > .set-row + * { border-top-color: var(--rd-line); }
+
+/* -- Page titles and section labels ----------------------------------------- */
+.kairos-redesign .view-header h2,
+.kairos-redesign .set-title {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; letter-spacing: 0; line-height: 1.08;
+  color: var(--rd-ink);
+}
+.kairos-redesign .view-header h2 { font-size: clamp(30px, 4vw, 42px); }
+.kairos-redesign .set-title { font-size: 30px; }
+.kairos-redesign .view-header .sub,
+.kairos-redesign .set-description { color: var(--rd-ink-dim); }
+.kairos-redesign :is(.dashboard-section-header h2, .set-section-title, .eyebrow) {
+  font-family: var(--rd-font-ui); font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+
+/* -- Buttons: a dark primary pill and a hairline secondary ------------------- */
+.kairos-redesign .btn {
+  font-family: var(--rd-font-ui); font-weight: 500; border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign .btn:not(.primary):not(.quiet):not(.danger):not(.forge-composer-send) {
+  background: var(--rd-surface); border-color: var(--rd-line-strong); color: var(--rd-ink);
+}
+.kairos-redesign .btn:not(.primary):not(.quiet):not(.danger):not(.forge-composer-send):hover:not(:disabled) {
+  background: var(--rd-surface-2); border-color: var(--rd-line-strong);
+}
+.kairos-redesign .btn.primary,
+.kairos-redesign .dashboard-actions .primary {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign .btn.primary:hover:not(:disabled),
+.kairos-redesign .dashboard-actions .primary:hover:not(:disabled) { background: var(--rd-primary-hover); border-color: transparent; }
+.kairos-redesign .btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; box-shadow: none; }
+
+/* -- Inputs ------------------------------------------------------------------ */
+.kairos-redesign :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]), textarea, select),
+.kairos-redesign .custom-select-btn {
+  background-color: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent);
+  border-color: var(--rd-line-strong); border-radius: var(--rd-radius-field); color: var(--rd-ink);
+  font-family: var(--rd-font-ui);
+}
+.kairos-redesign :is(input, textarea, select):focus,
+.kairos-redesign .custom-select-btn:focus-visible { border-color: var(--rd-focus); }
+
+/* -- Phones ------------------------------------------------------------------ */
+@media (max-width: 768px) {
+  .kairos-redesign .view-header h2 { font-size: 32px; }
+  .kairos-redesign .set-title { font-size: 28px; }
+}
+
+/* Backdrop refinements: the chat's own sky wash is dropped here so the cloud
+   shapes read, and titles sitting directly on the sky get a soft local halo
+   in the base color instead of a weaker sky. */
+.kairos-redesign .kairos-redesign-backdrop .chat-backdrop::before,
+.kairos-redesign .kairos-redesign-backdrop .chat-backdrop::after { opacity: 0; }
+.kairos-redesign #content > .view .view-header h2,
+.kairos-redesign #content > .view .view-header .sub {
+  text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8), 0 0 2px rgba(var(--wash-rgb), .9);
+}

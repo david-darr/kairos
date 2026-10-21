@@ -36,6 +36,7 @@
 .crm-settings .segmented-tabs { flex-wrap: wrap; max-width: 100%; }
 .crm-detail > .crm-actions { margin: 14px 0; }
 .crm-review { color: var(--warn); font-size: 12px; overflow-wrap: anywhere; }
+.crm-completion { white-space: pre-wrap; overflow-wrap: anywhere; }
 .crm-proposal { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 12px; margin: 12px 0; font-size: 12px; }
 .crm-evidence { border-top: 1px solid var(--border); padding: 12px 0; }
 .crm-evidence blockquote { margin: 8px 0; border-left: 2px solid var(--hairline); padding: 0 0 0 12px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }

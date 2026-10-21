@@ -1,0 +1,219 @@
+/* Redesign preview: the app shell (left sidebar and the "need you" row).
+   Every rule is scoped under .kairos-redesign, a class appearance.js puts on
+   the root only while Settings > Appearance > Redesign preview is on. Colors
+   come from the --rd-* tokens and the working theme variables; no raw values.
+   Inside the sidebar the text tokens (--text, --text-dim) are used directly,
+   because Color themes re-point them for #sidebar (appearance.css).
+   The row, the flyout and the Jump to button are built by redesignShell.js. */
+
+/* -- The floating chat pill goes away -------------------------------------------
+   It floated over controls inside tabs (Forge's Split button). Its information
+   is the sidebar row and flyout below. */
+.kairos-redesign #chat-progress-host { display: none !important; }
+
+/* -- The sidebar ------------------------------------------------------------------- */
+.kairos-redesign #sidebar {
+  gap: 16px; padding: 22px 14px 16px; font-family: var(--rd-font-ui);
+  border-right: 1px solid var(--rd-line);
+}
+.kairos-redesign #sidebar .sidebar-header { height: 36px; margin-bottom: 0; padding: 0 0 0 4px; }
+.kairos-redesign #brand { padding: 0 6px 0 6px; }
+.kairos-redesign #brand .brand-wordmark { height: 15px; }
+.kairos-redesign #sidebar-toggle {
+  width: 36px; height: 36px; border-radius: 10px; color: var(--text-dim);
+}
+.kairos-redesign #sidebar-toggle:hover { background: rgba(var(--ink-rgb), .06); color: var(--text); }
+
+/* Kairos / Forge switch: a soft track with a raised active segment. */
+.kairos-redesign #sidebar .forge-mode-switch {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px;
+  margin: 0; border: 0; border-radius: 12px; background: rgba(var(--ink-rgb), .06);
+}
+.kairos-redesign #sidebar .forge-mode-switch .segmented-tab {
+  min-height: 34px; padding: 3px 4px; border-radius: 9px; font-family: var(--rd-font-ui);
+  font-size: 13px; color: var(--text-dim);
+}
+.kairos-redesign #sidebar .forge-mode-switch .segmented-tab.active {
+  background: var(--bg-panel-solid); color: var(--text); font-weight: 500;
+  box-shadow: 0 1px 2px rgba(var(--shade-rgb), .12);
+}
+.kairos-redesign #sidebar .forge-mode-switch small { margin-top: -1px; line-height: 1; color: var(--text-dim); }
+.kairos-redesign #sidebar .forge-mode-switch .segmented-tab:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+
+/* Jump to: the Ctrl+K palette. */
+.kairos-redesign .rd-jump {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px; flex: none;
+  border: 1px solid var(--rd-line); border-radius: 10px; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  background: color-mix(in srgb, var(--bg-panel-solid) 60%, transparent); color: var(--text-dim);
+}
+.kairos-redesign .rd-jump:hover { border-color: var(--rd-line-strong); color: var(--text); }
+.kairos-redesign .rd-jump svg { flex: none; }
+.kairos-redesign .rd-jump-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign .rd-jump kbd {
+  font: inherit; font-size: 11px; padding: 2px 6px; border-radius: 6px; flex: none;
+  border: 1px solid var(--rd-line-strong); color: var(--text-dim);
+}
+.kairos-redesign .rd-jump:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+/* The "need you" row. Hidden at zero by the hidden attribute. */
+.kairos-redesign .rd-needs[hidden], .kairos-redesign .rd-flyout[hidden], .kairos-redesign .rd-flyout-scrim[hidden] { display: none; }
+.kairos-redesign .rd-needs {
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 44px; padding: 0 8px 0 6px; flex: none;
+  border: 1px solid var(--rd-line-strong); border-radius: 12px; font: inherit; text-align: left; cursor: pointer;
+  background: color-mix(in srgb, var(--bg-panel-solid) 90%, transparent); color: var(--text);
+}
+.kairos-redesign .rd-needs:hover, .kairos-redesign .rd-needs[aria-expanded="true"] { background: var(--bg-panel-solid); }
+.kairos-redesign .rd-needs:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign .rd-needs-avatars { display: flex; flex: none; }
+.kairos-redesign .rd-needs-avatars .rd-av { width: 20px; height: 20px; font-size: 10px; border: 2px solid var(--bg-panel-solid); box-sizing: content-box; }
+.kairos-redesign .rd-needs-avatars .rd-av + .rd-av { margin-left: -10px; }
+.kairos-redesign .rd-needs-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.kairos-redesign .rd-needs-need { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign .rd-needs-work { font-size: 11px; color: var(--text-dim); }
+.kairos-redesign .rd-needs-work:empty { display: none; }
+.kairos-redesign .rd-needs-count {
+  flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: grid; place-items: center;
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-size: 11px; font-weight: 500;
+}
+
+/* Avatars: initials on a soft tint of the item's kind (an agent uses its own color). */
+.kairos-redesign .rd-av {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 12px; font-weight: 500; color: var(--text); background: var(--bg-panel-solid);
+}
+.kairos-redesign .rd-av-agent { background: color-mix(in srgb, var(--rd-av, var(--chart-2)) 38%, var(--bg-panel-solid)); }
+.kairos-redesign .rd-av-review { background: var(--surface-2); }
+.kairos-redesign .rd-av-alert { background: color-mix(in srgb, var(--danger) 24%, var(--bg-panel-solid)); }
+
+/* The flyout: frosted parchment attached to the sidebar's right edge. */
+.kairos-redesign .rd-flyout {
+  position: fixed; z-index: 2600; display: flex; flex-direction: column;
+  width: 340px; max-width: calc(100vw - var(--sidebar-width) - 24px); padding: 8px; border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-panel-solid) 92%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--rd-line-strong); box-shadow: 0 12px 40px rgba(var(--shade-rgb), .16);
+  color: var(--text); font-family: var(--rd-font-ui);
+}
+.kairos-redesign .rd-flyout-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 6px 10px; flex: none; }
+.kairos-redesign .rd-flyout-title { font-family: var(--rd-font-title); font-style: italic; font-size: 20px; font-weight: 500; }
+.kairos-redesign .rd-flyout-close {
+  width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 10px; cursor: pointer;
+  background: transparent; color: var(--text-dim);
+}
+.kairos-redesign .rd-flyout-close:hover { background: rgba(var(--ink-rgb), .06); color: var(--text); }
+.kairos-redesign .rd-flyout-body { min-height: 0; overflow-y: auto; }
+.kairos-redesign .rd-flyout-label {
+  padding: 8px 10px 4px; font-size: var(--rd-label-size); letter-spacing: var(--rd-label-tracking);
+  text-transform: uppercase; color: var(--text-dim);
+}
+.kairos-redesign .rd-item { display: flex; align-items: center; gap: 4px; border-radius: 12px; }
+.kairos-redesign .rd-item:hover { background: rgba(var(--ink-rgb), .05); }
+.kairos-redesign .rd-item-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.kairos-redesign .rd-item-copy { flex: 1; min-width: 0; }
+.kairos-redesign .rd-item-title, .kairos-redesign .rd-item-detail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign .rd-item-title { font-size: 13px; font-weight: 500; }
+.kairos-redesign .rd-item-detail { font-size: 12px; color: var(--text-dim); }
+.kairos-redesign .rd-item-action { flex: none; font-size: 12px; color: var(--accent); }
+.kairos-redesign .rd-item-done {
+  flex: none; height: 28px; margin-right: 4px; padding: 0 10px; border: 1px solid var(--rd-line-strong); border-radius: 999px;
+  background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer;
+}
+.kairos-redesign .rd-item-done:hover { background: rgba(var(--ink-rgb), .05); }
+.kairos-redesign .rd-item-main:focus-visible, .kairos-redesign .rd-item-done:focus-visible,
+.kairos-redesign .rd-flyout-close:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+
+/* -- Navigation ---------------------------------------------------------------------- */
+.kairos-redesign nav#nav { gap: 2px; padding: 2px 0 6px; }
+.kairos-redesign #sidebar .nav-item {
+  height: 40px; gap: 12px; padding: 0 12px; margin: 0; border: 0; border-radius: 10px;
+  font-family: var(--rd-font-ui); font-size: 14px; color: var(--text-dim);
+}
+.kairos-redesign #sidebar .nav-item svg { width: 18px; height: 18px; opacity: 1; }
+.kairos-redesign #sidebar .nav-item:hover { background: rgba(var(--ink-rgb), .05); color: var(--text); }
+.kairos-redesign #sidebar .nav-item.active {
+  background: var(--bg-panel-solid); color: var(--text); font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--rd-line-strong);
+}
+.kairos-redesign #sidebar .nav-item:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+.kairos-redesign #sidebar .nav-group-label {
+  margin: 16px 0 0; padding: 0 12px 6px; font-size: var(--rd-label-size); font-weight: 400;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--text-dim);
+}
+.kairos-redesign #sidebar .nav-group-label:first-child { margin-top: 0; }
+.kairos-redesign .nav-badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; line-height: 20px;
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-size: 11px; font-weight: 500;
+}
+
+/* -- Account row ---------------------------------------------------------------------- */
+.kairos-redesign #sidebar-footer { margin-top: 0; padding: 14px 6px 0 6px; border-top: 1px solid var(--rd-line); }
+.kairos-redesign .sidebar-footer-row { gap: 6px; }
+.kairos-redesign .sidebar-user-card { padding: 0 6px; gap: 10px; min-height: 40px; border: 0; border-radius: 10px; color: var(--text); }
+.kairos-redesign .sidebar-user-card:hover { background: rgba(var(--ink-rgb), .05); border-color: transparent; }
+.kairos-redesign .sidebar-avatar {
+  width: 32px; height: 32px; font-size: 13px; font-weight: 500; color: var(--text);
+  background: var(--bg-panel-solid); border: 1px solid var(--rd-line-strong);
+}
+.kairos-redesign .sidebar-user-name { font-size: 14px; color: var(--text); }
+.kairos-redesign .sidebar-settings-btn { width: 40px; height: 40px; border: 0; border-radius: 10px; color: var(--text-dim); }
+.kairos-redesign .sidebar-settings-btn:hover { background: rgba(var(--ink-rgb), .05); color: var(--text); }
+.kairos-redesign #sidebar-footer .overflow-menu {
+  background: var(--bg-panel-solid); border: 1px solid var(--rd-line-strong); border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(var(--shade-rgb), .16); padding: 6px;
+}
+.kairos-redesign #sidebar-footer .overflow-menu-item { border-radius: 8px; }
+
+/* -- Collapsed rail (desktop) -------------------------------------------------------------
+   The row shows as a small badge, Jump to as an icon; the rest follows style.css. */
+@media (min-width: 769px) {
+  .kairos-redesign.sidebar-collapsed #sidebar { padding-left: 6px; padding-right: 6px; gap: 12px; }
+  .kairos-redesign.sidebar-collapsed #sidebar .sidebar-header { padding: 0; }
+  .kairos-redesign.sidebar-collapsed #sidebar .forge-mode-switch { display: flex; padding: 0; background: none; justify-content: center; }
+  .kairos-redesign.sidebar-collapsed #sidebar .nav-item { gap: 0; justify-content: center; padding: 0; }
+  .kairos-redesign.sidebar-collapsed #sidebar .nav-group-label { font-size: 0; height: 26px; padding: 0; margin: 12px 10px 0; border-top: 1px solid var(--rd-line); }
+  .kairos-redesign.sidebar-collapsed #sidebar-footer { padding: 10px 0 0; }
+  .kairos-redesign.sidebar-collapsed .sidebar-user-card { padding: 4px 0; }
+  .kairos-redesign.sidebar-collapsed .rd-jump { justify-content: center; padding: 0; }
+  .kairos-redesign.sidebar-collapsed .rd-jump-text, .kairos-redesign.sidebar-collapsed .rd-jump kbd { display: none; }
+  .kairos-redesign.sidebar-collapsed .rd-needs { justify-content: center; padding: 0; position: relative; }
+  .kairos-redesign.sidebar-collapsed .rd-needs-text { display: none; }
+  .kairos-redesign.sidebar-collapsed .rd-needs-avatars .rd-av:not(:first-child) { display: none; }
+  .kairos-redesign.sidebar-collapsed .rd-needs-count { position: absolute; top: -6px; right: -6px; }
+}
+@media (min-width: 769px) and (max-width: 1100px) {
+  .kairos-redesign .rd-flyout { max-width: calc(100vw - var(--sidebar-width) - 16px); }
+}
+
+/* -- Phones: the sidebar is a drawer; the flyout opens as a sheet ----------------------------- */
+@media (max-width: 768px) {
+  .kairos-redesign #sidebar { padding-top: calc(22px + var(--mobile-safe-top)); border-right-color: var(--rd-line); }
+  .kairos-redesign #sidebar .nav-item { height: 48px; border-radius: 12px; margin: 0; }
+  .kairos-redesign #sidebar .nav-item.active { background: var(--bg-panel-solid); color: var(--text); }
+  .kairos-redesign .rd-jump { height: 44px; }
+  .kairos-redesign .rd-jump kbd { display: none; }
+  .kairos-redesign .rd-needs { height: 52px; }
+  .kairos-redesign .rd-flyout.rd-flyout-sheet {
+    z-index: 2650; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 72dvh;
+    padding: 10px 10px max(12px, var(--mobile-safe-bottom)); border-radius: 22px 22px 0 0; border-bottom: 0;
+    padding-left: max(10px, var(--mobile-safe-left)); padding-right: max(10px, var(--mobile-safe-right));
+  }
+  .kairos-redesign .rd-flyout-scrim { position: fixed; inset: 0; z-index: 2640; background: var(--scrim); }
+  .kairos-redesign .rd-item-main { min-height: 52px; }
+  .kairos-redesign .rd-item-done { height: 36px; }
+  .kairos-redesign .rd-flyout-close { width: 44px; height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kairos-redesign .rd-flyout, .kairos-redesign .rd-needs, .kairos-redesign #sidebar .nav-item { transition: none; }
+}
+
+/* -- Phone polish: a 44px floor in the drawer ------------------------------------------------ */
+@media (max-width: 768px) {
+  .kairos-redesign #sidebar .forge-mode-switch .segmented-tab { min-height: 44px; }
+  .kairos-redesign .sidebar-settings-btn { width: 44px; height: 44px; }
+  .kairos-redesign .sidebar-user-card { min-height: 44px; }
+  .kairos-redesign .rd-item-done { min-height: 44px; }
+}

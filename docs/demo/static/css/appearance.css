@@ -96,3 +96,6 @@
   .appearance-halftone-card-actions { flex-direction: column; align-items: stretch; gap: 4px; }
 }
 @media(prefers-reduced-motion: reduce) { :is(.appearance-mode, .appearance-chat-style) { transition: none; } }
+/* Redesign preview switch: spacing like its siblings, and a visible keyboard focus ring. */
+.appearance-redesign-setting { margin-top: 26px; }
+#appearance-redesign:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
