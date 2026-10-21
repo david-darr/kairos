@@ -3,9 +3,6 @@ import { refreshActivity } from './mobileActivity.js';
 
 // One persistent entry control covers built-in views, Settings and custom tabs.
 export function mountMobileChrome(avatar) {
-  // The true screen height for home-screen apps, where 100dvh comes out short (2026-10-21).
-  const appHeight = () => document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
-  appHeight(); window.addEventListener('resize', appHeight); window.addEventListener('orientationchange', appHeight);
   const frost = edgeBlur('top'); frost.classList.add('ms-global-frost');
   document.body.append(frost);
   const sync = () => {

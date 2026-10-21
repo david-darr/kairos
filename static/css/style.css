@@ -244,7 +244,7 @@
 }
 @media (max-width: 768px) {
   .forge-shell-view.view { padding-top: 62px; }
-  .forge-project-sidebar { position: fixed; inset: 0; width: 100vw !important; height: 100dvh; z-index: 100; border: 0; }
+  .forge-project-sidebar { position: fixed; inset: 0; width: 100vw !important; height: var(--ms-page-height); z-index: 100; border: 0; }
   .forge-project-header { height: 48px; }
   .forge-project-resizer, .forge-pane-divider { display: none; }
   .forge-sidebar-tab { flex: 1; }
@@ -444,6 +444,20 @@
 }
 *::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.45); background-clip: padding-box; }
 *::-webkit-scrollbar-corner { background: transparent; }
+
+/* The phone page height (2026-10-21). In the browser it is the dynamic
+   viewport, so nothing hides behind Safari's or Chrome's toolbars. A
+   home-screen app has no toolbars, and iOS (26, black-translucent status bar)
+   reports a layout viewport short by the status bar (100dvh, 100%, innerHeight
+   and position:fixed inset:0 alike) while 100lvh is the true screen, so the
+   page takes the larger of the two. --ms-below-fold is the part of the page
+   below the layout viewport: 0 everywhere except that iOS case; fixed bottom
+   surfaces drop by it (redesign-mobile.css). */
+:root { --ms-page-height: 100%; --ms-below-fold: calc(var(--ms-page-height) - 100%); }
+@supports (height: 100dvh) {
+  :root { --ms-page-height: 100dvh; --ms-below-fold: calc(var(--ms-page-height) - 100dvh); }
+  @media (display-mode: standalone) { :root { --ms-page-height: max(100dvh, 100lvh); } }
+}
 
 html, body {
   margin: 0; padding: 0; height: 100%;
@@ -1450,7 +1464,7 @@ input[type="checkbox"]:checked::after {
 .panel-dialog .card-row input { min-width: 0; }
 @media (max-width: 768px) {
   /* Full screen on a phone, so solid: glass would show the page through it. */
-  .modal-backdrop > .panel-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 16px;
+  .modal-backdrop > .panel-dialog { width: 100vw; max-width: 100vw; height: var(--ms-page-height); max-height: var(--ms-page-height); border-radius: 0; padding: 16px;
     background: var(--bg-panel-solid); }
   .panel-dialog .modal-body { flex: 1; }
 }
@@ -2126,7 +2140,7 @@ button.dashboard-row:hover { background: var(--surface-2); }
   #sidebar.open { transform: translateX(0); box-shadow: 16px 0 50px rgba(var(--shade-rgb), 0.5); }
   .nav-item { padding: 13px 14px; font-size: 14.5px; } /* bigger touch targets */
 
-  html, body { height: 100dvh; }
+  html, body { height: var(--ms-page-height); }
   #content { width: 100%; padding: 0 var(--mobile-safe-right) 0 var(--mobile-safe-left); }
   .view { padding: 72px 14px 14px; } /* clears the fixed hamburger button */
 

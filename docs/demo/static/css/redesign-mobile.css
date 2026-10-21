@@ -23,12 +23,14 @@
   .kairos-redesign:has(.ms-shell:not([hidden])) #mobile-menu-btn,
   .kairos-redesign:has(.ms-conversation):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign #view-content.ms-home { padding: 0; overflow-x: hidden; }
-  .kairos-redesign .ms-home .dashboard-content { width: 100%; max-width: none; gap: 0; }
+  .kairos-redesign .ms-home .dashboard-content { width: 100%; max-width: none; gap: 0; flex: 1; min-height: 0; }
   .kairos-redesign .ms-home .dashboard-content > :not(.ms-shell) { display: none; }
   .kairos-redesign .ms-home .dashboard-hero { min-height: 0; padding: 16px; }
   .kairos-redesign .ms-shell {
     --ms-page: 0; position: relative; isolation: isolate; display: flex; flex-direction: column;
-    height: var(--ms-viewport-height, 100dvh); min-height: 0; width: 100%; overflow: hidden;
+    flex: 1; min-height: 0; width: 100%; overflow: hidden; box-sizing: border-box;
+    /* Fills the page (html/body: --ms-page-height); the keyboard lift (mobileDock.js) lifts the composer. */
+    padding-bottom: var(--ms-keyboard, 0px);
   }
   .kairos-redesign .ms-shell .ms-background { position: absolute; inset: 0; border-radius: 0; z-index: -1; opacity: .65; pointer-events: none; }
   .kairos-redesign .ms-shell .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
@@ -83,7 +85,7 @@
   .kairos-redesign .ms-history-filters { position: absolute; bottom: calc(100% + 8px); right: 0; padding: 8px; border-radius: 20px; display: flex; flex-direction: column; max-width: 100%; }
   .kairos-redesign .ms-history-filters select { max-width: 100%; padding: 0 8px; border: 0; background: transparent; font-size: 13px; }
   .kairos-redesign .ms-history-dock .ms-blur { z-index: -1; }
-  .kairos-redesign .ms-tab-sheet { position: fixed; inset: auto 0 0; padding: 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; border: 1px solid var(--rd-line-strong); border-radius: 28px 28px 0 0; background: var(--rd-surface-solid); overflow: auto; box-sizing: border-box; }
+  .kairos-redesign .ms-tab-sheet { position: fixed; inset: auto 0 calc(-1 * var(--ms-below-fold, 0px)); padding: 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; border: 1px solid var(--rd-line-strong); border-radius: 28px 28px 0 0; background: var(--rd-surface-solid); overflow: auto; box-sizing: border-box; }
   .kairos-redesign .ms-tab-sheet[open] { animation: ms-sheet-in 280ms cubic-bezier(.22, 1, .36, 1); }
   .kairos-redesign .ms-tab-sheet::backdrop { background: rgba(var(--shade-rgb), .4); }
   .kairos-redesign .ms-sheet-panel { padding: 0 max(20px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))) max(20px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
@@ -131,7 +133,7 @@
   .kairos-redesign .ms-chat-capsule .chat-documents-toggle { display: none; }
   .kairos-redesign .ms-chat-capsule .input-icon-btn { min-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
   .kairos-redesign .ms-conversation .chat-input-right .chat-header-model { min-width: 0; max-width: 160px; margin-right: auto; }
-  .kairos-redesign .ms-conversation .chat-input-right .model-picker-menu { position: fixed; top: auto; bottom: calc(100px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .ms-conversation .chat-input-right .model-picker-menu { position: fixed; top: auto; bottom: calc(100px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)) - var(--ms-below-fold, 0px)); }
   .kairos-redesign .ms-conversation .chat-phone-tools .overflow-menu { position: absolute; top: calc(100% + 8px); right: 0; max-height: calc(100dvh - 100px); max-width: calc(100vw - 24px); overflow-y: auto; }
   @keyframes ms-spin { to { transform: rotate(360deg); } }
   @keyframes ms-sheet-in { from { transform: translateY(100%); } }
@@ -155,7 +157,7 @@
   .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :is(button, input:not([type=checkbox]):not([type=radio]), select, textarea, summary) { min-height: 44px; min-width: 44px; box-sizing: border-box; font: inherit; }
   .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign .ms-has-dock { padding-bottom: calc(90px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) !important; scroll-padding-bottom: 100px; }
-  .kairos-redesign .ms-dock { position: fixed; z-index: 110; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); right: max(12px, var(--mobile-safe-right, env(safe-area-inset-right, 0px))); bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); padding: 3px; min-height: 50px; display: flex; gap: 4px; align-items: center; }
+  .kairos-redesign .ms-dock { position: fixed; z-index: 110; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); right: max(12px, var(--mobile-safe-right, env(safe-area-inset-right, 0px))); bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) - var(--ms-below-fold, 0px)); padding: 3px; min-height: 50px; display: flex; gap: 4px; align-items: center; }
   .kairos-redesign .ms-dock > input { flex: 1; width: 0; min-width: 0; border: 0; background: transparent; padding: 0 14px; border-radius: 999px; font-size: 16px; }
   .kairos-redesign .ms-dock > button { flex: 1; padding: 0 12px; border: 0; box-shadow: none; background: transparent; font-size: 15px; }
   .kairos-redesign .ms-dock:has(input) > button { flex: 0 0 44px; font-size: 24px; }
@@ -170,7 +172,7 @@
   .kairos-redesign .ms-filtered-out { display: none !important; }
   /* A checkbox row inside a phone sheet is a full 44px target. */
   .kairos-redesign .ms-sheet-surface :is(label.cal-checkbox-label, label:has(> input[type=checkbox])), .kairos-redesign .ms-sheet :is(label:has(> input[type=checkbox])) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-  .kairos-redesign .ms-dock-note { position: fixed; z-index: 109; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); max-width: calc(100vw - 200px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px); padding: 10px 16px; font-size: 14px; color: var(--rd-ink-dim); text-align: left; }
+  .kairos-redesign .ms-dock-note { position: fixed; z-index: 109; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); max-width: calc(100vw - 200px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px - var(--ms-below-fold, 0px)); padding: 10px 16px; font-size: 14px; color: var(--rd-ink-dim); text-align: left; }
   /* A dock holding only "+" is a round thumb button on the right, not an empty bar. */
   .kairos-redesign .ms-dock:has(> button:only-child) { left: auto; width: 56px; height: 56px; padding: 0; }
   .kairos-redesign .ms-dock > button:only-child { flex: 1; font-size: 26px; border-radius: 999px; }
@@ -178,7 +180,7 @@
   .kairos-redesign .ms-git-dock { position: sticky; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); display: flex; justify-content: center; gap: 4px; padding: 3px; margin-top: 16px; z-index: 2; }
   .kairos-redesign .ms-git-dock > button { border: 0; background: transparent; box-shadow: none; padding-inline: 12px; flex: 1; }
 
-  .kairos-redesign .ms-sheet { position: fixed; inset: auto 0 0; width: 100%; max-width: 100%; max-height: calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: var(--ms-keyboard, 0px); margin: 0; padding: 0; color: var(--rd-ink); border: 1px solid var(--rd-line-strong); border-radius: 26px 26px 0 0; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+  .kairos-redesign .ms-sheet { position: fixed; inset: auto 0 0; width: 100%; max-width: 100%; max-height: calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: calc(var(--ms-keyboard, 0px) - var(--ms-below-fold, 0px)); margin: 0; padding: 0; color: var(--rd-ink); border: 1px solid var(--rd-line-strong); border-radius: 26px 26px 0 0; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
   .kairos-redesign .ms-sheet[open] { display: flex; flex-direction: column; }
   .kairos-redesign .ms-sheet-full { height: calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
   .kairos-redesign .ms-sheet::backdrop { background: rgba(var(--shade-rgb), .38); }
@@ -444,9 +446,7 @@
 /* 2026-10-21 (David, on-device): edge to edge on iPhone.
    Top: one light frost that covers only the status bar area and fades out just
    below it, replacing the older tinted html::after strip and the 88px band.
-   Bottom: in a home-screen app drawn under the status bar, iOS sizes 100dvh
-   short by the status bar height and leaves a solid strip above the home
-   indicator, so the page is pinned to the full screen instead. */
+   Bottom: the page height is --ms-page-height (style.css), see the end of this file. */
 @media (max-width: 768px) {
   .kairos-redesign::after { display: none; }
   /* The frost lives only in the status bar area and is clear by its bottom
@@ -462,9 +462,17 @@
   .kairos-redesign #mobile-menu-btn.ms-avatar { z-index: 1100; }
   .kairos-redesign .ms-global-frost { z-index: 54; }
 }
-@media (max-width: 768px) and (display-mode: standalone) {
-  /* In a home-screen app drawn under the status bar, 100dvh comes out short and
-     left a strip above the home indicator, while window.innerHeight is the true
-     screen height. mobileChrome.js publishes it as --app-height. */
-  html.kairos-redesign, .kairos-redesign body { height: var(--app-height, 100%); min-height: 0; }
+
+/* 2026-10-21: the page is --ms-page-height tall (style.css). Where that is
+   taller than the layout viewport (an iOS home-screen app), position:fixed
+   still measures from the short viewport, so every full-screen or
+   bottom-anchored fixed surface drops by --ms-below-fold to reach the true
+   bottom. The value is 0 everywhere else, so this is a no-op there. */
+@media (max-width: 768px) {
+  :is(.modal-backdrop, .mobile-backdrop, .chat-sessions-backdrop, #chat-sessions, #sidebar, .chat-summary-backdrop,
+    .palette-backdrop, .onboarding-overlay, .screen-capture-dialog, .chat-image-preview, .agent-profile-backdrop,
+    .agent-profile-sheet, .agent-item-sheet, .agents-rail-scrim, .hm-sheet-root, .rd-flyout-scrim, .ts-sheet-backdrop,
+    .artifact-panel, .agent-conversations-home.is-open) { bottom: calc(-1 * var(--ms-below-fold, 0px)) !important; }
+  .app-background { height: calc(100% + var(--ms-below-fold, 0px)); }
+  dialog::backdrop { bottom: calc(-1 * var(--ms-below-fold, 0px)); }
 }

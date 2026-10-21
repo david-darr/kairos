@@ -641,6 +641,54 @@ async function run(ctx) {
   await js("document.querySelector('.settings-window .settings-titlebar-btn[title=Close]')?.click()");
   await resize(390, 844);
 
+  // 2026-10-21 (David, iPhone home-screen app, 393x852): iOS gives a home-screen app a layout viewport
+  // short by the status bar (100dvh = innerHeight = fixed inset:0 = 793) while 100lvh is the screen (852).
+  // Electron cannot shorten its own viewport, so each case sets the window to the layout viewport and
+  // --ms-page-height to what style.css computes there (max(100dvh, 100lvh)), plus the device's safe areas.
+  // The page must fill the screen, bottom surfaces sit safe-bottom + gap above the true bottom, and the
+  // status-bar frost stays inside the safe area.
+  const devices = [
+    ['iPhone home-screen app, Dynamic Island', 393, 793, 852, 59, 34],
+    ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0],
+    ['browser or Android (no fold)', 393, 852, 852, 47, 34],
+  ];
+  for (const [name, w, layout, screen, top, bottom] of devices) {
+    await resize(w, layout);
+    await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); })()`);
+    const gap = Math.max(12, bottom);
+    await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
+    const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
+    eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
+    const composer = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
+    ok(composer && Math.abs(composer.b - (screen - gap)) <= 1, `${name}: launch composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(composer)}`);
+    const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");
+    ok(frost.every(b => b <= top + 0.5), `${name}: launch frost stays within the ${top}px status bar: ${frost}`);
+    await shot('fold-' + w + 'x' + screen + '-launch');
+    // The workspace sheet reaches the true bottom.
+    await js("document.querySelector('.ms-shell .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(350);
+    eq(Math.round((await rect('.ms-tab-sheet')).b), screen, `${name}: workspace sheet reaches the screen bottom`);
+    await js("document.querySelector('.ms-tab-sheet').close()");
+    // A conversation's composer.
+    await navigate('chat', { mobileConversation: true }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
+    const chat = await rect('.ms-conversation .ms-composer');
+    ok(Math.abs(chat.b - (screen - gap)) <= 1, `${name}: conversation composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(chat)}`);
+    ok(Math.round((await rect('#view-content')).b) === screen, `${name}: conversation fills the screen`);
+    // A docked tab: the fixed dock and a bottom sheet.
+    await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
+    const dock = await rect('.ms-dock');
+    ok(Math.abs(dock.b - (screen - gap)) <= 1, `${name}: fixed dock bottom sits ${gap}px above the screen bottom: ${JSON.stringify(dock)}`);
+    const globalFrost = await rect('.ms-global-frost');
+    ok(!globalFrost || globalFrost.b <= top + 0.5, `${name}: page frost stays within the status bar`);
+    await js("import('/static/js/mobileSheet.js').then(m => { const p = document.createElement('p'); p.textContent = 'Fold check'; window.__foldSheet = m.openMobileSheet({ title: 'Fold check', content: p, fullHeight: true }); })");
+    await waitFor("!!document.querySelector('.ms-sheet[open]')"); await delay(350);
+    const sheet = await rect('.ms-sheet[open]');
+    ok(Math.round(sheet.b) === screen && Math.abs(sheet.t - top) <= 1, `${name}: a full bottom sheet spans from the status bar to the screen bottom: ${JSON.stringify(sheet)}`);
+    await shot('fold-' + w + 'x' + screen + '-sheet');
+    await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('.ms-sheet[open]')");
+  }
+  await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.setProperty('--native-safe-bottom', '0px'); })()");
+  await resize(390, 844);
+
   return { assertions };
 }
 

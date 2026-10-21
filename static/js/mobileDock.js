@@ -2,9 +2,21 @@ import { mobileOn, phone, button } from './mobileShared.js';
 
 // Tool Store keeps its own header search and phone sheet, so it mounts no dock.
 export const dockTabs = ['notes', 'library', 'tasks', 'cookbook', 'email', 'calendar'];
-export const keyboardLift = (height, viewport) => viewport ? Math.max(0, height - viewport.height - viewport.offsetTop) : 0;
+// How far the page runs below the layout viewport: 0, except in an iOS
+// home-screen app, where the page is the full screen (style.css
+// --ms-page-height) but the layout viewport is short by the status bar.
+export const belowFold = () => Math.max(0, (document.documentElement?.getBoundingClientRect().height || 0) - innerHeight);
+// The keyboard's height above the layout viewport's bottom (sub-pixel noise is 0).
+export const keyboardLift = (height, viewport) => {
+  const lift = viewport ? height - viewport.height - viewport.offsetTop : 0;
+  return lift > 1 ? lift : 0;
+};
+// --ms-keyboard is measured from the page bottom: 0 with the keyboard down, so
+// surfaces sit at the true bottom; with it up, it includes the page below the
+// layout viewport, so they land on the keyboard's top edge.
 export function watchKeyboard(node) {
-  const update = () => node.style.setProperty('--ms-keyboard', `${mobileOn() ? keyboardLift(innerHeight, window.visualViewport) : 0}px`);
+  const lifted = () => { const lift = mobileOn() ? keyboardLift(innerHeight, window.visualViewport) : 0; return lift ? lift + belowFold() : 0; };
+  const update = () => node.style.setProperty('--ms-keyboard', `${lifted()}px`);
   update(); window.visualViewport?.addEventListener('resize', update); window.visualViewport?.addEventListener('scroll', update); window.addEventListener('resize', update);
   phone.addEventListener('change', update); document.addEventListener('kairos:appearance', update);
   return () => { window.visualViewport?.removeEventListener('resize', update); window.visualViewport?.removeEventListener('scroll', update); window.removeEventListener('resize', update); phone.removeEventListener('change', update); document.removeEventListener('kairos:appearance', update); node.style.removeProperty('--ms-keyboard'); };

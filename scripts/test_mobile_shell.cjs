@@ -179,6 +179,8 @@ class Surface {
   assert.equal(keyboardLift(844, { height: 500, offsetTop: 20 }), 324);
   assert.equal(keyboardLift(500, { height: 600, offsetTop: 0 }), 0);
   assert.equal(keyboardLift(844, null), 0);
+  // Sub-pixel visual viewport rounding is not a keyboard (2026-10-21).
+  assert.equal(keyboardLift(793, { height: 792.4, offsetTop: 0 }), 0);
   assert.ok(!dockTabs.includes('agents'), 'Messenger retains its own composer and rail search');
   assert.ok(!dockTabs.includes('forgeSession'), 'Forge retains its session composer');
   const view = new Element('section'), toolbar = new Element('div'), searchInput = new Element('input'), create = new Element('button');

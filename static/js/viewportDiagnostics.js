@@ -55,13 +55,13 @@ function measure() {
       .map(sel => [sel, document.querySelector(sel)]).filter(([, n]) => n)
       .map(([sel, n]) => `${sel} scrollTop ${px(n.scrollTop)}  scrollHeight ${n.scrollHeight}  clientHeight ${n.clientHeight}`),
   ]);
-  const units = ['100vh', '100svh', '100lvh', '100dvh', '100%'];
+  const units = ['100vh', '100svh', '100lvh', '100dvh', '100%', 'var(--ms-page-height)', 'var(--ms-below-fold)'];
   const probes = units.map(u => probe(`height:${u}`));
   const full = probe('inset:0;width:auto;height:auto');
   const insets = ['top', 'bottom', 'left', 'right'].map(side => [side, probe(`height:0;padding-${side === 'left' || side === 'right' ? 'left' : 'top'}:env(safe-area-inset-${side}, 0px)`), probe(`height:0;padding-top:var(--mobile-safe-${side}, 0px)`)]);
   const fullRect = full.getBoundingClientRect();
   section('Height probes (position: fixed)', [
-    ...units.map((u, i) => `${u.padEnd(7)} ${px(probes[i].getBoundingClientRect().height)}`),
+    ...units.map((u, i) => `${u.replace(/^var\((.*)\)$/, '$1').padEnd(7)} ${px(probes[i].getBoundingClientRect().height)}`),
     `inset:0  top ${px(fullRect.top)}  bottom ${px(fullRect.bottom)}  h ${px(fullRect.height)}`,
   ]);
   section('Safe-area insets', insets.map(([side, env, mobile]) => {
@@ -71,8 +71,8 @@ function measure() {
   [...probes, full, ...insets.flatMap(([, a, b]) => [a, b])].forEach(n => n.remove());
   const html = document.documentElement, shell = document.querySelector('.ms-shell');
   section('Custom properties', [
-    `html --app-height: ${html.style.getPropertyValue('--app-height') || getComputedStyle(html).getPropertyValue('--app-height') || '(unset)'}`,
-    `.ms-shell --ms-viewport-height: ${shell ? shell.style.getPropertyValue('--ms-viewport-height') || '(unset)' : '(no shell)'}`,
+    `html --ms-page-height: ${getComputedStyle(html).getPropertyValue('--ms-page-height').trim() || '(unset)'}`,
+    `.ms-shell --ms-keyboard: ${shell ? shell.style.getPropertyValue('--ms-keyboard') || '(unset)' : '(no shell)'}`,
     `--native-safe-top: ${getComputedStyle(html).getPropertyValue('--native-safe-top') || '(unset)'}`,
     `html classes: ${short(html.className, 200)}   data-view ${html.dataset.view}`,
   ]);
@@ -113,6 +113,24 @@ function measure() {
     }
   }
   layers.sort((a, b) => b.blur - a.blur);
+  // Dot contrast of each visible dither canvas, per 20px band from the top: mean/stddev of brightness.
+  // A flat band (stddev near 0) means the canvas itself has no dots there.
+  const canvases = [...document.querySelectorAll('canvas.dither-canvas')].filter(c => c.getClientRects().length && c.width > 50 && c.height > 50);
+  section('Dither canvas dot contrast (top 200px, mean/stddev per 20px)', canvases.map(c => {
+    const r = c.getBoundingClientRect(), k = c.height / r.height, bands = [];
+    try {
+      const ctx = c.getContext('2d');
+      for (let y = Math.max(0, -r.top); y < Math.min(200 - r.top, r.height); y += 20) {
+        const d = ctx.getImageData(0, Math.round(y * k), c.width, Math.max(1, Math.round(20 * k))).data;
+        let sum = 0, sq = 0, n = 0;
+        for (let i = 0; i < d.length; i += 16) { const l = .3 * d[i] + .59 * d[i + 1] + .11 * d[i + 2]; sum += l; sq += l * l; n++; }
+        const m = sum / n; bands.push(`${Math.round(r.top + y)}:${Math.round(m)}/${Math.sqrt(Math.max(0, sq / n - m * m)).toFixed(0)}`);
+      }
+    } catch (error) { bands.push('unreadable: ' + error.message); }
+    const host = c.parentElement ? describe(c.parentElement) : '?';
+    return `${host} canvas ${c.width}x${c.height} at ${rectText(r)}
+    ${bands.join('  ')}`;
+  }));
   section(`Top 160px layers (${layers.filter(l => l.blur).length} with blur, ${layers.length} total)`, layers.map(l => l.text));
   return out;
 }
@@ -129,6 +147,20 @@ function render() {
     block.append(h, pre); return block;
   }));
   status.textContent = 'Measured ' + new Date().toLocaleTimeString();
+}
+
+const LAYERS = {
+  'Status-bar frost': '.ms-blur-top, .ms-global-frost { display: none !important; }',
+  'Glass pills': '.ms-glass, .ms-chat-capsule::before { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
+  'Background wash': '.ms-background::after, .dashboard-core::after { display: none !important; }',
+  'Background dots': '.ms-background { visibility: hidden !important; }',
+  'Sky backdrop': '.kairos-redesign-backdrop { visibility: hidden !important; }',
+};
+const hidden = new Set();
+function applyHidden() {
+  let node = document.getElementById('vp-diag-hide');
+  if (!node) { node = document.createElement('style'); node.id = 'vp-diag-hide'; document.head.append(node); }
+  node.textContent = [...hidden].map(name => LAYERS[name]).join('\n');
 }
 
 let frame = 0;
@@ -160,7 +192,7 @@ export function openViewportDiagnostics() {
   const style = document.createElement('style');
   style.textContent = `#${ID}{position:fixed;inset:0;z-index:2147483000;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:#fff;color:#111;font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px calc(env(safe-area-inset-bottom,0px) + 24px);box-sizing:border-box}
 #${ID} .vp-bar{position:sticky;top:calc(-8px - env(safe-area-inset-top,0px));display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 0;background:#fff;border-bottom:1px solid #ccc}
-#${ID} button{min-height:44px;min-width:44px;padding:0 14px;font:600 15px system-ui,sans-serif;border:1px solid #888;border-radius:10px;background:#f2f2f2;color:#111}
+#${ID} .vp-toggles{position:static}#${ID} button[aria-pressed=true]{background:#333;color:#fff}#${ID} button{min-height:44px;min-width:44px;padding:0 14px;font:600 15px system-ui,sans-serif;border:1px solid #888;border-radius:10px;background:#f2f2f2;color:#111}
 #${ID} h2{margin:0;flex:1 1 100%;font-size:17px}#${ID} h3{margin:16px 0 4px;font-size:16px}
 #${ID} pre{margin:0;white-space:pre-wrap;word-break:break-word;font:14px/1.45 ui-monospace,Menlo,monospace}#${ID} .vp-status{font-size:13px;color:#555}`;
   const bar = document.createElement('div'); bar.className = 'vp-bar';
@@ -168,8 +200,19 @@ export function openViewportDiagnostics() {
   const make = (label, action) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.addEventListener('click', action); return b; };
   status = document.createElement('span'); status.className = 'vp-status';
   bar.append(title, make('Refresh', render), make('Copy', copy), make('Close', closeViewportDiagnostics), status);
+  // Layer switches: hide one top layer, close this screen and look. They last until the app reloads.
+  const toggles = document.createElement('div'); toggles.className = 'vp-bar vp-toggles';
+  const label = document.createElement('h3'); label.textContent = 'Hide a layer, then Close to look'; label.style.flex = '1 1 100%';
+  toggles.append(label);
+  for (const [name, css] of Object.entries(LAYERS)) {
+    const b = make(name, () => {
+      const on = !hidden.has(name); on ? hidden.add(name) : hidden.delete(name);
+      b.setAttribute('aria-pressed', String(on)); applyHidden();
+    });
+    b.setAttribute('aria-pressed', String(hidden.has(name))); toggles.append(b);
+  }
   body = document.createElement('div');
-  overlay.append(style, bar, body);
+  overlay.append(style, bar, toggles, body);
   overlay.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeViewportDiagnostics(); } });
   document.body.append(overlay);
   addEventListener('resize', schedule); addEventListener('orientationchange', schedule);

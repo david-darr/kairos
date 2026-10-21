@@ -1,5 +1,5 @@
 import { mobileOn, phone, button } from './mobileShared.js';
-import { watchKeyboard } from './mobileDock.js';
+import { watchKeyboard, keyboardLift, belowFold } from './mobileDock.js';
 let sheetId = 0;
 
 // Also used by existing panel dialogs: their nesting, confirmation and owner
@@ -35,7 +35,11 @@ export function openMobileSheet({ title, content, opener = document.activeElemen
   const body = document.createElement('div'); body.className = 'ms-sheet-body'; body.append(content);
   dialog.append(heading, body); document.body.append(dialog);
   const keyboard = watchKeyboard(dialog);
-  const viewport = () => dialog.style.setProperty('--ms-sheet-height', `${window.visualViewport?.height || innerHeight}px`);
+  // The visible height; with the keyboard down that includes any page below the layout viewport (belowFold).
+  const viewport = () => {
+    const visible = window.visualViewport?.height || innerHeight;
+    dialog.style.setProperty('--ms-sheet-height', `${visible + (keyboardLift(innerHeight, window.visualViewport) ? 0 : belowFold())}px`);
+  };
   viewport(); window.visualViewport?.addEventListener('resize', viewport);
   let closed = false;
   const close = () => {

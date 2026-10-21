@@ -4,6 +4,7 @@ import { ICONS } from './icons.js';
 import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
+import { watchKeyboard } from './mobileDock.js';
 import { openTabSheet, initTabSheet } from './mobileTabSheet.js';
 import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
 
@@ -110,10 +111,8 @@ export function mountMobileHome({ container, content, banner, options }) {
     }
   };
   shell.hidden = true; sync();
-  const viewport = () => {
-    if (mobileOn()) shell.style.setProperty('--ms-viewport-height', `${window.visualViewport?.height || innerHeight}px`);
-  };
-  viewport(); window.visualViewport?.addEventListener('resize', viewport);
+  // The shell fills the page (CSS); the keyboard lift pads its bottom so the composer rides the keyboard.
+  const keyboard = watchKeyboard(shell);
   phone.addEventListener('change', sync); document.addEventListener('kairos:appearance', sync);
   return { update(key, value) {
     historyUI.update(key, value);
@@ -125,7 +124,7 @@ export function mountMobileHome({ container, content, banner, options }) {
     if (key === 'sessions') activityMetadata(value, null);
   }, dispose() {
     disposed = true; if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
-    window.visualViewport?.removeEventListener('resize', viewport);
+    keyboard();
     phone.removeEventListener('change', sync); document.removeEventListener('kairos:appearance', sync);
     shell.remove(); bannerAnchor.remove();
   } };
