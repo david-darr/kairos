@@ -67,7 +67,7 @@
   .kairos-redesign .rd-in-composer .model-picker-btn:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign .rd-in-composer .model-picker-btn:disabled { opacity: .55; }
   .kairos-redesign .rd-in-composer .model-picker-menu {
-    z-index: 90; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-field);
+    z-index: 90; border: 1px solid var(--rd-line-strong);
     background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
   }
 }
