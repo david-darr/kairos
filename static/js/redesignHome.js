@@ -272,7 +272,8 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
   // -- Usage rings on the model limits -----------------------------------------
   function decorateRings() {
     for (const window_ of parts.models?.querySelectorAll(".dashboard-quota-window") || []) {
-      if (window_.querySelector(".hm-ring")) continue;
+      // Home's visual cards already draw a ring with the percentage inside it.
+      if (window_.querySelector(".hm-ring, .dashboard-quota-ring")) continue;
       const meter = window_.querySelector('[role="meter"]');
       const fill = window_.querySelector(".dashboard-quota-fill");
       const tone = (fill?.className.match(/tone-(\w+)/) || [])[1] || "ample";
