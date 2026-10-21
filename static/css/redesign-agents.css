@@ -1,0 +1,159 @@
+/* Redesign preview: Agents and Teams, a light pass. Every rule is scoped under
+   .kairos-redesign, so with the switch off the tab is untouched. Built on the
+   --rd-* tokens from redesign.css; no raw colors. The messenger's layout,
+   structure and behaviour stay as they are: this only changes paint (surfaces,
+   hairlines, type, pills, fields). The village art and the call orb are left
+   alone; only the panels around them follow the redesign. Gold is a hairline,
+   never text. The washed sky behind the view comes from redesign.css. */
+
+/* -- Page title and the view switch ------------------------------------------ */
+.kairos-redesign .agents-workspace-bar h2 {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; letter-spacing: 0; line-height: 1.05;
+  font-size: clamp(28px, 3.4vw, 38px); color: var(--rd-ink);
+  text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8), 0 0 2px rgba(var(--wash-rgb), .9);
+}
+.kairos-redesign .agents-workspace-tabs {
+  background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agents-workspace-tabs button { border-radius: var(--rd-radius-pill); font-family: var(--rd-font-ui); font-weight: 500; }
+.kairos-redesign .agents-workspace-tabs button[aria-selected=true] {
+  background: var(--rd-surface-solid); border-color: var(--rd-line-strong); box-shadow: none;
+}
+
+/* -- Panels: the rail, the conversation stage, the village frame ------------- */
+.kairos-redesign :is(.agents-chat-rail, .agents-messenger-stage, .agent-ecosystem) {
+  background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agents-messenger-stage > .agent-conversation-page,
+.kairos-redesign .agents-messenger-stage > .swarm-view { background: transparent; }
+
+/* -- Section titles ---------------------------------------------------------- */
+.kairos-redesign :is(.agents-rail-top h2, .agents-messenger-welcome h1, .agent-call-scene h1, .ecosystem-header h2, .swarm-view h1, .agent-chat-empty .title) {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; letter-spacing: 0; color: var(--rd-ink);
+}
+.kairos-redesign .agents-rail-top h2 { font-size: 24px; line-height: 1.1; }
+.kairos-redesign .agents-messenger-welcome h1 { font-size: clamp(28px, 3.2vw, 38px); }
+.kairos-redesign .ecosystem-header h2 { font-size: 26px; }
+.kairos-redesign .swarm-view h1 { font-size: 30px; line-height: 1.1; }
+.kairos-redesign .agent-call-scene h1 { font-size: 26px; }
+.kairos-redesign .agent-call:is([data-state=setup], [data-state=preparing]) .agent-call-scene h1 { font-size: 22px; }
+/* Small uppercase tracked labels */
+.kairos-redesign :is(.agents-rail-group h3, .agents-rail-history > summary, .swarm-layout > section > h2, .swarm-view .swarm-field > span) {
+  font-family: var(--rd-font-ui); font-size: var(--rd-label-size); font-weight: 500;
+  letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
+}
+.kairos-redesign .swarm-view .swarm-field > span { font-size: 11px; }
+
+/* -- Rail rows: hairline for the current chat, no stacked card chrome -------- */
+.kairos-redesign .agents-messenger .agents-rail-item { box-shadow: none; background: transparent; border-color: transparent; border-radius: 18px; }
+.kairos-redesign .agents-messenger .agents-rail-item:hover { background: var(--rd-surface-2); border-color: var(--rd-line); }
+.kairos-redesign .agents-messenger .agents-rail-item[aria-current=page] {
+  background: var(--rd-surface-solid); border-color: var(--rd-line-strong); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agents-rail-action { background: var(--rd-surface-solid); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agents-rail-history { border-top-color: var(--rd-line); }
+.kairos-redesign .agents-rail-create .btn { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agents-messenger .agents-rail-search,
+.kairos-redesign .agent-thread-search { background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agents-chat-unread { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+
+/* -- Conversation: top bar, bubbles, composer -------------------------------- */
+.kairos-redesign .is-messages .agent-profile-face { background: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .is-messages .agent-profile-face:hover { border-color: var(--rd-line-strong); }
+.kairos-redesign .is-messages :is(.agent-info-toggle, .agent-call-open) { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .is-messages .session-chat-messages .msg > .msg-body { background: var(--rd-surface-solid); border: 1px solid var(--rd-line); }
+.kairos-redesign .is-messages .session-chat-messages .msg.user > .msg-body { background: var(--accent-dim); border-color: var(--rd-line-strong); }
+.kairos-redesign .agent-conversation-page .side-chat-composer,
+.kairos-redesign .swarm-composer {
+  background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent); border-color: var(--rd-line-strong); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agent-conversation-page .side-chat-composer:focus-within { border-color: var(--rd-focus); }
+.kairos-redesign .agent-conversation-page .side-chat-input { background: transparent; border: 0; box-shadow: none; border-radius: 0; }
+@media (min-width: 769px) {
+  /* The desktop Send is the primary pill; the phone keeps its round arrow. */
+  .kairos-redesign .agent-conversation-page .side-chat-composer .btn.side-chat-send:not(.primary):not(.quiet):not(.danger):not(.forge-composer-send) {
+    background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; border-radius: var(--rd-radius-pill); padding-inline: 18px;
+  }
+  .kairos-redesign .agent-conversation-page .side-chat-composer .btn.side-chat-send:not(.primary):not(.quiet):not(.danger):not(.forge-composer-send):hover:not(:disabled) { background: var(--rd-primary-hover); }
+}
+
+/* -- Inbox and the profile sheet --------------------------------------------- */
+.kairos-redesign .agents-view .agent-inbox,
+.kairos-redesign .agent-approval-card,
+.kairos-redesign .agent-live-panel,
+.kairos-redesign .agent-next-panel {
+  background: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agent-profile-sheet { border-color: var(--rd-line); box-shadow: var(--rd-shadow); }
+.kairos-redesign .agent-profile-tabs { border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agents-chat-actions,
+.kairos-redesign .agent-item-sheet {
+  background: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agents-chat-actions h2 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; }
+
+/* -- Calls: the panel around the orb, not the orb ---------------------------- */
+.kairos-redesign .agent-call {
+  background: var(--rd-surface-solid); border-color: var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .agent-call-tabs { background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agent-call-tabs > span { border-radius: var(--rd-radius-pill); }
+.kairos-redesign .agent-call .agent-call-action {
+  background: var(--rd-surface); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-pill); font-family: var(--rd-font-ui); font-weight: 500;
+}
+.kairos-redesign .agent-call .agent-call-action:hover { background: var(--rd-surface-2); border-color: var(--rd-line-strong); }
+.kairos-redesign .agent-call .agent-call-action.is-end { background: rgba(var(--danger-rgb), .1); border-color: rgba(var(--danger-rgb), .3); }
+.kairos-redesign .agent-call-setup { background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-card); }
+.kairos-redesign .agent-call-setup :is(select, input:not([type=checkbox])),
+.kairos-redesign .agent-call-runtime input {
+  background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-field); font-family: var(--rd-font-ui);
+}
+.kairos-redesign .agent-call-setup > button[type=submit] { box-shadow: 0 0 0 8px var(--rd-surface-solid); }
+.kairos-redesign .agent-call-setup label { text-transform: uppercase; letter-spacing: var(--rd-label-tracking); font-size: 11px; }
+
+/* -- Ecosystem: the frame and its controls (the village art is untouched) ---- */
+.kairos-redesign :is(.ecosystem-control, .ecosystem-more > summary, .ecosystem-locate) {
+  background: var(--rd-surface-solid); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-pill); font-family: var(--rd-font-ui);
+}
+.kairos-redesign :is(.ecosystem-control, .ecosystem-more > summary):hover { background: var(--rd-surface-2); }
+.kairos-redesign .ecosystem-extra-tools { background: var(--rd-surface-solid); border-color: var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow); }
+
+/* -- Teams -------------------------------------------------------------------- */
+.kairos-redesign .swarm-system-card,
+.kairos-redesign .swarm-layout > section,
+.kairos-redesign .swarm-notice {
+  background: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .is-messages .swarm-layout > .swarm-conversation { background: transparent; border: 0; box-shadow: none; }
+.kairos-redesign .swarm-system-card:hover { border-color: var(--rd-line-strong); }
+.kairos-redesign .swarm-system-card h2 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; }
+.kairos-redesign .swarm-state { background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign .swarm-view .view-header .sub { color: var(--rd-ink-dim); }
+.kairos-redesign .swarm-view [aria-pressed="true"] { background: var(--rd-surface-solid); border-color: var(--rd-line-strong); }
+.kairos-redesign .swarm-agent, .kairos-redesign .swarm-budget, .kairos-redesign .swarm-record,
+.kairos-redesign .swarm-composer, .kairos-redesign .swarm-dialog-header { border-color: var(--rd-line); }
+.kairos-redesign .swarm-dialog {
+  background: var(--rd-surface-solid); border-color: var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .swarm-dialog-header h2 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 26px; }
+.kairos-redesign .swarm-field :is(input, textarea, select) {
+  background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-field); font-family: var(--rd-font-ui);
+}
+.kairos-redesign .swarm-field :is(input, textarea, select):focus { border-color: var(--rd-focus); }
+.kairos-redesign :is(.swarm-member-form, .swarm-schedule, .swarm-memory) { border-color: var(--rd-line); border-radius: var(--rd-radius-field); }
+.kairos-redesign .swarm-panel-tabs { background: transparent; }
+
+/* -- Phones: titles a little smaller; every control keeps its 44px target ----- */
+@media (max-width: 768px) {
+  .kairos-redesign .agents-workspace-bar h2 { font-size: 26px; }
+  .kairos-redesign .swarm-view h1 { font-size: 26px; }
+  .kairos-redesign .agents-messenger-welcome h1 { font-size: 28px; }
+  .kairos-redesign .ecosystem-header h2 { font-size: 22px; }
+  .kairos-redesign :is(.agents-chat-rail, .agents-messenger-stage, .agent-ecosystem) { border-radius: var(--rd-radius-card); }
+  /* The redesign's fields and switch are a little shorter than 44px; give
+     them back the phone tap target the Agents surfaces already guarantee. */
+  .kairos-redesign :is(.agents-view, .agent-profile-sheet, .agent-create-dialog) input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]) { min-height: 44px; box-sizing: border-box; }
+  .kairos-redesign :is(.agents-view, .agent-profile-sheet, .agent-create-dialog) .set-switch {
+    box-sizing: border-box; width: 62px; height: 44px; border: 9px solid transparent; background-clip: padding-box;
+  }
+}
