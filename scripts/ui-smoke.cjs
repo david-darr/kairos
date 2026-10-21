@@ -839,7 +839,7 @@ app.whenReady().then(async () => {
     }
     writes.splice(forgeWrites);
     win.setContentSize(1440, 900); await delay(350);
-    const railWidth = () => js("document.querySelector('#sidebar').getBoundingClientRect().width");
+    const railWidth = () => js("Math.round(document.querySelector('#sidebar').getBoundingClientRect().width)");
     assert.equal(await railWidth(), 204);
     await js("document.querySelector('#sidebar-toggle').click()");
     await delay(80);
@@ -899,11 +899,17 @@ app.whenReady().then(async () => {
       await waitFor("!!document.querySelector('#view-content .library-editor')");
       assert.equal(await js("document.querySelector('#view-content .library-editor').getBoundingClientRect().width"), 1440, "Library document editor is 1440px wide");
       await navigate("library", { section: "documents" });
-      for (const tab of ["agents", "tasks", "notes", "email", "cookbook", "tool-store"]) {
+      for (const tab of ["tasks", "notes", "email", "cookbook", "tool-store"]) {
         await navigate(tab);
         await waitFor("!!document.querySelector('#view-content .view-constrained')");
         assert.equal(await js("document.querySelector('#view-content .view-constrained').getBoundingClientRect().width"), 1200, tab + " is 1200px wide");
       }
+      // 2026-10-20: Agents is the messenger (David approved), which fills the
+      // content area on a wide window instead of sitting in a 1200px column.
+      await navigate("agents");
+      await waitFor("!!document.querySelector('#view-content .agents-messenger-welcome')");
+      assert.ok(await js("(() => { const m=document.querySelector('#view-content .agents-messenger').getBoundingClientRect(), c=document.getElementById('view-content').getBoundingClientRect(); return m.width > 1200 && Math.abs(m.width - c.width) < 40; })()"), "agents fill the wide content area");
+      assert.ok(await js("!document.querySelector('#view-content .view-constrained')"), "agents is not held in the 1200px column");
     } finally {
       win.setContentSize(...previousSize);
       await delay(100);
@@ -1033,25 +1039,34 @@ app.whenReady().then(async () => {
         if (tab === "agents" && !demoState.empty) {
           demoState.agentUpkeepUndone = false;
           // Agents: the list, the cross-agent inbox with its answers, the badge.
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
-          assert.equal(await js("document.querySelectorAll('.agent-tile:not(.team-tile):not(.agent-new-card) .agent-dot-avatar').length"), 2, label + ' roster faces use the dot component');
-          assert.ok(await js("!!document.querySelector('.agent-new-card')"), label + ' creation card is in the roster');
-          assert.ok(await js("document.querySelector('.agent-teams .team-tile')?.textContent.includes('Launch team')"), label + " teams listed under agents");
-          assert.ok(await js("document.querySelector('.team-tile .agent-status').textContent === 'Working'"), label + " team state shown");
+          // 2026-10-20: the list is the messenger's chat rail (on a phone the
+          // rail is the Chats drawer), with a welcome pane until a chat is picked.
+          const phoneRail = () => js("!document.querySelector('.agents-rail-inbox').getClientRects().length");
+          const showRail = async () => { if (await phoneRail()) await js("document.querySelector('.agents-chats-open').click()"); await delay(300); };
+          await waitFor("document.querySelectorAll('.agents-rail-item.agent-tile').length === 2");
+          assert.ok(await js("!!document.querySelector('.agents-messenger-welcome')"), label + ' welcome pane before a chat is picked');
+          await showRail();
+          assert.equal(await js("document.querySelectorAll('.agents-rail-item.agent-tile .agent-dot-avatar').length"), 2, label + ' roster faces use the dot component');
+          assert.ok(await js("[...document.querySelectorAll('.agents-rail-create button')].map(b => b.getAttribute('aria-label')).join() === 'New agent,New team' && !!document.querySelector('.agents-messenger-welcome button')"), label + ' creation entry points are in the rail and the welcome pane');
+          assert.ok(await js("document.querySelector('.agents-rail-item.team-tile')?.textContent.includes('Launch team')"), label + " teams listed with the agents");
+          await js("document.querySelector('.agents-rail-inbox').click()");
+          await waitFor("!!document.querySelector('.agent-inbox .agent-inbox-question')");
           assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Reply')"), label + " a question can be answered");
           assert.equal(await js("document.querySelectorAll('.agent-inbox-approval').length"), 0, label + " agents run in Auto: nothing to approve");
           assert.ok(await js("document.querySelector('.agent-inbox-report').textContent.includes('Backend Engineer')"), label + " report body shown");
           assert.ok(await js("[...document.querySelectorAll('.agent-inbox-item')].every(n => n.querySelector('.agent-dot-avatar') && n.querySelectorAll('.agent-inbox-actions .btn.primary').length === 1 && n.querySelector('.agent-inbox-compose[hidden]'))"), label + ' waiting rows have faces and one primary action');
-          assert.ok((await js("document.querySelector('.agent-status-line.agent-status-working').textContent")).startsWith('Working on'));
           await waitFor("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent === '2'");
           assert.deepEqual(await overflow(), [], label + " overflow in agents list");
+          await capture(label + "-agents-inbox");
+          // The state line lives in the open agent's live panel (Info on a
+          // desktop), checked on the agent page below.
           await navigate("agents", { agentId: "a1" });
           await waitFor("!!document.querySelector('.agent-memory')");
           // The agent page opens on its Chat tab: its own chats, the open
           // conversation and a composer; Work holds everything else.
           await waitFor("document.querySelectorAll('.agent-chat-item').length === 1");
           assert.equal(await js("document.querySelector('.agent-tab.active').textContent"), "Chat", label + " opens on Chat");
-          assert.ok(await js("!!document.querySelector('.agent-header .agent-dot-avatar') && !!document.querySelector('.agent-profile-open')"), label + ' bot hero has face and settings');
+          assert.ok(await js("!!document.querySelector('.agent-profile-face .agent-dot-avatar') && !!document.querySelector('.agent-profile-face h2') && !!document.querySelector('.agent-info-toggle')"), label + ' top bar has the bot face (opens its profile) and Info');
           assert.equal(await js("[...document.querySelectorAll('.agent-tab')][1].textContent"), "Work (2)", label + " work tab counts what waits");
           await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0");
           assert.ok(await js("document.querySelector('.agent-chat-item.active')?.textContent.includes('Chat with Scout')"), label + " last chat open");
@@ -1084,7 +1099,10 @@ app.whenReady().then(async () => {
           assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
           await capture(label + '-agent-memory');
           await navigate("agents");
-          await waitFor("document.querySelectorAll('.agent-tile:not(.team-tile)').length === 3");
+          await waitFor("document.querySelectorAll('.agents-rail-item.agent-tile').length === 2");
+          if (await phoneRail()) await js("document.querySelector('.agents-chats-open').click()");
+          await js("document.querySelector('.agents-rail-inbox').click()");
+          await waitFor("!!document.querySelector('.agent-inbox .agent-inbox-question')");
           const agentComputerStart = writes.length;
           await js("[...document.querySelectorAll('.agent-inbox-question button')].find(b => b.textContent === 'Open computer').click()");
           await waitFor("document.querySelector('.agent-work-host:not([hidden]) .computer-state')?.textContent.includes('You have control')");
@@ -1743,8 +1761,12 @@ app.whenReady().then(async () => {
     const navigationWriteBaseline = writes.length;
     await navigate("home");
     await waitFor("document.querySelectorAll('.dashboard-row').length > 0");
-    // Forge sessions are listed too (newer here) and open the Forge screen; pick the plain chat.
-    await js("[...document.querySelectorAll('.dashboard-row')].find(r => r.textContent.includes('A clearer direction for the workspace')).click()");
+    // Home lists only the three newest chats, and Forge sessions from earlier
+    // checks are newer than this plain chat, so open it from the Chats list;
+    // Home's own rows are covered by the Home checks above.
+    await navigate("chat");
+    await waitFor("!!document.querySelector('.session-item[data-session-id=s1]')");
+    await js("document.querySelector('.session-item[data-session-id=s1]').click()");
     await waitFor("document.querySelectorAll('#chat-messages .msg').length === 2");
     await delay(400);
     await capture("desktop-conversation");

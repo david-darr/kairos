@@ -23,15 +23,17 @@ module.exports = async ({ js, waitFor, navigate, capture, win }) => {
     for (const [name, color, dark] of [['light', '#f3eadb', false], ['dark', '#1f1d24', true]]) {
       await js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: ${JSON.stringify(color)} }))`);
       await navigate('agents');
-      await waitFor("!!document.querySelector('.agent-new-card')");
-      await check('.agent-tile:not(.agent-new-card)', '.agent-tile .title', dark);
-      await check('.agent-new-card', '.agent-new-card', dark);
+      // 2026-10-20: the roster is the messenger's chat rail; Inbox is its own page.
+      await waitFor("!!document.querySelector('.agents-rail-item.agent-tile')");
+      await check('.agents-chat-rail', '.agents-rail-item.agent-tile', dark);
+      await check('.agents-chat-rail', '.agents-rail-item.team-tile', dark);
+      await js("document.querySelector('.agents-rail-inbox').click()");
+      await waitFor("!!document.querySelector('.agent-inbox')");
       await check('.agent-inbox', '.agent-inbox-title', dark);
-      await check('.team-tile', '.team-tile .title', dark);
       await capture(`agents-${name}-roster`);
       await navigate('agents', { agentId: 'a1', agentTab: 'work' });
-      await waitFor("!!document.querySelector('.agent-header')");
-      await check('.agent-header', '.agent-header h2', dark);
+      await waitFor("!!document.querySelector('.agent-profile-face h2')");
+      await check('.agents-messenger-stage', '.agent-profile-face h2', dark);
       await check('.agent-work-host > .glass', '.agent-work-host > .glass .title', dark);
       await capture(`agents-${name}-bot`);
       await navigate('agents', { team: 's1' });
@@ -45,8 +47,8 @@ module.exports = async ({ js, waitFor, navigate, capture, win }) => {
       await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
       await waitFor("document.querySelector('.agent-profile-sheet').hidden");
       await navigate('agents');
-      await waitFor("!!document.querySelector('.agent-new-card')");
-      await js("document.querySelector('.agent-new-card').click()");
+      await waitFor("!!document.querySelector('.agents-messenger-welcome')");
+      await js("document.querySelector('.agents-messenger-welcome .btn.primary').click()");
       await waitFor("!!document.querySelector('.agent-create-dialog')");
       await check('.agent-create-dialog', '.agent-create-dialog .modal-header', dark);
       await capture(`agents-${name}-create`);
@@ -59,8 +61,8 @@ module.exports = async ({ js, waitFor, navigate, capture, win }) => {
     assert.equal(await js("document.querySelector('.agent-profile-sheet').getAnimations({subtree:true}).length"), 0, 'sheet has no reduced-motion animation');
     await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
     await navigate('agents');
-    await waitFor("!!document.querySelector('.agent-new-card')");
-    await js("document.querySelector('.agent-new-card').click()");
+    await waitFor("!!document.querySelector('.agents-messenger-welcome')");
+    await js("document.querySelector('.agents-messenger-welcome .btn.primary').click()");
     await waitFor("!!document.querySelector('.agent-create-dialog')");
     assert.equal(await js("document.querySelector('.agent-create-dialog').getAnimations({subtree:true}).length"), 0, 'creation has no reduced-motion animation');
     await js("document.querySelector('.agent-create-dialog [aria-label=\"Close\"]').click()");
