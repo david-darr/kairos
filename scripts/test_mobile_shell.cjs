@@ -68,9 +68,11 @@ class Surface {
   }
   const { mountPager } = (await load('./mobilePager.js')).namespace;
   const { phoneRoute } = (await load('./mobileShell.js')).namespace;
-  assert.equal(phoneRoute('chat', {}).tab, 'home');
-  assert.equal(phoneRoute('chat', {}).options.mobilePage, 1);
+  assert.equal(phoneRoute('home', {}).tab, 'home', 'Home keeps the dashboard');
+  assert.equal(phoneRoute('chat', {}).tab, 'mobileLaunch');
+  assert.equal(phoneRoute('chat', {}).options.mobilePage, 0);
   assert.equal(phoneRoute('chat', { mobileNew: true }).options.mobilePage, 0);
+  assert.equal(phoneRoute('chat', { mobilePage: 1 }).options.mobilePage, 1, 'Conversation Back retains history page');
   for (const options of [{ sessionId: 's1' }, { projectId: 'p1' }, { mobileConversation: true }]) assert.equal(phoneRoute('chat', options).tab, 'chat');
   enabled = false;
   assert.equal(phoneRoute('chat', {}).tab, 'chat', 'Desktop and legacy routing stays unchanged');
@@ -94,7 +96,10 @@ class Surface {
   assert.equal(tabs[1].attrs['aria-selected'], 'true');
   assert.equal(pages[0].inert, true);
   swipe(80, 200, 100, 0);
-  assert.equal(host.values['--ms-page'], 1, 'Existing left drawer keeps its rightward zone');
+  assert.equal(host.values['--ms-page'], 0, 'Former sidebar zone belongs to the pager');
+  swipe(300, 200, -100, 0);
+  swipe(10, 200, 100, 0);
+  assert.equal(host.values['--ms-page'], 1, 'System edge is untouched');
   const row = { closest: selector => selector === 'button' || selector === '.ms-history-main' ? {} : null };
   swipe(300, 200, 100, 0, row);
   assert.equal(host.values['--ms-page'], 0, 'A rightward row swipe outside the drawer zone returns to New');
@@ -257,5 +262,14 @@ class Surface {
   assert.match(css, /settings-nav-item \{ min-height: 52px/); assert.match(css, /border-radius: 22px/);
   assert.match(css, /prefers-reduced-motion: reduce/); assert.match(css, /transition: border-radius 280ms/);
   assert.ok(mutationObservers.every(observer => !observer.active), 'All mounted observers disconnect');
+  const source = name => fs.readFileSync(path.join(__dirname, '../static/js', name), 'utf8');
+  assert.doesNotMatch(source('app.js'), /registerMobileDrawer/);
+  assert.match(source('mobileChrome.js'), /open workspace tabs/i);
+  assert.match(source('mobileTabSheet.js'), /sidebarLayout\(sources/);
+  assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);
+  assert.match(source('mobileShell.js'), /'Your workspace':/);
+  assert.doesNotMatch(source('mobileShell.js'), /Your day|touchstart/);
+  assert.match(css, /position: fixed; top: 0; left: 0; right: 0; height: calc/);
+  assert.match(css, /line-height: 24px; padding-block: 10px/);
   console.log('PASS: A1-A3 routing/pager; A4 dock delegation, keyboard and restore; A5 input/draft identity; A6 sheet focus/swipe/resize and quota boundaries; A7 grouped geometry and reduced-motion contract');
 })().catch(error => { console.error(error); process.exitCode = 1; });

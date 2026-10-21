@@ -36,6 +36,25 @@ async function run(ctx) {
   await resize(390, 844);
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
 
+  const checkAvatar = async tab => {
+    const avatar = await rect('#mobile-menu-btn');
+    ok(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('#mobile-menu-btn .menu-stroke')"), tab + ' has workspace avatar');
+    ok(avatar && avatar.l <= 44 && avatar.t <= 16 && avatar.w === 44 && avatar.h === 44, tab + ' avatar stays top-left');
+    ok(await js("[...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].filter(n => n.getClientRects().length).every(n => n.getBoundingClientRect().top >= document.getElementById('mobile-menu-btn').getBoundingClientRect().bottom)"), tab + ' headers clear avatar');
+  };
+  for (const tab of ['home', 'agents', 'tool-store', 'school', 'forgeHome']) {
+    await navigate(tab); await delay(500); await checkAvatar(tab);
+  }
+  const centeredComposer = async (selector, expanded = false) => {
+    ok(await js(`(() => {
+      const bar = document.querySelector('${selector}');
+      const nodes = expanded ? [...bar.querySelectorAll('.ms-forge-add, .ms-forge-mic, .ms-embedded-model-trigger')].filter(n => n.getClientRects().length)
+        : [bar.querySelector('textarea'), bar.querySelector('.ms-forge-add'), bar.querySelector('.ms-forge-mic')];
+      const centers = nodes.map(n => { const r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+      return centers.length >= 3 && Math.max(...centers) - Math.min(...centers) <= 1;
+    })()`), selector + (expanded ? ' bottom row' : ' resting controls and text') + ' centered within 1px');
+  };
+
   // ---- A. Every dock tab: geometry, controls, content clearance -------------------------
   const TABS = [
     ['notes', { input: 'Search notes', plus: 'Add note' }],
@@ -49,6 +68,9 @@ async function run(ctx) {
     await navigate(tab);
     await waitFor("document.querySelectorAll('.ms-dock').length === 1");
     await delay(250);
+    ok(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('#mobile-menu-btn .menu-stroke')"), tab + ' has avatar instead of hamburger');
+    const avatar = await rect('#mobile-menu-btn');
+    ok(avatar && avatar.l <= 44 && avatar.t <= 16 && avatar.w === 44 && avatar.h === 44, tab + ' avatar is top-left with a 44px target');
     const label = tab + ' dock';
     eq(await docks(), 1, label + ' mounts exactly once');
     ok(await js("document.querySelector('.ms-dock').parentElement === document.body"), label + ' lives outside the animating view');
@@ -300,6 +322,18 @@ async function run(ctx) {
     await delay(500);
   };
   await openForgeSession();
+  await checkAvatar('forgeShell');
+  await js("document.getElementById('mobile-menu-btn').click()"); await waitFor("document.querySelector('.ms-tab-sheet[open]')");
+  eq(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent)"), ['Kairos', 'Forge Preview'], 'Sheet offers both modes in Forge');
+  eq(await js("document.querySelectorAll('.ms-sheet-projects .ms-sheet-activity-main').length"), await js("document.querySelectorAll('.forge-project-row').length"), 'Sheet carries every Forge project');
+  await js("document.querySelector('.ms-sheet-projects > button').click()");
+  ok(await js("!document.querySelector('.ms-tab-sheet[open]') && ['Open folder', 'Clone repo', 'New repo'].every(text => [...document.querySelectorAll('button')].some(n => n.textContent === text && n.getClientRects().length))"), 'Add project delegates all existing actions outside the dismissed sheet');
+  await press('Escape');
+
+  await centeredComposer('.forge-transcript-composer');
+  await js("document.querySelector('.forge-transcript-composer textarea').focus()"); await delay(400);
+  await centeredComposer('.forge-transcript-composer', true);
+  await js("document.activeElement.blur()"); await delay(400);
   eq(await docks(), 0, 'A Forge session mounts no tab dock');
   const fc = await rect('.forge-transcript-composer'), fadd = await rect('.ms-forge-add');
   ok(fc && fc.b <= 844 && fc.h >= 50 && fc.t > 500, 'The session composer rests at the bottom: ' + JSON.stringify(fc));
@@ -407,11 +441,13 @@ async function run(ctx) {
   ok(home.fl >= home.pl - 1 && home.fr <= home.pr + 1 && home.fh <= 64, 'Forge Home composer sits inside its column as a pill: ' + JSON.stringify(home));
   ok(await js("[...document.querySelectorAll('.forge-composer .ms-embedded-model-trigger')].every(n => !n.getClientRects().length)"), 'The model chip stays out of the resting pill');
   await shot('forge-home-rest');
+  await centeredComposer('.forge-composer');
   await js("document.querySelector('.forge-composer textarea').focus()");
   await waitFor("!!document.querySelector('.forge-composer.ms-composer-expanded')");
   await delay(400);
   eq(await overflow(), [], 'Forge Home open composer does not overflow');
   ok(await js("(() => { const r = n => document.querySelector(n).getBoundingClientRect(); const a = r('.forge-composer .ms-forge-add'), m = r('.forge-composer .ms-embedded-model-trigger'); return a.right <= m.left + 1 && a.width >= 43.5 && m.height >= 43.5; })()"), 'Forge Home + and model chip sit side by side');
+  await centeredComposer('.forge-composer', true);
   await shot('forge-home-open');
   await js("document.querySelector('.forge-composer textarea').blur()");
 
@@ -504,9 +540,10 @@ async function run(ctx) {
   const backBtn = () => js("document.querySelector('.settings-mobile-back').click()");
   const visibleItems = () => js("[...document.querySelectorAll('.settings-nav-item')].filter(n => n.getClientRects().length).map(n => n.dataset.section)");
   await openSettings('notes');
+  await checkAvatar('settings');
   eq(await mview(), 'list', 'Settings opens on its list');
   const nav = await rect('#settings-nav');
-  ok(nav && nav.t < 100 && nav.h >= 844 - 100, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
+  ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
   eq(await js("document.getElementById('settings-content').getClientRects().length === 0 || document.getElementById('settings-content').getBoundingClientRect().height === 0"), true, 'No page content shares the screen with the list');
   const ids = await sectionIds();
   ok(ids.length >= 10, 'The list holds every section: ' + ids.length);

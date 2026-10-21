@@ -11,11 +11,12 @@ export function mountForgeRail(nav) {
     el('header', {}, [el('span', { text: 'Projects' }), add]), list,
   ]);
   nav.append(section);
-  add.onclick = () => {
-    const menu = openOptionMenu(add, ['Open folder', 'Clone repo', 'New repo'].map((text, i) => ({ text, value: ['existing', 'clone', 'new'][i] })), kind =>
-      openProjectForm(kind, { owner: section, opener: add, onSaved: () => document.dispatchEvent(new Event('kairos:forge-projects')) }));
+  add.forgeProjectActions = (anchor = add) => {
+    const menu = openOptionMenu(anchor, ['Open folder', 'Clone repo', 'New repo'].map((text, i) => ({ text, value: ['existing', 'clone', 'new'][i] })), kind =>
+      openProjectForm(kind, { owner: section, opener: anchor, onSaved: () => document.dispatchEvent(new Event('kairos:forge-projects')) }));
     menu.classList.add('forge-project-menu');
   };
+  add.onclick = () => add.forgeProjectActions();
   function draw() {
     if (disposed) return;
     list.replaceChildren(...groups.map(({ project, sessions }) => {
@@ -30,7 +31,7 @@ export function mountForgeRail(nav) {
         el('span', { class: 'forge-project-name', text: project.name }), diffCounts(totals),
         sessions.some(s => s._appRunning) && el('span', { class: 'status-dot ok forge-app-dot', 'aria-label': 'App running' }),
       ]);
-      const context = () => openOptionMenu(row, [
+      const context = (anchor = row) => openOptionMenu(anchor, [
         { value: 'home', text: 'Open on Home' }, { value: 'path', text: 'Copy path' }, { value: 'remove', text: 'Remove from list' },
       ], async action => {
         try {
@@ -43,6 +44,7 @@ export function mountForgeRail(nav) {
           }
         } catch (error) { toast(error.message, 'error'); }
       });
+      row.forgeProjectActions = context;
       row.oncontextmenu = event => { event.preventDefault(); context(); };
       row.onkeydown = event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); context(); } };
       return row;

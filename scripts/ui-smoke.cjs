@@ -497,7 +497,7 @@ app.whenReady().then(async () => {
       win.setContentSize(width, height); await delay(100);
       await navigate('home');
       if (label === 'mobile') await js("document.querySelector('#mobile-menu-btn').click()");
-      await js("document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
+      await js(label === 'mobile' ? "[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()" : "document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
       await waitFor("document.querySelectorAll('.forge-stats .forge-stat').length === 5 && document.querySelectorAll('.forge-widget-grid > section').length === 5");
       assert.deepEqual(await js("[...document.querySelectorAll('#nav [data-tab]')].map(n => n.dataset.tab)"), ['forgeHome'], label + ' Forge navigation');
       assert.deepEqual(await js("[...document.querySelectorAll('.forge-widget-grid > section > header h2')].map(n => n.textContent)"), ['Working now', 'Running services', 'Git activity', 'Recent projects', 'Repo lifespan']);
@@ -526,7 +526,7 @@ app.whenReady().then(async () => {
       await waitFor("document.querySelector('.forge-lifespan .forge-widget-body').textContent === 'Not a git repository'");
       await waitFor("document.querySelectorAll('#nav [data-forge-project]').length === 2");
       assert.ok(await js("!document.querySelector('[data-tab=forgeProjects], [data-tab=forgeSessions]')"), label + ' old views are absent');
-      if (width <= 768) await js("document.querySelector('#mobile-menu-btn').click()");
+      if (width <= 768) await js("document.querySelector('#mobile-menu-btn').click(); document.querySelector('.ms-tab-sheet').click()");
       await js("document.querySelector('[aria-label=\"Add project\"]').click()");
       assert.deepEqual(await js("[...document.querySelectorAll('.forge-project-menu button')].map(b => b.textContent)"), ['Open folder', 'Clone repo', 'New repo'], label + ' project menu');
       await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
@@ -831,13 +831,12 @@ app.whenReady().then(async () => {
         await js("document.querySelector('.forge-mode-rail').click()"); await waitFor("!!document.querySelector('.dashboard-hero')");
         await js("document.querySelector('#sidebar-toggle').click()"); await delay(350);
       } else {
-        // A phone retains the full switch even with the desktop rail preference.
+        // Saved desktop collapse does not affect phone mode controls.
         await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('#mobile-menu-btn').click()"); await delay(300);
-        assert.equal(await js("getComputedStyle(document.querySelector('#forge-mode-switch [data-mode=forge]')).display"), 'block');
-        assert.equal(await js("getComputedStyle(document.querySelector('.forge-mode-rail')).display"), 'none');
+        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview');
         await capture('mobile-forge-switch-collapsed');
-        await js("document.querySelector('#forge-mode-switch [data-mode=forge]').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('#sidebar').classList.contains('open')");
-        await js("document.querySelector('#mobile-menu-btn').click(); document.querySelector('#forge-mode-switch [data-mode=kairos]').click()");
+        await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('.ms-tab-sheet[open]')");
+        await js("document.querySelector('#mobile-menu-btn').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
         await waitFor("!!document.querySelector('.dashboard-hero')");
         await js("document.documentElement.classList.remove('sidebar-collapsed')");
       }
@@ -884,10 +883,10 @@ app.whenReady().then(async () => {
     await delay(100);
     await js("document.querySelector('#mobile-menu-btn').click()");
     await delay(300);
-    assert.ok(await railWidth() > 200, "Mobile retains full-width drawer despite desktop preference");
-    assert.equal(await js("getComputedStyle(document.querySelector('#nav .nav-item > span')).opacity"), "1");
+    assert.equal(await railWidth(), 0, "Phone keeps old sidebar hidden despite desktop preference");
+    assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=home]')"), "Workspace sheet replaces sidebar");
     await capture("mobile-sidebar");
-    await js("document.querySelector('[data-tab=home]').click()");
+    await js("document.querySelector('.ms-tab-tile[data-tab=home]').click()");
     win.setContentSize(1440, 900);
     await delay(100);
     await js("document.querySelector('#sidebar-toggle').focus()");
@@ -2299,8 +2298,8 @@ app.whenReady().then(async () => {
       assert.ok(await inDemo("!!d.querySelector('.demo-badge')"), label + " the demo says it is a demo");
       for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "agents", "cookbook", "school", "home"]) {
         await inDemo("d.querySelector('.nav-item[data-tab=" + tab + "]').click()");
-        // On a phone the Chat tab is the mobile launch page, which lives on Home.
-        const shown = label === "mobile" && tab === "chat" ? "home" : tab;
+        // On a phone the Chat tab is the mobile launch page, owned by Chats.
+        const shown = label === "mobile" && tab === "chat" ? "mobileLaunch" : tab;
         await waitDemo("d.getElementById('view-content')?.dataset.view === '" + shown + "' && !d.querySelector('#view-content .empty-state[role=status]')", tab + " opens in the demo");
         assert.ok(await inDemo("!d.getElementById('view-content').textContent.includes(\"couldn't load\")"), label + " demo " + tab + " renders");
       }

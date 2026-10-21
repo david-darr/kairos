@@ -25,7 +25,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   const small = () => js(`[...document.querySelectorAll('.ms-shell button, .ms-shell input, .ms-shell select, .ms-shell textarea, .ms-activity button, .ms-tab-sheet button')].filter(n => { const s = getComputedStyle(n); if (s.visibility === 'hidden' || n.closest('[hidden], [inert]')) return false; const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && (r.width < 43.5 || r.height < 43.5); }).map(n => (n.className || n.tagName) + ' ' + Math.round(n.getBoundingClientRect().width) + 'x' + Math.round(n.getBoundingClientRect().height))`);
   const live = id => js(`fetch('/api/chat/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: ${JSON.stringify(id)}, message: 'Check ' + ${JSON.stringify(id)} }) })`);
   const home = async (pageIndex = 0) => {
-    await navigate('home', { mobilePage: pageIndex });
+    await navigate('chat', { mobilePage: pageIndex });
     await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-shell').hidden");
     await delay(500);
   };
@@ -49,6 +49,16 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("document.querySelectorAll('.ms-header .ms-blur-top i').length"), 6, 'Edge blur is built from six layers');
   await capture('shell-new-idle');
 
+  assert.equal((await rect('.ms-global-frost')).y, 0, 'Frost starts at screen y=0');
+  assert.equal(await js("!!document.querySelector('.ms-your-day')"), false, 'No Your day button');
+  const centered = async () => assert.equal(await js(`(() => {
+    const bar = document.querySelector('.ms-composer'), input = bar.querySelector('textarea');
+    const r = n => n.getBoundingClientRect(), cy = n => { const b = r(n); return (b.top + b.bottom) / 2; };
+    const controls = ['#overflow-plus-btn', '#chat-mic'].map(s => bar.querySelector(s));
+    return controls.every(n => Math.abs(cy(n) - cy(input)) <= 1) && getComputedStyle(input).lineHeight === '24px';
+  })()`), true, 'Resting composer controls and text line are centered within 1px');
+  await centered();
+
   // ---- A1/A2: New / Chats pager
   assert.equal(await js("document.getElementById('ms-tab-0').getAttribute('aria-selected')"), 'true');
   await js("document.getElementById('ms-tab-1').click()"); await delay(450);
@@ -67,9 +77,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await page(), 0, 'A right swipe outside the drawer zone returns to New');
   await js("document.getElementById('ms-tab-1').click()"); await delay(450);
   await swipe('.ms-history-list', 40, 700, 140); await delay(500);
-  assert.equal(await page(), 1, 'A right swipe in the drawer zone does not move the pager');
-  assert.equal(await js("document.getElementById('sidebar').classList.contains('open')"), true, 'It opens the main drawer instead');
-  await js("document.getElementById('mobile-backdrop').click()"); await delay(300);
+  assert.equal(await page(), 0, 'A right swipe in the former drawer zone returns to New');
+  assert.equal(await js("document.getElementById('sidebar').classList.contains('open')"), false, 'No swipe opens the old sidebar');
+  await js("document.getElementById('ms-tab-1').click()"); await delay(300);
 
   // ---- A2: history
   const ids = await js("[...document.querySelectorAll('.ms-history-row')].map(n => n.dataset.sessionId)");
@@ -154,6 +164,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("document.querySelector('.chat-input-bar').classList.contains('ms-composer-expanded')"), true, 'Focus expands the composer');
   assert.ok((await rect('.chat-input-bar')).h > 110, 'The expanded card keeps room for the field, model and Send');
   assert.equal(await js("getComputedStyle(document.getElementById('chat-send')).display !== 'none' && document.getElementById('chat-send').getBoundingClientRect().height >= 44"), true, 'Send appears when drafting');
+  assert.equal(await js(`(() => { const controls = ['#overflow-plus-btn', '#chat-mic', '#chat-send'].map(s => document.querySelector(s)); const centers = controls.map(n => { const r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }); return Math.max(...centers) - Math.min(...centers) <= 1; })()`), true, 'Expanded chat bottom row centered within 1px');
   await capture('shell-conversation-drafting');
   await js("document.activeElement.blur()");
   // Back keeps the retained search
@@ -168,7 +179,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
 
   // ---- A3: tab sheet
   await js("document.getElementById('ms-tab-0').click()"); await delay(400);
-  await js("document.querySelector('.ms-avatar').focus(); document.querySelector('.ms-avatar').click()");
+  await js("document.querySelector('.ms-header .ms-avatar').focus(); document.querySelector('.ms-header .ms-avatar').click()");
   await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   await delay(400);
   const navTabs = await js("[...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab)");
@@ -191,32 +202,47 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Escape closes the sheet');
   assert.equal(await js("document.activeElement.classList.contains('ms-avatar')"), true, 'Focus returns to the avatar');
   // Backdrop and downward swipe
-  await js("document.querySelector('.ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Backdrop taps close the sheet');
-  await js("document.querySelector('.ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   await swipe('.ms-sheet-heading', 200, 300, 0, 110); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'A downward swipe closes the sheet');
+  await js("document.querySelector('.ms-header .ms-avatar').click()");
+  await waitFor("document.querySelector('.ms-tab-sheet[open]')");
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-group .ms-group-label')].map(n => n.textContent)"), ['Top', 'Workspace', 'Intelligence'], 'Sheet has the saved sidebar groups');
+  await js("document.querySelector('.ms-tab-tile[data-tab=home]').click()"); await delay(450);
+  assert.equal(await js("!!document.querySelector('.dashboard-hero') && !document.querySelector('.ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home tile opens dashboard and Customize');
+  await home();
   // Tiles navigate
-  await js("document.querySelector('.ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   await js("document.querySelector('.ms-tab-tile[data-tab=notes]').click()");
   await waitFor("document.documentElement.dataset.view === 'notes'");
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true);
-  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'visible', 'Other tabs keep the hamburger drawer');
+  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'visible', 'Other tabs show the workspace avatar');
   await home();
+
+  // A custom tab follows its saved group/order and hidden tabs stay out.
+  await js("import('/static/js/layout.js').then(m => { window.__phoneLayout = m.getLayout(); const next = m.getLayout(); for (const ids of Object.values(next.groups)) { const at = ids.indexOf('school'); if (at >= 0) ids.splice(at, 1); } next.groups.workspace.unshift('school'); next.hiddenTabs.push('cookbook'); m.saveLayout(next); })");
+  await waitFor("!!document.querySelector('#nav [data-tab=school]') && !document.querySelector('#nav [data-tab=cookbook]')");
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('.ms-tab-sheet[open]')");
+  assert.equal(await js("document.querySelector('.ms-tab-group[data-group=workspace] .ms-tab-tile').dataset.tab"), 'school', 'Custom tab is first in its saved group');
+  assert.equal(await js("!!document.querySelector('.ms-tab-sheet [data-tab=cookbook]')"), false, 'Hidden tabs stay out');
+  await js("document.querySelector('.ms-tab-sheet').click(); import('/static/js/layout.js').then(m => { m.saveLayout(window.__phoneLayout); delete window.__phoneLayout; })");
+  await waitFor("!!document.querySelector('#nav [data-tab=cookbook]')");
 
   // ---- Status never floats: badges on the entry controls and rows in the tab sheet
   demoState.liveHoldIds = ['s1'];
   await live('s1'); await delay(800);
   await navigate('notes'); await delay(600);
   assert.equal(await js("[...document.querySelectorAll('.ms-activity')].some(n => !n.hidden && n.getClientRects().length)"), false, 'No floating updates pill on other tabs');
-  assert.equal(await js("!!document.querySelector('#mobile-menu-btn > .ms-avatar-badge:not([hidden])')"), true, 'The hamburger carries the status badge');
+  assert.equal(await js("!!document.querySelector('#mobile-menu-btn > .ms-avatar-badge:not([hidden])')"), true, 'The workspace avatar carries the status badge');
   await navigate('chat', { mobileConversation: true, sessionId: 's2' });
   await waitFor("!!document.querySelector('.ms-conversation .ms-chat-back')"); await delay(500);
   assert.equal(await js("[...document.querySelectorAll('.ms-activity')].some(n => !n.hidden && n.getClientRects().length)"), false, 'No floating pill in a conversation');
   assert.equal(await js("!!document.querySelector('.ms-chat-back > .ms-avatar-badge:not([hidden])')"), true, 'Back carries the status badge');
   await js("document.querySelector('.ms-chat-back').click()"); await delay(600);
-  await js("document.querySelector('.ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   assert.ok(await js("document.querySelectorAll('.ms-sheet-activity-row').length >= 1"), 'The tab sheet lists working and waiting items');
   const icons = await js("Object.fromEntries([...document.querySelectorAll('.ms-tab-tile')].map(n => [n.dataset.tab || n.textContent.trim(), n.querySelector('svg')?.innerHTML]))");
   const vals = Object.values(icons);
@@ -295,7 +321,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await page(), 1, 'Reduced motion still switches pages');
   await swipe('.ms-history-list', 300, 700, 140); await delay(500);
   assert.equal(await page(), 0, 'A swipe switches without continuous dragging');
-  await js("document.querySelector('.ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
+  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-tab-sheet')).animationName"), 'none', 'The sheet appears without sliding');
   await press('Escape', 'Escape', 27); await delay(250);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
@@ -308,7 +334,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     assert.deepEqual(await small(), [], `${name} launch targets are 44px`);
     const bar = await rect('.ms-composer');
     assert.ok(bar.b <= h && bar.x >= 0 && bar.r <= w, `${name} composer stays on screen`);
-    assert.ok((await rect('.ms-avatar')).y >= 0 && (await rect('.ms-settings')).r <= w, `${name} header stays on screen`);
+    assert.ok((await rect('.ms-header .ms-avatar')).y >= 0 && (await rect('.ms-settings')).r <= w, `${name} header stays on screen`);
     await js("document.getElementById('ms-tab-1').click()"); await delay(400);
     assert.deepEqual(await overflow(), [], `${name} chats fit`);
     await capture(`shell-${name}-chats`);
@@ -320,8 +346,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   for (const [w, h, phone] of [[768, 1024, true], [769, 1024, false], [1440, 900, false]]) {
     await resize(w, h);
     await navigate('home'); await delay(500);
-    assert.equal(await js("(() => { const s = document.querySelector('.ms-shell'); return !!s && !s.hidden && s.getClientRects().length > 0; })()"), phone, `${w}px ${phone ? 'shows' : 'does not show'} the launch surface`);
-    assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0"), !phone, `${w}px ${phone ? 'hides' : 'shows'} the overview`);
+    assert.equal(await js("(() => { const s = document.querySelector('.ms-shell'); return !!s && !s.hidden && s.getClientRects().length > 0; })()"), false, `${w}px Home keeps the dashboard`);
+    assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0"), true, `${w}px shows the dashboard overview`);
     if (!phone) assert.equal(await js("[...document.querySelectorAll('.ms-activity, .ms-tab-sheet[open]')].every(n => n.hidden || !n.getClientRects().length)"), true, 'No phone chrome on desktop');
   }
   await resize(1440, 900);

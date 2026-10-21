@@ -14,17 +14,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     win.setContentSize(width, height);
     await js(`['top','bottom','left','right'].forEach((s,i)=>document.documentElement.style.setProperty('--native-safe-'+s, [${top},${bottom},${side},${side}][i]+'px'))`);
     await delay(350);
-    assert.equal(await js(`(() => {const s=getComputedStyle(document.documentElement,'::after');
-      return s.position==='fixed' && s.pointerEvents==='none' && parseFloat(s.height)===${top + 10}
-        && (s.backdropFilter || s.webkitBackdropFilter).includes('blur');})()`), true, name + ' status scrim covers the inset without blocking taps');
+    assert.equal(await js("document.querySelector('.ms-global-frost').getBoundingClientRect().top === 0 && getComputedStyle(document.querySelector('.ms-global-frost i')).backgroundColor === 'rgba(0, 0, 0, 0)'"), true, name + ' untinted frost begins at y=0');
     for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'agents']) {
       await navigate(tab); await delay(300);
-      // The launch surface has no hamburger: its avatar and Settings controls sit in the inset-aware header row.
-      if (tab === 'home') {
-        await visibleBelow('.ms-avatar', top + 5, 'Home avatar clears status area');
-        await visibleBelow('.ms-settings', top + 5, 'Home Settings clears status area');
-        await visibleBelow('.ms-switch', top + 5, 'Home New/Chats switch clears status area');
-      } else await visibleBelow('#mobile-menu-btn', top + 10, tab + ' menu clears status area');
+      await visibleBelow('#mobile-menu-btn', top + 5, tab + ' avatar clears status area');
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
@@ -33,7 +26,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await js("document.querySelector('.library-document-card').click()");
     await waitFor("!!document.querySelector('.library-editor')");
     await visibleBelow('.library-editor .view-header', top, name + ' document controls clear status area');
-    assert.equal(await js("document.querySelector('.library-editor .view-header > .card-row').getBoundingClientRect().left >= document.getElementById('mobile-menu-btn').getBoundingClientRect().right"), true, 'Document actions clear menu');
+    assert.equal(await js("document.querySelector('.library-editor .view-header > .card-row').getBoundingClientRect().top >= document.getElementById('mobile-menu-btn').getBoundingClientRect().bottom"), true, 'Document actions clear menu');
     await capture(name + '-document-safe-area');
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.getElementById('chat-messages')");
@@ -72,8 +65,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
   await js("['top','bottom','left','right'].forEach(s=>document.documentElement.style.removeProperty('--native-safe-'+s))");
   // Hiding the scrollbar must not disable scrolling or hold a page below the scrim.
   await navigate('home'); await delay(300);
-  // Your day is the scrolling overview beneath the launch surface.
-  await js("document.querySelector('.ms-your-day').click()"); await delay(300);
+  assert.equal(await js("!document.querySelector('.ms-your-day')"), true, 'Dashboard has no Your day toggle');
   assert.equal(await js(`(() => {const v=document.getElementById('view-content');
     const spacer=document.createElement('div');spacer.style.cssText='height:1600px;flex:none';v.append(spacer);
     v.scrollTop=0;const heading=v.querySelector('.dashboard-header'), before=heading.getBoundingClientRect().top;

@@ -8,50 +8,37 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     input.dispatchEvent(event); return event.defaultPrevented;
   })()`);
   const setDraft = (selector, text) => js(`(() => { const i = document.querySelector(${JSON.stringify(selector)}); i.focus(); i.value = ${JSON.stringify(text)}; i.setSelectionRange(i.value.length, i.value.length); i.dispatchEvent(new Event('input', {bubbles:true})); })()`);
-  // The phone shell hides the hamburger on the launch surface and inside a conversation (the avatar opens the tab sheet
-  // and the swipe drawer is a shortcut), so the hamburger's own focus contract is exercised on a tab that shows it.
-  await navigate('notes');
-  await resize(390, 844);
-  assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('sidebar').getAttribute('aria-hidden') === 'true'"), 'Closed phone menu is removed from focus and accessibility navigation');
+  await navigate('notes'); await resize(390, 844);
+  assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('sidebar').getAttribute('aria-hidden') === 'true'"), 'Old sidebar stays inaccessible on phone');
   await js("document.getElementById('mobile-menu-btn').click()");
-  assert.ok(await js("document.getElementById('sidebar').contains(document.activeElement)"), 'Menu takes focus');
-  assert.equal(await js("document.getElementById('mobile-menu-btn').getAttribute('aria-expanded')"), 'true');
-  assert.equal(await js("document.getElementById('mobile-menu-btn').getAttribute('aria-controls')"), 'sidebar');
+  assert.ok(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), 'Avatar focuses workspace sheet');
+  assert.equal(await js("document.getElementById('mobile-menu-btn').getAttribute('aria-controls')"), 'ms-workspace-sheet');
   assert.ok(await js(`(() => {
-    const controls = [...document.querySelectorAll('#sidebar button, #sidebar a[href], #sidebar [tabindex]')].filter(n => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
-    controls.at(-1).focus();
-    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', bubbles:true, cancelable:true}));
+    const sheet = document.querySelector('.ms-tab-sheet[open]');
+    const controls = [...sheet.querySelectorAll('button, a[href]')].filter(n => !n.disabled && n.getClientRects().length);
+    controls.at(-1).focus(); sheet.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', bubbles:true, cancelable:true}));
     const forward = document.activeElement === controls[0];
-    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', shiftKey:true, bubbles:true, cancelable:true}));
+    sheet.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', shiftKey:true, bubbles:true, cancelable:true}));
     return forward && document.activeElement === controls.at(-1);
-  })()`), 'Menu traps Tab in both directions');
-  await capture('mobile-menu-focus');
-  await js("(() => { const d=document.createElement('dialog'); d.id='mobile-modal-check'; d.innerHTML='<button>First</button><button>Last</button>'; document.body.append(d); d.showModal(); d.querySelector('button').focus(); })()");
-  assert.equal(await key('#mobile-modal-check button', { key: 'Tab' }), false, 'Drawer leaves a native modal in charge of focus');
-  await js("document.getElementById('mobile-modal-check').close(); document.getElementById('mobile-modal-check').remove()");
-  await key('#sidebar', { key: 'Escape' });
+  })()`), 'Sheet traps Tab in both directions');
+  await capture('mobile-workspace-focus');
+  await key('.ms-tab-sheet', { key: 'Escape' });
   assert.equal(await js('document.activeElement.id'), 'mobile-menu-btn');
-  await js("document.getElementById('mobile-menu-btn').click(); document.getElementById('mobile-backdrop').click()");
+  await js("document.getElementById('mobile-menu-btn').click(); document.querySelector('.ms-tab-sheet').click()");
   assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.id === 'mobile-menu-btn'"), 'Backdrop dismisses and returns focus');
-  // Drawer coordination, from a phone conversation (a plain phone navigate('chat') now lands on New/Chats).
-  await navigate('chat', { mobileConversation: true, sessionId: 's1' });
+  await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
-  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'hidden', 'A conversation replaces the hamburger with back and the tools capsule');
-  await js("document.querySelector('.chat-phone-tools > button').click()");
-  await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Conversations and projects')).click()");
-  assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('chat-sessions').contains(document.activeElement)"), 'The tools menu opens the history drawer with focus inside');
-  await js("document.getElementById('mobile-menu-btn').click()");
-  assert.ok(await js("document.getElementById('sidebar').classList.contains('open') && document.getElementById('chat-sessions').inert && !document.getElementById('chat-sessions').classList.contains('open')"), 'Menu replaces history');
-  await js("document.getElementById('chat-history-toggle').click()");
-  assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('chat-sessions').contains(document.activeElement)"), 'History replaces menu and takes focus');
+  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'hidden', 'Conversation has Back first');
+  await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent === 'Your workspace').click()");
+  assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open]')"), 'Conversation menu opens workspace');
+  await key('.ms-tab-sheet', { key: 'Escape' });
+  await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Conversations and projects')).click()");
+  assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('chat-sessions').contains(document.activeElement)"), 'History drawer keeps its focus behavior');
   await js("document.querySelector('.chat-history-close').click()");
-  assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Closing history returns focus to the tools capsule, not the hidden title button');
-  await js("document.getElementById('mobile-menu-btn').click()");
+  assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Closing history restores tools focus');
   await resize(1440, 900);
-  assert.ok(await js("!document.getElementById('sidebar').inert && !document.getElementById('sidebar').hasAttribute('aria-hidden') && !document.getElementById('sidebar').classList.contains('open') && document.getElementById('mobile-backdrop').classList.contains('hidden')"), 'Desktop restores accessible navigation and clears drawer overlay');
-  await js("document.querySelector('#nav .nav-item').focus()");
+  assert.ok(await js("!document.getElementById('sidebar').inert && !document.getElementById('sidebar').hasAttribute('aria-hidden')"), 'Desktop sidebar stays accessible');
   await resize(390, 844);
-  assert.ok(await js("document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Shrinking moves focus out of the closed menu to a visible control');
 
   const swipe = (selector, x, y, dx, dy = 0, cancel = false) => js(`(() => {
     document.activeElement?.blur(); window.getSelection()?.removeAllRanges();
@@ -63,21 +50,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     dispatch(${JSON.stringify(cancel ? 'touchcancel' : 'touchend')}, []);
     return prevented;
   })()`);
-  assert.equal(await swipe('#chat-messages', 40, 160, 120), true, 'Horizontal menu drag takes ownership');
-  assert.ok(await js("document.getElementById('sidebar').classList.contains('open') && document.getElementById('sidebar').contains(document.activeElement)"), 'Right swipe opens menu with focus');
-  await swipe('#sidebar .nav-item', 160, 110, -130);
-  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'Left swipe dismisses and restores focus to a visible control');
-  assert.equal(await swipe('#chat-messages', 40, 160, 15, 90), false, 'Vertical scroll stays native');
-  // The outermost 16px is reserved: it never opens the drawer. In a phone conversation it is the back gesture instead.
-  assert.equal(await swipe('#chat-messages', 10, 160, 120), true, 'System edge starts the back gesture');
-  assert.ok(await js("!document.getElementById('sidebar').classList.contains('open')"), 'System edge never opens the drawer');
-  await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-conversation .chat-mobile-header')");
-  await navigate('chat', { mobileConversation: true, sessionId: 's1' });
-  await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools') && !!document.querySelector('.msg')");
-  await swipe('#chat-messages', 40, 160, 20);
-  assert.ok(await js("!document.getElementById('sidebar').classList.contains('open')"), 'Short swipe snaps closed');
+  assert.equal(await swipe('#chat-messages', 40, 160, 120), false, 'Former sidebar swipe stays native');
+  assert.equal(await swipe('#chat-messages', 40, 160, 15, 90), false, 'Vertical scrolling stays native');
+  assert.equal(await swipe('#chat-messages', 10, 160, 120), false, 'System back edge stays free');
+  assert.ok(await js("!document.getElementById('sidebar').classList.contains('open') && !!document.querySelector('.ms-conversation')"), 'Swipes do not open sidebar or perform app Back');
   await swipe('#chat-messages', 40, 160, 120, 0, true);
-  assert.ok(await js("!document.querySelector('.drawer-dragging') && !document.getElementById('mobile-backdrop').style.display"), 'Cancelled gesture clears preview');
+  assert.ok(await js("!document.querySelector('.drawer-dragging') && !document.getElementById('mobile-backdrop').style.display"), 'Cancelled gesture leaves no preview');
   await swipe('.chat-title', 155, 35, 120);
   assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('sidebar').inert"), 'Header swipe opens history alone');
   await capture('mobile-swipe-history');

@@ -12,11 +12,12 @@ export function clearMobileDraft(text) { if (launchDraft === text) launchDraft =
 export const isPhoneShell = mobileOn;
 export function phoneRoute(tab, options) {
   if (!mobileOn() || tab !== 'chat' || options.mobileConversation || options.sessionId || options.projectId) return { tab, options };
-  return { tab: 'home', options: { ...options, mobilePage: options.mobileNew ? 0 : 1 } };
+  return { tab: 'mobileLaunch', options: { ...options, mobilePage: options.mobilePage ?? 0 } };
 }
 export function initMobileShell() { initTabSheet(); initActivity(); }
 
 export function mountMobileHome({ container, content, banner, options }) {
+  if (!options.mobileLaunchSurface) return { update() {}, dispose() {} };
   const shell = el('section', { class: 'ms-shell', 'aria-label': 'Launch workspace' });
   const avatar = button('', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
   const settings = button('', () => go('settings'), 'ms-settings ms-glass'); settings.innerHTML = ICONS.settings; settings.setAttribute('aria-label', 'Settings');
@@ -44,12 +45,7 @@ export function mountMobileHome({ container, content, banner, options }) {
   const more = button('+', () => start(false)); more.setAttribute('aria-label', 'Open full composer with attachments, model and voice');
   const send = button('Send', () => start(true));
   const composer = el('div', { class: 'ms-launch-composer ms-glass', 'data-mobile-hook': 'composer' }, [more, input, send]);
-  const day = button('Your day', () => {
-    const shown = !container.classList.contains('ms-show-day');
-    container.classList.toggle('ms-show-day', shown); day.setAttribute('aria-expanded', String(shown));
-    if (shown) content.querySelector('.dashboard-header')?.scrollIntoView({ block: 'start' });
-  }, 'ms-your-day'); day.setAttribute('aria-expanded', 'false');
-  const bottom = el('div', { class: 'ms-launch-bottom' }, [edgeBlur('bottom'), activitySlot, composer, day]);
+  const bottom = el('div', { class: 'ms-launch-bottom' }, [edgeBlur('bottom'), activitySlot, composer]);
   launch.append(intro, bottom);
   const track = el('div', { class: 'ms-page-track' }, [launch, history]);
   shell.append(header, el('div', { class: 'ms-page-window' }, [track])); content.prepend(shell);
@@ -140,10 +136,10 @@ export function mountMobileChat(container, actions) {
   const title = container.querySelector('.chat-title');
   const menu = container.querySelector('.chat-phone-tools .overflow-menu');
   if (!header || !menu || !title) return () => {};
-  const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('home', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to workspace');
+  const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to workspace');
   const heading = el('div', { class: 'ms-chat-heading' }, [el('strong', { text: title.textContent }), el('small', { text: 'All chats' })]);
   const blur = edgeBlur('top'); header.prepend(blur, back, heading); refreshActivity();
-  const extras = Object.entries(actions).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
+  const extras = Object.entries({ 'Your workspace': () => openTabSheet(container.querySelector('.chat-phone-tools > button')), ...actions }).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
   menu.append(...extras);
   let projects = [];
   const main = container.querySelector('#chat-main');
@@ -196,27 +192,11 @@ export function mountMobileChat(container, actions) {
   let syncFrame;
   const scheduleSync = () => { cancelAnimationFrame(syncFrame); syncFrame = requestAnimationFrame(sync); };
   phone.addEventListener('change', scheduleSync); document.addEventListener('kairos:appearance', scheduleSync);
-  let gesture;
-  const start = e => {
-    gesture = null;
-    if (!mobileOn() || e.touches.length !== 1 || e.target.closest('input, textarea, select, pre, canvas') || document.querySelector('dialog[open], [aria-modal="true"]') || !window.getSelection()?.isCollapsed) return;
-    const t = e.touches[0]; if (t.clientX < 16) gesture = { x: t.clientX, y: t.clientY };
-  };
-  const move = e => {
-    if (!gesture) return;
-    const dx = e.touches[0].clientX - gesture.x, dy = e.touches[0].clientY - gesture.y;
-    if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { gesture = null; return; }
-    if (dx > 10 && dx > Math.abs(dy) * 1.15 && e.cancelable) e.preventDefault();
-  };
-  const end = e => { if (gesture && e.changedTouches[0].clientX - gesture.x > 56 && Math.abs(e.changedTouches[0].clientY - gesture.y) < 40) { e.preventDefault(); back.click(); } gesture = null; };
-  const cancel = () => { gesture = null; };
-  container.addEventListener('touchstart', start, { passive: true }); container.addEventListener('touchmove', move, { passive: false }); container.addEventListener('touchend', end); container.addEventListener('touchcancel', cancel);
   return () => {
     observer.disconnect(); menuObserver.disconnect();
     restore();
     blur.remove(); back.remove(); heading.remove(); capsule.remove(); extras.forEach(n => n.remove());
     cancelAnimationFrame(syncFrame); header.removeEventListener('kairos:desktop-chat-layout', restore);
     phone.removeEventListener('change', scheduleSync); document.removeEventListener('kairos:appearance', scheduleSync);
-    container.removeEventListener('touchstart', start); container.removeEventListener('touchmove', move); container.removeEventListener('touchend', end); container.removeEventListener('touchcancel', cancel);
   };
 }

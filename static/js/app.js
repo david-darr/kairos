@@ -11,7 +11,8 @@ import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
-import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
+import { mountMobileChrome } from './mobileChrome.js';
+import { openTabSheet } from './mobileTabSheet.js';
 import { mountMobileDock } from './mobileDock.js';
 import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
@@ -173,7 +174,7 @@ async function performSwitch(tabId, options = {}) {
   const titlebarTab = document.getElementById("titlebar-tab");
   if (titlebarTab) titlebarTab.textContent = tabId === 'forgeShell' ? 'Forge' : NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
   document.querySelectorAll(".nav-item").forEach((item) => {
-    const selected = item.dataset.tab === tabId;
+    const selected = item.dataset.tab === (tabId === 'mobileLaunch' ? 'chat' : tabId);
     item.classList.toggle("active", selected);
     if (selected) item.setAttribute("aria-current", "page");
     else item.removeAttribute("aria-current");
@@ -215,102 +216,27 @@ async function performSwitch(tabId, options = {}) {
 }
 
 const mobileMenuMedia = matchMedia('(max-width: 768px)');
-let mobileMenuOpener = null;
-const drawerControls = sidebar => [...sidebar.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')]
-  .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length && !node.closest('[inert]'));
 function syncMobileMenu() {
   const sidebar = document.getElementById('sidebar');
-  const open = mobileMenuMedia.matches && sidebar.classList.contains('open');
+  const open = false;
   document.documentElement.classList.toggle('mobile-menu-open', open);
   sidebar.inert = mobileMenuMedia.matches && !open;
   if (mobileMenuMedia.matches) sidebar.setAttribute('aria-hidden', String(!open));
   else sidebar.removeAttribute('aria-hidden');
-  document.getElementById('mobile-menu-btn').setAttribute('aria-expanded', String(open));
-  document.getElementById('mobile-menu-btn').setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  document.getElementById('mobile-menu-btn').removeAttribute('aria-expanded');
+  document.getElementById('mobile-menu-btn').setAttribute('aria-label', 'Open workspace tabs');
 }
-const visiblePhoneAnchor = () => [...document.querySelectorAll('.ms-avatar, .chat-phone-tools > button')].find(n => n.getClientRects().length);
-function openMobileMenu(opener = document.getElementById('mobile-menu-btn')) {
-  if (!mobileMenuMedia.matches) return;
-  mobileMenuOpener = opener;
-  document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'sidebar' } }));
-  document.getElementById("sidebar").classList.add("open");
-  document.getElementById("mobile-backdrop").classList.remove("hidden");
+function closeMobileMenu() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('mobile-backdrop').classList.add('hidden');
   syncMobileMenu();
-  drawerControls(document.getElementById('sidebar'))[0]?.focus({ preventScroll: true });
-}
-function closeMobileMenu(restoreFocus = true) {
-  const wasOpen = document.getElementById('sidebar').classList.contains('open');
-  document.getElementById("sidebar").classList.remove("open");
-  document.getElementById("mobile-backdrop").classList.add("hidden");
-  syncMobileMenu();
-  if (wasOpen && restoreFocus && mobileMenuMedia.matches) {
-    let target = mobileMenuOpener?.isConnected && mobileMenuOpener.getClientRects().length ? mobileMenuOpener : document.getElementById('mobile-menu-btn');
-    // The phone shell hides the hamburger on the launch surface and in a conversation: focus a visible control there.
-    if (getComputedStyle(target).visibility === 'hidden') target = visiblePhoneAnchor() || target;
-    target.focus({ preventScroll: true });
-  }
 }
 function setupMobileMenu() {
-  const btn = document.getElementById("mobile-menu-btn");
-  const backdrop = document.getElementById("mobile-backdrop");
-  const sidebar = document.getElementById('sidebar');
-  btn.innerHTML = '<span class="menu-stroke"></span><span class="menu-stroke"></span><span class="menu-stroke"></span>';
-  btn.setAttribute('aria-controls', 'sidebar');
+  const btn = document.getElementById('mobile-menu-btn');
+  mountMobileChrome(btn);
+  btn.addEventListener('click', () => openTabSheet(btn));
+  mobileMenuMedia.addEventListener('change', () => closeMobileMenu(false));
   syncMobileMenu();
-  btn.addEventListener("click", () => {
-    document.getElementById("sidebar").classList.contains("open") ? closeMobileMenu() : openMobileMenu();
-  });
-  backdrop.addEventListener("click", () => closeMobileMenu());
-  registerMobileDrawer({ panel: sidebar, backdrop,
-    isOpen: () => sidebar.classList.contains('open'),
-    // Leave the outermost edge to Safari's system Back gesture.
-    canOpen: (target, touch) => isMainDrawerZone(touch) && !target.closest('.chat-mobile-header'),
-    open: openMobileMenu, close: () => closeMobileMenu(),
-    onDrag: (offset, width) => {
-      btn.classList.add('menu-dragging');
-      btn.style.setProperty('--menu-travel', `${Math.max(0, width + offset - 56 - parseFloat(getComputedStyle(btn).left))}px`);
-      btn.style.setProperty('--menu-progress', String(1 + offset / width));
-    },
-    onDragEnd: () => {
-      btn.classList.remove('menu-dragging');
-      btn.style.removeProperty('--menu-travel');
-      btn.style.removeProperty('--menu-progress');
-    },
-  });
-  // Close before navigation or an account/settings panel opens, so a panel
-  // outside the drawer can take focus without competing with its Tab trap.
-  sidebar.addEventListener('click', event => {
-    if (event.target.closest('.nav-item, .sidebar-settings-btn, .sidebar-user-card, .segmented-tab, .forge-mode-rail, .forge-project-row')) closeMobileMenu();
-  }, true);
-  document.addEventListener('kairos:mobile-drawer-opening', event => {
-    if (event.detail?.id !== 'sidebar') closeMobileMenu(false);
-  });
-  mobileMenuMedia.addEventListener('change', () => {
-    const hiddenFocus = mobileMenuMedia.matches && sidebar.contains(document.activeElement);
-    closeMobileMenu(false);
-    if (hiddenFocus) {
-      const refocus = () => (getComputedStyle(btn).visibility === 'hidden' ? visiblePhoneAnchor() || btn : btn).focus({ preventScroll: true });
-      refocus();
-      // The phone shell applies its header a frame after the breakpoint changes.
-      requestAnimationFrame(() => requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) refocus(); }));
-    }
-  });
-  document.addEventListener('keydown', event => {
-    if (!mobileMenuMedia.matches || !sidebar.classList.contains('open') || event.defaultPrevented) return;
-    if (document.activeElement?.closest('dialog[open], [aria-modal="true"]')) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeMobileMenu();
-    } else if (event.key === 'Tab') {
-      const controls = drawerControls(sidebar);
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && (document.activeElement === first || !sidebar.contains(document.activeElement))) {
-        event.preventDefault(); last?.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || !sidebar.contains(document.activeElement))) {
-        event.preventDefault(); first?.focus();
-      }
-    }
-  });
 }
 
 // How many agent inbox items and results wait on the person: a count on the
@@ -450,8 +376,8 @@ async function buildSidebar() {
   refreshAgentBadge();
 
   nav.querySelectorAll(".nav-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.tab === activeTab);
-    if (item.dataset.tab === activeTab) item.setAttribute("aria-current", "page");
+    item.classList.toggle("active", item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab));
+    if (item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab)) item.setAttribute("aria-current", "page");
   });
   buildSidebarFooter();
   return customTabs.filter((item) => !NAV.some((builtIn) => builtIn.id === item.id));
@@ -632,7 +558,7 @@ async function startApp() {
   document.addEventListener("jarvis:tabs-changed", async () => {
     for (const id of Object.keys(customViewUrls)) delete modules[id];
     const tabs = await buildSidebar();
-    if (activeTab && activeTab !== 'forgeShell' && ![...NAV, ...FORGE_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
+    if (activeTab && activeTab !== 'forgeShell' && activeTab !== 'mobileLaunch' && ![...NAV, ...FORGE_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
   });
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
@@ -671,7 +597,7 @@ async function startApp() {
   // before the Chat view is mounted — the pane lives in Chat's layout, so
   // this switches there first.
   window.jarvis?.browser?.onOpenRequest(async (url) => {
-    if (activeTab !== "chat") await switchTab("chat");
+    if (activeTab !== "chat") await switchTab("chat", { mobileConversation: true });
     openBrowser(url);
   });
   window.jarvis?.screenGrab?.onModelsRequest(async (requestId) => {
@@ -682,7 +608,7 @@ async function startApp() {
   });
   window.jarvis?.screenGrab?.onQuickDraft(async (draft) => {
     try {
-      await switchTab("chat");
+      await switchTab("chat", { mobileConversation: true });
       const chat = await loadModule("chat");
       await chat.acceptQuickEntryDraft(draft);
       window.jarvis.screenGrab.replyQuickDraft(draft.requestId, { ok: true });

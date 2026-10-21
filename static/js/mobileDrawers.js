@@ -31,6 +31,7 @@ function start(event) {
     if (node.scrollWidth > node.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(node).overflowX)) return;
   }
   const touch = event.touches[0];
+  if (touch.clientX < 16) return;
   const candidates = [...drawers].filter(d => d.panel.isConnected);
   const opened = candidates.find(d => d.isOpen());
   // Buttons and links keep ordinary taps. Only a committed horizontal drag

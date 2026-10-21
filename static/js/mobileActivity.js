@@ -57,16 +57,15 @@ function render() {
     .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i);
   const done = [...finished.values()].sort((a, b) => b.at - a.at);
   // Status outside the launch surface never floats over content: it shows as a badge on whichever entry control is
-  // on screen (avatar, hamburger or the conversation's back button) and as rows inside the tab sheet.
+  // on screen (avatar or the conversation's back button) and as rows inside the tab sheet.
   const count = attentionCount(), total = live.length;
   for (const anchor of document.querySelectorAll('.ms-avatar, #mobile-menu-btn, .ms-chat-back')) {
     let badge = anchor.querySelector(':scope > .ms-avatar-badge');
-    const shown = anchor.classList.contains('ms-avatar') ? count : total;
+    const shown = count || total;
     if (shown && !badge) { badge = document.createElement('span'); badge.className = 'ms-avatar-badge'; badge.setAttribute('aria-hidden', 'true'); anchor.append(badge); }
     if (badge) { badge.textContent = shown > 99 ? '99+' : String(shown); badge.hidden = shown === 0; }
   }
-  const avatar = document.querySelector('.ms-avatar');
-  if (avatar) avatar.setAttribute('aria-label', `Open workspace tabs${count ? `, ${count} need you` : ''}`);
+  for (const avatar of document.querySelectorAll('.ms-avatar')) avatar.setAttribute('aria-label', `Open workspace tabs${count ? `, ${count} need you` : ''}`);
   const atHome = !!homeSlot?.isConnected;
   host.hidden = !mobileOn() || !atHome || (!live.length && !done.length);
   if (!atHome) { signature = ''; return; }

@@ -31,13 +31,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         })()`), true, `${tab} title clears Menu`);
       }
       if (width <= 768 && tab === 'home') {
-        // The phone launch surface replaces the overview and the hamburger: the avatar opens the tab sheet and the
-        // original overview sits behind Your day.
-        assert.equal(await js("!!document.querySelector('.ms-avatar') && getComputedStyle(document.getElementById('mobile-menu-btn')).visibility === 'hidden'"), true, 'Home swaps the hamburger for the avatar');
-        assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length === 0"), true, 'The overview stays behind Your day');
-        await js("document.querySelector('.ms-your-day').click()"); await delay(300);
-        assert.equal(await js("(() => { const h=document.querySelector('.dashboard-header').getBoundingClientRect(); return h.width > 0 && h.left >= 0 && h.right <= innerWidth; })()"), true, 'Your day reveals the overview inside the viewport');
-        await js("document.querySelector('.ms-your-day').click()"); await delay(200);
+        assert.equal(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('.ms-shell')"), true, 'Home has the workspace avatar and dashboard');
+        assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0 && !document.querySelector('.ms-your-day')"), true, 'Dashboard is directly visible');
       }
       if (tab === 'calendar') {
         assert.equal(await js("document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar choices take no page space');
@@ -49,8 +44,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       }
       if (width <= 768 && tab === 'library') {
         await js("document.getElementById('mobile-menu-btn').click()");
-        assert.equal(await js("document.getElementById('sidebar').contains(document.activeElement) && document.getElementById('mobile-menu-btn').getAttribute('aria-expanded')==='true'"), true, 'Menu opens the shared drawer');
-        await js("document.getElementById('mobile-backdrop').click()");
+        assert.equal(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), true, 'Avatar opens workspace sheet');
+        await js("document.querySelector('.ms-tab-sheet').click()");
         assert.equal(await js("document.activeElement.id"), 'mobile-menu-btn', 'Menu button regains focus');
         await js('document.activeElement.blur()');
       }
@@ -70,11 +65,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
       const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
       assert.ok(bottomGap>=11.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
-      await js("document.getElementById('mobile-menu-btn').click()"); await delay(300);
-      assert.equal(await js("Math.abs(document.getElementById('sidebar').getBoundingClientRect().right-document.getElementById('mobile-menu-btn').getBoundingClientRect().right-12)<1"), true, 'Menu travels to drawer trailing edge');
-      assert.equal(await js("document.querySelector('#brand .brand-wordmark').getBoundingClientRect().left<=24"), true, 'Sidebar wordmark sits near the left edge');
-      await capture(`interface-${label}-animated-menu`);
-      await js("document.getElementById('mobile-menu-btn').click()"); await delay(300);
+      await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent === 'Your workspace').click()");
+      assert.equal(await js("!!document.querySelector('.ms-tab-sheet[open]') && !document.getElementById('sidebar').classList.contains('open')"), true, 'Conversation menu opens the sheet');
+      await capture(`interface-${label}-workspace`);
+      await js("document.querySelector('.ms-tab-sheet').click()");
+
     }
     await js("document.getElementById('chat-input').value='A draft that must survive opening menus'; document.getElementById('chat-input').dispatchEvent(new Event('input', {bubbles:true}))");
     if (width <= 768) {
