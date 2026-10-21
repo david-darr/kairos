@@ -46,7 +46,7 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
     win.setContentSize(width,height); await delay(250); await fits(); await capture(`agents-messenger-${name}`);
   }
   win.setContentSize(375,812); await delay(200);
-  assert.ok(await js("(()=>{const b=document.querySelector('.agents-chats-open'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()"),'Chats opener is reachable beside the app menu');
+  assert.ok(await js("(()=>{const b=document.querySelector('.agents-chats-open'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()"),'Chats opener is reachable beside the Chats and Ecosystem switch');
   await click('.agents-chats-open');
   assert.ok(await js("document.querySelector('.agents-chat-rail').getAttribute('aria-modal')==='true' && document.querySelector('.agents-messenger-stage').inert && document.querySelector('.agents-chat-rail').contains(document.activeElement)"),'Phone drawer opens with modal focus');
   await capture('agents-messenger-phone-drawer');

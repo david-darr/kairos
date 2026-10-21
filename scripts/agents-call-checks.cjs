@@ -66,6 +66,16 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await click('.agent-call-open'); await waitFor("document.querySelector('.agent-call').open");
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   assert.equal(await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value"),'small.en','Calls start with the Voice-line accuracy model');
+  // Dropdowns in the modal call dialog open above it, inside the viewport, and can be picked.
+  for (const label of ['Call mode','Conversation model connection','Speech recognition model','Call input mode','Speech acceleration']) {
+    const opened = await js(`(()=>{const s=document.querySelector('.agent-call [aria-label="${label}"]');s.scrollIntoView({block:'center'});s.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0}));const m=document.querySelector('.custom-select-menu');if(!m)return 'no menu';const r=m.getBoundingClientRect(),i=m.querySelector('.custom-select-item');if(!i)return 'no items';const q=i.getBoundingClientRect(),h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2);return [m.closest('dialog')===document.querySelector('.agent-call'),i.contains(h),r.top>=0&&r.left>=0&&r.bottom<=innerHeight&&r.right<=innerWidth].join()})()`);
+    assert.equal(opened,'true,true,true',`${label} menu opens above the call dialog, inside the viewport (${opened})`);
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    assert.ok(await js("!document.querySelector('.custom-select-menu') && document.querySelector('.agent-call').open"),`${label} menu closes on Escape and leaves the call dialog open`);
+  }
+  await js(`(()=>{const s=document.querySelector('.agent-call [aria-label="Call input mode"]');s.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0}));[...document.querySelectorAll('.custom-select-item')].find(b=>b.textContent.startsWith('Hold')).click()})()`);
+  assert.equal(await js("document.querySelector('.agent-call [aria-label=\"Call input mode\"]').value"),'hold','Picking from a call dropdown changes the select');
+  await js("(()=>{const s=document.querySelector('.agent-call [aria-label=\"Call input mode\"]');s.value='automatic';s.dispatchEvent(new Event('change'))})()");
   await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value='small.en';document.querySelector('[aria-label=\"Speech recognition model\"]').dispatchEvent(new Event('change'))");
   await capture('agents-call-setup');
   await js("document.querySelector('[aria-label=\"Call mode\"]').value='cloud';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");

@@ -35,6 +35,7 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
     closeDrawer(false);
     root.hidden = view !== 'chats'; root.inert = root.hidden;
     ecosystemHost.hidden = view !== 'ecosystem'; ecosystemHost.inert = ecosystemHost.hidden;
+    phoneOpen.hidden = view !== 'chats';
     views.forEach((button, index) => { const active = index === (view === 'chats' ? 0 : 1);
       button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
     if (view === 'ecosystem') ecosystem.reveal();
@@ -64,8 +65,8 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
     el('button', { type: 'button', class: 'btn', text: '+ Agent', title: 'New agent', 'aria-label': 'New agent', onclick: openCreateAgent }),
     el('button', { type: 'button', class: 'btn', text: '+ Team', title: 'New team', 'aria-label': 'New team', onclick: newTeam }),
   ]), lists, history, el('button', { type: 'button', class: 'btn quiet agents-rail-inbox', text: 'Inbox & approvals', title: 'Inbox and approvals', onclick: () => select('inbox', '') }));
-  root.append(rail, scrim, el('div', { class: 'agents-messenger-body' }, [el('div', { class: 'agents-messenger-mobilebar' }, [phoneOpen, el('span', { text: 'Agents' })]), stage]));
-  workspace.append(el('header', { class: 'agents-workspace-bar' }, [el('h2', { text: 'Agents' }), viewTabs]), root, ecosystemHost);
+  root.append(rail, scrim, el('div', { class: 'agents-messenger-body' }, [stage]));
+  workspace.append(el('header', { class: 'agents-workspace-bar' }, [el('h2', { text: 'Agents' }), el('div', { class: 'agents-workspace-controls' }, [phoneOpen, viewTabs])]), root, ecosystemHost);
   container.replaceChildren(workspace);
   let drawerOpener = null;
   function applyRail() {
