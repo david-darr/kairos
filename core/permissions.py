@@ -56,7 +56,7 @@ class Request:
         """What the surface shows. Text only - never markup, never executed."""
         return {"id": self.id, "tool": self.tool, "target": self.target,
                 "title": self.title, "description": self.description,
-                "arguments": _clip(self.arguments), "choices": self.choices,
+                "arguments": _clip(self.arguments, 100000 if self.tool == "creative_tools" else 4000), "choices": self.choices,
                 "expires_at": self.expires_at}
 
 
@@ -308,7 +308,8 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     # handoff on a surface nobody is watching now falls through to the deny
     # below, which is the honest answer: an agent should not hand work on
     # after reading a web page when there is nobody to ask.
-    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent"}
+    # 2026-10-16: local preview grants always belong to the person, including Auto.
+    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app", "creative_tools"}
     # Auto is an explicit, per-chat admin choice. It answers broker requests
     # for this chat only, including requests from a tainted turn; it does not
     # add a standing grant or change the policy for other chats/tasks.

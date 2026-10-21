@@ -132,6 +132,7 @@ const server = http.createServer(async (req, res) => {
       return json(id === 'openai' ? apiCatalog : catalog[models.find(m => m.id === id)?.kind] || []);
     }
     if (url.pathname === '/api/models') return json(models);
+    if (url.pathname.endsWith('/permission-mode')) return json({ mode: data.mode });
     if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, setup_required: false, username: 'Alex', is_admin: true });
     if (url.pathname === '/api/models/choices') return json(models.map(m => ({ ...m, supports_images: m.kind !== 'local' })));
     if (url.pathname === '/api/projects') return json([]);
@@ -267,6 +268,27 @@ app.whenReady().then(async () => {
     await win.loadURL(base); await mount();
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await js("import('/static/js/api.js').then(m => m.useAppMenusForSelects())");
+    // 2026-10-15: use real press/release events: a list covering Mode used
+    // to steal mouseup, target the click at BODY and dismiss both menus.
+    const click = async selector => {
+      const point = await js(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 });
+      }
+      await delay(200);
+    };
+    await delay(300);
+    await waitFor("document.querySelector('.chat-composer-dock').getAnimations().every(a => a.playState !== 'running')");
+    await click('#overflow-plus-btn');
+    await click('#chat-permission-mode');
+    assert.deepEqual(await js("[...document.querySelectorAll('.custom-select-menu .custom-select-item')].map(b => b.textContent)"), ['Base', 'Auto']);
+    assert.equal(await js("document.querySelector('#overflow-menu').classList.contains('hidden')"), false, 'Opening Mode keeps the + menu open');
+    await click('.custom-select-menu .custom-select-item:nth-child(2)');
+    await waitFor("document.querySelector('#chat-permission-mode').value==='auto' && !document.querySelector('#chat-permission-mode').disabled");
+    assert.equal(await js("document.querySelector('#chat-permission-mode').value"), 'auto');
+    assert.equal(requests.filter(r => r.path.endsWith('/permission-mode')).at(-1)?.data.mode, 'auto');
+    await click('#overflow-plus-btn');
     assert.equal(await js("document.querySelectorAll('.chat-prose h1').length"), 1);
     assert.equal(await js("document.querySelectorAll('.chat-prose table').length"), 1);
     assert.equal(await js("document.querySelectorAll('.chat-code-header button').length"), 1);
@@ -918,7 +940,7 @@ app.whenReady().then(async () => {
     pending.res.end('data: {"done":true}\n\n'); pending = null;
     await waitFor("document.querySelector('#chat-send').dataset.mode!=='stop'");
     assert.deepEqual(errors, []);
-    fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['centered landing and same-composer transition', 'first-message attachments and model-selection draft retention', 'reduced motion', 'rich Markdown and highlighting', 'model dispatch controls and reload persistence', 'artifact previews and Office fallback', 'isolated HTML and XSS filtering', 'session reattachment without duplicates', 'scroll position preservation', 'explicit stream completion', '320/390px mobile layouts'], requests, errors }, null, 2));
+    fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Mode dropdown opens and selects Auto with real mouse events', 'centered landing and same-composer transition', 'first-message attachments and model-selection draft retention', 'reduced motion', 'rich Markdown and highlighting', 'model dispatch controls and reload persistence', 'artifact previews and Office fallback', 'isolated HTML and XSS filtering', 'session reattachment without duplicates', 'scroll position preservation', 'explicit stream completion', '320/390px mobile layouts'], requests, errors }, null, 2));
     console.log('PASS ' + output);
   } catch (error) {
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: false, error: error.stack, errors }, null, 2));

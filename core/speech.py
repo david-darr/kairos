@@ -22,9 +22,9 @@ feature.
 
 Audio arrives as 16 kHz mono WAV
 --------------------------------
-The browser does the decoding and resampling (see static/js/voiceInput.js):
-MediaRecorder produces webm/opus, which WebAudio decodes and downsamples
-before upload. That keeps a media decoder out of the backend entirely - no
+Dictation uses browser decoding and resampling (static/js/voiceInput.js).
+Native calls capture 16 kHz PCM directly with an AudioWorklet and rolling
+pre-roll (static/js/callRecorder.js). Both keep a decoder out of the backend - no
 ffmpeg, no av - and works identically in the desktop shell and a phone
 browser, since Chromium already has the codecs.
 """
@@ -32,6 +32,7 @@ import asyncio
 import io
 import logging
 import os
+import re
 import wave
 
 import httpx
@@ -110,10 +111,13 @@ def engine_available() -> bool:
 
 
 def status() -> dict:
+    from core import speech_acceleration
     return {
         "engine_available": engine_available(),
         "active_model": installed_model(),
         "models": list_models(),
+        "call_model": "small.en",
+        "acceleration": speech_acceleration.status(),
     }
 
 
@@ -161,14 +165,68 @@ async def _run_download(name: str, url: str) -> None:
             pass
 
 
+def selected_model(name: str | None = None) -> str:
+    if name is None:
+        name = installed_model()
+    if name is None:
+        raise SpeechUnavailable("No speech model is downloaded yet. Add one in Settings.")
+    if name not in {entry['name'] for entry in CATALOG}:
+        raise SpeechUnavailable("Choose an offered speech model.")
+    if not os.path.isfile(model_path(name)):
+        raise SpeechUnavailable("Download the selected speech model before starting the call.")
+    return name
+
+
+def prepare(name: str | None = None) -> str:
+    if not engine_available():
+        raise SpeechUnavailable("Speech recognition is not available in this build.")
+    name = selected_model(name)
+    _load(name)
+    return name
+
+
+def prepare_call(name: str, backend: str = 'auto') -> dict:
+    from core import speech_acceleration
+    name = selected_model(name)
+    reason = None
+    if backend == 'auto' and speech_acceleration.status()['configured']:
+        try:
+            speech_acceleration.prepare(model_path(name))
+            return {'model': name, 'engine': 'cuda', 'fallback': None}
+        except ValueError as error:
+            reason = str(error)
+    prepare(name)
+    return {'model': name, 'engine': 'cpu', 'fallback': reason}
+
+
+def transcribe_call(audio: bytes, name: str, backend: str = 'auto') -> dict:
+    from core import speech_acceleration
+    if not audio or len(audio) > MAX_AUDIO_BYTES:
+        raise SpeechUnavailable('No audio was recorded.' if not audio else 'That recording is too large to transcribe.')
+    if len(_wav_to_float32(audio)) < 3200:
+        return {'text': '', **prepare_call(name, backend)}
+    info = prepare_call(name, backend)
+    if info['engine'] == 'cuda':
+        try:
+            text = speech_acceleration.transcribe(audio, model_path(name))
+        except ValueError as error:
+            info = {'model': name, 'engine': 'cpu', 'fallback': str(error)}
+            text = transcribe(audio, name)
+    else:
+        text = transcribe(audio, name)
+    # Match Voice-line's non-speech marker filtering on either engine.
+    return {'text': ' '.join(re.sub(r'\[[^\]]*\]', '', text).split()), **info}
+
+
 def _load(name: str):
     global _model, _model_name
     if _model is not None and _model_name == name:
         return _model
     from pywhispercpp.model import Model
-    # redirect_whispercpp_logs_to=False silences whisper.cpp's very chatty
+    # redirect_whispercpp_logs_to=None silences whisper.cpp's very chatty
     # init output, which otherwise floods the backend log on every load.
-    _model = Model(model_path(name), redirect_whispercpp_logs_to=False, print_progress=False)
+    _model = Model(model_path(name), redirect_whispercpp_logs_to=None, print_progress=False,
+                   language='en', no_context=True)
     _model_name = name
     return _model
 
@@ -216,7 +274,7 @@ def _wav_to_float32(audio: bytes):
     return samples
 
 
-def transcribe(audio: bytes) -> str:
+def transcribe(audio: bytes, model_name: str | None = None) -> str:
     """Transcribe 16 kHz mono WAV bytes. Raises SpeechUnavailable with a
     user-facing message when it cannot."""
     if not audio:
@@ -225,9 +283,7 @@ def transcribe(audio: bytes) -> str:
         raise SpeechUnavailable("That recording is too large to transcribe.")
     if not engine_available():
         raise SpeechUnavailable("Speech recognition is not available in this build.")
-    name = installed_model()
-    if name is None:
-        raise SpeechUnavailable("No speech model is downloaded yet. Add one in Settings.")
+    name = selected_model(model_name)
 
     samples = _wav_to_float32(audio)
     # Under ~0.2s is almost always a mis-click rather than speech, and

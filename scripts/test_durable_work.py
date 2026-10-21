@@ -180,6 +180,23 @@ class AtMostOnceTests(Base):
         self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
         self.assertEqual((Path(task_module.TASK_RUNS_FILE)).read_bytes(), before)
 
+    def test_history_from_before_run_ids_does_not_stop_startup(self):
+        # 2.1.0 crashed on start with KeyError: 'id' when a record written by
+        # a 1.x build sat in the history and a run had been cut off.
+        task = self.task("pre-2.0 history")
+        legacy = {"task_id": task["id"], "task_name": task["name"], "ran_at": time.time() - 3600,
+                  "output": "old result", "error": None, "delivered": None}
+        task_service.claim_occurrence(task["id"])  # the run starts, then Kairos closes
+        task_module.write_json_atomic(task_module.TASK_RUNS_FILE, [legacy, *task_service._runs])
+        restarted = task_module.TaskService()
+        lost = restarted.recover_interrupted_runs()
+        self.assertEqual([t["id"] for t in lost], [task["id"]])
+        history = restarted.list_runs(task["id"])
+        self.assertEqual([r["outcome"] for r in history], ["lost", "succeeded"])
+        self.assertTrue(all(r["id"] for r in history))
+        self.assertEqual(task_module.TaskService().list_runs(task["id"])[1]["id"], history[1]["id"],
+                         "the id given on load is kept, not reissued every start")
+
     def test_a_live_record_survives_the_history_cap_and_finishes_once(self):
         task = self.task("capped history", due_seconds_ago=None)
         task_service.mark_started(task["id"])

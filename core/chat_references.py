@@ -124,7 +124,7 @@ def _available_tools(session_id, is_admin, user) -> list[dict]:
             if name in disabled or (name == "Bash" and not is_admin) or (read_only and name not in {"Read", "Glob", "Grep", "WebFetch", "WebSearch"}):
                 continue
             tools.append({"id": "native:" + name, "name": name, "description": description})
-    # Codex currently exposes only Kairos registry tools, not connected MCPs.
+    # 2026-10-15: Codex discovers MCPs per turn; this picker lists its registry tools.
     if surface != tool_registry.CODEX and not read_only:
         tools.extend(tool for tool in integrations.reference_tools(session.get("enabled_integration_ids"), user, is_admin, surface)
                      if tool["name"] not in disabled)

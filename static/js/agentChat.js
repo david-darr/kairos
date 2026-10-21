@@ -8,6 +8,8 @@ import { api, el, toast, confirmDialog } from './api.js';
 import { mountSessionChat } from './sessionChat.js';
 
 const LAST_KEY = 'jarvis:agent-chat:';
+// In-memory drafts survive changing DMs without writing private text to disk.
+const drafts = new Map();
 
 function remembered(agentId) {
   try { return localStorage.getItem(LAST_KEY + agentId); } catch { return null; }
@@ -19,6 +21,14 @@ function remember(agentId, sessionId) {
 export async function mountAgentChat(host, agent, requestedSessionId = null, options = {}) {
   let sessionId = null;
   let closePane = () => {};
+  let disposed = false, paneVersion = 0;
+  const draftKey = () => `${agent.id}:${sessionId || 'new'}`;
+  const saveDraft = () => {
+    const input = main.querySelector('.side-chat-input');
+    if (!input) return;
+    if (input.value) drafts.set(draftKey(), input.value); else drafts.delete(draftKey());
+    if (drafts.size > 100) drafts.delete(drafts.keys().next().value);
+  };
   const media = matchMedia('(max-width: 768px)');
   const activityHome = options.activity?.parentNode;
   const placeActivity = () => {
@@ -32,7 +42,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
     scope.textContent = query ? 'Matching loaded titles only' : 'Search covers loaded conversation titles';
   };
   options.search?.addEventListener('input', filter);
-  const dispose = () => { closePane(); media.removeEventListener('change', placeActivity); options.search?.removeEventListener('input', filter); side.remove(); };
+  const dispose = () => { disposed = true; paneVersion++; saveDraft(); closePane(); media.removeEventListener('change', placeActivity); options.search?.removeEventListener('input', filter); side.remove(); };
 
   const list = el('div', { class: 'agent-chat-list', role: 'list', 'aria-label': `Chats with ${agent.name}` });
   const main = el('section', { class: 'agent-chat-main' });
@@ -55,10 +65,13 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
   if (!options.conversations) host.prepend(side);
 
   const pane = async (id) => {
+    if (disposed || !host.isConnected) return;
+    const version = ++paneVersion;
+    saveDraft();
     closePane();
     sessionId = id;
     remember(agent.id, id);
-    closePane = await mountSessionChat(main, {
+    const cleanup = await mountSessionChat(main, {
       sessionId: id,
       createSession: async () => {
         const created = await api(`/api/agents/${agent.id}/chat`, { method: 'POST' });
@@ -69,11 +82,16 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
       },
       title: `Chat with ${agent.name}`,
       agent,
+      modelPicker: true,
       placeholder: `Message ${agent.name}`,
       emptyTitle: `Talk with ${agent.name}`,
       emptyText: 'It knows its role, its notes and its tools. Anything it learns here it can keep in its memory.',
       onTurnEnd: () => refreshList(),
     });
+    if (disposed || version !== paneVersion || !host.isConnected) { cleanup(); return; }
+    closePane = cleanup;
+    const input = main.querySelector('.side-chat-input');
+    if (input && drafts.has(draftKey())) { input.value = drafts.get(draftKey()); input.dispatchEvent(new Event('input', { bubbles: true })); }
     placeActivity();
     markActive();
   };
@@ -123,6 +141,7 @@ export async function mountAgentChat(host, agent, requestedSessionId = null, opt
   });
 
   const chats = await refreshList();
+  if (!host.isConnected || disposed) return dispose;
   // 2026-10-14: sidebar threads address the same session, including a new
   // empty one, instead of falling back to this agent's remembered chat.
   if (requestedSessionId && chats.some(c => c.id === requestedSessionId)) { await open(requestedSessionId); return dispose; }

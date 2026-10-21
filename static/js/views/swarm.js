@@ -4,6 +4,7 @@ import { createBoard } from "../swarmBoard.js";
 import { createGraph } from "../swarmGraph.js";
 
 const drafts = new Map();
+const draftRecipients = new Map();
 const command = () => crypto.randomUUID();
 const label = (text, control) => el("label", { class: "swarm-field" }, [el("span", { text }), control]);
 const button = (text, onclick, attrs = {}) => el("button", { type: "button", class: "btn", text, onclick, "data-focus-key": text, ...attrs });
@@ -471,6 +472,11 @@ export function render(root, _tab, options = {}) {
   }
 
   function workspace() {
+    const info = button('Info', () => {
+      const open = root.classList.toggle('is-team-info-open');
+      info.setAttribute('aria-expanded', String(open));
+      if (!open) { workView = 'chat'; layout.dataset.mobilePanel = 'inbox'; applyWorkView(); }
+    }, { class: 'btn quiet swarm-info-toggle', 'aria-label': 'Team conversation info', 'aria-expanded': 'false' });
     const heading = el("h1");
     const state = el("span", { class: "swarm-state" });
     const notice = el("p", { class: "swarm-notice", role: "status" });
@@ -485,6 +491,7 @@ export function render(root, _tab, options = {}) {
     const form = el("form", { class: "swarm-composer" }, [composer, el("div", { class: "swarm-actions" }, [label("To", recipient), composeStatus, send])]);
     const companyId = selected;
     composer.addEventListener("input", () => drafts.set(companyId, composer.value));
+    recipient.addEventListener('change', () => draftRecipients.set(companyId, recipient.value));
     let retryId = null, retryText = null;
     form.addEventListener("submit", async event => {
       event.preventDefault(); if (send.disabled || ui.sending || !composer.value.trim()) return;
@@ -532,7 +539,7 @@ export function render(root, _tab, options = {}) {
     for (const [key, text] of [["chat", "Chat"], ["board", "Board"], ["map", "Map"]]) {
       views.append(button(text, () => { workView = key; applyWorkView(); }, { "data-view": key }));
     }
-    root.replaceChildren(el("header", { class: "swarm-header" }, [embedded ? button("← All agents", toAgents) : button("All systems", () => home()), heading, state, controls]), notice, views, mobile, layout,
+    root.replaceChildren(el("header", { class: "swarm-header" }, [embedded ? button("← All agents", toAgents) : button("All systems", () => home()), heading, state, controls, ...(options.messenger ? [info] : [])]), notice, views, mobile, layout,
       board.node, graph.node, el("footer", { class: "swarm-footer" }, [connection, button("Refresh", () => openSystem(selected))]));
     ui = { heading, state, controls, notice, team, messages, composer, recipient, send, tabs, detail, connection, applyWorkView, busy: false };
     applyWorkView();
@@ -645,10 +652,10 @@ export function render(root, _tab, options = {}) {
       queueMicrotask(() => ui?.controls.querySelector(`[data-focus-key="${CSS.escape(focusedControl)}"]`)?.focus());
     }
     const waiting = snapshot.conclusion?.reason === "needs_owner";
-    ui.composer.setAttribute("placeholder", waiting ? "Answer what the team asked for…" : "Give your lead an idea…");
-    ui.send.textContent = waiting ? "Answer and resume" : "Queue idea";
+    ui.composer.setAttribute("placeholder", waiting ? "Answer what the team asked for…" : options.messenger ? "Message the team…" : "Give your lead an idea…");
+    ui.send.textContent = waiting ? "Answer and resume" : options.messenger ? "Queue message" : "Queue idea";
     const enabled = agents.filter(a => a.enabled);
-    const chosen = ui.recipient.value;
+    const chosen = ui.recipient.options.length ? ui.recipient.value : (draftRecipients.get(selected) ?? (options.messenger ? 'all' : ''));
     ui.recipient.replaceChildren(el("option", { value: "", text: "The lead" }), el("option", { value: "all", text: "Everyone" }),
       ...enabled.filter(a => !a.is_lead).map(a => el("option", { value: a.id, text: a.name })));
     ui.recipient.value = [...ui.recipient.options].some(o => o.value === chosen) ? chosen : "";

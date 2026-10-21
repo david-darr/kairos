@@ -1,0 +1,12 @@
+{
+  "slug": "roblox",
+  "name": "Roblox",
+  "version": "1.0.0",
+  "description": "Build Roblox games with AI in the real Roblox Studio app.",
+  "api": 1,
+  "hooks": ["stop"],
+  "icon_svg": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"><path d=\"M6 2 22 6 18 22 2 18Z\"/><path d=\"m10 9 5 1-1 5-5-1Z\"/></svg>",
+  "blurb": "Turn an idea, model reference or UI mockup into a game you can follow in Roblox Studio.",
+  "detail": "Connect Roblox, browse accessible games, link local places or create experiments, and build with a persistent project chat. Includes a scoped Studio tool, reference attachments, script snapshots and playtest output. Roblox Studio runs on the Kairos host computer. Public account sign-in requires a configured Roblox OAuth app.",
+  "reads": "Reads your connected Roblox profile, accessible creations, chosen Studio place and attached references. AI edits require you to connect a Studio window and enable editing."
+}

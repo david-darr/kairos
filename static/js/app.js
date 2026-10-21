@@ -305,7 +305,11 @@ let agentBadgeTimer = null;
 // permission prompt appears, and a click brings the app window forward.
 const botInboxWatcher = watchBotInbox({
   names: async () => Object.fromEntries((await api('/api/agents').catch(() => [])).map(agent => [agent.id, agent.name])),
-  focusedAgentId: () => (document.hasFocus() ? activeAgentId : null),
+  focusedAgentId: () => {
+    if (!document.hasFocus()) return null;
+    const messenger = document.querySelector('.agents-messenger');
+    return messenger ? messenger.dataset.agentId || null : activeAgentId;
+  },
   show: ({ agentId, title, body }) => {
     if (!('Notification' in window) || Notification.permission === 'denied') return;
     const notify = () => {

@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/MSayib/roblox-dev-skill",
+  "commit": "4a35b01cb07eb237081bee705455e19db37342d8",
+  "license": "MIT",
+  "sha256": {
+    "LICENSE": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+    "references/agent-safety.md": "b7be6759fd8ca7b2e5d2b34157f1ea2ede5a84d74dc3c9af3f2ee457f3b7dbce",
+    "references/datastore-persistence.md": "14472ce3f192528d8d8aead760b8ee63cfa2d6c2b6558544d6c2940aa57b49aa",
+    "references/file-formats-and-assets.md": "b154fbc7bbd721947ba8744c0afade73cc4dd16c9eeb2111792f092d1a421048",
+    "references/legacy-migration.md": "36692538032e9cf1e28782d336ea598368db02268169430582b2338e255cc68a",
+    "references/luau-fundamentals.md": "37c4e032abccd9b7ab1995f715ba1961882c9bbf05c5442de9144930429129cb",
+    "references/mcp-integration.md": "c3948804b52f83ef2eaf4b9611484a833061b84635c49d00f7109fb23baf6bfe",
+    "references/monetization.md": "52aa9b36b37da41c385f48355183801079c24a82af2cc9d7c1467543e705fc8e",
+    "references/networking.md": "f2a43ebaab5aae9689bc199a18e40dbffb6895c05eb4cff365fce6dacc694227",
+    "references/performance-optimization.md": "90bbbca28efb3c48a015a37da5a06e86fa65744792eff8912a70becc4a5e9032",
+    "references/project-structure.md": "b7701f49bc4ba33fc54454b6e292bb362cf2326e404a884af10d993e2706b73b",
+    "references/security-hardening.md": "577e81eba5a895b0565051147880d97d8c811e222676b22658fc0cfd44686837",
+    "references/studio-plugins-and-limits.md": "3ac811b130f657bfc2e6337594d6201cb23ed2098a3858f5e371054ea6cad8cb",
+    "references/ui-systems.md": "31e6831d2bcbcb11c0ff91936fb7b8c99fb15cbc2b503297bcdeb1bf3379051a",
+    "references/worked-examples.md": "f1819581d303a96748aba3ff763f5a36ae98f871b881c98e752f7110683ce6c8"
+  }
+}

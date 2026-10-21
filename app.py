@@ -33,11 +33,13 @@ from routes import (
     model_routes,
     model_setup_routes,
     speech_routes,
+    call_routes,
     workspace_routes,
     forge_routes,
     system_routes,
     store_routes,
     integrations_routes,
+    creative_routes, addon_routes,
     google_routes,
     channels_routes,
     document_routes,
@@ -132,6 +134,10 @@ async def lifespan(_app: FastAPI):
     # skills folder on first run — data/ isn't packaged, so they can only
     # arrive from skill_templates/. Per-slug once-only; see the function.
     skills_service.seed_default_skills()
+    from core import addons
+    addons.migrate()
+    if addons.enabled('roblox'):
+        custom_tabs.mount_one(_app, 'roblox')
     # Moves already-enabled built-ins onto a wall-clock schedule when their
     # definition gained one (the Daily Brief, 2026-09-04). Without this, the
     # new 6am default would only ever apply to people who enable it AFTER
@@ -162,6 +168,8 @@ async def lifespan(_app: FastAPI):
         mobile_notifications.start()
         from services import bot_push
         bot_push.start()
+        from services import agent_calls
+        await agent_calls.recover()
         yield
     finally:
         from services.forge_apps import forge_apps
@@ -177,6 +185,7 @@ async def lifespan(_app: FastAPI):
             from core import computer
             await computer.manager.close_all()
             await remote_access.stop()
+            await agent_calls.shutdown()
             task_scheduler.stop()
             await discord_channel.stop()
             await connector_hub.stop_all()
@@ -187,6 +196,8 @@ async def lifespan(_app: FastAPI):
             await chat_service.shutdown()
             # Do not leave the built-in model process orphaned at shutdown.
             llamacpp_engine.stop()
+            from core import speech_acceleration
+            speech_acceleration.stop()
 
 
 app = FastAPI(title="Kairos", lifespan=lifespan)
@@ -205,11 +216,14 @@ app.include_router(settings_routes.router)
 app.include_router(model_routes.router)
 app.include_router(model_setup_routes.router)
 app.include_router(speech_routes.router)
+app.include_router(call_routes.router)
 app.include_router(workspace_routes.router)
 app.include_router(forge_routes.router)
 app.include_router(system_routes.router)
 app.include_router(store_routes.router)
 app.include_router(integrations_routes.router)
+app.include_router(creative_routes.router)
+app.include_router(addon_routes.router)
 app.include_router(google_routes.router)
 app.include_router(channels_routes.router)
 app.include_router(document_routes.router)

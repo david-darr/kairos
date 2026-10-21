@@ -74,6 +74,23 @@ def snapshot() -> dict:
     return {"type": "snapshot", "runs": {session_id: _visible(run) for session_id, run in _runs.items()}}
 
 
+def agent_activity(agent_id: str) -> dict | None:
+    """Bounded read-only activity for the admin agent summary, without transcripts."""
+    active = []
+    for session_id, run in list(_runs.items()):
+        if run.get("status") != "processing":
+            continue
+        session = chat_service.session_manager.get_session(session_id)
+        if session and session.get("agent_id") == agent_id:
+            active.append(run)
+    if not active:
+        return None
+    latest = max(active, key=lambda run: run.get("startedAt", 0))
+    return {"kind": "chat", "working": True, "waiting": any(bool(run.get("permission")) for run in active),
+            "name": str(latest.get("sessionTitle") or "Conversation")[:120],
+            "detail": str(latest.get("prompt") or "")[:240], "count": len(active)}
+
+
 def subscribe() -> tuple[asyncio.Queue, dict]:
     # Register before taking the snapshot. Any turn update that follows it is
     # queued for this viewer, so joining never leaves a gap between the two.

@@ -5,6 +5,10 @@ description: Build a Kairos tab or workflow as a self-contained user folder usin
 
 # Build a tab
 
+Before designing or changing its interface, read `ui-ux-pro-max` and use
+`ui_design` for relevant UX guidance. Follow the user's reference and the
+existing app theme and component conventions.
+
 A tab is one folder containing `tab.json` and `routes.py`, with optional
 `service.py`, `hooks.py`, `view.js`, `view.css`, and local helpers. Use this
 when someone asks for a new tab or workflow, such as a coursework tracker.

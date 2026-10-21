@@ -34,6 +34,8 @@ async def answer(request_id: str, body: Answer, user: str = Depends(require_user
     # A request id is server-made and lives only while something is waiting on
     # it, so a stale or invented id answers nothing.
     pending = permissions.pending_request(request_id)
+    if pending and pending.tool == "creative_tools" and pending.arguments.get("account_owner") != user:
+        raise HTTPException(403, "Only this creative account's owner can approve the request.")
     if pending and pending.surface.startswith("chat:"):
         from services.chat_live import require_session
         require_session(pending.surface.removeprefix("chat:"), user)

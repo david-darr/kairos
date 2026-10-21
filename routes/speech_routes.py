@@ -8,9 +8,14 @@ own chat is an ordinary per-session action, the same as sending a message.
 Downloading a model is admin-gated, because it writes several hundred
 megabytes into the shared data directory.
 """
+import asyncio
 import logging
+import threading
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel, Field
+from typing import Literal
 
 from core import speech
 from core.middleware import require_admin, require_user
@@ -18,6 +23,68 @@ from core.middleware import require_admin, require_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/speech", tags=["speech"])
+_transcription_lock = threading.Lock()
+
+
+def _local_transcription(data: bytes, model: str | None = None, timed: bool = False, backend: str | None = None):
+    # The cached whisper instance is shared. Serialize engine use on worker
+    # threads while leaving chat events, permission answers and Stop responsive.
+    requested = time.perf_counter()
+    with _transcription_lock:
+        started = time.perf_counter()
+        info = speech.transcribe_call(data, model, backend) if backend else None
+        text = info['text'] if info else speech.transcribe(data, model_name=model) if model else speech.transcribe(data)
+        timings = {'queue_ms': round((started-requested)*1000), 'recognition_ms': round((time.perf_counter()-started)*1000)}
+        if timed:
+            logger.info('speech timing model=%s bytes=%d queue_ms=%d recognition_ms=%d', model or 'default', len(data), timings['queue_ms'], timings['recognition_ms'])
+            return {**(info or {'text': text, 'model': model}), 'timings': timings}
+        return text
+
+
+class PrepareSpeech(BaseModel):
+    model: str
+    backend: Literal['auto', 'cpu'] | None = None
+
+
+class SpeechRuntime(BaseModel):
+    folder: str = Field(min_length=1, max_length=1000)
+
+
+@router.post('/runtime')
+async def register_runtime(body: SpeechRuntime, user: str = Depends(require_admin)) -> dict:
+    from core import speech_acceleration
+    def register():
+        with _transcription_lock:
+            return speech_acceleration.register(body.folder)
+    try:
+        return await asyncio.to_thread(register)
+    except (ValueError, OSError) as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.delete('/runtime')
+async def unregister_runtime(user: str = Depends(require_admin)) -> dict:
+    from core import speech_acceleration
+    def remove():
+        with _transcription_lock:
+            return speech_acceleration.unregister()
+    return await asyncio.to_thread(remove)
+
+
+@router.post('/prepare')
+async def prepare_speech(body: PrepareSpeech, user: str = Depends(require_user)) -> dict:
+    def load():
+        with _transcription_lock:
+            return speech.prepare_call(body.model, body.backend) if body.backend else speech.prepare(body.model)
+    try:
+        started = time.perf_counter()
+        model = await asyncio.to_thread(load)
+        return {**(model if isinstance(model, dict) else {'model': model}), 'prepare_ms': round((time.perf_counter()-started)*1000)}
+    except speech.SpeechUnavailable as error:
+        raise HTTPException(422, str(error)) from error
+    except Exception as error:
+        logger.exception('speech: model preparation failed')
+        raise HTTPException(422, 'Speech model could not load. Check its download and try again.') from error
 
 
 @router.get("/status")
@@ -47,7 +114,7 @@ async def download_progress(name: str, user: str = Depends(require_user)) -> dic
 
 
 @router.post("/transcribe")
-async def transcribe(audio: UploadFile = File(...), user: str = Depends(require_user)) -> dict:
+async def transcribe(audio: UploadFile = File(...), model: str | None = Form(default=None), backend: Literal['auto', 'cpu'] | None = Form(default=None), user: str = Depends(require_user)) -> dict:
     """16 kHz mono WAV in, text out.
 
     Read with an explicit ceiling rather than straight into memory: this
@@ -58,8 +125,13 @@ async def transcribe(audio: UploadFile = File(...), user: str = Depends(require_
     data = await audio.read(speech.MAX_AUDIO_BYTES + 1)
     if len(data) > speech.MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="That recording is too large to transcribe.")
+    if backend and not model:
+        raise HTTPException(422, 'Choose a speech model for calls.')
     try:
-        text = speech.transcribe(data)
+        result = await asyncio.to_thread(_local_transcription, data, model, bool(model), backend)
+        if model:
+            return result
+        text = result
     except speech.SpeechUnavailable as e:
         # 422 with the message as-is: every SpeechUnavailable is written to be
         # shown to the user, so wrapping it would lose the useful part.

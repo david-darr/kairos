@@ -1,0 +1,12 @@
+{
+  "id": "higgsfield",
+  "name": "Higgsfield",
+  "description": "Generate visual assets with your private Higgsfield connection across Kairos.",
+  "version": "1.0.0",
+  "skills": [
+    "higgsfield-creation"
+  ],
+  "files": {
+    "skills/higgsfield-creation/SKILL.md": "cccdd839024bbaf40ddc5ec138c95be9d29d8cfff34f912caa3f077d775680a0"
+  }
+}

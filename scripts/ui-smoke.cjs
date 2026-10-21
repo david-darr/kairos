@@ -313,6 +313,24 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("[...document.querySelectorAll('.dashboard-stat:not([data-stat=waiting]) .dashboard-stat-value')].filter(n => n.textContent !== '…').length === 4");
+    if (process.argv.includes('--agents-call-only')) {
+      await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
+      assert.deepEqual(errors, [], 'Agents call renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, errors }, null, 2));
+      console.log('Screenshots: ' + output); return;
+    }
+    if (process.argv.includes('--agents-ecosystem-only')) {
+      await require('./agents-ecosystem-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, agents: calendarFixtures.agentsFixture });
+      assert.deepEqual(errors, [], 'Agents ecosystem renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, errors }, null, 2));
+      console.log('Screenshots: ' + output); return;
+    }
+    if (process.argv.includes('--agents-messenger-only')) {
+      await require('./agents-messenger-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState });
+      assert.deepEqual(errors, [], 'Agents messenger renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, errors }, null, 2));
+      console.log('Screenshots: ' + output); return;
+    }
     if (layoutBefore || process.argv.includes('--agents-layout-only') || process.argv.includes('--agents-layout-captures')) {
       const result = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState,
         inbox: calendarFixtures.agentInbox, capturesOnly: layoutBefore || process.argv.includes('--agents-layout-captures'), stage: layoutBefore ? 'before' : 'after' });
@@ -430,6 +448,7 @@ app.whenReady().then(async () => {
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
     console.log('PASS: Home tab cards hidden by default, Layout show/reorder, reload/off/on persistence, native sections, endpoint failure and phone overflow.');
+    await require('./home-card-checks.cjs')({ js, win, waitFor, capture, navigate, demoState, delay });
     if (process.argv.includes('--home-tab-cards-only')) {
       assert.deepEqual(errors, [], 'No renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({passed:true, checks:['Home tab cards'], errors}, null, 2));
@@ -1919,13 +1938,13 @@ app.whenReady().then(async () => {
     // (quotaReadings.js), once per account, with signed-out and stale states.
     await navigate("home");
     await waitFor("document.querySelectorAll('.dashboard-quota').length === 2");
-    assert.ok(await js("(() => { const c = document.querySelector('.dashboard-quota[data-provider=claude]'); return c.querySelectorAll('.dashboard-quota-window').length === 2 && c.textContent.includes('5h · 34%') && c.textContent.includes('resets') && [...c.querySelectorAll('.dashboard-quota-head')].some(h => h.title.includes('34% Used · 66% left')) && !!c.querySelector('.tone-ample'); })()"), "Claude's limits show on Home (compact label, full reading on hover)");
+    assert.ok(await js("(() => { const c = document.querySelector('.dashboard-quota[data-provider=claude]'); return c.querySelectorAll('.dashboard-quota-window').length === 2 && c.querySelector('[role=meter]').getAttribute('aria-valuenow') === '34' && c.textContent.includes('resets') && [...c.querySelectorAll('.dashboard-quota-head')].some(h => h.title.includes('34% Used · 66% left')) && !!c.querySelector('.tone-ample'); })()"), "Claude's limits show on Home (ring, compact label, full reading on hover)");
     assert.ok(await js("!!document.querySelector('.dashboard-quota[data-provider=codex] .tone-crit')"), "A limit past 80% shows as critical");
     await capture("desktop-home-limits");
     // Compact Home (2026-10-09): Agents and Tool Store cards and the "waiting on
     // you" chip for admins, hidden for everyone else; the Store card never fetches.
     await waitFor("!document.querySelector('[data-home-section=agents]').hidden && document.querySelectorAll('[data-home-section=agents] .dashboard-agent-dot').length > 0");
-    assert.ok(await js("document.querySelector('[data-home-section=store]').textContent.includes('Installed') && !document.querySelector('.dashboard-stat[data-stat=waiting]').hidden"), "Admins see Agents, Tool Store and waiting on you");
+    assert.ok(await js("!!document.querySelector('[data-home-section=store] [aria-label=Installed]') && !document.querySelector('.dashboard-stat[data-stat=waiting]').hidden"), "Admins see Agents, Tool Store and waiting on you");
     const catalogReads = reads.filter(r => r.path === '/api/store/catalog');
     assert.ok(catalogReads.some(r => r.query.cache_only === 'true'), "Home reads the store catalog from cache only");
     await js("document.querySelector('.dashboard-stat[data-stat=waiting]').click()");

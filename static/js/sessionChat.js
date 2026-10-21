@@ -16,6 +16,9 @@ import { mountChatReferences, renderReferenceChips } from './chatReferences.js';
 import { renderAgentHandoff, watchAgentHandoffs } from './agentHandoff.js';
 import { agentAvatar } from './agentAvatar.js';
 import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported } from './voiceInput.js';
+import { creativeSelectionButton } from './creativeConnections.js';
+import { mountSessionAttachments, attachmentHistory } from './sessionAttachments.js';
+import { agentCall } from './agentCall.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli'];
 const queues = new Map();
@@ -27,6 +30,7 @@ const pausedQueues = new Set();
 //   title         the chat's name, used for the in-flight indicator
 //   placeholder, emptyTitle, emptyText
 //   modelPicker   show connection and model choices for this chat
+//   permissionPicker show Base/Auto permissions for an existing chat
 //   openInChats   show a button that opens the chat in Chats
 //   onTurnEnd     called once after each reply finishes
 //   initialMessage sends the first task after loading a new session
@@ -42,7 +46,9 @@ export async function mountSessionChat(host, options = {}) {
   let shownPermission = null;
   let disposed = false, submitting = false;
   let modelSaving = false, modelControls = [];
+  let permissionSaving = false, permissionControl = null;
   let workingTimer = null;
+  let call = null;
   const label = options.title || 'Chat';
   // Forge supplies document rendering/chrome; transport, queues and model
   // changes remain the same controller used by the embedded chats.
@@ -61,6 +67,7 @@ export async function mountSessionChat(host, options = {}) {
   const status = el('span', { class: 'meta session-chat-status', role: 'status' });
   const scrollHost = options.agent ? el('div', { class: 'agent-conversation-stream' }, [messages]) : messages;
   const composer = el('div', { class: 'side-chat-composer glass' }, [inputTop, queueButton, send]);
+  const attachments = options.attachments && !transcript ? mountSessionAttachments(host, composer, input) : null;
   let recorder = null;
   if (options.agent) {
     const add = el('button', { type: 'button', class: 'btn quiet agent-composer-add', text: '+', 'aria-label': 'Add a reference', onclick: () => references.openPicker() });
@@ -90,7 +97,8 @@ export async function mountSessionChat(host, options = {}) {
   else host.replaceChildren(el('div', { class: 'session-chat' }, [tools, scrollHost, queueList,
     ...(options.agent ? [el('div', { class: 'agent-composer-row' }, [el('div', { class: 'agent-composer-orb', 'aria-label': options.agent.name }, [agentAvatar(options.agent, 38)]), composer])] : [composer]),
   ]));
-  tools.hidden = !options.modelPicker && !options.openInChats;
+  tools.hidden = false;
+  tools.append(creativeSelectionButton(() => ({ sessionId }), host));
 
   const card = (role, text, message = null) => {
     if (transcript) return transcript.card(role, text, message);
@@ -98,7 +106,18 @@ export async function mountSessionChat(host, options = {}) {
     if (agent) return agent;
     const body = el('div', { class: 'msg-body' });
     renderMessageBody(body, text, sessionId, role === 'assistant');
-    return el('div', { class: `msg ${role}` }, [body, ...(role === 'user' && message?.references?.length ? [renderReferenceChips(message.references)] : [])]);
+    return el('div', { class: `msg ${role}`, ...(message?.call_summary_id ? {'data-call-summary':message.call_summary_id} : {}) }, [body,
+      ...(options.agent && role === 'assistant' ? [el('div', { class: 'agent-message-byline' }, [agentAvatar(options.agent, 24), el('span', { text: options.agent.name })])] : []),
+      ...(role === 'user' && message?.attachments?.length ? [attachmentHistory(message.attachments, sessionId)] : []),
+      ...(role === 'user' && message?.references?.length ? [renderReferenceChips(message.references)] : [])]);
+  };
+  let lastDay = '';
+  const dateMarker = (stamp = Date.now() / 1000) => {
+    if (!options.agent || transcript) return [];
+    const date = new Date(stamp * 1000), day = date.toDateString();
+    if (lastDay === day || !Number.isFinite(date.getTime())) return [];
+    lastDay = day;
+    return [el('div', { class: 'agent-message-date', text: day === new Date().toDateString() ? 'Today' : date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) })];
   };
   const busy = () => !!sessionId && chatStream.getInFlight(sessionId)?.status === 'processing';
   const syncSend = () => {
@@ -107,8 +126,10 @@ export async function mountSessionChat(host, options = {}) {
     send.dataset.mode = busy() ? 'stop' : 'send';
     queueButton.hidden = !options.queue || !busy() || options.readOnly;
     input.disabled = !!options.readOnly;
-    send.disabled = stopping || !!options.readOnly;
-    for (const control of modelControls) control.disabled = busy() || modelSaving || !!options.readOnly;
+    send.disabled = stopping || permissionSaving || !!options.readOnly;
+    attachments?.setDisabled(!!options.readOnly || submitting || busy());
+    for (const control of modelControls) control.disabled = busy() || modelSaving || permissionSaving || !!options.readOnly;
+    if (permissionControl) permissionControl.disabled = busy() || submitting || modelSaving || permissionSaving || !!options.readOnly;
     transcript?.setBusy(busy());
   };
   const drawQueue = () => {
@@ -123,10 +144,10 @@ export async function mountSessionChat(host, options = {}) {
     if (queued.length && pausedQueues.has(sessionId)) queueList.append(el('button', { class: 'btn quiet', text: 'Resume queue', disabled: busy() || !!options.readOnly, onclick: () => { pausedQueues.delete(sessionId); sendNext(); } }));
   };
   const sendNext = () => {
-    if (disposed || !host.isConnected || busy() || pausedQueues.has(sessionId) || options.readOnly) return;
+    if (disposed || !host.isConnected || busy() || permissionSaving || pausedQueues.has(sessionId) || options.readOnly) return;
     const queued = queues.get(sessionId) || [];
     const next = queued.shift(); drawQueue();
-    if (next) { if (next.text.trim()) runTurn(next.text.trim(), next.references); else sendNext(); }
+    if (next) { if (next.text.trim()) runTurn(next.text.trim(), next.references, next.attachments); else sendNext(); }
   };
   const handoffs = transcript ? { refresh() {}, dispose() {} } : watchAgentHandoffs(messages, () => sessionId);
 
@@ -222,6 +243,7 @@ export async function mountSessionChat(host, options = {}) {
         replyCard.append(el('div', { class: 'msg-interrupted', text: 'Stopped' }));
       }
       replyCard?.setAttribute('aria-busy', String(entry.status === 'processing'));
+      call?.update(entry);
       syncSend();
       if (transcript) transcript.follow(); else scrollHost.scrollTop = scrollHost.scrollHeight;
       if (entry.status !== 'processing' && !finished) {
@@ -254,7 +276,9 @@ export async function mountSessionChat(host, options = {}) {
     }
     if (!host.isConnected) return;
     const shown = session.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
-    messages.replaceChildren(...shown.map((m) => card(m.role, m.content, m)));
+    lastDay = '';
+    const historyCards = shown.map((m) => card(m.role, m.content, m));
+    messages.replaceChildren(...shown.flatMap((m, index) => [...dateMarker(m.ts), historyCards[index]]));
     if (transcript) await transcript.history(session);
     if (disposed) return;
     const current = chatStream.getInFlight(sessionId);
@@ -265,7 +289,7 @@ export async function mountSessionChat(host, options = {}) {
       const userIndex = shown.findLastIndex(m => m.role === 'user' && m.content === current.prompt && m.ts >= current.startedAt - 1);
       const savedIndex = shown.findIndex((m, index) => m.role === 'assistant' &&
         (current.runId ? m.run_id === current.runId : userIndex >= 0 && index === userIndex + 1));
-      if (savedIndex >= 0) attach(messages.children[savedIndex].querySelector('.msg-body, .forge-prose'));
+      if (savedIndex >= 0) attach(historyCards[savedIndex].querySelector('.msg-body, .forge-prose'));
       else {
         if (userIndex < 0 && current.prompt) messages.append(card('user', current.prompt));
         const reply = card('assistant', ''); messages.append(reply); attach(reply.querySelector('.msg-body, .forge-prose'));
@@ -309,7 +333,7 @@ export async function mountSessionChat(host, options = {}) {
     };
     const save = async (override) => {
       if (busy() || options.readOnly) { status.textContent = 'Wait for the current reply before changing the model.'; return; }
-      if (modelSaving) return;
+      if (modelSaving || permissionSaving) return;
       modelSaving = true; syncSend();
       try {
         await api(`/api/sessions/${sessionId}/model`, { method: 'POST',
@@ -326,6 +350,38 @@ export async function mountSessionChat(host, options = {}) {
     await loadVariants(current.model_override || null);
   };
 
+  const drawPermissionPicker = async () => {
+    if (!options.permissionPicker || !sessionId || !session) return;
+    let admin = false;
+    try { admin = !!(await api('/api/auth/status')).is_admin; } catch { /* Base remains available. */ }
+    if (disposed || !host.isConnected) return;
+    const description = 'Auto approves routine chat tool requests. Codex Auto also removes its workspace sandbox. Blender and Higgsfield requests still require approval.';
+    const picker = customSelect({}, [el('option', { value: 'base', text: 'Base' }),
+      el('option', { value: 'auto', text: 'Auto', disabled: !admin })]);
+    picker.querySelector('button').setAttribute('aria-label', 'Chat permission mode');
+    const notice = el('div', { class: 'chat-permission-notice', text: description, hidden: true });
+    const control = el('div', { class: 'session-chat-permissions', title: `${description} Auto is available only to admins.` }, [el('span', { class: 'meta', text: 'Mode' }), picker]);
+    const sync = () => {
+      picker.value = session.permission_mode === 'auto' ? 'auto' : 'base';
+      control.dataset.mode = picker.value;
+      notice.hidden = picker.value !== 'auto';
+    };
+    picker.addEventListener('change', async () => {
+      const requested = picker.value;
+      if (busy() || submitting || modelSaving || permissionSaving || options.readOnly || (requested === 'auto' && !admin)) { sync(); return; }
+      permissionSaving = true; syncSend();
+      try {
+        const result = await api(`/api/sessions/${sessionId}/permission-mode`, { method: 'POST', body: JSON.stringify({ mode: requested }) });
+        session.permission_mode = result.mode;
+      } catch (problem) { toast(problem.message, 'error'); }
+      finally { permissionSaving = false; if (!disposed) { sync(); syncSend(); } }
+    });
+    permissionControl = picker;
+    tools.insertBefore(control, status);
+    composer.append(notice);
+    sync(); syncSend();
+  };
+
   if (options.openInChats) {
     tools.append(el('button', { type: 'button', class: 'btn quiet', text: 'Open in Chats', onclick: async () => {
       if (!sessionId) return;
@@ -335,23 +391,58 @@ export async function mountSessionChat(host, options = {}) {
     } }));
   }
   tools.append(status);
+  if (options.agent && host.closest('.is-messages')) composer.append(tools);
 
-  const runTurn = (text, selected = []) => {
+  const runTurn = (text, selected = [], attached = []) => {
     messages.querySelector('.agent-chat-empty')?.remove();
-    messages.append(card('user', text, { references: selected }));
+    messages.append(...dateMarker());
+    messages.append(card('user', text, { references: selected, attachments: attached }));
     const reply = card('assistant', ''); messages.append(reply);
-    try { chatStream.startTurn(sessionId, session?.title || label, text, [], selected); }
+    let entry;
+    try { entry = chatStream.startTurn(sessionId, session?.title || label, text, attached.map(item => item.id), selected); }
     catch (error) { toast(error.message, 'error'); reply.remove(); pausedQueues.add(sessionId); return; }
     attach(reply.querySelector('.msg-body, .forge-prose')); syncSend(); scrollHost.scrollTop = scrollHost.scrollHeight;
+    return entry;
   };
+  if (options.agent && !options.readOnly) {
+    call = agentCall(options.agent, {
+      busy,
+      sessionId: () => sessionId,
+      async ensureSession() {
+        if (disposed || submitting || permissionSaving) throw new Error('Finish the current chat action first.');
+        if (!sessionId) {
+          submitting=true;syncSend();
+          try { sessionId = await options.createSession(); session = await api(`/api/sessions/${sessionId}`); }
+          finally { submitting=false;syncSend(); }
+        }
+        return sessionId;
+      },
+      async summarySaved(record) {
+        if (disposed || record.parent_id!==sessionId) return;
+        // Upsert only this call card so a concurrent typed reply and drafts
+        // retain their DOM, subscriptions and buffered rendering.
+        const saved = await api(`/api/sessions/${sessionId}`);
+        if (disposed) return;
+        const message = saved.messages.find(m => m.call_summary_id === record.id);
+        if (!message) return;
+        const existing = [...messages.querySelectorAll('[data-call-summary]')].find(n => n.dataset.callSummary === record.id);
+        const node = card('assistant', message.content, message); node.dataset.callSummary = record.id;
+        if (existing) existing.replaceWith(node); else { messages.querySelector('.agent-chat-empty')?.remove(); messages.append(node); }
+        options.onTurnEnd?.();
+      },
+    });
+    const callHost = host.closest('.agent-conversation-page')?.querySelector('.agent-topbar-tools') || tools;
+    callHost.prepend(call.button);
+  }
   const submit = async ({ fromKeyboard = false, enqueue = false } = {}) => {
-    if (options.readOnly || submitting || disposed) return;
+    if (options.readOnly || submitting || permissionSaving || disposed) return;
+    if (attachments?.busy()) { toast('Wait for the reference uploads to finish.', 'error'); return; }
     if (busy()) {
       if (options.queue && (fromKeyboard || enqueue)) {
         if (!input.value.trim()) return;
         const queued = queues.get(sessionId) || []; queues.set(sessionId, queued);
-        queued.push({ text: input.value.trim(), references: references.getSelected() });
-        input.value = ''; references.clear(); drawQueue();
+        queued.push({ text: input.value.trim(), references: references.getSelected(), attachments: attachments?.getSelected() || [] });
+        input.value = ''; references.clear(); attachments?.clear(); drawQueue();
       } else if (fromKeyboard) toast('A reply is still running. Wait for it, or press Stop.', 'error');
       else chatStream.stopTurn(sessionId);
       return;
@@ -366,9 +457,19 @@ export async function mountSessionChat(host, options = {}) {
       if (disposed) return;
     }
     const selected = references.getSelected();
+    const attached = attachments?.getSelected() || [];
+    if (attached.length) {
+      submitting = true; syncSend();
+      try { await api('/api/chat/validate-attachments', { method: 'POST',
+        toast: false, body: JSON.stringify({ session_id: sessionId, attachment_ids: attached.map(item => item.id) }) }); }
+      catch (problem) { toast(problem.message, 'error'); return; }
+      finally { submitting = false; syncSend(); }
+      if (disposed) return;
+    }
     references.clear();
+    attachments?.clear();
     input.value = ''; input.style.height = 'auto';
-    runTurn(text, selected);
+    runTurn(text, selected, attached);
   };
 
   send.addEventListener('click', () => submit());
@@ -389,10 +490,11 @@ export async function mountSessionChat(host, options = {}) {
     attach(reply.querySelector('.msg-body, .forge-prose'));
   });
   await drawModelPicker();
+  await drawPermissionPicker();
   syncSend();
   if (queues.get(sessionId)?.length && !busy()) pausedQueues.add(sessionId);
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposed = true; recorder?.cancel(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposed = true; call?.dispose(); recorder?.cancel(); attachments?.dispose(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }

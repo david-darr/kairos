@@ -28,7 +28,7 @@ import contextlib
 import logging
 from typing import AsyncIterator
 
-from core import attachments, integrations, mcp_client, mcp_oauth, permissions, projects, runs, system_prompt, tool_registry, tool_search
+from core import attachments, integrations, mcp_client, mcp_bridge, permissions, projects, runs, system_prompt, tool_registry, tool_search
 from core.providers import openai_compatible
 from core.session_manager import sent_text
 from core.turn_taint import TurnTaint
@@ -146,6 +146,7 @@ class ExternalBrain:
         (services/hook_service.py): a before-tool hook can block it. The
         tool search and describe steps are lookups, not tools, so they pass."""
         args = args if isinstance(args, dict) else {}
+        name = tool_search.LEGACY.get(name, name)
         if name in (tool_search.SEARCH, tool_search.DESCRIBE):
             return await self._run_tool(name, args)
         from services.hook_service import hook_service
@@ -164,14 +165,14 @@ class ExternalBrain:
         return await hook_service.around_tool(real, real_args, run, **self._context().hook_context())
 
     def _catalog(self) -> dict[str, dict]:
-        """What the bridge searches: JARVIS's deferred tools, then this
+        """What the bridge searches: Kairos's deferred tools, then this
         chat's MCP tools."""
         return {**self._deferred, **self._mcp_tools}
 
     async def _run_tool(self, name: str, args: dict) -> str:
         if name == tool_search.SEARCH:
             result = tool_search.search(self._catalog(), args.get("query", ""), args.get("limit", 5))
-            # Third-party descriptions are untrusted text; JARVIS's own are not.
+            # Third-party descriptions are untrusted text; Kairos's own are not.
             if result.startswith("[") and tool_search.search(self._mcp_tools, args.get("query", ""), 10).startswith("["):
                 self.turn_taint.mark("MCP tool catalog")
             return result
@@ -186,7 +187,7 @@ class ExternalBrain:
             if not isinstance(selected, str) or selected not in self._catalog():
                 return "Tool not available in this chat. Search again for an enabled tool."
             if not isinstance(args.get("arguments"), dict):
-                return "Tool arguments must be an object. Call jarvis_tool_describe to see its schema."
+                return f"Tool arguments must be an object. Call {tool_search.DESCRIBE} to see its schema."
             if selected in self._mcp_tools:
                 return await self._call_mcp(selected, args["arguments"])
             return await tool_registry.call(selected, args["arguments"], self._context(), tool_registry.OPENAI)
@@ -203,44 +204,10 @@ class ExternalBrain:
         through the chat's own permission prompt. With nobody to ask (no chat
         window open, a scheduled run) the broker refuses and says where to
         grant it."""
-        if self.read_only or tool_registry.session_read_only(self.session_id):
-            return 'Not run: Forge Plan mode is read-only.'
-        spec = self._mcp_tools[name]
-        current = integrations.list_mcp_servers_runtime(self.integration_ids).get(spec["server"])
-        if not self._same_mcp_endpoint(spec["config"], current):
-            return "Not run: this integration is no longer enabled for the chat."
-        decision = await permissions.decide(
-            surface=self._context().permission_surface,
-            tool=name, arguments=args if isinstance(args, dict) else {},
-            title=f"{spec['server']}: {spec['name']}", description=spec["description"][:300],
-            is_admin=self.is_admin,
-        )
-        if decision.behavior != "allow":
-            return f"Not run: {decision.reason}"
-        # A signed-in server's token can expire during a long chat; the
-        # config is re-read so each call carries the current one.
-        await mcp_oauth.refresh_due(self.integration_ids)
-        config = integrations.list_mcp_servers_runtime(self.integration_ids).get(spec["server"])
-        if not self._same_mcp_endpoint(spec["config"], config):
-            return "Not run: this integration is no longer enabled for the chat."
-        try:
-            if spec["server"] == "REA":
-                if self._rea_client is None:
-                    return "Tool error: REA's investigation session has closed. Reconnect this chat."
-                result = await self._rea_client.call_tool(spec["name"], args)
-            else:
-                result = await mcp_client.call_tool(config, spec["name"], args)
-            self.turn_taint.mark(f"MCP result: {name}")
-            return result
-        except Exception as e:
-            return f"Tool error: {e}"
+        return await mcp_bridge.call_tool(name, args, self._mcp_tools[name], self.integration_ids,
+                                          self._context(), rea_client=self._rea_client, allow_rea=True)
 
-    @staticmethod
-    def _same_mcp_endpoint(discovered: dict, current: dict | None) -> bool:
-        """Token refresh is fine; a replaced server with the same name is not."""
-        return current is not None and all(
-            discovered.get(key) == current.get(key) for key in ("type", "url", "command", "args")
-        )
+    _same_mcp_endpoint = staticmethod(mcp_bridge.same_endpoint)
 
     async def connect(self) -> None:
         """Find the tools of the MCP servers this chat may use. Only for a
@@ -248,12 +215,7 @@ class ExternalBrain:
         connection, so the tool list - part of the cached prompt - is stable."""
         if self.read_only or (not self.session_id and not self.agent_id):
             return
-        await mcp_oauth.refresh_due(self.integration_ids)
-        servers = integrations.list_mcp_servers_runtime(self.integration_ids)
-        if not servers:
-            return
-        rea_config = servers.pop("REA", None)
-        self._mcp_tools = await mcp_client.discover(servers)
+        self._mcp_tools, rea_config = await mcp_bridge.discover(self.integration_ids)
         if rea_config:
             self._rea_client = mcp_client.PersistentClient(rea_config)
             try:

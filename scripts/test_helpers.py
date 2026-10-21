@@ -339,7 +339,7 @@ class ScopeTests(unittest.TestCase):
         self.assertIn("browse", names)
         self.assertIn("search_sessions", names, "nothing is hidden behind the bridge, even on a small window")
         for forbidden in ("delegate", "helper_results", "create_note", "update_task", "run_code", "run_shell",
-                          "google_drive", "agent_ask", "jarvis_tool_call"):
+                          "google_drive", "agent_ask", "kairos_tool_call"):
             self.assertNotIn(forbidden, names)
         self.assertEqual(brain._messages[0]["content"], system_prompt.HELPER_PROMPT)
         self.assertTrue(brain._context().helper)

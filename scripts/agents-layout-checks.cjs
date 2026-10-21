@@ -67,7 +67,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
     // 2026-10-15 (David): Conversations left the chat column for the left
     // panels, with its search beside the list it filters.
-    ok(await js("!!document.querySelector('.agent-live-panels > .agent-conversations-home > .agent-chat-side .agent-thread-search') && !document.querySelector('.agent-chat .agent-chat-side') && !document.querySelector('.agent-chat-side summary')"), 'desktop conversations sit in the left column with their search');
+    ok(await js("!!document.querySelector('.agents-rail-history > .agent-conversations-home > .agent-chat-side .agent-thread-search') && !document.querySelector('.agent-chat .agent-chat-side') && !document.querySelector('.agent-chat-side summary')"), 'desktop conversations sit in the chat rail with their search');
     // The profile sheet once began under the desktop title bar, hiding the
     // face; in a short window its tabs were squeezed to a sliver.
     win.setContentSize(1280, 600);
@@ -102,13 +102,13 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     ok(await js("document.querySelector('.agent-conversation-page').dataset.agentTab === 'routines' && !document.querySelector('.agent-routines-host').hidden"), 'More opens Routines');
     await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
     await delay(320); // the sheet rises over 240ms; measure it settled
-    ok(await js("(() => { const n=document.querySelector('.agent-conversations-home.is-open'); if (!n) return false; const r=n.getBoundingClientRect(); return document.querySelector('.agent-conversation-page').dataset.agentTab === 'chat' && r.top <= 0 && r.height >= innerHeight - 1 && n.contains(document.activeElement) && n.getAttribute('aria-modal') === 'true'; })()"), 'Chat and conversations opens the conversation sheet');
+    ok(await js("(() => { const n=document.querySelector('.is-rail-open .agents-chat-rail'); if (!n) return false; const r=n.getBoundingClientRect(); return document.querySelector('.agent-conversation-page').dataset.agentTab === 'chat' && r.top >= 0 && r.bottom <= innerHeight && n.contains(document.activeElement) && n.getAttribute('aria-modal') === 'true'; })()"), 'Chat and conversations opens the chat rail drawer');
     await capture('agents-phone-conversations');
     await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
-    ok(await js("!document.querySelector('.agent-conversations-home.is-open') && document.activeElement === document.querySelector('.agent-more')"), 'Escape closes the conversation sheet');
+    ok(await js("!document.querySelector('.is-rail-open') && document.activeElement === document.querySelector('.agents-chats-open')"), 'Escape closes the rail drawer and restores visible focus');
     await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
     await js("document.querySelector('.agent-conversations-home .agent-chat-open').click()");
-    await waitFor("!document.querySelector('.agent-conversations-home.is-open')");
+    await waitFor("!document.querySelector('.is-rail-open')");
     ok(await js("[...document.querySelectorAll('.agent-chat-main .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)')].every(b => { const r=b.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }) && document.querySelector('.agent-chat-main .side-chat-send').textContent === 'Send'"), 'picking a conversation returns to the thread; composer targets stay 44px');
     ok(await js("(() => { const u=getComputedStyle(document.querySelector('.msg.user .msg-body')), a=getComputedStyle(document.querySelector('.msg.assistant .msg-body')); return u.backgroundColor !== a.backgroundColor && document.querySelector('.msg.user .msg-body').getBoundingClientRect().right > document.querySelector('.agent-conversation-stream').getBoundingClientRect().right - 12; })()"), 'phone bubbles: the person on the right, a distinct fill');
     // 2026-10-15 (David): the gear opens the bot's full settings; the face

@@ -56,7 +56,7 @@ INBOX_KINDS = ("report", "question")
 COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
 # 2026-10-14: the renderer and API share a closed vocabulary; custom colors
 # are hex only, so a saved spec can never inject markup into the SVG.
-AVATAR_FORMS = ("round", "pill", "triangle", "ears", "cloud", "heart", "sprout", "scallop", "hexagon", "diamond", "robot")
+AVATAR_FORMS = ("round", "pill", "triangle", "ears", "cloud", "heart", "sprout", "scallop", "hexagon", "diamond", "robot", "shield", "star", "bean", "squircle")
 AVATAR_COLORS = ("#FA70AB", "#DD6ADC", "#A25BFF", "#4778FF", "#00B1FF", "#04BB9F", "#B6D80B", "#FFCC38", "#FF8066")
 AVATAR_FINISHES = ("matte", "plush", "glossy", "ceramic")
 AVATAR_FACES = ("smile", "content", "curious", "sleepy", "wink")
@@ -66,15 +66,30 @@ AVATAR_CATALOGUE = {"form": AVATAR_FORMS, "finish": AVATAR_FINISHES,
 
 
 def validate_avatar(value: dict) -> dict:
-    if not isinstance(value, dict) or set(value) != {"form", "color", "finish", "face", "accessory"}:
-        raise ValueError("avatar needs exactly form, color, finish, face and accessory")
+    required = {"form", "color", "finish", "face", "accessory"}
+    extra = {"version", "eyes", "mouth", "accent", "accessories", "style"}
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - extra:
+        raise ValueError("avatar needs form, color, finish, face and accessory, with supported customization fields only")
     for key, choices in AVATAR_CATALOGUE.items():
         if value[key] not in choices:
             raise ValueError(f"unknown avatar {key}")
     color = value["color"]
     if not isinstance(color, str) or (color.upper() not in AVATAR_COLORS and not re.fullmatch(r"#[0-9A-Fa-f]{6}", color)):
         raise ValueError("avatar color must be an offered or custom hex color")
-    return {**value, "color": color.upper()}
+    choices = {"eyes": ("auto", "dots", "oval", "wide", "happy", "sleepy", "wink"),
+               "mouth": ("auto", "smile", "grin", "small", "curious", "none"), "style": ("rounded", "folded")}
+    for key, offered in choices.items():
+        if key in value and value[key] not in offered:
+            raise ValueError(f"unknown avatar {key}")
+    if "version" in value and (type(value["version"]) is not int or value["version"] != 2):
+        raise ValueError("unsupported avatar version")
+    if "accent" in value and (not isinstance(value["accent"], str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", value["accent"])):
+        raise ValueError("avatar accent must be a hex color")
+    if "accessories" in value and (not isinstance(value["accessories"], list) or len(value["accessories"]) > 5 or
+            any(not isinstance(item, str) or item not in AVATAR_ACCESSORIES[1:] for item in value["accessories"]) or
+            len(set(value["accessories"])) != len(value["accessories"])):
+        raise ValueError("choose up to five distinct avatar accessories")
+    return {**value, "color": color.upper(), **({"accent": value["accent"].upper()} if "accent" in value else {})}
 # The palette before the Kairos rebrand (2026-10-06); an agent saved with one
 # of these gets the color in the same position.
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))

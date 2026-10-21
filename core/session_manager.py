@@ -236,6 +236,20 @@ class SessionManager:
         store.append_message(session_id, count, message, session)
         return count
 
+    def upsert_call_summary(self, session_id: str, call_id: str, content: str) -> None:
+        """One call note, updated in place when its delegated work finishes."""
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        for index, message in enumerate(session['messages']):
+            if message.get('call_summary_id') == call_id:
+                message['content'] = content
+                _clear_claude_session(session)
+                session['updated_at'] = time.time()
+                store.save_session(session, rebuild_messages_from=index)
+                return
+        self.append_message(session_id, 'assistant', content, extra={'call_summary_id': call_id})
+
     def record_sent_text(self, session_id: str, index: int, typed: str, sent: str) -> None:
         """Keep the exact text a user message went out as, when it differs
         from what was typed (an attachment note, the Open Mic instruction).

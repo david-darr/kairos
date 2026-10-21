@@ -127,6 +127,18 @@ async def takeover(owner: str, user: str = Depends(require_user)) -> dict:
     return {"ok": True}
 
 
+# 2026-10-16: the same owner checks as stop; no route can create a grant.
+@router.post("/{owner}/local-apps/revoke")
+async def revoke_local_apps(owner: str, user: str = Depends(require_user)) -> dict:
+    _access(owner, user)
+    _running(owner)
+    try:
+        await computer.manager.revoke_local_apps(owner)
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from None
+    return {"ok": True}
+
+
 @router.post("/{owner}/handback")
 async def handback(owner: str, user: str = Depends(require_user)) -> dict:
     _access(owner, user)

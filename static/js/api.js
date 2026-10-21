@@ -281,7 +281,9 @@ export function openOptionMenu(anchor, items, onPick) {
   // above the whole composer, like its other menus. Forge Home's composer
   // sits near the top, so its pickers open below the whole box instead.
   const GAP = 6, MARGIN = 12, MAX = 260;
-  const composerNode = anchor.closest(".chat-input-bar");
+  // 2026-10-15: floating-menu selects use their own anchor so the list
+  // cannot cover the control and swallow the opening mouseup.
+  const composerNode = anchor.closest(".overflow-menu") ? null : anchor.closest(".chat-input-bar");
   const belowComposer = composerNode?.classList.contains("forge-composer");
   // A short window may leave no usable list below the Home composer.
   // Scroll the composer into view first, keeping the list below it.

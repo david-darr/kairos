@@ -629,9 +629,19 @@
 .session-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
 .session-chat-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .session-chat-tools[hidden] { display: none; }
+.session-chat-permissions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-chat-permissions[data-mode='auto'] .custom-select-btn { color: var(--accent); border-color: var(--accent); }
 .session-chat-models { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1; }
 .session-chat-models .custom-select { flex: 1 1 140px; min-width: 0; max-width: 220px; }
 .session-chat-status:empty { display: none; }
+.session-attachment-controls, .session-attachments { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.session-attachments:empty { display: none; }
+.session-attachment-controls .meta { font-size: 11px; line-height: 1.5; flex: 1; min-width: 140px; }
+.session-attachment, .session-attachment-history { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.session-attachment { border: 1px solid var(--border); padding: 5px 8px; font-size: 11px; max-width: 100%; }
+.session-attachment span { overflow-wrap: anywhere; }
+.session-attachment img { width: 54px; height: 54px; object-fit: contain; }
+.session-attachment-history { margin-top: 8px; }
 .side-chat-send[data-mode='stop'] { color: var(--danger); }
 .side-chat-drop-hint {
   position: absolute; top: 12px; right: 12px; bottom: 12px; width: calc(50% - 18px); z-index: 5; pointer-events: none;

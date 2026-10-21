@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -50,6 +51,21 @@ BOOTSTRAP = ("import json, sys; exec(compile(json.loads(sys.stdin.readline())['d
              "'<kairos-computer-driver>', 'exec'), {'__name__': '__main__'})")
 DELETE_CHOICES = [{"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"},
                   {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}]
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+LOCAL_CHOICES = [{"id": "once", "label": "Allow for this computer", "behavior": "allow", "scope": "once"},
+                 {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}]
+
+
+def _backend_ports() -> set[int]:
+    # 2026-10-16: include the actual listener and Electron's instance scheme.
+    from core import middleware, settings
+    from core.constants import APP_PORT
+    ports = {8420, 8421, 8422, 8430, 8431, APP_PORT, sandbox_egress.PROXY_PORT,
+             sandbox_egress.CONTROL_PORT, urlsplit(middleware.local_api_base()).port,
+             int(settings.get_setting("remote_access_port") or 8422)}
+    if os.environ.get("JARVIS_PORT"):
+        ports.add(int(os.environ["JARVIS_PORT"]))
+    return ports
 
 
 @dataclass
@@ -65,6 +81,10 @@ class Computer:
     screenshot: bytes | None = None
     frame_jpeg: bytes | None = None
     hosts: set[str] = field(default_factory=set)
+    local_ports: set[int] = field(default_factory=set)
+    local_ip: str | None = None
+    local_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    local_revision: int = 0
     sequence: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     snapshot_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -207,6 +227,9 @@ class ComputerManager:
                     waiter.set_exception(sandbox.SandboxUnavailable("the contained computer stopped"))
             c.pending.clear()
             c.frame_changed.set()
+            # 2026-10-16: an unexpected driver exit also ends its grants.
+            if self._computers.get(c.owner) is c:
+                asyncio.create_task(self.stop(c.owner))
 
     async def _get(self, owner: str, is_admin: bool = True) -> Computer:
         async with self._lock:
@@ -250,6 +273,14 @@ class ComputerManager:
         c = self._computers.pop(owner, None)
         if c is None:
             return
+        async with c.local_lock:
+            c.local_revision += 1
+            c.local_ports.clear()
+            if c.local_ip:
+                try:
+                    await sandbox_egress.set_grants(c.local_ip, set())
+                except RuntimeError:
+                    logger.exception("could not clear stopped computer's local app grants")
         from core.computer_history import jpeg
         image = jpeg(c.screenshot) if c.screenshot else None
         self._closed[owner] = (self.clock() + IDLE_SECONDS, {
@@ -303,7 +334,52 @@ class ComputerManager:
         except asyncio.CancelledError:
             pass
 
-    async def _site(self, c: Computer, host: str, ctx) -> tuple[bool, str]:
+    async def revoke_local_apps(self, owner: str) -> None:
+        c = self._computers.get(owner)
+        if c is None:
+            return
+        try:
+            async with c.local_lock:
+                c.local_revision += 1
+                c.local_ports.clear()
+                if c.local_ip:
+                    await sandbox_egress.set_grants(c.local_ip, set())
+        except RuntimeError:
+            await self.stop(owner)
+            raise
+
+    async def _site(self, c: Computer, host: str, ctx, url: str = "",
+                    prompt_local: bool = False) -> tuple[bool, str]:
+        if host in LOCAL_HOSTS:
+            parsed = urlsplit(url)
+            port = parsed.port
+            if port is None:
+                return False, "local apps need an explicit port in the URL."
+            if port in _backend_ports():
+                return False, f"port {port} belongs to Kairos's backend or proxy and cannot be granted."
+            async with c.local_lock:
+                if port in c.local_ports:
+                    return True, ""
+                if not prompt_local:
+                    return False, f"local app at {url} is not approved or was revoked; explicitly open its URL to ask."
+                revision = c.local_revision
+            decision = await permissions.decide(surface=ctx.permission_surface, tool="computer_local_app",
+                arguments={"url": url}, target=f"{host}:{port}",
+                title=f"Let the computer open your local app at {url}",
+                description="Allow this port for this computer until revoked or the computer closes.",
+                choices=LOCAL_CHOICES, is_admin=ctx.is_admin, force_prompt=True)
+            if decision.behavior != "allow":
+                return False, f"local app at {url} was not approved. {decision.reason}"
+            async with c.local_lock:
+                if self._computers.get(c.owner) is not c or revision != c.local_revision:
+                    return False, "the computer was stopped or local app access was revoked while waiting for approval."
+                try:
+                    c.local_ip = c.local_ip or await sandbox_egress.container_ip(c.name)
+                    await sandbox_egress.set_grants(c.local_ip, c.local_ports | {port})
+                except (RuntimeError, ValueError) as error:
+                    return False, str(error)
+                c.local_ports.add(port)
+                return True, ""
         if host in c.hosts:
             return True, ""
         decision = await permissions.decide(surface=ctx.permission_surface, tool="computer_site",
@@ -320,7 +396,8 @@ class ComputerManager:
             previous = await self._command(c, "back")
             url = previous.get("url") or "about:blank"
             host = urlsplit(url).hostname
-            if (host and host.lower() not in c.hosts) or (not host and url != "about:blank"):
+            if (host and (host.lower() not in c.hosts and not
+                    (host.lower() in LOCAL_HOSTS and urlsplit(url).port in c.local_ports))) or (not host and url != "about:blank"):
                 await self.stop(c.owner)
                 return
             c.url, c.title = url, previous.get("title") or ""
@@ -370,7 +447,7 @@ class ComputerManager:
                 await self._retreat(c)
                 return {"text": f"Not opened: the computer only opens web addresses. URL: {url}", "images": []}
             if host:
-                allowed, reason = await self._site(c, host.lower(), ctx)
+                allowed, reason = await self._site(c, host.lower(), ctx, url=url)
                 if not allowed:
                     await self._retreat(c)
                     return {"text": f"Not opened: {reason} URL: {url}", "images": []}
@@ -387,7 +464,7 @@ class ComputerManager:
             if urlsplit(url).username or urlsplit(url).password:
                 raise ValueError("addresses with sign-in details are not allowed")
             host = urlsplit(url).hostname.lower()
-            allowed, reason = await self._site(c, host, ctx)
+            allowed, reason = await self._site(c, host, ctx, url=url, prompt_local=True)
             if not allowed:
                 return {"text": f"Not opened: {reason}", "images": []}
             command["url"] = url
@@ -446,8 +523,8 @@ class ComputerManager:
             await self._retreat(c)
             return {"text": f"Not opened: the computer only opens web addresses. URL: {c.url}", "images": []}
         new_host = urlsplit(new_url).hostname
-        if new_host and new_host.lower() not in c.hosts:
-            allowed, reason = await self._site(c, new_host.lower(), ctx)
+        if new_host:
+            allowed, reason = await self._site(c, new_host.lower(), ctx, url=new_url)
             if not allowed:
                 await self._retreat(c)
                 return {"text": f"Not opened: {reason}", "images": []}
@@ -490,8 +567,8 @@ class ComputerManager:
             await self._retreat(c)
             return {"text": f"Not opened: the computer only opens web addresses. URL: {c.url}", "images": []}
         new_host = urlsplit(new_url).hostname
-        if new_host and new_host.lower() not in c.hosts:
-            allowed, reason = await self._site(c, new_host.lower(), ctx)
+        if new_host:
+            allowed, reason = await self._site(c, new_host.lower(), ctx, url=new_url)
             if not allowed:
                 await self._retreat(c)
                 return {"text": f"Not opened: {reason}", "images": []}

@@ -159,7 +159,7 @@ def search_skills(query: str, max_results: int = 5) -> list[dict]:
 SKILL_HARD_LIMIT_CHARS = 100_000
 
 
-def read_skill(slug: str) -> str:
+def read_skill(slug: str, path: str | None = None) -> str:
     """Reads one skill's full body — the deliberate second step after
     list_skills points at one.
 
@@ -179,7 +179,7 @@ def read_skill(slug: str) -> str:
             f"skill '{slug}' is held back: its content scanned as dangerous and has not been "
             "approved. The user can review and approve it in Tool Store."
         )
-    text = skill["body"]
+    text = skills_service.read_supporting_file(slug, path) if path else skill["body"]
     if len(text) > SKILL_HARD_LIMIT_CHARS:
         raise ValueError(
             f"skill '{slug}' is {len(text):,} characters, over the {SKILL_HARD_LIMIT_CHARS:,} "

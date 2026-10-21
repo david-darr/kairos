@@ -1,0 +1,40 @@
+import { SpeechSegments, HeldSpeech } from './speechSegments.js';
+
+class KairosCallProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super(); this.enabled = false; this.levelSamples = 0; this.ready = false;
+    this.manual = false;
+    this.held = new HeldSpeech({ rate: sampleRate,
+      onStart: () => this.port.postMessage({ type: 'speech_start' }),
+      onSegment: (pcm, timing) => this.port.postMessage({ type: 'segment', pcm, timing }, [pcm.buffer]),
+    });
+    this.segmenter = new SpeechSegments({ rate: sampleRate,
+      onStart: () => this.port.postMessage({ type: 'speech_start' }),
+      onSegment: (pcm, timing) => this.port.postMessage({ type: 'segment', pcm, timing }, [pcm.buffer]),
+    });
+    this.port.onmessage = ({ data }) => {
+      if (data.type === 'enabled' && data.value !== this.enabled) {
+        this.enabled = data.value; this.segmenter.reset(true);
+        if (!this.enabled) this.held.cancel();
+      }
+      if (data.type === 'mode') { this.manual = data.value === 'hold'; this.held.cancel(); this.segmenter.reset(true); }
+      if (data.type === 'hold_start' && this.enabled && this.manual) this.held.begin();
+      if (data.type === 'hold_end') this.held.release();
+      if (data.type === 'hold_cancel') this.held.cancel();
+    };
+  }
+  process(inputs) {
+    const channel = inputs[0]?.[0];
+    if (!this.enabled || !channel) return true;
+    let rms;
+    if (!this.manual || !this.ready) rms = this.segmenter.push(channel);
+    else { let square = 0; for (const value of channel) square += value*value; rms = Math.sqrt(square/channel.length); this.held.push(channel); }
+    if (!this.ready && this.segmenter.calibrated >= sampleRate * .2) { this.ready = true; this.port.postMessage({ type: 'ready' }); }
+    this.levelSamples += channel.length;
+    if (this.levelSamples >= sampleRate * .05) {
+      this.levelSamples = 0; this.port.postMessage({ type: 'level', level: Math.min(1, rms * 12) });
+    }
+    return true;
+  }
+}
+registerProcessor('kairos-call-capture', KairosCallProcessor);

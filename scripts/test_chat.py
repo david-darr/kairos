@@ -140,6 +140,15 @@ class ChatTests(unittest.TestCase):
         chat_service._busy.clear()
         chat_service._brains.clear()
 
+    def test_codex_receives_chat_and_agent_integration_scope(self):
+        # 2026-10-15: the Codex grant must inherit the same scope as other brains.
+        session_manager.set_integrations(self.sid, ["chat-integration"])
+        brain = chat_service._build_brain(ENDPOINTS["codex"], self.sid)
+        self.assertEqual(brain.integration_ids, ["chat-integration"])
+        with patch("services.agent_service.agent_service.get", return_value={"integration_ids": ["agent-integration"]}):
+            brain = chat_service._build_brain(ENDPOINTS["codex"], None, agent_id="agent")
+        self.assertEqual(brain.integration_ids, ["agent-integration"])
+
     def tearDown(self):
         self.endpoint_patch.stop()
 
@@ -933,7 +942,7 @@ class SpeechTests(unittest.TestCase):
         # whisper.cpp reports silence as [BLANK_AUDIO]. Dropping that literal
         # into someone's chat box would read as a bug, so it is stripped and
         # an empty string is a successful "nothing was said".
-        with patch.object(speech, "installed_model", return_value="tiny.en"),              patch.object(speech, "engine_available", return_value=True),              patch.object(speech, "_load") as load:
+        with patch.object(speech, "selected_model", return_value="tiny.en"),              patch.object(speech, "engine_available", return_value=True),              patch.object(speech, "_load") as load:
             load.return_value.transcribe.return_value = [
                 type("Seg", (), {"text": " [BLANK_AUDIO] "})(),
             ]
@@ -2470,7 +2479,9 @@ class McpClientTests(unittest.TestCase):
         catalog = integrations.mcp_catalog()
         self.assertEqual(len(catalog), 66)
         self.assertEqual(sum(1 for s in catalog if s["auth"] == "none"), 11)
-        self.assertTrue(all(s["name"] and s["description"] and (s.get("url") or s.get("package")) for s in catalog))
+        self.assertTrue(all(s["name"] and s["description"] and (s.get("url") or s.get("package")
+                            or s["transport"] == "builtin") for s in catalog))
+        self.assertNotIn('roblox-studio', {s['id'] for s in catalog}, 'Roblox is an optional add-on')
         rea = next(s for s in catalog if s["id"] == "rea")
         self.assertEqual(rea["transport"], "stdio")
         self.assertFalse(rea["added"])

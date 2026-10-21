@@ -262,6 +262,15 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    const organization = route.match(/^\/api\/agents\/conversations\/(agent|team)\/([^/]+)$/);
+    if (organization && method === 'POST') {
+      const key = organization[1] + ':' + organization[2];
+      state.chatPreferences ||= {};
+      const pref = state.chatPreferences[key] ||= {};
+      if (['pin', 'unpin'].includes(body.action)) pref.pinned = body.action === 'pin';
+      else pref.unread = body.action === 'unread';
+      return pref;
+    }
     // 2026-10-14: the birth smoke uses the same two writes as production and
     // keeps their state separate so a failed first routine leaves its bot.
     if (route === '/api/agents' && method === 'POST') {
@@ -811,6 +820,7 @@
     return { nodes, edges };
   }
   function fixture(url) {
+    if (url.pathname === '/api/addons') return [];
     if (url.pathname === '/api/store/catalog') return communityCatalog();
     if (url.pathname === '/api/store/github') return { configured: state.githubConfigured !== false, signed_in: !!state.githubSignedIn, login: state.githubSignedIn ? 'alex-demo' : null };
     if (url.pathname === '/api/store/submissions') return state.empty ? [] : [
@@ -1104,6 +1114,9 @@
           events: [], conditions: [], title_template: "", prompt_template: "", path: "/api/triggers/tr2", last_event_at: null, created_at: now - 8000, log: [] }],
       pending: [{ id: "p1abcdef0000", trigger_id: "tr1", trigger_name: "GitHub pushes", kind: "card", event_type: "push",
         summary: "Push: Fix the thing", created_at: now - 120 }] };
+    if (route === "/api/agents/conversations") return { agents: state.empty ? [] : agentsFixture.map((agent, i) => ({ id: agent.id,
+      preview: i === 0 ? 'A clearer direction for your project.' : 'The reference notes are ready.', at: now - (i + 1) * 300,
+      message_count: 2, ...(state.chatPreferences || {})['agent:' + agent.id] })), preferences: state.chatPreferences || {} };
     if (route === "/api/agents") return list(agentsFixture);
     if (route === "/api/agents/inbox") return state.empty ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };

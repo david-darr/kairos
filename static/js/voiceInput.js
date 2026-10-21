@@ -79,7 +79,7 @@ export async function requestMicrophoneAccess() {
   stream.getTracks().forEach(track => track.stop());
 }
 
-function encodeWav(samples, sampleRate) {
+export function encodeWav(samples, sampleRate) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
   const writeText = (offset, text) => {
@@ -141,19 +141,24 @@ async function toMono16kWav(blob) {
   return encodeWav(samples, TARGET_RATE);
 }
 
-export async function transcribeBlob(blob) {
-  const wav = await toMono16kWav(blob);
+export async function transcribeBlob(blob, { signal, model, backend, pcm = false, onTiming } = {}) {
+  const wav = pcm ? blob : await toMono16kWav(blob);
+  if (signal?.aborted) throw new DOMException('Transcription cancelled.', 'AbortError');
   const form = new FormData();
   form.append('audio', wav, 'speech.wav');
+  if (model) form.append('model', model);
+  if (backend) form.append('backend', backend);
   // Not api(): that helper sets a JSON content type, and FormData must set its
   // own multipart boundary.
-  const res = await fetch('/api/speech/transcribe', { method: 'POST', body: form });
+  const res = await fetch('/api/speech/transcribe', { method: 'POST', body: form, signal });
   if (!res.ok) {
     let detail = 'Transcription failed.';
     try { detail = (await res.json()).detail || detail; } catch { /* keep the default */ }
     throw new Error(detail);
   }
-  return (await res.json()).text || '';
+  const result = await res.json();
+  onTiming?.({ ...(result.timings || {}), ...(result.engine ? { engine: result.engine, fallback: result.fallback } : {}) });
+  return result.text || '';
 }
 
 // One recording session. Kept as an object rather than a start/stop pair of

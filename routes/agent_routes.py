@@ -78,17 +78,23 @@ def _owned(agent_id: str) -> list[dict]:
 def _summary(agent: dict) -> dict:
     """The agent plus what its card on the Agents list shows."""
     from services.agent_handoff import person_inbox
+    from services.chat_live import agent_activity
     owned = _owned(agent["id"])
     running = next((t for t in owned if t["schedule_kind"] == "card" and t.get("status") == "running"), None) \
         or next((t for t in owned if t["schedule_kind"] != "card" and t.get("run_started_at")), None)
     needs_you = len(person_inbox(agent["id"])) + sum(
         1 for t in owned if t["schedule_kind"] == "card" and t.get("status") == "review")
+    chat = agent_activity(agent["id"])
+    needs_you += int(bool(chat and chat["waiting"]))
+    activity = ({"kind": "task", "working": True, "waiting": bool(chat and chat["waiting"]),
+                 "name": running["name"], "detail": str(running.get("prompt") or "")[:240]}
+                if running else chat)
     may_run, why_not = agent_service.can_run(agent["id"])
-    status = ("off" if not agent["enabled"] else "working" if running else "needs_you" if needs_you
+    status = ("off" if not agent["enabled"] else "working" if activity else "needs_you" if needs_you
               else "capped" if not may_run else "idle")
     return {**agent, "blurb": agent.get("blurb", ""), "soul": agent.get("soul"),
             "revision": agent.get("revision", 0),
-            "status": status, "status_detail": running["name"] if running else why_not,
+            "status": status, "status_detail": activity["name"] if activity else why_not, "activity": activity,
             "needs_you": needs_you, "runs_today": agent_service.runs_today(agent["id"])}
 
 
@@ -152,6 +158,37 @@ async def whole_inbox(user: str = Depends(require_admin)) -> dict:
     from services.agent_handoff import person_inbox
     items = person_inbox()
     return {"items": items, "reviews": reviews, "count": len(items) + len(reviews)}
+
+
+class ConversationAction(BaseModel):
+    action: str
+
+
+@router.get('/conversations')
+async def conversations(user: str = Depends(require_admin)) -> dict:
+    from core.agent_conversations import agent_threads
+    return agent_threads(user, agent_service.list_agents())
+
+
+@router.post('/conversations/{kind}/{ident}')
+async def organize_conversation(kind: str, ident: str, body: ConversationAction, user: str = Depends(require_admin)) -> dict:
+    from core import agent_conversations
+    count = 0
+    session_id = None
+    if kind == 'agent':
+        _require(ident)
+        thread = agent_conversations.agent_threads(user, [agent_service.get(ident)])['agents'][0]
+        count, session_id = thread['message_count'], thread['session_id']
+    elif kind == 'team':
+        from services import swarm_service
+        if swarm_service.current is None:
+            raise HTTPException(404, 'Teams unavailable')
+        try: swarm_service.current.store.get_system(ident, owner=user)
+        except Exception as error: raise HTTPException(404, 'Team not found') from error
+    else:
+        raise HTTPException(400, 'Choose an agent or team conversation')
+    try: return agent_conversations.change(user, kind + ':' + ident, body.action, count, session_id)
+    except ValueError as error: raise HTTPException(400, str(error)) from error
 
 
 @router.get("/{agent_id}")

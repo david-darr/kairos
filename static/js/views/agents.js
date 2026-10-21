@@ -11,6 +11,7 @@ import { openCreateAgent } from "../agentCreation.js";
 import { openAgentItemSheet } from '../agentItemSheet.js';
 import { cadence, routinesPanel } from "../routinesPanel.js";
 import { agentModelSummary } from "../agentModelPicker.js";
+import { mountAgentsMessenger } from '../agentsMessenger.js';
 
 // Agents (2026-10-04, after xAI's Grok Bot and OpenAI's Dots): named workers
 // with a role, standing goals, their own memory and an inbox. Their work runs
@@ -35,19 +36,9 @@ function hasDraft(node) {
 }
 
 export async function render(container, tabId, options = {}) {
-  let timer = null;
-  const cleanups = [];
-  const root = el("div", { class: "view-constrained agents-view" });
-  container.innerHTML = "";
-  container.append(root);
-  const schedule = (fn) => { clearTimeout(timer); timer = setTimeout(() => document.body.contains(root) && fn(), POLL_MS); };
-  if (options.team) {
-    const swarm = await import("./swarm.js");
-    return swarm.render(container, tabId, { ...options, embedded: true, systemId: options.team });
-  }
-  if (options.agentId) await agentPage(root, options.agentId, schedule, cleanups, options.agentTab || "chat", !!options.computerTakeover, !!options.profile, options.sessionId, options.creationNotice);
-  else await listPage(root, schedule);
-  return () => { clearTimeout(timer); cleanups.forEach((cleanup) => cleanup()); };
+  return mountAgentsMessenger(container, tabId, options, (root, id, schedule, cleanups, initial, workspace) =>
+    agentPage(root, id, schedule, cleanups, initial.agentTab || 'chat', !!initial.computerTakeover,
+      !!initial.profile, initial.sessionId, initial.creationNotice, workspace), listPage);
 }
 
 export function avatar(agent, size = 28) {
@@ -91,14 +82,19 @@ async function listPage(root, schedule) {
   if (!document.body.contains(root) || version !== listRequests.get(root)) return;
   let state = listStates.get(root);
   if (!state) {
+    const inboxOnly = root.classList.contains('agents-inbox-view');
     const inboxHost = el('div', { class: 'agent-inbox-host' });
     const grid = el('div', { class: 'agent-grid' });
     const teamHost = el('div');
     root.append(el("div", { class: "view-header" }, [el("div", {}, [
-      el("h2", { text: "Agents" }),
-      el("div", { class: "sub", text: "Named helpers that work in the background and come back when they need you." }),
+      el("h2", { text: inboxOnly ? 'Inbox' : "Agents" }),
+      el("div", { class: "sub", text: inboxOnly ? 'Questions, reports and approvals.' : "Named helpers that work in the background and come back when they need you." }),
     ])]), el('h3', { class: 'agent-roster-title', text: 'Your bots' }), grid, inboxHost, teamHost);
     state = { inboxHost, grid, teamHost, tiles: new Map(), inbox: new Map(), teamsSignature: '' };
+    if (inboxOnly) {
+      state.emptyInbox = el('p', { class: 'agents-inbox-empty', text: 'You’re all caught up.', role: 'status', hidden: true });
+      root.append(state.emptyInbox);
+    }
     listStates.set(root, state);
   }
   const byId = new Map(agents.map((a) => [a.id, a]));
@@ -119,6 +115,7 @@ async function listPage(root, schedule) {
     } else { row.node.remove(); state.inbox.delete(key); }
   }
   state.inboxHost.hidden = !inbox.count && !state.inbox.size;
+  if (state.emptyInbox) state.emptyInbox.hidden = !!inbox.count || !!state.inbox.size;
   for (const [index, row] of incoming.entries()) {
     const signature = JSON.stringify([row.value, byId.get(row.value.agent_id)?.avatar]);
     let old = state.inbox.get(row.key);
@@ -290,7 +287,7 @@ function reviewItem(card, agent, refresh) {
 
 // -- one agent ----------------------------------------------------------------
 
-async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false, sessionId = null, creationNotice = null) {
+async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOver = false, profileOpen = false, sessionId = null, creationNotice = null, workspace = null) {
   let detail;
   try {
     detail = await api(`/api/agents/${agentId}`);
@@ -316,6 +313,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   // a phone the same panel becomes a sheet opened from the More menu.
   const conversations = el('div', { class: 'agent-conversations-home' });
   const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [conversations, live, activity, upcoming]);
+  if (workspace) workspace.history.append(conversations);
   const search = el('input', { type: 'search', class: 'agent-thread-search', placeholder: 'Search chats',
     'aria-label': 'Search this bot’s loaded conversation titles', title: 'Filters loaded conversation titles' });
   const profile = mountAgentProfile(root, detail, models, channels, () => redraw());
@@ -371,6 +369,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       host.hidden = which !== name;
     }
     root.dataset.agentTab = which;
+    if (workspace && which !== 'chat') { root.classList.add('is-info-open'); info.setAttribute('aria-expanded', 'true'); }
     side.hidden = which !== 'chat';
     if (which !== 'chat') closeConversations();
     const active = [chatTab, workTab, routinesTab, memoryTab].findIndex(button => button.classList.contains('active'));
@@ -378,7 +377,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     if (which === "chat" && !chatMounted) {
       chatMounted = true;
       mountAgentChat(chatHost, detail.agent, sessionId, { search, activity, conversations, onPick: () => closeConversations() })
-        .then((cleanup) => cleanups.push(cleanup));
+        .then((cleanup) => document.body.contains(root) ? cleanups.push(cleanup) : cleanup());
     }
     if (which === 'work' || which === 'chat') syncComputer();
     else if (computerView) { computerView.dispose(); computerView = null; computerHost.replaceChildren(); }
@@ -400,6 +399,10 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       tabs[next].click(); tabs[next].focus();
     });
   });
+  const info = el('button', { type: 'button', class: 'btn quiet agent-info-toggle', text: 'Info', 'aria-label': 'Conversation info', 'aria-expanded': 'false', onclick: () => {
+    const open = root.classList.toggle('is-info-open'); info.setAttribute('aria-expanded', String(open));
+    if (!open && root.dataset.agentTab !== 'chat') show('chat');
+  } });
   const back = el('button', { type: 'button', class: 'btn quiet agent-back', text: '\u2190', 'aria-label': 'All agents',
     onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } })) });
   // 2026-10-14: reserve the app menu’s place; reuse its drawer and focus logic.
@@ -444,6 +447,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   conversations.append(conversationsClose);
   let conversationsOpener = null;
   function openConversations() {
+    if (workspace) { workspace.open(); return; }
     if (!matchMedia('(max-width: 768px)').matches) { search.focus(); return; }
     conversationsOpener = document.activeElement;
     conversations.classList.add('is-open'); root.classList.add('agent-conversations-open');
@@ -451,6 +455,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     (conversations.querySelector('.agent-chat-new') || conversationsClose).focus();
   }
   function closeConversations() {
+    if (workspace) { workspace.close(); return; }
     if (!conversations.classList.contains('is-open')) return;
     conversations.classList.remove('is-open'); root.classList.remove('agent-conversations-open');
     for (const name of ['role', 'aria-modal', 'aria-label']) conversations.removeAttribute(name);
@@ -466,7 +471,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
-  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [header, more, moreMenu])]),
+  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [header, ...(workspace ? [info] : []), more, moreMenu])]),
     ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
     el('div', { class: 'agent-conversation-layout' }, [side, chatHost]), workHost, routinesHost, memoryHost);
   const giveJob = () => {
@@ -498,6 +503,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
         onclick: async () => { await api(`/api/agents/${agentId}`, { method: 'PATCH', body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } }),
         ...[...stoppable.values()].map(card => el('button', { type: 'button', class: 'btn', text: 'Stop',
           onclick: async () => { try { await api(`/api/tasks/${card.id}/stop`, { method: 'POST' }); redraw(); } catch (problem) { toast(problem.message, 'error'); } } }))]));
+    if (workspace) live.prepend(el('button', { type: 'button', class: 'agents-inspector-profile', 'aria-label': `Edit ${agent.name}'s profile`, onclick: () => profile.open() }, [
+      avatar(agent, 112), el('strong', { text: agent.name }), el('span', { text: agent.role || 'Your agent' })]));
     workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : 'Work';
   };
 
