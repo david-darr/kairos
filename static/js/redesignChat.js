@@ -8,6 +8,7 @@
 //  - the conversations button gets an icon, a "Conversations" label and a count,
 //    and the chat title it used to carry sits beside it as its own heading.
 // Switching the preview off, or narrowing to a phone, puts everything back.
+import { fitMenu } from "./menuFit.js";
 const on = () => document.documentElement.classList.contains("kairos-redesign");
 const ICON_LIST = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.3A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>';
 
@@ -27,17 +28,13 @@ export function mountRedesignChat(container) {
   let extras = [];
   let observers = [];
 
-  // The menu opens upward from the composer. chat.js's toggleMenu() places a
-  // header menu below its anchor with fixed coordinates, so correct it right
-  // after it runs. Absolute, against the picker wrapper, so the composer's
-  // own backdrop filter cannot become the fixed-position container.
+  // The menu opens upward from the composer, or downward when that side has
+  // more room. fitMenu() clamps it to the window and re-fits on resize.
+  // Absolute, against the picker wrapper, so the composer's own backdrop
+  // filter cannot become the fixed-position container.
   const place = () => {
     if (!applied || menu.classList.contains("hidden")) return;
-    const room = pill.getBoundingClientRect().top - 16;
-    Object.assign(menu.style, {
-      position: "absolute", top: "auto", left: "auto", right: "0", bottom: "calc(100% + 10px)",
-      transform: "", maxWidth: "calc(100vw - 24px)", maxHeight: `${Math.max(160, Math.min(480, room))}px`,
-    });
+    fitMenu(menu, pill, { prefer: "above", fixed: false });
   };
 
   const syncCount = () => {

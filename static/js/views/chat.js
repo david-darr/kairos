@@ -23,6 +23,7 @@ import { mountChatReferences, renderReferenceChips } from '../chatReferences.js'
 import { mountChatTimeline } from '../chatTimeline.js';
 import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
+import { fitMenu } from '../menuFit.js';
 import { mountRedesignChat } from '../redesignChat.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
@@ -1344,14 +1345,7 @@ function toggleMenu(menu, headerAnchor = null) {
   if (headerAnchor) {
     // The version button is visually hidden on phones. Anchor both menus to
     // the visible model pill, using viewport coordinates for fixed menus.
-    const anchor = (headerAnchor.closest('.chat-header-model') || headerAnchor).getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.top = `${anchor.bottom + 8}px`;
-    menu.style.bottom = 'auto';
-    menu.style.right = 'auto';
-    menu.style.maxWidth = 'calc(100vw - 24px)';
-    menu.style.maxHeight = `${Math.max(0, Math.min(420, innerHeight - anchor.bottom - 20))}px`;
-    menu.style.left = `${Math.max(12, Math.min(anchor.right - menu.getBoundingClientRect().width, innerWidth - menu.getBoundingClientRect().width - 12))}px`;
+    fitMenu(menu, headerAnchor.closest('.chat-header-model') || headerAnchor, { prefer: 'below', fixed: true, gap: 8 });
     return;
   }
   const anchor = menu.parentElement.getBoundingClientRect();
@@ -2091,6 +2085,8 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
 
   // -- connections
   menu.appendChild(el("div", { class: "model-picker-heading", text: endpoints.length ? "Connection" : "No models yet. Set up a model." }));
+  const connectionList = el("div", { class: "model-connection-list" });
+  menu.appendChild(connectionList);
   for (const ep of endpoints) {
     const optName = ep.kind === "claude_cli" || ep.kind === "codex_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
     const isCurrent = ep.id === (currentEndpointId || "");
@@ -2120,7 +2116,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     if (isCurrent) item.setAttribute('aria-current', 'true');
     const itemMark = modelMark(ep.mark, optName);
     if (itemMark) item.prepend(itemMark);
-    menu.appendChild(item);
+    connectionList.appendChild(item);
   }
 
   const ep = endpoints.find(e => e.id === currentEndpointId);
