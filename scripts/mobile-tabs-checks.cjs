@@ -304,7 +304,7 @@ async function run(ctx) {
   const fc = await rect('.forge-transcript-composer'), fadd = await rect('.ms-forge-add');
   ok(fc && fc.b <= 844 && fc.h >= 50 && fc.t > 500, 'The session composer rests at the bottom: ' + JSON.stringify(fc));
   ok(fadd && fadd.w >= 43.5 && fadd.h >= 43.5, 'The composer + is a 44px target');
-  ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-forge-add')); return s.backgroundColor === 'rgba(0, 0, 0, 0)' && parseFloat(s.borderTopWidth) === 0 && parseFloat(s.borderRadius) >= 20; })()"), 'The composer + is styled, not a default button');
+  ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-forge-add')); const chat = document.querySelector('#overflow-plus-btn'); return s.backgroundColor !== 'rgba(0, 0, 0, 0)' && parseFloat(s.borderRadius) >= 20 && (!chat || getComputedStyle(chat).backgroundColor === s.backgroundColor); })()"), 'The composer + is the tinted circle, like the chat composer +');
   const fpill = await rect('.ms-activity-floating');
   ok(!fpill || !hit(fpill, fc), 'The activity pill clears the Forge composer');
   eq(await overflow(), [], 'Forge session no overflow');

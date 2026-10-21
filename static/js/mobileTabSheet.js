@@ -88,7 +88,9 @@ export function openTabSheet(from) {
     }
   }
   panel.append(grab, heading, grid, work, footer); sheet.replaceChildren(panel);
-  sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); grab.focus();
+  sheet.setAttribute('aria-modal', 'true'); sheet.showModal();
+  // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
+  sheet.tabIndex = -1; sheet.focus({ preventScroll: true });
 }
 
 export function initTabSheet() {

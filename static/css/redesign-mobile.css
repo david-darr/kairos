@@ -358,3 +358,8 @@
   .kairos-redesign .ms-conversation { animation: ms-chat-reveal 320ms cubic-bezier(.22, 1, .36, 1); }
   @keyframes ms-chat-reveal { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
 }
+@media (max-width: 768px) {
+  /* The Forge "+" matches the chat composer "+": the same tinted circle. */
+  .kairos-redesign .ms-forge-add { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--hairline-soft); }
+  .kairos-redesign .ms-tab-sheet:focus { outline: none; }
+}
