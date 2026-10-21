@@ -1118,6 +1118,8 @@
       preview: i === 0 ? 'A clearer direction for your project.' : 'The reference notes are ready.', at: now - (i + 1) * 300,
       message_count: 2, ...(state.chatPreferences || {})['agent:' + agent.id] })), preferences: state.chatPreferences || {} };
     if (route === "/api/agents") return list(agentsFixture);
+    // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
+    if (route === "/api/notifications") return { devices: [] };
     if (route === "/api/agents/inbox") return state.empty ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };
     if (/^\/api\/agents\/a\d$/.test(route)) return agentDetail(route.split("/")[3]);

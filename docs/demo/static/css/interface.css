@@ -1107,7 +1107,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 .agents-rail-history .agent-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agents-rail-history .agent-chat-delete { min-width: 44px; height: 44px; opacity: 1; }
 .agents-messenger-body { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.agents-messenger-mobilebar { display: none; }
 .agents-messenger-stage { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 24px; background: var(--ui-wash); border: 1px solid var(--ui-line); }
 .agents-messenger-page { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 20px; }
 .agents-messenger .agent-conversation-page { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 20px; max-width: none; }
@@ -1168,7 +1167,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   .view.agents-shell-view { padding: 70px 8px max(8px, var(--mobile-safe-bottom)); }
   .agents-messenger, .agents-messenger.is-rail-collapsed { display: flex; gap: 0; }
   .agents-messenger-body { flex: 1; }
-  .agents-messenger-mobilebar { display: flex; align-items: center; gap: 12px; padding: 0 4px 8px 60px; font-size: 14px; }
   .agents-chat-rail { display: none; }
   .agents-messenger.is-rail-open .agents-chat-rail { display: flex; position: fixed; z-index: 250; top: calc(var(--titlebar-h) + max(16px, var(--mobile-safe-top))); left: 8px; bottom: max(8px, var(--mobile-safe-bottom)); width: min(310px, calc(100vw - 32px)); box-sizing: border-box; background: var(--ui-surface); box-shadow: var(--ui-shadow); align-items: stretch; }
   :root:has(.agents-messenger.is-rail-open) #mobile-menu-btn { visibility: hidden; }
