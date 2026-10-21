@@ -1,7 +1,8 @@
+import { EFFECTS, ART_PIECES, normalizeEffectOptions } from './backgroundEffectPreferences.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, redesign: false });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, redesign: false, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea' });
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -12,7 +13,7 @@ const STATUS = {
   light: { danger: [168, 67, 47], success: [77, 108, 72], warn: [140, 88, 21] },
   dark: { danger: [240, 128, 136], success: [140, 200, 172], warn: [217, 182, 125] },
 };
-let settings = { ...DEFAULTS }, storageKey = '', imageBitmap = null;
+let settings, storageKey = '', imageBitmap = null;
 let imageCanvas, shaderCanvas, previewCanvas, glScene, animation = 0, lastFrame = 0, time = 0;
 let storageIssue = '', imageRevision = 0, identityRevision = 0, imageQueue = Promise.resolve();
 
@@ -36,12 +37,16 @@ function normalizeHalftoneSlot(raw) {
   return { focusX, focusY, hash };
 }
 function normalize(raw = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
   const value = { ...DEFAULTS };
   if (['default', 'color', 'image', 'shader'].includes(raw.mode)) value.mode = raw.mode;
   if (/^#[\da-f]{6}$/i.test(raw.color)) value.color = raw.color;
   for (const key of ['tint', 'distortion', 'swirl', 'grainMixer', 'grainOverlay']) {
     if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
   }
+  if (EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
+  value.effectOptions = normalizeEffectOptions(raw.effectOptions);
+  if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
   if (typeof raw.redesign === 'boolean') value.redesign = raw.redesign;
@@ -54,6 +59,7 @@ function normalize(raw = {}) {
   value.halftoneImages = Object.fromEntries(HALFTONE_SLOTS.map((slot) => [slot, normalizeHalftoneSlot(raw.halftoneImages?.[slot])]));
   return value;
 }
+settings = normalize(DEFAULTS);
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 const css = values => `rgb(${values.map(Math.round).join(', ')})`;
 const mix = (color, target, amount) => color.map(v => v * (1 - amount) + target * amount);
@@ -120,7 +126,7 @@ export function halftoneSharedChatPicture() {
 }
 
 export function getAppearance() {
-  return { ...settings, hasImage: !!imageBitmap, storageIssue,
+  return { ...settings, effectOptions: structuredClone(settings.effectOptions), hasImage: !!imageBitmap, storageIssue,
     staticFallback: settings.mode === 'shader' && glScene === false,
     halftoneSlots: Object.fromEntries(HALFTONE_SLOTS.map((slot) => [slot,
       { hasImage: !!halftoneUrl[slot], focusX: settings.halftoneImages[slot].focusX, focusY: settings.halftoneImages[slot].focusY }])) };
@@ -151,7 +157,7 @@ export async function initAppearance(username) {
   for (const slot of HALFTONE_SLOTS) { if (halftoneUrl[slot]) URL.revokeObjectURL(halftoneUrl[slot]); halftoneUrl[slot] = null; ++halftoneRevision[slot]; }
   storageKey = 'jarvis:appearance:v1:' + String(username || 'local');
   try { settings = normalize(JSON.parse(localStorage.getItem(storageKey) || '{}')); }
-  catch { settings = { ...DEFAULTS }; }
+  catch { settings = normalize(DEFAULTS); }
   ensureCanvases();
   apply();
   try {
@@ -301,7 +307,7 @@ function apply() {
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   syncRedesign(root);
-  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ redesign: settings.redesign, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone })); } catch { /* Appearance still works without storage. */ }
+  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ redesign: settings.redesign, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');
@@ -366,7 +372,7 @@ function syncRedesign(root) {
     if (!host.isConnected) return;  // switched off (or replaced) while loading
     const mounted = mountChatBackdrop(host);
     redesignBackdrop = { host, dispose: mounted.dispose };
-    // Still: no dissolve, so reduced motion needs nothing more here.
+    // No scene dissolve here; the engine owns the selected effect's motion.
     mounted.show('sky');
   }).catch(() => { /* the parchment stays */ });
 }

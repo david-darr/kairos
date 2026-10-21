@@ -1,6 +1,6 @@
 import { api, el, customSelect, openPanelDialog, toast } from '../api.js';
 import { shouldSendOnEnter } from '../composerKeyboard.js';
-import { mountDither } from '../dither.js';
+import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { halftoneSource, halftoneFocus, halftonePalette, halftoneVersion } from '../appearance.js';
 import { bars, donut, heatmap, statCard, rankedTable } from '../forgeCharts.js';
 import { projectSessions, sessionRow, forgeRunning } from '../forgeUi.js';
@@ -117,7 +117,7 @@ export function render(container, tabId, options = {}) {
   function drawBanner() {
     banner.dataset.halftoneSrc = halftoneSource('home');
     const focus = halftoneFocus('home');
-    return mountDither(banner, halftoneSource('home'), { cell: 4, fade: [.7, 1], focusX: focus?.x ?? .7, focusY: focus?.y ?? .4,
+    return mountBackgroundEffect(banner, halftoneSource('home'), { cell: 4, fade: [.7, 1], focusX: focus?.x ?? .7, focusY: focus?.y ?? .4,
       palette: halftonePalette(), version: halftoneVersion('home') });
   }
   let disposeBanner = drawBanner();

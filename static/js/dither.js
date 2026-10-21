@@ -22,16 +22,24 @@ export function dissolveCells(ctx, c, ms, cancelled = () => false) {
   const started = performance.now();
   let cleared = 0;
   return new Promise((resolve) => {
+    let raf = 0;
+    const finish = () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', onVisibility);
+      resolve();
+    };
+    const onVisibility = () => { if (document.hidden) finish(); };
     const step = (now) => {
-      if (cancelled()) { resolve(); return; }
+      if (document.hidden || cancelled()) { finish(); return; }
       const due = Math.min(ORDER.length, Math.ceil(((now - started) / ms) * ORDER.length));
       for (; cleared < due; cleared++) {
         const [, bx, by] = ORDER[cleared];
         for (let y = by; y < rows; y += 4) for (let x = bx; x < cols; x += 4) ctx.clearRect(x * c, y * c, c, c);
       }
-      if (cleared < ORDER.length) requestAnimationFrame(step); else resolve();
+      if (cleared < ORDER.length) raf = requestAnimationFrame(step); else finish();
     };
-    requestAnimationFrame(step);
+    document.addEventListener('visibilitychange', onVisibility);
+    if (document.hidden) finish(); else raf = requestAnimationFrame(step);
   });
 }
 
