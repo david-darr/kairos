@@ -34,8 +34,8 @@ class Element extends Events {
         const data = new Uint8ClampedArray(w * h * 4);
         for (let i = 0; i < data.length; i += 4) { data[i] = 80; data[i + 1] = 120; data[i + 2] = 160; data[i + 3] = 255; }
         return { data };
-      }, createPattern() { return 'pattern'; } };
-    for (const name of ['fillText', 'drawImage', 'clearRect', 'fillRect', 'beginPath', 'arc', 'fill', 'save', 'restore', 'rect', 'clip']) {
+      }, createPattern() { return 'pattern'; }, createRadialGradient() { return { addColorStop() {} }; } };
+    for (const name of ['fillText', 'drawImage', 'clearRect', 'fillRect', 'beginPath', 'arc', 'fill', 'save', 'restore', 'rect', 'clip', 'translate', 'scale']) {
       ctx[name] = (...args) => commands.push([name, ...args.map(a => a instanceof Element ? 'canvas' : a), ctx.fillStyle]);
     }
     this.ctx = ctx; return ctx;

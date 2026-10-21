@@ -113,18 +113,33 @@ function picturePainter(target, img, W, H, opts, effect, prefs, colors) {
 function artPainter(target, W, H, prefs, mod, colors, preview) {
   const draw = mod.default(), atlas = new GlyphAtlas(), ctx = target.getContext('2d');
   target.width = W; target.height = H;
-  const { cols, rows } = mod.meta, aspect = 1.66;
-  // One composition, never tiled: the preview fits the whole piece, a backdrop
-  // scales it to cover (centred, overflow cropped). Density does not apply.
-  let cw = preview ? Math.max(2, Math.floor(Math.min(W / cols, H / (rows * aspect)))) : Math.ceil(Math.max(W / cols, H / (rows * aspect)));
-  const ch = cw * aspect, left = Math.round((W - cols * cw) / 2), top = Math.round((H - rows * ch) / 2);
-  const alpha = preview ? .9 : .28;
+  const { cols, rows } = mod.meta, aspect = 1.66, dpr = Math.min(2, window.devicePixelRatio || 1);
+  // One composition at a normal glyph size (the density, like ASCII), centred,
+  // never tiled. A large backdrop may grow it up to 1.5x; the edges fade out.
+  let cw;
+  if (preview) cw = Math.max(2, Math.floor(Math.min(W / cols, H / (rows * aspect))));
+  else {
+    const base = Math.max(3, Math.round(prefs.density * dpr));
+    cw = Math.round(base * Math.min(1.5, Math.max(1, Math.min(W / (cols * base), H / (rows * base * aspect)))));
+  }
+  const ch = cw * aspect, tw = Math.ceil(cols * cw), th = Math.ceil(rows * ch);
+  const tile = canvas(tw, th), tc = tile.getContext('2d');
+  const left = Math.round((W - tw) / 2), top = Math.round((H - th) / 2);
+  const alpha = preview ? .9 : .5;
   return t => {
+    tc.globalCompositeOperation = 'source-over'; tc.globalAlpha = 1; tc.clearRect(0, 0, tw, th);
+    paint(tc, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
+      { cw, ch, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
+    if (!preview) {
+      // Soft elliptical edge: opaque in the middle, gone before the borders.
+      tc.save(); tc.globalCompositeOperation = 'destination-in';
+      tc.translate(tw / 2, th / 2); tc.scale(1, th / tw);
+      const g = tc.createRadialGradient(0, 0, tw * .22, 0, 0, tw * .5);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      tc.fillStyle = g; tc.fillRect(-tw / 2, -tw / 2, tw, tw); tc.restore();
+    }
     ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = alpha;
-    paint(ctx, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
-      { x: left, y: top, cw, ch, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = alpha; ctx.drawImage(tile, left, top); ctx.globalAlpha = 1;
   };
 }
 
