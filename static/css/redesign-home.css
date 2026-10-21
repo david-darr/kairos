@@ -60,6 +60,17 @@
 }
 .kairos-redesign .dashboard-section-header { margin: 0; padding-bottom: 6px; }
 .kairos-redesign .dashboard-section-header h2 { color: var(--rd-ink-dim); }
+.kairos-redesign .dashboard-section-header .btn { min-width: 0; }
+/* Built-in cards carry no heading icon; tab cards keep their tab's icon. */
+.kairos-redesign .dashboard-section:not([data-home-section^="tab:"]) .dashboard-section-header h2 .dashboard-icon { display: none; }
+.kairos-redesign .dashboard-section-body > .dashboard-empty { min-height: 0; display: block; padding: 12px 0; line-height: 1.7; }
+.kairos-redesign .dashboard-stat > .dashboard-icon { display: none; }
+.kairos-redesign .dashboard-activity { align-items: center; gap: 10px; padding: 9px 0; }
+.kairos-redesign .dashboard-activity .dashboard-row-title { display: block; font-size: inherit; line-height: inherit; white-space: nowrap; }
+.kairos-redesign .dashboard-activity .dashboard-row-detail { padding-top: 0; }
+.kairos-redesign .dashboard-agent-dot { position: static; width: 8px; height: 8px; outline: 0; }
+.kairos-redesign .dashboard-tab-badge { max-width: 30%; }
+.kairos-redesign .dashboard-quota-note { grid-column: 1 / -1; }
 .kairos-redesign .dashboard-section-header .btn.quiet { color: var(--rd-ink); font-size: 14px; padding: 0 0 0 8px; border-color: transparent; background: transparent; }
 .kairos-redesign .dashboard-section-header .btn.quiet:hover { background: transparent; text-decoration: underline; }
 .kairos-redesign .dashboard-section-body { flex: 1; }
@@ -92,14 +103,25 @@
 .kairos-redesign .hm-ring.tone-watch { background: conic-gradient(var(--warn) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
 .kairos-redesign .hm-ring.tone-crit { background: conic-gradient(var(--danger) 0 calc(var(--rd-pct, 0) * 1%), var(--rd-surface-2) 0 100%); }
 
-/* The visual-cards ring (percentage inside) sits on the card's own surface. */
-.kairos-redesign .dashboard-quota-ring::before { background: var(--rd-surface-solid); }
+/* Models: the pre-visual-cards type scale (style.css later sets smaller sizes for the tile look) */
+.kairos-redesign .dashboard-model-name { flex: 0 1 auto; font-size: inherit; }
+.kairos-redesign .dashboard-model-variant { max-width: none; font-size: 11px; }
+.kairos-redesign .dashboard-model-usage { margin: 3px 0 0; font-size: 11px; }
+.kairos-redesign .dashboard-model-top { gap: 8px; }
+.kairos-redesign .dashboard-model-top > .model-mark { width: 15px; height: 15px; }
+.kairos-redesign .dashboard-model-top > .dashboard-icon { width: auto; height: auto; border-radius: 0; background: transparent; }
+.kairos-redesign .dashboard-quota { margin: 0; }
+.kairos-redesign .dashboard-quota-head > span { white-space: nowrap; }
+.kairos-redesign .dashboard-quota-note { font-size: 11px; }
+.kairos-redesign .dashboard-quota-note summary { cursor: pointer; }
 
 /* Systems: one row per system */
 .kairos-redesign .dashboard-system-chips { flex-direction: column; flex-wrap: nowrap; gap: 0; }
 .kairos-redesign .dashboard-system-chip {
   display: flex; gap: 10px; padding: 9px 0; border: 0; border-top: 1px solid var(--rd-line); border-radius: 0; font-size: 14px; background: transparent;
 }
+.kairos-redesign button.dashboard-system-chip { width: 100%; align-items: center; text-align: left; color: inherit; font-family: inherit; cursor: pointer; }
+.kairos-redesign button.dashboard-system-chip:hover > span:nth-child(2) { text-decoration: underline; text-decoration-color: var(--rd-line-strong); text-underline-offset: 3px; }
 .kairos-redesign .dashboard-system-chip .status-dot { flex: 0 0 8px; width: 8px; height: 8px; }
 .kairos-redesign .dashboard-system-chip > span:nth-child(2) { flex: 1; }
 .kairos-redesign .dashboard-system-chip .meta { font-size: 12px; color: var(--rd-ink-dim); }
