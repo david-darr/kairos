@@ -52,6 +52,7 @@ export function mountRedesignChat(container) {
 
   function apply() {
     if (applied) return;
+    header.dispatchEvent(new Event('kairos:desktop-chat-layout'));
     applied = true;
     pillNext = pill.nextSibling;
     right.insertBefore(pill, right.firstChild);

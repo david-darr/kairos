@@ -1,3 +1,4 @@
+import { mountSheetSurface } from './mobileSheet.js';
 // Thin fetch wrapper — every view module goes through this rather than
 // calling fetch() directly, matching Odysseus's own shared-request-helper
 // pattern (see specs/frontend.md's appConfig.js).
@@ -132,6 +133,7 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
     if (top()) closeOptionMenu();
     controller.abort();
     observer?.disconnect();
+    disposeSheet();
     document.removeEventListener("keydown", keydown);
     document.removeEventListener("focusin", focusin);
     backdrop.remove();
@@ -155,6 +157,7 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
   owner ||= opener?.closest?.(".panel-dialog") || null;
   const observer = owner ? new MutationObserver(() => { if (!owner.isConnected) close(); }) : null;
   const dialog = { panel, backdrop, close, opener, group, signal: controller.signal };
+  const disposeSheet = mountSheetSurface(panel, close);
   panelDialogs.push(dialog);
   opener?.setAttribute?.("aria-haspopup", "dialog");
   closeButton.addEventListener("click", close, { signal: controller.signal });
@@ -273,7 +276,7 @@ export function openOptionMenu(anchor, items, onPick) {
     else row.addEventListener("click", (e) => { e.stopPropagation(); closeOptionMenu(); anchor.focus?.({ focusVisible: false }); onPick(item.value); });
     menu.append(row);
   }
-  document.body.append(menu);
+  (anchor.closest('dialog[open]') || document.body).append(menu);
 
   // Below the control, or above it when there is more room there, never
   // taller than the space on that side (2026-10-05: a long list near the

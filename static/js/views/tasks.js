@@ -84,6 +84,8 @@ export async function render(container) {
     ])
   );
 
+  form.querySelector('summary').dataset.mobileDock = 'create';
+  form.querySelector('summary').dataset.mobileCreateLabel = 'Schedule a task';
   const list = el("div", { id: "tasks-list", style: "margin-top:14px;" });
   list.builtinCard = builtinCard;
   const boardCard = el("div", { class: "glass card task-board-card" });

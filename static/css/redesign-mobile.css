@@ -1,0 +1,282 @@
+/* Part A1-A8. Phone chrome only.
+   Geometry adapted from the Monocode study, using Kairos brand tokens. */
+@media (max-width: 768px) {
+  .kairos-redesign .ms-shell,
+  .kairos-redesign .ms-activity,
+  .kairos-redesign .ms-tab-sheet { color: var(--rd-ink); font-family: var(--rd-font-ui); }
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) [hidden] { display: none !important; }
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :is(button, input, select, textarea) {
+    font: inherit; color: inherit; box-sizing: border-box; min-height: 44px; min-width: 44px;
+  }
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) button { cursor: pointer; }
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :focus-visible,
+  .kairos-redesign .ms-conversation .ms-chat-back:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .ms-glass {
+    background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong);
+    border-radius: 999px; box-shadow: var(--rd-shadow); color: var(--rd-ink);
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .kairos-redesign .ms-glass { background: color-mix(in srgb, var(--rd-surface-solid) 82%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  }
+  .kairos-redesign #chat-progress-host,
+  .kairos-redesign #rd-needs { display: none !important; }
+  .kairos-redesign[data-view="home"]:not(.mobile-menu-open) #mobile-menu-btn,
+  .kairos-redesign:has(.ms-conversation):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
+  .kairos-redesign #view-content.ms-home { padding: 0; overflow-x: hidden; }
+  .kairos-redesign .ms-home .dashboard-content { width: 100%; max-width: none; gap: 0; }
+  .kairos-redesign .ms-home:not(.ms-show-day) .dashboard-content > :not(.ms-shell) { display: none; }
+  .kairos-redesign .ms-home.ms-show-day .dashboard-content > :not(.ms-shell) { margin: 16px; }
+  .kairos-redesign .ms-home .dashboard-hero { min-height: 0; padding: 16px; }
+  .kairos-redesign .ms-shell {
+    --ms-page: 0; position: relative; isolation: isolate; display: flex; flex-direction: column;
+    height: var(--ms-viewport-height, 100dvh); min-height: 0; width: 100%; overflow: hidden;
+  }
+  .kairos-redesign .ms-shell .ms-background { position: absolute; inset: 0; border-radius: 0; z-index: -1; opacity: .65; pointer-events: none; }
+  .kairos-redesign .ms-shell .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
+  .kairos-redesign .ms-header { position: relative; z-index: 3; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px; }
+  .kairos-redesign .ms-header-row { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 8px; height: 44px; }
+  .kairos-redesign :is(.ms-avatar, .ms-settings) { display: grid; place-items: center; padding: 0; width: 44px; height: 44px; }
+  .kairos-redesign .ms-avatar { position: relative; font-weight: 600; }
+  .kairos-redesign .ms-avatar-badge { position: absolute; top: -2px; right: -4px; font-size: 10px; padding: 2px 4px; border-radius: 999px; background: var(--rd-ink); color: var(--rd-ground); }
+  .kairos-redesign .ms-settings svg { width: 20px; height: 20px; }
+  .kairos-redesign .ms-switch { justify-self: center; display: flex; position: relative; padding: 3px; height: 44px; width: 174px; }
+  .kairos-redesign .ms-switch-thumb { position: absolute; inset: 3px auto 3px 3px; width: calc(50% - 3px); border-radius: inherit; background: var(--rd-surface-2); transform: translateX(calc(var(--ms-page) * 100%)); transition: transform 350ms cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign .ms-switch .ms-segment { position: relative; flex: 1; min-height: 44px; margin-block: -3px; padding: 0; border: 0; background: transparent; font-size: 15px; font-weight: 600; }
+  .kairos-redesign .ms-context { margin: 2px 0 0; min-height: 22px; line-height: 22px; font-size: 12px; text-align: center; color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-context select { max-width: 100%; min-height: 44px; border: 0; background: transparent; padding: 0 12px; font-size: 12px; color: var(--rd-ink-dim); text-align: center; }
+  .kairos-redesign .ms-page-window { flex: 1; min-height: 0; overflow: hidden; }
+  .kairos-redesign .ms-page-track { display: flex; width: 200%; height: 100%; transform: translateX(calc(var(--ms-page) * -50%)); transition: transform 350ms cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign .ms-dragging :is(.ms-page-track, .ms-switch-thumb) { transition: none; }
+  .kairos-redesign .ms-page { position: relative; flex: 0 0 50%; min-width: 0; box-sizing: border-box; }
+  .kairos-redesign .ms-launch { display: flex; flex-direction: column; }
+  .kairos-redesign .ms-intro { flex: 1; min-height: 100px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; padding: 0 24px 52px; text-align: center; }
+  .kairos-redesign .ms-mark { width: 84px; height: 84px; opacity: .3; }
+  .kairos-redesign .ms-mark svg { width: 100%; height: 100%; }
+  .kairos-redesign .ms-intro h1 { margin: 0; font: 500 30px/1.1 var(--rd-font-title); }
+  .kairos-redesign .ms-launch-bottom { position: relative; padding: 0 16px max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px); }
+  .kairos-redesign .ms-launch-composer { position: relative; display: flex; align-items: flex-end; gap: 4px; padding: 5px; border-radius: 28px; }
+  .kairos-redesign .ms-launch-composer button { border: 0; border-radius: 999px; background: transparent; padding: 0 10px; }
+  .kairos-redesign .ms-launch-composer button:last-child { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign .ms-launch-composer textarea { flex: 1; width: 0; resize: none; max-height: 160px; border: 0; background: transparent; padding: 11px 2px; line-height: 22px; font-size: 16px; box-shadow: none; }
+  .kairos-redesign .ms-your-day { position: relative; display: block; margin: 0 auto; background: transparent; border: 0; font-size: 13px; text-decoration: underline; }
+  .kairos-redesign .ms-blur { position: absolute; left: 0; right: 0; pointer-events: none; z-index: -1; height: 140px; }
+  .kairos-redesign .ms-blur-top { top: 0; }
+  .kairos-redesign .ms-blur-bottom { bottom: 0; height: calc(100% + 40px); }
+  .kairos-redesign .ms-blur i { position: absolute; inset: 0; backdrop-filter: blur(calc(1px + var(--step) * 1px)); -webkit-backdrop-filter: blur(calc(1px + var(--step) * 1px)); background: color-mix(in srgb, var(--rd-ground) 12%, transparent); mask-image: linear-gradient(to bottom, var(--rd-ink), transparent); }
+  .kairos-redesign .ms-blur-top i { height: calc(100% - var(--step) * 12%); }
+  .kairos-redesign .ms-blur-bottom i { top: calc(var(--step) * 12%); mask-image: linear-gradient(to top, var(--rd-ink), transparent); }
+  .kairos-redesign .ms-history { display: flex; flex-direction: column; padding: 8px 16px max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px); }
+  .kairos-redesign .ms-history-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
+  .kairos-redesign .ms-history-row { position: relative; border-radius: 12px; overflow: hidden; border-bottom: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-history-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: calc(100% - 44px); gap: 6px; border: 0; border-radius: 12px; background: var(--rd-surface-solid); text-align: left; padding: 14px; transition: transform 240ms ease; }
+  .kairos-redesign .ms-history-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
+  .kairos-redesign .ms-history-main small { grid-column: 1 / -1; font-size: 13px; color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-history-age { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-row-more { position: absolute; right: 0; top: 0; height: 100%; border: 0; background: var(--rd-surface-solid); }
+  .kairos-redesign .ms-row-actions { position: absolute; right: 0; inset-block: 0; display: flex; align-items: center; gap: 8px; visibility: hidden; }
+  .kairos-redesign .ms-row-actions button { width: 60px; padding: 0 2px; font-size: 12px; }
+  .kairos-redesign .ms-row-actions button:last-child { color: var(--danger); }
+  .kairos-redesign .ms-actions-open .ms-history-main { width: 100%; transform: translateX(-136px); }
+  .kairos-redesign .ms-actions-open .ms-row-more { display: none; }
+  .kairos-redesign .ms-actions-open .ms-row-actions { visibility: visible; }
+  .kairos-redesign .ms-history-dock { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; padding: 5px; border-radius: 26px; }
+  .kairos-redesign .ms-history-dock input { min-width: 0; width: 100%; height: 50px; padding-inline: 14px; border: 0; background: transparent; font-size: 16px; }
+  .kairos-redesign .ms-history-dock > button { border: 0; background: transparent; padding-inline: 12px; }
+  .kairos-redesign .ms-history-filters { position: absolute; bottom: calc(100% + 8px); right: 0; padding: 8px; border-radius: 20px; display: flex; flex-direction: column; max-width: 100%; }
+  .kairos-redesign .ms-history-filters select { max-width: 100%; padding: 0 8px; border: 0; background: transparent; font-size: 13px; }
+  .kairos-redesign .ms-history-dock .ms-blur { z-index: -1; }
+  .kairos-redesign .ms-tab-sheet { position: fixed; inset: auto 0 0; padding: 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; border: 1px solid var(--rd-line-strong); border-radius: 28px 28px 0 0; background: var(--rd-surface-solid); overflow: auto; box-sizing: border-box; }
+  .kairos-redesign .ms-tab-sheet[open] { animation: ms-sheet-in 280ms cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign .ms-tab-sheet::backdrop { background: rgba(var(--shade-rgb), .4); }
+  .kairos-redesign .ms-sheet-panel { padding: 0 max(20px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))) max(20px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .ms-sheet-grab { display: block; margin: 0 auto; width: 60px; border: 0; background: transparent; font-size: 0 !important; }
+  .kairos-redesign .ms-sheet-grab::after { content: ''; display: block; width: 36px; height: 4px; border-radius: 999px; background: var(--rd-line-strong); margin: auto; }
+  .kairos-redesign .ms-sheet-heading { margin: 0 0 20px; font: 500 30px var(--rd-font-title); }
+  .kairos-redesign .ms-tab-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .kairos-redesign .ms-tab-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 86px !important; border-radius: 20px; padding: 10px 4px; font-size: 13px !important; overflow-wrap: anywhere; }
+  .kairos-redesign .ms-tab-tile svg { width: 22px; height: 22px; }
+  .kairos-redesign .ms-tab-tile[aria-current] { border-color: var(--rd-focus); background: var(--rd-surface-2); }
+  .kairos-redesign .ms-tab-tile .nav-badge { position: absolute; right: 8px; top: 6px; }
+  .kairos-redesign .ms-sheet-footer { margin-top: 20px; border-top: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-account-row { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--rd-line); background: transparent; padding: 10px 4px; }
+  .kairos-redesign .ms-account-row:disabled { opacity: .5; }
+  .kairos-redesign .ms-activity { position: relative; margin-bottom: 10px; }
+  .kairos-redesign .ms-activity-slot { max-height: 38dvh; overflow-y: auto; }
+  .kairos-redesign .ms-activity-floating { position: fixed; z-index: 120; right: max(12px, var(--mobile-safe-right, env(safe-area-inset-right, 0px))); bottom: max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); max-width: min(360px, calc(100vw - 24px)); max-height: 55dvh; overflow-y: auto; padding: 4px; }
+  .kairos-redesign:has(.ms-conversation) .ms-activity-floating { top: calc(84px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: auto; }
+  .kairos-redesign .ms-activity-floating > button { padding: 0 16px; }
+  .kairos-redesign .ms-player { display: flex; align-items: center; padding: 5px; gap: 4px; min-height: 60px; }
+  .kairos-redesign .ms-player button { border: 0; box-shadow: none; background: transparent; padding: 0 8px; font-size: 12px; }
+  .kairos-redesign .ms-player-main { flex: 1; min-width: 0 !important; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-launch:has(textarea:focus) .ms-intro { padding-bottom: 12px; }
+  .kairos-redesign .ms-needs-you { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--rd-surface-solid)); }
+  .kairos-redesign .ms-spinner { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--rd-line-strong); border-top-color: var(--rd-ink); border-radius: 50%; margin-right: 8px; animation: ms-spin 1.4s linear infinite; }
+  .kairos-redesign .ms-mini-pills { display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow: auto; padding-top: 8px; }
+  .kairos-redesign .ms-mini-row { display: flex; gap: 4px; min-height: 52px; }
+  .kairos-redesign .ms-mini-row button:first-child { flex: 1; min-width: 0; padding: 8px 14px; text-align: left; }
+  .kairos-redesign .ms-finished-deck { margin-bottom: 10px; }
+  .kairos-redesign .ms-finished-deck > button { border: 0; background: transparent; padding: 0 12px; font-size: 12px; }
+  .kairos-redesign .ms-finished-cards { position: relative; height: 62px; }
+  .kairos-redesign .ms-finished-card { position: absolute; inset: auto 0 0; width: 100%; height: 48px; padding: 0 16px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transform: translateY(calc(var(--deck-index) * -7px)) scale(calc(1 - var(--deck-index) * .05)); z-index: calc(3 - var(--deck-index)); }
+  .kairos-redesign .ms-spread .ms-finished-cards { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; height: auto; max-height: 190px; overflow: auto; }
+  .kairos-redesign .ms-spread .ms-finished-card { position: relative; inset: auto; transform: none; }
+  .kairos-redesign .ms-put-away { background: transparent; border: 0; }
+  .kairos-redesign .ms-conversation { animation: ms-chat-in 320ms cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign .ms-conversation .chat-mobile-header { position: relative; isolation: isolate; display: flex; gap: 8px; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 12px 8px; min-height: 58px; }
+  .kairos-redesign .ms-conversation #chat-history-toggle { display: none; }
+  .kairos-redesign .ms-chat-back { flex: none; width: 44px; height: 44px; padding: 0; font-size: 28px; }
+  .kairos-redesign .ms-chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .kairos-redesign .ms-chat-heading strong { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .ms-chat-heading small { color: var(--rd-ink-dim); font-size: 12px; }
+  .kairos-redesign .ms-chat-capsule { position: relative; isolation: isolate; display: flex; flex: none; align-items: center; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .kairos-redesign .ms-chat-capsule::before { content: ''; position: absolute; inset: 0; border-radius: inherit; z-index: -1; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  .kairos-redesign .ms-chat-capsule .chat-documents-toggle { display: none; }
+  .kairos-redesign .ms-chat-capsule .input-icon-btn { min-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+  .kairos-redesign .ms-conversation .chat-input-right .chat-header-model { min-width: 0; max-width: 160px; margin-right: auto; }
+  .kairos-redesign .ms-conversation .chat-input-right .model-picker-menu { position: fixed; top: auto; bottom: calc(100px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .ms-conversation .chat-phone-tools .overflow-menu { position: absolute; top: calc(100% + 8px); right: 0; max-height: calc(100dvh - 100px); max-width: calc(100vw - 24px); overflow-y: auto; }
+  @keyframes ms-spin { to { transform: rotate(360deg); } }
+  @keyframes ms-sheet-in { from { transform: translateY(100%); } }
+  @keyframes ms-chat-in { from { transform: translateX(100%); } }
+  @media (max-height: 560px) {
+    .kairos-redesign .ms-intro { padding-bottom: 8px; gap: 8px; }
+    .kairos-redesign .ms-mark { width: 48px; height: 48px; }
+    .kairos-redesign .ms-intro h1 { font-size: 24px; }
+    .kairos-redesign .ms-activity-slot { max-height: 24dvh; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet, .ms-conversation),
+    .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet, .ms-conversation) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+}
+
+/* Shared interaction zone, composer and pushed pages. Desktop has no rules. */
+@media (max-width: 768px) {
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer, .settings-mobile-page) [hidden] { display: none !important; }
+  .kairos-redesign :is(.ms-sheet, .ms-dock, .ms-git-dock, .ms-composer) { color: var(--rd-ink); font-family: var(--rd-font-ui); box-sizing: border-box; }
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :is(button, input:not([type=checkbox]):not([type=radio]), select, textarea, summary) { min-height: 44px; min-width: 44px; box-sizing: border-box; font: inherit; }
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .ms-has-dock { padding-bottom: calc(90px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) !important; scroll-padding-bottom: 100px; }
+  .kairos-redesign .ms-dock { position: fixed; z-index: 110; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); right: max(12px, var(--mobile-safe-right, env(safe-area-inset-right, 0px))); bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); padding: 3px; min-height: 50px; display: flex; gap: 4px; align-items: center; }
+  .kairos-redesign .ms-dock > input { flex: 1; width: 0; min-width: 0; border: 0; background: transparent; padding: 0 14px; border-radius: 999px; font-size: 16px; }
+  .kairos-redesign .ms-dock > button { flex: 1; padding: 0 12px; border: 0; box-shadow: none; background: transparent; font-size: 15px; }
+  .kairos-redesign .ms-dock:has(input) > button { flex: 0 0 44px; font-size: 24px; }
+  .kairos-redesign .ms-dock button[aria-pressed=true] { background: var(--rd-surface-2); }
+  .kairos-redesign:has(.ms-has-dock) .ms-activity-floating { bottom: auto; top: calc(64px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
+  .kairos-redesign[data-view=agents] .ms-activity-floating { top: calc(64px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: auto; }
+  .kairos-redesign .ms-git-dock { position: sticky; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); display: flex; justify-content: center; gap: 4px; padding: 3px; margin-top: 16px; z-index: 2; }
+  .kairos-redesign .ms-git-dock > button { border: 0; background: transparent; box-shadow: none; padding-inline: 12px; flex: 1; }
+
+  .kairos-redesign .ms-sheet { position: fixed; inset: auto 0 0; width: 100%; max-width: 100%; max-height: calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: var(--ms-keyboard, 0px); margin: 0; padding: 0; color: var(--rd-ink); border: 1px solid var(--rd-line-strong); border-radius: 26px 26px 0 0; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+  .kairos-redesign .ms-sheet[open] { display: flex; flex-direction: column; }
+  .kairos-redesign .ms-sheet-full { height: calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
+  .kairos-redesign .ms-sheet::backdrop { background: rgba(var(--shade-rgb), .38); }
+  .kairos-redesign .ms-sheet-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px 8px; border-bottom: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-sheet-header h2 { font: 500 26px/1.2 var(--rd-font-title); margin: 0; }
+  .kairos-redesign .ms-sheet-header button { padding-inline: 14px; }
+  .kairos-redesign .ms-sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 16px calc(20px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .ms-sheet-grabber { display: block; width: 64px; height: 44px; min-height: 44px; margin: 0 auto; border: 0; border-radius: 0; padding: 0; background: transparent; position: relative; touch-action: none; flex-shrink: 0; }
+  .kairos-redesign .ms-sheet-grabber::after { content: ''; position: absolute; width: 36px; height: 4px; border-radius: 4px; background: var(--rd-ink-faint); left: 14px; top: 16px; }
+  .kairos-redesign .modal-panel.ms-sheet-surface { width: 100%; max-width: 100%; max-height: calc(100dvh - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); margin: auto 0 0; border-radius: 26px 26px 0 0; padding-top: 0; padding-bottom: calc(16px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .modal-backdrop:has(> .ms-sheet-surface) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 0; align-items: flex-end; }
+  .kairos-redesign .ms-sheet .ms-model-menu { display: block !important; position: static !important; inset: auto !important; max-width: none !important; width: 100% !important; max-height: none !important; overflow: visible; margin: 16px 0 0; border: 0; box-shadow: none; background: transparent; padding: 0; }
+  .kairos-redesign .ms-sheet .ms-model-menu.hidden { display: none !important; }
+  .kairos-redesign .ms-model-menu :is(.model-version-search, .model-effort-row, .model-picker-heading:first-child) { display: none; }
+  .kairos-redesign .ms-model-root > input { width: 100%; font-size: 16px; margin-bottom: 8px; }
+  .kairos-redesign .ms-model-root > button, .kairos-redesign .ms-model-options > button { width: 100%; border-radius: 16px; text-align: left; padding-inline: 14px; }
+  .kairos-redesign .ms-model-menu .model-picker-item { min-height: 52px; border-radius: 14px; white-space: normal; }
+  .kairos-redesign .ms-model-menu .model-picker-item.active::after { content: '✓'; margin-left: auto; color: var(--rd-ink); }
+  .kairos-redesign .ms-provider-heading { font: 500 14px var(--rd-font-ui); color: var(--rd-ink-dim); margin: 20px 4px 8px; }
+  .kairos-redesign .ms-default-badge { border: 1px solid var(--rd-line); border-radius: 999px; padding: 4px 8px; margin-left: 8px; font-size: 12px; }
+  .kairos-redesign .ms-account-card { background: var(--rd-surface-2); border: 1px solid var(--rd-line); border-radius: 22px; margin-top: 16px; padding: 16px; }
+  .kairos-redesign .ms-account-card h3 { margin: 0 0 12px; }
+  .kairos-redesign .ms-account-provider + .ms-account-provider { margin-top: 16px; border-top: 1px solid var(--rd-line); padding-top: 16px; }
+  .kairos-redesign .ms-account-provider p { font-size: 14px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-quota { display: grid; gap: 6px; margin-top: 10px; font-size: 13px; }
+  .kairos-redesign .ms-quota progress { width: 100%; height: 8px; accent-color: var(--point); }
+  .kairos-redesign .ms-quota[data-tone=warning] progress { accent-color: var(--warn); }
+  .kairos-redesign .ms-quota[data-tone=danger] progress { accent-color: var(--danger); }
+  .kairos-redesign .ms-quota small { color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-model-options { animation: ms-chat-in 280ms ease-out; }
+  .kairos-redesign .ms-model-options label { display: block; margin-top: 20px; }
+  .kairos-redesign .ms-model-options input[type=range] { display: block; width: 100%; accent-color: var(--point); }
+  .kairos-redesign .ms-model-options .composer-menu-options { display: flex; flex-direction: column; gap: 12px; }
+  .kairos-redesign .ms-phone-model-controls { display: none; }
+  .kairos-redesign .ms-embedded-model-trigger { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .kairos-redesign .ms-composer { position: relative; min-height: 50px; margin-inline: 8px; padding: 2px 54px; border: 1px solid var(--rd-line-strong); border-radius: 25px; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); transition: border-radius 280ms ease-out, margin 280ms ease-out, padding 280ms ease-out; }
+  .kairos-redesign .chat-input-bar.ms-composer, .kairos-redesign .forge-transcript-composer.ms-composer { display: block; }
+  .kairos-redesign .ms-composer .ms-composer-context { display: block; padding: 0 12px; max-height: 0; opacity: 0; font-size: 12px; color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: max-height 280ms ease-out, padding 280ms ease-out, opacity 280ms ease-out; }
+  .kairos-redesign .ms-composer textarea { min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; font-size: 16px; width: 100%; border: 0; background: transparent; padding: 10px 4px; box-shadow: none; transition: height 280ms ease-out; }
+  .kairos-redesign .ms-composer .chat-input-top { display: block; padding: 0; min-width: 0; }
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) :is(.chat-input-bottom, .chat-input-left, .chat-input-right) { display: contents; }
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) .overflow-wrapper:has(#overflow-plus-btn) { position: absolute; left: 3px; bottom: 3px; }
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) #chat-mic { position: absolute; right: 3px; bottom: 3px; }
+  .kairos-redesign .ms-composer:not(.ms-composer-expanded) :is(#chat-send, .chat-header-model, #workspace-pill-slot, .attach-strip, .forge-composer-context, .forge-composer-chips) { display: none; }
+  .kairos-redesign .ms-composer.ms-composer-expanded { border-radius: 24px; margin-inline: 0; padding: 4px 8px 6px; }
+  .kairos-redesign .ms-composer-expanded .ms-composer-context { max-height: 44px; opacity: 1; padding-block: 8px; }
+  .kairos-redesign .ms-composer-expanded textarea { min-height: 64px; padding: 10px 12px; }
+  .kairos-redesign .ms-composer-expanded .chat-input-bottom { display: flex; align-items: center; gap: 4px; padding: 2px 0 0; }
+  .kairos-redesign .ms-composer-expanded .chat-input-left { display: flex; align-items: center; flex: 0 0 auto; }
+  .kairos-redesign .ms-composer-expanded .chat-input-right { display: flex; flex: 1; min-width: 0; align-items: center; gap: 2px; }
+  .kairos-redesign .ms-composer-expanded .chat-header-model { flex: 1; max-width: none; margin: 0 auto 0 0; }
+  .kairos-redesign .ms-composer-expanded .ms-composer-context { display: flex; align-items: center; gap: 8px; max-height: 60px; }
+  .kairos-redesign .ms-composer-expanded .ms-composer-context > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .ms-composer-expanded #workspace-pill-slot { display: block; min-width: 0; max-width: 90px; overflow: hidden; }
+  .kairos-redesign .ms-composer-expanded #workspace-pill-slot:empty { display: none; }
+  .kairos-redesign .ms-composer .attach-strip { margin: 0; padding: 0 8px; overflow-x: auto; }
+  .kairos-redesign .ms-composer .chat-reference-chips { padding-inline: 10px; }
+  .kairos-redesign .ms-composer .overflow-menu { max-height: min(55dvh, 420px); overflow-y: auto; max-width: calc(100vw - 24px); }
+  .kairos-redesign .ms-conversation:not(.ms-launch-chat) .chat-composer-dock { padding-bottom: max(8px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  .kairos-redesign .ms-conversation:not(.ms-launch-chat) .ms-composer { transform: translateY(calc(-1 * var(--ms-keyboard, 0px))); }
+  .kairos-redesign .ms-composer.ms-dictating .chat-input-bottom { display: none; }
+  .kairos-redesign .ms-composer.ms-dictating .forge-transcript-footer { display: none; }
+  .kairos-redesign .ms-voice-row { display: flex; align-items: center; gap: 8px; }
+  .kairos-redesign .ms-voice-row button { background: transparent; border: 0; box-shadow: none; padding-inline: 10px; }
+  .kairos-redesign .ms-voice-wave { display: flex; flex: 1; gap: 3px; height: 32px; align-items: center; justify-content: center; }
+  .kairos-redesign .ms-voice-wave i { width: 3px; border-radius: 3px; background: var(--point); height: calc(5px + var(--ms-level, .15) * 24px); }
+  .kairos-redesign .ms-voice-wave i:nth-child(2n) { height: calc(8px + var(--ms-level, .15) * 12px); }
+  .kairos-redesign .ms-voice-timer { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .kairos-redesign .forge-transcript-composer.ms-composer { padding-inline: 8px; padding-bottom: 4px; transform: translateY(calc(-1 * var(--ms-keyboard, 0px))); }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) { padding-inline: 54px; }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) .forge-transcript-footer { position: absolute; inset: 3px; pointer-events: none; display: flex; justify-content: space-between; }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) .forge-transcript-footer > button { pointer-events: auto; }
+  .kairos-redesign .forge-transcript-composer.ms-composer:not(.ms-composer-expanded) :is(.forge-send, .forge-queue-button) { display: none; }
+  .kairos-redesign .forge-transcript-composer.ms-composer-expanded .forge-transcript-footer { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .kairos-redesign .forge-transcript-composer.ms-composer-expanded .forge-composer-chips { flex: 1; min-width: 0; }
+  .kairos-redesign .forge-composer-chips > .custom-select, .kairos-redesign .forge-composer-chips .session-chat-tools > :not(.ms-embedded-model-trigger):not(.model-picker-menu) { display: none; }
+  .kairos-redesign .forge-composer.ms-composer .chat-input-left { display: none; }
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) > .chat-input-bottom > .ms-forge-add { position: absolute; left: 3px; bottom: 3px; }
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) :is(.chat-input-left, .model-pill, .forge-composer-send) { display: none; }
+  .kairos-redesign .forge-composer.ms-composer:not(.ms-composer-expanded) .ms-forge-mic { position: absolute; right: 3px; bottom: 3px; }
+  .kairos-redesign .ms-composer.ms-dictating .chat-input-bottom { display: none !important; }
+  .kairos-redesign .ms-composer-expanded .forge-composer-context { display: none; }
+  .kairos-redesign .ms-launch-chat { display: block; width: 100%; height: auto; min-height: 0; padding: 0; animation: none; }
+  .kairos-redesign .ms-launch-context { border: 0; background: transparent; color: var(--rd-ink-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; padding: 0 12px; }
+  .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) > :not(#chat-main) { display: none !important; }
+  .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) #chat-main { display: block; padding: 0; overflow: visible; }
+  .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) #chat-main > :not(.chat-composer-dock) { display: none !important; }
+  .kairos-redesign .ms-launch-chat:not(.ms-launch-chat-open) .chat-composer-dock { position: relative; inset: auto; transform: none; width: 100%; margin: 0; padding: 0; }
+  .kairos-redesign .ms-live-chat > .ms-header, .kairos-redesign .ms-live-chat .ms-intro, .kairos-redesign .ms-live-chat .ms-your-day, .kairos-redesign .ms-live-chat .ms-activity-slot { display: none; }
+  .kairos-redesign .ms-live-chat .ms-launch-bottom { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; }
+  .kairos-redesign .ms-live-chat .ms-launch-chat-open { flex: 1; height: 100%; min-height: 0; }
+  .kairos-redesign .ms-live-chat .ms-launch-chat-open #chat-main { min-height: 0; height: 100%; }
+
+  .kairos-redesign .settings-mobile-page .settings-nav { background: var(--rd-ground); padding: 16px; }
+  .kairos-redesign .settings-mobile-page .settings-nav-block, .kairos-redesign .settings-mobile-page .set-group { border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-surface-solid); overflow: hidden; }
+  .kairos-redesign .settings-mobile-page .settings-nav-item { min-height: 52px; border: 0; border-radius: 0; padding: 8px 16px; color: var(--rd-ink); position: relative; }
+  .kairos-redesign .settings-mobile-page .settings-nav-item + .settings-nav-item { border-top: 0; }
+  .kairos-redesign .settings-mobile-page .settings-nav-item + .settings-nav-item::before { content: ''; position: absolute; top: 0; left: 52px; right: 16px; height: 1px; background: var(--rd-line); }
+  .kairos-redesign .settings-mobile-page .set-row { min-height: 52px; padding: 12px 16px; border: 0; position: relative; }
+  .kairos-redesign .settings-mobile-page .set-row + .set-row::before { content: ''; position: absolute; top: 0; left: 16px; right: 16px; height: 1px; background: var(--rd-line); }
+  .kairos-redesign .settings-mobile-page .settings-mobile-back { min-width: 44px; min-height: 44px; }
+  .kairos-redesign .settings-mobile-page :is(.settings-search, .set-row-control .btn, .set-header-actions .btn) { min-height: 44px; }
+  .kairos-redesign .settings-mobile-page[data-mobile-view=page] .set-page { animation: ms-chat-in 280ms ease-out; padding-bottom: calc(56px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .kairos-redesign .ms-composer { background: color-mix(in srgb, var(--rd-surface-solid) 86%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .kairos-redesign :is(.ms-dock, .ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page),
+    .kairos-redesign :is(.ms-dock, .ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+}

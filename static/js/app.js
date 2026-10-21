@@ -12,6 +12,8 @@ import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
+import { mountMobileDock } from './mobileDock.js';
+import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
 import { mountForgeRail } from './forgeRail.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
@@ -118,13 +120,14 @@ let navigationVersion = 0;
 // captured once the arriving view has drawn its halftone (and the chat has
 // opened any chat it was asked for), or after 800 ms at most.
 export function switchTab(tabId, options = {}) {
+  ({ tab: tabId, options } = phoneRoute(tabId, options));
   if (tabId === 'forgeSession') tabId = 'forgeShell';
   if (tabId === 'forgeShell' && activeTab === 'forgeShell' && modules.forgeShell) {
     closeMobileMenu();
     return modules.forgeShell.open(options);
   }
   const homeAndChat = (activeTab === "home" && tabId === "chat") || (activeTab === "chat" && tabId === "home");
-  if (!homeAndChat || !document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches
+  if (isPhoneShell() || !homeAndChat || !document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches
       || document.documentElement.dataset.halftone !== "on") {
     return performSwitch(tabId, options);
   }
@@ -192,6 +195,11 @@ async function performSwitch(tabId, options = {}) {
     if (typeof result === "function") {
       if (version === navigationVersion) activeUnmount = result;
       else result();
+    }
+    if (version === navigationVersion) {
+      const disposeDock = mountMobileDock(nextView, tabId);
+      const previousUnmount = activeUnmount;
+      activeUnmount = () => { disposeDock(); previousUnmount?.(); };
     }
   } catch (error) {
     if (version !== navigationVersion) return;
@@ -621,6 +629,7 @@ async function startApp() {
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
   floatingProgress.init({ switchTab });
+  initMobileShell();
   import('./redesignShell.js').then(shell => shell.init()).catch(() => {}); // the redesign preview's sidebar row; inert with the switch off
   await chatStream.connect();
   notificationRegistration().catch(() => {});
@@ -677,7 +686,7 @@ async function startApp() {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');
     await switchTab(['chat', 'home', 'library', 'notes', 'tasks', 'calendar'].includes(target)
-      ? target : appMode === 'forge' ? 'forgeHome' : 'home');
+      ? target : appMode === 'forge' ? 'forgeHome' : 'home', { mobileNew: launch.get('newchat') === '1' });
     if (launch.has('newchat') || launch.has('view')) history.replaceState(null, '', '/');
   }
 }

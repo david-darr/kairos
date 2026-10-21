@@ -82,6 +82,7 @@ export async function render(container) {
   const weekBtn = el('button', { class: 'btn', text: 'Week', 'aria-pressed': String(viewMode === 'week') });
   // The wrapper only lets the redesign draw Month and Week as one segmented
   // control; with the switch off it is display: contents (redesign-calendar.css).
+  todayBtn.dataset.mobileDock = 'today'; monthBtn.dataset.mobileDock = 'month'; weekBtn.dataset.mobileDock = 'week';
   const viewSwitch = el('div', { class: 'cal-view-switch', role: 'group', 'aria-label': 'Calendar view' }, [monthBtn, weekBtn]);
   nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
 
@@ -152,7 +153,7 @@ function buildCreateBar() {
   const bar = el('div', { class: 'cal-create-bar' });
   bar._dateInput = el('input', { type: 'date', value: dateOnly(new Date()) });
   bar._calendars = [];
-  bar.append(el('button', { type: 'button', class: 'btn primary', text: '+ Add an event', onclick: () => {
+  bar.append(el('button', { type: 'button', class: 'btn primary', 'data-mobile-dock': 'create', 'data-mobile-create-label': 'New event', text: '+ Add an event', onclick: () => {
     const day = new Date(`${bar._dateInput.value}T00:00:00`);
     eventDialog(bar._calendars, bar._refresh, null, day, bar._owner);
   } }));

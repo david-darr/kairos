@@ -100,6 +100,8 @@ function renderDrive(host, status, refreshAll) {
   const more = button('Load more', () => load(true)); more.hidden = true;
   const uploadInput = el('input', { type: 'file', multiple: true, hidden: true });
   const newMenu = el('details', { class: 'google-new-menu' }, [el('summary', { class: 'btn primary', text: '+ New' })]);
+  newMenu.querySelector('summary').dataset.mobileDock = 'create';
+  newMenu.querySelector('summary').dataset.mobileCreateLabel = 'Create or upload in Drive';
   newMenu.append(el('div', { class: 'google-new-actions' }, [
     button('New folder', async () => {
       detail.hidden = false;
@@ -145,6 +147,7 @@ function renderDrive(host, status, refreshAll) {
     const gb = value => `${(Number(value || 0) / 1024 ** 3).toFixed(1)} GB`;
     storage.textContent = `${gb(quota.usage)} used${quota.limit ? ` of ${gb(quota.limit)}` : ''}`;
   }).catch(() => { storage.textContent = 'Storage unavailable'; });
+  search.dataset.mobileDock = 'search';
   search.addEventListener('input', () => { state.query = search.value.trim(); state.parent = null; state.trail = []; schedule(); });
   kind.addEventListener('change', () => { state.kind = kind.value; load(); });
   uploadInput.addEventListener('change', async () => {

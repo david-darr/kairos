@@ -1,3 +1,4 @@
+import { mobileOn } from '../mobileShared.js';
 import { api, el, customSelect, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { shortcutGroups, readQuickEntry } from '../shortcuts.js';
@@ -293,15 +294,23 @@ export async function renderMobilePage(container, section, onExit) {
   container.append(titlebar, body);
 
   mobile = {
-    container, barTitle, subBack: null,
+    container, barTitle, subBack: null, listScroll: 0,
     showList() {
       renderVersion++; // a page still loading must not take the screen back
       container.dataset.mobileView = "list";
       barTitle.textContent = "Settings";
       this.subBack = null;
       content.replaceChildren();
+      if (mobileOn()) {
+        nav.scrollTop = this.listScroll;
+        nav.querySelector(`[data-section="${activeSectionId}"]`)?.focus({ preventScroll: true });
+      }
     },
-    showPage(title) { container.dataset.mobileView = "page"; barTitle.textContent = title; },
+    showPage(title) {
+      if (container.dataset.mobileView !== 'page') this.listScroll = nav.scrollTop;
+      container.dataset.mobileView = "page"; barTitle.textContent = title;
+      if (mobileOn()) backBtn.focus({ preventScroll: true });
+    },
   };
   backBtn.addEventListener("click", () => {
     if (container.dataset.mobileView !== "page") { mobile = null; onExit?.(); return; }

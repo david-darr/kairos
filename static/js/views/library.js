@@ -125,7 +125,9 @@ async function renderList(container) {
   const [header, tabs] = libraryChrome(container, "documents");
 
   const searchInput = el("input", { placeholder: "Search documents and chat files...", style: "flex:1;" });
+  searchInput.dataset.mobileDock = 'search'; searchInput.setAttribute('aria-label', 'Search documents and chat files');
   const newBtn = el("button", { class: "btn primary", text: "+ New document" });
+  newBtn.dataset.mobileDock = 'create'; newBtn.dataset.mobileCreateLabel = 'New document';
   // Plain file input + FileReader (David's ask 2026-09-01) — works
   // identically in the Electron shell and the plain-HTTP web-access path,
   // so import is no longer gated behind window.jarvis (see skillManager.js's

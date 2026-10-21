@@ -6,6 +6,7 @@ import { mountDither } from "../dither.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { mountRedesignHome } from "../redesignHome.js";
+import { mountMobileHome } from '../mobileShell.js';
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
 
 // The redesign is the look that ships, and its Home cards are quiet list rows,
@@ -214,6 +215,7 @@ export function render(container, tabId, options = {}) {
   const customize = el("div", { class: "dashboard-customize" }, [action("Customize", "settings", false, { section: "layout" })]);
   content.append(hero, customize, grid);
   container.appendChild(content);
+  const mobile = mountMobileHome({ container, content, banner, options });
   // Chat to Home (app.js switchTab) waits for the banner before animating
   // into it. It's drawn from the Home halftone slot (a custom picture, or
   // the Kairos figure), in the appearance's halftone colors, and redrawn
@@ -523,6 +525,7 @@ export function render(container, tabId, options = {}) {
     if (["skills", "integrations", "tabs", "catalog", "addons"].includes(key)) drawStore();
     content.classList.add("is-filled");
     redesign?.update(key);
+    mobile.update(key, value);
   }
 
   async function refresh() {
@@ -570,5 +573,5 @@ export function render(container, tabId, options = {}) {
   document.addEventListener("jarvis:tabs-changed", refresh);
   const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
 }

@@ -71,7 +71,7 @@ function updatePresentation() {
 }
 
 async function jumpToSession(sessionId) {
-  await _switchTab("chat");
+  await _switchTab("chat", { mobileConversation: true });
   const chatView = await import("./views/chat.js");
   chatView.openSessionById(sessionId);
 }

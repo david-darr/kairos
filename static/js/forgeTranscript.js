@@ -1,3 +1,7 @@
+import { mountMobileDictation } from './mobileDictation.js';
+import { openMobileSheet } from './mobileSheet.js';
+import { mobileOn, phone, button } from './mobileShared.js';
+import { mountMobileComposer } from './mobileComposer.js';
 import { api, el, confirmDialog } from './api.js';
 import { mountSessionChat } from './sessionChat.js';
 import { renderMessageBody } from './chatContent.js';
@@ -48,7 +52,7 @@ function createTranscript(options) {
   let disposed = false, following = true, heldUntil = 0, refreshVersion = 0;
   let files = [], checkpoints = [], refreshing = false;
   let modelStatus, modeControl, sendControl, inputControl;
-  let backdrop;
+  let backdrop, disposeMobileComposer = () => {}, disposePhoneControls = () => {};
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const jump = el('button', { class: 'forge-jump btn', text: 'Jump to latest', hidden: true, onclick: () => {
     following = true; heldUntil = 0; follow();
@@ -91,6 +95,17 @@ function createTranscript(options) {
     root.replaceChildren(el('div', { class: 'forge-transcript-layout' }, [
       el('div', { class: 'forge-transcript-scroll' }, [messages, jump]), queueList, composer,
     ]));
+    const footer = composer.querySelector('.forge-transcript-footer');
+    let toolsSheet;
+    const add = button('+', () => {
+      const anchor = document.createComment('Session tools home'); tools.before(anchor);
+      toolsSheet = openMobileSheet({ title: 'Session tools', content: tools, opener: add, onClose: () => { anchor.after(tools); anchor.remove(); toolsSheet = null; } });
+    }, 'ms-forge-add');
+    add.setAttribute('aria-label', 'Session tools'); footer.prepend(add);
+    const gate = () => { add.hidden = !mobileOn(); }; gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
+    const dictation = mountMobileDictation(composer, input, footer);
+    disposePhoneControls = () => { toolsSheet?.close(); dictation(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); add.remove(); };
+    disposeMobileComposer = mountMobileComposer({ composer, input, context: () => context.textContent, busy: () => send.dataset.mode === 'stop', recording: () => composer.classList.contains('ms-dictating') });
     backdrop = mountChatBackdrop(root.firstElementChild);
     backdrop.show(options.hasMessages ? 'sky' : 'figure');
   }
@@ -309,7 +324,7 @@ function createTranscript(options) {
   return {
     messages: documentBody, mount, card, paint, history, follow, setBusy,
     dispose() {
-      backdrop?.dispose();
+      disposePhoneControls(); disposeMobileComposer(); backdrop?.dispose();
       disposed = true; ++refreshVersion; clearInterval(ticker); observer.disconnect(); unsubscribe();
       documentBody.querySelectorAll('.forge-prompt').forEach(node => node._observer?.disconnect());
       document.removeEventListener('kairos:forge-review', reviewChanged); states.clear();

@@ -128,6 +128,7 @@ export function createVaultGraph(container) {
     counts, el("span", { text: "Drag to explore · Scroll to zoom · Select to read" }),
   ]));
   container.appendChild(wrap);
+  search.dataset.mobileDock = 'search';
   search.addEventListener("input", () => {
     searchResults.replaceChildren();
     const query = search.value.trim().toLowerCase();

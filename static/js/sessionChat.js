@@ -1,3 +1,5 @@
+import { mountMobileModelSheet, renderMobileCatalogMenu } from './mobileModelSheet.js';
+import { mobileOn, phone } from './mobileShared.js';
 // One embedded conversation (2026-10-08): the Agents tab's chat pane and a
 // tab's own chat (CRM task chats, School course chats) share this. It streams
 // through the same chatStream.js registry as every other chat, so a reply
@@ -45,7 +47,7 @@ export async function mountSessionChat(host, options = {}) {
   let liveTurnId = null;
   let shownPermission = null;
   let disposed = false, submitting = false;
-  let modelSaving = false, modelControls = [];
+  let modelSaving = false, modelControls = [], disposePhoneModels = () => {};
   let permissionSaving = false, permissionControl = null;
   let workingTimer = null;
   let call = null;
@@ -312,6 +314,17 @@ export async function mountSessionChat(host, options = {}) {
     catch { status.textContent = "Models couldn't load."; return; }
     if (!host.isConnected) return;
     const current = session || {};
+    let phoneCatalog = [], phoneMenu, phoneTrigger;
+    const refreshPhoneMenu = () => {
+      if (!phoneMenu) return;
+      const endpoint = endpoints.find(item => item.id === connection.value);
+      phoneTrigger.textContent = [endpoint?.name || 'Choose model', current.model_override || endpoint?.model, current.model_effort].filter(Boolean).join(' ? ');
+      renderMobileCatalogMenu(phoneMenu, {
+        endpoints, endpointId: connection.value, model: current.model_override, effort: current.model_effort, catalog: phoneCatalog,
+        onConnection: value => { if (phoneTrigger.disabled) return; connection.value = value; connection.dispatchEvent(new Event('change')); },
+        onModel: value => { if (!phoneTrigger.disabled) save(value, null); }, onEffort: value => { if (!phoneTrigger.disabled) save(current.model_override, value); },
+      });
+    };
     const connection = customSelect({}, [el('option', { value: '', text: endpoints.length ? 'Choose a model' : 'Add a model in Settings' }),
       ...endpoints.map((e) => el('option', { value: e.id, text: e.name }))]);
     connection.value = current.model_endpoint_id || '';
@@ -319,7 +332,7 @@ export async function mountSessionChat(host, options = {}) {
     variantNode.hidden = true;
     const loadVariants = async (selected) => {
       const endpoint = endpoints.find((e) => e.id === connection.value);
-      if (!endpoint || ![...CLI_KINDS, 'api'].includes(endpoint.kind)) { variantNode.hidden = true; return; }
+      if (!endpoint || ![...CLI_KINDS, 'api'].includes(endpoint.kind)) { variantNode.hidden = true; phoneCatalog = []; refreshPhoneMenu(); return; }
       let choices = [];
       try { choices = await api(`/api/models/${encodeURIComponent(endpoint.id)}/catalog`); } catch { /* default only */ }
       if (!host.isConnected) return;
@@ -329,23 +342,38 @@ export async function mountSessionChat(host, options = {}) {
       next.addEventListener('change', () => save(next.value || null));
       variantNode.replaceWith(next);
       variantNode = next;
+      phoneCatalog = choices; refreshPhoneMenu();
       modelControls = [connection, variantNode]; syncSend();
     };
-    const save = async (override) => {
+    const save = async (override, effort) => {
       if (busy() || options.readOnly) { status.textContent = 'Wait for the current reply before changing the model.'; return; }
       if (modelSaving || permissionSaving) return;
       modelSaving = true; syncSend();
       try {
-        await api(`/api/sessions/${sessionId}/model`, { method: 'POST',
-          body: JSON.stringify({ model_endpoint_id: connection.value || null, model_override: override }) });
+        const saved = await api(`/api/sessions/${sessionId}/model`, { method: 'POST',
+          body: JSON.stringify({ model_endpoint_id: connection.value || null, model_override: override, ...(effort === undefined ? {} : { effort }) }) });
+        current.model_effort = saved.effort ?? null;
         status.textContent = '';
         current.model_endpoint_id = connection.value || null; current.model_override = override;
         options.onModelChange?.(endpoints.find(e => e.id === connection.value), override);
       } catch (problem) { connection.value = current.model_endpoint_id || ''; variantNode.value = current.model_override || ''; status.textContent = problem.message; }
-      finally { modelSaving = false; syncSend(); }
+      finally { modelSaving = false; syncSend(); refreshPhoneMenu(); }
     };
     connection.addEventListener('change', async () => { await save(null); await loadVariants(null); });
-    tools.prepend(el('div', { class: 'session-chat-models', role: 'group', 'aria-label': 'Model for this chat' }, [connection, variantNode]));
+    const controls = el('div', { class: 'session-chat-models', role: 'group', 'aria-label': 'Model for this chat' }, [connection, variantNode]);
+    tools.prepend(controls);
+    if (transcript) {
+      controls.classList.add('ms-phone-model-controls');
+      phoneTrigger = el('button', { type: 'button', class: 'ms-embedded-model-trigger model-picker-btn', text: 'Choose model' });
+      phoneMenu = el('div', { class: 'model-picker-menu hidden' }); tools.prepend(phoneTrigger, phoneMenu);
+      const picker = mountMobileModelSheet({ trigger: phoneTrigger, menu: phoneMenu, permission: options.modeControl });
+      const gate = () => { phoneTrigger.hidden = !mobileOn(); }; gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
+      disposePhoneModels = () => { picker.dispose(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); };
+      const syncTrigger = new MutationObserver(() => { phoneTrigger.disabled = connection.disabled; });
+      syncTrigger.observe(connection.querySelector('button'), { attributes: true, attributeFilter: ['disabled'] });
+      const dispose = disposePhoneModels; disposePhoneModels = () => { syncTrigger.disconnect(); dispose(); };
+      refreshPhoneMenu();
+    }
     modelControls = [connection, variantNode]; syncSend();
     await loadVariants(current.model_override || null);
   };
@@ -496,5 +524,5 @@ export async function mountSessionChat(host, options = {}) {
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposed = true; call?.dispose(); recorder?.cancel(); attachments?.dispose(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposePhoneModels(); disposed = true; call?.dispose(); recorder?.cancel(); attachments?.dispose(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }

@@ -30,6 +30,7 @@ export function createVaultExplorer(container) {
     reader,
   ]));
 
+  search.dataset.mobileDock = 'search';
   search.addEventListener("input", drawTree);
   refresh.addEventListener("click", async () => {
     if (!await canLeave()) return;

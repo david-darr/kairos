@@ -1,3 +1,8 @@
+import { mountMobileModelSheet, renderMobileCatalogMenu } from '../mobileModelSheet.js';
+import { mountMobileComposer } from '../mobileComposer.js';
+import { mountMobileDictation } from '../mobileDictation.js';
+import { openMobileSheet } from '../mobileSheet.js';
+import { mobileOn, phone, button } from '../mobileShared.js';
 import { api, el, customSelect, openPanelDialog, toast } from '../api.js';
 import { shouldSendOnEnter } from '../composerKeyboard.js';
 import { mountDither } from '../dither.js';
@@ -62,6 +67,28 @@ export function render(container, tabId, options = {}) {
   let isolationSelect, modeSelect, branchSelect, branchField, branchVersion = 0, starting = false, branchesReady = false, sessionGroups = [];
   let pendingStart = null;
   const approvalController = new AbortController();
+  let locationSheet, mobileCatalog = [], launchEffort = null;
+  const phoneModel = el('button', { type: 'button', class: 'ms-embedded-model-trigger model-picker-btn', text: 'Choose model' });
+  const phoneMenu = el('div', { class: 'model-picker-menu hidden' });
+  agentPill.classList.add('ms-phone-model-controls'); inputRight.prepend(phoneModel, phoneMenu);
+  const phonePicker = mountMobileModelSheet({ trigger: phoneModel, menu: phoneMenu, permission: () => modeSelect });
+  const refreshPhoneMenu = () => {
+    const endpoint = models.find(item => item.id === modelSelect?.value);
+    phoneModel.textContent = [endpoint?.name || 'Choose model', variantSelect?.value || endpoint?.model, launchEffort].filter(Boolean).join(' ? ');
+    renderMobileCatalogMenu(phoneMenu, { endpoints: models, endpointId: modelSelect?.value, model: variantSelect?.value || null, effort: launchEffort, catalog: mobileCatalog,
+      onConnection: value => { if (starting) return; launchEffort = null; modelSelect.value = value; modelSelect.dispatchEvent(new Event('change')); },
+      onModel: value => { if (starting || !variantSelect) return; launchEffort = null; variantSelect.value = value || ''; variantSelect.dispatchEvent(new Event('change')); refreshPhoneMenu(); },
+      onEffort: value => { if (!starting) { launchEffort = value; refreshPhoneMenu(); } },
+    });
+  };
+  const phoneAdd = button('+', () => {
+    const anchor = document.createComment('Forge location controls'); inputLeft.before(anchor);
+    locationSheet = openMobileSheet({ title: 'Session context', content: inputLeft, opener: phoneAdd, onClose: () => { anchor.after(inputLeft); anchor.remove(); locationSheet = null; } });
+  }, 'ms-forge-add');
+  phoneAdd.setAttribute('aria-label', 'Session context'); pickers.prepend(phoneAdd);
+  const gatePhone = () => { phoneAdd.hidden = phoneModel.hidden = !mobileOn(); }; gatePhone(); phone.addEventListener('change', gatePhone); document.addEventListener('kairos:appearance', gatePhone);
+  const disposeDictation = mountMobileDictation(composer, message, inputRight);
+  const disposeComposer = mountMobileComposer({ composer, input: message, context: () => projects.find(item => item.id === projectSelect?.value)?.name || 'Choose a project', busy: () => starting, recording: () => composer.classList.contains('ms-dictating') });
   const drawWorking = () => {
     if (disposed) return;
     const running = sessionGroups.flatMap(({ project, sessions }) => sessions.filter(s => !s.forge.removed && forgeRunning(s.id)).map(s => sessionRow(s, project)));
@@ -70,6 +97,7 @@ export function render(container, tabId, options = {}) {
   const unsubscribe = subscribeAll(drawWorking);
   const updateSend = () => {
     send.disabled = starting || !message.value.trim() || !projectSelect?.value || !modelSelect?.value || (isolationSelect?.value === 'existing_branch' && (!branchesReady || !branchSelect?.value));
+    phoneModel.disabled = starting;
     firstCommitButton.disabled = starting; message.readOnly = starting; pickers.inert = starting;
   };
   const clearRecovery = () => { if (!starting) { pendingStart = null; recovery.hidden = true; } };
@@ -202,6 +230,10 @@ export function render(container, tabId, options = {}) {
   async function startSession(payload) {
     try {
       const session = await api('/api/forge/sessions', { method: 'POST', toast: false, body: JSON.stringify(payload) });
+      if (!disposed && launchEffort !== null) {
+        try { await api(`/api/sessions/${session.id}/model`, { method: 'POST', body: JSON.stringify({ model_endpoint_id: payload.model_endpoint_id, model_override: payload.model_override, effort: launchEffort }) }); }
+        catch (error) { toast(`Session created. Effort could not be saved: ${error.message}`, 'error'); }
+      }
       if (!disposed) navigate('forgeSession', { sessionId: session.id, initialMessage: payload.task });
     } catch (error) {
       if (disposed) return;
@@ -238,7 +270,7 @@ export function render(container, tabId, options = {}) {
   async function loadVariants() {
     const version = ++variantVersion;
     const endpoint = models.find(m => m.id === modelSelect?.value);
-    variantSelect = null; variantField.hidden = true; variantField.replaceChildren();
+    variantSelect = null; variantField.hidden = true; variantField.replaceChildren(); mobileCatalog = []; refreshPhoneMenu();
     if (!endpoint || !['claude_cli', 'codex_cli', 'api'].includes(endpoint.kind)) return;
     let choices = [];
     try { choices = await api(`/api/models/${encodeURIComponent(endpoint.id)}/catalog`); } catch { /* Default model only. */ }
@@ -246,11 +278,12 @@ export function render(container, tabId, options = {}) {
     variantSelect = composerPicker('Model for new session', [el('option', { value: '', text: 'Default model' }),
       ...choices.map(m => el('option', { value: m.id, text: m.display_name || m.id }))]);
     variantField.replaceChildren(variantSelect);
-    variantField.hidden = false;
+    variantField.hidden = false; mobileCatalog = choices; refreshPhoneMenu();
+    variantSelect.addEventListener('change', () => { launchEffort = null; refreshPhoneMenu(); });
   }
   message.onkeydown = event => { if (shouldSendOnEnter(event)) { event.preventDefault(); composer.requestSubmit(); } };
   load();
   document.addEventListener('kairos:forge-apps', refreshActivity);
   const timer = setInterval(() => { if (!document.hidden) { refreshActivity(); lifespan(); } }, 30000);
-  return () => { disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
+  return () => { phonePicker.dispose(); locationSheet?.close(); disposeDictation(); disposeComposer(); phone.removeEventListener('change', gatePhone); document.removeEventListener('kairos:appearance', gatePhone); disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
 }

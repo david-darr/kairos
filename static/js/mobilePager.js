@@ -1,0 +1,65 @@
+import { mobileOn, reduced, haptic } from './mobileShared.js';
+
+// One continuous progress value drives both the pages and the glass thumb.
+// Rightward drags in the existing main-drawer zone belong to mobileDrawers.
+export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) {
+  let index = initial, gesture = null, suppress = false;
+  const paint = progress => host.style.setProperty('--ms-page', progress);
+  const select = next => {
+    index = Math.max(0, Math.min(1, next));
+    if (pages[1 - index].contains(document.activeElement)) document.activeElement.blur?.();
+    host.classList.remove('ms-dragging'); paint(index);
+    pages.forEach((page, i) => { page.inert = i !== index; page.setAttribute('aria-hidden', String(i !== index)); });
+    tabs.forEach((tab, i) => { tab.setAttribute('aria-selected', String(i === index)); tab.tabIndex = i === index ? 0 : -1; });
+    onChange(index);
+  };
+  tabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => { haptic(); select(i); });
+    tab.addEventListener('keydown', e => {
+      if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+        e.preventDefault(); select(e.key === 'Home' ? 0 : e.key === 'End' ? 1 : e.key === 'ArrowRight' ? 1 : 0); tabs[index].focus();
+      }
+    });
+  });
+  const start = e => {
+    gesture = null;
+    if (!mobileOn() || e.touches.length !== 1 || document.querySelector('dialog[open], [aria-modal="true"]') ||
+        e.target.closest('input, textarea, select, a, [contenteditable], pre, canvas') ||
+        (e.target.closest('button') && !e.target.closest('.ms-history-main')) || !window.getSelection()?.isCollapsed) return;
+    const t = e.touches[0]; gesture = { x: t.clientX, y: t.clientY, dx: 0, locked: false, at: performance.now() };
+  };
+  const move = e => {
+    if (!gesture || e.touches.length !== 1) return;
+    const t = e.touches[0], dx = t.clientX - gesture.x, dy = t.clientY - gesture.y;
+    if (!gesture.locked) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 5) return;
+      if (index === 1 && dx < 0) { gesture = null; return; }
+      if (Math.abs(dy) > Math.abs(dx) || (dx > 0 && gesture.x >= 16 && gesture.x <= Math.min(200, innerWidth * .5))) { gesture = null; return; }
+      gesture.locked = true; host.classList.add('ms-dragging');
+    }
+    if (e.cancelable) e.preventDefault();
+    gesture.dx = dx;
+    if (!reduced.matches) paint(Math.max(0, Math.min(1, index - dx / host.clientWidth)));
+  };
+  const end = () => {
+    if (!gesture) return;
+    if (gesture.locked) {
+      const { dx, at } = gesture;
+      const commit = Math.abs(dx) >= 60 || (Math.abs(dx) > 24 && Math.abs(dx) / (performance.now() - at) > .5);
+      select(commit ? index + (dx < 0 ? 1 : -1) : index);
+      suppress = true; setTimeout(() => { suppress = false; }, 400); haptic();
+    }
+    gesture = null;
+  };
+  const cancel = () => { gesture = null; select(index); };
+  const click = e => { if (suppress) { e.preventDefault(); e.stopPropagation(); } };
+  host.addEventListener('touchstart', start, { passive: true });
+  host.addEventListener('touchmove', move, { passive: false });
+  host.addEventListener('touchend', end); host.addEventListener('touchcancel', cancel);
+  host.addEventListener('click', click, true);
+  select(index);
+  return { select, dispose() {
+    host.removeEventListener('touchstart', start); host.removeEventListener('touchmove', move);
+    host.removeEventListener('touchend', end); host.removeEventListener('touchcancel', cancel); host.removeEventListener('click', click, true);
+  } };
+}

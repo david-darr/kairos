@@ -14,6 +14,7 @@ export async function render(container) {
   ]);
 
   const textInput = el("input", { placeholder: "e.g. Finish the CS 571 lab writeup" });
+  textInput.dataset.mobileDock = 'create'; textInput.dataset.mobileCreateLabel = 'Add note';
   const dueInput = el("input", { type: "datetime-local" });
   const addBtn = el("button", { class: "btn primary", text: "Add note" });
 

@@ -38,6 +38,8 @@ export async function render(container) {
     ]),
   ]);
 
+  form.querySelector('summary').dataset.mobileDock = 'create';
+  form.querySelector('summary').dataset.mobileCreateLabel = 'Connect an email account';
   const list = el("div", { id: "email-accounts-list", style: "margin-top:14px;" });
   const triage = el("div", { id: "email-triage", style: "margin-top:14px;" });
   wrap.append(header, triage, form, list);

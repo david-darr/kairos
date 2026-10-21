@@ -37,6 +37,13 @@ let open = false;
 let timer = null;
 let unsubscribe = null;
 let lastFocus = null;
+const activityListeners = new Set();
+// The phone player consumes the same reads and actions as the desktop row.
+export function subscribeActivity(listener) {
+  activityListeners.add(listener);
+  listener(collect());
+  return () => activityListeners.delete(listener);
+}
 
 const isOn = () => root.classList.contains("kairos-redesign");
 const go = detail => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail }));
@@ -94,7 +101,9 @@ function collect() {
   const agentTint = id => names.get(id)?.color || "";
 
   for (const [id, chat] of chats) {
-    const base = { key: `chat:${id}`, kind: "chat", initial: initial(chat.title), title: chat.title, go: () => openSession(id) };
+    const base = { key: `chat:${id}`, kind: "chat", status: chat.status, sessionId: id,
+      stop: chat.status === 'processing' ? () => chatStream.stopTurn(id) : null,
+      initial: initial(chat.title), title: chat.title, go: () => openSession(id) };
     if (chat.status !== "processing") {
       const word = chat.status === "done" ? "finished" : chat.status === "stopped" ? "stopped" : "failed";
       need.push({ ...base, detail: `Chat · ${word}`, action: chat.status === "done" ? "Open" : "View",
@@ -107,13 +116,13 @@ function collect() {
   }
   for (const item of remote.inbox.items) {
     const name = agentName(item.agent_id), question = item.kind === "question";
-    need.push({ key: `inbox:${item.id}`, kind: "agent", tint: agentTint(item.agent_id), initial: initial(name),
+    need.push({ key: `inbox:${item.id}`, kind: "agent", finished: !question, tint: agentTint(item.agent_id), initial: initial(name),
       title: question ? `${name} asked a question` : `${name} sent a report`, detail: clip(item.title),
       action: question ? "Reply" : "Review", go: () => go({ tab: "agents", agentId: item.agent_id }) });
   }
   for (const card of remote.inbox.reviews) {
     const name = agentName(card.agent_id);
-    need.push({ key: `review:${card.id}`, kind: "agent", tint: agentTint(card.agent_id), initial: initial(name),
+    need.push({ key: `review:${card.id}`, kind: "agent", finished: true, tint: agentTint(card.agent_id), initial: initial(name),
       title: `${name} has a result ready`, detail: clip(card.title || card.name || "Waiting for your review"),
       action: "Review", go: () => go({ tab: "agents", agentId: card.agent_id }) });
   }
@@ -132,7 +141,8 @@ function collect() {
   }
   for (const agent of remote.agents) {
     if (agent.status !== "working") continue;
-    work.push({ key: `working:${agent.id}`, kind: "agent", tint: agent.color || "", initial: initial(agent.name),
+    work.push({ key: `working:${agent.id}`, kind: "agent", agentId: agent.id, modelEndpointId: agent.endpoint_id,
+      model: agent.model_override, needsYou: !!agent.activity?.waiting, tint: agent.color || "", initial: initial(agent.name),
       title: `${agent.name} is working`, detail: clip(agent.status_detail || "Working"), action: "View",
       go: () => go({ tab: "agents", agentId: agent.id }) });
   }
@@ -223,6 +233,7 @@ function unmount() {
 }
 
 function refresh() {
+  for (const listener of activityListeners) listener(collect());
   if (!ui || !started) return;
   const { need, work } = collect();
   const n = need.length, w = work.length;

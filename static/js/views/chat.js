@@ -1,5 +1,6 @@
+import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
-import { api, el, toast, confirmDialog, modelMark } from "../api.js";
+import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
 import { ICON as KAIROS_MARK } from '../brand.js';
@@ -24,6 +25,9 @@ import { mountChatTimeline } from '../chatTimeline.js';
 import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
 import { mountRedesignChat } from '../redesignChat.js';
+import { mountMobileComposer } from '../mobileComposer.js';
+import { mountMobileModelSheet } from '../mobileModelSheet.js';
+import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -664,7 +668,7 @@ export async function render(container, tabId, options = {}) {
     const wasOpen = sessionsPanel.classList.contains('open');
     sessionsPanel.classList.remove('open');
     sessionsBackdrop.classList.add('hidden');
-    if (wasOpen && (restoreFocus || sessionsPanel.contains(document.activeElement))) openSessionsBtn.focus({ preventScroll: true });
+    if (wasOpen && (restoreFocus || sessionsPanel.contains(document.activeElement))) (container.classList.contains('ms-conversation') ? container.querySelector('.chat-phone-tools > button') : openSessionsBtn)?.focus({ preventScroll: true });
     syncHistory();
   }
   function openSessionsDrawer() {
@@ -845,6 +849,7 @@ export async function render(container, tabId, options = {}) {
   const modelMenu = el("div", { class: "model-picker-menu model-picker-unified hidden", id: "model-picker-menu", role: 'dialog', 'aria-label': 'Model for this chat' });
   const modelWrap = el("div", { class: "model-picker-wrap" }, [modelBtn, modelMenu]);
   const openModelMenu = (focusFirst = false) => {
+    if (mobileModelSheet.open()) return;
     if (modelMenu.classList.contains('hidden')) toggleMenu(modelMenu, modelBtn);
     if (focusFirst) (modelMenu.querySelector('.model-picker-item.active') || modelMenu.querySelector('.model-picker-item'))?.focus();
   };
@@ -1040,11 +1045,14 @@ export async function render(container, tabId, options = {}) {
   const micBtn = el("button", { type: "button", class: "input-icon-btn chat-mic-btn", id: "chat-mic", title: "Dictate", "aria-label": "Dictate a message" });
   micBtn.insertAdjacentHTML("beforeend", ICON_MIC);
   micBtn.hidden = !isRecordingSupported();
-  wireMic(micBtn, input);
+  const disposeMic = wireMic(micBtn, input);
   const openMicBtn = el("button", { type: "button", class: "input-icon-btn chat-openmic-btn", id: "chat-openmic", title: "Open Mic", "aria-label": "Start an Open Mic conversation" });
   openMicBtn.insertAdjacentHTML("beforeend", ICON_OPENMIC);
   openMicBtn.hidden = !isRecordingSupported();
-  openMicBtn.addEventListener("click", () => setOpenMic(!isOpenMicActive(), openMicBtn));
+  openMicBtn.addEventListener("click", () => {
+    if (!isOpenMicActive()) options.onBeforeSend?.();
+    setOpenMic(!isOpenMicActive(), openMicBtn);
+  });
   const modelPill = el("div", { class: "model-pill", role: "group", "aria-label": "Model for this chat" }, [modelWrap]);
   modelPill.classList.add('chat-header-model');
   mobileHeader.insertBefore(modelPill, filesBtn);
@@ -1065,6 +1073,11 @@ export async function render(container, tabId, options = {}) {
     }
   });
   for (const menu of [modelMenu, overflowMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
+  const disposeVoiceRow = mountMobileVoiceRow(composer, micBtn, openMicBtn);
+  const mobileModelSheet = mountMobileModelSheet({ trigger: modelBtn, menu: modelMenu, permission: composerOptions });
+  const disposeMobileComposer = mountMobileComposer({ composer, input, attachmentHost: attachStrip,
+    context: () => document.getElementById('project-picker-label')?.textContent || 'Current vault',
+    busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
   const composerHint = el('div', { class: 'composer-hint' });
   const syncComposerHint = () => {
@@ -1149,6 +1162,7 @@ export async function render(container, tabId, options = {}) {
 
   sendBtn.addEventListener("click", () => {
     if (sendBtn.dataset.mode === 'stop') { chatStream.stopTurn(activeSessionId); return; }
+    if (input.value.trim() || stagedAttachments.length || chatReferences?.getSelected().length) options.onBeforeSend?.();
     sendMessage(messages, input, sendBtn, attachStrip);
   });
   // Composer history (Hermes-style, 2026-09-25, both chat styles): Up on an
@@ -1240,9 +1254,26 @@ export async function render(container, tabId, options = {}) {
     refreshModelPicker(current).catch(() => {});
   };
   document.addEventListener('kairos:models-changed', onModelsChanged);
+  const currentSession = () => activeSessionId ? api(`/api/sessions/${activeSessionId}`) : Promise.resolve(null);
+  const disposeMobileChat = mountMobileChat(container, {
+    'Rename': async () => {
+      const session = await currentSession();
+      if (!session || !container.isConnected) return;
+      const target = el('button', { text: session.title });
+      const panel = openPanelDialog({ title: 'Rename chat', owner: container, body: target });
+      startRename(target, session, sessionsList, messages, async () => { panel.close(); await refreshSessions(sessionsList, messages); });
+    },
+    'Delete': async () => { const session = await currentSession(); if (session && await deleteSession(session) && container.isConnected) startNewChat(); },
+    'Copy': () => copyText(messages.innerText),
+    'Settings': () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings' } })),
+    'Find in chat': () => chatFind.open(),
+    'Fork': async () => { const session = await currentSession(); if (session?.messages?.length) forkFrom(session, session.messages.length - 1); },
+    'Conversations and projects': () => openSessionsBtn.click(),
+  });
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    disposeVoiceRow(); disposeMic(); disposeMobileChat(); disposeMobileComposer(); mobileModelSheet.dispose();
     document.removeEventListener('kairos:models-changed', onModelsChanged);
     handoffs.dispose();
     redesignChat.dispose();
@@ -1298,6 +1329,27 @@ export async function render(container, tabId, options = {}) {
   backdropInstant = false;
   backdrop.ready.then(() => options.transitionReady?.());
 
+  if (options.mobileDraft !== undefined) {
+    input.value = options.mobileDraft;
+    input.dispatchEvent(new Event('input'));
+    try {
+      if (options.mobileModelEndpointId) {
+        const session = await createSession({ preserveAttachments: true });
+        if (disposed || !container.isConnected) return cleanup;
+        await api(`/api/sessions/${session.id}/model`, { method: 'POST', body: JSON.stringify({ model_endpoint_id: options.mobileModelEndpointId }) });
+        await refreshModelPicker(options.mobileModelEndpointId);
+      }
+      if (options.mobileSend) {
+        await sendMessage(messages, input, sendBtn, attachStrip);
+        if (!input.value) clearMobileDraft(options.mobileDraft);
+      } else input.focus();
+    } catch (error) {
+      if (disposed || !container.isConnected) return cleanup;
+      input.value = options.mobileDraft; input.dispatchEvent(new Event('input')); input.focus();
+      toast(error.message || 'Could not start chat', 'error');
+    }
+  }
+
   // Builder brief handoff from Tool Store or Tasks: the
   // one deliberate exception to "Chat always lands on the welcome screen"
   // above. builderBrief.js creates a real session and stashes it here rather
@@ -1305,7 +1357,7 @@ export async function render(container, tabId, options = {}) {
   // filled out the form. Consumed once (removeItem) so a later, ordinary
   // visit to this tab still resets to welcome as normal.
   const pendingRaw = sessionStorage.getItem("jarvis:pendingChatHandoff");
-  if (pendingRaw) {
+  if (pendingRaw && !options.mobileLaunch) {
     sessionStorage.removeItem("jarvis:pendingChatHandoff");
     try {
       const pending = JSON.parse(pendingRaw);
@@ -1748,6 +1800,9 @@ function wireMic(micBtn, input) {
     micBtn.disabled = false;
   };
 
+  const cancel = () => { recorder?.cancel(); reset(); };
+  micBtn.addEventListener('kairos:cancel-dictation', cancel);
+  let disposed = false;
   micBtn.addEventListener('click', async () => {
     if (recorder) {
       // Stop and transcribe.
@@ -1761,6 +1816,7 @@ function wireMic(micBtn, input) {
         const blob = await active.stop();
         if (!blob) { reset(); return; }
         const text = await transcribeBlob(blob);
+        if (disposed) return;
         if (!text) {
           toast('No speech was picked up.', 'error');
         } else {
@@ -1781,6 +1837,7 @@ function wireMic(micBtn, input) {
     // Starting: check the model is actually there before opening the mic, so
     // the failure arrives before recording rather than after.
     const status = await getSpeechStatus();
+    if (disposed) return;
     if (!status || !status.engine_available) {
       toast('Speech recognition is not available in this build.', 'error');
       return;
@@ -1800,11 +1857,13 @@ function wireMic(micBtn, input) {
         : 'No microphone is available.', 'error');
       return;
     }
+    if (disposed) { active.cancel(); return; }
     recorder = active;
     micBtn.classList.add('recording');
     micBtn.title = 'Stop and transcribe';
     micBtn.setAttribute('aria-label', 'Stop recording and transcribe');
   });
+  return () => { disposed = true; cancel(); micBtn.removeEventListener('kairos:cancel-dictation', cancel); };
 }
 
 // -- Open Mic ----------------------------------------------------------------
@@ -2097,6 +2156,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     const item = el("button", {
       type: 'button',
       'data-endpoint-id': ep.id,
+      'data-provider': ep.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', api: 'API connections' }[ep.kind] || ep.kind),
       class: "model-picker-item model-connection-item" + (isCurrent ? " active" : ""),
       onclick: async () => {
         if (chatStream.getInFlight(activeSessionId)?.status === 'processing') return;
@@ -2146,6 +2206,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   if (!selectable) {
     menu.appendChild(setupItem());
     if (hadFocus) (menu.querySelector('.model-picker-item.active') || menu.querySelector('.model-picker-item'))?.focus();
+    menu.dispatchEvent(new Event('kairos:model-menu-updated'));
     syncChatBusy(chatStream.getInFlight(activeSessionId)?.status === 'processing');
     return;
   }
@@ -2193,6 +2254,8 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
       const row = el('button', {
         type: 'button',
         class: 'model-picker-item model-catalog-item' + (current ? ' active' : ''),
+        'data-model-default': String(!!ep.model && (m.id === ep.model || m.alias === ep.model)),
+        'data-model-search': `${m.id} ${m.display_name || ''} ${m.description || ''}`,
         // Switching model drops the effort: levels are per-model (verified
         // against Codex's own catalog — GPT-5.5 advertises no "ultra"
         // while Astra does), so carrying one across would send a value the
@@ -2250,6 +2313,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     ...(ep.kind === 'api' ? [] : [el('button', { type: 'button', class: 'model-picker-item', text: 'Use CLI default', onclick: () => save('') })]),
     el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) })]));
   menu.append(section, setupItem());
+  menu.dispatchEvent(new Event('kairos:model-menu-updated'));
   if (hadFocus) (section.querySelector('.model-catalog-item.active') || section.querySelector('#chat-model-search, .model-catalog-item'))?.focus();
   syncChatBusy(chatStream.getInFlight(activeSessionId)?.status === 'processing');
 }
@@ -2522,24 +2586,7 @@ function showSessionMenu(x, y, session, item, sessionsList, messages) {
     text: "Delete",
     onclick: async () => {
       closeSessionMenu();
-      // Deleting a whole conversation used to happen on one click with no
-      // undo — the most destructive single action in the app (audit
-      // 2026-09-03).
-      const ok = await confirmDialog({
-        title: "Delete this chat?",
-        message: `"${session.title}" and its full message history will be permanently deleted. This can't be undone.`,
-        confirmLabel: "Delete chat",
-      });
-      if (!ok) return;
-      await api(`/api/sessions/${session.id}`, { method: "DELETE" });
-      if (sideChatSessionId() === session.id) closeSideChat();
-      if (activeSessionId === session.id) {
-        activeSessionId = null;
-        activeTimeline?.reset();
-        messages.innerHTML = "";
-      }
-      await refreshSessions(sessionsList, messages);
-      toast("Chat deleted", "success");
+      if (await deleteSession(session)) await refreshSessions(sessionsList, messages);
     },
   });
 
@@ -2555,7 +2602,27 @@ function showSessionMenu(x, y, session, item, sessionsList, messages) {
   setTimeout(() => document.addEventListener("click", closeSessionMenu), 0);
 }
 
-function startRename(item, session, sessionsList, messages) {
+// Shared by history rows and the phone actions capsule. Keep confirmation,
+// stream ownership, side-chat cleanup and mutation feedback in one path.
+export async function deleteSession(session) {
+  const ok = await confirmDialog({
+    title: "Delete this chat?",
+    message: `"${session.title}" and its full message history will be permanently deleted. This can't be undone.`,
+    confirmLabel: "Delete chat",
+  });
+  if (!ok) return false;
+  await api(`/api/sessions/${session.id}`, { method: "DELETE" });
+  if (sideChatSessionId() === session.id) closeSideChat();
+  if (activeSessionId === session.id) {
+    activeSessionId = null; activeTimeline?.reset();
+    const messages = document.getElementById('chat-messages');
+    if (messages) messages.innerHTML = '';
+  }
+  toast("Chat deleted", "success");
+  return true;
+}
+
+export function startRename(item, session, sessionsList, messages, refresh = () => refreshSessions(sessionsList, messages)) {
   const input = el("input", { class: "session-rename-input", value: session.title, "aria-label": "Conversation title" });
   item.replaceWith(input);
   input.focus();
@@ -2569,12 +2636,12 @@ function startRename(item, session, sessionsList, messages) {
     if (newTitle && newTitle !== session.title) {
       await api(`/api/sessions/${session.id}`, { method: "PATCH", body: JSON.stringify({ title: newTitle }) });
     }
-    await refreshSessions(sessionsList, messages);
+    await refresh();
   };
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    if (e.key === "Escape") { e.preventDefault(); done = true; refreshSessions(sessionsList, messages); }
+    if (e.key === "Escape") { e.preventDefault(); done = true; refresh(); }
   });
   input.addEventListener("blur", commit);
   // Renaming shouldn't also open the chat underneath the input.
@@ -2583,6 +2650,7 @@ function startRename(item, session, sessionsList, messages) {
 
 async function createSession({ preserveAttachments = false } = {}) {
   const draftFiles = preserveAttachments ? stagedAttachments : [];
+  const draftReferences = preserveAttachments && isPhoneShell() ? chatReferences?.getSelected() || [] : [];
   const session = await api("/api/sessions", { method: "POST", body: JSON.stringify({}) });
   activeSessionId = session.id;
   setArtifactContext(session.id);
@@ -2602,6 +2670,7 @@ async function createSession({ preserveAttachments = false } = {}) {
   if (preserveAttachments && activeSessionId === session.id && messages.isConnected) {
     stagedAttachments = draftFiles;
     renderAttachStrip(document.getElementById('attach-strip'));
+    draftReferences.forEach(reference => chatReferences?.add(reference));
   }
   return session;
 }
@@ -2664,6 +2733,7 @@ async function openSession(sessionId, sessionsList, messages) {
     activeUnsubscribers.push(attachToInFlight(sessionId, messages, replyCard, replyBody, null));
   }
   syncChatLayout(messages, session.title);
+  messages.closest('#chat-main').dataset.projectId = session.project_id || '';
   messages.scrollTop = messages.scrollHeight;
   await refreshModelPicker(session.model_endpoint_id, session.model_override ?? null, session.model_effort ?? null);
   if (!messages.isConnected || activeSessionId !== sessionId) return;

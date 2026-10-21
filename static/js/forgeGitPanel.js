@@ -1,3 +1,4 @@
+import { mountGitDock } from './mobileDock.js';
 import { api, el, customSelect } from './api.js';
 import { permissionAction } from './forgeAppPreview.js';
 import { forgeRunning } from './forgeUi.js';
@@ -6,6 +7,7 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
   const base = `/api/forge/sessions/${encodeURIComponent(id)}/git`;
   const controller = new AbortController();
   let disposed = false, busy = false, version = 0, commitDraft = '', branchDraft = '';
+  let disposeDock = () => {};
   const status = el('p', { class: 'meta', role: 'status' });
   const content = el('div', { class: 'forge-git-content' });
   panel.replaceChildren(status, content);
@@ -46,15 +48,18 @@ export function mountGitPanel(panel, id, { onChanged, onMerged } = {}) {
       const branch = el('input', { placeholder: 'New branch name', 'aria-label': 'New branch name' });
       branch.value = branchDraft; branch.oninput = () => { branchDraft = branch.value; };
       const create = button('Create branch', 'create-branch', () => ({ branch: branch.value }));
+      const push = button('Push', 'push'), pull = button('Pull', 'pull');
+      disposeDock();
       content.replaceChildren(el('p', { class: 'forge-branch', text: `${state.branch} · ${state.ahead} ahead, ${state.behind} behind${state.upstream ? ` · ${state.upstream}` : ' · No upstream'}` }),
         el('div', { class: 'forge-git-actions' }, [button('Refresh', refresh), button('Stage all', 'stage'), button('Unstage all', 'unstage')]),
         files('Staged'), files('Unstaged'), message, commit,
-        el('div', { class: 'forge-git-actions' }, [button('Push', 'push'), button('Pull', 'pull'), button('Merge back', 'merge')]),
+        el('div', { class: 'forge-git-actions' }, [push, pull, button('Merge back', 'merge')]),
         branches, branch, create);
+      disposeDock = mountGitDock(content, { files: state.files, message, commit, push, pull });
     } catch (error) { if (!disposed && current === version) status.textContent = error.message; }
   }
   document.addEventListener('kairos:forge-review', refresh);
   const timer = setInterval(() => { if (!panel.hidden && !document.hidden) refresh(); }, 30000);
   refresh();
-  return () => { disposed = true; ++version; controller.abort(); clearInterval(timer); document.removeEventListener('kairos:forge-review', refresh); };
+  return () => { disposeDock(); disposed = true; ++version; controller.abort(); clearInterval(timer); document.removeEventListener('kairos:forge-review', refresh); };
 }

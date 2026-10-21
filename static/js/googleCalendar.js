@@ -1,3 +1,4 @@
+import { mountSheetSurface } from './mobileSheet.js';
 import { api, el, toast, openPanelDialog } from './api.js';
 import { repeatControls } from './calendarRepeat.js';
 
@@ -159,7 +160,8 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   ]);
   const backdrop = el('div', { class: 'modal-backdrop' }, [form]);
   const opener = document.activeElement;
-  const dispose = () => { backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
+  const dispose = () => { disposeSheet(); backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
+  const disposeSheet = mountSheetSurface(form, dispose);
   const onKey = event => {
     if (event.key === 'Escape') dispose();
     if (event.key === 'Tab') {

@@ -27,6 +27,7 @@ export async function render(container) {
   const githubHost = el("div", { class: "store-github" });
   const count = el("span", { class: "meta", "aria-live": "polite" });
   const manageSkills = el("button", { type: "button", class: "btn quiet", text: "Manage skills" });
+  manageSkills.dataset.mobileDock = 'create'; manageSkills.dataset.mobileCreateLabel = 'Add or manage skills';
   const manageTools = el("button", { type: "button", class: "btn quiet", text: "Add MCP server", disabled: true });
   const buildTab = el("button", { type: "button", class: "btn primary", text: "Build a tab", hidden: true, "aria-haspopup": "dialog" });
   const installTab = el("button", { type: "button", class: "btn quiet", text: "Install a tab", hidden: true, "aria-haspopup": "dialog" });
