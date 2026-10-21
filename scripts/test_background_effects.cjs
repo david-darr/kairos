@@ -163,13 +163,13 @@ class Element extends Events {
   const realAppearance = await load(appearancePath); await realAppearance.evaluate();
   const api = realAppearance.namespace;
   await api.initAppearance('one');
-  api.updateAppearance({ backgroundEffect: 'binary', animatedPiece: 'coffee-steam',
+  api.updateAppearance({ backgroundEffect: 'binary', animatedPiece: 'snowfall',
     effectOptions: { ...api.getAppearance().effectOptions, binary: { density: 13, motion: false, tint: 'picture' } } });
   assert.equal(JSON.parse(saved.get('jarvis:appearance:v1:one')).backgroundEffect, 'binary');
   assert.equal(JSON.parse(saved.get('jarvis:welcome-appearance:v1')).effectOptions.binary.density, 13);
   await api.initAppearance('two'); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   await api.initAppearance('one'); assert.equal(api.getAppearance().effectOptions.binary.motion, false);
-  assert.equal(api.getAppearance().animatedPiece, 'coffee-steam');
+  assert.equal(api.getAppearance().animatedPiece, 'snowfall');
   await api.resetAppearance(); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   assert.equal(api.getAppearance().effectOptions.binary.density, 9);
   saved.set('jarvis:appearance:v1:broken', 'null'); await api.initAppearance('broken');

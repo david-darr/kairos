@@ -111,34 +111,22 @@ function picturePainter(target, img, W, H, opts, effect, prefs, colors) {
   };
 }
 function artPainter(target, W, H, prefs, mod, colors, preview) {
-  const draw = mod.default(), atlas = new GlyphAtlas();
-  const tile = canvas(1, 1), tc = tile.getContext('2d'), ctx = target.getContext('2d');
-  let c = Math.max(3, Math.round(prefs.density * Math.min(2, window.devicePixelRatio || 1)));
-  if (preview) c = Math.min(c, Math.max(2, Math.ceil(Math.max(W / mod.meta.cols, H / (mod.meta.rows * 1.66)))));
-  tile.width = mod.meta.cols * c; tile.height = mod.meta.rows * c * 1.66;
+  const draw = mod.default(), atlas = new GlyphAtlas(), ctx = target.getContext('2d');
   target.width = W; target.height = H;
+  const { cols, rows } = mod.meta, aspect = 1.66;
+  // One composition, never tiled: the preview fits the whole piece, a backdrop
+  // scales it to cover (centred, overflow cropped). Density does not apply.
+  let cw = preview ? Math.max(2, Math.floor(Math.min(W / cols, H / (rows * aspect)))) : Math.ceil(Math.max(W / cols, H / (rows * aspect)));
+  const ch = cw * aspect, left = Math.round((W - cols * cw) / 2), top = Math.round((H - rows * ch) / 2);
+  const alpha = preview ? .9 : .28;
   return t => {
-    tc.clearRect(0, 0, tile.width, tile.height);
-    const frame = draw(t * .2 + 2);
-    paint(tc, frame, prefs.tint === 'picture' ? mod.meta.palette : null,
-      { cw: c, ch: c * 1.66, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
-    ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = preview ? .9 : .28;
-    if (preview) {
-      const scale = Math.min(W / tile.width, H / tile.height);
-      const w = tile.width * scale, h = tile.height * scale;
-      ctx.drawImage(tile, (W - w) / 2, (H - h) / 2, w, h);
-    } else {
-      // Center the composition so a torus or moon remains visible at any size.
-      let left = (W - tile.width) / 2, top = (H - tile.height) / 2;
-      while (left > 0) left -= tile.width;
-      while (top > 0) top -= tile.height;
-      for (let y = top; y < H; y += tile.height) for (let x = left; x < W; x += tile.width) ctx.drawImage(tile, x, y);
-    }
+    ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = alpha;
+    paint(ctx, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
+      { x: left, y: top, cw, ch, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
     ctx.globalAlpha = 1;
   };
 }
-
 
 // Default preferences pass the same options to the unchanged legacy painter.
 export function drawSceneDither(target, img, W, H, opts = {}) {

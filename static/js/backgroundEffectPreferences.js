@@ -5,7 +5,6 @@ export const ART_PIECES = Object.freeze([
   ['ripple-pond', 'Ripple Pond'], ['rain-shower', 'Rain Shower'],
   ['snowfall', 'Snowfall Valley'], ['fireflies', 'Firefly Meadow'],
   ['ocean-waves', 'Breaking Waves'], ['plasma', 'Sine Plasma'],
-  ['spinning-torus', 'Spinning Torus'], ['coffee-steam', 'Coffee Mug'],
 ]);
 export function normalizeEffectOptions(raw) {
   return Object.fromEntries(EFFECTS.map(effect => {

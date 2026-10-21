@@ -121,6 +121,7 @@ export function renderAppearancePanel(content, _status, page) {
   const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Animated piece' }), piece]);
   const density = el('input', { type: 'range', min: '3', max: '24', step: '1', id: 'appearance-effect-density' });
   const densityValue = el('output', { for: density.id });
+  const densityRow = el('label', { class: 'appearance-effect-control', for: density.id }, [el('span', { text: 'Density (cell size)' }), density, densityValue]);
   const tint = el('select', { id: 'appearance-effect-tint' }, [
     el('option', { value: 'original', text: 'Original palette' }),
     el('option', { value: 'theme', text: 'Theme accent' }), el('option', { value: 'picture', text: 'Picture colours' }),
@@ -134,10 +135,10 @@ export function renderAppearancePanel(content, _status, page) {
   const effectMotion = toggle({ label: 'Animate effect', onChange: motion => saveEffect({ motion }) });
   const effectSection = el('fieldset', { class: 'appearance-effect-section', 'aria-describedby': 'appearance-effect-note' }, [
     el('legend', { text: 'Background effect' }), effectGrid, pieceRow,
-    el('label', { class: 'appearance-effect-control', for: density.id }, [el('span', { text: 'Density (cell size)' }), density, densityValue]),
+    densityRow,
     el('label', { class: 'appearance-effect-control', for: tint.id }, [el('span', { text: 'Tint' }), tint]),
     group({}, [row({ title: 'Animate effect', description: 'Motion pauses when hidden. Reduced motion shows a still frame.', control: effectMotion })]),
-    el('p', { class: 'meta', id: 'appearance-effect-note', text: 'Options are saved separately for each effect on this device. Smaller cells show more detail. Original palette preserves the existing dithered look. Dithered motion controls scene transitions. Halftone dots stay still.' }),
+    el('p', { class: 'meta', id: 'appearance-effect-note', text: 'Options are saved separately for each effect on this device. Smaller cells show more detail (not for Animated art, which always fills the backdrop). Original palette preserves the existing dithered look. Dithered motion controls scene transitions. Halftone dots stay still.' }),
     el('p', { class: 'meta appearance-effect-credit' }, [el('span', { text: 'Credits: Animated art by ' }),
       el('a', { href: 'https://github.com/kailashsr38/ascii-magic-art', target: '_blank', rel: 'noopener noreferrer', text: 'ASCII Magic' }),
       el('span', { text: ' (MIT). Picture colours uses the art palette for animated pieces.' })]),
@@ -288,7 +289,7 @@ export function renderAppearancePanel(content, _status, page) {
     density.value = effectPrefs.density; densityValue.textContent = `${effectPrefs.density} px`;
     tint.options[0].hidden = value.backgroundEffect !== 'dithered';
     tint.value = effectPrefs.tint; effectMotion.checked = effectPrefs.motion;
-    piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated';
+    piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated'; densityRow.hidden = value.backgroundEffect === 'animated';
     const nextPreviewSource = halftoneSource('home');
     if (nextPreviewSource !== effectPreviewSource) {
       effectPreviewStops.forEach(stop => stop()); effectPreviewSource = nextPreviewSource;
