@@ -85,13 +85,13 @@ _CLAUDE_EFFORT_DESCRIPTIONS = {
 # opt-in beta (ClaudeAgentOptions.betas) this app does not enable, so the
 # standard figure is the honest one to show.
 _CLAUDE_MODELS = (
-    {"id": "claude-opus-5", "display_name": "Opus 5", "alias": "opus",
+    {"id": "claude-opus-5-5", "display_name": "Opus 5.5", "alias": "opus",
      "description": "Most capable Claude model for complex work.", "context_window": 200_000},
-    {"id": "claude-sonnet-5", "display_name": "Sonnet 5", "alias": "sonnet",
+    {"id": "claude-sonnet-5-5", "display_name": "Sonnet 5.5", "alias": "sonnet",
      "description": "Balanced capability and speed.", "context_window": 200_000},
-    {"id": "claude-fable-5", "display_name": "Fable 5", "alias": "fable",
+    {"id": "claude-fable-5-1", "display_name": "Fable 5.1", "alias": "fable",
      "description": "Latest Fable generation.", "context_window": 200_000},
-    {"id": "claude-haiku-4-5-20251001", "display_name": "Haiku 4.5", "alias": None,
+    {"id": "claude-haiku-5-5", "display_name": "Haiku 5.5", "alias": None,
      "description": "Fastest, lightest Claude model.", "context_window": 200_000},
 )
 

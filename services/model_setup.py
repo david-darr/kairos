@@ -40,7 +40,7 @@ MAX_DOWNLOAD = 300 * 1024 * 1024
 MAX_EXPANDED = 600 * 1024 * 1024
 PROVIDERS = {
     'openai': ('OpenAI', 'https://api.openai.com/v1', 'gpt-4o-mini'),
-    'anthropic': ('Anthropic', 'https://api.anthropic.com', 'claude-haiku-4-5'),
+    'anthropic': ('Anthropic', 'https://api.anthropic.com', 'claude-haiku-5-5'),
     'openrouter': ('OpenRouter', 'https://openrouter.ai/api/v1', 'openai/gpt-4o-mini'),
     'google': ('Google Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'),
 }

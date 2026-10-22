@@ -422,13 +422,13 @@ class ModelsAndFilesLive(unittest.IsolatedAsyncioTestCase):
     only, against the real backend."""
 
     def test_model_and_effort_by_name(self):
-        result = cli("--model", "sonnet 5", "--effort", "high", "-p", "hello", "--output-format", "json")
+        result = cli("--model", "sonnet 5.5", "--effort", "high", "-p", "hello", "--output-format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         session_id = json.loads(result.stdout)["session_id"]
         with app_window() as window:
             session = window.get(f"/api/sessions/{session_id}").json()
-        self.assertEqual((session["model_override"], session["model_effort"]), ("claude-sonnet-5", "high"))
-        refused = cli("--model", "sonnet 5", "--effort", "ultra", "-p", "hello")
+        self.assertEqual((session["model_override"], session["model_effort"]), ("claude-sonnet-5-5", "high"))
+        refused = cli("--model", "sonnet 5.5", "--effort", "ultra", "-p", "hello")
         self.assertEqual(refused.returncode, 1)
         self.assertIn("does not offer the ultra effort", refused.stderr)
         unknown = cli("--model", "gemini 9", "-p", "hello")
