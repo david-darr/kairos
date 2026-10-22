@@ -80,11 +80,11 @@ pywhispercpp>=1.5,<2
 pywinpty>=3.0.5,<4; sys_platform == "win32"
 ptyprocess>=0.7,<0.9; sys_platform != "win32"
 
-# Kairos CLI (vault spec "Kairos CLI (Build Spec)", 2026-10-22). PENDING
-# DAVID'S APPROVAL of the swap: he approved Textual and Rich, but the spec's
-# Phase 1 spike showed Textual's inline mode does not run on Windows (it falls
-# back to the full-screen driver and loses scrollback), so the CLI uses the
-# spec's fallback, Rich + prompt_toolkit, and Textual is not needed.
+# Kairos CLI (vault spec "Kairos CLI (Build Spec)", 2026-10-22). Approved by
+# David 2026-10-22 ("approve prompt_toolkit for the CLI"). The spec's Phase 1
+# spike showed Textual's inline mode does not run on Windows (it falls back to
+# the full-screen driver and loses scrollback), so the CLI uses the spec's
+# fallback, Rich + prompt_toolkit, and Textual is not needed.
 # Rich draws (MIT); prompt_toolkit reads input (BSD-3-Clause). Pure Python.
 rich>=14,<15
 prompt_toolkit>=3.0.43,<4
