@@ -532,6 +532,9 @@ async function boot() {
 
 
   if (!settings.onboarding_complete) {
+    // The live feed also carries terminal pairing prompts (cliPair.js), which
+    // must reach the person even before setup is finished.
+    chatStream.connect().catch(() => {});
     app.style.display = "none";
     overlay.classList.remove("hidden");
     await onboarding.run(overlay, () => {

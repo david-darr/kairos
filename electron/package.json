@@ -102,6 +102,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Kairos",
       "deleteAppDataOnUninstall": false,
+      "include": "installer.nsh",
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico"
     },

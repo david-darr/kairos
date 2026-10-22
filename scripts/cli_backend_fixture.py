@@ -27,9 +27,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import app  # noqa: E402,F401  (the real application)
-from core import file_checkpoints, model_endpoints, permissions  # noqa: E402
+from core import cli_access, file_checkpoints, model_endpoints, permissions  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from services import chat_service  # noqa: E402
+
+# The live tests pair many terminals in a minute; the limit itself is
+# covered by scripts/test_cli_access.py.
+cli_access.PAIRS_PER_MINUTE = int(os.environ.get("KAIROS_TEST_PAIRS_PER_MINUTE", cli_access.PAIRS_PER_MINUTE))
 
 FAKE_NAME = "Scripted model"
 if not any(e.get("name") == FAKE_NAME for e in model_endpoints.list_endpoints()):

@@ -95,6 +95,9 @@ def app_command(instance: str | None, background: bool = True) -> list[str] | No
     to the tray and no window (--background); without it, a running app
     just shows its window (Electron's single-instance hand-off)."""
     flags = (["--background"] if background else []) + ([f"--instance={instance}"] if instance else [])
+    # Development and tests only: extra Electron flags, such as an isolated
+    # --user-data-dir, for a throwaway instance.
+    flags += [flag for flag in os.environ.get("KAIROS_APP_FLAGS", "").split() if flag.startswith("--user-data-dir=")]
     exe = os.environ.get("KAIROS_APP_EXE")
     if exe and Path(exe).is_file():
         return [exe, *flags]
@@ -174,8 +177,11 @@ class Connection:
         await self.pair(on_words=on_words)
 
     async def login(self, username: str | None = None, password: str | None = None) -> None:
-        username = username or input("Kairos username: ").strip()
-        password = password if password is not None else getpass.getpass("Password: ")
+        try:
+            username = username or input("Kairos username: ").strip()
+            password = password if password is not None else getpass.getpass("Password: ")
+        except EOFError:
+            raise KairosError("This Kairos has accounts on. Run kairos login in a terminal.") from None
         body = {"username": username, "password": password}
         response = await self.client.post("/api/auth/login", json=body)
         if response.status_code == 401 and "2FA" in response.text:

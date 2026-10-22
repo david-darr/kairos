@@ -5,8 +5,10 @@ rem Python, then the checkout's .venv, then python on PATH.
 setlocal
 set "KAIROS_CLI_HOME=%~dp0"
 set "PY="
-if exist "%KAIROS_CLI_HOME%runtime\python.exe" set "PY=%KAIROS_CLI_HOME%runtime\python.exe"
+if defined KAIROS_PYTHON set "PY=%KAIROS_PYTHON%"
+if not defined PY if exist "%KAIROS_CLI_HOME%runtime\python.exe" set "PY=%KAIROS_CLI_HOME%runtime\python.exe"
 if not defined PY if exist "%KAIROS_CLI_HOME%resources\backend\runtime\python.exe" set "PY=%KAIROS_CLI_HOME%resources\backend\runtime\python.exe"
+if not defined PY if exist "%KAIROS_CLI_HOME%..\runtime\python.exe" set "PY=%KAIROS_CLI_HOME%..\runtime\python.exe"
 if not defined PY if exist "%KAIROS_CLI_HOME%..\.venv\Scripts\python.exe" set "PY=%KAIROS_CLI_HOME%..\.venv\Scripts\python.exe"
 if not defined PY set "PY=python"
 set "CLI_DIR=%KAIROS_CLI_HOME%"

@@ -33,6 +33,29 @@ from .sanitize import one_line
 SUBCOMMANDS = ("status", "login", "agents", "forge")
 
 
+VALUE_OPTIONS = {"--instance", "--port", "--theme", "--color", "--model", "--output-format", "--permissions"}
+
+
+def find_subcommand(argv: list[str]) -> tuple[str | None, int]:
+    """The subcommand is the first positional word, wherever the options sit
+    (kairos --instance dev status). Anything after -p/-r is a value, so
+    `kairos -p status` sends the word "status"."""
+    skip = False
+    for index, token in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        if token in VALUE_OPTIONS:
+            skip = True
+            continue
+        if token in ("-p", "--print", "-r", "--resume"):
+            return None, -1
+        if token.startswith("-"):
+            continue
+        return (token, index) if token in SUBCOMMANDS else (None, -1)
+    return None, -1
+
+
 def build_parser(sub: str | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f"kairos {sub}" if sub else "kairos",
                                      description="Kairos in your terminal.")
@@ -275,8 +298,10 @@ async def run_login(args, palette) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    sub = argv[0] if argv and argv[0] in SUBCOMMANDS else None
-    args = build_parser(sub).parse_args(argv[1:] if sub else argv)
+    sub, index = find_subcommand(argv)
+    if sub:
+        argv = argv[:index] + argv[index + 1:]
+    args = build_parser(sub).parse_args(argv)
     headless = not sub and args.headless is not None
     palette = choose(None if args.theme == "auto" else args.theme, args.color,
                      probe=not headless and sys.stdout.isatty())

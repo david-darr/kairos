@@ -264,7 +264,7 @@ async def _ask(pair: Pair) -> None:
             title=f"A terminal wants to use Kairos. It shows {pair.words}. Allow this terminal?",
             description=("Allow only if your terminal shows the same words. The terminal can then chat, "
                          "run Forge and answer its own chats' prompts until it closes, for 12 hours at most."),
-            target=None, timeout=PAIR_TIMEOUT_SECONDS, force_prompt=True,
+            target=pair.words, timeout=PAIR_TIMEOUT_SECONDS, force_prompt=True,
             choices=[{"id": "allow", "label": "Allow until this terminal closes", "behavior": "allow", "scope": "once"},
                      {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}])
         if decision.behavior == "allow":
