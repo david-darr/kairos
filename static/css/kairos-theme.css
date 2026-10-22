@@ -42,6 +42,20 @@
   --k-font-serif: "Cormorant Garamond", "Garamond", "Times New Roman", serif;
 }
 
+/* The mascot's body colours (Kairos Mascot build spec, 2026-10-22): the six
+   agent pastels (services/agent_service.py COLORS), named by their hex so a
+   saved bot spec ("color": "#D9B260") maps straight to its token. Like the
+   village, these are illustration colours and stay fixed across Appearance;
+   Kairos's own body is ink and follows the theme (css/mascot.css). */
+:root {
+  --m-body-d9b260: #D9B260;  /* gold */
+  --m-body-b9d2e3: #B9D2E3;  /* powder */
+  --m-body-e8c39e: #E8C39E;  /* sand */
+  --m-body-d99a92: #D99A92;  /* rose */
+  --m-body-b5c7a5: #B5C7A5;  /* sage */
+  --m-body-cdbfd9: #CDBFD9;  /* lilac */
+}
+
 /* The Agent village's illustration palette (the pixel-art buildings, trees,
    lakes, roads and its signs and status lights). Like the avatar faces, the
    village paints its own scene, so these stay fixed across Appearance
