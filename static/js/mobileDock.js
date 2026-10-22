@@ -5,7 +5,8 @@ export const dockTabs = ['notes', 'library', 'tasks', 'cookbook', 'email', 'cale
 // How far the page runs below the layout viewport: 0, except in an iOS
 // home-screen app, where the page is the full screen (style.css
 // --ms-page-height) but the layout viewport is short by the status bar.
-export const belowFold = () => Math.max(0, (document.documentElement?.getBoundingClientRect().height || 0) - innerHeight);
+// Measured from the app, which is the page in a home-screen app and one dynamic viewport in a Safari tab (mobileChrome.js).
+export const belowFold = () => Math.max(0, ((document.getElementById?.('app') || document.documentElement)?.getBoundingClientRect().bottom || 0) - innerHeight);
 // The keyboard's height above the layout viewport's bottom (sub-pixel noise is 0).
 export const keyboardLift = (height, viewport) => {
   const lift = viewport ? height - viewport.height - viewport.offsetTop : 0;

@@ -102,8 +102,6 @@ export function openTabSheet(from) {
   footer.append(account, accountActions, button('Settings', () => { closeTabSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row'));
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeTabSheet(); native.click(); }, 'ms-account-row'));
-  // TEMPORARY (2026-10-21): on-device viewport numbers for the iPhone height and frost bugs. Remove with viewportDiagnostics.js.
-  footer.append(button('Viewport diagnostics (temporary)', () => { closeTabSheet(); import('./viewportDiagnostics.js').then(m => m.openViewportDiagnostics()); }, 'ms-account-row'));
   const { live, done } = activityItems();
   const work = document.createElement('section'); work.className = 'ms-sheet-activity'; work.setAttribute('aria-label', 'Work and updates');
   if (live.length || done.length) {

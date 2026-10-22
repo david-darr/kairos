@@ -1,7 +1,7 @@
 import { api, el } from './api.js';
 import { ICON as MARK } from './brand.js';
 import { ICONS } from './icons.js';
-import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js';
+import { mobileOn, phone, go, button, edgeBlur, haptic, pageBleed } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
 import { watchKeyboard } from './mobileDock.js';
@@ -104,7 +104,8 @@ export function mountMobileHome({ container, content, banner, options }) {
     if (enabled === active) return; active = enabled;
     container.classList.toggle('ms-home', enabled); shell.hidden = !enabled;
     if (enabled) {
-      shell.prepend(banner); banner.classList.add('ms-background');
+      // In an iOS Safari tab the picture runs under Safari's bars from the page-level layer.
+      (pageBleed() || shell).prepend(banner); banner.classList.add('ms-background');
       avatar.textContent = document.querySelector('.sidebar-avatar')?.textContent || 'K';
       detachActivity = attachActivity(activitySlot); mountLaunch();
     } else {
@@ -127,6 +128,7 @@ export function mountMobileHome({ container, content, banner, options }) {
     disposed = true; if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
     phone.removeEventListener('change', sync); document.removeEventListener('kairos:appearance', sync);
+    if (banner.parentElement === pageBleed()) banner.remove();
     shell.remove(); bannerAnchor.remove();
   } };
 }

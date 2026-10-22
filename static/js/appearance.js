@@ -364,7 +364,8 @@ function syncRedesign(root) {
     redesignBackdrop?.dispose(); redesignBackdrop?.host.remove(); redesignBackdrop = null;
     return;
   }
-  const content = document.getElementById('content');
+  // An iOS Safari tab keeps page backgrounds in its bleed layer (mobileChrome.js).
+  const content = document.querySelector('body > .ms-page-bleed') || document.getElementById('content');
   if (!content || redesignBackdrop?.host.isConnected) return;
   const host = document.createElement('div');
   host.className = 'kairos-redesign-backdrop';

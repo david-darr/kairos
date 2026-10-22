@@ -452,7 +452,7 @@
   /* The frost lives only in the status bar area and is clear by its bottom
      edge, so the avatar and header controls below it stay sharp. */
   .kairos-redesign .ms-global-frost,
-  .kairos-redesign .ms-blur-top { height: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
+  .kairos-redesign .ms-blur-top { height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-standalone-nudge, 0px)); }
   /* 2026-10-21 (David): lighter and higher still: 1px, clear by about the
      clock's baseline (60% of the safe area). */
   .kairos-redesign .ms-blur-top i {
@@ -610,4 +610,28 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-sheet-surface :is(.forge-app-suggestions button, .forge-folder-list button.forge-path) { display: block; width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 14px; border: 1px solid var(--rd-line); border-radius: 18px; background: var(--rd-surface-2); color: var(--rd-ink); text-align: left; overflow-wrap: anywhere; }
   .kairos-redesign .ms-sheet-surface .forge-folder-list { display: grid; gap: 8px; }
+}
+
+/* 2026-10-21: iOS Safari in a browser tab (html.ms-safari-bleed, set by
+   mobileChrome.js only there). Safari 26 shows page pixels under its status
+   bar and floating toolbar only while the document scrolls, so the document
+   scrolls with 1px of slack and sits at 1px; the app sticks to the top at one
+   dynamic viewport, so nothing sits behind the toolbar; the backgrounds sit in
+   an in-flow layer one large viewport tall that runs under both bars; the
+   status-bar frost sticks to the top. Vertical overscroll is off; horizontal
+   swipe-back is untouched. */
+@media (max-width: 768px) {
+  html.ms-safari-bleed { height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; }
+  html.ms-safari-bleed body { height: auto; min-height: calc(100lvh + 1px); overflow: visible; }
+  html.ms-safari-bleed .ms-page-bleed {
+    position: relative; z-index: 0; isolation: isolate; overflow: hidden; pointer-events: none;
+    height: calc(100lvh + 1px); margin-bottom: calc(-100lvh - 1px);
+  }
+  html.ms-safari-bleed #app { position: sticky; top: 0; z-index: 1; height: 100dvh; }
+  html.ms-safari-bleed .ms-global-frost { position: sticky; top: 0; display: block; margin-bottom: calc(-1 * var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
+  html.ms-safari-bleed .ms-global-frost[hidden] { display: none; }
+  html.ms-safari-bleed .ms-page-bleed > .ms-background {
+    display: block; position: absolute; inset: 0; z-index: 1; border-radius: 0; opacity: .65; pointer-events: none;
+  }
+  html.ms-safari-bleed .ms-page-bleed > .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
 }

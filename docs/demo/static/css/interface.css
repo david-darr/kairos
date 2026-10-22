@@ -2,7 +2,8 @@
    context pills, open transcripts and a compact input. Paint stays entirely
    in the existing appearance system, including a person's custom dark base. */
 :root {
-  --mobile-safe-top: var(--native-safe-top, env(safe-area-inset-top, 0px));
+  /* --ms-standalone-nudge (style.css): an iOS home-screen app moves its top content a little further down. */
+  --mobile-safe-top: calc(var(--native-safe-top, env(safe-area-inset-top, 0px)) + var(--ms-standalone-nudge, 0px));
   --mobile-safe-right: var(--native-safe-right, env(safe-area-inset-right, 0px));
   --mobile-safe-bottom: var(--native-safe-bottom, env(safe-area-inset-bottom, 0px));
   --mobile-safe-left: var(--native-safe-left, env(safe-area-inset-left, 0px));

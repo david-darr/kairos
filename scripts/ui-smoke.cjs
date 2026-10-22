@@ -2341,8 +2341,10 @@ app.whenReady().then(async () => {
       await waitDemo("!!d.querySelector('.forge-home .forge-composer')", 'Forge Home opens in the demo');
       await waitDemo("!!d.querySelector('[data-forge-project=fp1]')", 'Forge projects load in the demo sidebar');
       await inDemo("d.querySelector('[data-forge-project=fp1]').click()");
-      await waitDemo("!!d.querySelector('.forge-session-card[data-session-id=fs1]')", 'Forge sessions load in the demo');
-      await inDemo("d.querySelector('.forge-session-card[data-session-id=fs1]').click()");
+      // A phone lists a project's sessions on its Sessions page (mobileForgeSessions.js) instead of cards.
+      const sessionEntry = label === "mobile" ? "#mf-sessions .ms-history-row[data-session-id=fs1] .ms-history-main" : ".forge-session-card[data-session-id=fs1]";
+      await waitDemo("!!d.querySelector('" + sessionEntry + "')", 'Forge sessions load in the demo');
+      await inDemo("d.querySelector('" + sessionEntry + "').click()");
       await waitDemo("!!d.querySelector('.forge-shell .forge-transcript-layout')", 'Forge session renders in the bundle');
       assert.ok(await inDemo("d.querySelector('.forge-session-header').textContent.includes('Kairos garden')"), label + ' demo Forge header');
       await inDemo("d.querySelector('#forge-mode-switch [data-mode=kairos]').click()");

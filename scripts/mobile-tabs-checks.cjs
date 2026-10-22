@@ -513,17 +513,21 @@ async function run(ctx) {
   // The page must fill the screen, bottom surfaces sit safe-bottom + gap above the true bottom, and the
   // status-bar frost stays inside the safe area.
   const devices = [
-    ['iPhone home-screen app, Dynamic Island', 393, 793, 852, 59, 34],
-    ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0],
-    ['browser or Android (no fold)', 393, 852, 852, 47, 34],
+    // The last field is the iOS home-screen nudge (style.css --ms-standalone-nudge): 12px there, 0 elsewhere.
+    ['iPhone home-screen app, Dynamic Island', 393, 793, 852, 59, 34, 12],
+    ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0, 12],
+    ['browser or Android (no fold)', 393, 852, 852, 47, 34, 0],
   ];
-  for (const [name, w, layout, screen, top, bottom] of devices) {
+  ok(await js("!document.documentElement.classList.contains('ms-safari-bleed') && !document.querySelector('.ms-page-bleed') && scrollY === 0"), 'Outside an iOS Safari tab the page stays locked, with no bleed layer');
+  for (const [name, w, layout, screen, top, bottom, nudge] of devices) {
     await resize(w, layout);
-    await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); })()`);
+    await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-standalone-nudge', '${nudge}px'); })()`);
     const gap = Math.max(12, bottom);
     await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
     const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
     eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
+    const avatarTop = (await rect('.ms-shell .ms-header .ms-avatar')).t;
+    eq(Math.round(avatarTop), top + nudge + 6, `${name}: launch avatar clears the status bar by 6px plus the ${nudge}px nudge`);
     const composer = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
     ok(composer && Math.abs(composer.b - (screen - gap)) <= 1, `${name}: launch composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(composer)}`);
     const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");
@@ -547,7 +551,7 @@ async function run(ctx) {
     await js("import('/static/js/mobileSheet.js').then(m => { const p = document.createElement('p'); p.textContent = 'Fold check'; window.__foldSheet = m.openMobileSheet({ title: 'Fold check', content: p, fullHeight: true }); })");
     await waitFor("!!document.querySelector('.ms-sheet[open]')"); await delay(350);
     const sheet = await rect('.ms-sheet[open]');
-    ok(Math.round(sheet.b) === screen && Math.abs(sheet.t - top) <= 1, `${name}: a full bottom sheet spans from the status bar to the screen bottom: ${JSON.stringify(sheet)}`);
+    ok(Math.round(sheet.b) === screen && Math.abs(sheet.t - top - nudge) <= 1, `${name}: a full bottom sheet spans from the status bar (plus the nudge) to the screen bottom: ${JSON.stringify(sheet)}`);
     await shot('fold-' + w + 'x' + screen + '-sheet');
     await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('.ms-sheet[open]')");
     // Forge: the project New page, a session's composer and the Changes dock follow the same system.
@@ -571,7 +575,45 @@ async function run(ctx) {
   }
   // Outside an iOS home-screen app (navigator.standalone), theme-color still tints the browser and Android toolbars.
   eq(await js("document.querySelector('meta[name=theme-color]')?.content"), '#F3EADB', 'Browser keeps theme-color');
-  await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.setProperty('--native-safe-bottom', '0px'); })()");
+  await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.removeProperty('--ms-standalone-nudge'); s.setProperty('--native-safe-bottom', '0px'); })()");
+
+  // iOS Safari in a browser tab (mobileChrome.js setPageBleed; Electron cannot match its gate, so it is
+  // switched on directly). The document scrolls 1px, the app sticks at one dynamic viewport, and the
+  // backgrounds run in a page-level layer one large viewport tall, under Safari's bars.
+  await resize(393, 852);
+  await js("(() => { const s = document.documentElement.style; s.setProperty('--native-safe-top', '47px'); s.setProperty('--native-safe-bottom', '34px'); })()");
+  await js("import('/static/js/mobileChrome.js').then(m => m.setPageBleed(true))"); await delay(200);
+  await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer')"); await delay(500);
+  const bleed = await js(`(() => { const r = s => { const n = document.querySelector(s); if (!n) return null; const b = n.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)]; };
+    return { cls: document.documentElement.classList.contains('ms-safari-bleed'), scrollY, range: document.scrollingElement.scrollHeight - innerHeight,
+      app: r('#app'), layer: r('.ms-page-bleed'), sky: document.querySelector('.kairos-redesign-backdrop')?.parentElement?.className,
+      picture: document.querySelector('.dashboard-core')?.parentElement?.className, frost: getComputedStyle(document.querySelector('.ms-global-frost')).position,
+      composer: r('.ms-shell .ms-composer') }; })()`);
+  eq(bleed.cls && bleed.scrollY === 1 && bleed.range === 1, true, 'Safari tab: the document scrolls with 1px of slack and sits at 1px: ' + JSON.stringify(bleed));
+  eq(bleed.app, [0, 852], 'Safari tab: the app sticks to the top, one dynamic viewport tall');
+  eq(bleed.layer, [-1, 852], 'Safari tab: the background layer is in flow, one large viewport (plus the 1px slack) tall');
+  ok(bleed.sky === 'ms-page-bleed' && bleed.picture === 'ms-page-bleed', 'Safari tab: the sky and the launch picture live in the background layer: ' + JSON.stringify(bleed));
+  ok(bleed.frost === 'sticky' && bleed.composer[1] === 852 - 34, 'Safari tab: sticky frost, and the composer sits above the bottom inset: ' + JSON.stringify(bleed));
+  ok(await js("(() => { const r = document.querySelector('.ms-global-frost').getBoundingClientRect(); return r.top === 0 && r.height <= 47.5; })()"), 'Safari tab: the frost sits at the top within the status bar');
+  await shot('safari-bleed-launch');
+  // It returns to 1px after any scroll that reaches 0, and on pageshow.
+  await js("scrollTo(0, 0)"); await delay(400);
+  eq(await js("scrollY"), 1, 'Safari tab: a scroll back to 0 settles at 1px');
+  await js("scrollTo(0, 0); dispatchEvent(new PageTransitionEvent('pageshow'))"); await delay(50);
+  eq(await js("scrollY"), 1, 'Safari tab: pageshow returns to 1px');
+  // Docked tab, Forge New: fixed docks and the Forge picture follow.
+  await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
+  ok(!(await js("!!document.querySelector('.ms-page-bleed > .ms-background')")), 'Safari tab: leaving the launch view takes its picture with it');
+  eq(Math.round((await rect('.ms-dock')).b), 852 - 34, 'Safari tab: the fixed dock sits above the bottom inset');
+  await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-project')"); await delay(500);
+  ok(await js("document.querySelector('.forge-banner')?.parentElement?.classList.contains('ms-page-bleed') && getComputedStyle(document.querySelector('.forge-banner')).display !== 'none'"), 'Safari tab: the Forge New picture lives in the background layer');
+  await shot('safari-bleed-forge');
+  await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer')"); await delay(300);
+  ok(await js("!document.querySelector('.ms-page-bleed .forge-banner')"), 'Safari tab: leaving Forge takes its picture back');
+  await js("import('/static/js/mobileChrome.js').then(m => m.setPageBleed(false))"); await delay(200);
+  const restored = await js("({ cls: document.documentElement.classList.contains('ms-safari-bleed'), layer: !!document.querySelector('.ms-page-bleed'), scrollY, range: document.scrollingElement.scrollHeight - innerHeight, sky: document.querySelector('.kairos-redesign-backdrop')?.parentElement?.id, picture: !!document.querySelector('.ms-shell > .dashboard-core'), app: getComputedStyle(document.getElementById('app')).position })");
+  eq(restored, { cls: false, layer: false, scrollY: 0, range: 0, sky: 'content', picture: true, app: 'relative' }, 'Safari mode off restores the locked page exactly');
+  await js("(() => { const s = document.documentElement.style; s.removeProperty('--native-safe-top'); s.setProperty('--native-safe-bottom', '0px'); })()");
   await resize(390, 844);
 
   return { assertions };
