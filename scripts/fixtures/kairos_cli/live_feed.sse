@@ -1,0 +1,46 @@
+data: {"type": "snapshot", "runs": {}, "cliPairs": []}
+
+data: {"type": "started", "sessionId": "SESSION", "run": {"turnId": "3efb410e488c4ec2bf2f337d68363349", "sessionTitle": "record", "prompt": "hello", "text": "", "startedAt": 1792652143.156997, "status": "processing", "stopping": false, "permission": null, "toolEvents": [], "toolSteps": [], "handoffs": null, "runId": null, "error": null, "revision": 1}}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "3efb410e488c4ec2bf2f337d68363349", "revision": 2, "chunk": "You said: hello\n"}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "3efb410e488c4ec2bf2f337d68363349", "revision": 3, "changes": {"status": "done", "stopping": false, "permission": null, "error": null}}
+
+data: {"type": "started", "sessionId": "SESSION", "run": {"turnId": "f50fe7cd21004a129e3bbb5d1ba23af0", "sessionTitle": "record", "prompt": "tool", "text": "", "startedAt": 1792652143.2928493, "status": "processing", "stopping": false, "permission": null, "toolEvents": [], "toolSteps": [], "handoffs": null, "runId": null, "error": null, "revision": 1}}
+
+data: {"type": "tool_step", "sessionId": "SESSION", "turnId": "f50fe7cd21004a129e3bbb5d1ba23af0", "revision": 2, "value": {"phase": "started", "id": "t1", "name": "read_file", "summary": "services/forge_sessions.py", "ok": null, "output": "", "at": 1792652143.2988524, "seconds": 0}}
+
+data: {"type": "tool_step", "sessionId": "SESSION", "turnId": "f50fe7cd21004a129e3bbb5d1ba23af0", "revision": 3, "value": {"phase": "finished", "id": "t1", "name": "read_file", "summary": "services/forge_sessions.py", "ok": true, "output": "def create(...):\n    ...", "at": 1792652143.2988524, "seconds": 0.3}}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "f50fe7cd21004a129e3bbb5d1ba23af0", "revision": 4, "chunk": "Read it.\n"}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "f50fe7cd21004a129e3bbb5d1ba23af0", "revision": 5, "changes": {"status": "done", "stopping": false, "permission": null, "error": null}}
+
+data: {"type": "started", "sessionId": "SESSION", "run": {"turnId": "e8fea5310b444d8a9d6b8c24efe4ec8d", "sessionTitle": "record", "prompt": "ask", "text": "", "startedAt": 1792652143.6359525, "status": "processing", "stopping": false, "permission": null, "toolEvents": [], "toolSteps": [], "handoffs": null, "runId": null, "error": null, "revision": 1}}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "e8fea5310b444d8a9d6b8c24efe4ec8d", "revision": 2, "changes": {"permission": {"id": "078ffb436c5f4fa1aa092b342437fcd8", "tool": "Bash", "target": "pytest scripts/test_chat.py", "title": "Kairos wants to run a command", "description": "Run the Forge tests", "arguments": "{\"command\": \"pytest scripts/test_chat.py -k forge\"}", "choices": [{"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"}, {"id": "session", "label": "Always in this chat (pytest scripts/test_chat.py)", "behavior": "allow", "scope": "session"}, {"id": "forever", "label": "Always allow pytest scripts/test_chat.py", "behavior": "allow", "scope": "forever"}, {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}], "expires_at": 1792652203.640481}}}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "e8fea5310b444d8a9d6b8c24efe4ec8d", "revision": 3, "changes": {"permission": null}}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "e8fea5310b444d8a9d6b8c24efe4ec8d", "revision": 4, "chunk": "The command was refused.\n"}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "e8fea5310b444d8a9d6b8c24efe4ec8d", "revision": 5, "changes": {"status": "done", "stopping": false, "permission": null, "error": null}}
+
+data: {"type": "started", "sessionId": "SESSION", "run": {"turnId": "8a92be8b029046f88ecf9b426cc3a031", "sessionTitle": "record", "prompt": "lines 3", "text": "", "startedAt": 1792652143.896846, "status": "processing", "stopping": false, "permission": null, "toolEvents": [], "toolSteps": [], "handoffs": null, "runId": null, "error": null, "revision": 1}}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 2, "chunk": "Here are the lines.\n\n```python\ndef hello():\n    return 'kairos'\n```\n\n| col | value |\n|---|---|\n| a | 1 |\n| b | 2 |\n\n"}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 3, "chunk": "line 00001 **bold** and "}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 4, "chunk": "`code` text\n"}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 5, "chunk": "line 00002 **bold** and "}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 6, "chunk": "`code` text\n"}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 7, "chunk": "line 00003 **bold** and "}
+
+data: {"type": "chunk", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 8, "chunk": "`code` text\n"}
+
+data: {"type": "update", "sessionId": "SESSION", "turnId": "8a92be8b029046f88ecf9b426cc3a031", "revision": 9, "changes": {"status": "done", "stopping": false, "permission": null, "error": null}}
+

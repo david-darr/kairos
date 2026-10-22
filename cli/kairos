@@ -1,0 +1,8 @@
+#!/bin/sh
+# kairos - Kairos in the terminal (macOS and Linux). Uses the app's bundled
+# Python, then a checkout's .venv, then python3 on PATH.
+here="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$here/runtime/bin/python3" ]; then py="$here/runtime/bin/python3"
+elif [ -x "$here/../.venv/bin/python" ]; then py="$here/../.venv/bin/python"
+else py=python3; fi
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m kairos_cli "$@"

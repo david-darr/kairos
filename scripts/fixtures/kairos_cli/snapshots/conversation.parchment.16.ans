@@ -1,0 +1,9 @@
+  [90myou  [0mFix the failing test in forge_sessions                                                       
+[1m  kairos[0m
+  Reading [1mservices/forge_sessions.py[0m now.                                                           
+  [33m• one [0m[1;33mitem[0m                                                                                        
+    [38;2;157;0;6;49mdef[0m[38;2;0;0;0;49m [0m[38;2;66;123;88;49mf[0m[38;2;0;0;0;49m([0m[38;2;0;0;0;49m)[0m[38;2;0;0;0;49m:[0m                                                                                        
+    [38;2;0;0;0;49m    [0m[38;2;157;0;6;49mreturn[0m[38;2;0;0;0;49m [0m[38;2;143;63;113;49m1[0m                                                                                    
+[33m   ▸ [0m[1;33mread_file    [0m[90mservices/forge_sessions.py                   [0m[32mdone[0m[90m  0.4s[0m
+[33m   ▸ [0m[1;33mbash         [0m[90mpytest scripts/test_chat.py -k forge         [0m[33mrunning[0m
+[33m  · [0m[32mdone[0m[90m in 3.2s[0m
