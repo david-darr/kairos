@@ -1809,6 +1809,8 @@ class DriverContractTests(unittest.TestCase):
         self.assertEqual([r["ref"] for r in removed], ["r1:2"])
         self.assertEqual(self.d["diff_lines"]("a\nb\nb\nc", "a\nb\nc\nd\n"), (["d"], ["b"]))
         self.assertEqual([r["ref"] for r in self.d["query_rows"](new, "EMAIL")], ["r2:1"])
+        under = [{"ref": "r3:1", "tag": "button", "label": "Check", "heading": "Answer"}, {"ref": "r3:2", "tag": "a", "label": "Home"}]
+        self.assertEqual([r["ref"] for r in self.d["query_rows"](under, "answer")], ["r3:1"], "a section's controls match its heading")
 
     def test_verify_reports_what_it_found(self):
         checks = self.d["verify_checks"]({"url_contains": "done", "title_contains": "Order", "text_present": "Thanks",

@@ -1,0 +1,14 @@
+<!doctype html>
+<title>Delivery: 1 of 3</title>
+<h1>Delivery options</h1>
+<label><input type="radio" name="ship" value="standard" aria-label="Standard shipping"> Standard</label>
+<label><input type="radio" name="ship" value="express" aria-label="Express shipping"> Express</label>
+<p><button type="button" id="next">Next</button></p>
+<p id="note"></p>
+<script>
+  document.getElementById('next').onclick = () => {
+    const chosen = document.querySelector('input[name=ship]:checked');
+    if (!chosen) { document.getElementById('note').textContent = 'Choose a shipping option first.'; return; }
+    location.href = 'step2.html?ship=' + chosen.value;
+  };
+</script>

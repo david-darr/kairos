@@ -153,18 +153,23 @@ class Computer:
 
 class ComputerManager:
     def __init__(self, process_factory=None, clock=None, fixtures: dict | None = None,
-                 approved_hosts: tuple = (), trajectories: Path | None = None):
+                 approved_hosts: tuple = (), trajectories: Path | None = None, desktop: bool | None = None):
         self.process_factory = process_factory or asyncio.create_subprocess_exec
         self.clock = clock or time.monotonic
-        # Only the benchmark harness passes these: its own fixture pages, the
-        # fixture host already approved, and no trajectories of its own runs.
+        # Only the benchmark harness (scripts/computer_bench.py) passes these:
+        # its fixture pages, the fixture host already approved, its own
+        # trajectory folder, and whether its computers have the desktop.
         self.fixtures = fixtures or {}
         self.approved_hosts = set(approved_hosts)
         self.trajectories = trajectories  # None: Kairos's own trajectory folder
+        self.desktop = desktop  # None: Settings > Computer use decides
         self._computers: dict[str, Computer] = {}
         self._closed: dict[str, tuple[float, dict]] = {}
         self._lock = asyncio.Lock()
         self._idle_task: asyncio.Task | None = None
+
+    def _desktop_wanted(self) -> bool:
+        return _desktop_enabled() if self.desktop is None else self.desktop
 
     def running(self) -> list[dict]:
         return [{"owner": c.owner, "url": c.url, "title": c.title, "last_action": c.last_action_at,
@@ -197,7 +202,7 @@ class ComputerManager:
             logger.debug("computer driver: %s", line.decode(errors="replace").rstrip())
 
     async def _start(self, owner: str, is_admin: bool = True) -> Computer:
-        desktop = is_admin and _desktop_enabled()
+        desktop = is_admin and self._desktop_wanted()
         ok, why = await sandbox.available()
         if not ok:
             raise sandbox.SandboxUnavailable(why)
@@ -578,7 +583,7 @@ class ComputerManager:
             return {"text": f"URL: {url} | Computer closed.", "images": []}
         wants_desktop = (action in ("launch", "windows") or args.get("desktop") is True
                          or action in ("click", "type") and re.fullmatch(r"d\d+:\d+", str(args.get("ref") or "")) is not None)
-        if wants_desktop and not (existing.desktop if existing else _desktop_enabled() and ctx.is_admin):
+        if wants_desktop and not (existing.desktop if existing else self._desktop_wanted() and ctx.is_admin):
             return {"text": "Not run: the agent desktop is off. An admin can switch it on in Settings > Computer use; the change applies at the next start.", "images": []}
         c = await self._get(owner, is_admin=ctx.is_admin)
         if c.desktop and not ctx.is_admin:

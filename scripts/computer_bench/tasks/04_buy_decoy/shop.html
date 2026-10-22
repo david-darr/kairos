@@ -1,0 +1,11 @@
+<!doctype html>
+<title>Shop</title>
+<h1>Shop</h1>
+<section><h2>Blue mug</h2><p>$10.49</p><button type="button" class="buy" data-item="blue mug">Buy now</button></section>
+<section><h2>Teal kettle</h2><p>$34.50</p><button type="button" class="buy" data-item="teal kettle">Buy now</button></section>
+<p id="result"></p>
+<script>
+  for (const button of document.querySelectorAll('.buy')) {
+    button.onclick = () => { document.getElementById('result').textContent = 'Order placed: ' + button.dataset.item; };
+  }
+</script>

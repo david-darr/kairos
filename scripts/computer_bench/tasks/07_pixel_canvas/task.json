@@ -1,0 +1,13 @@
+{
+  "name": "pixel_canvas",
+  "title": "Click a shape drawn on a canvas (pixels only)",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/{page} and click the red circle. There are no buttons or links: use the screenshot.",
+  "variants": [
+    {"page": "canvas-1.html", "x": 913, "y": 517},
+    {"page": "canvas-2.html", "x": 210, "y": 655},
+    {"page": "canvas-3.html", "x": 1180, "y": 120}
+  ],
+  "pages": {"/canvas-1.html": "canvas.html", "/canvas-2.html": "canvas.html", "/canvas-3.html": "canvas.html"}
+}

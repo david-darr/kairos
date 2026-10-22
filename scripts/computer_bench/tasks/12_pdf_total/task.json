@@ -1,0 +1,12 @@
+{
+  "name": "pdf_total",
+  "title": "Read a value from a PDF and save it (desktop)",
+  "kind": "task",
+  "desktop": true,
+  "instruction": "On the agent desktop, open {pdf} in the PDF viewer, find the invoice total, and save just that amount (for example 12.34) as a new text file {out}.",
+  "variants": [
+    {"pdf": "/profile/Documents/invoice.pdf", "out": "/profile/Documents/total.txt", "total": "1,284.60"},
+    {"pdf": "/profile/Documents/invoice.pdf", "out": "/profile/Documents/total.txt", "total": "317.05"}
+  ],
+  "pages": {}
+}

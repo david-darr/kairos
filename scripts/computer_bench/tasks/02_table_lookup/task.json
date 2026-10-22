@@ -1,0 +1,12 @@
+{
+  "name": "table_lookup",
+  "title": "Find a value in a table",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/prices.html. Find the price of the {product} in the table, type it (for example 12.50) in the Answer box, and press Check.",
+  "variants": [
+    {"product": "Teal kettle", "price": "34.50"},
+    {"product": "Oak shelf", "price": "88.10"}
+  ],
+  "pages": {"/prices.html": "prices.html"}
+}

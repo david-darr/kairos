@@ -106,7 +106,7 @@ def diff_lines(old, new):
 def query_rows(rows, query):
     query = query.lower()
     return [row for row in rows if any(query in str(row.get(key) or '').lower()
-                                       for key in ('label', 'role', 'tag', 'type', 'value', 'href'))]
+                                       for key in ('label', 'role', 'tag', 'type', 'value', 'href', 'heading'))]
 
 def verify_checks(expect, found):
     """Each expected condition, whether it held, and what was actually there."""
@@ -314,6 +314,18 @@ async def on_a11y(fn, *args, seconds=8):
 def a11y_name(node):
     return ' '.join((node.get_name() or '').split())[:160]
 
+def a11y_label(node):
+    """An unnamed field's label through its labelled-by relation, as GTK
+    forms and dialogs link them ("Name:" beside the Save dialog's field)."""
+    try:
+        Atspi = atspi()
+        for relation in node.get_relation_set() or []:
+            if relation.get_relation_type() == Atspi.RelationType.LABELLED_BY and relation.get_n_targets():
+                return a11y_name(relation.get_target(0)).rstrip(':').strip()
+    except Exception:
+        return ''
+    return ''
+
 def a11y_states(node):
     S = atspi().StateType
     states = node.get_state_set()
@@ -401,6 +413,7 @@ def a11y_walk(roots, app, query=''):
         except Exception:
             return
         if states['DEFUNCT'] or not states['SHOWING']: return
+        if not name and role in A11Y_TEXT: name = a11y_label(node)
         if (role in A11Y_ACTIONABLE and (name or role in A11Y_TEXT)) or (name and role not in A11Y_CONTAINERS):
             add(node, role, name, states)
         if role in ('table', 'tree table') and count > 500:

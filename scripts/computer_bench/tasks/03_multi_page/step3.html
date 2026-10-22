@@ -1,0 +1,14 @@
+<!doctype html>
+<title>Delivery: 3 of 3</title>
+<h1>Review</h1>
+<p id="review"></p>
+<p><button type="button" id="finish">Finish</button></p>
+<p id="result"></p>
+<script>
+  const params = new URLSearchParams(location.search);
+  const summary = (params.get('ship') || '') + ' ' + (params.get('code') || '');
+  document.getElementById('review').textContent = 'Review: ' + summary;
+  document.getElementById('finish').onclick = () => {
+    document.getElementById('result').textContent = 'Flow finished: ' + summary;
+  };
+</script>
