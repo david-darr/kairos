@@ -49,7 +49,7 @@ function normalize(raw = {}) {
   if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
-  // Show the mascot (Kairos Mascot build spec, 2026-10-22): on by default; off
+  // Show Kip (Kairos Mascot build spec, 2026-10-22): on by default; off
   // brings back the plain markers and the mark (mascot.css, data-mascot).
   if (typeof raw.mascot === 'boolean') value.mascot = raw.mascot;
   // The redesign is the default look. `classic` is the opt-out. The old

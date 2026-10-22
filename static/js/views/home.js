@@ -167,19 +167,19 @@ export function render(container, tabId, options = {}) {
   const banner = el("div", { class: "dashboard-core", "aria-hidden": "true" });
   const nextTaskLabel = el("span", { class: "dashboard-next", text: "Checking schedule…" });
   // Kairos beside the greeting (Kairos Mascot build spec, 2026-10-22), in
-  // the halftone finish (Mote), showing the app's aggregate state: needs you
+  // Kip in the halftone style, showing the app's aggregate state: needs you
   // beats working beats idle (botStatus.js order). Needs you opens Agents,
   // where the waiting items are answered; it never answers anything itself.
   const heroMascot = createMascot({ state: "idle", finish: "halftone", decorative: true });
   const heroMascotButton = el("button", { type: "button", class: "dashboard-mascot", disabled: true,
-    "aria-label": "Kairos, idle", onclick: () => navigate("agents") }, [heroMascot]);
+    "aria-label": "Kip, idle", onclick: () => navigate("agents") }, [heroMascot]);
   const syncHeroMascot = () => {
     const agentList = Array.isArray(data.agents) ? data.agents : [];
     const state = (data.inbox?.count || 0) > 0 || agentList.some((a) => a.status === "needs_you" || a.needs_you > 0) ? "needs"
       : agentList.some((a) => a.status === "working") || chatStream.listInFlight().some((e) => e.status === "processing") ? "thinking" : "idle";
     if (heroMascot.getAttribute("state") !== state) heroMascot.setAttribute("state", state);
     heroMascotButton.disabled = state !== "needs";
-    heroMascotButton.setAttribute("aria-label", state === "needs" ? "Kairos needs you. Open Agents" : `Kairos, ${STATE_WORDS[state]}`);
+    heroMascotButton.setAttribute("aria-label", state === "needs" ? "Kip, needs you. Open Agents" : `Kip, ${STATE_WORDS[state]}`);
     heroMascotButton.dataset.state = state;
   };
   const stopHeroStream = chatStream.subscribeAll(() => syncHeroMascot());

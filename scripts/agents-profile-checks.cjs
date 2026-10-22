@@ -46,7 +46,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.ok(await js("document.querySelector('.agent-profile-tabs').dataset.active === 'library' && document.querySelector('.agent-profile-tab.active').textContent === 'Library'"), 'segment arrow moves the tab indicator');
   await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
   const avatarStart = writes.length;
-  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Mascot accessory\"] [data-value=quill]').click()");
+  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Kip accessory\"] [data-value=quill]').click()");
   await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
   await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('quill')");
   assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.acc === 'quill'), 'profile saves the look');

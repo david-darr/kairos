@@ -72,7 +72,7 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
   await waitFor("document.querySelector('.agent-profile-sheet')?.classList.contains('is-open') || document.querySelector('.agent-profile-sheet')?.getClientRects().length>0");
   await capture('agents-messenger-profile');
   // The Ajar picker (mascot, 2026-10-22): body, shape and one accessory.
-  await js(`for(const [key,value] of [['shape','squircle'],['accessory','laurel'],['body','#B5C7A5']]) document.querySelector('.agent-profile-sheet [aria-label="Mascot '+key+'"] [data-value="'+value+'"]').click();`);
+  await js(`for(const [key,value] of [['shape','squircle'],['accessory','laurel'],['body','#B5C7A5']]) document.querySelector('.agent-profile-sheet [aria-label="Kip '+key+'"] [data-value="'+value+'"]').click();`);
   const look = await js("JSON.parse(document.querySelector('.agent-profile-sheet .agent-avatar-picker-preview .agent-avatar').dataset.avatarSpec)");
   assert.deepEqual(look,{version:3,character:'ajar',shape:'squircle',color:'#B5C7A5',acc:'laurel',finish:'flat'});
   await click('.agent-profile-details > .btn.primary');
