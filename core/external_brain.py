@@ -193,7 +193,20 @@ class ExternalBrain:
             return await tool_registry.call(selected, args["arguments"], self._context(), tool_registry.OPENAI)
         if name in self._mcp_tools:
             return await self._call_mcp(name, args)
-        return await tool_registry.call(name, args, self._context(), tool_registry.OPENAI)
+        result = await tool_registry.call(name, args, self._context(), tool_registry.OPENAI)
+        if name == "design_create":
+            self._offer_design_tools()
+        return result
+
+    def _offer_design_tools(self) -> None:
+        """A design now linked to this chat: its editing tools join the list
+        in place, so the rest of this turn can use them (core/design_tools.py)."""
+        if self.small_window:
+            return  # Already in the bridge catalog.
+        have = {tool["function"]["name"] for tool in self.tools if tool.get("type") == "function"}
+        self.tools.extend(tool for tool in tool_registry.openai_tools(
+            self.is_admin, agent=bool(self.agent_id), helper=self.helper, read_only=self.read_only,
+            session_id=self.session_id or '') if tool["function"]["name"] not in have)
 
     def _context(self) -> tool_registry.ToolContext:
         return tool_registry.ToolContext(self.session_id, self.is_admin, self.allow_user_tab_source,

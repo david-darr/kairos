@@ -35,7 +35,7 @@ export const ALWAYS_SHOWN = "home";
 
 const DEFAULT_GROUPS = {
   main: ["home", "chat", "agents"],
-  workspace: ["notes", "library", "calendar", "email", "tasks"],
+  workspace: ["notes", "library", "design", "calendar", "email", "tasks"],
   intelligence: ["tool-store", "cookbook"],
 };
 const defaults = () => (syncNeeds(), {

@@ -352,7 +352,8 @@ def _tool_messages(result, supports_images: bool, provider: str | None) -> tuple
     if not isinstance(result, tool_registry.ToolResult):
         return str(result), []
     if not result.images or not supports_images:
-        suffix = "\nScreenshots unavailable on this connection; use computer read." if result.images else ""
+        suffix = ("\nScreenshots unavailable on this connection; use computer read." if result.image_fallback is None
+                  else result.image_fallback) if result.images else ""
         return result.text + suffix, []
     images = [base64.b64encode(image).decode() for image in result.images]
     if provider == "anthropic":

@@ -10,6 +10,8 @@ export function bindReviewComposer(value) {
   return () => { if (composer === value) { composer = null; reviewsChanged(); } };
 }
 export function reviewsChanged() { for (const listener of listeners) listener(); }
+// The main chat composer, for the Design canvas's selections (designSelection.js).
+export const reviewComposer = () => composer;
 const comments = sessionId => composer?.sessionId() === sessionId ? composer.getSelected().filter(r => r.kind === 'artifact_comment') : [];
 export async function openReview(item, sessionId, opener) {
   const { openArtifactComment } = await import('./chatContent.js');

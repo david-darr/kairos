@@ -20,6 +20,8 @@ import { badgeCounts } from './mobileActivity.js';
 const PUSHED = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',
   '.agents-messenger .side-chat-input', '.library-editor', '.vault-phone-detail',
+  // The Design canvas: its one-board pager, and its composer while in use.
+  '.design-focus', '.design-composer.is-active',
 ].join(', ');
 const nav = id => document.querySelector(`#nav .nav-item[data-tab="${id}"]`);
 const forge = () => document.documentElement.dataset.appMode === 'forge';

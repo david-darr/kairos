@@ -48,6 +48,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         remember_loopback_port(request.scope)
         response = await call_next(request)
+        # A Design board's own policy (routes/design_routes.py): its viewer
+        # script's hash, no network, framed only by the app itself.
+        design_board = response.headers.get("X-Kairos-Design-Render") == "1"
+        board_policy = response.headers.get("Content-Security-Policy") if design_board else None
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -101,6 +105,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 response.headers["Content-Disposition"] = "attachment"
         if path == "/" or path.endswith(_NO_CACHE_SUFFIXES):
             response.headers["Cache-Control"] = "no-store"
+        if board_policy:
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = board_policy
         return response
 
 

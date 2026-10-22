@@ -749,7 +749,12 @@
     if (event && method === "PATCH") { Object.assign(event, body); return event; }
     return null;
   }
+  // Scout's routine (agent a1): a real task, as on the backend, so its Pause
+  // and Edit (PATCH /api/tasks/g1) succeed; the agent's routines list shows this same record.
+  const routineG1 = { id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.",
+    schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: "a1", next_run_at: future(20) };
   const tasks = [
+    routineG1,
     { id: "t1", name: "Daily briefing", builtin_action: "routine0", enabled: true, schedule_kind: "daily", run_time: "07:00", next_run_at: future(6), last_run_at: now - 3000,
       deliver_to_channel: "discord" },
     // Running right now (roadmap phase 4): offers Stop instead of Run now.
@@ -798,7 +803,7 @@
       memory: state.agentMemories?.[id] ?? `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
       memory_upkeep_journal: id === 'a1' ? [{ id: 'upkeep-demo', at: now - 1800, topic: null,
         status: state.agentUpkeepUndone ? 'undone' : 'committed', changes: [{ section: 'Notes', line: 'Old note', reason: 'expired' }] }] : [],
-      goals: [{ id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
+      goals: [id === "a1" ? routineG1 : { id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
       cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: state.agentReview ? 'review' : 'ready', agent_id: id, comments: [] }],
       inbox: agentInbox.filter((i) => i.agent_id === id), answered: [], runs: runs.c1,
       teams: [{ id: "s1", name: "Launch team", state: "active", member_id: "s1-m2", is_lead: 0 }],
@@ -950,6 +955,10 @@
   }
   function fixture(url) {
     if (url.pathname === '/api/addons') return [];
+    // The Design canvas: no designs in the demo (its boards are live frames from the backend).
+    if (url.pathname === '/api/designs') return [];
+    if (url.pathname === '/api/designs/render-status') return { available: false, message: 'Needs the Kairos desktop app' };
+    if (url.pathname === '/api/design-systems') return [{ id: 'kairos', name: 'Kairos', builtin: true }];
     if (url.pathname === '/api/store/catalog') return communityCatalog();
     if (url.pathname === '/api/store/github') return { configured: state.githubConfigured !== false, signed_in: !!state.githubSignedIn, login: state.githubSignedIn ? 'alex-demo' : null };
     if (url.pathname === '/api/store/submissions') return state.empty ? [] : [
