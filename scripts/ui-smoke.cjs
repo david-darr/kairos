@@ -115,7 +115,9 @@ const server = http.createServer(async (req, res) => {
     if (demoState.homeCardsUnavailable && url.pathname === '/api/home/tab-cards') { res.writeHead(503); res.end('{"detail":"Unavailable"}'); return; }
     if (req.method !== "GET") {
       let body = ""; for await (const chunk of req) body += chunk;
-      writes.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body });
+      const write = { path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body };
+      writes.push(write);
+      res.on('finish', () => { write.status = res.statusCode; });  // so a check can require the answer was OK
       if (url.pathname === '/api/settings/computer-use') demoState.computerUse = JSON.parse(body);
       let parsed = {}; try { parsed = JSON.parse(body); } catch {}
       if (url.pathname === '/api/chat/live/stop') {
@@ -2449,14 +2451,17 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.routines-panel .routine-row')");
     const routineStart = writes.length;
     await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Pause').click()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path)); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false), 'Pause sends enabled false');
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && w.status); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false && w.status === 200), 'Pause sends enabled false and succeeds');
     await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
     await waitFor("!!document.querySelector('.routines-panel .routine-row')");
     await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Edit').click()");
     await js("(() => { const row = document.querySelector('.routines-panel .routine-row'); const input = row.querySelector('.routine-editor input'); input.value = 'Morning postings'; input.dispatchEvent(new Event('input', { bubbles: true })); [...row.querySelectorAll('.routine-editor button')].find(b => b.textContent === 'Save').click(); })()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status === 200), 'Edit saves the new name and succeeds');
+    assert.deepEqual(await js("[...document.querySelectorAll('#toast-host .toast.error')].map(t => t.textContent)"), [], 'routine Pause and Edit raise no error');
+    // Pause and Edit now really change the routine: put it back for the checks that follow.
+    assert.equal(await js("fetch('/api/tasks/g1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, name: 'New postings' }) }).then(r => r.status)"), 200);
     // Every bot surface on a phone: no sideways scroll, 44px targets.
     await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow });
     console.log('PASS: design canvas.');
