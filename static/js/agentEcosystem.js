@@ -1,6 +1,6 @@
 import { el } from './api.js';
 import { botStatusLine } from './botStatus.js';
-import { profileSprite } from './ecosystemAvatar.js';
+import { profileSprite, kipSheets } from './ecosystemAvatar.js';
 import { assignment, villageLayout, roadRoute, PLACES } from './ecosystemModel.js';
 import { buildingArt, villageGround } from './ecosystemArt.js';
 
@@ -137,8 +137,9 @@ export function mountAgentEcosystem(host, open, retry = () => {}) {
     button.style.left=`${building.x}px`;button.style.top=`${building.y}px`;sign.textContent=building.name;
     if(!entry.drawn){art.innerHTML=buildingArt(building.kind,seed(building.id));entry.drawn=true;}
     if(building.kind==='home'){
-      const agent=agents.find(a=>a.id===building.id), spec=JSON.stringify(agent?.avatar||agent?.id);
-      if(entry.profileKey!==spec){entry.resident?.remove();entry.resident=el('span',{class:'ecosystem-home-resident','aria-hidden':'true'},[profileSprite(agent)]);button.append(entry.resident);entry.profileKey=spec;}
+      // Kip sleeps at home when the bot is off (mascot, 2026-10-22).
+      const agent=agents.find(a=>a.id===building.id), pose=botStatusLine(agent).state==='off'?'sleeping':'idle', spec=JSON.stringify([agent?.avatar||agent?.id,pose]);
+      if(entry.profileKey!==spec){entry.resident?.remove();entry.resident=el('span',{class:'ecosystem-home-resident','aria-hidden':'true'},[profileSprite(agent,pose)]);button.append(entry.resident);entry.profileKey=spec;}
       button.setAttribute('aria-label',`${agent.name}’s home. ${botStatusLine(agent).text}. Open direct message`);
     }else if(building.kind==='team'){
       const team=teams.find(t=>t.id===building.id);badge.textContent=teamsError?'State unavailable':team.state||'Unknown';
@@ -177,7 +178,7 @@ export function mountAgentEcosystem(host, open, retry = () => {}) {
     record.work=work;record.home=home;record.site=site;record.destination=destination;
     record.node.dataset.destination=work.place;
     const spec=JSON.stringify(agent.avatar||agent.id);
-    if(record.profileKey!==spec){record.sprite.replaceChildren(profileSprite(agent));record.profileKey=spec;}
+    if(record.profileKey!==spec){record.sprite.replaceChildren(profileSprite(agent));for(const [name,value] of Object.entries(kipSheets(agent)))record.sprite.style.setProperty(name,value);record.profileKey=spec;}
     const state=botStatusLine(agent);record.name.textContent=agent.name;
     record.node.className=`ecosystem-character ecosystem-state-${agentsError?'unknown':state.state}`;
     record.state.textContent=agentsError?'State unavailable':state.text;
