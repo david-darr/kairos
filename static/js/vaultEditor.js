@@ -126,7 +126,8 @@ export function mountVaultEditor(host, { store, node, note, onSaved, onCancel, o
           // One source object: CodeMirror tracks a running completion by its source's identity.
           cm.EditorState.languageData.of(() => completionData),
           cm.EditorView.lineWrapping,
-          cm.keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { store_(); return true; } }]),
+          // Ctrl/Cmd+S saves and keeps editing; the Save button saves and returns to reading.
+        cm.keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { store_(false); return true; } }]),
           cm.EditorView.theme({
             '&': { height: '100%', color: 'var(--text)', backgroundColor: 'transparent' },
             '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--rd-font-ui, var(--font-sans, sans-serif))', fontSize: '14px', lineHeight: '1.7' },
@@ -138,6 +139,10 @@ export function mountVaultEditor(host, { store, node, note, onSaved, onCancel, o
             '.cm-panels, .cm-tooltip': { backgroundColor: 'var(--bg-panel-solid)', color: 'var(--text)', border: '1px solid var(--border-strong)', borderRadius: '10px' },
             '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--accent-dim)', color: 'var(--text)' },
             '.cm-completionDetail': { color: 'var(--text-dim)', fontStyle: 'normal', marginLeft: '8px' },
+          '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--rd-font-ui, var(--font-sans, sans-serif))', fontSize: '13px', maxHeight: '14em' },
+          '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { padding: '4px 10px' },
+          '.cm-completionMatchedText': { textDecoration: 'none', fontWeight: '600' },
+          '.cm-completionIcon': { display: 'none' },
           }),
           cm.syntaxHighlighting(cm.HighlightStyle.define([
             { tag: cm.tags.heading, fontWeight: '600', color: 'var(--text)' },
@@ -158,11 +163,11 @@ export function mountVaultEditor(host, { store, node, note, onSaved, onCancel, o
     });
     status.textContent = 'Saved';
     paint();
-    save.addEventListener('click', () => store_());
+    save.addEventListener('click', () => store_(true));
     if (!phone.matches) view.focus();
   }).catch(error => { if (!disposed) { status.textContent = `The editor could not load: ${error.message}`; } });
 
-  async function store_() {
+  async function store_(close) {
     if (disposed || saving || !dirty()) return;
     const content = text();
     let allow = false;
@@ -177,7 +182,8 @@ export function mountVaultEditor(host, { store, node, note, onSaved, onCancel, o
       version = saved.version; original = content; note = { ...note, ...saved };
       changed(); status.textContent = 'Saved';
       toast('Vault note saved', 'success');
-      onSaved?.(saved);
+      await onSaved?.(saved);
+      if (close && !disposed) onCancel?.();
     } catch (error) {
       if (disposed) return;
       const message = error.message.replace(/^\d+: /, '');

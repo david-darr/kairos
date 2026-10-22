@@ -31,7 +31,10 @@
 .vault-mode-pill:hover { color: var(--text); border-color: var(--border-strong); }
 .vault-mode-pill.active { background: var(--accent-dim); color: var(--text); border-color: transparent; }
 .vault-mode-pill .vault-icon { color: inherit; }
-.vault-today-btn { margin-left: auto; display: inline-grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--text-dim); cursor: pointer; }
+.vault-refresh-btn { margin-left: auto; display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 999px; background: none; color: var(--text-faint); cursor: pointer; }
+.vault-refresh-btn:hover { color: var(--text); background: var(--accent-dim); }
+.vault-refresh-btn svg { width: 15px; height: 15px; }
+.vault-today-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--text-dim); cursor: pointer; }
 .vault-today-btn:hover { color: var(--text); border-color: var(--border-strong); }
 .vault-today-btn[hidden] { display: none; }
 .vault-today-btn svg { width: 16px; height: 16px; }
@@ -376,7 +379,7 @@ button.vault-history-row:hover { background: var(--accent-dim); }
   .kairos-redesign .library-vault-search { height: 44px; }
   .kairos-redesign .vault-mode-row { gap: 8px; }
   .kairos-redesign .vault-mode-pill { min-height: 44px; padding: 0 16px; font-size: 13px; background: var(--rd-surface-solid); }
-  .kairos-redesign .vault-today-btn { width: 44px; height: 44px; }
+  .kairos-redesign .vault-today-btn, .kairos-redesign .vault-refresh-btn { width: 44px; height: 44px; }
   .kairos-redesign .vault-home-host { margin-bottom: 12px; }
   .kairos-redesign .vault-home { padding: 0; gap: 12px; }
   .kairos-redesign .vault-home-head { display: none; }

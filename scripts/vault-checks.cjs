@@ -155,8 +155,10 @@ async function run(ctx) {
   await capture(label + '-vault-editor');
   if (phone) { await clickText('.vault-editor-modes button', 'Preview'); await delay(250); ok(await js("document.querySelector('.vault-editor-preview').textContent.includes('Added in the Library.')"), 'phone: Preview shows the edit'); await clickText('.vault-editor-modes button', 'Write'); }
   start = writes.length;
-  await clickText('.vault-editor-bar .btn', 'Save');
-  await waitFor("document.querySelector('.vault-editor-status').textContent === 'Saved'");
+  const ctrlS = () => js("document.querySelector('.vault-editor .cm-content').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))");
+  await ctrlS();
+  await waitFor("document.querySelector('.vault-editor-status').textContent === 'Saved' && !document.querySelector('.vault-note-title').classList.contains('dirty')");
+  ok(await js("!!document.querySelector('.vault-editor')"), 'Ctrl+S saves and keeps the editor open');
   const save = JSON.parse(since(start).find(w => w.path === '/api/vault/note').body);
   eq([save.path, save.version, save.content.endsWith('Added in the Library.\n'), save.content.startsWith('---\nstatus: active')], ['Projects/Projects.md', 'v1', true, true], 'the save sends the version it opened and the raw text');
   // An outside edit in the meantime: 409, nothing lost, Reload or Copy my version.
@@ -172,6 +174,7 @@ async function run(ctx) {
   await waitFor("!document.querySelector('.vault-conflict-dialog') && !document.querySelector('.vault-editor .cm-content').textContent.includes('Mine.')");
   ok(true, 'Reload loads the latest version');
   // Removing the properties block asks first.
+  const original = await cm("return view.state.doc.toString();");
   await cm("const doc = view.state.doc.toString(); const end = doc.indexOf('---', 3) + 4; view.dispatch({ changes: { from: 0, to: end, insert: '' } });");
   await clickText('.vault-editor-bar .btn', 'Save');
   await waitFor("[...document.querySelectorAll('.panel-dialog')].some(d => d.textContent.includes('Remove the properties block?'))");
@@ -179,6 +182,14 @@ async function run(ctx) {
   await js("document.querySelector('.panel-dialog .modal-close-btn').click()");
   await delay(250);
   eq(since(start).filter(w => w.path === '/api/vault/note').length, 0, 'cancelling keeps the properties block: nothing is saved');
+  // The Save button saves and returns to the reading view.
+  await cm(`view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(original + 'Saved and closed.' + String.fromCharCode(10))} } });`);
+  await clickText('.vault-editor-bar .btn', 'Save');
+  await waitFor("!document.querySelector('.vault-editor') && !!document.querySelector('.vault-note-body')");
+  ok(since(start).some(w => w.path === '/api/vault/note' && JSON.parse(w.body).content.endsWith('Saved and closed.' + String.fromCharCode(10))), 'Save persists and returns to reading');
+  await clickText('.library-vault-reader-actions .btn', 'Edit');
+  await waitFor("!!document.querySelector('.vault-editor .cm-editor')");
+  await cm("view.dispatch({ changes: { from: view.state.doc.length, insert: 'Unsaved.' } });");
   // Leaving with unsaved changes asks first.
   await click('.vault-mode-pill');
   await waitFor("[...document.querySelectorAll('.panel-dialog')].some(d => d.textContent.includes('Discard note edits?'))");
@@ -289,9 +300,13 @@ async function run(ctx) {
     eq(await overflow(), [], 'switch off: no overflow');
     await capture(label + '-vault-classic');
     await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ classic: false }))");
-    await waitFor("document.documentElement.classList.contains('kairos-redesign')");
+    await waitFor("document.documentElement.classList.contains('kairos-redesign') && !!document.querySelector('.sidebar-settings-btn')");
   }
   demoState.vault = undefined;
+  // Leave the app as the next checks expect it: Home, with the sidebar built.
+  await navigate('home');
+  await waitFor("!!document.querySelector('.sidebar-settings-btn') && !document.querySelector('.panel-dialog, dialog[open]')");
+  await delay(300);
   return { assertions };
 }
 

@@ -100,7 +100,8 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
   const filterRow = el("div", { class: "vault-map-filters", role: "group", "aria-label": "Map filters" });
   const legend = el("div", { class: "vault-map-legend", role: "group", "aria-label": "Colour by project" });
   const focusBar = el("div", { class: "vault-focus-bar", hidden: true });
-  const toolbar = el("div", { class: "vault-toolbar" }, [browseBtn, search, fitBtn]);
+  const foldersBtn = el("button", { class: "btn quiet", type: "button", text: "All folders", title: "Open the vault's folders in the panel" });
+  const toolbar = el("div", { class: "vault-toolbar" }, [browseBtn, search, fitBtn, foldersBtn]);
   const wrap = el("div", { class: "vault-graph-wrap" }, [canvas, toolbar, el("div", { class: "vault-map-controls" }, [focusBar, filterRow, legend]), searchResults, panel,
     el("div", { class: "vault-caption" }, [counts, el("span", { class: "vault-caption-hint", text: "Drag to explore · Scroll to zoom · Select to read" })])]);
   container.replaceChildren(wrap);
@@ -112,6 +113,7 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
   // -- toolbar ---------------------------------------------------------------
   browseBtn.addEventListener("click", async () => { if (await canLeave()) onBrowse?.(selectedId && store.note(selectedId) ? selectedId : null); });
   fitBtn.addEventListener("click", () => { autoFit = true; fitToView(); redraw(); });
+  foldersBtn.addEventListener("click", () => { if (store.byId.has("")) selectNode(""); });
   search.addEventListener("input", () => {
     searchResults.replaceChildren();
     const query = search.value.trim().toLowerCase();
@@ -315,7 +317,10 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
     for (const n of sim.nodes) {
       if (!visible.has(n.id)) continue;
       const r = nodeRadius(n);
-      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      // Folders are circles, notes triangles (as the kiosk drew them).
+      ctx.beginPath();
+      if (n.type === "folder") ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      else { const t = r * 1.25; ctx.moveTo(n.x, n.y - t); ctx.lineTo(n.x + t * .866, n.y + t * .5); ctx.lineTo(n.x - t * .866, n.y + t * .5); ctx.closePath(); }
       const dim = selectedId !== null && n.id !== selectedId && n.id !== hoveredId && !(store.outlinks.get(selectedId) || []).includes(n.id) && !(store.backlinks.get(selectedId) || []).includes(n.id);
       ctx.globalAlpha = dim ? .35 : n.type === "folder" ? .5 : .92;
       ctx.fillStyle = nodeColor(n); ctx.fill();
@@ -481,7 +486,7 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
     redraw();
     pointerDown = { x: e.clientX, y: e.clientY, moved: false };
     const hit = hitTest(e.clientX, e.clientY);
-    if (hit && !reducedMotion.matches) { hit.fixed = true; drag = { node: hit }; }
+    if (hit) { hit.fixed = true; drag = { node: hit }; }
     else { drag = { pan: true, startX: e.clientX, startY: e.clientY, startTX: transform.x, startTY: transform.y }; canvas.classList.add("dragging"); }
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -493,7 +498,7 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
       return;
     }
     if (pointerDown && (Math.abs(e.clientX - pointerDown.x) > 3 || Math.abs(e.clientY - pointerDown.y) > 3)) pointerDown.moved = true;
-    if (drag.node) { const p = screenToWorld(e.clientX, e.clientY); Object.assign(drag.node, { x: p.x, y: p.y, vx: 0, vy: 0 }); }
+    if (drag.node) { const p = screenToWorld(e.clientX, e.clientY); Object.assign(drag.node, { x: p.x, y: p.y, vx: 0, vy: 0 }); if (reducedMotion.matches) draw(); }
     else if (drag.pan) { transform.x = drag.startTX + (e.clientX - drag.startX); transform.y = drag.startTY + (e.clientY - drag.startY); if (reducedMotion.matches) draw(); }
   });
   canvas.addEventListener("pointerup", () => {
@@ -522,7 +527,7 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
     buildColorGroups();
     resizeCanvas();
     relayout();
-    if (focusId && store.note(focusId)) selectNode(focusId);
+    if (focusId && store.note(focusId)) { if (!mobileOn()) selectNode(focusId); else { selectedId = focusId; redraw(); } }
     else if (select && store.note(select) && !mobileOn()) selectNode(select);
   }
   load().catch(() => { if (!disposed) counts.textContent = "Couldn't load the vault. Reopen this view to retry."; });

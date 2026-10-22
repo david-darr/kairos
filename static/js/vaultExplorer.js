@@ -21,11 +21,12 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
   const homeBtn = el('button', { type: 'button', class: 'vault-mode-pill active', 'aria-pressed': 'true', title: 'Vault Home' }, [icon('home'), el('span', { text: 'Home' })]);
   const mapBtn = el('button', { type: 'button', class: 'vault-mode-pill', 'aria-pressed': 'false', title: 'Map of links' }, [icon('map'), el('span', { text: 'Map' })]);
   const todayBtn = el('button', { type: 'button', class: 'vault-today-btn', title: "Today's note", 'aria-label': "Today's note", hidden: true }, [icon('today')]);
+  const refreshBtn = el('button', { type: 'button', class: 'vault-refresh-btn', title: 'Reload the vault from disk', 'aria-label': 'Refresh vault' }, [icon('refresh')]);
   todayBtn.dataset.mobileDock = 'create'; todayBtn.dataset.mobileCreateLabel = "Today's note";
   const count = el('div', { class: 'vault-count', 'aria-live': 'polite', text: 'Loading vault...' });
   const tree = el('div', { class: 'library-vault-tree', role: 'navigation', 'aria-label': 'Vault notes' });
   const sidebar = el('aside', { class: 'library-vault-sidebar' }, [
-    el('div', { class: 'library-vault-sidebar-head' }, [search, el('div', { class: 'vault-mode-row' }, [homeBtn, mapBtn, todayBtn])]),
+    el('div', { class: 'library-vault-sidebar-head' }, [search, el('div', { class: 'vault-mode-row' }, [homeBtn, mapBtn, refreshBtn, todayBtn])]),
     count, tree,
   ]);
   const homeHost = el('div', { class: 'vault-home-host' });
@@ -39,6 +40,14 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
   // rail's "Open in Map" opens it focused on the note instead.
   mapBtn.addEventListener('click', async () => { if (await canLeave()) onMap?.(null, 1, selected); });
   todayBtn.addEventListener('click', () => openToday());
+  refreshBtn.addEventListener('click', async () => {
+    if (!await canLeave()) return;
+    editor?.destroy(); editor = null; browser.classList.remove('vault-editing');
+    refreshBtn.disabled = true; count.textContent = 'Loading vault...';
+    try { await store.load(); if (!disposed) { drawCount(); showHome(); } }
+    catch (error) { if (!disposed) count.textContent = 'Vault unavailable'; toast(error.message.replace(/^\d+: /, ''), 'error'); }
+    finally { refreshBtn.disabled = false; }
+  });
   search.addEventListener('input', () => { drawTree(); scheduleSearch(); });
   search.addEventListener('keydown', event => {
     if (event.key === 'Escape') { search.value = ''; drawTree(); }
