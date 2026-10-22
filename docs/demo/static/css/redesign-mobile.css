@@ -393,11 +393,12 @@
   .kairos-redesign .dashboard .hm-customize { min-height: 44px; min-width: 44px; }
   .kairos-redesign .dashboard-actions { flex-wrap: wrap; }
   .kairos-redesign .dashboard :is(button.dashboard-row, .dashboard-section-header .btn) { min-height: 44px; }
+  /* 2026-10-21 (David): a page's content starts below the avatar's row, and
+     its title sits on that row (see "Page title" at the end of this file). */
   .kairos-redesign #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) {
-    padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 72px);
+    position: relative; padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 62px);
   }
   .kairos-redesign .view:not(.chat-layout) .view-header:first-child > div > h2 { padding-left: 0; }
-  .kairos-redesign .settings-mobile-page .settings-titlebar { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 60px); padding-left: 16px; }
   .kairos-redesign .dashboard-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .kairos-redesign .dashboard-grid > * { grid-column: 1 / -1 !important; min-width: 0; }
   .kairos-redesign .ms-tab-group { margin-bottom: 20px; }
@@ -431,13 +432,19 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-sheet-projects .ms-account-row { width: auto; flex: 0 0 auto; padding-inline: 12px; }
   .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
-  /* TEMPORARY (2026-10-21): the Safari page readout in the workspace sheet (mobileTabSheet.js). */
-  .kairos-redesign .ms-sheet-readout { margin: 12px 4px 0; font-size: 11px; line-height: 1.4; color: var(--rd-ink-dim); overflow-wrap: anywhere; }
 }
 
 /* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
 @media (max-width: 768px) {
-  .kairos-redesign .tool-store-view .tool-store-top { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 4px); z-index: 56; }
+  /* The search and filter card starts below the header row and scrolls with the page (2026-10-21: it ran off the top). */
+  .kairos-redesign .tool-store-view .tool-store-top { position: static; top: auto; margin: 0; padding: 6px 12px 6px; border: 1px solid var(--rd-line); border-radius: 20px; z-index: auto; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* The title moves to the avatar's row, so "+" joins the search on the card's first row. */
+  .kairos-redesign .tool-store-view .tool-store-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
+  .kairos-redesign .tool-store-view .tool-store-top :is(.view-header, .view-header > div:first-child) { display: contents; }
+  .kairos-redesign .tool-store-view .tool-store-top .ts-plus { grid-column: 2; grid-row: 1; }
+  .kairos-redesign .tool-store-view .tool-store-top .tool-store-toolbar { display: contents; }
+  .kairos-redesign .tool-store-view .tool-store-top .tool-store-search { grid-column: 1; grid-row: 1; }
+  .kairos-redesign .tool-store-view .tool-store-top :is(.tool-store-toolbar > :not(.tool-store-search), > :not(.view-header):not(.tool-store-toolbar)) { grid-column: 1 / -1; }
 }
 
 /* Forge session: the page already clears the safe area, so the panes do not add it a second time. */
@@ -454,7 +461,7 @@
   /* The frost lives only in the status bar area and is clear by its bottom
      edge, so the avatar and header controls below it stay sharp. */
   .kairos-redesign .ms-global-frost,
-  .kairos-redesign .ms-blur-top { height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-standalone-nudge, 0px)); }
+  .kairos-redesign .ms-blur-top { height: max(0px, calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-ios-nudge, 0px))); }
   /* 2026-10-21 (David): lighter and higher still: 1px, clear by about the
      clock's baseline (60% of the safe area). */
   .kairos-redesign .ms-blur-top i {
@@ -614,34 +621,6 @@
   .kairos-redesign .ms-sheet-surface .forge-folder-list { display: grid; gap: 8px; }
 }
 
-/* 2026-10-21: iOS Safari in a browser tab (html.ms-safari-bleed, set by
-   mobileChrome.js only there). Safari 26 shows page pixels under its status
-   bar and floating toolbar only while the document scrolls, so the document
-   scrolls with 1px of slack and sits at 1px; the app is one dynamic viewport
-   tall from the top, so nothing sits behind the toolbar; the backgrounds sit
-   in an in-flow layer one large viewport tall that runs under both bars. Vertical overscroll is off; horizontal
-   swipe-back is untouched. */
-@media (max-width: 768px) {
-  html.ms-safari-bleed { height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; }
-  html.ms-safari-bleed body { height: auto; min-height: calc(100lvh + 1px); overflow: visible; }
-  html.ms-safari-bleed .ms-page-bleed {
-    position: relative; z-index: 0; isolation: isolate; overflow: hidden; pointer-events: none;
-    height: calc(100lvh + 1px); margin-bottom: calc(-100lvh - 1px);
-  }
-  /* No fixed or sticky element may touch the screen edges here: Safari samples
-     those for a flat bar tint (a full-screen sticky app did exactly that on
-     device, 2026-10-21). The app is in flow 1px down, so at the 1px scroll it
-     sits at the top; the frost is absolute, which Safari does not sample. */
-  html.ms-safari-bleed #app { position: relative; z-index: 1; height: 100dvh; margin-top: 1px; }
-  html.ms-safari-bleed .ms-global-frost { position: absolute; top: 1px; left: 0; right: 0; display: block; }
-  html.ms-safari-bleed .ms-global-frost[hidden] { display: none; }
-  html.ms-safari-bleed .ms-page-bleed > .app-background { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; object-fit: cover; }
-  html.ms-safari-bleed .ms-page-bleed > .ms-background {
-    display: block; position: absolute; inset: 0; z-index: 1; border-radius: 0; opacity: .65; pointer-events: none;
-  }
-  html.ms-safari-bleed .ms-page-bleed > .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
-}
-
 /* Forge phone Home: the desktop dashboard as a page, reached like Kairos Home.
    Header, avatar and safe areas come from the phone shell; the cards stack in one column. */
 @media (max-width: 768px) {
@@ -661,4 +640,55 @@
   .kairos-redesign .mf-dashboard .forge-widget-body .dashboard-row { min-height: 44px; width: 100%; }
   .kairos-redesign .mf-dashboard :is(svg, table) { max-width: 100%; }
   .kairos-redesign .mf-dashboard .forge-ranked { display: block; overflow-x: auto; }
+}
+
+/* 2026-10-21: iPhone Safari in a browser tab keeps its own status bar and
+   floating toolbar and paints them in the page colour (html/body --bg). The
+   page meets each of them through a short fade to that same colour, so no
+   mismatched band shows where our picture ends. Absolute, not fixed, so
+   Safari does not sample them. The home-screen app is unchanged. */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 768px) and (display-mode: browser) {
+    .kairos-redesign #app::before, .kairos-redesign #app::after {
+      content: ""; position: absolute; left: 0; right: 0; height: 16px; z-index: 56; pointer-events: none;
+    }
+    .kairos-redesign #app::before { top: 0; background: linear-gradient(to bottom, var(--bg), transparent); }
+    .kairos-redesign #app::after { bottom: 0; height: 12px; background: linear-gradient(to top, var(--bg), transparent); }
+  }
+}
+
+/* Page title (2026-10-21, David): on every phone tab the title sits on the
+   avatar's row, centred with it and set against the right edge; the page
+   content starts below that row. One rule for the shared page header and the
+   two pages that draw their own (Agents' bar, Settings' title bar). Pages with
+   a switch in that row (Chats, Forge New/Sessions) keep the switch as their
+   title, and Forge Home keeps its own header row. */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content > .view-header:first-child h2,
+  .kairos-redesign #view-content > :first-child > .view-header:first-child h2,
+  .kairos-redesign #view-content .tool-store-view .view-header h2,
+  .kairos-redesign #view-content .agents-workspace-bar > h2 {
+    position: absolute; z-index: 2; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: 72px; right: 16px;
+    height: 44px; min-height: 0; margin: 0; padding: 0; box-sizing: border-box;
+    font-size: 28px; line-height: 44px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Ancestors between the page and its title stay unpositioned, so the title measures from the page. */
+  .kairos-redesign #view-content :is(.view-constrained, .view-header, .tool-store-view, .agents-workspace, .agents-workspace-bar, .tool-store-top):has(h2) { position: static; }
+  .kairos-redesign #view-content .agents-workspace-bar { padding-left: 0; justify-content: flex-end; }
+  .kairos-redesign .settings-mobile-page .settings-titlebar {
+    min-height: 44px; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px 72px; justify-content: flex-end;
+  }
+  .kairos-redesign .settings-mobile-page .settings-titlebar .title { margin-left: auto; text-align: right; }
+}
+
+/* Full-screen panels and sheets sit above every page header and the avatar
+   (2026-10-21, David: Chat's documents panel lay under the chat's title and
+   buttons). Headers are 55-56 and the avatar 1100; dialogs and the shared
+   sheets are already in the top layer or above 1400. Each panel clears the
+   status bar with its own header. */
+@media (max-width: 768px) {
+  .kairos-redesign :is(.artifact-panel, .hm-sheet-root, .chat-summary-backdrop) { z-index: 1150; }
+  .kairos-redesign .agents-rail-scrim { z-index: 1149; }
+  .kairos-redesign .agents-messenger.is-rail-open .agents-chat-rail { z-index: 1150; }
+  .kairos-redesign .hm-sheet { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 16px); padding-bottom: calc(28px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
 }

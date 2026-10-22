@@ -458,14 +458,15 @@
   :root { --ms-page-height: 100dvh; --ms-below-fold: calc(var(--ms-page-height) - 100dvh); }
   @media (display-mode: standalone) { :root { --ms-page-height: max(100dvh, 100lvh); } }
 }
-/* An iOS home-screen app (WebKit's -webkit-touch-callout, standalone; not
-   Android's installed app) draws its own haze below the status bar that no
-   page style changes (2026-10-21, David on device). Everything that clears
-   the top safe area (--mobile-safe-top, interface.css) clears this much more.
-   The status-bar frost itself stays within the true safe area. */
-:root { --ms-standalone-nudge: 0px; }
+/* iPhone (WebKit's -webkit-touch-callout; not Android, not desktop), at
+   phone width: the home-screen app draws its own haze below the status bar
+   that no page style changes, so everything that clears the top safe area
+   (--mobile-safe-top, interface.css) clears 12px more (2026-10-21, David on
+   device). A Safari tab gets the same spacing so the two look alike. The
+   status-bar frost itself stays within the true safe area. */
+:root { --ms-ios-nudge: 0px; }
 @supports (-webkit-touch-callout: none) {
-  @media (display-mode: standalone) { :root { --ms-standalone-nudge: 12px; } }
+  @media (max-width: 768px) { :root { --ms-ios-nudge: 12px; } }
 }
 
 html, body {

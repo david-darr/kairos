@@ -1,5 +1,5 @@
 import { api, el } from './api.js';
-import { mobileOn, phone, button, go, edgeBlur, pageBleed } from './mobileShared.js';
+import { mobileOn, phone, button, go, edgeBlur } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { openTabSheet } from './mobileTabSheet.js';
 import { openMobileSheet } from './mobileSheet.js';
@@ -67,7 +67,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' }), start])]);
     const body = el('div', { class: 'mf-dashboard-body mf-overview' });
     shell.append(header, body); page.prepend(shell);
-    move(banner, pageBleed() || shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body);
+    move(banner, shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body);
     page.classList.add('mf-home');
   }
   function enable() {
@@ -88,7 +88,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     const bottom = el('div', { class: 'ms-launch-bottom' }), activity = el('div', { class: 'ms-activity-slot' }); bottom.append(activity); launch.append(bottom);
     const track = el('div', { class: 'ms-page-track' }, [launch, sessionsPage]);
     shell.append(header, el('div', { class: 'ms-page-window' }, [track])); page.prepend(shell);
-    move(banner, pageBleed() || shell); banner.classList.add('ms-background'); move(composer, bottom); move(hint, bottom);
+    move(banner, shell); banner.classList.add('ms-background'); move(composer, bottom); move(hint, bottom);
     page.classList.add('mf-home');
     pager = mountPager(shell, [launch, sessionsPage], tabs, lastPage, index => { lastPage = index; });
     // As on the Chats launch: the shell fills the page and the keyboard lift pads its bottom.

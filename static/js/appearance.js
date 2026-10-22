@@ -292,8 +292,7 @@ function ensureCanvases() {
   shaderCanvas = document.createElement('canvas');
   for (const canvas of [imageCanvas, shaderCanvas]) {
     canvas.className = 'app-background'; canvas.setAttribute('aria-hidden', 'true');
-    // An iOS Safari tab keeps page backgrounds in its in-flow layer (mobileChrome.js): a fixed one would tint its bars.
-    (document.querySelector('body > .ms-page-bleed') || document.body).prepend(canvas);
+    document.body.prepend(canvas);
   }
   shaderCanvas.addEventListener('webglcontextlost', event => {
     event.preventDefault(); glScene = false; apply();
@@ -365,8 +364,7 @@ function syncRedesign(root) {
     redesignBackdrop?.dispose(); redesignBackdrop?.host.remove(); redesignBackdrop = null;
     return;
   }
-  // An iOS Safari tab keeps page backgrounds in its bleed layer (mobileChrome.js).
-  const content = document.querySelector('body > .ms-page-bleed') || document.getElementById('content');
+  const content = document.getElementById('content');
   if (!content || redesignBackdrop?.host.isConnected) return;
   const host = document.createElement('div');
   host.className = 'kairos-redesign-backdrop';

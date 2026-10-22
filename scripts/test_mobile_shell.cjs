@@ -35,7 +35,7 @@ class Surface {
     window: { getSelection: () => ({ isCollapsed: true }) },
     queueMicrotask: callback => callback(), innerWidth: 390, performance: { now: () => 1000 }, setTimeout: action => action(),
   });
-  const shared = { mobileOn: () => enabled, reduced, haptic() {}, phone: new Surface(), go() {}, pageBleed: () => null,
+  const shared = { mobileOn: () => enabled, reduced, haptic() {}, phone: new Surface(), go() {},
     button(label, action, className = 'ms-glass') { const node = context.document.createElement('button'); node.textContent = label; node.className = className; node.addEventListener('click', action); return node; }, edgeBlur() {} };
   const stubs = {
     './mobileShared.js': shared,

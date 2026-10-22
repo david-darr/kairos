@@ -195,7 +195,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
     // A diff replaced the preview tab; open a file again so the editor flow has its surface.
     await tool('Explorer');
     await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row')");
-    await js("document.querySelector('dialog.ms-sheet .forge-tree-directory').open = true");
+    // After the commit above the tree may list the file at its root, with no folder to open.
+    await js("{ const folder = document.querySelector('dialog.ms-sheet .forge-tree-directory'); if (folder) folder.open = true; }");
     await waitFor("!!document.querySelector('dialog.ms-sheet [data-file-path]')");
     await click('dialog.ms-sheet [data-file-path]');
     await waitFor("!!document.querySelector('.forge-pane .cm-editor') && !document.querySelector('dialog.ms-sheet')");

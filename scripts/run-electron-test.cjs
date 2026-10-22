@@ -16,6 +16,7 @@ const result = spawnSync(electronBinary,
   [path.join(__dirname, suite + '.cjs'), ...process.argv.slice(3)],
   // 2026-10-14: UI-3 adds appearance captures and real control checks to an
   // already seven-minute suite. Give it time to finish the phone audit too.
-  { stdio: 'inherit', windowsHide: true, timeout: suite === 'ui-smoke' ? 600000 : 420000 });
+  // 2026-10-21: the phone checks now walk every tab, popup and two device classes; ui-smoke runs them too.
+  { stdio: 'inherit', windowsHide: true, timeout: suite === 'ui-smoke' ? 900000 : 420000 });
 if (result.error) console.error(result.error.message);
 process.exit(result.status ?? 1);

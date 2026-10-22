@@ -3,8 +3,6 @@ export const phone = matchMedia('(max-width: 768px)');
 // The composer plus: one glyph for chat and Forge so the three controls centre identically.
 export const PLUS_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 export const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-// The in-flow background layer of an iOS Safari tab (mobileChrome.js), or null everywhere else.
-export const pageBleed = () => document.querySelector('body > .ms-page-bleed');
 export const mobileOn = () => phone.matches && document.documentElement.classList.contains('kairos-redesign');
 export const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
 // Browsers refuse (and log an error for) vibration before the first tap, so it is gated on user activation.
