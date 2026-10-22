@@ -1,0 +1,118 @@
+/* Ajar, the Kairos mascot (Kairos Mascot build spec, 2026-10-22).
+   static/js/mascot.js builds the SVG and injects the still poses (POSE_CSS);
+   this file holds the tokens and the movement. No raw colours: every value
+   derives from the theme, so Appearance carries through. Movement runs only
+   when the system allows motion, pauses off screen and in a hidden window,
+   and never uses SVG filters. */
+
+:root {
+  --m-point: var(--point);
+  --m-stage: var(--bg-panel-solid);
+  --m-shadow: rgba(var(--shade-rgb), .13);
+  --m-halo: var(--k-gold-hi);
+  --m-danger: var(--danger);
+  --m-ripple: var(--accent);
+  --m-dim: var(--text-dim);
+  --m-faint: var(--text-faint);
+  --m-gold-hi: var(--k-gold-hi);
+  --m-gold-text: var(--accent);
+  --m-acc: var(--accent);
+  --m-rose: var(--k-rose);
+  --m-line: rgba(var(--ink-rgb), .35);
+  /* Kairos is the ink body; a pastel bot keeps bistre eyes in every theme. */
+  --m-ink-body: var(--text);
+  --m-ink-eye: var(--bg-panel-solid);
+  --m-pastel-eye: var(--k-ink);
+  --m-ink-fixed: var(--k-ink);
+}
+
+kairos-mascot {
+  display: inline-block; position: relative; flex: none; line-height: 0; vertical-align: middle;
+  width: 72px; height: 72px;
+}
+kairos-mascot > svg { width: 100%; height: 100%; }
+
+@media (prefers-reduced-motion: no-preference) {
+  kairos-mascot .ajar .aj-pt { transition: transform .35s ease, opacity .35s; }
+  kairos-mascot .ajar .aj-tilt { transition: transform .35s ease; }
+  kairos-mascot .ajar .aj-eyes { transition: transform .3s ease; }
+  kairos-mascot .ajar:is([data-state=listening], [data-state=speaking]) :is(.aj-pt, .aj-eye, .aj-mouth, .aj-voice) { transition: transform .12s ease-out, opacity .12s; }
+  kairos-mascot .ajar .aj-breathe { animation: aj-breathe 3.8s ease-in-out infinite alternate; }
+  kairos-mascot .ajar[data-state=idle] .aj-eye { animation: aj-blink 4.6s infinite; }
+  kairos-mascot .ajar[data-state=idle] .aj-eyes { animation: aj-glance 9s infinite; }
+  kairos-mascot .ajar[data-state=idle] .aj-pt { animation: aj-bob 3s ease-in-out infinite alternate; }
+  kairos-mascot .ajar[data-state=thinking] .aj-orbit { animation: aj-orbit 2.6s linear infinite; }
+  kairos-mascot .ajar[data-state=thinking] .aj-eyes { animation: aj-follow 2.6s linear infinite; }
+  kairos-mascot .ajar[data-state=thinking] .aj-eye { animation: aj-blink 5.2s infinite; }
+  kairos-mascot .ajar[data-state=listening] .aj-ripple path { animation: aj-ripple 1.5s ease-out infinite; }
+  kairos-mascot .ajar[data-state=listening] .aj-ripple path + path { animation-delay: .45s; }
+  kairos-mascot .ajar[data-state=success] .aj-hop { animation: aj-hop 1.8s ease-out 1; }
+  kairos-mascot .ajar[data-state=success] .aj-spark { animation: aj-spark 1.8s ease-out 1 both; }
+  kairos-mascot .ajar[data-state=success] .aj-pt { animation: aj-pop 1.8s ease-out 1; }
+  kairos-mascot .ajar[data-state=needs] .aj-eye { animation: aj-blink 3s infinite; }
+  kairos-mascot .ajar[data-state=needs] .aj-halo { animation: aj-halo 1.6s ease-out infinite; }
+  kairos-mascot .ajar[data-state=needs] .aj-pt { animation: aj-needs 1.6s ease-in-out infinite; }
+  kairos-mascot .ajar[data-state=needs] .aj-hop { animation: aj-nudge 3.2s ease-in-out infinite; }
+  kairos-mascot .ajar[data-state=error] .aj-tilt { animation: aj-shake 3s ease-in-out infinite; }
+  kairos-mascot .ajar[data-state=sleeping] .aj-breathe { animation: aj-breathe-slow 5s ease-in-out infinite alternate; }
+  kairos-mascot .ajar[data-state=sleeping] .aj-z text { animation: aj-z 3.6s ease-in infinite; }
+  kairos-mascot .ajar[data-state=sleeping] .aj-z text + text { animation-delay: 1.8s; }
+}
+/* Off screen, in a hidden window, or held still by its host: no movement. */
+kairos-mascot[data-offscreen] *, :root[data-page-hidden] kairos-mascot * { animation-play-state: paused !important; }
+kairos-mascot[still] * { animation: none !important; transition: none !important; }
+
+@keyframes aj-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.08); } }
+@keyframes aj-glance { 0%, 55%, 100% { transform: translate(0, 0); } 60%, 75% { transform: translate(4px, -1px); } 80%, 90% { transform: translate(-2px, 0); } }
+@keyframes aj-breathe { from { transform: scale(1, 1); } to { transform: scale(1.015, .985); } }
+@keyframes aj-breathe-slow { from { transform: scale(1, 1); } to { transform: scale(1.035, .965); } }
+@keyframes aj-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+@keyframes aj-orbit { to { transform: rotate(360deg); } }
+@keyframes aj-follow { 0%, 100% { transform: translate(3px, -3px); } 12.5% { transform: translate(4px, 0); } 25% { transform: translate(3px, 3px); } 37.5% { transform: translate(0, 4px); }
+  50% { transform: translate(-3px, 3px); } 62.5% { transform: translate(-4px, 0); } 75% { transform: translate(-3px, -3px); } 87.5% { transform: translate(0, -4px); } }
+@keyframes aj-ripple { 0% { opacity: 0; transform: translateX(-6px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateX(5px); } }
+@keyframes aj-hop { 0% { transform: none; } 15% { transform: scale(1.04, .94); } 35% { transform: translateY(-12px) scale(.97, 1.04); } 55% { transform: scale(1.03, .96); } 70%, 100% { transform: none; } }
+@keyframes aj-spark { 0%, 30% { opacity: 0; transform: scale(.5); } 45% { opacity: 1; } 80%, 100% { opacity: 0; transform: scale(1.35); } }
+@keyframes aj-pop { 0%, 30% { transform: scale(1); } 45% { transform: scale(1.35); } 70%, 100% { transform: scale(1); } }
+@keyframes aj-halo { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes aj-needs { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.25); } }
+@keyframes aj-nudge { 0%, 70%, 100% { transform: none; } 76% { transform: translateY(-5px) rotate(-2deg); } 84% { transform: none; } 90% { transform: translateY(-3px); } }
+@keyframes aj-shake { 0%, 80%, 100% { transform: rotate(0); } 84% { transform: rotate(-3deg); } 88% { transform: rotate(3deg); } 92% { transform: rotate(-2deg); } 96% { transform: rotate(0); } }
+@keyframes aj-z { 0% { opacity: 0; transform: translate(0, 4px); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, -18px); } }
+
+/* -- Placements ------------------------------------------------------------ */
+/* With the switch off (Settings > Appearance > Show the mascot) every
+   placement shows what it showed before: the marker, the icon, the orb. */
+:root[data-mascot="off"] :is(.chat-activity-marker, .empty-state-mascot, .dashboard-mascot, .agent-call-orb) kairos-mascot,
+:root[data-mascot="off"] .empty-state-mascot, :root[data-mascot="off"] .dashboard-mascot { display: none; }
+
+/* Chat activity: the mascot stands in for the spinner and the glyph. */
+.chat-activity-marker kairos-mascot { display: none; }
+:root:not([data-mascot="off"]) .chat-activity-marker { width: 22px; height: 22px; border: 0 !important; border-radius: 0 !important; animation: none !important; }
+:root:not([data-mascot="off"]) .chat-activity-marker kairos-mascot { display: inline-block; width: 22px; height: 22px; }
+:root:not([data-mascot="off"]) .chat-activity-glyph { display: none; }
+
+/* Empty states: Kairos above the serif title, the icon as the fallback. */
+.empty-state-mascot { display: flex; justify-content: center; margin: 0 auto 10px; }
+:root:not([data-mascot="off"]) .empty-state-rich:has(.empty-state-mascot) .empty-state-icon { display: none; }
+
+/* Home: Kairos beside the greeting, on the banner's parchment wash. */
+.dashboard-mascot { display: block; width: 84px; height: 84px; margin: 0 0 8px -8px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: inherit; cursor: default; }
+.dashboard-mascot:not(:disabled) { cursor: pointer; }
+.dashboard-mascot:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.dashboard-mascot kairos-mascot { width: 100%; height: 100%; --m-stage: rgb(var(--wash-rgb)); }
+@media (min-width: 901px) {
+  .kairos-redesign .dashboard-intro { position: relative; }
+  .kairos-redesign .dashboard-mascot { position: absolute; right: -24px; top: 58px; width: 116px; height: 116px; margin: 0; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign .dashboard-mascot { width: 68px; height: 68px; margin: 0 0 6px -6px; }
+}
+
+/* The call: the bot's Ajar replaces the orb and its voice halo. */
+.agent-call-orb kairos-mascot { display: none; }
+:root:not([data-mascot="off"]) .agent-call-orb { transform: none; }
+:root:not([data-mascot="off"]) .agent-call-orb::before, :root:not([data-mascot="off"]) .agent-call-orb-core { display: none; }
+:root:not([data-mascot="off"]) .agent-call-orb kairos-mascot { display: block; width: 100%; height: 100%; --m-stage: var(--ui-wash, var(--bg-panel-solid)); }
+.agent-call-orb .ajar:is([data-state=listening], [data-state=speaking]) .aj-voice { opacity: calc(.14 + var(--m-v) * .4); transform: scale(calc(1 + var(--m-v) * .32)); }
