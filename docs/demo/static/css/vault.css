@@ -397,7 +397,6 @@ button.vault-history-row:hover { background: var(--accent-dim); }
   .kairos-redesign .vault-count { padding: 0 4px 10px; }
 
   /* Detail page: the note, pushed in with a back button. */
-  .kairos-redesign:has(.vault-phone-detail):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign #view-content[data-view="library"]:has(.vault-phone-detail) .library-vault-page > :is(.view-header, .library-tabs) { display: none; }
   .kairos-redesign #view-content[data-view="library"]:has(.vault-phone-detail) { padding-top: 0 !important; }
   .kairos-redesign .vault-phone-detail > .library-vault-reader { display: flex; overflow: visible; margin: 0 -16px; }
@@ -442,7 +441,7 @@ button.vault-history-row:hover { background: var(--accent-dim); }
 
   /* Map: full bleed, a peek sheet instead of the side panel. */
   .kairos-redesign .library-vault-host[data-mode="map"] { margin: 0 -16px; width: auto; }
-  .kairos-redesign .library-vault-host[data-mode="map"] .vault-graph-wrap { height: calc(100dvh - 220px - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); min-height: 420px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
+  .kairos-redesign .library-vault-host[data-mode="map"] .vault-graph-wrap { height: calc(100dvh - 290px - var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-tabbar-space, 0px)); min-height: 380px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
   .kairos-redesign .library-vault-host[data-mode="map"] .vault-panel { display: none !important; }
   .kairos-redesign .vault-toolbar { top: 10px; left: 12px; right: 12px; }
   .kairos-redesign .vault-toolbar .vault-mode-pill, .kairos-redesign .vault-toolbar .btn, .kairos-redesign .vault-search { min-height: 44px; }

@@ -37,6 +37,9 @@ async function run(ctx) {
     eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Search vault', 'phone: the vault search is in the dock');
     eq(await js("[...document.querySelectorAll('.ms-dock button')].map(b => b.getAttribute('aria-label'))"), ["Today's note"], "phone: the dock's + is Today's note");
     eq(await small('.library-vault-browser button, .library-vault-browser summary, .ms-dock button, .ms-dock input'), [], 'phone: list page controls are 44px');
+    await delay(300);
+    const barDock = await js("(() => { const bar = document.querySelector('.ms-tabbar'); const dock = document.querySelector('.ms-dock'); if (!bar || !dock) return null; return { up: document.documentElement.classList.contains('ms-tabbar-up'), dock: dock.getBoundingClientRect().bottom, bar: bar.getBoundingClientRect().top }; })()");
+    ok(barDock && barDock.up && barDock.dock <= barDock.bar + 0.5, 'phone: the tab bar shows on the list page and the dock sits above it: ' + JSON.stringify(barDock));
   }
   await capture(label + '-vault-home');
   eq(await overflow(), [], 'Vault Home has no overflow');
@@ -90,7 +93,9 @@ async function run(ctx) {
     await capture(label + '-vault-note');
   } else {
     ok(await js("document.querySelector('.library-vault-browser').classList.contains('vault-phone-detail') && document.querySelector('.library-vault-sidebar').hidden"), 'phone: the note pushes in as its own page');
-    ok(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility === 'hidden' && !!document.querySelector('.vault-phone-back')"), 'phone: a back button replaces the avatar');
+    ok(await js("!!document.querySelector('.vault-phone-back')"), 'phone: the note page has a back button');
+    await delay(400);
+    ok(await js("!document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'"), 'phone: the tab bar steps aside on the pushed note page, as on other pushed pages');
     eq(await js("document.querySelectorAll('.ms-dock').length"), 0, 'phone: the dock leaves with the list page');
     eq(await small('.vault-phone-detail .library-vault-reader-head button, .vault-phone-back'), [], 'phone: note controls are 44px');
     await capture(label + '-vault-note');
