@@ -49,7 +49,7 @@ function serve(url, req, res) {
     const info = boards[render[1]];
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; font-src http://${req.headers.host}/api/design-fonts/; script-src '${HASH}'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`);
-    res.end(`<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:Jost;src:url("/api/design-fonts/kairos/Jost-Variable.woff2")}${TOKENS}html{width:${info.w}px}body{margin:0;min-height:${info.h}px;background:var(--ds-bg);color:var(--ds-text);font-family:var(--ds-font-sans)}[hidden]{display:none!important}[data-kd-mark~="picked"]{outline:2px solid var(--ds-accent)}</style><style id="kd-live-tokens"></style></head><body>${html[render[1]]}<script>${VIEWER}</script></body></html>`);
+    res.end(`<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:Jost;src:url("/api/design-fonts/kairos/Jost-Variable.woff2")}${TOKENS}*{box-sizing:border-box}html{width:${info.w}px;overflow-x:hidden}body{margin:0;min-height:${info.h}px;background:var(--ds-bg);color:var(--ds-text);font-family:var(--ds-font-sans)}[hidden]{display:none!important}[data-kd-mark~="picked"]{outline:2px solid var(--ds-accent)}</style><style id="kd-live-tokens"></style></head><body>${html[render[1]]}<script>${VIEWER}</script></body></html>`);
     return true;
   }
   if (url.pathname === `/api/designs/${ID}` && req.method === 'GET') return json(design());
@@ -67,6 +67,11 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     return frames.at(-1).executeJavaScript(code);
   };
   win.setContentSize(1440, 900); await delay(200);
+  // Toasts left by the step before (the Agents routines checks PATCH /api/tasks/g1,
+  // a fixture that answers 404) are not the canvas's: clear them, then hold the
+  // Design view to no error toast of its own.
+  await js("document.querySelectorAll('#toast-host .toast').forEach(t => t.remove())");
+  const noErrorToasts = async where => assert.deepEqual(await js("[...document.querySelectorAll('#toast-host .toast.error')].map(t => t.textContent)"), [], 'no error toast: ' + where);
   await navigate('design');
   await waitFor("document.querySelectorAll('.design-card').length === 1");
   assert.match(await js("document.querySelector('.design-card').textContent"), /Habit onboarding.*3 boards/);
@@ -95,6 +100,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await js("(() => { const s = document.querySelector('.design-stage'); const r = s.getBoundingClientRect(); const at = (t, x) => s.dispatchEvent(new PointerEvent(t, { clientX: r.left + x, clientY: r.bottom - 20, pointerId: 7, button: 0, bubbles: true })); at('pointerdown', 40); at('pointermove', 140); at('pointerup', 140); })()");
   assert.notEqual(await transform(), panned, 'dragging the canvas pans');
   await key('!', { shiftKey: true }); await delay(300);
+  await noErrorToasts('design-canvas');
   await capture('design-canvas');
   // Focus: one board at real size; arrows move; Escape closes.
   await key('ArrowRight'); await delay(400);
@@ -106,6 +112,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   // A click-through in Focus opens the board it names.
   await frameJs('welcome', "document.querySelectorAll('[data-kd-goto]').forEach(n => n.closest('html').dataset.kdMode === 'browse' && n.click()); 1");
   await waitFor("/2 \\/ 3/.test(document.querySelector('.design-focus-bar strong').textContent)");
+  await noErrorToasts('design-focus');
   await capture('design-focus');
   await key('Escape');
   await waitFor("!document.querySelector('.design-focus')");
@@ -128,6 +135,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   assert.equal(await frameJs('landing', "document.querySelector('h1').getAttribute('data-kd-mark')"), 'picked');
   // The toggle click-through works on the canvas in Pan mode.
   await js("[...document.querySelectorAll('.design-mode')].find(b => b.textContent === 'Pan').click()");
+  await noErrorToasts('design-select');
   await capture('design-select');
   // Phones: the board list and the one-board pager, no sideways scroll, 44px targets.
   for (const [width, height] of [[390, 844], [430, 932]]) {
@@ -140,6 +148,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     assert.deepEqual(small, [], `44px targets at ${width}`);
     // The phone tab bar (mobileTabBar.js): the board list keeps it; the pager hides it.
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    await noErrorToasts(`phone ${width}`);
     await capture(`design-phone-${width}`);
     await js("document.querySelectorAll('.design-list-card')[0].click()");
     await waitFor("!!document.querySelector('.design-focus iframe')");
