@@ -884,3 +884,29 @@
   .overflow-menu .overflow-menu-item, .model-picker-option { min-height: 44px; }
   .composer-hint { font-size: 10px; line-height: 1.5; }
 }
+
+/* ---- Computer steps (cua upgrade 5.4): a run's kept actions, step by step.
+   Desktop: a wide panel dialog; phone: the same panel as a bottom sheet. ---- */
+.computer-steps { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.computer-steps-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.computer-steps-dialog .btn.btn, .kairos-redesign .panel-dialog.computer-steps-dialog .btn.btn { min-height: 44px; min-width: 44px; }
+.computer-steps-position { font-size: 13px; font-weight: 600; text-align: center; }
+.computer-steps-action { font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
+.computer-steps-result { font-size: 12px; color: var(--text-dim); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 96px; overflow: auto; }
+.computer-steps-result.is-error { color: var(--danger); }
+.computer-steps-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.computer-steps-tabs .btn.active { border-color: var(--accent); color: var(--accent); }
+.computer-steps-stage { width: 100%; aspect-ratio: 8 / 5; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.computer-steps-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.computer-steps-empty { padding: 16px; text-align: center; }
+.computer-steps-notes p { margin: 0; }
+.computer-steps-footer { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.computer-steps-runs { display: flex; flex-direction: column; gap: 6px; }
+.computer-steps-run { justify-content: flex-start; text-align: left; }
+.btn.run-steps-open { margin: 4px 0 8px; min-height: 44px; }
+@media (max-width: 768px) {
+  .kairos-redesign .computer-steps-dialog .computer-steps-footer { flex-direction: column-reverse; align-items: stretch; width: 100%; }
+  .kairos-redesign .computer-steps-dialog .computer-steps-footer .btn { width: 100%; box-sizing: border-box; white-space: normal; }
+  .kairos-redesign .computer-steps-dialog .computer-steps-nav .btn { flex: 1; }
+}
