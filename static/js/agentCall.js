@@ -8,11 +8,11 @@ import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js'
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
 import { createMascot } from './mascot.js';
 
-// In a call the bot's Ajar replaces the orb (Kairos Mascot build spec,
+// In a call the bot's Kip replaces the orb (Kairos Mascot build spec,
 // 2026-10-22). It reads the orb's --level (microphone) and --word (speech)
 // by inheritance: eyes widen while listening, squash and the point pulses
 // while speaking, and a halo swells with the level. The orb core stays as
-// the fallback when Show the mascot is off.
+// the fallback when Show Kip is off.
 const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listening', transcribing: 'thinking', thinking: 'thinking', speaking: 'speaking', paused: 'sleeping' };
 
 export function agentCall(agent, controller) {

@@ -1,5 +1,5 @@
-// Bot faces are Ajar variants (Kairos Mascot build spec, 2026-10-22; David:
-// every bot switches to Ajar right away and the dot-face picker is removed).
+// Every bot's face is its own Kip (Kairos Mascot build spec, 2026-10-22; David:
+// every bot switches to Kip right away and the dot-face picker is removed).
 // A bot's look is one of the six agent pastels, a shape and one accessory;
 // the gold point, the bite and the eyes are Kairos's and never change.
 //
@@ -74,7 +74,7 @@ export function avatarPicker(initial, onChange = () => {}) {
     const section = document.createElement('section'); section.className = `agent-avatar-choice agent-avatar-choice-${key}`;
     const heading = document.createElement('h4'); heading.textContent = title;
     const grid = document.createElement('div'); grid.className = `agent-avatar-options agent-avatar-options-${key === 'color' ? 'color' : 'faces'}`;
-    grid.setAttribute('role', 'radiogroup'); grid.setAttribute('aria-label', `Mascot ${title.toLowerCase()}`);
+    grid.setAttribute('role', 'radiogroup'); grid.setAttribute('aria-label', `Kip ${title.toLowerCase()}`);
     const buttons = values.map(value => {
       const button = document.createElement('button'); button.type = 'button'; button.dataset.value = value;
       button.className = 'agent-avatar-option'; button.setAttribute('role', 'radio'); button.setAttribute('aria-label', label(value));
@@ -100,7 +100,7 @@ export function avatarPicker(initial, onChange = () => {}) {
   group('shape', 'Shape', AJAR_SHAPES, value => value[0].toUpperCase() + value.slice(1));
   group('acc', 'Accessory', AJAR_ACCESSORIES, value => AJAR_ACCESSORY_NAMES[value]);
   const note = document.createElement('p'); note.className = 'meta agent-avatar-note';
-  note.textContent = 'The gold point and the eyes are Kairos. Every bot keeps them.';
+  note.textContent = 'Every bot is a Kip. The gold point and the eyes stay the same on all of them.';
   const shuffle = document.createElement('button'); shuffle.type = 'button'; shuffle.className = 'btn agent-avatar-shuffle'; shuffle.textContent = 'Shuffle';
   shuffle.onclick = () => {
     let next;

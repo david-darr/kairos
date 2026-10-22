@@ -232,6 +232,42 @@ async def calendar_items(user, start, end):
     return items
 
 
+async def task_items(user, query="", slug=None):
+    """Read owner-scoped task summaries from approved tabs, without app imports."""
+    entries = [e for e in list(tab_folders._registered.values()) if slug is None or e["slug"] == slug]
+    results = await asyncio.gather(*(_declared(e, "task_items", user, query[:300]) for e in entries))
+    items = []
+    for entry, result in zip(entries, results):
+        if (tab_folders._registered.get(entry["slug"]) is not entry
+                or not await _invoke(entry["slug"], "policy", tab_folders._allowed, entry)
+                or not isinstance(result, list)):
+            continue
+        for row in result[:20]:
+            if (not isinstance(row, dict) or not isinstance(row.get("id"), str) or not 1 <= len(row["id"]) <= 200
+                    or not isinstance(row.get("title"), str) or not row["title"].strip()):
+                continue
+            item = {k: str(row[k])[:500] for k in ("id", "title", "status", "priority", "due_date", "contact", "project")
+                    if row.get(k) is not None}
+            item["tab"] = entry["slug"]
+            items.append(item)
+            if len(items) >= 20:
+                return items
+    return items
+
+
+async def task_context(user, slug, task_id):
+    entry = tab_folders._registered.get(slug)
+    if entry is None:
+        return None
+    result = await _declared(entry, "task_context", user, task_id)
+    if (tab_folders._registered.get(slug) is not entry
+            or not await _invoke(slug, "policy", tab_folders._allowed, entry)):
+        return None
+    if not isinstance(result, str) or not result.strip():
+        return None
+    return result if len(result) <= 24000 else result[:24000] + "\n[Task context truncated; ask for the remaining requirements before assuming the full scope.]"
+
+
 async def home_cards(user):
     from core.home_cards import validate_cards
     entries = list(tab_folders._registered.values())

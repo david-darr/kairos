@@ -1,7 +1,7 @@
 import { avatarSpec } from './agentAvatar.js';
 import { kipUrl, kipStripUrl } from './mascot.js';
 
-// The village draws each bot as Kip, the pixel rendition of its Ajar (Kairos
+// The village draws each bot as its Kip in the pixel style (Kairos
 // Mascot build spec, 2026-10-22; David: Kip is the visual agent ecosystem).
 // The still sprite is rasterized once per look and pose at twice the 24px
 // grid, so it stays crisp; walking, working and waiting play strips of frames

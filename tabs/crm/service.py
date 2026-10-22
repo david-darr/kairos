@@ -371,7 +371,7 @@ class CRMService:
 
     # Reply and chat bookkeeping. Kept out of update_task: these aren't the
     # person's edits, so they must not land in a task's overrides.
-    _WORK_FIELDS = ("reply_draft", "last_reply", "chat_session_id", "chat_evidence_count", "completion_card_receipt")
+    _WORK_FIELDS = ("reply_draft", "last_reply", "chat_session_id", "chat_evidence_count", "chat_context_signature", "completion_card_receipt")
 
     @staticmethod
     def _source_completion_is_new(task, message):

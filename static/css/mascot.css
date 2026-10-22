@@ -1,4 +1,4 @@
-/* Ajar, the Kairos mascot (Kairos Mascot build spec, 2026-10-22).
+/* Kip, the Kairos mascot, flat style (Kairos Mascot build spec, 2026-10-22).
    static/js/mascot.js builds the SVG and injects the still poses (POSE_CSS);
    this file holds the tokens and the movement. No raw colours: every value
    derives from the theme, so Appearance carries through. Movement runs only
@@ -86,7 +86,7 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
 @keyframes aj-z { 0% { opacity: 0; transform: translate(0, 4px); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, -18px); } }
 
 /* -- Placements ------------------------------------------------------------ */
-/* With the switch off (Settings > Appearance > Show the mascot) every
+/* With the switch off (Settings > Appearance > Show Kip) every
    placement shows what it showed before: the marker, the icon, the orb. */
 :root[data-mascot="off"] :is(.chat-activity-marker, .empty-state-mascot, .dashboard-mascot, .agent-call-orb) kairos-mascot,
 :root[data-mascot="off"] .empty-state-mascot, :root[data-mascot="off"] .dashboard-mascot { display: none; }
@@ -115,7 +115,7 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
   .kairos-redesign .dashboard-mascot { width: 68px; height: 68px; margin: 0 0 6px -6px; }
 }
 
-/* The call: the bot's Ajar replaces the orb and its voice halo. */
+/* The call: the bot's Kip replaces the orb and its voice halo. */
 .agent-call-orb kairos-mascot { display: none; }
 :root:not([data-mascot="off"]) .agent-call-orb { transform: none; }
 :root:not([data-mascot="off"]) .agent-call-orb::before, :root:not([data-mascot="off"]) .agent-call-orb-core { display: none; }

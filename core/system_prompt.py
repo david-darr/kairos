@@ -103,6 +103,18 @@ Before telling a user you don't know something, or that nothing's recorded/sched
 - If the question is about how to do something Kairos already knows a procedure for, search the available Skills, then read the relevant one.
 - If the question is about how Kairos itself is built (architecture, a specific subsystem), check the spec docs.""" + UI_DESIGN_DISCIPLINE + DESIGN_CANVAS_LINE
 
+_TAB_TASK_GUIDANCE = """
+For a task in Kairos's built-in CRM or another enabled tab, use list_tab_tasks
+to find it and read_tab_task to read its current requirements and evidence.
+These are separate from Notes, scheduled Tasks and vault files. Use these tools
+before claiming CRM access is unavailable or asking which CRM the user means.
+Do not try to open Kairos's internal interface in the computer browser. If
+multiple tasks match, ask which one. Perform the requested work and report the
+actual result and artifact link; do not manually mark a task done to make a test
+pass. CRM independently checks completion when enabled with a reader model.
+"""
+_SHARED_CORE += _TAB_TASK_GUIDANCE
+
 _CLAUDE_ADDENDUM = """
 Your file tools (Read/Glob/Grep/Write/Edit) are already scoped to the vault directory as your working directory — use them directly for vault notes. You also have full read/write access to Kairos's own source (core/, routes/, services/, static/, scripts/, specs/, mcp_servers/, electron/) and user-built tab source (<data-dir>/tabs/) via those same file tools. Use file tools for listing, searching and reading files; reserve shell commands for running or verifying code. The rest of data/ is deliberately excluded because it contains credentials and session tokens. For anything else outside the vault (other chat sessions, Skills, Notes, Tasks, Calendar, Documents, Contacts), use your search_sessions/search_skills/list_skills/read_skill/list_notes/list_tasks/list_upcoming_events/list_task_runs/list_documents/read_document/list_contacts/list_specs/read_spec tools — and their write counterparts (create_note/update_note/delete_note, create_task/update_task/delete_task, create_event/update_event/delete_event) when the user wants something added, changed, or removed rather than just looked up.
 
@@ -206,6 +218,7 @@ Available subcommands (a true|false flag alone means true; ID,ID is a comma-sepa
 
 Before telling a user you don't know something, or that nothing's recorded/scheduled, check first: priorities/todos → list_notes; scheduled/automated jobs, or what one actually produced → list_tasks / list_task_runs; what's coming up → list_upcoming_events; a saved document → list_documents/read_document; a person → list_contacts; something discussed in a different conversation → search_sessions; a procedure Kairos already knows → search_skills/read_skill; how Kairos itself is built → list_specs/read_spec.
 
+{_TAB_TASK_GUIDANCE}
 {access}"""
 
 

@@ -1,5 +1,11 @@
 # CRM prebuilt tab
 
+## Private preview upgrade contract
+
+The private Windows preview is **Kairos 2.1.1-crm.1 / CRM 1.2.1**, built from stable `v2.1.0` plus `a4fc712`, `1592f18` and `53ba315` on the local `preview/crm-chris` branch (metadata commit `a42c34e`). It is not a public release. The next public release accepting these users must be **2.1.1 or higher**, contain these CRM changes, retain app ID `com.davidmichael.jarvis`, and keep the ordinary `%APPDATA%/JARVIS` profile. Do not require uninstalling the preview or switching to a named dev instance. Stable-only updates and disabled downgrades are intentional; do not reintroduce prerelease-channel trapping.
+
+The installer keeps application data outside the install directory. Preserve `data/tab-data/crm/crm.json`, its task IDs, completion receipts, ownership, source provenance and unknown fields, along with the profile's encryption key and other app data. Before public distribution, repeat packaged startup/data-migration/restore checks and verify a preview-created task and completion receipt are still readable. The private preview passed these checks with synthetic data, plus updater fixtures for stable 2.1.1 and 2.2.0; the actual future release still requires its own verification. CRM contract suites include `test_crm.py`, `test_crm_completion.py`, `test_crm_daily.py`, `test_crm_source_links.py` and `test_crm_chat_access.py`.
+
 CRM is offered in Tool Store > Tabs for every installation. Its source ships in the application; personal data stays in `data/tab-data/crm/crm.json`. Fresh installations have no sources, model selection, sample tasks or enabled scanning. Removing the tab disables it and preserves records.
 
 The tab is a folder package: `tabs/crm/tab.json` declares metadata and hooks, `routes.py` exports its router, `view.js` exports `render`, and `service.py` owns an atomic JSON store through `core.tab_api`. Existing `crm.json` is adopted once. Models, mail, auth, Library access and backlog cards go through `core.tab_api`; the base app dispatches declared hooks without naming this tab. `view.css` is loaded from the manifest. The stylesheet uses shared appearance tokens.
@@ -29,6 +35,8 @@ Relative deadlines use the message timestamp and configured IANA timezone. No de
 Tasks have deadlines, priority explanations, contact/project fields, source evidence, status, notes and optional snoozing. Contacts groups follow-ups by their recorded contact; it does not merge identities across providers. Later messages can propose changes; they do not overwrite edits or reopen completed/dismissed work. A clear current-message confirmation that the same whole action was completed closes an existing task automatically. Ambiguous confirmations remain suggestions. Users can manage manual tasks without connection-admin access.
 
 ### Automatic completion (1.1)
+
+Models find open CRM tasks from ordinary chats using `list_tab_tasks` and read current requirements with `read_tab_task` (tab `crm` and the returned ID). Both tools are read-only, shared across Claude, Codex and local/API models, and filter by the chat owner's identity. CRM supplies generic `task_items` and `task_context` hooks rather than putting tab imports into the base app. Disabled or unapproved tabs do not expose records. Ownerless chats/background agents cannot read private tab tasks when accounts are enabled. Source text is wrapped as untrusted data and taints the turn like other external evidence. The task's own chat supplies its ID and context directly and refreshes that context when requirements or evidence change. Completing work does not require a model-controlled status mutation or internal-browser access.
 
 While CRM is enabled and Kairos is running, the passive `on_chat_turn(user, turn)` hook queues matching owned tasks after a successful chat run. This includes ordinary chats, task chats and agent chats with an identifiable owner. Failed/stopped runs and ownerless chats with accounts enabled do not emit completion receipts. Task chats bind their authenticated owner, including existing unowned task chats. No tab-specific implementation imports were added to base chat code.
 

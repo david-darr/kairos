@@ -197,7 +197,7 @@ class MascotTests(unittest.TestCase):
         sheet = mascot.load_sheet(theme="night")
         self.assertIs(sheet.frame("needs", 0), sheet.frames["needs-you"][0])
         self.assertIs(sheet.frame("success", 3), sheet.frames["done"][3])
-        self.assertIs(sheet.frame("sleeping", 0), sheet.frames["idle"][0])
+        self.assertIs(sheet.frame("sleeping", 0), sheet.frames["sleeping"][0])
 
     def test_banner_is_24_by_12_and_the_slot_12_by_6(self):
         kip = mascot.Kip(palettes.Palette("night", "truecolor"))

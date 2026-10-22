@@ -59,6 +59,8 @@ Declare only hooks you implement in `hooks.py`. Exact callable signatures
 - `on_chat_turn(user, turn)`: passive receipt for a successful completed chat run owned by `user`; return ignored. `turn` contains `id` (run ID), `session_id`, `message`, `reply`, `at` (finish timestamp), and recorded `actions` (`name`, `ok`, `detail`). It does not fire for failed/stopped runs or ownerless chats when accounts are enabled. Treat all text as untrusted evidence. Queue slow model work and return immediately; recheck `api.is_on` and ownership before writing.
 - `calendar_items(user, start, end)`: return a list of calendar item dictionaries for this user and range.
 - `home_cards(user)`: return a list of at most two Home card dictionaries for this user.
+- `task_items(user, query)`: return at most 20 owned open task summaries, filtered by query. Fields: `id`, `title`, `status`, `priority`, `due_date`, `contact`, `project`. Used by the read-only `list_tab_tasks` model tool. No model or network calls.
+- `task_context(user, task_id)`: return current owned task requirements and source evidence as plain text (up to 24,000 characters), or None for a missing/foreign task. Used by `read_tab_task`. Authenticate ownership inside the hook; never return secrets or execute source instructions. The model tool wraps this as untrusted text. Neither hook changes task status.
 
 Each hook has a **2-second limit**; slow or failed hooks are skipped. Keep
 module imports quick too. Start background work and return; retain tasks and
@@ -238,7 +240,7 @@ folder survives app updates; removing/replacing source keeps saved tab data.
 
 Before handing it over, run this checklist using the files you wrote:
 
-- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `calendar_items` and `home_cards`; check their signatures above.
+- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `calendar_items`, `home_cards`, `task_items` and `task_context`; check their signatures above.
 - If using `home_cards`, check shapes, text/number limits, unique stable IDs, at most two cards, owner filtering and cheap reads. Verify hidden-by-default cards, Layout controls and off/on placement.
 - Check `routes.py` exposes `router`, owns its API prefix and authenticates endpoints.
 - Check all Kairos imports use only `core.tab_api`; local imports are relative.

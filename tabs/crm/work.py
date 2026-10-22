@@ -3,6 +3,7 @@ the task's context. Source text is untrusted throughout: drafts come from a
 tool-free completion, and the task chat is marked untrusted so every turn in
 it asks before shell commands (tab_api.chat_session(untrusted=...))."""
 import asyncio
+import hashlib
 import re
 
 from core import tab_api
@@ -80,13 +81,16 @@ def open_chat(owner, task_id):
     session_id = api.chat_session(f"{owner}:{task_id}", ("CRM: " + task["title"])[:80],
                                   untrusted="CRM source messages", model_endpoint_id=settings["endpoint_id"], owner_user=owner)
     seen = task.get("chat_evidence_count")
+    signature = hashlib.sha256((_facts(task) + _sources(owner, task)).encode()).hexdigest()
     if task.get("chat_session_id") != session_id or seen is None:
         api.append_chat_message(session_id, "user",
-            "Context for this chat, from my CRM task. Help me work on it.\n\n" + _facts(task) + "\n\n"
-            + wrap_untrusted("source messages for this task", _sources(owner, task)))
-    elif len(task["evidence"]) > seen:
-        added = "\n".join(f"- {e.get('label', '')} {e.get('sent_at') or ''}: {e['quote']}" for e in task["evidence"][seen:])
+            "Context for this chat, from my built-in Kairos CRM task. Help me do the work described below. "
+            "CRM checks completion automatically; do not manually change its status to make it pass. "
+            "Use read_tab_task for current requirements, not the browser or another CRM service.\n\n"
+            + wrap_untrusted("CRM task requirements and source messages", f"Tab: crm\nTask ID: {task_id}\n" + _facts(task) + "\n\n" + _sources(owner, task)))
+    elif task.get("chat_context_signature") != signature:
         api.append_chat_message(session_id, "user",
-            "New evidence on this CRM task since we last spoke:\n" + wrap_untrusted("new source quotes", added))
-    crm_service.set_work(owner, task_id, chat_session_id=session_id, chat_evidence_count=len(task["evidence"]))
+            "Current requirements and evidence for this built-in Kairos CRM task:\n"
+            + wrap_untrusted("CRM task requirements and source messages", f"Tab: crm\nTask ID: {task_id}\n" + _facts(task) + "\n\n" + _sources(owner, task)))
+    crm_service.set_work(owner, task_id, chat_session_id=session_id, chat_evidence_count=len(task["evidence"]), chat_context_signature=signature)
     return session_id
