@@ -490,7 +490,9 @@ class InteractiveLive(unittest.TestCase):
         from kairos_cli_vt import Screen
         self.Screen = Screen
         self.approver = approve_next("allow")
-        self.reveal_log = os.path.join(tempfile.mkdtemp(prefix="kairos-cli-reveal-"), "reveal.log")
+        reveal_folder = tempfile.mkdtemp(prefix="kairos-cli-reveal-")
+        self.addCleanup(remove_tree, reveal_folder)
+        self.reveal_log = os.path.join(reveal_folder, "reveal.log")
         env = {**os.environ, "PYTHONPATH": str(ROOT / "cli"), "PYTHONIOENCODING": "utf-8", "WT_SESSION": "test",
                "KAIROS_CLI_REVEAL_LOG": self.reveal_log}
         self.process = PtyProcess.spawn([sys.executable, "-X", "utf8", "-m", "kairos_cli", "--port", str(BACKEND.port),
