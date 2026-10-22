@@ -487,7 +487,7 @@
   .kairos-redesign #view-content.view:has(.mf-home):not(.chat-layout):not(.settings-mobile-page):not(.ms-home),
   .kairos-redesign #view-content.view:has(.mf-session):not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: 0; overflow: hidden; }
   .kairos-redesign .forge-home.mf-home { width: 100%; max-width: none; margin: 0; padding: 0; height: 100%; }
-  .kairos-redesign .mf-home > :not(.mf-project) { display: none; }
+  .kairos-redesign .mf-home > :not(.mf-project, .mf-dashboard) { display: none; }
   .kairos-redesign .mf-project { height: 100%; min-height: 0; }
   .kairos-redesign .mf-project .ms-header-row { grid-template-columns: 44px minmax(0, 1fr) 64px; }
   .kairos-redesign .mf-project .ms-switch { width: min(174px, 100%); }
@@ -495,7 +495,7 @@
   .kairos-redesign .mf-workspace-line { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; padding: 0 8px; border: 0; background: transparent; font-size: 12px !important; color: var(--rd-ink-dim); }
   .kairos-redesign .mf-workspace-line > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The washed picture behind the Chats launch, over the page sky (redesign-forge.css shows it on Forge Home). */
-  .kairos-redesign .mf-project .forge-banner.ms-background { display: block; inset: 0; opacity: .65; }
+  .kairos-redesign :is(.mf-project, .mf-dashboard) .forge-banner.ms-background { display: block; inset: 0; opacity: .65; }
   .kairos-redesign .mf-project .ms-intro { padding-bottom: 24px; gap: 12px; min-height: 0; }
   .kairos-redesign .mf-project .ms-intro h1 { font-size: clamp(24px, 6vw, 30px); }
   .kairos-redesign .mf-mark { font: 500 64px/1 var(--rd-font-title); opacity: .3; }
@@ -534,7 +534,7 @@
   .kairos-redesign .mf-session-heading :is(strong, small) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kairos-redesign .mf-session-heading strong { font-size: 15px; }
   .kairos-redesign .mf-session-heading small { font-size: 11px; color: var(--rd-ink-dim); }
-  .kairos-redesign:has(.mf-project):not(.mobile-menu-open) #mobile-menu-btn,
+  .kairos-redesign:has(.mf-project, .mf-dashboard):not(.mobile-menu-open) #mobile-menu-btn,
   .kairos-redesign:has(.mf-session):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign .mf-session .forge-transcript-composer { margin-bottom: max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
   .kairos-redesign .mf-session .forge-composer-chips > .custom-select { display: block; }
@@ -555,7 +555,7 @@
   .kairos-redesign :is(.mf-session, .mf-tool) :is(.forge-terminal-toolbar, .forge-preview-toolbar, .forge-editor-toolbar) { flex-wrap: wrap; }
   .kairos-redesign :is(.mf-project, .mf-session, .mf-tool, .mf-commit, .mf-projects, .mf-session-actions, .mf-workspace-options) :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) {
-    .kairos-redesign :is(.mf-project, .mf-session), .kairos-redesign :is(.mf-project, .mf-session) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    .kairos-redesign :is(.mf-project, .mf-session, .mf-dashboard), .kairos-redesign :is(.mf-project, .mf-session, .mf-dashboard) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
   @media (max-height: 480px) {
     .kairos-redesign .mf-project .mf-mark { display: none; }
@@ -634,4 +634,25 @@
     display: block; position: absolute; inset: 0; z-index: 1; border-radius: 0; opacity: .65; pointer-events: none;
   }
   html.ms-safari-bleed .ms-page-bleed > .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
+}
+
+/* Forge phone Home: the desktop dashboard as a page, reached like Kairos Home.
+   Header, avatar and safe areas come from the phone shell; the cards stack in one column. */
+@media (max-width: 768px) {
+  .kairos-redesign .mf-dashboard { height: 100%; min-height: 0; }
+  .kairos-redesign .mf-dashboard .ms-header { padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+  .kairos-redesign .mf-dashboard-title { margin: 0; min-width: 0; text-align: center; font: 500 22px/1.1 var(--rd-font-title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .mf-dashboard-body {
+    flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain;
+    padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) max(16px, env(safe-area-inset-left, 0px));
+  }
+  .kairos-redesign .mf-dashboard .forge-toolbar { align-items: center; margin-bottom: 0; padding: 8px 0 12px; }
+  .kairos-redesign .mf-dashboard .forge-toolbar .btn { height: 44px; padding-inline: 18px; border-radius: 999px; }
+  .kairos-redesign .mf-dashboard .forge-widget-grid > .forge-panel { padding: 16px 18px 10px; border-radius: var(--rd-radius-card); background: var(--rd-surface); border: 1px solid var(--rd-line); box-shadow: var(--rd-shadow); }
+  .kairos-redesign .mf-dashboard .forge-analysis-grid .forge-panel { box-shadow: none; }
+  .kairos-redesign .mf-dashboard .forge-panel-header { flex-wrap: wrap; }
+  .kairos-redesign .mf-dashboard .forge-panel-header .custom-select { max-width: 100%; min-width: 0; }
+  .kairos-redesign .mf-dashboard .forge-widget-body .dashboard-row { min-height: 44px; width: 100%; }
+  .kairos-redesign .mf-dashboard :is(svg, table) { max-width: 100%; }
+  .kairos-redesign .mf-dashboard .forge-ranked { display: block; overflow-x: auto; }
 }

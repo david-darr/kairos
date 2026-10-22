@@ -1,4 +1,4 @@
-import { button, mobileOn, haptic } from './mobileShared.js';
+import { button, mobileOn, haptic, go } from './mobileShared.js';
 import { attentionCount, activityItems } from './mobileActivity.js';
 import { sidebarLayout } from './layout.js';
 import { ICONS } from './icons.js';
@@ -58,8 +58,16 @@ export function openTabSheet(from) {
     // A custom tab without its own icon falls back to the Library glyph; give it a distinct generic one here.
     if (source.dataset.tab !== 'library' && source.querySelector('svg')?.innerHTML === libraryGlyph()) tile.querySelector('svg').outerHTML = ICONS.tabGeneric;
     tile.setAttribute('aria-label', source.getAttribute('aria-label') || source.textContent.trim());
-    if (source.dataset.tab === 'forgeHome') { tile.querySelector('span').textContent = 'Forge Home'; tile.setAttribute('aria-label', 'Forge Home'); }
     if (source.hasAttribute('aria-current')) tile.setAttribute('aria-current', 'page');
+    if (source.dataset.tab === 'forgeHome') {
+      // As Kairos's Home and Chats: Home is the Forge overview, Sessions the New / Sessions pager.
+      tile.querySelector('span').textContent = 'Forge Home'; tile.setAttribute('aria-label', 'Forge Home');
+      const sessions = button('', () => { closeTabSheet(); go('forgeHome', { mobilePage: 0 }); }, 'ms-tab-tile ms-glass');
+      sessions.innerHTML = `${ICONS.chats}<span>Sessions</span>`; sessions.dataset.tab = 'forgeSessions'; sessions.setAttribute('aria-label', 'Forge sessions');
+      const onPager = !!document.querySelector('#view-content .mf-project');
+      if (onPager) { tile.removeAttribute('aria-current'); sessions.setAttribute('aria-current', 'page'); }
+      grid.append(tile, sessions); continue;
+    }
     if (source.dataset.tab === 'home' && attentionCount()) {
       const badge = document.createElement('span'); badge.className = 'nav-badge'; badge.textContent = String(attentionCount());
       tile.append(badge); tile.setAttribute('aria-label', `Home, ${attentionCount()} need you`);

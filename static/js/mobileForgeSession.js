@@ -38,7 +38,7 @@ export function mountMobileForgeSession(shell, bridge) {
       try { const chat = await import('./views/chat.js'); chat.startRename(name, state.session, null, null, () => { sheet?.close(); bridge.reload(); }); } catch (error) { toast(error.message, 'error'); }
     }));
     body.append(button('New session', () => { sheet?.close(); go('forgeHome', { projectId: state.project?.id, mobilePage: 0, compose: true }); }));
-    body.append(button('Your workspace', () => { sheet?.close(); go('forgeHome', { projectId: state.project?.id }); }));
+    body.append(button('Your workspace', () => { sheet?.close(); go('forgeHome', { projectId: state.project?.id, mobileWorkspace: true }); }));
     const surfaces = el('details', {}, [el('summary', { text: 'Open sessions and tools' })]);
     for (const tab of state.tabs) {
       const row = el('div', { class: 'mf-project-row' }, [button(`${tab.title}${tab.dirty ? ' *' : ''}`, () => { sheet?.close(); bridge.activate(tab.id); }), button('Close', async () => { sheet?.close(); await bridge.close(tab.id); })]);

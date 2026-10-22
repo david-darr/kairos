@@ -6,11 +6,16 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
   win.setContentSize(1440, 900);
   await navigate('home');
   await js("document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
-  await waitFor("!!document.querySelector('.forge-composer [aria-label=Agent]')");
-  await js("{ const p = document.querySelector('.forge-composer [aria-label=Agent]').parentElement; p.value = 'm2'; p.dispatchEvent(new Event('change')); const w = document.querySelector('.forge-composer [aria-label=\"Where it runs\"]').parentElement; w.value = 'existing_branch'; w.dispatchEvent(new Event('change')); }");
-  await waitFor("!!document.querySelector('.forge-composer [aria-label=Branch]') && !!document.querySelector('.forge-composer [aria-label=\"Model for new session\"]')");
+  const pickBranch = async () => {
+    await waitFor("!!document.querySelector('.forge-composer [aria-label=Agent]')");
+    await js("{ const p = document.querySelector('.forge-composer [aria-label=Agent]').parentElement; p.value = 'm2'; p.dispatchEvent(new Event('change')); const w = document.querySelector('.forge-composer [aria-label=\"Where it runs\"]').parentElement; w.value = 'existing_branch'; w.dispatchEvent(new Event('change')); }");
+    await waitFor("!!document.querySelector('.forge-composer [aria-label=Branch]') && !!document.querySelector('.forge-composer [aria-label=\"Model for new session\"]')");
+  };
+  await pickBranch();
   for (const [width, height] of [[1440, 900], [1280, 420], [390, 844], [390, 420]]) {
     win.setContentSize(width, height); await delay(100);
+    // A phone's Forge Home is the overview; the composer lives on the New page.
+    if (width === 390 && height === 844) { await navigate('forgeHome', { mobilePage: 0 }); await pickBranch(); await delay(300); }
     for (const label of ['Project', 'Where it runs', 'Branch', 'Mode', 'Agent', 'Model for new session']) {
       await js(`document.querySelector('.forge-composer [aria-label=${JSON.stringify(label)}]').click()`);
       await delay(140);

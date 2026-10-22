@@ -7,10 +7,16 @@ import { attachActivity, refreshActivity } from './mobileActivity.js';
 import { mountForgeSessions } from './mobileForgeSessions.js';
 import { diffCounts, changeTotals } from './forgeUi.js';
 import { watchKeyboard } from './mobileDock.js';
+import { ICONS } from './icons.js';
 
-let lastPage = 0;
+let lastPage = 0, lastProject = null;
+// The project last shown on a phone, so Home and Sessions open on the same one.
+export const rememberedProject = () => lastProject;
+// On a phone, Forge Home is the overview (as Kairos Home is the dashboard);
+// any request for a page, a composer or the workspace opens the New / Sessions pager.
+export const wantsOverview = (options = {}) => options.mobilePage == null && !options.compose && !options.mobileWorkspace;
 // Own only phone arrangement. All moved controls keep their handlers and state.
-export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, getState, pickProject, refresh, initialPage }) {
+export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, getState, pickProject, refresh, initialPage, overview = false }) {
   if (initialPage != null) lastPage = initialPage;
   let metaVersion = 0;
   let shell, pager, history, sheet, detachActivity, keyboard, homes = [];
@@ -52,12 +58,20 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     body.append(worktrees, changes, button('Explorer', () => { sheet.close(); go('forgeShell', { projectId: project?.id, mobileTool: 'explorer' }); }), el('small', { text: changes.disabled ? 'Open an existing worktree to review its changes. A new worktree is created when you send.' : project?.path || 'Add a project to begin.' }));
     sheet = openMobileSheet({ title: 'Workspace', content: body, opener });
   }
-  function overview(opener) {
-    const body = el('div', { class: 'mf-overview' });
-    const nodes = [toolbar, grid], anchors = nodes.map(node => { const a = document.createComment('Overview home'); node.before(a); body.append(node); return a; });
-    sheet = openMobileSheet({ title: 'Project overview', content: body, opener, fullHeight: true, onClose: () => { nodes.forEach((node, i) => { anchors[i].after(node); anchors[i].remove(); }); } });
+  // Home: the desktop dashboard's toolbar (Customize) and cards, moved into a phone page.
+  function enableOverview() {
+    shell = el('section', { class: 'ms-shell mf-dashboard', 'aria-label': 'Forge overview' });
+    const avatar = button(document.querySelector('.sidebar-avatar')?.textContent || 'K', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
+    const start = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'ms-settings ms-glass mf-dashboard-new');
+    start.innerHTML = ICONS.plus; start.setAttribute('aria-label', 'New session');
+    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' }), start])]);
+    const body = el('div', { class: 'mf-dashboard-body mf-overview' });
+    shell.append(header, body); page.prepend(shell);
+    move(banner, pageBleed() || shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body);
+    page.classList.add('mf-home');
   }
   function enable() {
+    if (overview) { enableOverview(); return; }
     shell = el('section', { class: 'ms-shell mf-project', 'aria-label': 'Forge project' });
     const avatar = button(document.querySelector('.sidebar-avatar')?.textContent || 'K', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
     const projectButton = button('Projects', () => projects(projectButton)); projectButton.classList.add('mf-project-trigger');
@@ -70,8 +84,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     tabs.forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `mf-tab-${i}`; tab.setAttribute('aria-controls', i ? 'mf-sessions' : 'mf-new'); [launch, sessionsPage][i].setAttribute('aria-labelledby', tab.id); });
     const mark = el('div', { class: 'mf-mark', 'aria-hidden': 'true' });
     const caption = el('p', { class: 'mf-project-caption' });
-    const overviewButton = button('Project overview', () => overview(overviewButton));
-    launch.append(el('div', { class: 'ms-intro' }, [mark, el('h1', { text: 'What should we work on?' }), caption, overviewButton]));
+    launch.append(el('div', { class: 'ms-intro' }, [mark, el('h1', { text: 'What should we work on?' }), caption]));
     const bottom = el('div', { class: 'ms-launch-bottom' }), activity = el('div', { class: 'ms-activity-slot' }); bottom.append(activity); launch.append(bottom);
     const track = el('div', { class: 'ms-page-track' }, [launch, sessionsPage]);
     shell.append(header, el('div', { class: 'ms-page-window' }, [track])); page.prepend(shell);
@@ -92,10 +105,12 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     await Promise.allSettled(sessions.filter(s => !s.forge.removed).map(async s => { s._changes = (await api(`/api/forge/sessions/${encodeURIComponent(s.id)}/changes`)).files; }));
     if (version === metaVersion && shell) paint();
   }
-  function update(refreshCounts = true) { paint(); if (shell && refreshCounts) loadCounts(); }
+  function update(refreshCounts = true) { paint(); if (shell && refreshCounts && !overview) loadCounts(); }
   function paint() {
     if (!shell) return;
     const { project, sessions, models, location } = getState();
+    if (project) lastProject = project.id;
+    if (overview) return;
     shell.querySelector('.mf-mark').textContent = project?.name.slice(0, 1).toUpperCase() || 'K';
     shell.querySelector('.mf-project-caption').textContent = project?.name || 'Choose a project';
     const files = location?.value === 'new_worktree' ? [] : sessions.filter(s => !s.forge.removed && s.forge.isolation === 'in_place').slice(0, 1).flatMap(s => s._changes || []);
@@ -103,8 +118,12 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     history.update(sessions, models, refresh); refreshActivity();
   }
   const gate = () => { if (mobileOn() && !shell) enable(); else if (!mobileOn() && shell) disable(); };
-  const projectsChanged = () => { if (mobileOn()) { sheet?.close(); go('forgeHome', { projectId: getState().project?.id, mobilePage: lastPage }); } };
+  const projectsChanged = () => { if (mobileOn()) { sheet?.close(); go('forgeHome', { projectId: getState().project?.id, ...(overview ? {} : { mobilePage: lastPage }) }); } };
+  // A recent project on the phone overview opens it on the New page, where its composer lives.
+  const openProject = id => { if (!overview || !mobileOn()) return false; go('forgeHome', { projectId: id, mobilePage: 0 }); return true; };
   document.addEventListener('kairos:forge-projects', projectsChanged);
   phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate); gate();
-  return { update, dispose() { ++metaVersion; document.removeEventListener('kairos:forge-projects', projectsChanged); disable(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); } };
+  // Where a reload of Forge Home should land: the same phone page (desktop takes no options).
+  const here = () => (overview || !mobileOn() ? {} : { mobileWorkspace: true });
+  return { update, openProject, here, dispose() { ++metaVersion; document.removeEventListener('kairos:forge-projects', projectsChanged); disable(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); } };
 }

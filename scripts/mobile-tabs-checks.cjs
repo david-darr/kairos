@@ -555,7 +555,7 @@ async function run(ctx) {
     await shot('fold-' + w + 'x' + screen + '-sheet');
     await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('.ms-sheet[open]')");
     // Forge: the project New page, a session's composer and the Changes dock follow the same system.
-    await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-project')"); await js("document.getElementById('mf-tab-0').click()"); await delay(500);
+    await navigate('forgeHome', { mobilePage: 0 }); await waitFor("!!document.querySelector('.mf-project')"); await js("document.getElementById('mf-tab-0').click()"); await delay(500);
     eq(Math.round((await rect('.mf-project')).b), screen, `${name}: Forge project page fills the screen`);
     const forgeBottom = await js("(() => { const b = document.querySelector('.mf-project #mf-new .ms-launch-bottom'); const kids = [...b.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height); return { box: Math.round(b.getBoundingClientRect().bottom), last: Math.round(Math.max(...kids.map(n => n.getBoundingClientRect().bottom))), composer: Math.round(document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom) }; })()");
     ok(forgeBottom.box === screen && forgeBottom.last === screen - gap && forgeBottom.composer <= screen - gap, `${name}: Forge New composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeBottom)}`);
@@ -605,9 +605,12 @@ async function run(ctx) {
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
   ok(!(await js("!!document.querySelector('.ms-page-bleed > .ms-background')")), 'Safari tab: leaving the launch view takes its picture with it');
   eq(Math.round((await rect('.ms-dock')).b), 852 - 34, 'Safari tab: the fixed dock sits above the bottom inset');
-  await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-project')"); await delay(500);
+  await navigate('forgeHome', { mobilePage: 0 }); await waitFor("!!document.querySelector('.mf-project')"); await delay(500);
   ok(await js("document.querySelector('.forge-banner')?.parentElement?.classList.contains('ms-page-bleed') && getComputedStyle(document.querySelector('.forge-banner')).display !== 'none'"), 'Safari tab: the Forge New picture lives in the background layer');
   await shot('safari-bleed-forge');
+  await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-dashboard')"); await delay(500);
+  ok(await js("document.querySelector('.forge-banner')?.parentElement?.classList.contains('ms-page-bleed') && !document.querySelector('.mf-project')"), 'Safari tab: Forge Home is the overview and its picture lives in the background layer');
+  await shot('safari-bleed-forge-overview');
   await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer')"); await delay(300);
   ok(await js("!document.querySelector('.ms-page-bleed .forge-banner')"), 'Safari tab: leaving Forge takes its picture back');
   await js("import('/static/js/mobileChrome.js').then(m => m.setPageBleed(false))"); await delay(200);

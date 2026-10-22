@@ -21,8 +21,45 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   };
   const menu = async () => { await click('.mf-session-header [aria-label="Session actions"]'); await sheetNamed('Session actions'); };
   const tool = async name => { await menu(); await textButton('dialog.ms-sheet', name); await sheetNamed(name); };
+  const cards = ['Working now', 'Running services', 'Git activity', 'Recent projects', 'Repo lifespan'];
+  const sheetTile = async tab => {
+    await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
+    await click(`.ms-tab-sheet .ms-tab-tile[data-tab=${tab}]`); await delay(150);
+  };
+  // Home: as Kairos Home opens the dashboard, Forge Home opens the overview page.
   await navigate('forgeHome');
-  await waitFor("!!document.querySelector('.mf-project') && document.querySelectorAll('#nav [data-forge-project]').length > 0 && !!document.querySelector('[aria-label=Project]')");
+  await waitFor("!!document.querySelector('.mf-dashboard') && document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5 && document.querySelectorAll('#nav [data-forge-project]').length > 0");
+  await waitFor("!!document.querySelector('.mf-dashboard .forge-activity-total') && ![...document.querySelectorAll('.mf-dashboard .forge-widget-body')].some(b => b.textContent.trim() === 'Loading...')");
+  await delay(300);
+  ok(await js("!document.querySelector('.mf-project') && !document.querySelector('dialog.ms-sheet[open]')"), 'Home opens the overview as a page, not the pager or a sheet');
+  ok(await js("document.querySelector('.mf-dashboard-title').textContent === 'Forge Home' && !!document.querySelector('.mf-dashboard .ms-header .ms-avatar') && getComputedStyle(document.getElementById('mobile-menu-btn')).visibility === 'hidden'"), 'Overview uses the phone header and its own avatar');
+  ok(await js("parseFloat(getComputedStyle(document.querySelector('.mf-dashboard .ms-header')).paddingTop) >= 6"), 'Overview header clears the safe area');
+  assert.deepEqual(await js("[...document.querySelectorAll('.mf-dashboard .forge-widget-grid > section > header h2')].map(n => n.textContent)"), cards); assertions++;
+  ok(await js("(() => { const s = [...document.querySelectorAll('.mf-dashboard .forge-widget-grid > section')].map(n => n.getBoundingClientRect()); return s.every(r => Math.abs(r.left - s[0].left) < 1 && Math.abs(r.width - s[0].width) < 1) && s.every((r, i) => !i || r.top >= s[i - 1].bottom); })()"), 'Overview cards stack in one full-width column');
+  ok(await js("getComputedStyle(document.querySelector('.mf-dashboard .forge-panel')).borderRadius !== '0px' && getComputedStyle(document.querySelector('.mf-dashboard .forge-panel')).boxShadow !== 'none'"), 'Overview cards use the redesign card style');
+  ok(await js("[...document.querySelectorAll('.mf-dashboard button, .mf-dashboard .custom-select-btn')].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => { const r = n.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; })"), 'Overview controls are 44px');
+  ok(await js("![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Project overview')"), 'The Project overview sheet button is gone');
+  await fit('Forge overview');
+  await capture('mobile-forge-overview');
+  await js("document.querySelector('.mf-dashboard-body').scrollTop = document.querySelector('.mf-dashboard-body').scrollHeight"); await delay(200);
+  await capture('mobile-forge-overview-lifespan');
+  await js("document.querySelector('.mf-dashboard-body').scrollTop = 0");
+  await textButton('.mf-dashboard .forge-toolbar', 'Customize');
+  await waitFor("!!document.querySelector('[data-widget-toggle=working]')");
+  ok(await js("document.querySelectorAll('[data-widget-toggle]').length === 5"), 'Customize retains all five visibility controls');
+  await click('[data-widget-toggle=services]');
+  ok(await js("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 4 && !document.querySelector('.mf-dashboard .forge-widget-grid').textContent.includes('Running services')"), 'Customize hides a card on the phone overview');
+  await click('[data-widget-toggle=services]');
+  ok(await js("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5"), 'Customize shows it again');
+  await escape(); await delay(150);
+  ok(await js("!document.querySelector('[data-widget-toggle]')?.getClientRects().length"), 'Customize closes');
+  await click('.mf-dashboard .ms-avatar');
+  await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
+  ok(await js("document.querySelector('.ms-tab-sheet .ms-tab-tile[data-tab=forgeHome]').getAttribute('aria-current') === 'page' && !document.querySelector('.ms-tab-sheet .ms-tab-tile[data-tab=forgeSessions]').hasAttribute('aria-current')"), 'Tab sheet marks Forge Home current on the overview');
+  // Sessions: as Kairos Chats opens What should we work on?, Forge Sessions opens the New page.
+  await sheetTile('forgeSessions');
+  await waitFor("!!document.querySelector('.mf-project') && document.querySelector('#mf-tab-0').getAttribute('aria-selected') === 'true' && !!document.querySelector('[aria-label=Project]')");
+  ok(await js("!document.querySelector('.mf-dashboard')"), 'Sessions opens the New / Sessions pager');
   await delay(500);
   await click('#mf-tab-0');
   ok(await js("document.querySelector('#mf-new').inert === false && document.querySelector('#mf-sessions').inert"), 'New is the only interactive page');
@@ -31,7 +68,14 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('.mf-project .ms-avatar');
   await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
   ok(await js("!!document.querySelector('.ms-sheet-projects') && document.querySelectorAll('.ms-mode-row button').length === 2"), 'Avatar retains projects and both workspace modes');
-  await escape(); await delay(100);
+  ok(await js("document.querySelector('.ms-tab-sheet .ms-tab-tile[data-tab=forgeSessions]').getAttribute('aria-current') === 'page' && !document.querySelector('.ms-tab-sheet .ms-tab-tile[data-tab=forgeHome]').hasAttribute('aria-current')"), 'Tab sheet marks Sessions current on the pager');
+  await sheetTile('forgeHome');
+  await waitFor("!!document.querySelector('.mf-dashboard') && !document.querySelector('.mf-project')");
+  ok(true, 'Forge Home in the tab sheet returns to the overview');
+  await click('.mf-dashboard-new');
+  await waitFor("!!document.querySelector('.mf-project') && document.querySelector('#mf-tab-0').getAttribute('aria-selected') === 'true' && !!document.querySelector('[aria-label=Project]')");
+  ok(true, 'New session on the overview opens the New page');
+  await delay(300);
   await click('.mf-project-trigger'); await sheetNamed('Projects');
   ok(await js("document.querySelector('dialog.ms-sheet').contains(document.activeElement)"), 'Projects receives focus');
   await input('dialog.ms-sheet input', 'no-such-project');
@@ -43,13 +87,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('.mf-workspace-line'); await sheetNamed('Workspace');
   ok(await js("['Current checkout', 'New worktree', 'Existing worktrees', 'View changes'].every(t => document.querySelector('dialog.ms-sheet').textContent.includes(t))"), 'Workspace exposes all locations and review');
   await close();
-  await textButton('.mf-project .ms-intro', 'Project overview'); await sheetNamed('Project overview');
-  await waitFor("document.querySelectorAll('.mf-overview .forge-widget-grid > section').length === 5");
-  ok(await js("['Working now', 'Running services', 'Git activity', 'Recent projects', 'Repo lifespan', 'Customize'].every(t => document.querySelector('.mf-overview').textContent.includes(t))"), 'Overview retains every dashboard and Customize');
-  await textButton('.mf-overview .forge-toolbar', 'Customize');
-  await waitFor("!!document.querySelector('[data-widget-toggle=working]')");
-  ok(await js("document.querySelectorAll('[data-widget-toggle]').length === 5"), 'Customize retains all five visibility controls');
-  await escape(); await delay(100); await close();
+  ok(await js("!document.querySelector('.mf-project .ms-intro button')"), 'New keeps its introduction without an overview button');
   await js("document.querySelector('.forge-composer textarea').focus()");
   await waitFor("!!document.querySelector('.forge-composer.ms-composer-expanded')");
   ok(await js("getComputedStyle(document.querySelector('.forge-composer .chat-input-left')).display !== 'none'"), 'Expanded composer contains the original location and mode controls');
@@ -182,5 +220,14 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("!document.querySelector('.mf-project') && !!document.querySelector('.forge-hero .forge-composer') && !!document.querySelector('.forge-widget-grid')"), 'Desktop restores the original composer and dashboard nodes');
   win.setContentSize(390, 844); await delay(250);
   ok(await js("document.querySelectorAll('.mf-project').length === 1 && document.querySelectorAll('#forge-message').length === 1"), 'Resize back creates one phone workspace with the original input');
+  await navigate('forgeHome');
+  await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
+  for (const [width, height] of [[320, 640], [667, 375]]) {
+    win.setContentSize(width, height); await delay(250); await fit(`Forge overview ${width}x${height}`);
+  }
+  win.setContentSize(1440, 900); await delay(250);
+  ok(await js("!document.querySelector('.mf-dashboard') && !!document.querySelector('.forge-home > .forge-toolbar + .forge-widget-grid') && document.querySelectorAll('.forge-widget-grid > section').length === 5"), 'Desktop restores the toolbar and cards from the overview');
+  win.setContentSize(390, 844); await delay(250);
+  ok(await js("document.querySelectorAll('.mf-dashboard').length === 1 && document.querySelectorAll('.mf-dashboard .forge-widget-grid').length === 1"), 'Resize back creates one phone overview');
   return { assertions };
 };

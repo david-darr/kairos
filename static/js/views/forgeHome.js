@@ -1,4 +1,4 @@
-import { mountMobileForge } from '../mobileForge.js';
+import { mountMobileForge, wantsOverview, rememberedProject } from '../mobileForge.js';
 import { mountMobileModelSheet, renderMobileCatalogMenu } from '../mobileModelSheet.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileDictation } from '../mobileDictation.js';
@@ -202,6 +202,8 @@ export function render(container, tabId, options = {}) {
       if (disposed) return;
       if (results[0].status === 'rejected') throw results[0].reason;
       projects = results[0].value;
+      // A phone keeps the project it last showed when Home and Sessions are opened from the tab sheet.
+      const wanted = options.projectId || (mobileOn() ? rememberedProject() : null);
       models = results[1].status === 'fulfilled' ? results[1].value : [];
       projectSelect = composerPicker('Project', projects.map(p => el('option', { value: p.id, text: p.name })));
       modelSelect = composerPicker('Agent', models.map(m => el('option', { value: m.id, text: `${m.name} · ${m.model || 'CLI default'}` })));
@@ -215,17 +217,17 @@ export function render(container, tabId, options = {}) {
       projectSelect.addEventListener('change', locationChanged); isolationSelect.addEventListener('change', locationChanged);
       modelSelect.addEventListener('change', () => { updateSend(); loadVariants(); });
       loadVariants();
-      if (options.projectId && projects.some(p => p.id === options.projectId)) projectSelect.value = options.projectId;
+      if (wanted && projects.some(p => p.id === wanted)) projectSelect.value = wanted;
       locationChanged();
-      if (!projects.length || !models.length) inputLeft.append(el('button', { type: 'button', class: 'btn quiet', text: !projects.length ? 'Add a project' : 'Add a model', onclick: event => !projects.length ? openProjectForm('existing', { owner: page, opener: event.currentTarget, onSaved: () => { document.dispatchEvent(new Event('kairos:forge-projects')); navigate('forgeHome'); } }) : navigate('settings', { section: 'add-models' }) }));
+      if (!projects.length || !models.length) inputLeft.append(el('button', { type: 'button', class: 'btn quiet', text: !projects.length ? 'Add a project' : 'Add a model', onclick: event => !projects.length ? openProjectForm('existing', { owner: page, opener: event.currentTarget, onSaved: () => { document.dispatchEvent(new Event('kairos:forge-projects')); navigate('forgeHome', phoneWorkspace.here()); } }) : navigate('settings', { section: 'add-models' }) }));
       lifespanSelect = projectPicker(projects, 'Repository for lifespan');
       lifespanSelect.disabled = !projects.length;
-      if (options.projectId && projects.some(p => p.id === options.projectId)) projectSelect.value = lifespanSelect.value = options.projectId;
+      if (wanted && projects.some(p => p.id === wanted)) projectSelect.value = lifespanSelect.value = wanted;
       panels.lifespan.querySelector('header').append(lifespanSelect);
       lifespanSelect.addEventListener('change', lifespan);
       bodies.recent.replaceChildren(...(projects.length ? projects.slice(0, 5).map(p => el('button', { type: 'button', class: 'dashboard-row', onclick: async () => {
-        try { await api(`/api/forge/projects/${p.id}/opened`, { method: 'POST' }); if (!disposed) { projectSelect.value = lifespanSelect.value = p.id; locationChanged(); lifespan(); message.focus(); } } catch { /* api displays the error. */ }
-      } }, [el('span', { class: 'dashboard-row-copy' }, [el('strong', { text: p.name }), el('small', { class: 'meta', text: p.path })])])) : [el('p', { class: 'meta', text: 'Add an existing folder, clone a repository, or start a new project.' }), el('button', { type: 'button', class: 'btn', text: 'Open folder', onclick: event => openProjectForm('existing', { owner: page, opener: event.currentTarget, onSaved: () => { document.dispatchEvent(new Event('kairos:forge-projects')); navigate('forgeHome'); } }) })]));
+        try { await api(`/api/forge/projects/${p.id}/opened`, { method: 'POST' }); if (!disposed && !phoneWorkspace.openProject(p.id)) { projectSelect.value = lifespanSelect.value = p.id; locationChanged(); lifespan(); message.focus(); } } catch { /* api displays the error. */ }
+      } }, [el('span', { class: 'dashboard-row-copy' }, [el('strong', { text: p.name }), el('small', { class: 'meta', text: p.path })])])) : [el('p', { class: 'meta', text: 'Add an existing folder, clone a repository, or start a new project.' }), el('button', { type: 'button', class: 'btn', text: 'Open folder', onclick: event => openProjectForm('existing', { owner: page, opener: event.currentTarget, onSaved: () => { document.dispatchEvent(new Event('kairos:forge-projects')); navigate('forgeHome', phoneWorkspace.here()); } }) })]));
       lifespan(); refreshActivity();
       if (options.compose) message.focus();
     } catch { if (!disposed) grid.replaceChildren(el('p', { role: 'status', text: 'Forge could not load. Open Home again to retry.' })); }
@@ -287,7 +289,7 @@ export function render(container, tabId, options = {}) {
   message.onkeydown = event => { if (shouldSendOnEnter(event)) { event.preventDefault(); composer.requestSubmit(); } };
   phoneWorkspace = mountMobileForge({ page, composer, banner, toolbar: page.querySelector('.forge-toolbar'), grid, hint,
     getState: () => { const project = projects.find(p => p.id === projectSelect?.value); return { projects, project, models, location: isolationSelect, sessions: sessionGroups.find(g => g.project.id === project?.id)?.sessions || [] }; },
-    pickProject: id => { if (!projectSelect) return; projectSelect.value = id; lifespanSelect.value = id; locationChanged(); lifespan(); }, refresh: refreshActivity, initialPage: options.mobilePage });
+    pickProject: id => { if (!projectSelect) return; projectSelect.value = id; lifespanSelect.value = id; locationChanged(); lifespan(); }, refresh: refreshActivity, initialPage: options.mobilePage, overview: wantsOverview(options) });
   composer.addEventListener('change', phoneWorkspace.update);
   load();
   document.addEventListener('kairos:forge-apps', refreshActivity);
