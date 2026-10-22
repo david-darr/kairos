@@ -77,14 +77,14 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   // is the last previewed combination, including a custom hex color.
   const originalFace = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
   for (const [key, value] of [['shape', 'tall'], ['body', '#D99A92'], ['accessory', 'scarf']]) {
-    await js(`document.querySelector('.agent-create-dialog [aria-label="Mascot ${key}"] [data-value="${value}"]').click()`);
+    await js(`document.querySelector('.agent-create-dialog [aria-label="Kip ${key}"] [data-value="${value}"]').click()`);
   }
   assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), originalFace, 'picker updates live preview');
-  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Mascot body\"] [role=radio]').length"), 6, 'the six pastels, no free colour');
-  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Mascot accessory\"] [role=radio]').length"), 6, 'none and five accessories');
+  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Kip body\"] [role=radio]').length"), 6, 'the six pastels, no free colour');
+  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Kip accessory\"] [role=radio]').length"), 6, 'none and five accessories');
   assert.equal(await js("!!document.querySelector('.agent-create-dialog [aria-label^=\"Avatar \"]')"), false, 'the dot-face picker is gone');
-  await js("(() => { const pick=document.querySelector('.agent-create-dialog [aria-label=\"Mascot shape\"] [aria-checked=true]'); pick.focus(); pick.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
-  assert.equal(await js("document.querySelector('.agent-create-dialog [aria-label=\"Mascot shape\"] [aria-checked=true]').dataset.value"), 'squircle', 'arrow moves radio selection');
+  await js("(() => { const pick=document.querySelector('.agent-create-dialog [aria-label=\"Kip shape\"] [aria-checked=true]'); pick.focus(); pick.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
+  assert.equal(await js("document.querySelector('.agent-create-dialog [aria-label=\"Kip shape\"] [aria-checked=true]').dataset.value"), 'squircle', 'arrow moves radio selection');
   const beforeShuffle = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
   await js("document.querySelector('.agent-create-dialog .agent-avatar-shuffle').click()");
   assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), beforeShuffle, 'Shuffle changes the face');

@@ -22,7 +22,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await waitFor("!!document.querySelector('.dashboard-mascot kairos-mascot svg.ajar')");
   // Scout waits on the person in the fixtures: needs you beats working.
   await waitFor("document.querySelector('.dashboard-mascot kairos-mascot').getAttribute('state') === 'needs'");
-  assert.equal(await js("document.querySelector('.dashboard-mascot').getAttribute('aria-label')"), 'Kairos needs you. Open Agents');
+  assert.equal(await js("document.querySelector('.dashboard-mascot').getAttribute('aria-label')"), 'Kip, needs you. Open Agents');
   assert.equal(await js("document.querySelector('.dashboard-mascot').disabled"), false, 'a needs-you mascot is a way to the waiting items');
   assert.equal(await js("document.querySelector('.dashboard-mascot svg.ajar').dataset.finish"), 'halftone', 'Home uses the halftone finish (Mote)');
   assert.ok(await js("(() => { const m = document.querySelector('.dashboard-mascot').getBoundingClientRect(), h = document.querySelector('.dashboard-hero').getBoundingClientRect(); return m.width >= 72 && m.left >= h.left && m.right <= h.right && m.top >= h.top && m.bottom <= h.bottom; })()"), 'the mascot sits inside the hero');

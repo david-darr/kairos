@@ -24,12 +24,12 @@ window.M = M;
 const q = new URLSearchParams(location.search);
 await initAppearance('mascot-review');
 updateAppearance(q.get('color') ? { mode: 'color', color: q.get('color'), halftone: false } : { mode: 'default', halftone: false });
-document.getElementById('title').textContent = 'Ajar · ' + (q.get('name') || 'light');
+document.getElementById('title').textContent = 'Kip · ' + (q.get('name') || 'light');
 const grid = document.getElementById('grid');
-const head = document.createElement('tr'); head.innerHTML = '<th>State</th><th>16</th><th>28</th><th>72</th><th>176</th><th>Static 72</th><th>Halftone 96</th>'; grid.append(head);
+const head = document.createElement('tr'); head.innerHTML = '<th>State</th><th>16</th><th>28</th><th>72</th><th>176</th><th>Static 72</th><th>Halftone style 96</th>'; grid.append(head);
 for (const state of M.MASCOT_STATES) {
   const tr = document.createElement('tr'); const th = document.createElement('th'); th.textContent = M.STATE_WORDS[state]; tr.append(th);
-  for (const size of [16, 28, 72, 176]) { const td = document.createElement('td'); td.append(M.createMascot({ state, size, decorative: false, label: 'Kairos' })); tr.append(td); }
+  for (const size of [16, 28, 72, 176]) { const td = document.createElement('td'); td.append(M.createMascot({ state, size, decorative: false })); tr.append(td); }
   const td = document.createElement('td'); const img = document.createElement('img'); img.width = img.height = 72; img.alt = ''; img.src = M.mascotUrl(M.KAIROS_SPEC, state); td.append(img); tr.append(td);
   const tone = document.createElement('td'); tone.append(M.createMascot({ state, size: 96, finish: 'halftone' })); tr.append(tone);
   grid.append(tr);

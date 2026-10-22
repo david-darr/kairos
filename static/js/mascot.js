@@ -1,4 +1,7 @@
-// Ajar, the Kairos mascot (Kairos Mascot build spec, locked 2026-10-22).
+// Kip, the Kairos mascot (Kairos Mascot build spec, locked 2026-10-22). David
+// named it Kip; this file draws its flat style (the build's working name was
+// Ajar, kept in internal identifiers), kip.js its pixel style, and the
+// halftone style is the finish below. User-facing text says Kip.
 // The Kairos mark turned into a character: a flat body with the ring's
 // opening bitten out of the upper right, the gold point resting in the bite,
 // and two blinking pill eyes. Kairos itself is the ink round body; every bot
@@ -314,11 +317,11 @@ export function kipStripUrl(rawSpec, state = 'walk') {
   return { url: remember(kips, key, `data:image/svg+xml,${encodeURIComponent(kipStripSvg(frames))}`), frames: frames.length };
 }
 
-// -- the halftone finish (Mote) --------------------------------------------------
+// -- the halftone style ------------------------------------------------------------
 
 // Ajar's body as halftone dots, the same 4 by 4 ordered dither as dither.js,
 // drawn once into a fixed canvas per size and theme. Only the Home hero uses
-// it (David, 2026-10-22: Mote is the Home hero's finish).
+// it (David, 2026-10-22: the halftone style is the Home hero's).
 function insideBody(shape, x, y) {
   let d;
   if (shape === 'squircle') { const u = Math.max(0, Math.abs(x - 70) - 13), v = Math.max(0, Math.abs(y - 76) - 13); d = Math.hypot(u, v) - 30; }
@@ -425,7 +428,7 @@ export class KairosMascot extends ElementBase {
     else {
       this.removeAttribute('aria-hidden'); this.setAttribute('role', 'img');
       // Set as an attribute value, never as markup: a bot's name is text.
-      this.setAttribute('aria-label', `${this.getAttribute('label') || this._agent?.name || 'Kairos'}, ${STATE_WORDS[state]}`);
+      this.setAttribute('aria-label', `${this.getAttribute('label') || this._agent?.name || 'Kip'}, ${STATE_WORDS[state]}`);
     }
     clearTimeout(this._timer);
     if (state === 'success') {

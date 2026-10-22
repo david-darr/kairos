@@ -1,5 +1,5 @@
-// Kip: the pixel rendition of Ajar (Kairos Mascot build spec, 2026-10-22).
-// David's call: Ajar is the mascot; Kip is the same character on a 24 by 24
+// Kip in its pixel style (Kairos Mascot build spec, 2026-10-22; David named
+// the mascot Kip, in flat, pixel and halftone styles): the character on a 24 by 24
 // grid, used in the Agents village and in the terminal (the CLI reads the
 // sheets this module builds, static/img/mascot/kip/). No DOM and no imports,
 // so scripts/build_kip_assets.cjs and scripts/test_mascot.cjs load it from

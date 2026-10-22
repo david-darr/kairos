@@ -40,11 +40,11 @@ export function renderAppearancePanel(content, _status, page) {
       el('strong', { text: title }), el('span', { text: subtitle })]);
     styleButtons.set(style, button); chatStyles.append(button);
   }
-  // Show the mascot (Kairos Mascot build spec, 2026-10-22).
-  const mascot = toggle({ label: 'Show the mascot', onChange: (on) => { updateAppearance({ mascot: on }); sync(); } });
+  // Show Kip (Kairos Mascot build spec, 2026-10-22).
+  const mascot = toggle({ label: 'Show Kip', onChange: (on) => { updateAppearance({ mascot: on }); sync(); } });
   mascot.id = 'appearance-mascot';
   const mascotSection = el('div', { class: 'appearance-mascot-setting' }, [
-    group({}, [row({ title: 'Show the mascot', description: 'Kairos on Home, in the chat while it works, on empty pages and in calls. Off shows the plain markers. Bots keep their faces.', control: mascot })]),
+    group({}, [row({ title: 'Show Kip', description: 'Kip, the Kairos mascot, on Home, in the chat while it works, on empty pages and in calls. Off shows the plain markers. Bots keep their faces.', control: mascot })]),
   ]);
   const chatStyleSection = el('section', { class: 'appearance-chat-style-setting' }, [
     el('h3', { text: 'Chat style' }), chatStyles,

@@ -15,7 +15,7 @@ if (art) import("./demo/static/js/dither.js")
   .catch(() => {});
 
 // -- the mascot ----------------------------------------------------------
-// Ajar (static/js/mascot.js, the demo's copy): in the hero and the states
+// Kip (static/js/mascot.js, the demo's copy): in the hero and the states
 // strip. Opened from disk, where modules don't load, the strip stays hidden.
 import("./demo/static/js/mascot.js").then(({ createMascot }) => {
   document.documentElement.classList.add("has-mascot");

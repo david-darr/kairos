@@ -37,11 +37,11 @@ from rich.text import Text
 
 REPO = Path(__file__).resolve().parents[2]
 KIP_DIR = REPO / "static" / "img" / "mascot" / "kip"
-ASSET_STATES = ("idle", "thinking", "needs-you", "done", "error")
-# The CLI's own state words, mapped onto the assets' (sleeping has no frames
-# yet and shows idle).
+ASSET_STATES = ("idle", "thinking", "needs-you", "done", "error", "sleeping")
+# The CLI's own state words, mapped onto the assets'. Older asset folders
+# without sleeping frames fall back to idle (Sheet.frame).
 STATE_MAP = {"idle": "idle", "thinking": "thinking", "needs": "needs-you", "success": "done",
-             "error": "error", "sleeping": "idle"}
+             "error": "error", "sleeping": "sleeping"}
 _ROW = re.compile(r"^[.0-9a-z]+$")
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -137,8 +137,9 @@ def half_blocks(frame: list[list[Pixel]]) -> list[Text]:
 # Used only when kip.json is missing, so the text tiers never disappear.
 _FALLBACK_FACE = {"unicode": [" .---.  *", "( ▮ ▮ )", " `---'"], "ascii": [" .---.  *", "( | | )", " `---'"]}
 _FALLBACK_SPINNER = {"thinking": ["◜", "◝", "◞", "◟"], "needs-you": ["!"], "done": ["✓"], "error": ["×"], "idle": ["•"],
+                     "sleeping": ["z"],
                      "ascii": {"thinking": ["|", "/", "-", "\\"], "needs-you": ["!"], "done": ["+"], "error": ["x"],
-                               "idle": ["."]}}
+                               "idle": ["."], "sleeping": ["z"]}}
 
 
 def plain_still(state: str, folder: Path | None = None) -> list[str] | None:
