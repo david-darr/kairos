@@ -793,6 +793,7 @@ class DesktopSemanticsLiveTests(unittest.TestCase):
                     self.assertTrue(taint.tainted, "desktop labels taint the turn")
                     self.assertIn("UNTRUSTED", writer["text"])
                     self.assertRegex(writer["text"], r"\] menu Edit\b")
+                    self.assertEqual(len(regex.findall(r"\] menu File\b", writer["text"])), 1, "one menu bar, not two")
                     self.assertRegex(writer["text"], r"\] (toggle|push) button Bold", "toolbar rows")
                     self.assertRegex(writer["text"], r"Desktop read completed: Untitled 1 . LibreOffice Writer \(soffice\)")
                     opened = await act("click", ref=ref(writer, r"menu Edit\b"))

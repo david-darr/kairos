@@ -401,7 +401,7 @@ def a11y_walk(roots, app, query=''):
     and 4 seconds. A spreadsheet's million cells are not walked: its top-left
     cells, and a cell named in the query, are fetched through its table."""
     Atspi = atspi()
-    rows, nodes, seen, started = [], [], [0], time.monotonic()
+    rows, nodes, seen, started, menu_bars = [], [], [0], time.monotonic(), set()
     def add(node, role, name, states):
         rows.append(a11y_row(node, role, name, states, app)); nodes.append(node)
     def visit(node, depth):
@@ -413,6 +413,15 @@ def a11y_walk(roots, app, query=''):
         except Exception:
             return
         if states['DEFUNCT'] or not states['SHOWING']: return
+        if role == 'menu bar':
+            # LibreOffice's GTK3 front end publishes its menu bar twice, both
+            # showing: list one, skip any later bar with the same menus.
+            try:
+                menus = tuple(a11y_name(node.get_child_at_index(i)) for i in range(min(count, 40)))
+            except Exception:
+                menus = None
+            if menus is not None and menus in menu_bars: return
+            if menus is not None: menu_bars.add(menus)
         if not name and role in A11Y_TEXT: name = a11y_label(node)
         if (role in A11Y_ACTIONABLE and (name or role in A11Y_TEXT)) or (name and role not in A11Y_CONTAINERS):
             add(node, role, name, states)
