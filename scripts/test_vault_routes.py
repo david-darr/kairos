@@ -169,6 +169,10 @@ class VaultRouteTests(unittest.TestCase):
         self.assertEqual(by_raw["diagram.png"]["kind"], "attachment")
         self.assertTrue(by_raw["Beta"]["embed"])
         self.assertNotIn("Inside Code", by_raw)
+        alpha = self.note("Projects/Alpha.md")
+        contexts = {b["id"]: b["snippet"] for b in alpha["backlinks"]}
+        self.assertEqual(contexts["Archive/Gamma.md"], "Gamma body. [[Projects/Alpha|back to alpha]]")
+        self.assertTrue(contexts["Vault Index.md"].startswith("See [[Projects/Alpha]]"))
         crlf = self.note("CRLF.md")
         self.assertNotIn("\r", crlf["content"])
         self.assertEqual(crlf["line_ending"], "crlf")

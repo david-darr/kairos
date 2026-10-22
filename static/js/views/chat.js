@@ -1371,6 +1371,14 @@ export async function render(container, tabId, options = {}) {
     }
   }
 
+  // Library > Vault "Ask Kairos" (2026-10-22): a new chat with the note
+  // attached as a reference chip and the composer focused. Nothing is sent;
+  // the server fences and taint-marks the note when David sends.
+  if (Array.isArray(options.references) && options.references.length && chatReferences && !options.mobileLaunch) {
+    for (const reference of options.references.slice(0, 5)) chatReferences.add(reference);
+    input.focus();
+  }
+
   // Unmount (David's ask 2026-09-12): app.js's switchTab() calls this
   // before tearing down the DOM for whichever tab comes next, same
   // convention home.js already uses for its WebGL scene. Without it, a

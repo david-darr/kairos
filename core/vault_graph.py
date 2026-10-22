@@ -519,3 +519,28 @@ def index_proposal(folder: str, note_path: str) -> Optional[dict]:
     at = dated[-1] + 1 if dated else len(lines) - (1 if lines and lines[-1] == "" else 0)
     content = "\n".join(lines[:at] + [line] + lines[at:])
     return {"path": index_path, "version": index["version"], "line": line, "after": lines[at - 1] if at else "", "content": content}
+
+
+def backlink_contexts(path: str, limit: int = 60) -> list[dict]:
+    """The notes linking to `path`, each with the line that links here (a
+    one-line context for the reader's "Linked from")."""
+    graph = build_vault_graph()
+    sources = [e["source"] for e in graph["edges"] if e["kind"] == "link" and e["target"] == path][:limit]
+    if not sources:
+        return []
+    index = LinkIndex([n["id"] for n in graph["nodes"] if n["type"] == "note"])
+    vault_root = os.path.realpath(resolve_vault_dir())
+    out = []
+    for source in sources:
+        snippet = ""
+        try:
+            with open(os.path.join(vault_root, source), "r", encoding="utf-8-sig", errors="replace") as f:
+                text = _link_text(f.read())
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            if any(index.resolve(parse_wikilink(m.group(2))[0]) == ("note", path) for m in _WIKILINK_RE.finditer(line)):
+                snippet = re.sub(r"^\s*(?:[-*+]|\d+\.|#+|>)\s*", "", line).strip()
+                break
+        out.append({"id": source, "snippet": snippet[:200]})
+    return out

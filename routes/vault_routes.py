@@ -51,6 +51,7 @@ async def get_vault_note(path: str = Query(...), user: str = Depends(require_use
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
     note["links"] = vault_graph.resolve_links(note["content"])
+    note["backlinks"] = vault_graph.backlink_contexts(note["path"])
     note["can_edit"] = auth_manager.is_admin(user) and note["editable"]
     if auth_manager.is_admin(user):
         note["last_change"] = vault_library.last_change(path, user)

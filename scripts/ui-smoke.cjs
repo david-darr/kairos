@@ -1429,27 +1429,10 @@ app.whenReady().then(async () => {
         assert.deepEqual(await overflow(), [], label + " overflow in " + tab);
         await capture(label + "-" + tab);
       }
-      await navigate("library", { section: "vault" });
-      await js("[...document.querySelectorAll('.library-vault-modes button')].find(b => b.textContent === 'Map').click()");
-      await waitFor("document.querySelector('.vault-caption').textContent.includes('130 notes')");
-      await delay(400);
-      await capture(label + "-vault");
-      await js("document.querySelector('.vault-search').value = 'Projects index'; document.querySelector('.vault-search').dispatchEvent(new Event('input'))");
-      assert.equal(await js("document.querySelectorAll('.vault-search-result').length"), 1);
-      await js("document.querySelector('.vault-search-result').click()");
-      await waitFor("document.querySelector('.vault-panel-body').textContent.includes('connected place')");
-      assert.equal(await js("document.querySelector('.vault-note-content h1')?.textContent"), "Projects index", "Vault Markdown has a rendered heading");
-      assert.equal(await js("document.querySelector('.vault-note-content strong')?.textContent"), "connected place", "Vault Markdown has rendered emphasis");
-      assert.ok(await js("!document.querySelector('.vault-note-content').textContent.includes('status: active')"), "Vault reading view hides frontmatter");
-      assert.equal(await js("document.querySelector('.vault-note-link')?.textContent"), "the next note", "Wikilink has a readable label");
-      await js("document.querySelector('.vault-panel-actions button').click()");
-      assert.ok(await js("document.querySelector('#vault-note-editor').value.includes('status: active')"), "Edit preserves original frontmatter");
-      await js("document.querySelector('.vault-panel-actions button:nth-child(3)').click()");
-      await waitFor("!!document.querySelector('.vault-note-content h1')");
-      await capture(label + "-vault-note");
-      assert.deepEqual(await overflow(), [], label + " vault note overflow");
-      await js("document.querySelector('.vault-note-link').click()");
-      assert.equal(await js("document.querySelector('.vault-panel-header span').textContent"), "Projects note 1", "Wikilink opens its vault note");
+      // Library > Vault (Library Vault Polish, 2026-10-22): Browse, the
+      // reader and rail, Home, search, pins, History, the editor and its
+      // 409, today's note, Ask Kairos and the Map, in scripts/vault-checks.cjs.
+      await require('./vault-checks.cjs').run({ js, win, waitFor, delay, navigate, capture, overflow, writes, demoState, label });
       await navigate("home");
       await js("document.querySelector('.sidebar-settings-btn').click()");
       if (label === "mobile") {

@@ -264,18 +264,17 @@ async function run(ctx) {
   eq(await docks(), 1, 'The dock returns once after Back');
   await libTab('Vault');
   await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.ms-dock input')");
-  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");
+  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree summary').length > 0");
   await delay(400);
-  eq((await dockInfo()).buttons, [], 'Vault dock is search only, no invented create');
-  eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Find a note or folder', 'Vault Browse search lives in the dock');
-  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");
-  const treeBefore = await js("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length");
+  // Library Vault Polish (2026-10-22): the dock's "+" is Today's note, the only create.
+  eq((await dockInfo()).buttons.map(b => b.label), ["Today's note"], "Vault dock offers Today's note and nothing else");
+  eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Search vault', 'Vault Browse search lives in the dock');
   await type('.ms-dock input', 'Daily');
   await delay(300);
-  const treeAfter = await js("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length");
-  ok(treeAfter > 0 && treeAfter <= treeBefore, 'Vault dock search narrows the tree');
+  ok(await js("[...document.querySelectorAll('.vault-group-names .library-vault-note')].length > 0 && [...document.querySelectorAll('.vault-group-names .library-vault-note')].every(b => /daily/i.test(b.textContent))"), 'Vault dock search narrows the list to matching names');
   await shot('library-vault');
-  await js("[...document.querySelectorAll('.segmented-tab, [role=tab], button')].find(b => b.textContent.trim() === 'Map')?.click()");
+  await type('.ms-dock input', '');
+  await js("[...document.querySelectorAll('.vault-mode-pill')].find(b => b.textContent.trim() === 'Map')?.click()");
   await delay(600);
   ok(await docks() <= 1, 'Vault Map keeps one dock at most');
   await libTab('Google Drive');
