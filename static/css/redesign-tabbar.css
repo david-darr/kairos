@@ -119,6 +119,15 @@
   .kairos-redesign .ms-more-sheet .ms-profile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kairos-redesign .ms-more-sheet .ms-settings-row svg { flex: none; width: 22px; height: 22px; margin-inline: 7px; }
 
+  /* Short screens (a phone on its side): a compact bar, icon beside label as iOS
+     does in landscape, and the launch introduction gives way before the composer does. */
+  @media (max-height: 480px) {
+    .kairos-redesign { --ms-tabbar-height: 48px; }
+    .kairos-redesign .ms-tabbar-item { flex-direction: row; gap: 4px; font-size: 11.5px; }
+    .kairos-redesign .ms-tabbar-item svg { width: 20px; height: 20px; }
+    .kairos-redesign .ms-tabbar-badge { position: static; flex: none; min-width: 16px; height: 16px; padding: 0 4px; line-height: 16px; box-shadow: none; }
+    .kairos-redesign .ms-intro { min-height: 0; overflow: hidden; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .kairos-redesign .ms-tabbar, .kairos-redesign .ms-tabbar * { animation: none !important; transition: none !important; }
   }
