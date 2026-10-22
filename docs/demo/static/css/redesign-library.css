@@ -81,52 +81,7 @@
 .kairos-redesign .library-editor > .view-header > .card-row:last-child .btn:not(.danger) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
 .kairos-redesign .library-editor > textarea { margin-top: 4px !important; border-radius: 12px; background: var(--rd-ground); padding: 14px; }
 
-/* -- Vault: the intro, the browser and the reader ----------------------------------------- */
-.kairos-redesign .library-vault-intro { margin: 8px 0 12px; align-items: center; }
-.kairos-redesign .library-vault-intro h3 {
-  font-size: var(--rd-label-size); font-weight: 500; letter-spacing: var(--rd-label-tracking); text-transform: uppercase; color: var(--rd-ink-dim);
-}
-.kairos-redesign .library-vault-intro p { color: var(--rd-ink-dim); font-size: 13px; }
-.kairos-redesign .library-vault-browser {
-  border: 1px solid var(--rd-line); border-radius: 18px; background-color: var(--rd-surface); box-shadow: var(--rd-shadow);
-}
-.kairos-redesign .library-vault-sidebar { padding: 12px; border-right-color: var(--rd-line); }
-.kairos-redesign .library-vault-sidebar-head input { height: 34px; border-radius: 10px; font-size: 13px; background: var(--rd-ground); }
-.kairos-redesign .library-vault-sidebar > .meta { color: var(--rd-ink-dim); font-size: 12px; }
-.kairos-redesign .library-vault-folder-summary, .kairos-redesign .library-vault-note {
-  border-radius: 8px; font-size: 13px; color: var(--rd-ink);
-}
-.kairos-redesign .library-vault-folder-summary:hover, .kairos-redesign .library-vault-note:hover { background: var(--rdl-hover); }
-.kairos-redesign .library-vault-note.active { background: var(--rdl-tint); }
-.kairos-redesign .library-vault-children { border-left-color: var(--rd-line); }
-.kairos-redesign .library-vault-mark { color: var(--rd-ink-dim); }
-.kairos-redesign .library-vault-note.active .library-vault-mark { color: var(--rd-ink); }
-.kairos-redesign .library-vault-reader-head { padding: 18px 26px 12px; border-bottom-color: var(--rd-line); }
-.kairos-redesign .library-vault-reader-title h3 {
-  margin-top: 2px; font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 30px; line-height: 1.1;
-}
-.kairos-redesign .library-vault-reader-title .meta, .kairos-redesign .library-vault-reader-title small { color: var(--rd-ink-dim); }
-.kairos-redesign .library-vault-reading { font-size: 14px; line-height: 1.7; padding: 20px min(5vw, 42px); }
-.kairos-redesign .library-vault-reading h1, .kairos-redesign .library-vault-reading h2, .kairos-redesign .library-vault-reading h3 { font-weight: 500; }
-.kairos-redesign .library-vault-reading a, .kairos-redesign .vault-note-link { color: var(--rd-ink); text-decoration-color: var(--rd-line-strong); text-underline-offset: 3px; }
-.kairos-redesign .library-vault-editor { background: var(--rd-ground); font-size: 14px; }
-.kairos-redesign .library-vault-empty h3 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; }
-
-/* -- Vault map ------------------------------------------------------------------------------ */
-.kairos-redesign .library-vault-host .vault-graph-wrap {
-  border: 1px solid var(--rd-line); border-radius: 18px; box-shadow: var(--rd-shadow); overflow: hidden;
-}
-.kairos-redesign .vault-search { border-radius: 10px; height: 34px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); }
-.kairos-redesign .vault-toolbar .btn { height: 34px; }
-.kairos-redesign .vault-caption { color: var(--rd-ink-dim); }
-.kairos-redesign .vault-search-results { border-radius: 12px; border-color: var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
-.kairos-redesign .vault-search-result:hover { background: var(--rdl-hover); }
-.kairos-redesign .vault-panel { border-radius: 18px; border-color: var(--rd-line); background-color: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
-.kairos-redesign .vault-panel-header { border-bottom-color: var(--rd-line); }
-.kairos-redesign .vault-panel-actions .btn { padding: 4px 12px; font-size: 11px; }
-.kairos-redesign .vault-panel-breadcrumb { color: var(--rd-ink-dim); }
-.kairos-redesign .vault-child-row:hover { background: var(--rdl-hover); color: var(--rd-ink); }
-.kairos-redesign .vault-panel-resize-handle:hover, .kairos-redesign .vault-panel-resize-handle.dragging { background: var(--rd-focus); }
+/* The Vault (Browse, Map, reader, rail, editor) is styled in vault.css. */
 
 /* -- Google Drive ------------------------------------------------------------------------------ */
 .kairos-redesign .google-account-line {
@@ -188,19 +143,12 @@
   .kairos-redesign .document-grid { padding: 10px 12px 14px; }
   .kairos-redesign .library-chat-files { padding: 10px 12px 14px; }
   .kairos-redesign .library-editor { padding: 12px 14px; }
-  .kairos-redesign .library-vault-reader-head { padding: 14px 16px 10px; }
-  .kairos-redesign .library-vault-reader-title h3 { font-size: 26px; }
   .kairos-redesign .google-rail .google-section { flex: 1 1 auto; justify-content: center; border: 1px solid var(--rd-line); }
   /* Polish: 44px touch targets on a phone. */
-  .kairos-redesign .library-vault-note,
-  .kairos-redesign .library-vault-folder-summary { min-height: 44px !important; }
-  .kairos-redesign .library-vault-search,
-  .kairos-redesign input.vault-search,
   .kairos-redesign #view-content[data-view="library"] .google-toolbar input,
   .kairos-redesign #view-content[data-view="library"] .google-toolbar select,
   .kairos-redesign #view-content[data-view="library"] input[type="search"],
   .kairos-redesign #view-content[data-view="library"] select { min-height: 44px !important; }
   .kairos-redesign #view-content[data-view="library"] details > summary { min-height: 44px !important; display: flex; align-items: center; }
-  .kairos-redesign .vault-breadcrumb-crumb { min-height: 44px !important; display: inline-flex; align-items: center; }
   .kairos-redesign #view-content[data-view="library"] input[placeholder^="Search documents"] { flex: 1 1 100% !important; min-width: 0; }
 }
