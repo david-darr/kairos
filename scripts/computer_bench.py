@@ -133,10 +133,16 @@ class Env:
             await asyncio.sleep(every)
 
     async def command(self, name: str, **args) -> dict:
-        computer = await self.computer()
+        """A driver command on THIS attempt's computer. It never starts one:
+        the first real Claude run (2026-10-22) was graded on a fresh, blank
+        computer started here after the model's `done` had closed its own."""
+        computer = self.manager._computers.get(self.owner)
+        if computer is None:
+            raise ComputerGone("this attempt's computer is not running")
         return await self.manager._command(computer, name, **args)
 
     async def computer(self):
+        """Start the attempt's computer (setup only)."""
         computer = await self.manager._get(self.owner, is_admin=True)
         # `docker run` returns before the container exists; its driver's
         # first answer proves it is up.
@@ -144,27 +150,45 @@ class Env:
         return computer
 
     async def page_has(self, text: str) -> bool:
-        reply = await self.command("verify", expect={"text_present": text})
+        """False when nothing ever ran (a no-op never starts a computer)."""
+        try:
+            reply = await self.command("verify", expect={"text_present": text})
+        except ComputerGone:
+            self.notes["computer"] = "not running at evaluation"
+            return False
         return bool(reply["checks"][0]["met"])
 
     async def exec(self, *argv: str, data: bytes | None = None) -> subprocess.CompletedProcess:
-        computer = await self.computer()
+        computer = self.manager._computers.get(self.owner)
+        if computer is None:
+            raise ComputerGone("this attempt's computer is not running")
         return await asyncio.to_thread(subprocess.run, ["docker", "exec", "-i", computer.name, *argv],
                                        input=data, capture_output=True, timeout=30)
 
     async def file_text(self, path: str) -> str | None:
-        done = await self.exec("cat", path)
+        try:
+            done = await self.exec("cat", path)
+        except ComputerGone:
+            self.notes["computer"] = "not running at evaluation"
+            return None
         return done.stdout.decode(errors="replace") if done.returncode == 0 else None
 
     async def put_file(self, path: str, data: bytes) -> None:
+        await self.computer()
         done = await self.exec("sh", "-c", 'cat > "$0"', path, data=data)
         if done.returncode:
             raise RuntimeError(f"could not place {path}: {done.stderr.decode(errors='replace')[:200]}")
 
 
+class ComputerGone(RuntimeError):
+    """The attempt's computer is not running (evaluation never starts one)."""
+
+
 class BenchManager:
-    """A ComputerManager that also notes the codes of every action, so a
-    model's refusals reach evaluate() the same way the oracle's do."""
+    """A ComputerManager that also notes every action and its code, so a
+    model's refusals reach evaluate() the same way the oracle's do. `done`
+    is noted but does not close the computer: the attempt is graded on it,
+    and closed after evaluate()."""
 
     def __new__(cls, root: Path, desktop: bool, pages: dict):
         from core import computer
@@ -173,12 +197,17 @@ class BenchManager:
             noted: list = []
 
             async def act(self, owner, action, args, ctx):
+                if action == "done":
+                    self.noted.append({"action": "done", "code": None})
+                    running = self._computers.get(owner)
+                    return {"text": f"URL: {running.url if running else 'about:blank'} | Done. The benchmark checks "
+                                    "the computer now and closes it afterwards.", "images": []}
                 try:
                     result = await super().act(owner, action, args, ctx)
                 except ValueError as error:
-                    self.noted.append(getattr(error, "code", None) or "failed")
+                    self.noted.append({"action": action, "code": getattr(error, "code", None) or "failed"})
                     raise
-                self.noted.append(result.get("code"))
+                self.noted.append({"action": action, "code": result.get("code")})
                 return result
 
         manager = Noting(fixtures=pages, approved_hosts=(FIXTURE_HOST,), trajectories=root / "trajectories",
@@ -201,14 +230,15 @@ async def attempt(task: Task, variant: dict, mode: str, root: Path, endpoint: di
     env = Env(manager, "chat:" + session_id, _context(session_id), variant)
     context = runs.RunContext("bench", session_id=session_id, model=mode)
     token = runs.CURRENT.set(context)
-    started, tokens, error, score = time.time(), None, None, 0.0
+    started, error, score = time.time(), None, 0.0
+    spent = {"tokens": None, "usage": None, "reply": None}
     try:
         await task.module.setup(env)
         if mode == "oracle":
             await task.module.oracle(env)
         elif mode != "noop":
-            tokens = await model_solve(task, variant, env, endpoint, context)
-        env.codes += [code for code in manager.noted if code and code not in env.codes]
+            spent = await model_solve(task, variant, env, endpoint, context)
+        env.codes += [item["code"] for item in manager.noted if item["code"] and item["code"] not in env.codes]
         env.actions = len(manager.noted)
         score = float(await task.module.evaluate(env))
     except Exception as problem:  # a crash is a score of 0, with the reason
@@ -217,11 +247,13 @@ async def attempt(task: Task, variant: dict, mode: str, root: Path, endpoint: di
         runs.CURRENT.reset(token)
         await manager.close_all()
     return {"task": task.name, "variant": variant, "mode": mode, "score": max(0.0, min(1.0, score)),
-            "passed": score >= 1.0, "steps": len(manager.noted), "codes": sorted({c for c in manager.noted if c}),
-            "tokens": tokens, "seconds": round(time.time() - started, 1), "trajectory": context.run_id, "error": error}
+            "passed": score >= 1.0, "steps": len(manager.noted), "actions": [item["action"] for item in manager.noted],
+            "codes": sorted({item["code"] for item in manager.noted if item["code"]}),
+            "tokens": spent["tokens"], "usage": spent["usage"], "reply": spent["reply"], "notes": env.notes,
+            "seconds": round(time.time() - started, 1), "trajectory": context.run_id, "error": error}
 
 
-async def model_solve(task: Task, variant: dict, env: Env, endpoint: dict, context) -> int | None:
+async def model_solve(task: Task, variant: dict, env: Env, endpoint: dict, context) -> dict:
     """Give the instruction to a model connection with the computer tool,
     in this process: its computer calls reach this attempt's manager. Not
     run by any test; David starts the one approved run by hand."""
@@ -236,28 +268,62 @@ async def model_solve(task: Task, variant: dict, env: Env, endpoint: dict, conte
         if callable(getattr(brain, "connect", None)):
             await brain.connect()
         if isinstance(getattr(brain, "tools", None), list):
-            # An API or local model sees only the computer tool here. Claude
-            # Code keeps its own tool set: its brain has no narrower mode.
+            # An API or local model sees only the computer tool here, as
+            # Claude does (BenchClaude below).
             brain.tools = [tool for tool in brain.tools if tool.get("function", {}).get("name") == "computer"]
         prompt = (task.instruction(variant) + "\n\nUse the computer tool. Call done when the task is finished, "
                   "or when the rest is for the person.")
         tally = runs.Tally()
         async for item in brain.events(prompt, stream=False):
             tally.add(item)
-        return tally.usage.total_tokens if tally.usage else None
+        usage = tally.usage
+        return {"tokens": usage.total_tokens if usage else None,
+                "usage": {"input": usage.uncached_input_tokens, "cache_read": usage.cache_read_tokens,
+                          "cache_write": usage.cache_write_tokens, "output": usage.output_tokens} if usage else None,
+                "reply": "".join(tally.parts).strip()[:2000]}
     finally:
         if brain is not None and callable(getattr(brain, "disconnect", None)):
             await brain.disconnect()
         computer.manager, settings.get_setting = original_manager, original_setting
 
 
+BENCH_SYSTEM = ("You operate a contained computer for the person through the computer tool. Work only through it. "
+                "Do the task you are given, then call done.")
+
+
+def bench_claude(endpoint: dict, session_id: str):
+    """Claude Code with the computer and nothing else. The chat brain gives
+    Claude its whole working set: Claude Code's built-in tools and system
+    prompt, the person's own MCP servers, settings and skills, every Kairos
+    tool, and the repo folders. In the first real run (2026-10-22) that
+    prefix was resent with every request, about 240k tokens a task. A bench
+    measures the computer, the same way for every connection."""
+    import tempfile
+    from claude_agent_sdk import ClaudeAgentOptions
+    from core import claude_cli, hive_mind_server, system_prompt
+    from core.brain import MAX_CLI_LINE_BYTES, Brain
+
+    class BenchClaude(Brain):
+        def _options(self) -> ClaudeAgentOptions:
+            server = hive_mind_server.get_hive_mind_server(self.session_id, True, self.turn_taint, None,
+                                                           only=frozenset({"computer"}))
+            self.tool_fingerprint = "bench"
+            return ClaudeAgentOptions(
+                cli_path=claude_cli.preferred_cli_path(), cwd=self.cwd_override, add_dirs=[],
+                tools=[], mcp_servers={"hive_mind": server}, strict_mcp_config=True, setting_sources=[],
+                allowed_tools=["mcp__hive_mind__computer"], can_use_tool=self._permission,
+                permission_mode="default", model=self.model, include_partial_messages=True,
+                max_buffer_size=MAX_CLI_LINE_BYTES,
+                system_prompt=BENCH_SYSTEM + system_prompt._computer_addendum(True))
+
+    return BenchClaude(session_id=session_id, is_admin=True, model=endpoint.get("model") or None,
+                       cwd_override=tempfile.mkdtemp(prefix="kairos-" + session_id + "-"))
+
+
 def build_brain(endpoint: dict, session_id: str):
     """A brain for a connection, detached from any saved chat."""
     if endpoint["kind"] == "claude_cli":
-        from core.brain import Brain
-        import tempfile
-        return Brain(session_id=session_id, is_admin=True, model=endpoint.get("model") or None,
-                     cwd_override=tempfile.mkdtemp(prefix="kairos-" + session_id + "-"))
+        return bench_claude(endpoint, session_id)
     if endpoint["kind"] == "codex_cli":
         raise ValueError("Codex runs its own computer use; benchmark Claude or an API or local connection")
     from core import model_endpoints
@@ -284,7 +350,10 @@ def summarize(results: list[dict]) -> str:
                      f"{sum(i['score'] for i in items) / len(items):.2f} | {sum(i['steps'] for i in items) / len(items):.1f} | "
                      f"{sum(tokens) if tokens else '-'} | {sum(i['seconds'] for i in items):.0f} |")
     errors = [f"- {r['task']} ({r['mode']}): {r['error']}" for r in results if r["error"]]
-    return "\n".join(lines) + ("\n\nErrors:\n" + "\n".join(errors) if errors else "") + "\n"
+    notes = [f"- {r['task']} ({r['mode']}): " + "; ".join(f"{k}: {v}" for k, v in r["notes"].items())
+             for r in results if r.get("notes")]
+    return ("\n".join(lines) + ("\n\nErrors:\n" + "\n".join(errors) if errors else "")
+            + ("\n\nNotes:\n" + "\n".join(notes) if notes else "") + "\n")
 
 
 async def run(modes: list[str], tasks: list[Task], attempts: int, out: Path, endpoints: dict | None = None,
