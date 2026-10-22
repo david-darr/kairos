@@ -1,7 +1,6 @@
 import { api, el } from './api.js';
 import { mobileOn, phone, button, go, edgeBlur } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
-import { openTabSheet } from './mobileTabSheet.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { attachActivity, refreshActivity } from './mobileActivity.js';
 import { mountForgeSessions } from './mobileForgeSessions.js';
@@ -61,11 +60,10 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
   // Home: the desktop dashboard's toolbar (Customize) and cards, moved into a phone page.
   function enableOverview() {
     shell = el('section', { class: 'ms-shell mf-dashboard', 'aria-label': 'Forge overview' });
-    const avatar = button(document.querySelector('.sidebar-avatar')?.textContent || 'K', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
-    // The title takes the avatar's row on the right, like every phone tab; New session joins Customize on the toolbar.
+    // The title sits on the top row on the right, like every phone tab; New session joins Customize on the toolbar.
     newSession = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'ms-settings ms-glass mf-dashboard-new');
     newSession.innerHTML = ICONS.plus; newSession.setAttribute('aria-label', 'New session');
-    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' })])]);
+    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' })])]);
     const body = el('div', { class: 'mf-dashboard-body mf-overview' });
     shell.append(header, body); page.prepend(shell);
     move(banner, shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body); toolbar.append(newSession);
@@ -74,12 +72,11 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
   function enable() {
     if (overview) { enableOverview(); return; }
     shell = el('section', { class: 'ms-shell mf-project', 'aria-label': 'Forge project' });
-    const avatar = button(document.querySelector('.sidebar-avatar')?.textContent || 'K', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
     const projectButton = button('Projects', () => projects(projectButton)); projectButton.classList.add('mf-project-trigger');
     const tabs = [button('New', () => {}, 'ms-segment'), button('Sessions', () => {}, 'ms-segment')];
     const switcher = el('div', { class: 'ms-switch ms-glass', role: 'tablist', 'aria-label': 'Forge pages' }, [el('span', { class: 'ms-switch-thumb', 'aria-hidden': 'true' }), ...tabs]);
     const line = button('', () => workspace(line), 'mf-workspace-line');
-    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, switcher, projectButton]), line]);
+    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [switcher, projectButton]), line]);
     const launch = el('section', { class: 'ms-page ms-launch', role: 'tabpanel', id: 'mf-new' });
     const sessionsPage = el('section', { class: 'ms-page ms-history', role: 'tabpanel', id: 'mf-sessions' });
     tabs.forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `mf-tab-${i}`; tab.setAttribute('aria-controls', i ? 'mf-sessions' : 'mf-new'); [launch, sessionsPage][i].setAttribute('aria-labelledby', tab.id); });

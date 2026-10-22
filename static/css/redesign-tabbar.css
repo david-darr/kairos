@@ -1,0 +1,126 @@
+/* Phone tab bar and More sheet (2026-10-22, David): a floating liquid-glass bar
+   at the bottom of every phone page (static/js/mobileTabBar.js) replaces the
+   top-left avatar and its workspace sheet. Phone only, redesign only; desktop
+   has no rules here.
+
+   Geometry. The bar sits max(12px, bottom safe area) above the true bottom,
+   like every dock (redesign-mobile.css), and drops by --ms-below-fold so it
+   reaches the true bottom in an iOS home-screen app. While it shows, the root
+   carries .ms-tabbar-up and --ms-tabbar-space is the room it takes (its height
+   plus a 10px gap); docks, the launch composer and page padding add it, so
+   they sit above the bar. Inside a conversation, a Forge session or a pushed
+   page the bar slides away and the space is 0. The 12px --ms-ios-nudge only
+   moves things at the top, so the bar is unaffected by it. */
+@media (max-width: 768px) {
+  .kairos-redesign { --ms-tabbar-height: 62px; --ms-tabbar-space: 0px; }
+  .kairos-redesign.ms-tabbar-up { --ms-tabbar-space: calc(var(--ms-tabbar-height) + 10px); }
+
+  .kairos-redesign .ms-tabbar {
+    position: fixed; z-index: 1100; box-sizing: border-box; height: var(--ms-tabbar-height);
+    left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) - var(--ms-below-fold, 0px));
+    max-width: 460px; margin-inline: auto;
+    color: var(--rd-ink); font-family: var(--rd-font-ui);
+    transform: none; opacity: 1; visibility: visible;
+    transition: transform 420ms cubic-bezier(.22, 1, .36, 1), opacity 220ms ease, visibility 0s;
+  }
+  /* Slides below the screen edge, then leaves the tab order once it is gone. */
+  .kairos-redesign .ms-tabbar[data-state=hidden] {
+    transform: translateY(calc(100% + 16px + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))));
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: transform 320ms cubic-bezier(.4, 0, 1, 1), opacity 260ms ease, visibility 0s 320ms;
+  }
+
+  /* The glass: a translucent, saturated blur of the page under it, a gilded
+     hairline, a soft sheen from the top and a bright specular top edge. */
+  .kairos-redesign .ms-tabbar-glass {
+    position: relative; isolation: isolate; display: grid; box-sizing: border-box; height: 100%; padding: 4px;
+    grid-template-columns: repeat(var(--ms-tab-count, 5), minmax(0, 1fr));
+    border-radius: var(--rd-radius-pill); border: 1px solid color-mix(in srgb, var(--rd-line-strong) 75%, transparent);
+    background: color-mix(in srgb, var(--rd-surface-solid) 92%, transparent);
+    box-shadow: 0 14px 34px rgba(var(--shade-rgb), .16), 0 2px 8px rgba(var(--shade-rgb), .08),
+      inset 0 1px 0 rgba(var(--parchment-rgb), .55), inset 0 -1px 0 rgba(var(--shade-rgb), .06);
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .kairos-redesign .ms-tabbar-glass {
+      background: color-mix(in srgb, var(--rd-surface-solid) 56%, transparent);
+      backdrop-filter: blur(22px) saturate(190%); -webkit-backdrop-filter: blur(22px) saturate(190%);
+    }
+  }
+  .kairos-redesign .ms-tabbar-glass::before {
+    content: ''; position: absolute; z-index: -2; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(180deg, rgba(var(--parchment-rgb), .32), rgba(var(--parchment-rgb), 0) 52%);
+  }
+  .kairos-redesign .ms-tabbar-glass::after {
+    content: ''; position: absolute; z-index: 1; top: 0; left: 22px; right: 22px; height: 1px; pointer-events: none;
+    background: linear-gradient(90deg, rgba(var(--parchment-rgb), 0), rgba(var(--parchment-rgb), .95) 30%, rgba(var(--parchment-rgb), .95) 70%, rgba(var(--parchment-rgb), 0));
+  }
+
+  /* The selected item: a smaller glass pill that slides between items. */
+  .kairos-redesign .ms-tabbar-pill {
+    position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; box-sizing: border-box;
+    width: calc((100% - 8px) / var(--ms-tab-count, 5)); border-radius: var(--rd-radius-pill);
+    transform: translateX(calc(var(--ms-tab-index, 0) * 100%));
+    background: color-mix(in srgb, var(--rd-surface-solid) 78%, transparent);
+    border: 1px solid color-mix(in srgb, var(--rd-line-strong) 60%, transparent);
+    box-shadow: inset 0 1px 0 rgba(var(--parchment-rgb), .85), inset 0 -1px 2px rgba(var(--shade-rgb), .06), 0 4px 12px rgba(var(--shade-rgb), .10);
+    transition: transform 460ms cubic-bezier(.34, 1.3, .5, 1);
+  }
+
+  .kairos-redesign .ms-tabbar-item {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    box-sizing: border-box; min-width: 44px; min-height: 44px; height: 100%; margin: 0; padding: 0 2px;
+    border: 0; border-radius: var(--rd-radius-pill); background: transparent; box-shadow: none;
+    color: var(--rd-ink-dim); font: 500 10.5px/1.1 var(--rd-font-ui); letter-spacing: .01em;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color 200ms ease;
+  }
+  .kairos-redesign .ms-tabbar-item svg { flex: none; width: 24px; height: 24px; transition: transform 240ms cubic-bezier(.34, 1.3, .5, 1); }
+  .kairos-redesign .ms-tabbar-item:active svg { transform: scale(.88); }
+  .kairos-redesign .ms-tabbar-item[aria-current=page] { color: var(--rd-ink); font-weight: 600; }
+  .kairos-redesign .ms-tabbar-item:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+  .kairos-redesign .ms-tabbar-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-tabbar-badge {
+    position: absolute; top: 3px; left: calc(50% + 5px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+    border-radius: var(--rd-radius-pill); background: var(--rd-ink); color: var(--rd-ground);
+    font: 600 10px/18px var(--rd-font-ui); text-align: center; pointer-events: none;
+    box-shadow: 0 0 0 2px var(--rd-surface-solid);
+  }
+  .kairos-redesign .ms-tabbar-badge[hidden] { display: none; }
+
+  /* Everything that used to meet the bottom edge now meets the bar. */
+  .kairos-redesign .ms-dock { bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space) - var(--ms-below-fold, 0px)); }
+  .kairos-redesign .ms-dock-note { bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px + var(--ms-tabbar-space) - var(--ms-below-fold, 0px)); }
+  .kairos-redesign .ms-has-dock { padding-bottom: calc(90px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)) + var(--ms-tabbar-space)) !important; scroll-padding-bottom: calc(100px + var(--ms-tabbar-space)); }
+  .kairos-redesign.ms-tabbar-up #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home):not(.ms-has-dock):not(:has(.mf-home, .mf-session)) {
+    padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
+    scroll-padding-bottom: var(--ms-tabbar-space);
+  }
+  .kairos-redesign .ms-launch-bottom { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
+  .kairos-redesign .ms-history { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
+  .kairos-redesign .mf-dashboard-body { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space)); }
+
+  /* More: a glass sheet over the page. */
+  .kairos-redesign .ms-more-sheet {
+    background: color-mix(in srgb, var(--rd-surface-solid) 94%, transparent);
+    box-shadow: inset 0 1px 0 rgba(var(--parchment-rgb), .6), 0 -14px 44px rgba(var(--shade-rgb), .16);
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .kairos-redesign .ms-more-sheet {
+      background: color-mix(in srgb, var(--rd-surface-solid) 74%, transparent);
+      backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+    }
+  }
+  .kairos-redesign .ms-more-sheet .ms-sheet-heading { margin-bottom: 16px; }
+  .kairos-redesign .ms-more-sheet :is(.ms-profile-row, .ms-settings-row) { display: flex; align-items: center; gap: 12px; min-height: 52px; }
+  .kairos-redesign .ms-more-sheet .ms-profile-initial {
+    flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--rd-line-strong); background: var(--rd-surface-2); font-weight: 600;
+  }
+  .kairos-redesign .ms-more-sheet .ms-profile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-more-sheet .ms-settings-row svg { flex: none; width: 22px; height: 22px; margin-inline: 7px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .kairos-redesign .ms-tabbar, .kairos-redesign .ms-tabbar * { animation: none !important; transition: none !important; }
+  }
+}
+.ms-tabbar[hidden] { display: none !important; }
