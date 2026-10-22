@@ -261,7 +261,10 @@ app.whenReady().then(async () => {
   const waitFor = async condition => { for (let i = 0; i < 100; i++) { if (await js(condition)) return; await delay(40); } throw Error('Timed out: ' + condition); };
   const capture = async name => { await delay(300); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
   const open = async sid => { await js(`import('/static/js/views/chat.js').then(m => m.openSessionById('${sid}'))`); };
+  // --mascot-off: the root attribute Settings > Appearance > Show the mascot sets (appearance.js).
+  const mascotOff = process.argv.includes('--mascot-off');
   const mount = async () => {
+    if (mascotOff) await js("document.documentElement.dataset.mascot = 'off'");
     await js(`import('/static/js/views/chat.js').then(async m => { window.cleanup?.(); window.cleanup = await m.render(document.querySelector('#view-content'), 'chat', {sessionId: 's1'}); })`);
   };
   try {
@@ -528,8 +531,10 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.chat-activity summary').click()");
     assert.equal(await js("document.querySelectorAll('.chat-activity li[data-state=done]').length"), 1);
     // The mascot is the marker while it streams (Kairos Mascot build spec, 2026-10-22).
+    // --mascot-off runs the suite with the switch off: the plain marker spins as before.
     assert.equal(await js("document.querySelector('.chat-activity-marker kairos-mascot').getAttribute('state')"), 'thinking');
-    assert.notEqual(await js("getComputedStyle(document.querySelector('.chat-activity-marker kairos-mascot')).display"), 'none');
+    if (mascotOff) assert.equal(await js("getComputedStyle(document.querySelector('.chat-activity-marker kairos-mascot')).display + ' ' + getComputedStyle(document.querySelector('.chat-activity-marker')).animationName"), 'none activity-spin');
+    else assert.notEqual(await js("getComputedStyle(document.querySelector('.chat-activity-marker kairos-mascot')).display"), 'none');
     await capture('chat-activity-waiting');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{name:'prefers-reduced-motion',value:'reduce'}] });
     assert.equal(await js("getComputedStyle(document.querySelector('.chat-activity-marker')).animationName"), 'none');
@@ -574,7 +579,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("getComputedStyle([...document.querySelectorAll('.chat-activity-marker kairos-mascot')].at(-1)).display"), 'none');
     assert.equal(await js("[...document.querySelectorAll('.chat-activity-glyph')].at(-1).textContent"), '!');
     await capture('chat-activity-mascot-off');
-    await js("document.documentElement.dataset.mascot = 'on'");
+    await js(`document.documentElement.dataset.mascot = '${mascotOff ? 'off' : 'on'}'`);
     assert.equal(await js("document.querySelectorAll('.msg.assistant').length"), 2);
 
     // -- stopping a running turn (David's ask 2026-09-15, the foundation the

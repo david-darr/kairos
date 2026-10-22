@@ -134,7 +134,10 @@ half-blocks from kip.json, then the plain text face, else hidden. Honour
 
 build().then(files => {
   if (process.argv.includes('--check')) {
-    const stale = [...files].filter(([name, data]) => !fs.existsSync(path.join(outDir, name)) || !fs.readFileSync(path.join(outDir, name)).equals(data)).map(([name]) => name);
+    // Text is compared with LF line endings: Git may check it out as CRLF.
+    const same = (name, data) => { const disk = fs.readFileSync(path.join(outDir, name));
+      return name.endsWith('.png') ? disk.equals(data) : disk.toString('utf8').replace(/\r\n/g, '\n') === data.toString('utf8'); };
+    const stale = [...files].filter(([name, data]) => !fs.existsSync(path.join(outDir, name)) || !same(name, data)).map(([name]) => name);
     if (stale.length) { console.error('Stale Kip assets (run node scripts/build_kip_assets.cjs): ' + stale.join(', ')); process.exit(1); }
     console.log('Kip assets are current.'); return;
   }

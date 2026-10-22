@@ -6,6 +6,15 @@
 const assert = require('node:assert/strict');
 module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, writes, fixtures }) => {
   const setMascot = on => js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mascot: ${on} }))`);
+  // ui-smoke --mascot-off: the same checks from a start with the switch off.
+  const startedOff = process.argv.includes('--mascot-off');
+  if (startedOff) {
+    await navigate('home');
+    assert.equal(await js("document.documentElement.dataset.mascot"), 'off');
+    assert.equal(await js("!!document.querySelector('.dashboard-mascot') && getComputedStyle(document.querySelector('.dashboard-mascot')).display"), 'none', 'off from the start: no mascot on Home');
+    await capture('mascot-home-off-from-start');
+    await js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: true }); return true; })");
+  }
   const shown = selector => js(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); return !!n && n.getClientRects().length > 0 && getComputedStyle(n).display !== 'none'; })()`);
 
   // -- Home -------------------------------------------------------------------
@@ -44,7 +53,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await waitFor("!!document.querySelector('[data-section=appearance]')");
   await js("document.querySelector('[data-section=appearance]').click()");
   await waitFor("!!document.getElementById('appearance-mascot')");
-  assert.equal(await js("document.getElementById('appearance-mascot').checked"), true, 'on by default');
+  assert.equal(await js("document.getElementById('appearance-mascot').checked"), true, 'on (by default, or after the off run turned it back on)');
   await js("document.getElementById('appearance-mascot').click()");
   await waitFor("document.documentElement.dataset.mascot === 'off'");
   await js("document.getElementById('appearance-mascot').click()");
@@ -97,4 +106,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     fixtures.agentInbox.splice(fixtures.agentInbox.findIndex(item => item.id === 'mascot-q'), 1);
     await js("window.Notification = window.mascotNotification; document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
   }
+
+  // -- The website: the hero character and the states strip ----------------------------
+  const app = await js('location.href');
+  await win.loadURL(new URL('/docs/index.html', app).href);
+  await waitFor("document.documentElement.classList.contains('has-mascot') && document.querySelectorAll('.mascot-strip kairos-mascot svg.ajar').length === 10 && !!document.querySelector('.hero-mascot kairos-mascot svg')");
+  assert.deepEqual(await js("[...document.querySelectorAll('[data-mascot-state] kairos-mascot')].map(n => n.querySelector('svg').dataset.state)"), ['idle', 'thinking', 'needs', 'success', 'error', 'sleeping']);
+  await js("document.querySelector('.mascot-states').scrollIntoView({ block: 'center', behavior: 'instant' })"); await delay(400);
+  await capture('mascot-site-strip');
+  await js("scrollTo(0, 0)"); await delay(200);
+  await capture('mascot-site-hero');
+  await win.loadURL(app);
+  await waitFor("!!document.querySelector('.dashboard-core')");
+  if (startedOff) await js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })");
 };

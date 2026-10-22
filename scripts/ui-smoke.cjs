@@ -317,6 +317,9 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+    // --mascot-off runs the suite with Settings > Appearance > Show the mascot off (saved, so reloads keep it).
+    const mascotOff = () => process.argv.includes('--mascot-off') ? js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })") : null;
+    await mascotOff();
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
       assert.deepEqual(errors, [], 'Agents call renderer errors');
@@ -479,6 +482,7 @@ app.whenReady().then(async () => {
     await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
     await require('./classic-look-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
+    await mascotOff();  // appearance checks reset Appearance to its defaults
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./artifact-review-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
