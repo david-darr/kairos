@@ -593,9 +593,20 @@ async function run(ctx) {
   eq(bleed.app, [0, 852], 'Safari tab: the app sticks to the top, one dynamic viewport tall');
   eq(bleed.layer, [-1, 852], 'Safari tab: the background layer is in flow, one large viewport (plus the 1px slack) tall');
   ok(bleed.sky === 'ms-page-bleed' && bleed.picture === 'ms-page-bleed', 'Safari tab: the sky and the launch picture live in the background layer: ' + JSON.stringify(bleed));
-  ok(bleed.frost === 'sticky' && bleed.composer[1] === 852 - 34, 'Safari tab: sticky frost, and the composer sits above the bottom inset: ' + JSON.stringify(bleed));
+  ok(bleed.frost === 'absolute' && bleed.composer[1] === 852 - 34, 'Safari tab: absolute frost, and the composer sits above the bottom inset: ' + JSON.stringify(bleed));
   ok(await js("(() => { const r = document.querySelector('.ms-global-frost').getBoundingClientRect(); return r.top === 0 && r.height <= 47.5; })()"), 'Safari tab: the frost sits at the top within the status bar');
+  // Safari 26 tints a bar flat from any fixed or sticky element at least 80% wide within 4px of the top or 3px of
+  // the bottom; the page only shows under its bars when there is none (2026-10-21, a sticky app did this on device).
+  const edges = () => js(`[...document.querySelectorAll('body *')].filter(n => { const s = getComputedStyle(n); if (s.position !== 'fixed' && s.position !== 'sticky' || !n.getClientRects().length) return false;
+    const r = n.getBoundingClientRect(); return r.width >= innerWidth * .8 && r.height >= 3 && ((r.top <= 4 && r.bottom > 0) || (r.bottom >= innerHeight - 3 && r.top < innerHeight)); }).map(n => n.id || n.className)`);
+  eq(await edges(), [], 'Safari tab: no fixed or sticky element touches the screen edges on the launch view');
+  ok(await js("[...document.querySelectorAll('.app-background')].every(n => n.parentElement.classList.contains('ms-page-bleed'))"), 'Safari tab: the appearance canvases live in the background layer, not fixed');
   await shot('safari-bleed-launch');
+  // TEMPORARY readout for one device screenshot (mobileTabSheet.js).
+  await js("document.querySelector('.ms-shell .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-sheet-readout')");
+  const readout = await js("document.querySelector('.ms-sheet-readout').textContent");
+  ok(/Safari tab on/.test(readout) && /scrollY 1 /.test(readout) && /edges: none$/.test(readout), 'Workspace sheet shows the Safari page readout: ' + readout);
+  await js("document.querySelector('.ms-tab-sheet').close()");
   // It returns to 1px after any scroll that reaches 0, and on pageshow.
   await js("scrollTo(0, 0)"); await delay(400);
   eq(await js("scrollY"), 1, 'Safari tab: a scroll back to 0 settles at 1px');
@@ -605,7 +616,9 @@ async function run(ctx) {
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
   ok(!(await js("!!document.querySelector('.ms-page-bleed > .ms-background')")), 'Safari tab: leaving the launch view takes its picture with it');
   eq(Math.round((await rect('.ms-dock')).b), 852 - 34, 'Safari tab: the fixed dock sits above the bottom inset');
+  eq(await edges(), [], 'Safari tab: no fixed or sticky element touches the screen edges on a docked tab (Safari would tint its bar from it)');
   await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-project')"); await delay(500);
+  eq(await edges(), [], 'Safari tab: no fixed or sticky element touches the screen edges on Forge New');
   ok(await js("document.querySelector('.forge-banner')?.parentElement?.classList.contains('ms-page-bleed') && getComputedStyle(document.querySelector('.forge-banner')).display !== 'none'"), 'Safari tab: the Forge New picture lives in the background layer');
   await shot('safari-bleed-forge');
   await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer')"); await delay(300);
@@ -613,6 +626,7 @@ async function run(ctx) {
   await js("import('/static/js/mobileChrome.js').then(m => m.setPageBleed(false))"); await delay(200);
   const restored = await js("({ cls: document.documentElement.classList.contains('ms-safari-bleed'), layer: !!document.querySelector('.ms-page-bleed'), scrollY, range: document.scrollingElement.scrollHeight - innerHeight, sky: document.querySelector('.kairos-redesign-backdrop')?.parentElement?.id, picture: !!document.querySelector('.ms-shell > .dashboard-core'), app: getComputedStyle(document.getElementById('app')).position })");
   eq(restored, { cls: false, layer: false, scrollY: 0, range: 0, sky: 'content', picture: true, app: 'relative' }, 'Safari mode off restores the locked page exactly');
+  ok(await js("[...document.querySelectorAll('.app-background')].every(n => n.parentElement === document.body && getComputedStyle(n).position === 'fixed')"), 'Safari mode off returns the appearance canvases to the page');
   await js("(() => { const s = document.documentElement.style; s.removeProperty('--native-safe-top'); s.setProperty('--native-safe-bottom', '0px'); })()");
   await resize(390, 844);
 

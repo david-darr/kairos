@@ -5,7 +5,7 @@ import { refreshActivity } from './mobileActivity.js';
 // draws page pixels under its status bar and floating toolbar while the
 // document itself is scrolled; a locked page gets flat tinted bands instead.
 // So, there only: the document scrolls with 1px of slack and sits at 1px, the
-// app is sticky and one dynamic viewport tall, and the page backgrounds live in
+// app is in flow and one dynamic viewport tall, and the page backgrounds live in
 // an in-flow layer one large viewport tall (.ms-page-bleed) that runs under
 // both bars. The same condition gates the CSS (html.ms-safari-bleed). The
 // home-screen app, Android and desktop never take this path.
@@ -20,13 +20,15 @@ export function setPageBleed(on) {
   if (on && !layer) {
     layer = document.createElement('div'); layer.className = 'ms-page-bleed'; layer.setAttribute('aria-hidden', 'true');
     document.body.prepend(layer);
-    // The frost goes first so it can stick to the top above everything.
     if (frost) document.body.prepend(frost);
     const sky = document.querySelector('.kairos-redesign-backdrop'); if (sky) layer.prepend(sky);
+    // The appearance's colour, picture or shader canvases are full-screen fixed layers: they go underneath, in flow.
+    layer.prepend(...document.querySelectorAll('body > .app-background'));
     // A launch view already on screen hands over its picture too.
     const picture = document.querySelector('.ms-shell > .ms-background'); if (picture) layer.append(picture);
   } else if (!on && layer) {
     const sky = layer.querySelector('.kairos-redesign-backdrop'); if (sky) document.getElementById('content')?.prepend(sky);
+    document.body.prepend(...layer.querySelectorAll(':scope > .app-background'));
     const shell = document.querySelector('.ms-shell');
     for (const node of [...layer.children]) (shell || document.body).prepend(node);
     layer.remove(); if (frost) document.body.append(frost);
