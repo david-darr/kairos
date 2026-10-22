@@ -66,6 +66,11 @@ def search(catalog: dict[str, dict], query: str, limit: int = 5) -> str:
         if not matched:
             continue
         score = len(words & title_words) * 4 + len(words & summary_words)
+        # A description that opens with the query's word names the action
+        # itself ("Design screens..." for "design"), so it ranks first.
+        lead = _WORDS.findall(summary[:40])
+        if lead and lead[0] in words:
+            score += 2
         if query.lower() in title:
             score += 8
         ranked.append((-score, name, {"name": name, "server": spec["server"],

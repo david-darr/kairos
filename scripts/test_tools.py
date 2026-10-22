@@ -567,7 +567,7 @@ class CodexMCPTests(unittest.TestCase):
         self.mcp_call.assert_not_awaited()
 
     def test_prompt_addendum_is_conditional_and_cli_posts_nested_arguments(self):
-        old = (system_prompt._codex_core("py", "cli.py") + system_prompt.UI_DESIGN_DISCIPLINE + system_prompt._computer_addendum(False, True))
+        old = (system_prompt._codex_core("py", "cli.py") + system_prompt.UI_DESIGN_DISCIPLINE + system_prompt.DESIGN_CANVAS_LINE + system_prompt._computer_addendum(False, True))
         with patch("core.integrations.list_mcp_servers_runtime", return_value={}):
             self.assertEqual(system_prompt.for_codex("py", "cli.py"), old)
         self.assertEqual(system_prompt.for_codex("py", "cli.py", integration_ids=[]), old)

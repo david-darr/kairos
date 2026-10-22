@@ -51,6 +51,9 @@ UI_DESIGN_DISCIPLINE = (
     'Load detailed references on demand. Pure backend/nonvisual work does not need it. '
     'A skill never grants permission to edit, install, publish or change unrelated scope.'
 )
+# Every chat model (not helpers, which cannot write): a design request goes to
+# the Design canvas (core/design_tools.py), not a hand-built HTML file.
+DESIGN_CANVAS_LINE = "\n\nTo design screens, pages or slides, use the Design canvas: design_create, then design_edit by id."
 
 
 def computer_allowed(is_admin: bool) -> bool:
@@ -98,7 +101,7 @@ Before telling a user you don't know something, or that nothing's recorded/sched
 - Asked about priorities/todos? Check Notes. Asked about scheduled/automated jobs, or what one actually produced when it ran? Check Tasks / task run history. Asked what's coming up or scheduled? Check upcoming Calendar events. Asked about a saved document? Check the Library. Asked about a person? Check Contacts.
 - If the question is about something discussed in a *different* conversation, use your cross-session search tool.
 - If the question is about how to do something Kairos already knows a procedure for, search the available Skills, then read the relevant one.
-- If the question is about how Kairos itself is built (architecture, a specific subsystem), check the spec docs.""" + UI_DESIGN_DISCIPLINE
+- If the question is about how Kairos itself is built (architecture, a specific subsystem), check the spec docs.""" + UI_DESIGN_DISCIPLINE + DESIGN_CANVAS_LINE
 
 _CLAUDE_ADDENDUM = """
 Your file tools (Read/Glob/Grep/Write/Edit) are already scoped to the vault directory as your working directory — use them directly for vault notes. You also have full read/write access to Kairos's own source (core/, routes/, services/, static/, scripts/, specs/, mcp_servers/, electron/) and user-built tab source (<data-dir>/tabs/) via those same file tools. Use file tools for listing, searching and reading files; reserve shell commands for running or verifying code. The rest of data/ is deliberately excluded because it contains credentials and session tokens. For anything else outside the vault (other chat sessions, Skills, Notes, Tasks, Calendar, Documents, Contacts), use your search_sessions/search_skills/list_skills/read_skill/list_notes/list_tasks/list_upcoming_events/list_task_runs/list_documents/read_document/list_contacts/list_specs/read_spec tools — and their write counterparts (create_note/update_note/delete_note, create_task/update_task/delete_task, create_event/update_event/delete_event) when the user wants something added, changed, or removed rather than just looked up.
@@ -220,6 +223,6 @@ def for_codex(python_exe: str, cli_script: str, is_admin: bool = False, full_acc
               'kairos_tool_describe --name TOOL and kairos_tool_call --name TOOL --args_json JSON_OBJECT. '
               'Use these helpers to find and call the integrations enabled for this chat.') if enabled else ""
     return (_codex_core(python_exe, cli_script, full_access, is_admin, agent, session_id)
-            + UI_DESIGN_DISCIPLINE
+            + UI_DESIGN_DISCIPLINE + DESIGN_CANVAS_LINE
             + (_CODEX_ADMIN_ADDENDUM if is_admin and not full_access else "")
             + (_CODEX_GOOGLE_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available) + bridge)

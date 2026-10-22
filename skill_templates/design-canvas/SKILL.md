@@ -50,6 +50,9 @@ changes nothing and says what is valid; read it and try again.
   `var(--ds-success)`, `var(--ds-hairline)`, `var(--ds-font-sans)`,
   `var(--ds-size-1..7)`, `var(--ds-space-1..8)`, `var(--ds-radius-s|m|l|pill)`,
   `var(--ds-shadow-1|2)`. No raw hex colours. `design_tokens` lists values.
+- Keep the design system's look. Change tokens with `design_tokens` only when the
+  person asks for a different look or palette; otherwise style with the
+  system's variables as they are (the default system is Kairos's own brand).
 - The accent is for hairlines, icons and one point of emphasis, never text.
   Text uses `--ds-text`, links `--ds-accent-text`.
 - Real, readable text. Buttons and tap targets at least 44px tall.
