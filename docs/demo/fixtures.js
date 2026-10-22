@@ -821,6 +821,10 @@
   }
   function fixture(url) {
     if (url.pathname === '/api/addons') return [];
+    // The Design canvas: no designs in the demo (its boards are live frames from the backend).
+    if (url.pathname === '/api/designs') return [];
+    if (url.pathname === '/api/designs/render-status') return { available: false, message: 'Needs the Kairos desktop app' };
+    if (url.pathname === '/api/design-systems') return [{ id: 'kairos', name: 'Kairos', builtin: true }];
     if (url.pathname === '/api/store/catalog') return communityCatalog();
     if (url.pathname === '/api/store/github') return { configured: state.githubConfigured !== false, signed_in: !!state.githubSignedIn, login: state.githubSignedIn ? 'alex-demo' : null };
     if (url.pathname === '/api/store/submissions') return state.empty ? [] : [
