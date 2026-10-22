@@ -983,6 +983,9 @@
       last: { ok: true, at: now - 86400, safety_copy: "C:\\Users\\Alex\\AppData\\Roaming\\JARVIS\\data\\.restore\\before-restore-20261005-101500" } };
     if (route === "/api/system/diagnostics") return { vault_exists: true, vault_dir: "C:\\Users\\Alex\\Documents\\Vault", sessions_count: 12, notes_count: 40,
       tasks_count: 3, skills_count: 5, model_endpoints_count: 3, data_dir_bytes: 524288, discord_configured: false };
+    // Kairos CLI terminals (Settings > Permissions). The demo is a browser, not
+    // a locked desktop backend, so there is nothing to pair.
+    if (route === "/api/auth/cli/terminals") return { terminals: [], pairing: false };
     if (route === "/api/permissions") return { rules: [
       { id: "r1", tool: "Bash", content: null, behavior: "allow", scope: "global", admin_only: true, source: "built-in" },
       { id: "r2", tool: "WebFetch", content: "docs.python.org", behavior: "allow", scope: "session", granted_by: "Alex", granted_at: now - 3600 }],

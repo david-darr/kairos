@@ -1,7 +1,7 @@
 {
  "built": {
   "app.js": "bac9fa3e25c7893d1e02ab2e63eeb8c6f23641370fa2d60596b32dc4346c1752",
-  "fixtures.js": "8db94db9f27b7bcf54ba8dd654932c6aaf557f6d07257f303b7153804e72e2b4",
+  "fixtures.js": "bfa23419c07db9e4264fa438b325772c191347721a7a999b3d440e221261fb36",
   "index.html": "a8b53b2f2feb9ddf2b8a6ad50564534e76da301bdcf9058cdf14d17603c4d1bc",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/bot-window.html": "563398340acc54ce5948a0bba6c01982ac36f90d6920a82b7fb47ce865ec3b92",
@@ -291,7 +291,7 @@
   "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5"
  },
  "sources": {
-  "demo/fixtures.js": "8db94db9f27b7bcf54ba8dd654932c6aaf557f6d07257f303b7153804e72e2b4",
+  "demo/fixtures.js": "bfa23419c07db9e4264fa438b325772c191347721a7a999b3d440e221261fb36",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "a481d41485fe04296c969b26da61b80c0c3a835051b634685ceb860189e88de2",
   "static/bot-window.html": "563398340acc54ce5948a0bba6c01982ac36f90d6920a82b7fb47ce865ec3b92",
