@@ -65,7 +65,10 @@ def _computer_addendum(is_admin: bool, available: bool = True) -> str:
     guidance = ("\n\nTo open, visit, search or operate a website, use the computer tool. The person watches it live "
             "in Kairos and can take over. Do not open pages on their desktop or browser with shell commands "
             "(Start-Process, start, open, xdg-open, explorer or a browser executable) unless they explicitly "
-            "ask for their own browser. Buying, sending, posting, passwords and payment are left for the person.")
+            "ask for their own browser. Buying, sending, posting, passwords and payment are left for the person. "
+            "Look narrowly (read with query, or since=\"latest\" after acting), batch routine input with steps, and "
+            "use verify at checkpoints, not after every action. A met verify is evidence only: a step left for the "
+            "person is never done until they do it.")
     from core import settings
     if is_admin and (settings.get_setting("computer_use") or {}).get("desktop"):
         guidance += (" The computer also has a desktop with a file manager, text editor, PDF viewer, image viewer "

@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from core import computer_image, permissions, sandbox, sandbox_browser, sandbox_egress
 from core.computer_driver import SOURCE
+from core.untrusted import wrap_untrusted
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -47,8 +48,49 @@ PRIVATE_FIELDS = {"current-password", "new-password", "one-time-code"}
 # The driver's source arrives as the first stdin line, not on the command
 # line: Windows caps a command line at 32,767 characters, and the driver
 # passed that in phase 3 ("The filename or extension is too long").
-BOOTSTRAP = ("import json, sys; exec(compile(json.loads(sys.stdin.readline())['driver'], "
-             "'<kairos-computer-driver>', 'exec'), {'__name__': '__main__'})")
+# Benchmark fixture pages ride along only from a manager built with them
+# (scripts/computer_bench.py); Kairos's own manager sends none.
+BOOTSTRAP = ("import json, sys; m = json.loads(sys.stdin.readline()); exec(compile(m['driver'], "
+             "'<kairos-computer-driver>', 'exec'), {'__name__': '__main__', 'FIXTURES': m.get('fixtures') or {}})")
+# The action contract (vault: "Agents - Computer-Use Upgrade from cua (Build
+# Spec)" 5.2): a batch of at most MAX_STEPS ordinary actions, each through
+# the same checks as a single call.
+MAX_STEPS = 16
+STEP_ACTIONS = ("click", "type", "key", "scroll", "wait")
+STEP_KEYS = {"action", "ref", "x", "y", "text", "key", "dx", "dy", "seconds", "desktop"}
+EXPECT_KEYS = ("url_contains", "title_contains", "text_present", "text_absent", "element")
+# Each refusal keeps its sentence and gains a short code, matched here from
+# the sentence so no message changes (the audit classifies by prefix).
+REFUSAL_CODES = (
+    ("Stopped before pressing", "person_only"),
+    ("embedded frame", "opaque_frame"),
+    ("passwords, codes and payment details are entered by the person", "private_field"),
+    ("only opens web addresses", "not_web_address"),
+    ("agent desktop is", "needs_desktop"),
+    ("the person has control", "person_in_control"),
+    ("the computer was stopped", "computer_stopped"),
+    ("That is the browser window", "use_web_actions"),
+    ("could not identify the desktop window", "unknown_window"),
+    ("unknown computer action", "unknown_action"),
+    ("desktop coordinates apply", "bad_arguments"),
+    ("choose files, editor", "bad_arguments"),
+    ("Not pressed:", "not_approved"),
+    ("Not opened:", "site_not_approved"),
+)
+
+
+class ComputerRefusal(ValueError):
+    """A driver refusal that carries its code ("[stale_ref] That ref...")."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+
+
+def refusal_code(text: str) -> str | None:
+    if not text.startswith(("Not ", "Stopped")):
+        return None
+    return next((code for needle, code in REFUSAL_CODES if needle in text), "refused")
 DELETE_CHOICES = [{"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"},
                   {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}]
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -108,9 +150,15 @@ class Computer:
 
 
 class ComputerManager:
-    def __init__(self, process_factory=None, clock=None):
+    def __init__(self, process_factory=None, clock=None, fixtures: dict | None = None,
+                 approved_hosts: tuple = (), record: bool = True):
         self.process_factory = process_factory or asyncio.create_subprocess_exec
         self.clock = clock or time.monotonic
+        # Only the benchmark harness passes these: its own fixture pages, the
+        # fixture host already approved, and no trajectories of its own runs.
+        self.fixtures = fixtures or {}
+        self.approved_hosts = set(approved_hosts)
+        self.record = record
         self._computers: dict[str, Computer] = {}
         self._closed: dict[str, tuple[float, dict]] = {}
         self._lock = asyncio.Lock()
@@ -188,8 +236,8 @@ class ComputerManager:
                                               limit=REPLY_LIMIT)
         except (FileNotFoundError, OSError) as e:
             raise sandbox.SandboxUnavailable(f"Docker did not start: {e}") from e
-        proc.stdin.write((json.dumps({"driver": SOURCE}) + "\n").encode())
-        c = Computer(owner, proc, name, desktop=desktop, last_action=self.clock())
+        proc.stdin.write((json.dumps({"driver": SOURCE, **({"fixtures": self.fixtures} if self.fixtures else {})}) + "\n").encode())
+        c = Computer(owner, proc, name, desktop=desktop, last_action=self.clock(), hosts=set(self.approved_hosts))
         c.stderr_task = asyncio.create_task(self._drain_stderr(proc))
         c.reader_task = asyncio.create_task(self._read(c))
         return c
@@ -266,7 +314,8 @@ class ComputerManager:
         finally:
             c.pending.pop(ident, None)
         if reply.get("error"):
-            raise ValueError(reply["error"])
+            coded = re.match(r"\[([a-z_]+)\] (.*)", reply["error"], re.S)
+            raise ComputerRefusal(coded.group(2), coded.group(1)) if coded else ValueError(reply["error"])
         return reply
 
     async def _stop(self, owner: str):
@@ -407,6 +456,74 @@ class ComputerManager:
             await self.stop(c.owner)
 
     async def act(self, owner: str, action: str, args: dict, ctx) -> dict:
+        """One model action, or a batch (`steps`). A refusal's reply gains a
+        `code`; a driver refusal raises ComputerRefusal with its code."""
+        if action == "steps":
+            result = await self._steps(owner, args, ctx)
+        else:
+            result = await self._act_one(owner, action, args, ctx)
+        code = result.get("code") or refusal_code(result["text"])
+        if code:
+            result["code"] = code
+        return result
+
+    async def _steps(self, owner: str, args: dict, ctx) -> dict:
+        """Run up to MAX_STEPS click/type/key/scroll/wait actions with one
+        observation at the end. Every step is checked before the first runs
+        and then goes through act(), so a batch grants nothing a single call
+        lacks. It stops at the first refusal, failure or new host."""
+        steps, problem = _check_steps(args.get("steps"))
+        if problem:
+            return {"text": f"Not run: {problem} Nothing ran.", "images": [], "code": "bad_arguments"}
+        lines, stop, code, ran = [], None, None, 0
+        for index, step in enumerate(steps, 1):
+            action = step["action"]
+            step_args = {key: value for key, value in step.items() if key != "action"}
+            running = self._computers.get(owner)
+            before = urlsplit(running.url).hostname if running else None
+            label = _step_label(step)
+            try:
+                result = await self.act(owner, action, step_args, ctx)
+            except ComputerRefusal as error:
+                result = {"text": f"Not run: {error}", "images": [], "code": error.code}
+            except ValueError as error:
+                result = {"text": f"Not run: {error}", "images": [], "code": "step_failed"}
+            text = result["text"].split("\n", 1)[0]
+            if result.get("code"):
+                stop, code = f"{index}. {label}: {text} (code: {result['code']})", result["code"]
+                break
+            ran = index
+            lines.append(f"{index}. {label}: done.")
+            running = self._computers.get(owner)
+            after = urlsplit(running.url).hostname if running else None
+            if after != before and index < len(steps):
+                stop = f"Stopped after step {index}: the page moved to {after or 'a blank page'}; look before going on."
+                break
+        summary = f"Steps: {ran} of {len(steps)} ran."
+        if stop and code:
+            summary = f"Stopped: at step {ran + 1} of {len(steps)}. " + summary
+        if stop:
+            lines.append(stop)
+        if ran and stop:
+            lines.append(f"Step{'s 1 to ' + str(ran) if ran > 1 else ' 1'} already ran and {'were' if ran > 1 else 'was'} not undone.")
+        images, observed = [], ""
+        running = self._computers.get(owner)
+        if running and code not in ("person_in_control", "computer_stopped"):
+            try:
+                final = await self._act_one(owner, "read", {"since": "latest"}, ctx)
+                images = final["images"]
+                observed = "\n\n" + final["text"].split("\n", 1)[-1].lstrip("\n") if "\n" in final["text"] else ""
+            except ValueError as error:
+                observed = f"\n\nCould not read the page afterwards: {error}"
+        running = self._computers.get(owner)
+        url = running.url if running else "about:blank"
+        head = summary if code else f"URL: {url} | {summary}"
+        result = {"text": head + "\n" + "\n".join(lines) + (f"\nURL: {url}" if code else "") + observed, "images": images}
+        if code:
+            result["code"] = code
+        return result
+
+    async def _act_one(self, owner: str, action: str, args: dict, ctx) -> dict:
         existing = self._computers.get(owner)
         if existing and existing.taken_over:
             existing.waiting_model = True
@@ -438,7 +555,7 @@ class ComputerManager:
         desktop_action = wants_desktop or action == "screenshot" and c.desktop and args.get("desktop") is not False
         if desktop_action and action not in ("launch", "windows", "click", "type", "key", "scroll", "screenshot"):
             return {"text": "Not run: desktop coordinates apply to click, type, key, scroll or screenshot.", "images": []}
-        command = {}
+        command, info, note = {}, {}, ""
         if action != "open":
             current = await self._command(c, "state")
             url = current.get("url") or "about:blank"
@@ -470,7 +587,8 @@ class ComputerManager:
             command["url"] = url
         elif action in ("click", "type"):
             command.update({k: args[k] for k in ("x", "y", "ref") if k in args})
-            info = (await self._command(c, "inspect", **command)).get("element") or {}
+            inspected = await self._command(c, "inspect", **command)
+            info, note = inspected.get("element") or {}, inspected.get("note") or ""
             if action == "type" and not info:
                 info = (await self._command(c, "focused", expected_url=c.url)).get("element") or {}
             if info.get("opaque_frame"):
@@ -509,13 +627,35 @@ class ComputerManager:
             command.update(dx=args.get("dx", 0), dy=args.get("dy", 0))
         elif action == "wait":
             command["seconds"] = min(10, max(0, float(args.get("seconds", 1))))
-        elif action not in ("screenshot", "read", "back"):
+        elif action == "read":
+            problem = _read_problem(args)
+            if problem:
+                return {"text": f"Not run: {problem}", "images": [], "code": "bad_arguments"}
+            command.update({key: args[key] for key in ("query", "since", "max_elements") if args.get(key) not in (None, "")})
+        elif action == "verify":
+            expect, problem = _check_expect(args.get("expect"))
+            if problem:
+                return {"text": f"Not run: {problem}", "images": [], "code": "bad_arguments"}
+            command["expect"] = expect
+        elif action not in ("screenshot", "back"):
             return {"text": f"Not run: unknown computer action {action}", "images": []}
         try:
             reply = await self._command(c, action, **command)
         except sandbox.SandboxUnavailable:
             await self.stop(owner)
             raise
+        if action == "verify":
+            c.last_action = self.clock()
+            c.last_action_at = time.time()
+            checks = reply.get("checks") or []
+            met = bool(checks) and all(check["met"] for check in checks)
+            lines = [f"- {check['check']} {json.dumps(check['expected'], ensure_ascii=False)}: "
+                     f"{'met' if check['met'] else 'not met'} ({check['found']})" for check in checks]
+            if ctx.turn_taint:
+                ctx.turn_taint.mark("computer page")
+            return {"text": f"URL: {reply.get('url') or c.url} | Verify: {'met' if met else 'not met'}.\n"
+                    + wrap_untrusted("what the contained computer's page shows", "\n".join(lines)),
+                    "images": [], "met": met}
         c.last_action = self.clock()
         c.last_action_at = time.time()
         new_url = reply.get("url") or c.url
@@ -531,13 +671,20 @@ class ComputerManager:
         c.url, c.title = new_url, reply.get("title") or ""
         c.screenshot = base64.b64decode(reply["screenshot"])
         detail = f"URL: {c.url} | Title: {c.title} | {action} completed."
+        if note:
+            detail += " " + note
         if action == "read":
-            entries = [f"[{e['ref']}] {e.get('tag','')} {e.get('label','')[:120]} {e.get('href','')}".strip()
-                       for e in reply.get("elements", [])]
-            detail += "\n\n" + reply.get("text", "") + "\n\nElements:\n" + ("\n".join(entries) or "(none)")
+            detail += _read_text(reply)
         if ctx.turn_taint:
             ctx.turn_taint.mark("computer page")
-        return {"text": detail, "images": [c.screenshot]}
+        result = {"text": detail, "images": [c.screenshot]}
+        if reply.get("point"):
+            result["point"] = reply["point"]
+        if action == "read":
+            result["state"] = {key: reply[key] for key in ("snapshot", "elements", "diff", "query") if key in reply}
+        if info:
+            result["element"] = {key: info[key] for key in ("label", "role", "tag", "type", "autocomplete") if key in info}
+        return result
 
     async def _desktop_act(self, c: Computer, action: str, args: dict, ctx) -> dict:
         if action == "launch" and args.get("app") not in computer_image.DESKTOP_APPS:
@@ -820,6 +967,137 @@ def _labels(info: dict) -> list[str]:
 def _private(info: dict) -> bool:
     autocomplete = info.get("autocomplete") or ""
     return (info.get("tag") == "input" and info.get("type") == "password") or autocomplete in PRIVATE_FIELDS or autocomplete.startswith("cc-")
+
+
+def _step_label(step: dict) -> str:
+    target = step.get("ref") or (f"({step['x']}, {step['y']})" if "x" in step and "y" in step else "")
+    detail = {"type": "", "key": step.get("key") or "", "scroll": f"dx {step.get('dx', 0)} dy {step.get('dy', 0)}",
+              "wait": f"{step.get('seconds', 1)}s"}.get(step["action"], "")
+    return " ".join(part for part in (step["action"], str(target), str(detail)) if part)
+
+
+def _check_steps(steps) -> tuple[list, str]:
+    """Every step, checked before the first runs: (steps, problem)."""
+    if not isinstance(steps, list) or not steps:
+        return [], "give steps as a list of actions, such as [{\"action\": \"click\", \"ref\": \"r3:2\"}]."
+    if len(steps) > MAX_STEPS:
+        return [], f"give at most {MAX_STEPS} steps."
+    integer = lambda value: isinstance(value, int) and not isinstance(value, bool)
+    for index, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            return [], f"step {index} is not an action."
+        action = step.get("action")
+        if action not in STEP_ACTIONS:
+            return [], f"step {index}: steps can click, type, key, scroll or wait."
+        unknown = set(step) - STEP_KEYS
+        if unknown:
+            return [], f"step {index}: unknown argument {sorted(unknown)[0]}."
+        if "ref" in step and not isinstance(step["ref"], (str, int)):
+            return [], f"step {index}: ref must be text, such as r3:2."
+        if any(key in step and not integer(step[key]) for key in ("x", "y", "dx", "dy")):
+            return [], f"step {index}: x, y, dx and dy are whole numbers."
+        if action == "click" and not (step.get("ref") or ("x" in step and "y" in step)):
+            return [], f"step {index}: a click needs a ref or x and y."
+        if action == "type" and (not isinstance(step.get("text"), str) or len(step["text"]) > 10000):
+            return [], f"step {index}: type needs text of at most 10000 characters."
+        if action == "key" and (not isinstance(step.get("key"), str) or not 0 < len(step["key"]) <= 80):
+            return [], f"step {index}: key needs one key or combination."
+        if action == "wait" and not isinstance(step.get("seconds", 1), (int, float)):
+            return [], f"step {index}: seconds is a number."
+        if "desktop" in step and not isinstance(step["desktop"], bool):
+            return [], f"step {index}: desktop is true or false."
+    return steps, ""
+
+
+def _check_expect(expect) -> tuple[dict, str]:
+    if not isinstance(expect, dict) or not expect:
+        return {}, "verify needs expect, with any of " + ", ".join(EXPECT_KEYS) + "."
+    unknown = set(expect) - set(EXPECT_KEYS)
+    if unknown:
+        return {}, f"verify does not know {sorted(unknown)[0]}; use " + ", ".join(EXPECT_KEYS) + "."
+    for key in EXPECT_KEYS[:4]:
+        if key in expect and (not isinstance(expect[key], str) or not 0 < len(expect[key]) <= 500):
+            return {}, f"{key} needs text of at most 500 characters."
+    if "element" in expect:
+        element = expect["element"]
+        if (not isinstance(element, dict) or set(element) - {"role", "name"} or not isinstance(element.get("role"), str)
+                or not 0 < len(element["role"]) <= 40 or not isinstance(element.get("name", ""), str)
+                or len(element.get("name", "")) > 200):
+            return {}, "element needs a role, such as button, and optionally a name."
+    return dict(expect), ""
+
+
+def _read_problem(args: dict) -> str:
+    if args.get("since") not in (None, "", "latest"):
+        return "since takes \"latest\"."
+    if args.get("query") is not None and not isinstance(args["query"], str):
+        return "query is text."
+    limit = args.get("max_elements")
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200):
+        return "max_elements is a whole number from 1 to 200."
+    return ""
+
+
+def _row(row: dict, removed: bool = False) -> str:
+    ref = f"({row['ref']})" if removed else f"[{row['ref']}]"
+    tag = row.get("tag", "")
+    if row.get("role") and row["role"] != tag:
+        tag += f"[{row['role']}]"
+    parts = [ref, tag, str(row.get("label") or "")[:120], row.get("href") or ""]
+    if row.get("value"):
+        parts.append(f"={json.dumps(row['value'], ensure_ascii=False)}")
+    if row.get("checked") is not None:
+        parts.append("(checked)" if row["checked"] else "(not checked)")
+    if row.get("disabled"):
+        parts.append("(disabled)")
+    return " ".join(part for part in parts if part)
+
+
+def _rows(rows: list, headings: bool) -> list[str]:
+    lines, heading = [], None
+    for row in rows:
+        if headings and row.get("heading") and row["heading"] != heading:
+            heading = row["heading"]
+            lines.append(f"## {heading}")
+        lines.append(_row(row))
+    return lines
+
+
+def _read_text(reply: dict) -> str:
+    """A read's reply for the model: page text and refs, a query's matches,
+    or the changes since the last read, fenced as untrusted page content."""
+    snapshot = reply.get("snapshot")
+    diff = reply.get("diff")
+    if diff:
+        counts = diff.get("counts") or [len(diff.get(key) or []) for key in ("added", "changed", "removed", "text_added", "text_removed")]
+        body = [f"Changes since {diff['since']} (now {snapshot}): {counts[0]} added, {counts[1]} changed, {counts[2]} removed; "
+                f"{counts[3]} text lines appeared, {counts[4]} went."]
+        for title, key, removed in (("Added", "added", False), ("Changed", "changed", False), ("Removed", "removed", True)):
+            if diff.get(key):
+                body += [f"{title}:"] + [_row(row, removed) for row in diff[key]]
+        if diff.get("text_added"):
+            body += ["Text appeared:"] + [f"+ {line[:300]}" for line in diff["text_added"]]
+        if diff.get("text_removed"):
+            body += ["Text went:"] + [f"- {line[:300]}" for line in diff["text_removed"]]
+        if not any(counts):
+            body.append("Nothing changed.")
+        return " Snapshot " + snapshot + ".\n\n" + wrap_untrusted("page content from the contained computer", "\n".join(body))
+    head = ""
+    if reply.get("full_reason"):
+        head = f" Full read: {reply['full_reason']}."
+    elements = reply.get("elements", [])
+    total = reply.get("total_elements", len(elements))
+    if reply.get("query") is not None:
+        body = (f"Matching \"{reply['query']}\": {reply.get('matched', len(elements))} of {total} elements, "
+                f"{reply.get('text_lines', 0)} text lines.\n\nText:\n{reply.get('text') or '(none)'}\n\nElements:\n"
+                + ("\n".join(_rows(elements, True)) or "(none)"))
+    else:
+        shown = f" ({len(elements)} of {total} shown; use query or max_elements for others)" if total > len(elements) else ""
+        body = reply.get("text", "") + f"\n\nElements{shown}:\n" + ("\n".join(_rows(elements, False)) or "(none)")
+    if reply.get("scan_capped"):
+        body += "\n(The page has more controls than one read scans; use query to narrow it.)"
+    return (f" Snapshot {snapshot}." if snapshot else "") + head + "\n\n" + wrap_untrusted(
+        "page content from the contained computer", body)
 
 
 def _needs_person(owner: str, url: str):

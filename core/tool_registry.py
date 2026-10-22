@@ -948,40 +948,54 @@ async def _browse(args, ctx):
 @register(
     "computer",
     "Operate your contained browser. Start with open using a full URL, look at each screenshot or use read for "
-    "the title, URL, visible text and numbered clickable/typeable refs, then click, type, scroll or use keys. "
+    "the title, URL, visible text and refs such as r3:12 (a ref works only until the next read or page change). "
+    "read takes query to see only matching rows and text, and since=\"latest\" to see only what changed. "
+    "steps runs up to 16 click/type/key/scroll/wait actions in one call, each with the same checks, and stops at "
+    "the first refusal. verify checks expect (url_contains, title_contains, text_present, text_absent, "
+    "element {role, name}) at checkpoints; it is evidence, not permission. "
     "Call done when finished. Buying, sending, posting, passwords, codes and payment details require the person to take over. "
     "If screenshots are unavailable, use read after each step. With Agent desktop enabled (admins only), "
-    "launch an app or list windows; desktop=true uses desktop coordinates for click/type/key/scroll. "
+    "launch an app or list windows; desktop=true uses desktop coordinates for click/type/key/scroll, and read "
+    "with desktop=true lists the focused window's controls as refs. "
     "Screenshots default to the whole desktop. Browser windows always require web actions. Files stay in Documents.",
     _object({"action": {"type": "string", "enum": ["open", "screenshot", "read", "click", "type", "key",
-                "scroll", "back", "wait", "done", "launch", "windows"]},
+                "scroll", "back", "wait", "done", "launch", "windows", "steps", "verify"]},
              "app": {"type": "string", "enum": ["files", "editor", "pdf", "images", "writer", "calc", "impress"]},
-             "desktop": {"type": "boolean", "description": "Desktop input or screenshot; false selects the browser screenshot"},
+             "desktop": {"type": "boolean", "description": "Desktop input, read or screenshot; false selects the browser screenshot"},
              "url": _str("Full URL for open"), "x": {"type": "integer"}, "y": {"type": "integer"},
-             "ref": _str("Element number from read"), "text": _str("Text to enter"),
+             "ref": _str("Ref from read, such as r3:12"), "text": _str("Text to enter"),
              "key": _str("Key or combination, e.g. Enter, Tab, Control+a"),
              "dx": {"type": "integer"}, "dy": {"type": "integer"},
-             "seconds": {"type": "number", "description": "Wait at most 10 seconds"}}, ("action",)),
+             "seconds": {"type": "number", "description": "Wait at most 10 seconds"},
+             "query": _str("read: only rows and text lines matching this"),
+             "since": {"type": "string", "enum": ["latest"], "description": "read: only what changed since the last read"},
+             "max_elements": {"type": "integer", "description": "read: at most this many rows (default 60, up to 200)"},
+             "steps": {"type": "array", "maxItems": 16, "items": {"type": "object"},
+                       "description": "steps: actions such as {\"action\": \"type\", \"ref\": \"r3:2\", \"text\": \"Ada\"}"},
+             "expect": {"type": "object", "description": "verify: url_contains, title_contains, text_present, "
+                        "text_absent (text) and element ({role, name})"}}, ("action",)),
     surfaces=ALL, effect=EXTERNAL,
 )
 async def _computer(args, ctx):
     from core import computer, sandbox, settings
     config = settings.get_setting("computer_use") or {}
     if not config.get("enabled"):
-        return "Not opened: computer use is off. An admin can switch it on in Settings > Computer use."
+        return "Not opened: computer use is off. An admin can switch it on in Settings > Computer use. (code: computer_off)"
     if not ctx.is_admin and not config.get("allow_non_admins"):
-        return "Not opened: computer use is limited to admins. An admin can allow others in Settings > Computer use."
+        return "Not opened: computer use is limited to admins. An admin can allow others in Settings > Computer use. (code: computer_off)"
     owner = f"agent:{ctx.agent_id}" if ctx.agent_id else f"chat:{ctx.session_id}" if ctx.session_id else ""
     if not owner:
         return "Not opened: this turn has no chat or agent owner."
     try:
         answer = await computer.manager.act(owner, args.get("action") or "", args, ctx)
     except sandbox.SandboxUnavailable as e:
-        return f"Not opened: the sandbox is unavailable ({e})."
+        return f"Not opened: the sandbox is unavailable ({e}). (code: sandbox_unavailable)"
     except ValueError as e:
-        return f"Not run: {e}"
+        code = getattr(e, "code", None)
+        return f"Not run: {e}" + (f" (code: {code})" if code else "")
     current = next((item["url"] for item in computer.manager.running() if item["owner"] == owner), None)
-    return ToolResult(answer["text"], answer["images"], audit_url=current)
+    text = answer["text"] + (f"\n(code: {answer['code']})" if answer.get("code") else "")
+    return ToolResult(text, answer["images"], audit_url=current)
 
 
 # Google Workspace uses one permission decision per mutation, inside the

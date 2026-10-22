@@ -609,7 +609,7 @@ class ComputerLiveTests(unittest.TestCase):
                     await manager.act("chat:live-computer", "open", {"url": "https://example.com/"}, ctx)
                     read = await manager.act("chat:live-computer", "read", {}, ctx)
                     self.assertIn("Example Domain", read["text"])
-                    self.assertIn("[1]", read["text"])
+                    self.assertIn("[r1:1]", read["text"])  # refs are snapshot-scoped (cua upgrade 5.2)
                     clicked = await manager.act("chat:live-computer", "click", {"ref": "1"}, ctx)
                     self.assertNotIn("URL: https://example.com/ |", clicked["text"])
                     await manager.act("chat:live-computer", "done", {}, ctx)
@@ -617,6 +617,154 @@ class ComputerLiveTests(unittest.TestCase):
             finally:
                 await manager.close_all()
         asyncio.run(check())
+
+
+STALE_PAGE = ("<ul id=list><li><button>Archive</button></li><li><button>Keep</button></li></ul><p id=out></p>"
+              "<script>setTimeout(() => { document.getElementById('list').innerHTML = "
+              "'<li><button onclick=\"out.textContent=`deleted`\">Delete item</button></li><li><button>Archive</button></li>'"
+              " }, 1200)</script>")
+
+
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class ComputerContractLiveTests(unittest.TestCase):
+    """The action contract (vault: Agents - Computer-Use Upgrade from cua)."""
+
+    def fixture_source(self, body):
+        from core.computer_driver import SOURCE
+        anchor = "page = context.pages[0] if context.pages else await context.new_page()\n"
+        return SOURCE.replace(anchor, anchor + "        await page.route('https://example.com/**', "
+                              f"lambda route: route.fulfill(body={body!r}, content_type='text/html'))\n", 1)
+
+    def test_a_ref_from_an_earlier_read_never_clicks_what_replaced_it(self):
+        from core import computer, permissions
+        import re as regex
+
+        async def check():
+            manager = computer.ComputerManager()
+            owner = "chat:live-stale"
+            ctx = tool_registry.ToolContext(session_id="live-stale", is_admin=True)
+            try:
+                with patch("core.computer.SOURCE", self.fixture_source(STALE_PAGE)), \
+                     patch("core.computer.permissions.decide", return_value=permissions.Decision("allow")):
+                    await manager.act(owner, "open", {"url": "https://example.com/"}, ctx)
+                    first = await manager.act(owner, "read", {}, ctx)
+                    archive = regex.search(r"\[([^\]]+)\] button Archive", first["text"]).group(1)
+                    await asyncio.sleep(2)
+                    second = await manager.act(owner, "read", {}, ctx)
+                    self.assertIn("Delete item", second["text"])
+                    try:
+                        clicked = await manager.act(owner, "click", {"ref": archive}, ctx)
+                    except ValueError as refused:
+                        self.assertEqual(getattr(refused, "code", None), "stale_ref")
+                        self.assertIn("older read", str(refused))
+                    else:
+                        self.fail(f"a ref from the earlier read was used: {clicked['text']}")
+                    c = manager._computers[owner]
+                    page = await manager._command(c, "verify", expect={"text_absent": "deleted"})
+                    self.assertTrue(page["checks"][0]["met"], "the replacing button was pressed")
+            finally:
+                await manager.close_all()
+        asyncio.run(check())
+
+    def bench(self, check):
+        """Run `check(manager, act)` against fixture pages served inside the
+        driver (the benchmark's own mechanism; no network, no approval)."""
+        from core import computer
+        from core.turn_taint import TurnTaint
+
+        async def run():
+            manager = computer.ComputerManager(fixtures=CONTRACT_PAGES, approved_hosts=("bench.kairos.test",))
+            ctx = tool_registry.ToolContext(session_id="live-contract", is_admin=True, turn_taint=TurnTaint())
+            try:
+                with patch("core.computer.permissions.decide", side_effect=AssertionError("nothing here may ask")):
+                    await check(manager, lambda action, **args: manager.act("chat:live-contract", action, args, ctx))
+            finally:
+                await manager.close_all()
+        asyncio.run(run())
+
+    def test_a_five_field_form_fills_in_one_call_and_verify_reports_both_outcomes(self):
+        import re as regex
+
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/form.html")
+            read = await act("read", query="field")
+            refs = dict(regex.findall(r"\[(r\d+:\d+)\] input (\w+ field)", read["text"]))
+            refs = {label: ref for ref, label in refs.items()}
+            self.assertEqual(len(refs), 5, read["text"])
+            values = {"First field": "Ada", "Last field": "Lovelace", "Email field": "ada@example.com",
+                      "City field": "London", "Notes field": "Engines"}
+            calls_before = len(manager._computers["chat:live-contract"].pending)
+            done = await act("steps", steps=[{"action": "type", "ref": refs[label], "text": value}
+                                              for label, value in values.items()])
+            self.assertEqual(calls_before, 0)
+            self.assertIn("Steps: 5 of 5 ran.", done["text"])
+            self.assertIn("Changes since", done["text"])
+            self.assertEqual(len(done["images"]), 1, "one observation at the end")
+            met = await act("verify", expect={"text_present": "Form ready", "url_contains": "form.html"})
+            self.assertTrue(met["met"], met["text"])
+            self.assertIn("Verify: met.", met["text"])
+            missed = await act("verify", expect={"text_present": "Submitted", "element": {"role": "button", "name": "Continue"}})
+            self.assertFalse(missed["met"])
+            self.assertIn("text_present \"Submitted\": not met (not on the page)", missed["text"])
+            self.assertIn("element", missed["text"])
+            self.assertIn("1 matching element", missed["text"])
+        self.bench(check)
+
+    def test_a_buy_button_in_step_three_stops_the_batch_after_two(self):
+        import re as regex
+
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/form.html")
+            read = await act("read")
+            ref = lambda label: regex.search(r"\[(r\d+:\d+)\] [^\n]*" + label, read["text"]).group(1)
+            done = await act("steps", steps=[
+                {"action": "type", "ref": ref("First field"), "text": "Ada"},
+                {"action": "type", "ref": ref("Last field"), "text": "Lovelace"},
+                {"action": "click", "ref": ref("Buy now")},
+                {"action": "type", "ref": ref("City field"), "text": "never typed"}])
+            self.assertEqual(done["code"], "person_only")
+            self.assertTrue(done["text"].startswith("Stopped: at step 3 of 4. Steps: 2 of 4 ran."), done["text"])
+            self.assertIn("Steps 1 to 2 already ran and were not undone.", done["text"])
+            c = manager._computers["chat:live-contract"]
+            state = await manager._command(c, "verify", expect={"text_absent": "Bought", "text_present": "Lovelace"})
+            self.assertFalse(any(row["check"] == "text_absent" and not row["met"] for row in state["checks"]))
+            filled = await act("read", query="City")
+            self.assertNotIn("never typed", filled["text"])
+            private = await act("steps", steps=[{"action": "type", "ref": regex.search(
+                r"\[(r\d+:\d+)\] input[^\n]*Password", (await act("read")).get("text")).group(1), "text": "hunter2"}])
+            self.assertEqual(private["code"], "private_field")
+        self.bench(check)
+
+    def test_a_diff_read_is_smaller_than_a_full_read(self):
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/long.html")
+            full = await act("read")
+            await act("click", ref=__import__("re").search(r"\[(r\d+:\d+)\] button Add a row", full["text"]).group(1))
+            diff = await act("read", since="latest")
+            self.assertIn("1 added", diff["text"])
+            self.assertIn("Row 41", diff["text"])
+            self.assertLess(len(diff["text"]), len(full["text"]) / 4, (len(diff["text"]), len(full["text"])))
+            narrow = await act("read", query="Row 7")
+            self.assertLess(len(narrow["text"]), len(full["text"]) / 4)
+            self.assertIn("## Table", narrow["text"])
+            await act("open", url="https://bench.kairos.test/form.html")
+            moved = await act("read", since="latest")
+            self.assertIn("Full read: the page navigated.", moved["text"])
+        self.bench(check)
+
+
+CONTRACT_PAGES = {
+    "/form.html": {"body": "<title>Form</title><h1>Sign up</h1><form onsubmit='return false'>"
+                   + "".join(f"<label>{name} field <input aria-label='{name} field' name='{name.lower()}'></label><br>"
+                             for name in ("First", "Last", "Email", "City", "Notes"))
+                   + "<label>Password <input type=password aria-label='Password'></label>"
+                   "<button type=button>Continue</button><button type=button onclick=\"document.body.append('Bought')\">"
+                   "Buy now</button></form><p>Form ready</p>"},
+    "/long.html": {"body": "<title>Long</title><h1>Table</h1><button onclick=\"const r=document.createElement('a');"
+                   "r.href='#41';r.textContent='Row 41 link';document.body.append(r)\">Add a row</button>"
+                   + "".join(f"<p><a href='#{i}'>Row {i} link</a> value {i * 7} and some longer descriptive text "
+                             f"so the page is like a real one</p>" for i in range(1, 41))},
+}
 
 
 @unittest.skipUnless(DOCKER_UP, "Docker is not running")

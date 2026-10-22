@@ -21,6 +21,7 @@ DESKTOP = os.environ.get('KAIROS_COMPUTER_DESKTOP') == '1'
 APPS = DESKTOP_APPS_MAPPING
 BROWSER_REFUSAL = "That is the browser window: use the computer's web actions (open, read, click by ref) so its safety checks apply."
 MAX_FRAME_DEPTH = 5
+FIXTURE_ORIGIN = 'https://bench.kairos.test'
 MAX_FPS = 30
 PRIVATE_SELECTOR = 'input[type=password],input[autocomplete=current-password],input[autocomplete=new-password],input[autocomplete=one-time-code],input[autocomplete^=cc-]'
 PRIVATE_STYLE = PRIVATE_SELECTOR + ' { visibility: hidden !important; }'
@@ -34,6 +35,103 @@ DOTS = """(() => { const css = %s; const add = () => { const s = document.create
 def emit(message):
     sys.stdout.write(json.dumps(message) + '\n')
     sys.stdout.flush()
+
+# The action contract (vault: "Agents - Computer-Use Upgrade from cua (Build
+# Spec)" 5.2). A read is a snapshot: its refs print as <snapshot>:<n>, and
+# only the page's live snapshot resolves. A coded error starts "[code] ".
+SCAN_LIMIT = 400
+ROW_FIELDS = ('ref', 'tag', 'role', 'type', 'label', 'href', 'value', 'checked', 'disabled', 'heading')
+
+def row_key(row):
+    return (row.get('tag') or '', row.get('role') or '', row.get('type') or '',
+            (row.get('label') or '')[:160], row.get('href') or '')
+
+def row_state(row):
+    return (row.get('value'), row.get('checked'), row.get('disabled'))
+
+def suggest_ref(older, snap):
+    """The current read's ref for an older row, when exactly one row matches."""
+    if not older or not snap.get('id') or snap.get('stale'): return ''
+    matches = [row for row in snap.get('rows') or [] if row_key(row) == row_key(older)]
+    return matches[0]['ref'] if len(matches) == 1 else ''
+
+def resolve_ref(ref, snap, history):
+    """(number, note) for a ref in the live snapshot, else a coded refusal."""
+    ref = str(ref).strip()
+    current, stale = snap.get('id'), snap.get('stale')
+    match = re.fullmatch(r'([rd]\d+):(\d+)', ref)
+    if match:
+        sid, number = match.groups()
+        if sid == current and not stale: return number, ''
+        if sid == current:
+            raise ValueError('[stale_ref] That ref is from %s, and %s since. Read again.' % (sid, stale))
+        hint = suggest_ref((history.get(sid) or {}).get(number), snap)
+        raise ValueError('[stale_ref] That ref is from an older read (%s). %s' % (
+            sid, ('Use %s or read again.' % hint) if hint else 'Read again.'))
+    if re.fullmatch(r'\d+', ref):
+        if not current: raise ValueError('[stale_ref] There is no current read of this page. Read again.')
+        if stale: raise ValueError('[stale_ref] %s since the last read (%s). Read again.' % (stale[0].upper() + stale[1:], current))
+        return ref, 'Ref %s was taken from the current read, %s.' % (ref, current)
+    raise ValueError('[bad_arguments] Give a ref from read, such as r3:12.')
+
+def diff_rows(old, new):
+    """Rows added, changed (same control, new value or state) and removed."""
+    pool = {}
+    for row in old: pool.setdefault(row_key(row), []).append(row)
+    added, changed = [], []
+    for row in new:
+        bucket = pool.get(row_key(row))
+        if bucket:
+            before = bucket.pop(0)
+            if row_state(before) != row_state(row): changed.append(row)
+        else: added.append(row)
+    return added, changed, [row for bucket in pool.values() for row in bucket]
+
+def diff_lines(old, new):
+    """Visible text lines that appeared and disappeared, counted, in order."""
+    def lines(text): return [line.strip() for line in (text or '').splitlines() if line.strip()]
+    before, after = {}, {}
+    for line in lines(old): before[line] = before.get(line, 0) + 1
+    for line in lines(new): after[line] = after.get(line, 0) + 1
+    added, removed, seen = [], [], dict(before)
+    for line in lines(new):
+        if seen.get(line, 0) > 0: seen[line] -= 1
+        else: added.append(line)
+    seen = dict(after)
+    for line in lines(old):
+        if seen.get(line, 0) > 0: seen[line] -= 1
+        else: removed.append(line)
+    return added, removed
+
+def query_rows(rows, query):
+    query = query.lower()
+    return [row for row in rows if any(query in str(row.get(key) or '').lower()
+                                       for key in ('label', 'role', 'tag', 'type', 'value', 'href'))]
+
+def verify_checks(expect, found):
+    """Each expected condition, whether it held, and what was actually there."""
+    checks = []
+    def snippet(text, needle):
+        at = text.lower().find(needle.lower())
+        return text[max(0, at - 40):at + len(needle) + 40].replace('\n', ' ').strip()
+    for key in ('url_contains', 'title_contains', 'text_present', 'text_absent'):
+        if key not in expect: continue
+        wanted = str(expect[key])
+        if key == 'url_contains':
+            met, seen = wanted.lower() in (found.get('url') or '').lower(), 'URL is ' + (found.get('url') or '')
+        elif key == 'title_contains':
+            met, seen = wanted.lower() in (found.get('title') or '').lower(), 'title is ' + (found.get('title') or '(none)')
+        else:
+            present = wanted.lower() in (found.get('text') or '').lower()
+            met = present if key == 'text_present' else not present
+            seen = ('found: "%s"' % snippet(found.get('text') or '', wanted)) if present else 'not on the page'
+        checks.append({'check': key, 'expected': wanted, 'met': met, 'found': seen})
+    if 'element' in expect:
+        count = found.get('element_count') or 0
+        element = expect['element']
+        checks.append({'check': 'element', 'expected': element, 'met': count > 0,
+                       'found': found.get('element_error') or ('%d matching element%s' % (count, '' if count == 1 else 's'))})
+    return checks
 
 async def xdo(*args, optional=False):
     proc = await asyncio.create_subprocess_exec('xdotool', *map(str, args),
@@ -258,6 +356,22 @@ return {tag:a.tagName.toLowerCase(), type:(a.getAttribute('type')||'').toLowerCa
 submit: a.matches('button:not([type]),button[type=submit],input[type=submit],input[type=image]') || !!(f && a.type === 'submit'),
 signals:labels, form_submits:submitControls.map(n => ({label:(signals(n)[0] || '').slice(0,160), signals:signals(n)})),
 form:!!f, href:a.href||''};}"""
+CONTROLS = 'a,button,input,textarea,select,[role=button],[contenteditable=true]'
+# One page call for every candidate: visible rows only, each with its value
+# or state (never a private field's value) and the heading it sits under.
+READ_ROWS = """(els) => { const info = ELEMENT_JS;
+const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]'));
+return els.map(e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+  if (!(r.width > 0 && r.height > 0) || s.visibility === 'hidden') return null;
+  const row = info(e); let heading = '';
+  for (const h of heads) { if (h !== e && (h.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)) heading = (h.innerText || '').trim().slice(0, 120); else break; }
+  const auto = row.autocomplete || '';
+  const secret = (row.tag === 'input' && row.type === 'password') || ['current-password','new-password','one-time-code'].includes(auto) || auto.startsWith('cc-');
+  if (['input','textarea','select'].includes(row.tag) && !secret && !['checkbox','radio','submit','button','reset','image','hidden','file'].includes(row.type)) row.value = String(e.value || '').slice(0, 120);
+  if (row.type === 'checkbox' || row.type === 'radio' || e.hasAttribute('aria-checked')) row.checked = !!(e.checked || e.getAttribute('aria-checked') === 'true');
+  if (e.disabled || e.getAttribute('aria-disabled') === 'true') row.disabled = true;
+  if (heading) row.heading = heading;
+  return row; }); }""".replace('ELEMENT_JS', ELEMENT)
 
 def recorded_input(kind, values, info, url, window=None):
     step = {'kind': kind, 'url': url}
@@ -293,13 +407,28 @@ async def main():
         context = await p.chromium.launch_persistent_context('/profile', **browser_launch_options(DESKTOP))
         await context.add_init_script(script=DOTS)
         page = context.pages[0] if context.pages else await context.new_page()
-        refs = {}
+        fixtures = globals().get('FIXTURES') or {}
+        if fixtures:
+            # Benchmark pages (scripts/computer_bench.py): answered here, so
+            # they never cross the filtered network. Only a manager built
+            # with fixtures sends them; Kairos's own manager never does.
+            async def fixture(route):
+                path = route.request.url.split(FIXTURE_ORIGIN, 1)[1].split('?', 1)[0].split('#', 1)[0] or '/'
+                item = fixtures.get(path) or fixtures.get(path.rstrip('/') + '/index.html')
+                if item is None: await route.fulfill(status=404, body='not found', content_type='text/plain')
+                else: await route.fulfill(status=200, body=item['body'], content_type=item.get('type') or 'text/html')
+            await context.route(FIXTURE_ORIGIN + '/**', fixture)
+        snap = {'seq': 0, 'id': None, 'stale': '', 'rows': [], 'handles': {}, 'text': ''}
+        history = {}
+        def invalidate(why):
+            if snap['id'] and not snap['stale']: snap['stale'] = why
         recording = {'id': None, 'task': None, 'windows': set()}
         def step_event(step, ident):
             if ident and recording['id'] == ident:
                 emit({'event': 'step', 'recording_id': ident, 'step': step})
         def navigation(frame):
             if frame is frame.page.main_frame:
+                if frame.page is page: invalidate('the page navigated')
                 step_event({'kind': 'open', 'url': frame.url}, recording['id'])
         def observe(tab):
             tab.on('framenavigated', navigation)
@@ -396,12 +525,15 @@ async def main():
                 return None
         async def element(arg):
             if arg.get('ref'):
-                handle = refs.get(str(arg['ref']))
-                if not handle: return None, False
+                number, _ = resolve_ref(arg['ref'], snap, history)
+                handle = snap['handles'].get(number)
+                if not handle: raise ValueError('[stale_ref] Read %s has no element %s. Read again.' % (snap['id'], number))
                 try:
-                    tag = await handle.evaluate('(e) => e.tagName.toLowerCase()')
+                    tag, connected = await handle.evaluate('(e) => [e.tagName.toLowerCase(), e.isConnected]')
                 except Exception:
                     return None, True
+                if not connected:
+                    raise ValueError('[stale_ref] That element left the page (it re-rendered) after %s. Read again.' % snap['id'])
                 return (None, True) if tag in ('iframe', 'frame') else (handle, False)
             if arg.get('x') is None or arg.get('y') is None:
                 return None, False
@@ -463,6 +595,54 @@ async def main():
                 return await handle.evaluate(ELEMENT)
             except Exception:
                 return {'opaque_frame': True, 'tag': 'iframe'}
+        async def read_page(cmd):
+            """A new snapshot of the page: refs <id>:<n>, narrowed by query,
+            or only what changed since the live snapshot (since: latest)."""
+            query = str(cmd.get('query') or '').strip()[:200]
+            limit = min(200, max(1, int(cmd.get('max_elements') or 60)))
+            since = cmd.get('since') == 'latest'
+            previous = None if snap['stale'] or not snap['id'] else {'id': snap['id'], 'rows': snap['rows'], 'text': snap['text']}
+            why_full = snap['stale'] or ('there was no earlier read of this page' if not snap['id'] else '')
+            handles = await page.locator(CONTROLS).element_handles()
+            scanned, extra = handles[:SCAN_LIMIT], handles[SCAN_LIMIT:]
+            infos = await page.evaluate(READ_ROWS, scanned) if scanned else []
+            visible = await page.locator('body').inner_text(timeout=10000)
+            snap['seq'] += 1
+            sid = 'r%d' % snap['seq']
+            rows, kept, unused = [], {}, list(extra)
+            for handle, info in zip(scanned, infos):
+                if not info: unused.append(handle); continue
+                number = str(len(rows) + 1)
+                rows.append({'ref': '%s:%s' % (sid, number), **{k: info[k] for k in ROW_FIELDS if k in info and k != 'ref'}})
+                kept[number] = handle
+            unused += list(snap['handles'].values())
+            if snap['id']:
+                history[snap['id']] = {row['ref'].split(':', 1)[1]: row for row in snap['rows']}
+                for old in sorted(history, key=lambda key: int(key[1:]))[:-8]: history.pop(old, None)
+            snap.update(id=sid, stale='', rows=rows, handles=kept, text=visible)
+            await asyncio.gather(*(handle.dispose() for handle in unused), return_exceptions=True)
+            result = {'snapshot': sid, 'total_elements': len(rows), 'scan_capped': bool(extra)}
+            if since and previous:
+                added, changed, removed = diff_rows(previous['rows'], rows)
+                text_added, text_removed = diff_lines(previous['text'], visible)
+                if query:
+                    added, changed, removed = (query_rows(part, query) for part in (added, changed, removed))
+                    text_added = [line for line in text_added if query.lower() in line.lower()]
+                    text_removed = [line for line in text_removed if query.lower() in line.lower()]
+                result['diff'] = {'since': previous['id'], 'added': added[:limit], 'changed': changed[:limit],
+                    'removed': removed[:limit], 'text_added': text_added[:40], 'text_removed': text_removed[:40],
+                    'counts': [len(added), len(changed), len(removed), len(text_added), len(text_removed)]}
+                return result
+            if since: result['full_reason'] = why_full
+            if query:
+                matched = query_rows(rows, query)
+                lines = [line.strip() for line in visible.splitlines() if query.lower() in line.lower() and line.strip()]
+                result.update(query=query, matched=len(matched), elements=matched[:limit],
+                              text='\n'.join(lines[:60])[:4000], text_lines=len(lines))
+            else:
+                result.update(elements=rows[:limit],
+                              text=visible[:12000] + ('\n... page text cut here' if len(visible) > 12000 else ''))
+            return result
         async def execute(cmd):
             nonlocal page
             action = cmd['action']
@@ -498,7 +678,27 @@ async def main():
                 return result
             if action == 'snapshot' and DESKTOP:
                 return {'url':page.url, 'title':await page.title(), 'screenshot':await asyncio.to_thread(desktop_capture, True)}
-            if action == 'inspect': return {'element': await inspect(cmd)}
+            if action == 'inspect':
+                note = resolve_ref(cmd['ref'], snap, history)[1] if cmd.get('ref') else ''
+                return {'element': await inspect(cmd), 'note': note}
+            if action == 'capture':
+                # A trajectory's before image: no wait, private fields masked.
+                if cmd.get('desktop') and DESKTOP:
+                    return {'url': page.url, 'screenshot': await asyncio.to_thread(desktop_capture, True)}
+                return {'url': page.url, 'screenshot': base64.b64encode(await page.screenshot(type='jpeg', quality=65,
+                    mask=[page.locator(PRIVATE_SELECTOR)], style=PRIVATE_STYLE)).decode()}
+            if action == 'verify':
+                expect = cmd.get('expect') or {}
+                found = {'url': page.url, 'title': await page.title()}
+                if 'text_present' in expect or 'text_absent' in expect:
+                    found['text'] = await page.locator('body').inner_text(timeout=10000)
+                if 'element' in expect:
+                    wanted = expect['element']
+                    try:
+                        found['element_count'] = await page.get_by_role(wanted['role'], **({'name': wanted['name']} if wanted.get('name') else {})).count()
+                    except Exception:
+                        found['element_error'] = 'not a role this check knows'
+                return {'url': page.url, 'title': found['title'], 'checks': verify_checks(expect, found)}
             if action == 'focused': return {'element': await inspect_focused()}
             if action in ('click','type','key') and 'expected' in cmd:
                 current = await (inspect_focused() if action == 'key' or
@@ -527,8 +727,11 @@ async def main():
                 if opaque: raise ValueError('embedded frame needs the person to take over')
                 if not h: raise ValueError('no element at that point or ref')
                 if cmd.get('x') is not None and cmd.get('y') is not None:
+                    result['point'] = {'x': cmd['x'], 'y': cmd['y']}
                     await page.mouse.click(cmd['x'], cmd['y'])
                 else:
+                    box = await h.bounding_box()
+                    if box: result['point'] = {'x': round(box['x'] + box['width'] / 2), 'y': round(box['y'] + box['height'] / 2)}
                     await h.click(timeout=10000)
             elif action == 'type':
                 h, opaque = await element(cmd)
@@ -540,17 +743,7 @@ async def main():
             elif action == 'back': await page.go_back(wait_until='domcontentloaded', timeout=30000)
             elif action == 'wait': await asyncio.sleep(min(10,max(0,float(cmd.get('seconds',1)))))
             elif action == 'read':
-                refs.clear()
-                handles = await page.locator('a,button,input,textarea,select,[role=button],[contenteditable=true]').element_handles()
-                entries = []
-                for h in handles[:100]:
-                    if not await h.is_visible(): continue
-                    info = await h.evaluate(ELEMENT)
-                    ref = str(len(entries)+1); refs[ref] = h
-                    entries.append({'ref':ref, **info})
-                visible = await page.locator('body').inner_text(timeout=10000)
-                result = {'text':visible[:12000] + ('\n... page text cut here' if len(visible)>12000 else ''),
-                          'elements':entries[:60]}
+                result = await read_page(cmd)
             elif action not in ('screenshot','snapshot','done'): raise ValueError('unknown action')
             if action == 'done':
                 cast['watching'] = False
@@ -559,14 +752,14 @@ async def main():
             if action.startswith('person_'):
                 if context.pages and context.pages[-1] is not page:
                     page = context.pages[-1]
-                    refs.clear()
+                    invalidate('a new tab opened')
                     await follow_page()
                 return {'url':page.url, 'title':await page.title()}
             await page.wait_for_timeout(250)
             if context.pages and context.pages[-1] is not page:
                 page = context.pages[-1]
                 await page.wait_for_load_state('domcontentloaded', timeout=10000)
-                refs.clear()
+                invalidate('a new tab opened')
                 await follow_page()
             private = page.locator(PRIVATE_SELECTOR)
             screenshot_type = 'jpeg' if action == 'snapshot' else 'png'
