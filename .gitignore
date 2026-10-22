@@ -58,3 +58,4 @@ evals/**/results/
 
 # Isolated tab tests use a workspace temp root in restricted environments.
 scripts/.tab-test-*/
+.cli-venv/

@@ -154,6 +154,14 @@ def record_tool_use(outcome: str, tool: str, effect: str, arguments: dict, by: s
     _save(data)
 
 
+def record_event(entry: dict) -> None:
+    """Any other decision worth keeping in the same audit trail, such as a
+    terminal being paired or revoked (core/cli_access.py)."""
+    data = _load()
+    _record(data, dict(entry))
+    _save(data)
+
+
 def record_mode_change(session_id: str, mode: str, user: str) -> None:
     data = _load()
     _record(data, {"decision": "chat_mode_changed", "session_id": session_id,

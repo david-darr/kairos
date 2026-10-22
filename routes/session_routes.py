@@ -1,6 +1,6 @@
 """Session CRUD — the sidebar list, create/rename/delete surface."""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from functools import wraps
 from typing import Literal, Optional
 
@@ -27,6 +27,10 @@ def idle_session(fn):
 
 class CreateSessionRequest(BaseModel):
     title: str = "New Chat"
+    # The folder a Kairos CLI terminal was started in, so `kairos -c` can
+    # carry on the latest chat from that folder. Recorded, never used as a
+    # workspace: it grants the chat no file access.
+    launch_dir: str | None = Field(default=None, max_length=1024)
 
 
 class RenameSessionRequest(BaseModel):
@@ -102,7 +106,13 @@ async def list_sessions(agent_id: Optional[str] = None, user: str = Depends(requ
 
 @router.post("")
 async def create_session(body: CreateSessionRequest, user: str = Depends(require_user)) -> dict:
-    return session_manager.create_session(body.title, owner_user=user)
+    launch_dir = body.launch_dir
+    if launch_dir is not None:
+        import os
+        import re
+        if not os.path.isabs(launch_dir) or re.search(r"[\x00-\x1f]", launch_dir):
+            raise HTTPException(400, "launch_dir must be an absolute folder path")
+    return session_manager.create_session(body.title, owner_user=user, launch_dir=launch_dir)
 
 
 @router.get("/{session_id}")

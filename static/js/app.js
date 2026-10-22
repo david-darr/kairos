@@ -18,6 +18,7 @@ import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
 import { mountForgeRail } from './forgeRail.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
+import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
 
 let forgeRailCleanup = () => {};
 restoreSidebar();

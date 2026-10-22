@@ -9,10 +9,10 @@ answering a real request, so nothing can be granted that was never asked for.
 """
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from core import permissions
+from core import cli_access, permissions
 from core.middleware import require_admin, require_user
 from services import chat_live
 
@@ -30,10 +30,14 @@ async def list_permissions(user: str = Depends(require_user)) -> dict:
 
 
 @router.post("/{request_id}/answer")
-async def answer(request_id: str, body: Answer, user: str = Depends(require_user)) -> dict:
+async def answer(request_id: str, body: Answer, request: Request, user: str = Depends(require_user)) -> dict:
     # A request id is server-made and lives only while something is waiting on
     # it, so a stale or invented id answers nothing.
     pending = permissions.pending_request(request_id)
+    if pending and pending.surface == cli_access.SURFACE and not cli_access.is_app_window(request):
+        # Only the app window approves a terminal. A paired terminal answering
+        # this would let one token mint the next (core/cli_access.py).
+        raise HTTPException(404, "request not found")
     if pending and pending.tool == "creative_tools" and pending.arguments.get("account_owner") != user:
         raise HTTPException(403, "Only this creative account's owner can approve the request.")
     if pending and pending.surface.startswith("chat:"):

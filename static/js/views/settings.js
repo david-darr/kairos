@@ -1952,6 +1952,22 @@ async function renderPermissionsPanel(body, status, page) {
       } }) });
   });
   const parts = [group({ title: "Standing grants" }, rows.length ? rows : [empty("Nothing is granted yet.")])];
+  // Kairos CLI terminals paired from this window (core/cli_access.py). Each
+  // lasts until its terminal closes, 12 hours at most; Revoke ends it now.
+  const paired = await api("/api/auth/cli/terminals").catch(() => null);
+  if (paired?.pairing) {
+    const terminals = paired.terminals.map((item) => row({ title: `${item.terminal} · ${item.words}`, cls: "settings-row",
+      description: `Paired ${new Date(item.created_at * 1000).toLocaleString()} · ends by ${new Date(item.expires_at * 1000).toLocaleTimeString()}`,
+      control: el("button", { class: "btn quiet danger", text: "Revoke", "data-cli-terminal": item.id, onclick: async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await api(`/api/auth/cli/terminals/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+          renderPermissionsPanel(body, status, page);
+        } catch (problem) { toast(problem.message, "error"); button.disabled = false; }
+      } }) }));
+    parts.push(group({ title: "Paired terminals" }, terminals.length ? terminals : [empty("No terminal is paired. Run kairos in a terminal to pair one.")]));
+  }
   if (audit.length) {
     const log = el("details", { class: "disclosure-panel" }, [el("summary", { text: "Recent decisions" })]);
     for (const entry of [...audit].reverse()) {

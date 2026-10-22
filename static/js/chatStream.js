@@ -66,7 +66,14 @@ async function _recoverMissing(sessionId, entry) {
   } catch { /* The next reconnect will retry with a fresh snapshot. */ }
 }
 
+// Terminal pairing prompts (Kairos CLI) ride this feed to the app window
+// only; static/js/cliPair.js shows them.
+function _cliPair(type, detail) {
+  if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent(type, { detail }));
+}
+
 function _snapshot(packet) {
+  for (const request of packet.cliPairs || []) _cliPair('kairos:cli-pair', request);
   const incoming = packet.runs || {};
   for (const [sessionId, run] of Object.entries(incoming)) _mergeRun(sessionId, run);
   for (const [sessionId, entry] of _inflight) {
@@ -76,6 +83,8 @@ function _snapshot(packet) {
 
 function _packet(packet) {
   if (packet.type === 'snapshot') { _snapshot(packet); return; }
+  if (packet.type === 'cli_pair') { _cliPair('kairos:cli-pair', packet.request); return; }
+  if (packet.type === 'cli_pair_closed') { _cliPair('kairos:cli-pair-closed', { id: packet.id }); return; }
   const sessionId = packet.sessionId;
   if (packet.type === 'started') { _mergeRun(sessionId, packet.run); return; }
   const entry = _inflight.get(sessionId);

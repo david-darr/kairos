@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, UploadFile, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
-from core import attachments, chat_artifacts, chat_files, chat_references, office_preview
+from core import attachments, chat_artifacts, chat_files, chat_references, cli_access, office_preview
 from core.auth import auth_manager
 from core.middleware import require_user, get_current_user
 from services import chat_live, chat_service
@@ -186,16 +186,19 @@ async def stream_chat_message(body: ChatRequest, user: str = Depends(require_use
 
 
 @router.get("/live/snapshot")
-async def live_chat_snapshot(user: str = Depends(require_user)) -> dict:
-    return chat_live.visible_packet(chat_live.snapshot(), user)
+async def live_chat_snapshot(request: Request, user: str = Depends(require_user)) -> dict:
+    return chat_live.visible_packet(chat_live.snapshot(), user, cli_access.is_app_window(request))
 
 
 @router.get("/live/events")
 async def live_chat_events(request: Request = None, user: str = Depends(require_user)) -> StreamingResponse:
+    # Terminal pairing prompts ride this feed to the app window only.
+    app_window = request is not None and cli_access.is_app_window(request)
+
     async def events():
         queue, initial = chat_live.subscribe()
         try:
-            yield f"data: {json.dumps(chat_live.visible_packet(initial, user))}\n\n"
+            yield f"data: {json.dumps(chat_live.visible_packet(initial, user, app_window))}\n\n"
             while True:
                 if request is not None and get_current_user(request) != user:
                     return
@@ -203,7 +206,7 @@ async def live_chat_events(request: Request = None, user: str = Depends(require_
                     packet = await asyncio.wait_for(queue.get(), timeout=15)
                     if request is not None and get_current_user(request) != user:
                         return
-                    packet = chat_live.visible_packet(packet, user)
+                    packet = chat_live.visible_packet(packet, user, app_window)
                     if packet is not None:
                         yield f"data: {json.dumps(packet)}\n\n"
                 except asyncio.TimeoutError:

@@ -31,6 +31,7 @@ const { installScreenGrab } = require("./screen-grab");
 const { createDesktopLog } = require("./desktop-log");
 const { createUiSecret, uiCookie, browserHandoffUrl } = require("./ui-access");
 const { resolveInstance } = require("./instance");
+const { wantsBackground } = require("./launch-flags");
 
 // Which copy this is (electron/instance.js): the real app, or a named
 // development instance with its own data folder, lock and port. Decided
@@ -43,6 +44,8 @@ try {
   app.exit(1);
 }
 if (INSTANCE && INSTANCE.userData) app.setPath("userData", INSTANCE.userData);
+// --background: start to the tray with the window hidden (launch-flags.js).
+const START_IN_BACKGROUND = wantsBackground(process.argv);
 
 // desktop.log, beside the backend's logs in the per-user data folder, so the
 // shell's own messages are no longer lost with its console (see
@@ -379,6 +382,8 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
+    // The Kairos CLI's --background start: created and loaded, not shown.
+    show: !START_IN_BACKGROUND,
     // Kairos parchment until the page reports its own colors (window:title-bar).
     backgroundColor: "#F3EADB",
     title: INSTANCE.label,
@@ -749,7 +754,8 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on("second-instance", showWindow);
+  // A terminal starting Kairos in the background must not pop the window up.
+  app.on("second-instance", (_event, argv) => { if (!wantsBackground(argv)) showWindow(); });
 
   app.whenReady().then(() => {
     loadOverlayPreference();

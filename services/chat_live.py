@@ -37,15 +37,23 @@ def require_session(session_id: str, user: str) -> dict:
     return session
 
 
-def visible_packet(packet: dict, user: str) -> dict | None:
+def visible_packet(packet: dict, user: str, app_window: bool = False) -> dict | None:
     def allowed(session_id):
         try:
             require_session(session_id, user)
             return True
         except HTTPException:
             return False
+    if packet["type"] in APP_ONLY_PACKETS:
+        # Terminal pairing prompts (core/cli_access.py) go to the app window
+        # alone; a paired terminal never sees, let alone answers, the next one.
+        return packet if app_window else None
     if packet["type"] == "snapshot":
-        return {**packet, "runs": {sid: run for sid, run in packet["runs"].items() if allowed(sid)}}
+        visible = {**packet, "runs": {sid: run for sid, run in packet["runs"].items() if allowed(sid)}}
+        if app_window:
+            from core import cli_access
+            visible["cliPairs"] = cli_access.pending_pairs()
+        return visible
     return packet if allowed(packet["sessionId"]) else None
 
 
@@ -111,6 +119,17 @@ def _broadcast(packet: dict) -> None:
                 queue.get_nowait()
             queue.put_nowait(snapshot())
         else:
+            queue.put_nowait(packet)
+
+
+APP_ONLY_PACKETS = ("cli_pair", "cli_pair_closed")
+
+
+def broadcast_app(packet: dict) -> None:
+    """A packet for the app window only (see visible_packet). Not a chat turn,
+    so it skips the phone notification projection."""
+    for queue in tuple(_subscribers):
+        if not queue.full():
             queue.put_nowait(packet)
 
 

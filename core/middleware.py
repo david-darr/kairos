@@ -107,12 +107,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 def local_access_open(request: Request) -> bool:
     """With accounts off: is this the app's own window (or a browser it
     handed the cookie to)? Always true for a backend started without a UI
-    secret, such as a dev server. See core/auth.py's UI_SECRET."""
+    secret, such as a dev server. See core/auth.py's UI_SECRET.
+
+    A terminal the person paired in the app window (core/cli_access.py) also
+    counts, on API routes only and never on the cookie-only ones."""
     secret = auth_module.UI_SECRET
     if not secret:
         return True
     cookie = request.cookies.get(UI_COOKIE_NAME) or ""
-    return secrets.compare_digest(cookie, secret)
+    if secrets.compare_digest(cookie, secret):
+        return True
+    from core import cli_access
+    return cli_access.request_allowed(request)
 
 
 def get_current_user(request: Request) -> Optional[str]:

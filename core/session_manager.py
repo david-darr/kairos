@@ -44,7 +44,8 @@ class SessionManager:
     # JSON import itself, so the migration doesn't depend on this class
     # having been constructed (or on which module imported what first).
 
-    def create_session(self, title: str = "New Chat", owner_user: str | None = None) -> dict:
+    def create_session(self, title: str = "New Chat", owner_user: str | None = None,
+                       launch_dir: str | None = None) -> dict:
         session_id = uuid.uuid4().hex[:12]
         now = time.time()
         session = {
@@ -83,6 +84,9 @@ class SessionManager:
             # servers; REA is opt-in. A list restricts to just those ids.
             "enabled_integration_ids": None,
         }
+        if launch_dir:
+            # Where a Kairos CLI terminal started this chat (`kairos -c`).
+            session["launch_dir"] = launch_dir
         store.save_session(session)
         return session
 
