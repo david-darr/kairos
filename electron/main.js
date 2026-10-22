@@ -64,6 +64,10 @@ const SHOULD_SPAWN_BACKEND = !process.env.JARVIS_BACKEND_URL;
 // Only for a backend this process starts: an already-running one (a dev
 // server) was not given it and stays open to local requests. See ui-access.js.
 const UI_SECRET = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
+// The Design canvas's render worker (designRender.js): the backend this
+// process starts gets the token, and only this process can take its jobs.
+const designRender = require('./designRender');
+const RENDER_TOKEN = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
 
 let backendProcess = null;
 
@@ -224,7 +228,8 @@ function startBackend() {
       // own environment at startup, so nothing it starts inherits it.
       // JARVIS_INSTANCE tells the page which copy it is (the DEV badge).
       env: { ...process.env, JARVIS_DATA_DIR: path.join(app.getPath("userData"), "data"), JARVIS_UI_SECRET: UI_SECRET,
-             APP_PORT: String(INSTANCE.port), JARVIS_INSTANCE: INSTANCE.name, KAIROS_VERSION: app.getVersion() },
+             APP_PORT: String(INSTANCE.port), JARVIS_INSTANCE: INSTANCE.name, KAIROS_VERSION: app.getVersion(),
+             KAIROS_RENDER_TOKEN: RENDER_TOKEN },
     },
   );
   const proc = backendProcess;
@@ -516,6 +521,7 @@ async function createWindow() {
   // Before the first page loads: with accounts off, the backend answers only
   // requests carrying this (ui-access.js). The usage overlay shares the session.
   if (UI_SECRET) await session.defaultSession.cookies.set(uiCookie(BACKEND_URL, UI_SECRET));
+  if (RENDER_TOKEN) designRender.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
   await win.loadURL(BACKEND_URL);
   if (process.platform === "win32" && !screenGrab) {
     screenGrab = installScreenGrab({
@@ -795,6 +801,7 @@ app.on("before-quit", (event) => {
   // Destroyed, not hidden — a hidden view keeps running scripts and audio.
   sideBrowser.close();
   forgePreview.close();
+  designRender.stop();
   if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.destroy();
   stopBackend();
 });

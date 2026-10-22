@@ -14,8 +14,9 @@ let activeSection = "documents";
 let activeVaultView = null;
 
 export async function render(container, tabId, options = {}) {
-  if (["vault", "documents", "google"].includes(options.section)) activeSection = options.section;
-  if (activeSection === "vault") renderVault(container);
+  if (["vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
+  if (activeSection === "designs") await renderDesigns(container);
+  else if (activeSection === "vault") renderVault(container);
   else if (activeSection === "google") renderGoogle(container);
   else await renderList(container);
   return () => disposeVault();
@@ -33,23 +34,36 @@ function libraryChrome(container, current) {
       el("div", { class: "sub", text: current === "vault"
         ? "Browse and read the notes in your connected Vault."
         : current === "google" ? "Your connected Google Drive, Sheets, and Forms."
+        : current === "designs" ? "Every design: open one to change it, comment on it, or export it."
         : "A home for your references, drafts, and ideas worth keeping." }),
     ]),
   ]);
   const tabs = el("div", { class: "segmented-tabs library-tabs", role: "group", "aria-label": "Library section" });
-  for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"]]) {
+  for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"], ["designs", "Designs"]]) {
     const button = el("button", { type: "button", class: "segmented-tab" + (id === current ? " active" : ""),
       text: label, "aria-pressed": id === current ? "true" : "false" });
     button.addEventListener("click", async () => {
       if (id === current) return;
       if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
       if (id === "vault") renderVault(container);
+      else if (id === "designs") await renderDesigns(container);
       else if (id === "google") renderGoogle(container);
       else await renderList(container);
     });
     tabs.append(button);
   }
   return [header, tabs];
+}
+
+// Library > Designs (the Design canvas): the Design tab's list, here too.
+async function renderDesigns(container) {
+  disposeVault();
+  activeSection = "designs";
+  const [header, tabs] = libraryChrome(container, "designs");
+  const host = el("div", { class: "design-home" });
+  container.replaceChildren(header, tabs, host);
+  const { renderDesignList } = await import("./design.js");
+  await renderDesignList(host);
 }
 
 function renderGoogle(container) {

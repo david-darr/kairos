@@ -18,6 +18,8 @@ export const ICONS = {
   camera: `<svg viewBox="0 0 24 24" ${S}><path d="M8 5l1.5-2h5L16 5h3a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="12.5" r="4"/></svg>`,
   notes: `<svg viewBox="0 0 24 24" ${S}><path d="M6 3h9l5 5v13H6V3z"/><path d="M9 12h6M9 16h6M9 8h3"/></svg>`,
   library: `<svg viewBox="0 0 24 24" ${S}><path d="M5 4v16M9 4v16M14 4l4 16"/></svg>`,
+  // The Design canvas (2026-10-22): two boards on a canvas.
+  design: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="14" y="8" width="7" height="8" rx="1.2"/><path d="M11 12h3"/></svg>`,
   calendar: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="5" width="18" height="16" rx="1.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
   email: `<svg viewBox="0 0 24 24" ${S}><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M4 6l8 7 8-7"/></svg>`,
   tasks: `<svg viewBox="0 0 24 24" ${S}><path d="M5 7h14M5 12h14M5 17h14"/><circle cx="5" cy="7" r="0.8" fill="currentColor"/><circle cx="5" cy="12" r="0.8" fill="currentColor"/><circle cx="5" cy="17" r="0.8" fill="currentColor"/></svg>`,

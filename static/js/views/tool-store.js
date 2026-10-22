@@ -236,7 +236,7 @@ export async function render(container) {
   function draw() {
     if (!view.isConnected) return;
     filters.innerHTML = "";
-    for (const [id, label] of [["all", "All"], ["skills", "Skills"], ["tools", "Tools"], ["tabs", "Tabs"], ["automations", "Automations"]]) {
+    for (const [id, label] of [["all", "All"], ["skills", "Skills"], ["tools", "Tools"], ["tabs", "Tabs"], ["automations", "Automations"], ["designs", "Design systems"]]) {
       const button = el("button", {
         type: "button", class: "segmented-tab" + (state.kind === id ? " active" : ""),
         text: label, "aria-pressed": state.kind === id ? "true" : "false",
@@ -253,6 +253,12 @@ export async function render(container) {
     }
     installTab.hidden = state.kind !== "tabs" || !state.admin;
     results.innerHTML = "";
+    // Design systems for the Design canvas (designSystems.js).
+    if (state.kind === "designs") {
+      count.textContent = "";
+      import("../designSystems.js").then(module => module.renderDesignSystems(results, { admin: state.admin }));
+      return;
+    }
     const q = state.query;
     // Redesign only: surface a community update above the lists.
     const pendingUpdate = document.documentElement.classList.contains("kairos-redesign") && state.admin

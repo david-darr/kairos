@@ -34,7 +34,7 @@ function syncNeeds() {
 export const ALWAYS_SHOWN = "home";
 
 const DEFAULT_GROUPS = {
-  main: ["home", "chat", "agents"],
+  main: ["home", "chat", "agents", "design"],
   workspace: ["notes", "library", "calendar", "email", "tasks"],
   intelligence: ["tool-store", "cookbook"],
 };

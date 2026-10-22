@@ -107,7 +107,7 @@ async def pdf(design_id: str, slugs: list[str]) -> bytes:
             raw = await design_render_bridge.render(design_id, slug, "pdf")
             source = pdfium.PdfDocument(raw)
             try:
-                merged.import_pages(source)
+                merged.import_pages(source, [0])  # One page per board, whatever the print layout did.
             finally:
                 source.close()
         out = io.BytesIO()
