@@ -39,6 +39,16 @@ if not Path(BACKEND_PYTHON).exists():
     BACKEND_PYTHON = sys.executable
 
 
+def remove_tree(path) -> None:
+    """Git marks its objects read-only; clear that so temp folders really go."""
+    import stat
+
+    def unlock(function, target, _error):
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+    shutil.rmtree(path, onexc=unlock) if sys.version_info >= (3, 12) else shutil.rmtree(path, onerror=unlock)
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -74,7 +84,7 @@ class Backend:
             if sys.platform == "win32" else self.process.kill()
         self.process.wait(timeout=20)
         self.log.close()
-        shutil.rmtree(self.data, ignore_errors=True)
+        remove_tree(self.data)
 
 
 BACKEND: Backend | None = None
@@ -344,7 +354,7 @@ class ForgeAndAgentsLive(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.conn.close()
-        shutil.rmtree(self.folder, ignore_errors=True)
+        remove_tree(self.folder)
 
     async def turn(self, session_id, text):
         events = asyncio.Queue()
