@@ -577,6 +577,17 @@ ipcMain.handle('forge-preview:open', (event, id, url, rect) => fromAppWindow(eve
 ipcMain.handle('forge-preview:navigate', (event, url) => fromAppWindow(event) ? forgePreview.navigate(url) : { ok: false });
 ipcMain.handle('forge-preview:state', event => fromAppWindow(event) ? forgePreview.state() : { open: false });
 ipcMain.handle('forge-preview:external', event => fromAppWindow(event) ? forgePreview.openExternal() : { ok: false });
+// Library > Vault "Open in Obsidian" (2026-10-22). The backend builds the URL
+// from a vault-checked path; this accepts only obsidian://open?path=...
+ipcMain.handle('vault:obsidian', async (event, raw) => {
+  if (!fromAppWindow(event) || typeof raw !== 'string' || raw.length > 4000) return { ok: false };
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'obsidian:' || url.hostname !== 'open' || [...url.searchParams.keys()].join() !== 'path') return { ok: false };
+    await shell.openExternal(url.toString());
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
 ipcMain.handle('forge-terminal:external', async (event, raw) => {
   if (!fromAppWindow(event) || typeof raw !== 'string' || raw.length > 4000) return { ok: false };
   try {
