@@ -546,14 +546,15 @@ class ComputerManager:
             url = previous.url if previous else "about:blank"
             await self.stop(owner)
             return {"text": f"URL: {url} | Computer closed.", "images": []}
-        wants_desktop = action in ("launch", "windows") or args.get("desktop") is True
+        wants_desktop = (action in ("launch", "windows") or args.get("desktop") is True
+                         or action in ("click", "type") and re.fullmatch(r"d\d+:\d+", str(args.get("ref") or "")) is not None)
         if wants_desktop and not (existing.desktop if existing else _desktop_enabled() and ctx.is_admin):
             return {"text": "Not run: the agent desktop is off. An admin can switch it on in Settings > Computer use; the change applies at the next start.", "images": []}
         c = await self._get(owner, is_admin=ctx.is_admin)
         if c.desktop and not ctx.is_admin:
             return {"text": "Not run: the agent desktop is limited to admins.", "images": []}
         desktop_action = wants_desktop or action == "screenshot" and c.desktop and args.get("desktop") is not False
-        if desktop_action and action not in ("launch", "windows", "click", "type", "key", "scroll", "screenshot"):
+        if desktop_action and action not in ("launch", "windows", "click", "type", "key", "scroll", "screenshot", "read", "verify"):
             return {"text": "Not run: desktop coordinates apply to click, type, key, scroll or screenshot.", "images": []}
         command, info, note = {}, {}, ""
         if action != "open":
@@ -689,6 +690,29 @@ class ComputerManager:
     async def _desktop_act(self, c: Computer, action: str, args: dict, ctx) -> dict:
         if action == "launch" and args.get("app") not in computer_image.DESKTOP_APPS:
             return {"text": "Not run: choose files, editor, pdf, images, writer, calc or impress.", "images": []}
+        if action in ("read", "verify"):
+            return await self._desktop_read(c, action, args, ctx)
+        ref = str(args.get("ref") or "")
+        if action in ("click", "type") and ref:
+            return await self._desktop_ref(c, action, ref, args, ctx)
+        if action in ("type", "key"):
+            # The focused control decides, as on the web: a password field is
+            # the person's, and Enter or Space presses what it would press.
+            focus = await self._command(c, "desktop_focused", expected_url=c.url)
+            focused = focus.get("element") or {}
+            key = str(args.get("key") or "").lower()
+            if focused.get("private") and (action == "type" or key not in ("tab", "shift+tab", "escape")):
+                _needs_person(c.owner, c.url)
+                return {"text": "Not typed: passwords, codes and payment details are entered by the person. "
+                        "Ask them to take over the computer. URL: desktop", "images": []}
+            last = key.split("+")[-1]
+            if action == "key" and last in ("enter", "return", "kp_enter", "space"):
+                pressed = [_desktop_control(focused)] + ([_desktop_control(row) for row in focus.get("defaults") or []]
+                                                          if last != "space" else [])
+                stopped = await self._press_guard(c, {**pressed[0], "form_submits": pressed[1:]}, ctx, enter=True,
+                                                  place=_desktop_place(focused))
+                if stopped:
+                    return {"text": stopped, "images": []}
         async with c.lock:
             if action in ("click", "type", "key", "scroll"):
                 values = {k: args[k] for k in ("x", "y", "text", "key", "dx", "dy") if k in args}
@@ -724,7 +748,70 @@ class ComputerManager:
         detail = f"URL: {c.url} | Desktop {action} completed."
         if action == "windows": detail += "\n" + json.dumps(reply.get("windows", []))
         if ctx.turn_taint: ctx.turn_taint.mark("computer desktop")
-        return {"text": detail, "images": [c.screenshot]}
+        result = {"text": detail, "images": [c.screenshot]}
+        if action == "click" and "x" in args and "y" in args:
+            result["point"] = {"x": args["x"], "y": args["y"]}
+        return result
+
+    async def _desktop_read(self, c: Computer, action: str, args: dict, ctx) -> dict:
+        """The focused window's controls by AT-SPI, as refs d<n>:<k>; or a
+        verify against them. Labels are untrusted text: the turn is tainted."""
+        if action == "verify":
+            expect, problem = _check_expect(args.get("expect"))
+            if problem:
+                return {"text": f"Not run: {problem}", "images": [], "code": "bad_arguments"}
+            reply = await self._command(c, "desktop_verify", expected_url=c.url, expect=expect)
+            checks = reply.get("checks") or []
+            met = bool(checks) and all(check["met"] for check in checks)
+            lines = [f"- {check['check']} {json.dumps(check['expected'], ensure_ascii=False)}: "
+                     f"{'met' if check['met'] else 'not met'} ({check['found']})" for check in checks]
+            if ctx.turn_taint: ctx.turn_taint.mark("computer desktop")
+            return {"text": f"URL: {c.url} | Desktop verify: {'met' if met else 'not met'}.\n"
+                    + wrap_untrusted("what the contained computer's desktop shows", "\n".join(lines)), "images": [], "met": met}
+        problem = _read_problem(args)
+        if problem:
+            return {"text": f"Not run: {problem}", "images": [], "code": "bad_arguments"}
+        reply = await self._command(c, "desktop_read", expected_url=c.url,
+                                    **{key: args[key] for key in ("query", "since", "max_elements") if args.get(key) not in (None, "")})
+        c.last_action = self.clock()
+        c.last_action_at = time.time()
+        c.screenshot = base64.b64decode(reply["screenshot"])
+        if ctx.turn_taint: ctx.turn_taint.mark("computer desktop")
+        window = reply.get("window") or {}
+        return {"text": f"URL: {c.url} | Desktop read completed: {window.get('title', '')} ({window.get('app', '')})."
+                + _read_text(reply).replace("page content from the contained computer", "desktop window content from the contained computer"),
+                "images": [c.screenshot],
+                "state": {key: reply[key] for key in ("snapshot", "elements", "diff", "query", "window") if key in reply}}
+
+    async def _desktop_ref(self, c: Computer, action: str, ref: str, args: dict, ctx) -> dict:
+        """Click or type on a desktop control by its ref: the same guards as
+        the web (buying, sending and posting stop; delete asks; password
+        fields are the person's), then its accessible action or focus."""
+        inspected = await self._command(c, "desktop_inspect", expected_url=c.url, ref=ref)
+        info, note = inspected.get("element") or {}, inspected.get("note") or ""
+        place = _desktop_place(info)
+        if action == "type" and info.get("private"):
+            _needs_person(c.owner, c.url)
+            return {"text": "Not typed: passwords, codes and payment details are entered by the person. "
+                    f"Ask them to take over the computer. URL: {c.url}", "images": []}
+        if action == "click":
+            stopped = await self._press_guard(c, info, ctx, place=place)
+            if stopped:
+                return {"text": stopped, "images": []}
+        if action == "type" and (not isinstance(args.get("text"), str) or len(args["text"]) > 10000):
+            return {"text": "Not run: give text of at most 10000 characters to type.", "images": [], "code": "bad_arguments"}
+        async with c.lock:
+            if c.taken_over:
+                return {"text": "Not run: the person has control of the computer.", "images": []}
+            reply = await self._send(c, "desktop_ref_input", expected_url=c.url, ref=ref, kind=action,
+                                     expected=info, **({"text": args["text"]} if action == "type" else {}))
+        c.last_action = self.clock()
+        c.last_action_at = time.time()
+        c.screenshot = base64.b64decode(reply["screenshot"])
+        if ctx.turn_taint: ctx.turn_taint.mark("computer desktop")
+        detail = f"URL: {c.url} | Desktop {action} completed on {info.get('role', 'control')} '{info.get('label', '')}' by {reply.get('how', 'its action')}."
+        return {"text": detail + (" " + note if note else ""), "images": [c.screenshot],
+                "element": {key: info[key] for key in ("label", "role", "app") if key in info}}
 
     def takeover(self, owner: str) -> bool:
         c = self._computers.get(owner)
@@ -915,9 +1002,9 @@ class ComputerManager:
                 else:
                     await self._sync_rate(c)
 
-    async def _press_guard(self, c: Computer, info: dict, ctx, enter: bool = False) -> str | None:
+    async def _press_guard(self, c: Computer, info: dict, ctx, enter: bool = False, place: str | None = None) -> str | None:
         controls = [info, *((info.get("form_submits") or []) if enter else [])]
-        host = urlsplit(c.url).hostname or "this page"
+        host = place or urlsplit(c.url).hostname or "this page"
 
         def hand_over(shown: str, why: str) -> str:
             if c.owner.startswith("agent:"):
@@ -967,6 +1054,15 @@ def _labels(info: dict) -> list[str]:
 def _private(info: dict) -> bool:
     autocomplete = info.get("autocomplete") or ""
     return (info.get("tag") == "input" and info.get("type") == "password") or autocomplete in PRIVATE_FIELDS or autocomplete.startswith("cc-")
+
+
+def _desktop_control(row: dict) -> dict:
+    """A desktop control as the press guard reads it."""
+    return {"label": row.get("label") or "", "signals": [value for value in (row.get("label"), row.get("value")) if value]}
+
+
+def _desktop_place(info: dict) -> str:
+    return f"the desktop ({info['app']})" if info.get("app") else "the desktop"
 
 
 def _step_label(step: dict) -> str:

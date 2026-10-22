@@ -72,7 +72,8 @@ def _computer_addendum(is_admin: bool, available: bool = True) -> str:
     from core import settings
     if is_admin and (settings.get_setting("computer_use") or {}).get("desktop"):
         guidance += (" The computer also has a desktop with a file manager, text editor, PDF viewer, image viewer "
-                     "and LibreOffice Writer, Calc and Impress (launch them with launch); files stay in its Documents folder.")
+                     "and LibreOffice Writer, Calc and Impress (launch them with launch); files stay in its Documents folder. "
+                     "read with desktop=true lists the focused window's controls as refs such as d2:14, which click and type accept.")
     return guidance
 
 

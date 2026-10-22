@@ -753,6 +753,94 @@ class ComputerContractLiveTests(unittest.TestCase):
         self.bench(check)
 
 
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class DesktopSemanticsLiveTests(unittest.TestCase):
+    """Desktop read by AT-SPI under the same hardening (cua upgrade 5.3)."""
+
+    def setUp(self):
+        desktop = patch("core.computer._desktop_enabled", return_value=True)
+        desktop.start()
+        self.addCleanup(desktop.stop)
+
+    def test_writer_menus_calc_cells_password_dialog_and_labels_guard(self):
+        from core import computer, permissions
+        from core.turn_taint import TurnTaint
+        import re as regex
+
+        async def check():
+            manager = computer.ComputerManager()
+            owner = "chat:live-a11y"
+            taint = TurnTaint()
+            ctx = tool_registry.ToolContext(session_id="live-a11y", is_admin=True, turn_taint=taint)
+            act = lambda action, **args: manager.act(owner, action, args, ctx)
+
+            async def read_until(pattern, **args):
+                for _ in range(60):
+                    try:
+                        read = await act("read", desktop=True, **args)
+                        if regex.search(pattern, read["text"]): return read
+                    except ValueError:
+                        pass
+                    await asyncio.sleep(0.5)
+                self.fail(f"never saw {pattern}: {read['text'][-1500:]}")
+
+            def ref(read, pattern):
+                return regex.search(r"\[(d\d+:\d+)\] " + pattern, read["text"]).group(1)
+            try:
+                with patch("core.computer.permissions.decide", side_effect=AssertionError("nothing here may ask")):
+                    await act("launch", app="writer")
+                    writer = await read_until(r"\] menu File\b", max_elements=200)
+                    self.assertTrue(taint.tainted, "desktop labels taint the turn")
+                    self.assertIn("UNTRUSTED", writer["text"])
+                    self.assertRegex(writer["text"], r"\] menu Edit\b")
+                    self.assertRegex(writer["text"], r"\] (toggle|push) button Bold", "toolbar rows")
+                    self.assertRegex(writer["text"], r"Desktop read completed: Untitled 1 . LibreOffice Writer \(soffice\)")
+                    opened = await act("click", ref=ref(writer, r"menu Edit\b"))
+                    self.assertIn("by action", opened["text"])
+                    menu = await read_until(r"\] menu Track Changes")
+                    await act("click", ref=ref(menu, r"menu Track Changes"))
+                    sub = await read_until(r"\] (check )?menu item Protect\.\.\.", query="Protect")
+                    await act("click", ref=ref(sub, r"(?:check )?menu item Protect\.\.\."))
+                    dialog = await read_until(r"\] password text")
+                    secret = ref(dialog, r"password text")
+                    refused = await act("type", ref=secret, text="private-desktop-secret")
+                    self.assertEqual(refused["code"], "private_field", refused["text"])
+                    keyed = await act("type", desktop=True, text="private-desktop-secret")
+                    self.assertEqual(keyed["code"], "private_field", keyed["text"])
+                    await act("key", desktop=True, key="Escape")
+                    files = await read_until(r"\] menu File\b")
+                    await act("click", ref=ref(files, r"menu File\b"))
+                    file_menu = await read_until(r"\] menu Send\b")
+                    stopped = await act("click", ref=ref(file_menu, r"menu Send\b"))
+                    self.assertEqual(stopped["code"], "person_only", stopped["text"])
+                    self.assertIn("Stopped before pressing 'Send' on the desktop (soffice)", stopped["text"])
+                    await act("key", desktop=True, key="Escape")
+                    await act("launch", app="calc")
+                    sheet = await read_until(r"\] table cell B2", query="B2")
+                    typed = await act("type", ref=ref(sheet, r"table cell B2"), text="42")
+                    self.assertIn("by focus", typed["text"])
+                    await act("key", desktop=True, key="Enter")
+                    landed = await read_until(r"table cell B2 =\"42\"", query="B2")
+                    self.assertIn('=\"42\"', landed["text"])
+                    stale = await act("read", desktop=True, since="latest")
+                    self.assertIn("Changes since", stale["text"])
+                    with self.assertRaises(computer.ComputerRefusal) as old:
+                        await act("click", ref=ref(writer, r"menu Edit\b"))
+                    self.assertEqual(old.exception.code, "stale_ref")
+                    met = await act("verify", desktop=True, expect={"element": {"role": "cell", "name": "B2"}, "text_present": "42"})
+                    self.assertTrue(met["met"], met["text"])
+                    c = manager._computers[owner]
+                    seal = subprocess.run(["docker", "exec", c.name, "sh", "-c", "id -u; touch /etc/owned 2>/dev/null && echo WRITABLE"],
+                                          capture_output=True, text=True, timeout=10)
+                    self.assertEqual(seal.stdout.strip(), "65534")
+                    data = __import__("json").loads(subprocess.run(["docker", "inspect", c.name], capture_output=True, text=True, check=True).stdout)[0]
+                    self.assertTrue(data["HostConfig"]["ReadonlyRootfs"])
+                    self.assertEqual(data["HostConfig"]["CapDrop"], ["ALL"])
+            finally:
+                await manager.close_all()
+        asyncio.run(check())
+
+
 CONTRACT_PAGES = {
     "/form.html": {"body": "<title>Form</title><h1>Sign up</h1><form onsubmit='return false'>"
                    + "".join(f"<label>{name} field <input aria-label='{name} field' name='{name.lower()}'></label><br>"
@@ -779,9 +867,10 @@ class DesktopLiveTests(ComputerLiveTests):
     def test_editor_documents_display_and_web_hard_stop(self):
         from core import computer, permissions
         from core.computer_driver import SOURCE
-        fixture = SOURCE.replace("        refs = {}", "        await page.route('https://example.com/**', "
+        fixture = SOURCE.replace("        history = {}", "        await page.route('https://example.com/**', "
             "lambda route: route.fulfill(body=\"<button>Place order</button><button style='position:absolute;right:0;bottom:0' "
-            "onclick='this.textContent=String(12345)'>Safe</button>\"))\n        refs = {}", 1)
+            "onclick='this.textContent=String(12345)'>Safe</button>\"))\n        history = {}", 1)
+        self.assertNotEqual(fixture, SOURCE, "the fixture page must reach the driver")
 
         async def check():
             manager = computer.ComputerManager()

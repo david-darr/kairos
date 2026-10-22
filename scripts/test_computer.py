@@ -1548,6 +1548,77 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.ran("click"))
 
 
+class DesktopContractTests(unittest.IsolatedAsyncioTestCase):
+    """Desktop refs (cua upgrade 5.3) through the same guards, fake driver."""
+
+    async def asyncSetUp(self):
+        self.desktop = patch("core.computer._desktop_enabled", return_value=True)
+        self.desktop.start()
+        await ContractTests.asyncSetUp(self)
+        self.control = {}
+        self.focused = {"element": {}, "defaults": []}
+        original = self.proc.reply
+
+        def reply(cmd):
+            if cmd["action"] == "desktop_inspect":
+                return {"id": cmd["id"], "element": self.control, "note": ""}
+            if cmd["action"] == "desktop_focused":
+                return {"id": cmd["id"], **self.focused}
+            if cmd["action"] == "desktop_ref_input":
+                return {"id": cmd["id"], "how": "action click", "url": self.proc.url, "title": "", "screenshot": base64.b64encode(PNG).decode()}
+            if cmd["action"] == "desktop_read":
+                return {"id": cmd["id"], "snapshot": "d1", "url": self.proc.url, "title": "", "total_elements": 1,
+                        "window": {"title": "Untitled 1", "app": "soffice"}, "text": "Window: Untitled 1 (soffice)",
+                        "elements": [{"ref": "d1:1", "tag": "push button", "label": "Save"}],
+                        "screenshot": base64.b64encode(PNG).decode()}
+            return original(cmd)
+        self.proc.reply = reply
+
+    async def asyncTearDown(self):
+        await ContractTests.asyncTearDown(self)
+        self.desktop.stop()
+
+    ran = ContractTests.ran
+
+    async def test_desktop_refs_read_act_and_route_without_a_desktop_flag(self):
+        read = await self.manager.act("chat:s1", "read", {"desktop": True}, self.ctx)
+        self.assertIn("[d1:1] push button Save", read["text"])
+        self.assertIn("desktop window content", read["text"])
+        self.assertTrue(self.ctx.turn_taint.tainted)
+        self.control = {"tag": "push button", "role": "push button", "label": "Save", "app": "soffice", "signals": ["Save"]}
+        clicked = await self.manager.act("chat:s1", "click", {"ref": "d1:1"}, self.ctx)
+        self.assertIn("by action click", clicked["text"])
+        sent = self.ran("desktop_ref_input")[-1]
+        self.assertEqual((sent["ref"], sent["kind"], sent["expected"]), ("d1:1", "click", self.control))
+
+    async def test_desktop_labels_go_through_the_press_guard(self):
+        for label, code in (("Send", "person_only"), ("Buy now", "person_only"), ("Delete Sheet", "not_approved")):
+            self.ask.return_value = permissions.Decision("deny", "No")
+            self.control = {"tag": "menu item", "role": "menu item", "label": label, "app": "soffice", "signals": [label]}
+            result = await self.manager.act("chat:s1", "click", {"ref": "d1:1"}, self.ctx)
+            self.assertEqual(result["code"], code, result["text"])
+            if code == "person_only":
+                self.assertIn(f"Stopped before pressing '{label}' on the desktop (soffice)", result["text"])
+        self.assertFalse(self.ran("desktop_ref_input"), "no guarded control was pressed")
+        self.ask.return_value = permissions.Decision("allow")
+
+    async def test_desktop_password_fields_and_enter_on_a_default_button(self):
+        self.control = {"tag": "password text", "role": "password text", "label": "Password", "app": "soffice", "private": True, "signals": []}
+        refused = await self.manager.act("chat:s1", "type", {"ref": "d1:1", "text": "secret"}, self.ctx)
+        self.assertEqual(refused["code"], "private_field")
+        self.focused = {"element": {"tag": "password text", "label": "Password", "private": True}, "defaults": []}
+        for action, args in (("type", {"text": "secret"}), ("key", {"key": "a"})):
+            result = await self.manager.act("chat:s1", action, {"desktop": True, **args}, self.ctx)
+            self.assertEqual(result["code"], "private_field", action)
+        tabbed = await self.manager.act("chat:s1", "key", {"desktop": True, "key": "Tab"}, self.ctx)
+        self.assertNotIn("code", tabbed)
+        self.focused = {"element": {"tag": "text", "label": "To"}, "defaults": [{"tag": "push button", "label": "Send now"}]}
+        stopped = await self.manager.act("chat:s1", "key", {"desktop": True, "key": "Return"}, self.ctx)
+        self.assertEqual(stopped["code"], "person_only")
+        self.assertIn("'Send now'", stopped["text"])
+        self.assertNotIn("secret", json.dumps([c for c in self.proc.calls if c["action"] == "desktop_input"]))
+
+
 class DriverContractTests(unittest.TestCase):
     """The driver's own ref, diff and verify rules, run from its source."""
 
