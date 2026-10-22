@@ -338,8 +338,12 @@ async def _resume_default_model(req: dict, prompt: str, agent: dict) -> None:
         await brain.connect()
         if hasattr(brain, "pending_reference_taint"):
             brain.pending_reference_taint = "result from another bot"
-        output = await complete(brain, agent_service.run_prompt(agent, prompt),
-                                {"id": source_id, "agent_id": agent["id"]}, "agent")
+        # Its vault edits are this chat's turn, checkpointed like any other
+        # (as core/task_scheduler.py does), not "Edited outside Kairos".
+        from core import file_checkpoints
+        async with file_checkpoints.around_turn(f"chat:{session_id}"):
+            output = await complete(brain, agent_service.run_prompt(agent, prompt),
+                                    {"id": source_id, "agent_id": agent["id"]}, "agent")
         session_manager.append_message(session_id, "assistant", output,
                                        extra={"agent_id": agent["id"], "agent_name": agent["name"]})
     finally:

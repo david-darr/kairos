@@ -1,0 +1,14 @@
+<!doctype html>
+<title>Preferences</title>
+<h1>Preferences</h1>
+<p><label><input type="checkbox" id="email" checked aria-label="Email alerts"> Email alerts</label></p>
+<p><label><input type="checkbox" id="dark" aria-label="Dark mode"> Dark mode</label></p>
+<p><label><input type="checkbox" id="digest" checked aria-label="Weekly digest"> Weekly digest</label></p>
+<p><button type="button" id="apply">Apply settings</button></p>
+<p id="result"></p>
+<script>
+  const state = id => document.getElementById(id).checked ? 'on' : 'off';
+  document.getElementById('apply').onclick = () => {
+    document.getElementById('result').textContent = `Applied: email=${state('email')} dark=${state('dark')} digest=${state('digest')}`;
+  };
+</script>

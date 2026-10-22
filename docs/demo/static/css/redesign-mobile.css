@@ -20,8 +20,6 @@
   }
   .kairos-redesign #chat-progress-host,
   .kairos-redesign #rd-needs { display: none !important; }
-  .kairos-redesign:has(.ms-shell:not([hidden])) #mobile-menu-btn,
-  .kairos-redesign:has(.ms-conversation):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign #view-content.ms-home { padding: 0; overflow-x: hidden; }
   .kairos-redesign .ms-home .dashboard-content { width: 100%; max-width: none; gap: 0; flex: 1; min-height: 0; }
   .kairos-redesign .ms-home .dashboard-content > :not(.ms-shell) { display: none; }
@@ -35,10 +33,9 @@
   .kairos-redesign .ms-shell .ms-background { position: absolute; inset: 0; border-radius: 0; z-index: -1; opacity: .65; pointer-events: none; }
   .kairos-redesign .ms-shell .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
   .kairos-redesign .ms-header { position: relative; z-index: 3; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px; }
-  .kairos-redesign .ms-header-row { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 8px; height: 44px; }
-  .kairos-redesign :is(.ms-avatar, .ms-settings) { display: grid; place-items: center; padding: 0; width: 44px; height: 44px; }
-  .kairos-redesign .ms-avatar { position: relative; font-weight: 600; }
-  .kairos-redesign .ms-avatar-badge { position: absolute; top: -2px; right: -4px; font-size: 10px; padding: 2px 4px; border-radius: 999px; background: var(--rd-ink); color: var(--rd-ground); }
+  /* The top row holds the page's title or switch only; navigation is the tab bar (redesign-tabbar.css). */
+  .kairos-redesign .ms-header-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 8px; height: 44px; }
+  .kairos-redesign .ms-settings { display: grid; place-items: center; padding: 0; width: 44px; height: 44px; }
   .kairos-redesign .ms-settings svg { width: 20px; height: 20px; }
   .kairos-redesign .ms-switch { justify-self: center; display: flex; position: relative; padding: 3px; height: 44px; width: 174px; }
   .kairos-redesign .ms-switch-thumb { position: absolute; inset: 3px auto 3px 3px; width: calc(50% - 3px); border-radius: inherit; background: var(--rd-surface-2); transform: translateX(calc(var(--ms-page) * 100%)); transition: transform 350ms cubic-bezier(.22, 1, .36, 1); }
@@ -352,7 +349,7 @@
   .kairos-redesign .ms-sheet-activity-row button { border: 0; background: transparent; min-height: 48px; }
   .kairos-redesign .ms-sheet-activity-main { flex: 1; min-width: 0; text-align: left; padding: 0 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kairos-redesign .ms-sheet-activity-stop { padding: 0 16px; }
-  .kairos-redesign .ms-avatar-badge, .kairos-redesign #mobile-menu-btn > .ms-avatar-badge, .kairos-redesign .ms-chat-back > .ms-avatar-badge { position: absolute; top: -2px; right: -4px; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 999px; background: var(--rd-ink); color: var(--rd-ground); pointer-events: none; }
+  .kairos-redesign .ms-chat-back > .ms-avatar-badge { position: absolute; top: -2px; right: -4px; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 999px; background: var(--rd-ink); color: var(--rd-ground); pointer-events: none; }
   .kairos-redesign .ms-chat-back { position: relative; }
   /* A transform on the conversation would re-anchor fixed panels (artifact pane) for 320ms: reveal with a clip instead. */
   .kairos-redesign .ms-conversation { animation: ms-chat-reveal 320ms cubic-bezier(.22, 1, .36, 1); }
@@ -368,12 +365,6 @@
    A single light, untinted layer avoids compounded blur and colored bands. */
 @media (max-width: 768px) {
   .kairos-redesign #sidebar { display: none !important; }
-  .kairos-redesign #mobile-menu-btn.ms-avatar {
-    position: fixed;
-    top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: max(16px, env(safe-area-inset-left, 0px));
-    width: 44px; height: 44px; min-width: 44px; min-height: 44px; z-index: 1100;
-    display: grid; place-items: center; transform: none; line-height: 1; font: 400 14px var(--rd-font-ui);
-  }
   .kairos-redesign .ms-global-frost {
     position: fixed; top: 0; left: 0; right: 0; height: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 88px);
     z-index: 54; background: transparent;
@@ -393,8 +384,8 @@
   .kairos-redesign .dashboard .hm-customize { min-height: 44px; min-width: 44px; }
   .kairos-redesign .dashboard-actions { flex-wrap: wrap; }
   .kairos-redesign .dashboard :is(button.dashboard-row, .dashboard-section-header .btn) { min-height: 44px; }
-  /* 2026-10-21 (David): a page's content starts below the avatar's row, and
-     its title sits on that row (see "Page title" at the end of this file). */
+  /* 2026-10-21 (David): a page's content starts below the top row, and its
+     title sits on that row (see "Page title" at the end of this file). */
   .kairos-redesign #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) {
     position: relative; padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 62px);
   }
@@ -433,11 +424,11 @@
   .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
 }
 
-/* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
+/* Tool Store keeps its own sticky header; its title row sits under the safe area. */
 @media (max-width: 768px) {
   /* The search and filter card starts below the header row and scrolls with the page (2026-10-21: it ran off the top). */
   .kairos-redesign .tool-store-view .tool-store-top { position: static; top: auto; margin: 0; padding: 6px 12px 6px; border: 1px solid var(--rd-line); border-radius: 20px; z-index: auto; -webkit-backdrop-filter: none; backdrop-filter: none; }
-  /* The title moves to the avatar's row, so "+" joins the search on the card's first row. */
+  /* The title moves to the top row, so "+" joins the search on the card's first row. */
   .kairos-redesign .tool-store-view .tool-store-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
   .kairos-redesign .tool-store-view .tool-store-top :is(.view-header, .view-header > div:first-child) { display: contents; }
   .kairos-redesign .tool-store-view .tool-store-top .ts-plus { grid-column: 2; grid-row: 1; }
@@ -458,7 +449,7 @@
 @media (max-width: 768px) {
   .kairos-redesign::after { display: none; }
   /* The frost lives only in the status bar area and is clear by its bottom
-     edge, so the avatar and header controls below it stay sharp. */
+     edge, so the titles and header controls below it stay sharp. */
   .kairos-redesign .ms-global-frost,
   .kairos-redesign .ms-blur-top { height: max(0px, calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-ios-nudge, 0px))); }
   /* 2026-10-21 (David): lighter and higher still: 1px, clear by about the
@@ -469,7 +460,6 @@
     mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 60%);
     -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 60%);
   }
-  .kairos-redesign #mobile-menu-btn.ms-avatar { z-index: 1100; }
   .kairos-redesign .ms-global-frost { z-index: 54; }
 }
 
@@ -497,8 +487,8 @@
   .kairos-redesign .forge-home.mf-home { width: 100%; max-width: none; margin: 0; padding: 0; height: 100%; }
   .kairos-redesign .mf-home > :not(.mf-project, .mf-dashboard) { display: none; }
   .kairos-redesign .mf-project { height: 100%; min-height: 0; }
-  .kairos-redesign .mf-project .ms-header-row { grid-template-columns: 44px minmax(0, 1fr) 64px; }
-  .kairos-redesign .mf-project .ms-switch { width: min(174px, 100%); }
+  .kairos-redesign .mf-project .ms-header-row { grid-template-columns: 64px minmax(0, 1fr) 64px; }
+  .kairos-redesign .mf-project .ms-switch { grid-column: 2; width: min(174px, 100%); }
   .kairos-redesign .mf-project-trigger { padding: 0 8px; font-size: 12px !important; }
   .kairos-redesign .mf-workspace-line { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; padding: 0 8px; border: 0; background: transparent; font-size: 12px !important; color: var(--rd-ink-dim); }
   .kairos-redesign .mf-workspace-line > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -542,8 +532,6 @@
   .kairos-redesign .mf-session-heading :is(strong, small) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kairos-redesign .mf-session-heading strong { font-size: 15px; }
   .kairos-redesign .mf-session-heading small { font-size: 11px; color: var(--rd-ink-dim); }
-  .kairos-redesign:has(.mf-project, .mf-dashboard):not(.mobile-menu-open) #mobile-menu-btn,
-  .kairos-redesign:has(.mf-session):not(.mobile-menu-open) #mobile-menu-btn { visibility: hidden; }
   .kairos-redesign .mf-session .forge-transcript-composer { margin-bottom: max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
   .kairos-redesign .mf-session .forge-composer-chips > .custom-select { display: block; }
   .kairos-redesign .mf-session .forge-transcript-composer:not(.ms-composer-expanded) .forge-composer-chips { display: none; }
@@ -621,12 +609,12 @@
 }
 
 /* Forge phone Home: the desktop dashboard as a page, reached like Kairos Home.
-   Header, avatar and safe areas come from the phone shell; the cards stack in one column. */
+   Header and safe areas come from the phone shell; the cards stack in one column. */
 @media (max-width: 768px) {
   .kairos-redesign .mf-dashboard { height: 100%; min-height: 0; }
   .kairos-redesign .mf-dashboard .ms-header { padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
-  /* The title sits on the avatar's row, against the right edge, as on every phone tab ("Page title" below). */
-  .kairos-redesign .mf-dashboard .ms-header-row { grid-template-columns: 44px minmax(0, 1fr); }
+  /* The title sits on the top row, against the right edge, as on every phone tab ("Page title" below). */
+  .kairos-redesign .mf-dashboard .ms-header-row { grid-template-columns: minmax(0, 1fr); }
   .kairos-redesign .mf-dashboard-title { margin: 0; min-width: 0; text-align: right; font: 500 28px/44px var(--rd-font-title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kairos-redesign .mf-dashboard .forge-toolbar { justify-content: flex-start; gap: 8px; }
   .kairos-redesign .mf-dashboard .forge-toolbar > .meta { margin-right: auto; }
@@ -662,8 +650,9 @@
 }
 
 /* Page title (2026-10-21, David): on every phone tab the title sits on the
-   avatar's row, centred with it and set against the right edge; the page
-   content starts below that row. One rule for the shared page header and the
+   top row (44px, 6px under the status bar) against the right edge; the page
+   content starts below that row. Since the tab bar replaced the avatar
+   (2026-10-22) the row holds the title alone. One rule for the shared page header and the
    two pages that draw their own (Agents' bar, Settings' title bar). Pages with
    a switch in that row (Chats, Forge New/Sessions) keep the switch as their
    title; Forge Home's own header row follows the same placement. */
@@ -672,7 +661,7 @@
   .kairos-redesign #view-content > :first-child > .view-header:first-child h2,
   .kairos-redesign #view-content .tool-store-view .view-header h2,
   .kairos-redesign #view-content .agents-workspace-bar > h2 {
-    position: absolute; z-index: 2; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: 72px; right: 16px;
+    position: absolute; z-index: 2; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: 16px; right: 16px;
     height: 44px; min-height: 0; margin: 0; padding: 0; box-sizing: border-box;
     font-size: 28px; line-height: 44px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -680,14 +669,14 @@
   .kairos-redesign #view-content :is(.view-constrained, .view-header, .tool-store-view, .agents-workspace, .agents-workspace-bar, .tool-store-top):has(h2) { position: static; }
   .kairos-redesign #view-content .agents-workspace-bar { padding-left: 0; justify-content: flex-end; }
   .kairos-redesign .settings-mobile-page .settings-titlebar {
-    min-height: 44px; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px 72px; justify-content: flex-end;
+    min-height: 44px; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px 16px; justify-content: flex-end;
   }
   .kairos-redesign .settings-mobile-page .settings-titlebar .title { margin-left: auto; text-align: right; }
 }
 
-/* Full-screen panels and sheets sit above every page header and the avatar
+/* Full-screen panels and sheets sit above every page header and the tab bar
    (2026-10-21, David: Chat's documents panel lay under the chat's title and
-   buttons). Headers are 55-56 and the avatar 1100; dialogs and the shared
+   buttons). Headers are 55-56 and the tab bar 1100; dialogs and the shared
    sheets are already in the top layer or above 1400. Each panel clears the
    status bar with its own header. */
 @media (max-width: 768px) {
@@ -697,7 +686,7 @@
   .kairos-redesign .hm-sheet { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 16px); padding-bottom: calc(28px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
 }
 
-/* Tab sheet: the app mode switch at the top of the workspace sheet (mobileTabSheet.js).
+/* More sheet: the app mode switch at its top (mobileTabSheet.js).
    A segmented radio group with a sliding thumb, like the New / Chats switch; the
    sheet-wide reduced-motion rule turns the slide off. */
 @media (max-width: 768px) {

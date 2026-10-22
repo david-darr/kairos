@@ -1,0 +1,14 @@
+<!doctype html>
+<title>Sign in</title>
+<h1>Sign in</h1>
+<p><label>Username <input id="user" aria-label="Username" autocomplete="username"></label></p>
+<p><label>Password <input id="pass" type="password" aria-label="Password" autocomplete="current-password"></label></p>
+<p><button type="button" id="go">Sign in</button></p>
+<p id="result"></p>
+<script>
+  document.getElementById('go').onclick = () => {
+    const user = document.getElementById('user').value.trim();
+    const filled = document.getElementById('pass').value.length > 0;
+    document.getElementById('result').textContent = filled ? 'Signed in as ' + user : 'Enter a password.';
+  };
+</script>

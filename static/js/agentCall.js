@@ -6,6 +6,14 @@ import { voiceSettings, neuralSpeaker } from './callVoice.js';
 import { transcribeBlob, refreshSpeechStatus } from './voiceInput.js';
 import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js';
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
+import { createMascot } from './mascot.js';
+
+// In a call the bot's Ajar replaces the orb (Kairos Mascot build spec,
+// 2026-10-22). It reads the orb's --level (microphone) and --word (speech)
+// by inheritance: eyes widen while listening, squash and the point pulses
+// while speaking, and a halo swells with the level. The orb core stays as
+// the fallback when Show the mascot is off.
+const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listening', transcribing: 'thinking', thinking: 'thinking', speaking: 'speaking', paused: 'sleeping' };
 
 export function agentCall(agent, controller) {
   let recorder = null, active = false, disposed = false, starting = false, epoch = 0;
@@ -45,7 +53,8 @@ export function agentCall(agent, controller) {
   dialog.dataset.state = 'setup';
   const clock = el('time', { class: 'agent-call-clock', text: '00:00' });
   const status = el('div', { class: 'agent-call-status', role: 'status', text: 'Ready when you are' });
-  const orb = el('div', { class: 'agent-call-orb', 'aria-hidden': 'true' }, [el('div', { class: 'agent-call-orb-core' })]);
+  const callMascot = createMascot({ agent, state: 'idle' });
+  const orb = el('div', { class: 'agent-call-orb', 'aria-hidden': 'true' }, [el('div', { class: 'agent-call-orb-core' }), callMascot]);
   const error = el('p', { class: 'agent-call-error', role: 'alert' });
   const readiness = el('p', { class: 'agent-call-readiness', role: 'status', text: 'Checking speech on this device...' });
   const voice = el('select', { 'aria-label': 'Call voice', disabled: true });
@@ -164,6 +173,7 @@ export function agentCall(agent, controller) {
   voice.onchange = () => { try { localStorage.setItem(voiceKey, voice.value); } catch {} };
   function setState(next, text) {
     state = next; dialog.dataset.state = next; status.textContent = text;
+    callMascot.setAttribute('state', CALL_MASCOT[next] || 'idle');
     if (next !== 'listening') orb.style.setProperty('--level', '0');
     if (next !== 'speaking') orb.style.setProperty('--word', '0');
     recorder?.setEnabled(active && !microphoneMuted && !['speaking', 'paused', 'preparing', 'setup'].includes(next));

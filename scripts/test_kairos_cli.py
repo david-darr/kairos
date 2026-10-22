@@ -179,51 +179,72 @@ class PaletteTests(unittest.TestCase):
 
 
 class MascotTests(unittest.TestCase):
-    def test_the_placeholder_sheet_loads_in_the_documented_format(self):
-        manifest = json.loads((mascot.PLACEHOLDER_DIR / "kip.json").read_text(encoding="utf-8"))
-        self.assertEqual((manifest["format"], manifest["version"]), ("kairos-sprite-sheet", 1))
-        for theme in ("default", "night"):
-            sheet = mascot.load_sheet(mascot.PLACEHOLDER_DIR, theme)
-            self.assertIsNotNone(sheet)
-            self.assertTrue(sheet.placeholder)
-            for state in ("idle", "thinking", "needs", "success", "error", "sleeping"):
-                self.assertEqual(len(sheet.frames[state]), 16)
+    """Kip from the mascot work's real assets (static/img/mascot/kip)."""
 
-    def test_banner_is_22_by_12_and_the_slot_12_by_6(self):
-        sheet = mascot.load_sheet(mascot.PLACEHOLDER_DIR, "night")
-        banner = mascot.half_blocks(sheet.frame("idle", 0))
-        self.assertEqual((len(banner), {line.cell_len for line in banner}), (12, {22}))
-        slot = mascot.half_blocks(sheet.frame("thinking", 3), scale=2)
+    def test_the_real_assets_load_in_both_themes_and_sizes(self):
+        manifest = mascot.load_manifest()
+        self.assertEqual((manifest["format"], manifest["version"]), ("kairos-kip-sheet", 1))
+        for theme in ("parchment", "night"):
+            for size, grid in (("full", 24), ("mini", 12)):
+                sheet = mascot.load_sheet(theme=theme, size=size)
+                self.assertIsNotNone(sheet, (theme, size))
+                self.assertEqual(set(sheet.frames), set(mascot.ASSET_STATES))
+                for state, count in manifest["frame_counts"].items():
+                    self.assertEqual(len(sheet.frames[state]), count)
+                self.assertEqual(len(sheet.frame("idle", 0)), grid)
+
+    def test_cli_states_map_onto_the_assets(self):
+        sheet = mascot.load_sheet(theme="night")
+        self.assertIs(sheet.frame("needs", 0), sheet.frames["needs-you"][0])
+        self.assertIs(sheet.frame("success", 3), sheet.frames["done"][3])
+        self.assertIs(sheet.frame("sleeping", 0), sheet.frames["idle"][0])
+
+    def test_banner_is_24_by_12_and_the_slot_12_by_6(self):
+        kip = mascot.Kip(palettes.Palette("night", "truecolor"))
+        banner = kip.banner("idle", 0)
+        self.assertEqual((len(banner), {line.cell_len for line in banner}), (12, {24}))
+        slot = kip.slot("thinking", 0.5)
         self.assertEqual((len(slot), {line.cell_len for line in slot}), (6, {12}))
 
-    def test_real_assets_win_when_present_and_bad_ones_are_refused(self):
+    def test_lower_colour_depths_use_the_assets_plain_still(self):
+        kip = mascot.Kip(palettes.Palette("night", "256"))
+        self.assertEqual(kip.tier, "blocks")
+        self.assertEqual([line.plain for line in kip.banner("idle")], mascot.plain_still("idle"))
+        self.assertEqual(mascot.Kip(palettes.Palette("night", "none"), ascii_only=True).tier, "text")
+
+    def test_malformed_assets_are_refused(self):
+        manifest = mascot.load_manifest()
         with tempfile.TemporaryDirectory() as folder:
-            manifest = json.loads((mascot.PLACEHOLDER_DIR / "kip.json").read_text(encoding="utf-8"))
-            for name in ("kip.png", "kip-night.png"):
-                (Path(folder) / name).write_bytes((mascot.PLACEHOLDER_DIR / name).read_bytes())
-            manifest["placeholder"] = False
-            (Path(folder) / "kip.json").write_text(json.dumps(manifest), encoding="utf-8")
+            def write(data):
+                (Path(folder) / "kip.json").write_text(json.dumps(data), encoding="utf-8")
+            broken = json.loads(json.dumps(manifest))
+            broken["sizes"]["full"]["frames"]["night"]["idle"][0][0] = "[2J" + "." * 20
+            write(broken)
+            self.assertIsNone(mascot.load_sheet(Path(folder), "night"))
+            broken = json.loads(json.dumps(manifest))
+            broken["themes"]["night"]["full"][0] = "red; evil"
+            write(broken)
+            self.assertIsNone(mascot.load_sheet(Path(folder), "night"))
+            broken = json.loads(json.dumps(manifest))
+            broken["format"] = "something-else"
+            write(broken)
+            self.assertIsNone(mascot.load_sheet(Path(folder), "night"))
             os.environ["KAIROS_KIP_DIR"] = folder
             try:
+                write(manifest)
                 self.assertEqual(mascot.asset_dir(), Path(folder))
-                self.assertFalse(mascot.load_sheet().placeholder)
             finally:
                 del os.environ["KAIROS_KIP_DIR"]
-            manifest["sheets"] = {"default": "../outside.png"}
-            (Path(folder) / "kip.json").write_text(json.dumps(manifest), encoding="utf-8")
-            self.assertIsNone(mascot.load_sheet(Path(folder)))
-            manifest["states"]["idle"]["frames"] = 99
-            manifest["sheets"] = {"default": "kip.png"}
-            (Path(folder) / "kip.json").write_text(json.dumps(manifest), encoding="utf-8")
-            self.assertIsNone(mascot.load_sheet(Path(folder)))
 
     def test_text_tiers(self):
-        self.assertEqual(mascot.text_face("idle", 0), [" .---.*", "( ▮ ▮ )", " `---'"])
-        self.assertEqual(mascot.text_face("idle", 0, ascii_only=True)[1], "( | | )")
-        self.assertEqual(mascot.status_mark("needs", 0), "!")
-        self.assertEqual([mascot.status_mark("thinking", t) for t in range(4)], ["◜", "◝", "◞", "◟"])
+        manifest = mascot.load_manifest()
+        self.assertEqual(mascot.text_face("idle", manifest), manifest["text_face"]["idle"]["unicode"])
+        self.assertEqual(mascot.text_face("needs", manifest, ascii_only=True), manifest["text_face"]["needs-you"]["ascii"])
+        self.assertEqual(mascot.status_mark("needs", 0, manifest), "!")
+        self.assertEqual([mascot.status_mark("thinking", t, manifest) for t in range(4)], ["◜", "◝", "◞", "◟"])
+        self.assertEqual(mascot.text_face("idle", None)[1], "( ▮ ▮ )")
         pal = palettes.Palette("night", "16")
-        self.assertEqual(mascot.Kip(pal).tier, "text")
+        self.assertEqual(mascot.Kip(pal).tier, "blocks")
         self.assertEqual(mascot.Kip(palettes.Palette("night", "truecolor")).tier, "pixels")
         self.assertEqual(mascot.Kip(pal, enabled=False).tier, "off")
 

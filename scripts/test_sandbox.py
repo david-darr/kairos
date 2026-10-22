@@ -609,7 +609,7 @@ class ComputerLiveTests(unittest.TestCase):
                     await manager.act("chat:live-computer", "open", {"url": "https://example.com/"}, ctx)
                     read = await manager.act("chat:live-computer", "read", {}, ctx)
                     self.assertIn("Example Domain", read["text"])
-                    self.assertIn("[1]", read["text"])
+                    self.assertIn("[r1:1]", read["text"])  # refs are snapshot-scoped (cua upgrade 5.2)
                     clicked = await manager.act("chat:live-computer", "click", {"ref": "1"}, ctx)
                     self.assertNotIn("URL: https://example.com/ |", clicked["text"])
                     await manager.act("chat:live-computer", "done", {}, ctx)
@@ -617,6 +617,318 @@ class ComputerLiveTests(unittest.TestCase):
             finally:
                 await manager.close_all()
         asyncio.run(check())
+
+
+STALE_PAGE = ("<ul id=list><li><button>Archive</button></li><li><button>Keep</button></li></ul><p id=out></p>"
+              "<script>setTimeout(() => { document.getElementById('list').innerHTML = "
+              "'<li><button onclick=\"out.textContent=`deleted`\">Delete item</button></li><li><button>Archive</button></li>'"
+              " }, 1200)</script>")
+
+
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class ComputerContractLiveTests(unittest.TestCase):
+    """The action contract (vault: Agents - Computer-Use Upgrade from cua)."""
+
+    def fixture_source(self, body):
+        from core.computer_driver import SOURCE
+        anchor = "page = context.pages[0] if context.pages else await context.new_page()\n"
+        return SOURCE.replace(anchor, anchor + "        await page.route('https://example.com/**', "
+                              f"lambda route: route.fulfill(body={body!r}, content_type='text/html'))\n", 1)
+
+    def test_a_ref_from_an_earlier_read_never_clicks_what_replaced_it(self):
+        from core import computer, permissions
+        import re as regex
+
+        async def check():
+            manager = computer.ComputerManager()
+            owner = "chat:live-stale"
+            ctx = tool_registry.ToolContext(session_id="live-stale", is_admin=True)
+            try:
+                with patch("core.computer.SOURCE", self.fixture_source(STALE_PAGE)), \
+                     patch("core.computer.permissions.decide", return_value=permissions.Decision("allow")):
+                    await manager.act(owner, "open", {"url": "https://example.com/"}, ctx)
+                    first = await manager.act(owner, "read", {}, ctx)
+                    archive = regex.search(r"\[([^\]]+)\] button Archive", first["text"]).group(1)
+                    await asyncio.sleep(2)
+                    second = await manager.act(owner, "read", {}, ctx)
+                    self.assertIn("Delete item", second["text"])
+                    try:
+                        clicked = await manager.act(owner, "click", {"ref": archive}, ctx)
+                    except ValueError as refused:
+                        self.assertEqual(getattr(refused, "code", None), "stale_ref")
+                        self.assertIn("older read", str(refused))
+                    else:
+                        self.fail(f"a ref from the earlier read was used: {clicked['text']}")
+                    c = manager._computers[owner]
+                    page = await manager._command(c, "verify", expect={"text_absent": "deleted"})
+                    self.assertTrue(page["checks"][0]["met"], "the replacing button was pressed")
+            finally:
+                await manager.close_all()
+        asyncio.run(check())
+
+    def bench(self, check):
+        """Run `check(manager, act)` against fixture pages served inside the
+        driver (the benchmark's own mechanism; no network, no approval)."""
+        from core import computer
+        from core.turn_taint import TurnTaint
+
+        async def run():
+            manager = computer.ComputerManager(fixtures=CONTRACT_PAGES, approved_hosts=("bench.kairos.test",))
+            ctx = tool_registry.ToolContext(session_id="live-contract", is_admin=True, turn_taint=TurnTaint())
+            try:
+                with patch("core.computer.permissions.decide", side_effect=AssertionError("nothing here may ask")):
+                    await check(manager, lambda action, **args: manager.act("chat:live-contract", action, args, ctx))
+            finally:
+                await manager.close_all()
+        asyncio.run(run())
+
+    def test_a_five_field_form_fills_in_one_call_and_verify_reports_both_outcomes(self):
+        import re as regex
+
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/form.html")
+            read = await act("read", query="field")
+            refs = dict(regex.findall(r"\[(r\d+:\d+)\] input (\w+ field)", read["text"]))
+            refs = {label: ref for ref, label in refs.items()}
+            self.assertEqual(len(refs), 5, read["text"])
+            values = {"First field": "Ada", "Last field": "Lovelace", "Email field": "ada@example.com",
+                      "City field": "London", "Notes field": "Engines"}
+            calls_before = len(manager._computers["chat:live-contract"].pending)
+            done = await act("steps", steps=[{"action": "type", "ref": refs[label], "text": value}
+                                              for label, value in values.items()])
+            self.assertEqual(calls_before, 0)
+            self.assertIn("Steps: 5 of 5 ran.", done["text"])
+            self.assertIn("Changes since", done["text"])
+            self.assertEqual(len(done["images"]), 1, "one observation at the end")
+            met = await act("verify", expect={"text_present": "Form ready", "url_contains": "form.html"})
+            self.assertTrue(met["met"], met["text"])
+            self.assertIn("Verify: met.", met["text"])
+            missed = await act("verify", expect={"text_present": "Submitted", "element": {"role": "button", "name": "Continue"}})
+            self.assertFalse(missed["met"])
+            self.assertIn("text_present \"Submitted\": not met (not on the page)", missed["text"])
+            self.assertIn("element", missed["text"])
+            self.assertIn("1 matching element", missed["text"])
+        self.bench(check)
+
+    def test_a_buy_button_in_step_three_stops_the_batch_after_two(self):
+        import re as regex
+
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/form.html")
+            read = await act("read")
+            ref = lambda label: regex.search(r"\[(r\d+:\d+)\] [^\n]*" + label, read["text"]).group(1)
+            done = await act("steps", steps=[
+                {"action": "type", "ref": ref("First field"), "text": "Ada"},
+                {"action": "type", "ref": ref("Last field"), "text": "Lovelace"},
+                {"action": "click", "ref": ref("Buy now")},
+                {"action": "type", "ref": ref("City field"), "text": "never typed"}])
+            self.assertEqual(done["code"], "person_only")
+            self.assertTrue(done["text"].startswith("Stopped: at step 3 of 4. Steps: 2 of 4 ran."), done["text"])
+            self.assertIn("Steps 1 to 2 already ran and were not undone.", done["text"])
+            c = manager._computers["chat:live-contract"]
+            state = await manager._command(c, "verify", expect={"text_absent": "Bought", "text_present": "Lovelace"})
+            self.assertFalse(any(row["check"] == "text_absent" and not row["met"] for row in state["checks"]))
+            filled = await act("read", query="City")
+            self.assertNotIn("never typed", filled["text"])
+            private = await act("steps", steps=[{"action": "type", "ref": regex.search(
+                r"\[(r\d+:\d+)\] input[^\n]*Password", (await act("read")).get("text")).group(1), "text": "hunter2"}])
+            self.assertEqual(private["code"], "private_field")
+        self.bench(check)
+
+    def test_a_diff_read_is_smaller_than_a_full_read(self):
+        async def check(manager, act):
+            await act("open", url="https://bench.kairos.test/long.html")
+            full = await act("read")
+            await act("click", ref=__import__("re").search(r"\[(r\d+:\d+)\] button Add a row", full["text"]).group(1))
+            diff = await act("read", since="latest")
+            self.assertIn("1 added", diff["text"])
+            self.assertIn("Row 41", diff["text"])
+            self.assertLess(len(diff["text"]), len(full["text"]) / 4, (len(diff["text"]), len(full["text"])))
+            narrow = await act("read", query="Row 7")
+            self.assertLess(len(narrow["text"]), len(full["text"]) / 4)
+            self.assertIn("## Table", narrow["text"])
+            await act("open", url="https://bench.kairos.test/form.html")
+            moved = await act("read", since="latest")
+            self.assertIn("Full read: the page navigated.", moved["text"])
+        self.bench(check)
+
+
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class DesktopSemanticsLiveTests(unittest.TestCase):
+    """Desktop read by AT-SPI under the same hardening (cua upgrade 5.3)."""
+
+    def setUp(self):
+        desktop = patch("core.computer._desktop_enabled", return_value=True)
+        desktop.start()
+        self.addCleanup(desktop.stop)
+
+    def test_writer_menus_calc_cells_password_dialog_and_labels_guard(self):
+        from core import computer, permissions
+        from core.turn_taint import TurnTaint
+        import re as regex
+
+        async def check():
+            manager = computer.ComputerManager()
+            owner = "chat:live-a11y"
+            taint = TurnTaint()
+            ctx = tool_registry.ToolContext(session_id="live-a11y", is_admin=True, turn_taint=taint)
+            act = lambda action, **args: manager.act(owner, action, args, ctx)
+
+            async def read_until(pattern, **args):
+                for _ in range(60):
+                    try:
+                        read = await act("read", desktop=True, **args)
+                        if regex.search(pattern, read["text"]): return read
+                    except ValueError:
+                        pass
+                    await asyncio.sleep(0.5)
+                self.fail(f"never saw {pattern}: {read['text'][-1500:]}")
+
+            def ref(read, pattern):
+                return regex.search(r"\[(d\d+:\d+)\] " + pattern, read["text"]).group(1)
+            try:
+                with patch("core.computer.permissions.decide", side_effect=AssertionError("nothing here may ask")):
+                    await act("launch", app="writer")
+                    writer = await read_until(r"\] menu File\b", max_elements=200)
+                    self.assertTrue(taint.tainted, "desktop labels taint the turn")
+                    self.assertIn("UNTRUSTED", writer["text"])
+                    self.assertRegex(writer["text"], r"\] menu Edit\b")
+                    self.assertEqual(len(regex.findall(r"\] menu File\b", writer["text"])), 1, "one menu bar, not two")
+                    self.assertRegex(writer["text"], r"\] (toggle|push) button Bold", "toolbar rows")
+                    self.assertRegex(writer["text"], r"Desktop read completed: Untitled 1 . LibreOffice Writer \(soffice\)")
+                    opened = await act("click", ref=ref(writer, r"menu Edit\b"))
+                    self.assertIn("by action", opened["text"])
+                    menu = await read_until(r"\] menu Track Changes")
+                    await act("click", ref=ref(menu, r"menu Track Changes"))
+                    sub = await read_until(r"\] (check )?menu item Protect\.\.\.", query="Protect")
+                    await act("click", ref=ref(sub, r"(?:check )?menu item Protect\.\.\."))
+                    dialog = await read_until(r"\] password text")
+                    secret = ref(dialog, r"password text")
+                    refused = await act("type", ref=secret, text="private-desktop-secret")
+                    self.assertEqual(refused["code"], "private_field", refused["text"])
+                    keyed = await act("type", desktop=True, text="private-desktop-secret")
+                    self.assertEqual(keyed["code"], "private_field", keyed["text"])
+                    await act("key", desktop=True, key="Escape")
+                    files = await read_until(r"\] menu File\b")
+                    await act("click", ref=ref(files, r"menu File\b"))
+                    file_menu = await read_until(r"\] menu Send\b")
+                    stopped = await act("click", ref=ref(file_menu, r"menu Send\b"))
+                    self.assertEqual(stopped["code"], "person_only", stopped["text"])
+                    self.assertIn("Stopped before pressing 'Send' on the desktop (soffice)", stopped["text"])
+                    await act("key", desktop=True, key="Escape")
+                    await act("launch", app="calc")
+                    sheet = await read_until(r"\] table cell B2", query="B2")
+                    typed = await act("type", ref=ref(sheet, r"table cell B2"), text="42")
+                    self.assertIn("by focus", typed["text"])
+                    await act("key", desktop=True, key="Enter")
+                    landed = await read_until(r"table cell B2 =\"42\"", query="B2")
+                    self.assertIn('=\"42\"', landed["text"])
+                    stale = await act("read", desktop=True, since="latest")
+                    self.assertIn("Changes since", stale["text"])
+                    with self.assertRaises(computer.ComputerRefusal) as old:
+                        await act("click", ref=ref(writer, r"menu Edit\b"))
+                    self.assertEqual(old.exception.code, "stale_ref")
+                    met = await act("verify", desktop=True, expect={"element": {"role": "cell", "name": "B2"}, "text_present": "42"})
+                    self.assertTrue(met["met"], met["text"])
+                    c = manager._computers[owner]
+                    seal = subprocess.run(["docker", "exec", c.name, "sh", "-c", "id -u; touch /etc/owned 2>/dev/null && echo WRITABLE"],
+                                          capture_output=True, text=True, timeout=10)
+                    self.assertEqual(seal.stdout.strip(), "65534")
+                    data = __import__("json").loads(subprocess.run(["docker", "inspect", c.name], capture_output=True, text=True, check=True).stdout)[0]
+                    self.assertTrue(data["HostConfig"]["ReadonlyRootfs"])
+                    self.assertEqual(data["HostConfig"]["CapDrop"], ["ALL"])
+            finally:
+                await manager.close_all()
+        asyncio.run(check())
+
+
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class TrajectoryLiveTests(unittest.TestCase):
+    """An agent's computer run kept as evidence (cua upgrade 5.4)."""
+
+    def test_an_agent_run_keeps_step_folders_markers_and_no_private_text(self):
+        from core import computer, computer_trajectory, runs
+        from core.turn_taint import TurnTaint
+        from services.agent_service import agent_service
+        from PIL import Image
+        import io, json as jsonlib, re as regex
+        root = Path(tempfile.mkdtemp(prefix="trajectories-"))
+        agent = agent_service.create("Trajectory check")
+        owner = "agent:" + agent["id"]
+
+        async def check():
+            manager = computer.ComputerManager(fixtures=CONTRACT_PAGES, approved_hosts=("bench.kairos.test",), trajectories=root)
+            ctx = tool_registry.ToolContext(agent_id=agent["id"], is_admin=True, turn_taint=TurnTaint())
+            context = runs.RunContext("task", agent_id=agent["id"])
+            token = runs.CURRENT.set(context)
+            act = lambda action, **args: manager.act(owner, action, args, ctx)
+            try:
+                await act("open", url="https://bench.kairos.test/send.html")
+                read = await act("read")
+                ref = lambda label: regex.search(r"\[(r\d+:\d+)\] [^\n]*" + label, read["text"]).group(1)
+                await act("type", ref=ref("To field"), text="ada@example.com")
+                refused = await act("type", ref=ref("Password"), text="never-kept-secret")
+                self.assertEqual(refused["code"], "private_field")
+                await act("click", ref=ref("Preview"))
+                stopped = await act("click", ref=ref("Send"))
+                self.assertEqual(stopped["code"], "person_only")
+                return context.run_id
+            finally:
+                runs.CURRENT.reset(token)
+                await manager.close_all()
+        try:
+            run_id = asyncio.run(check())
+            folder = root / run_id
+            names = sorted(path.name for path in folder.iterdir())
+            self.assertEqual(names, ["meta.json", "step-0001", "step-0002", "step-0003", "step-0004", "step-0005", "step-0006"])
+            self.assertEqual(jsonlib.loads((folder / "meta.json").read_text())["owner"], owner)
+            steps = computer_trajectory.steps(run_id, root)
+            self.assertEqual([s["action"] for s in steps], ["open", "read", "type", "type", "click", "click"])
+            self.assertTrue((folder / "step-0002" / "state.json").exists(), "a read keeps its rows")
+            private = steps[3]
+            self.assertEqual(private["arguments"]["text"], "(private field)")
+            self.assertEqual(private["images"], [])
+            self.assertEqual(private["evidence"]["not_kept"]["after.jpg"], "private field")
+            self.assertNotIn("never-kept-secret", "".join(p.read_text(errors="ignore") for p in folder.rglob("*.json")))
+            preview = steps[4]
+            self.assertEqual(preview["images"], ["before.jpg", "after.jpg", "marker.jpg"])
+            point = preview["point"]
+            with Image.open(folder / "step-0005" / "marker.jpg") as marker:
+                red, green, blue = marker.convert("RGB").getpixel((point["x"], point["y"]))
+            self.assertGreater(red, 150); self.assertLess(green, 90); self.assertLess(blue, 90)
+            with Image.open(folder / "step-0005" / "before.jpg") as before:
+                self.assertEqual(before.size, (1280, 800))
+            self.assertEqual(steps[5]["code"], "person_only")
+            self.assertIn("before.jpg", steps[5]["images"])
+            self.assertEqual(steps[2]["arguments"]["text"], "ada@example.com")
+            shaped = computer_trajectory.skill_steps(run_id, root)
+            self.assertEqual([s["kind"] for s in shaped], ["open", "type", "click"])
+            self.assertEqual(shaped[2]["element"]["label"], "Preview")
+            with patch.object(agent_service, "_require", return_value={}), \
+                 patch.object(computer_trajectory, "ROOT", root):
+                agent_service.forget_logins(agent["id"])
+            self.assertFalse(folder.exists(), "Forget logins deletes the agent's steps")
+        finally:
+            agent_service.delete(agent["id"])
+            shutil.rmtree(root, ignore_errors=True)
+
+
+CONTRACT_PAGES = {
+    "/send.html": {"body": "<title>Mail</title><h1>New message</h1><label>To field <input aria-label='To field'></label>"
+                   "<label>Password <input type=password aria-label='Password'></label>"
+                   "<p id=state>Draft</p><button onclick=\"state.textContent='Previewed'\">Preview</button>"
+                   "<div style='height:300px'></div><button onclick=\"state.textContent='Sent'\">Send</button>"},
+    "/form.html": {"body": "<title>Form</title><h1>Sign up</h1><form onsubmit='return false'>"
+                   + "".join(f"<label>{name} field <input aria-label='{name} field' name='{name.lower()}'></label><br>"
+                             for name in ("First", "Last", "Email", "City", "Notes"))
+                   + "<label>Password <input type=password aria-label='Password'></label>"
+                   "<button type=button>Continue</button><button type=button onclick=\"document.body.append('Bought')\">"
+                   "Buy now</button></form><p>Form ready</p>"},
+    "/long.html": {"body": "<title>Long</title><h1>Table</h1><button onclick=\"const r=document.createElement('a');"
+                   "r.href='#41';r.textContent='Row 41 link';document.body.append(r)\">Add a row</button>"
+                   + "".join(f"<p><a href='#{i}'>Row {i} link</a> value {i * 7} and some longer descriptive text "
+                             f"so the page is like a real one</p>" for i in range(1, 41))},
+}
 
 
 @unittest.skipUnless(DOCKER_UP, "Docker is not running")
@@ -631,9 +943,10 @@ class DesktopLiveTests(ComputerLiveTests):
     def test_editor_documents_display_and_web_hard_stop(self):
         from core import computer, permissions
         from core.computer_driver import SOURCE
-        fixture = SOURCE.replace("        refs = {}", "        await page.route('https://example.com/**', "
+        fixture = SOURCE.replace("        history = {}", "        await page.route('https://example.com/**', "
             "lambda route: route.fulfill(body=\"<button>Place order</button><button style='position:absolute;right:0;bottom:0' "
-            "onclick='this.textContent=String(12345)'>Safe</button>\"))\n        refs = {}", 1)
+            "onclick='this.textContent=String(12345)'>Safe</button>\"))\n        history = {}", 1)
+        self.assertNotEqual(fixture, SOURCE, "the fixture page must reach the driver")
 
         async def check():
             manager = computer.ComputerManager()

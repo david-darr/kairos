@@ -55,7 +55,11 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     "hand_to_agent save_skill add_mcp_server forge_app_logs "
     # Reviewed 2026-10-15: own-topic reads (decb912); peer-scoped, capped
     # assignments and requester-owned question answers (5421f76).
-    "agent_read_topic agent_assign agent_answer_assignment roblox_studio creative_tools roblox_style roblox_assets ui_design").split()}
+    "agent_read_topic agent_assign agent_answer_assignment roblox_studio creative_tools roblox_style roblox_assets ui_design "
+    # The Design canvas (2026-10-22): writes to Kairos's own design store, audited;
+    # design_system_save still asks through the broker itself.
+    "design_create design_outline design_read design_add_board design_edit design_boards design_tokens "
+    "design_snapshot design_comments design_export design_system_save").split()}
 
 
 def load_cli():
@@ -210,7 +214,9 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_remember", shown(self.brain(8192, agent_id="a1")), "an agent keeps its own tools")
         for big in (None, tool_registry.SMALL_WINDOW + 1, 200000):
             full = self.brain(big, is_admin=True)
-            self.assertEqual(shown(full), set(names(tool_registry.specs(tool_registry.OPENAI, True, session_id=self.sid))), big)
+            # Less the Design canvas's editing tools, listed once a design is linked (design_gate).
+            self.assertEqual(shown(full), {s.name for s in tool_registry.specs(tool_registry.OPENAI, True, session_id=self.sid)
+                                           if tool_registry.design_gate(s, self.sid)}, big)
             self.assertNotIn("kairos_tool_search", shown(full))
             self.assertNotIn("only your most-used tools are listed", full._messages[0]["content"])
         small = self.brain(8192, is_admin=True)

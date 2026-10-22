@@ -631,6 +631,8 @@ class SessionManager:
             forge_apps.records.pop(session_id, None)
         from core.computer import manager
         manager.forget(f"chat:{session_id}")
+        from core import computer_trajectory
+        computer_trajectory.delete_owner(f"chat:{session_id}")
         store.delete_session(session_id)
 
     def get_channel_session_id(self, channel_key: str) -> Optional[str]:

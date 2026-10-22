@@ -12,13 +12,14 @@ import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { mountMobileChrome } from './mobileChrome.js';
-import { openTabSheet } from './mobileTabSheet.js';
 import { mountMobileDock } from './mobileDock.js';
 import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
 import { mountForgeRail } from './forgeRail.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
 import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
+import { mascotPng } from './mascot.js';
+import { avatarSpec } from './agentAvatar.js';
 
 let forgeRailCleanup = () => {};
 restoreSidebar();
@@ -39,6 +40,7 @@ const NAV = [
   { id: "home", label: "Home", icon: "home" },
   { id: "chat", label: "Chats", icon: "chats" },
   { id: "agents", label: "Agents", icon: "agents" },
+  { id: "design", label: "Design", icon: "design" },  // The Design canvas, its own tab beside Forge (David, 2026-10-22).
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "library", label: "Library", icon: "library" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
@@ -57,6 +59,8 @@ const STUB_TABS = new Set();
 const FORGE_NAV = [
   { id: 'forgeHome', label: 'Home', icon: 'home' },
 ];
+// Tabs either mode may open without switching mode (the Design tab).
+const SHARED_TABS = new Set(['design']);
 let forgeAdmin = false;
 let appMode = 'kairos';
 try { appMode = localStorage.getItem('kairos:app-mode') === 'forge' ? 'forge' : 'kairos'; } catch { /* Device storage is optional. */ }
@@ -152,7 +156,7 @@ export function switchTab(tabId, options = {}) {
 }
 
 async function performSwitch(tabId, options = {}) {
-  const mode = tabId === 'forgeShell' || FORGE_NAV.some(item => item.id === tabId) ? 'forge' : 'kairos';
+  const mode = SHARED_TABS.has(tabId) ? appMode : tabId === 'forgeShell' || FORGE_NAV.some(item => item.id === tabId) ? 'forge' : 'kairos';
   if (mode === 'forge' && !forgeAdmin) return;
   if (mode !== appMode) { rememberMode(mode); await buildSidebar(); }
   const version = ++navigationVersion;
@@ -224,18 +228,16 @@ function syncMobileMenu() {
   sidebar.inert = mobileMenuMedia.matches && !open;
   if (mobileMenuMedia.matches) sidebar.setAttribute('aria-hidden', String(!open));
   else sidebar.removeAttribute('aria-hidden');
-  document.getElementById('mobile-menu-btn').removeAttribute('aria-expanded');
-  document.getElementById('mobile-menu-btn').setAttribute('aria-label', 'Open workspace tabs');
 }
 function closeMobileMenu() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('mobile-backdrop').classList.add('hidden');
   syncMobileMenu();
 }
+// Phone navigation is the bottom tab bar (mobileTabBar.js, 2026-10-22); the
+// sidebar stays hidden and inert at phone width.
 function setupMobileMenu() {
-  const btn = document.getElementById('mobile-menu-btn');
-  mountMobileChrome(btn);
-  btn.addEventListener('click', () => openTabSheet(btn));
+  mountMobileChrome();
   mobileMenuMedia.addEventListener('change', () => closeMobileMenu(false));
   syncMobileMenu();
 }
@@ -246,17 +248,22 @@ let agentBadgeTimer = null;
 // Native notifications for new bot items, one per bot per poll (botNotifications.js).
 // Electron and browsers both support the Notification API; in Electron no
 // permission prompt appears, and a click brings the app window forward.
+// The icon is the bot's own face in its needs-you pose (Kairos Mascot build
+// spec, 2026-10-22), rasterized once per look; phone push stays generic.
+let notifiedAgents = [];
 const botInboxWatcher = watchBotInbox({
-  names: async () => Object.fromEntries((await api('/api/agents').catch(() => [])).map(agent => [agent.id, agent.name])),
+  names: async () => { notifiedAgents = await api('/api/agents').catch(() => []); return Object.fromEntries(notifiedAgents.map(agent => [agent.id, agent.name])); },
   focusedAgentId: () => {
     if (!document.hasFocus()) return null;
     const messenger = document.querySelector('.agents-messenger');
     return messenger ? messenger.dataset.agentId || null : activeAgentId;
   },
-  show: ({ agentId, title, body }) => {
+  show: async ({ agentId, kind, title, body }) => {
     if (!('Notification' in window) || Notification.permission === 'denied') return;
+    const agent = notifiedAgents.find(a => a.id === agentId);
+    const icon = await mascotPng(avatarSpec(agent || { id: agentId }), kind === 'needs_you' ? 'needs' : 'success', 64).catch(() => null);
     const notify = () => {
-      const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false });
+      const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false, ...(icon ? { icon } : {}) });
       note.onclick = () => {
         window.jarvis?.showWindow?.(); window.focus();
         document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } }));
@@ -620,7 +627,14 @@ async function startApp() {
       window.jarvis.screenGrab.replyQuickDraft(draft.requestId, { ok: false, error: error.message });
     }
   });
-  if (!await openNotificationChat(location.href)) {
+  // A design link: #/design/<id> (the Design tab keeps it in the address).
+  const designLink = /^#\/design\/([a-f0-9]{12})$/.exec(location.hash);
+  window.addEventListener('hashchange', () => {
+    const match = /^#\/design\/([a-f0-9]{12})$/.exec(location.hash);
+    if (match) switchTab('design', { designId: match[1] });
+  });
+  if (designLink) await switchTab('design', { designId: designLink[1] });
+  else if (!await openNotificationChat(location.href)) {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');
     await switchTab(['chat', 'home', 'library', 'notes', 'tasks', 'calendar'].includes(target)

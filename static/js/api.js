@@ -1,4 +1,5 @@
 import { mountSheetSurface } from './mobileSheet.js';
+import { createMascot } from './mascot.js';
 // Thin fetch wrapper — every view module goes through this rather than
 // calling fetch() directly, matching Odysseus's own shared-request-helper
 // pattern (see specs/frontend.md's appConfig.js).
@@ -235,8 +236,11 @@ export function modelMark(mark, label = "") {
   return node;
 }
 
-export function emptyState({ icon, title, hint, actionLabel, onAction }) {
+// `mascot`: Kairos above the title, idle or sleeping (Kairos Mascot build
+// spec, 2026-10-22); the icon stays as the fallback when the mascot is off.
+export function emptyState({ icon, title, hint, actionLabel, onAction, mascot = "idle" }) {
   const node = el("div", { class: "empty-state empty-state-rich" });
+  if (mascot) node.appendChild(el("div", { class: "empty-state-mascot" }, [createMascot({ state: mascot, size: 84 })]));
   if (icon) {
     const iconHost = el("div", { class: "empty-state-icon" });
     iconHost.insertAdjacentHTML("beforeend", icon);

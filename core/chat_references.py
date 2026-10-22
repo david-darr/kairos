@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from core import attachments, artifact_comments, chat_artifacts, chat_files, memory_tools, office_preview
+from core import attachments, artifact_comments, chat_artifacts, chat_files, design_comments, memory_tools, office_preview
 from core.session_manager import session_manager
 from core.untrusted import wrap_untrusted
 from services import documents_service, skills_service
@@ -21,6 +21,7 @@ TEXT_EXTENSIONS = chat_artifacts.TEXT_EXTENSIONS
 def metadata(references: list[dict]) -> list[dict]:
     """Save only the fields needed to reselect a reference on edit/regenerate."""
     saved = [artifact_comments.validate(ref) if ref.get("kind") == "artifact_comment" else
+             design_comments.validate(ref) if ref.get("kind") == "design_comment" else
              {"kind": ref["kind"], "id": ref["id"], "session_id": ref.get("session_id"),
              "label": (ref.get("label") if isinstance(ref.get("label"), str) else "Reference")[:500]}
             for ref in references]
@@ -253,13 +254,18 @@ def _chat_content(reference: dict, current_session_id: str) -> tuple[str, str]:
 
 def resolve(session_id: str, references: list[dict] | None, is_admin: bool = False, user: str | None = None) -> str:
     """Validate client IDs against current records and build bounded model context."""
+    mode = design_comments.design_mode_context(session_id)
     if not references:
-        return ""
+        return mode
     if not isinstance(references, list) or any(not isinstance(ref, dict) for ref in references):
         raise ValueError("Invalid references")
     comments = sum(ref.get("kind") == "artifact_comment" for ref in references)
     if comments > artifact_comments.MAX_COMMENTS:
         raise ValueError("Select at most 10 artifact comments")
+    design_refs = sum(ref.get("kind") == "design_comment" for ref in references)
+    if design_refs > design_comments.MAX_COMMENTS:
+        raise ValueError("Select at most 10 design comments")
+    comments += design_refs
     if len(references) - comments > MAX_REFERENCES:
         raise ValueError(f"Select at most {MAX_REFERENCES} references")
     parts = []
@@ -274,6 +280,9 @@ def resolve(session_id: str, references: list[dict] | None, is_admin: bool = Fal
                 parts.append(artifact_comments.resolve(session_id, reference))
             except (HTTPException, OSError, office_preview.PreviewUnavailable) as error:
                 raise ValueError("An artifact comment is no longer available") from error
+            continue
+        if kind == "design_comment":
+            parts.append(design_comments.resolve(session_id, reference))
             continue
         if kind not in ("file", "note", "chat", "agent", "skill", "tool", "automation", "document"):
             raise ValueError("Invalid reference type")
@@ -350,6 +359,8 @@ def resolve(session_id: str, references: list[dict] | None, is_admin: bool = Fal
             wrapped = instruction + wrap_untrusted(label, _truncate(content, min(MAX_ITEM_CHARS, remaining - overhead)))
         parts.append(wrapped)
         total += len(wrapped) + 2
-    if comments:
+    if comments - design_refs:
         parts.append(artifact_comments.PUBLISH_INSTRUCTION)
-    return "\n\n[Selected references for this message]\n" + "\n\n".join(parts) if parts else ""
+    if design_refs:
+        parts.append(design_comments.EDIT_INSTRUCTION)
+    return mode + ("\n\n[Selected references for this message]\n" + "\n\n".join(parts) if parts else "")

@@ -18,6 +18,11 @@ DEFAULTS: dict[str, Any] = {
     "forge_terminal_remote": False,
     "onboarding_complete": False,
     "vault_dir": None,  # None = use core/vault.py's default resolution
+    # Library Vault (2026-10-22): pinned notes per user, and where "Today's
+    # note" is created from (another user's vault may differ).
+    "vault_pins": {},
+    "vault_daily_folder": "01 - Daily Notes",
+    "vault_daily_template": "01 - Daily Notes/Daily Note Template.md",
     "discord_bot_token_encrypted": None,
     "discord_allowed_user_id": None,
     "disabled_tools": [],  # Settings > Admin > Agent Tools, David's ask 2026-08-31
@@ -38,6 +43,8 @@ DEFAULTS: dict[str, Any] = {
     # message (roadmap phase 3, 2026-10-05; services/chat_service.py).
     "auto_compact": True,
     "computer_use": {"enabled": False, "allow_non_admins": False, "allow_reactions": False, "desktop": False},
+    # Days a model's computer steps (core/computer_trajectory.py) are kept; 0 keeps none.
+    "computer_steps_days": 7,
     # The connection helpers run on (core/helpers.py, roadmap phase 5,
     # 2026-10-06): None = the first local one, "off", or a local or API
     # connection's id.

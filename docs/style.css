@@ -282,3 +282,30 @@ figcaption { display: flex; justify-content: space-between; gap: 16px; color: va
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* -- the mascot (Ajar; the app's static/js/mascot.js and css/mascot.css) -- */
+:root {
+  --point: var(--gold); --bg-panel-solid: var(--bg); --text-dim: var(--dim); --text-faint: var(--faint);
+  --danger: #A8432F; --shade-rgb: 58, 42, 32; --ink-rgb: 58, 42, 32;
+  --k-gold-hi: #D9B260; --k-rose: #D99A92; --k-ink: #3A2A20;
+  --m-body-d9b260: #D9B260; --m-body-b9d2e3: #B9D2E3; --m-body-e8c39e: #E8C39E;
+  --m-body-d99a92: #D99A92; --m-body-b5c7a5: #B5C7A5; --m-body-cdbfd9: #CDBFD9;
+}
+.hero-inner { position: relative; }
+.hero-mascot { width: 96px; height: 96px; margin: 0 0 6px -10px; }
+.hero-mascot kairos-mascot { width: 100%; height: 100%; }
+.mascot-strip { display: none; }
+.has-mascot .mascot-strip { display: block; }
+.mascot-lede { max-width: 640px; margin: 0 auto 32px; text-align: center; color: var(--dim); }
+.mascot-states, .mascot-bots { list-style: none; padding: 0; margin: 0 auto; display: grid; gap: 16px; text-align: center; font-size: 14px; color: var(--dim); }
+.mascot-states { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.mascot-bots { grid-template-columns: repeat(4, minmax(0, 120px)); justify-content: center; margin-top: 28px; }
+.mascot-states li, .mascot-bots li { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mascot-slot { display: block; width: 104px; height: 104px; }
+.mascot-slot kairos-mascot { width: 100%; height: 100%; }
+@media (max-width: 760px) {
+  .mascot-states { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mascot-bots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mascot-slot { width: 84px; height: 84px; }
+  .hero-mascot { width: 72px; height: 72px; }
+}

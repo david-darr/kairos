@@ -56,6 +56,9 @@ INBOX_KINDS = ("report", "question")
 COLORS = ("#d9b260", "#b9d2e3", "#e8c39e", "#d99a92", "#b5c7a5", "#cdbfd9")
 # 2026-10-14: the renderer and API share a closed vocabulary; custom colors
 # are hex only, so a saved spec can never inject markup into the SVG.
+# The v2 dot-face vocabulary below is kept only to read and migrate old specs:
+# since the mascot (Kairos Mascot build spec, 2026-10-22) every bot is an Ajar
+# variant, and a v2 spec that arrives is converted, never stored.
 AVATAR_FORMS = ("round", "pill", "triangle", "ears", "cloud", "heart", "sprout", "scallop", "hexagon", "diamond", "robot", "shield", "star", "bean", "squircle")
 AVATAR_COLORS = ("#FA70AB", "#DD6ADC", "#A25BFF", "#4778FF", "#00B1FF", "#04BB9F", "#B6D80B", "#FFCC38", "#FF8066")
 AVATAR_FINISHES = ("matte", "plush", "glossy", "ceramic")
@@ -63,9 +66,93 @@ AVATAR_FACES = ("smile", "content", "curious", "sleepy", "wink")
 AVATAR_ACCESSORIES = ("none", "bow", "glasses", "hat", "headphones", "flower")
 AVATAR_CATALOGUE = {"form": AVATAR_FORMS, "finish": AVATAR_FINISHES,
                     "face": AVATAR_FACES, "accessory": AVATAR_ACCESSORIES}
+# Spec version 3: Ajar. The body is one of the six agent pastels (COLORS),
+# never Kairos's own ink; the gold point, the bite and the eyes are not
+# customisable, so they are not in the spec. static/js/mascot.js mirrors this.
+AJAR_SHAPES = ("round", "squircle", "tall")
+AJAR_ACCESSORIES = ("none", "laurel", "spectacles", "quill", "rays", "scarf")
+AJAR_FINISHES = ("flat", "halftone")
+AJAR_COLORS = tuple(color.upper() for color in COLORS)
+_LEGACY_SHAPES = {"round": "round", "squircle": "squircle", "pill": "tall", "bean": "tall"}
 
 
-def validate_avatar(value: dict) -> dict:
+def _hash_id(value) -> int:
+    """FNV-1a over UTF-16 code units, as static/js/mascot.js hashId."""
+    h, data = 2166136261, str(value or "agent").encode("utf-16-le")
+    for index in range(0, len(data), 2):
+        h = ((h ^ int.from_bytes(data[index:index + 2], "little")) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def _hsl(rgb):
+    r, g, b = (v / 255 for v in rgb)
+    high, low = max(r, g, b), min(r, g, b)
+    d, light = high - low, (high + low) / 2
+    sat = 0 if d == 0 else d / (1 - abs(2 * light - 1))
+    hue = 0.0
+    if d:
+        hue = ((g - b) / d) % 6 if high == r else (b - r) / d + 2 if high == g else (r - g) / d + 4
+    return (hue * 60 + 360) % 360, sat
+
+
+def nearest_ajar_color(value) -> Optional[str]:
+    """The pastel nearest a hex colour: by hue for a coloured source, by
+    distance for a greyish one (static/js/mascot.js nearestAjarColor)."""
+    if not isinstance(value, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        return None
+    source = tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+    hue, sat = _hsl(source)
+    best, best_score = AJAR_COLORS[0], float("inf")
+    for color in AJAR_COLORS:
+        target = tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+        if sat > .15:
+            delta = abs(_hsl(target)[0] - hue)
+            score = min(delta, 360 - delta)
+        else:
+            score = sum((a - b) ** 2 for a, b in zip(target, source)) ** .5
+        if score < best_score - 1e-9:
+            best, best_score = color, score
+    return best
+
+
+def ajar_from_legacy(avatar: Optional[dict], agent_id: str = "", color: Optional[str] = None) -> dict:
+    """Migrate a v2 dot face (or no face) to Ajar: the colour to the nearest
+    pastel, pill and bean to tall, glasses to spectacles, the rest from the id
+    (David, 2026-10-22: every bot switches to Ajar and keeps its colour)."""
+    legacy = avatar if isinstance(avatar, dict) else {}
+    seed = _hash_id(agent_id)
+    extra = legacy.get("accessories") if isinstance(legacy.get("accessories"), list) else []
+    accessories = [legacy.get("accessory"), *extra]
+    return {"version": 3, "character": "ajar",
+            "shape": _LEGACY_SHAPES.get(legacy.get("form"), AJAR_SHAPES[seed % 3]),
+            "color": nearest_ajar_color(legacy.get("color")) or nearest_ajar_color(color) or AJAR_COLORS[seed % 6],
+            "acc": "spectacles" if "glasses" in accessories else "none", "finish": "flat"}
+
+
+def _validate_ajar(value: dict) -> dict:
+    allowed = {"version", "character", "shape", "color", "acc", "finish"}
+    if set(value) - allowed or not {"version", "shape", "color"}.issubset(value):
+        raise ValueError("avatar needs version, shape and color, with supported mascot fields only")
+    if value.get("character", "ajar") != "ajar":
+        raise ValueError("unknown avatar character")
+    if value["shape"] not in AJAR_SHAPES:
+        raise ValueError("unknown avatar shape")
+    if value.get("acc", "none") not in AJAR_ACCESSORIES:
+        raise ValueError("unknown avatar accessory")
+    if value.get("finish", "flat") not in AJAR_FINISHES:
+        raise ValueError("unknown avatar finish")
+    color = value["color"]
+    if not isinstance(color, str) or color.upper() not in AJAR_COLORS:
+        raise ValueError("avatar color must be one of the offered colors")
+    return {"version": 3, "character": "ajar", "shape": value["shape"], "color": color.upper(),
+            "acc": value.get("acc", "none"), "finish": value.get("finish", "flat")}
+
+
+def validate_avatar(value: dict, agent_id: str = "", agent_color: Optional[str] = None) -> dict:
+    """A clean v3 (Ajar) spec. A v3 spec is checked against the closed
+    vocabulary; a valid v2 dot-face spec is still accepted and converted."""
+    if isinstance(value, dict) and value.get("version") == 3:
+        return _validate_ajar(value)
     required = {"form", "color", "finish", "face", "accessory"}
     extra = {"version", "eyes", "mouth", "accent", "accessories", "style"}
     if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - extra:
@@ -89,7 +176,13 @@ def validate_avatar(value: dict) -> dict:
             any(not isinstance(item, str) or item not in AVATAR_ACCESSORIES[1:] for item in value["accessories"]) or
             len(set(value["accessories"])) != len(value["accessories"])):
         raise ValueError("choose up to five distinct avatar accessories")
-    return {**value, "color": color.upper(), **({"accent": value["accent"].upper()} if "accent" in value else {})}
+    return ajar_from_legacy(value, agent_id, agent_color)
+
+
+def is_ajar(avatar) -> bool:
+    return isinstance(avatar, dict) and avatar.get("version") == 3 and avatar.get("character") == "ajar"
+
+
 # The palette before the Kairos rebrand (2026-10-06); an agent saved with one
 # of these gets the color in the same position.
 LEGACY_COLORS = dict(zip(("#b3a7f5", "#7dd3c0", "#f0b37e", "#e88f8f", "#8fb8e8", "#c9d67a"), COLORS))
@@ -148,6 +241,17 @@ class AgentService:
             for agent in self._agents.values():
                 agent["color"] = LEGACY_COLORS.get(agent.get("color"), agent.get("color"))
             self._save()
+        # The mascot (David, 2026-10-22): every bot switches to Ajar on
+        # upgrade. Its colour maps to the nearest pastel; the old dot face is
+        # kept beside it, unused, so the move can be undone by hand.
+        stale = [agent for agent in self._agents.values() if not is_ajar(agent.get("avatar"))]
+        for agent in stale:
+            if agent.get("avatar") is not None:
+                agent["avatar_legacy"] = agent["avatar"]
+            agent["avatar"] = ajar_from_legacy(agent.get("avatar"), agent.get("id", ""), agent.get("color"))
+            agent["color"] = agent["avatar"]["color"].lower()
+        if stale:
+            self._save()
         self._inbox: list = read_json(INBOX_FILE, [])
         # Each asyncio task carries its own work (Agents 2.0, 2026-10-13):
         # an agent's card and goal can overlap, so its identity cannot be a
@@ -201,8 +305,11 @@ class AgentService:
         }
         if soul is not None:
             agent["soul"] = soul
-        if avatar is not None:
-            agent["avatar"] = validate_avatar(avatar)
+        # Every new bot is an Ajar: the one chosen, or its default.
+        agent["avatar"] = (validate_avatar(avatar, agent_id, agent["color"]) if avatar is not None
+                           else ajar_from_legacy(None, agent_id, agent["color"]))
+        # The bot's colour is its body colour, so chips and the face agree.
+        agent["color"] = agent["avatar"]["color"].lower()
         if model_override is not None:
             agent["model_override"] = model_override
         if model_effort is not None:
@@ -241,8 +348,11 @@ class AgentService:
                 elif key == "peers":
                     value = self._check_peers(value, agent_id)
                 elif key == "avatar":
-                    value = validate_avatar(value)
+                    value = validate_avatar(value, agent_id, agent.get("color"))
                 changes[key] = value
+            # A new look carries its body colour to the bot's colour (mascot, 2026-10-22).
+            if "avatar" in changes and "color" not in changes:
+                changes["color"] = changes["avatar"]["color"].lower()
             # 2026-10-14: validate the complete selection before mutating the
             # identity. A connection switch without an explicit new version
             # must never carry a version or effort to another provider.
@@ -429,6 +539,9 @@ class AgentService:
         if Path(DATA_DIR).resolve() not in root.parents or root not in target.parents:
             raise ValueError("profile path is outside Kairos data")
         shutil.rmtree(target, ignore_errors=True)
+        # Its computer steps go with its logins (vault: Agents - Computer-Use Upgrade from cua, 5.4).
+        from core import computer_trajectory
+        computer_trajectory.delete_owner(f"agent:{agent_id}")
 
     def _require(self, agent_id: str) -> dict:
         agent = self._agents.get(agent_id)

@@ -2,7 +2,7 @@ import { EFFECTS, ART_PIECES, normalizeEffectOptions } from './backgroundEffectP
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, classic: false, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea' });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, classic: false, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', mascot: true });
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -49,6 +49,9 @@ function normalize(raw = {}) {
   if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
+  // Show the mascot (Kairos Mascot build spec, 2026-10-22): on by default; off
+  // brings back the plain markers and the mark (mascot.css, data-mascot).
+  if (typeof raw.mascot === 'boolean') value.mascot = raw.mascot;
   // The redesign is the default look. `classic` is the opt-out. The old
   // opt-in `redesign` field is ignored on read (most stored copies say false
   // without the user ever choosing it) and is dropped by the next save.
@@ -309,6 +312,7 @@ function apply() {
   root.dataset.appearance = settings.mode;
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
+  root.dataset.mascot = settings.mascot ? 'on' : 'off';
   syncRedesign(root);
   try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ classic: settings.classic, mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {

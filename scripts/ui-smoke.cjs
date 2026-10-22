@@ -3,6 +3,7 @@
 // in this process, and no request can reach the running JARVIS backend.
 const { app, BrowserWindow, session } = require("electron");
 const { exitAfterFlush } = require('./electron-exit.cjs');
+const designChecks = require('./design-canvas-checks.cjs');
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -65,6 +66,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith("/api/")) {
     if (req.method === 'GET') reads.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    if (designChecks.serve(url, req, res)) return;  // The Design canvas (design-canvas-checks.cjs).
     if (url.pathname === '/api/chat/live/snapshot') {
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
     }
@@ -113,7 +115,9 @@ const server = http.createServer(async (req, res) => {
     if (demoState.homeCardsUnavailable && url.pathname === '/api/home/tab-cards') { res.writeHead(503); res.end('{"detail":"Unavailable"}'); return; }
     if (req.method !== "GET") {
       let body = ""; for await (const chunk of req) body += chunk;
-      writes.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body });
+      const write = { path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body };
+      writes.push(write);
+      res.on('finish', () => { write.status = res.statusCode; });  // so a check can require the answer was OK
       if (url.pathname === '/api/settings/computer-use') demoState.computerUse = JSON.parse(body);
       let parsed = {}; try { parsed = JSON.parse(body); } catch {}
       if (url.pathname === '/api/chat/live/stop') {
@@ -317,6 +321,9 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
     await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+    // --mascot-off runs the suite with Settings > Appearance > Show the mascot off (saved, so reloads keep it).
+    const mascotOff = () => process.argv.includes('--mascot-off') ? js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })") : null;
+    await mascotOff();
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
       assert.deepEqual(errors, [], 'Agents call renderer errors');
@@ -354,6 +361,14 @@ app.whenReady().then(async () => {
       console.log('PHONE AUDIT ' + found.length + ' problem(s)');
       for (const line of found) console.log('  ' + line);
       exitAfterFlush(0); return;
+    }
+    // The mascot (Kairos Mascot build spec, 2026-10-22): scripts/mascot-checks.cjs.
+    if (process.argv.includes('--mascot-only')) {
+      await require('./mascot-checks.cjs')({ js, waitFor, delay, navigate, win, capture, demoState, writes, fixtures: calendarFixtures });
+      assert.deepEqual(errors, [], 'Mascot renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['mascot'], errors }, null, 2));
+      console.log('PASS: mascot on Home, empty states, Agents, the call, the village and notifications.');
+      console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
@@ -461,6 +476,7 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
     console.log('PASS: Home tab cards hidden by default, Layout show/reorder, reload/off/on persistence, native sections, endpoint failure and phone overflow.');
     await require('./home-card-checks.cjs')({ js, win, waitFor, capture, navigate, demoState, delay });
+    await require('./mascot-checks.cjs')({ js, waitFor, delay, navigate, win, capture, demoState, writes, fixtures: calendarFixtures });
     if (process.argv.includes('--home-tab-cards-only')) {
       assert.deepEqual(errors, [], 'No renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({passed:true, checks:['Home tab cards'], errors}, null, 2));
@@ -470,6 +486,7 @@ app.whenReady().then(async () => {
     await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
     await require('./classic-look-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
+    await mascotOff();  // appearance checks reset Appearance to its defaults
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./artifact-review-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
@@ -496,12 +513,12 @@ app.whenReady().then(async () => {
     for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
       win.setContentSize(width, height); await delay(100);
       await navigate('home');
-      if (label === 'mobile') await js("document.querySelector('#mobile-menu-btn').click()");
+      if (label === 'mobile') { await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); }
       await js(label === 'mobile' ? "[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()" : "document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
       if (width <= 768) {
         await require('./mobile-forge-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, overflow });
         await navigate('home');
-        await js("document.getElementById('mobile-menu-btn').click()");
+        await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
         await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
         assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview', 'phone keeps both mode controls');
         await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
@@ -543,7 +560,7 @@ app.whenReady().then(async () => {
       await waitFor("document.querySelector('.forge-lifespan .forge-widget-body').textContent === 'Not a git repository'");
       await waitFor("document.querySelectorAll('#nav [data-forge-project]').length === 2");
       assert.ok(await js("!document.querySelector('[data-tab=forgeProjects], [data-tab=forgeSessions]')"), label + ' old views are absent');
-      if (width <= 768) await js("document.querySelector('#mobile-menu-btn').click(); document.querySelector('.ms-tab-sheet').click()");
+      if (width <= 768) await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); document.querySelector('.ms-tab-sheet').click()");
       await js("document.querySelector('[aria-label=\"Add project\"]').click()");
       assert.deepEqual(await js("[...document.querySelectorAll('.forge-project-menu button')].map(b => b.textContent)"), ['Open folder', 'Clone repo', 'New repo'], label + ' project menu');
       await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
@@ -849,11 +866,11 @@ app.whenReady().then(async () => {
         await js("document.querySelector('#sidebar-toggle').click()"); await delay(350);
       } else {
         // Saved desktop collapse does not affect phone mode controls.
-        await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('#mobile-menu-btn').click()"); await delay(300);
+        await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await delay(300);
         assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview');
         await capture('mobile-forge-switch-collapsed');
         await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('.ms-tab-sheet[open]')");
-        await js("document.querySelector('#mobile-menu-btn').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
+        await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
         await waitFor("!!document.querySelector('.dashboard-hero')");
         await js("document.documentElement.classList.remove('sidebar-collapsed')");
       }
@@ -904,12 +921,14 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.sidebar-tooltip').classList.contains('show')"));
     win.setContentSize(390, 844);
     await delay(100);
-    await js("document.querySelector('#mobile-menu-btn').click()");
+    await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'agents', 'calendar', 'more'], "The phone tab bar replaces the sidebar");
+    await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
     await delay(300);
     assert.equal(await railWidth(), 0, "Phone keeps old sidebar hidden despite desktop preference");
-    assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=home]')"), "Workspace sheet replaces sidebar");
+    assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=notes]') && !document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=home]')"), "More lists the tabs the bar does not");
     await capture("mobile-sidebar");
-    await js("document.querySelector('.ms-tab-tile[data-tab=home]').click()");
+    await js("document.querySelector('.ms-tab-sheet').close(); document.querySelector('.ms-tabbar [data-tabbar=home]').click()");
     win.setContentSize(1440, 900);
     await delay(100);
     await js("document.querySelector('#sidebar-toggle').focus()");
@@ -976,6 +995,31 @@ app.whenReady().then(async () => {
           assert.ok(await js("document.querySelector('.chat-computer-history .computer-shot').open"), label + ' screenshot expands');
           await capture(label + '-chat-computer-history-expanded');
           await js("document.querySelector('.chat-computer-history .computer-shot summary').click()");
+          // Steps (cua upgrade 5.4): the run's kept actions, a panel on desktop and a sheet on phone.
+          await js("document.querySelector('.chat-computer-history .run-steps-open').click()");
+          await waitFor("document.querySelector('.computer-steps-dialog .computer-steps-image')?.naturalWidth > 0");
+          assert.equal(await js("document.querySelector('.computer-steps-position').textContent"), 'Step 3 of 3', label + ' Steps opens on the last step');
+          assert.equal(await js("[...document.querySelectorAll('.computer-steps-tabs .btn')].map(b => b.textContent).join(',')"), 'Before,After,Click');
+          await js("[...document.querySelectorAll('.computer-steps-tabs .btn')].find(b => b.textContent === 'Click').click()");
+          await waitFor("document.querySelector('.computer-steps-image')?.src.endsWith('/3/marker.jpg') && document.querySelector('.computer-steps-image').naturalWidth > 0");
+          await waitFor("document.getAnimations().filter(a => a.playState === 'running' && a.effect?.target?.closest?.('.modal-backdrop')).length === 0");
+          if (label === 'mobile') {
+            assert.ok(await js("document.querySelector('.computer-steps-dialog').classList.contains('ms-sheet-surface')"), 'Steps is a sheet on phone');
+            // The phone tab bar stays under the sheet: its footer is on top and fully on screen.
+            assert.ok(await js("!!document.elementFromPoint(innerWidth / 2, innerHeight - 24)?.closest('.computer-steps-dialog, .modal-backdrop')"), 'Steps sheet covers the tab bar');
+            assert.ok(await js("(() => { const r = document.querySelector('.computer-steps-footer').getBoundingClientRect(); return r.bottom <= innerHeight && document.elementFromPoint(r.left + r.width / 2, r.bottom - 6)?.closest('.computer-steps-footer'); })()"), 'Steps footer is reachable above the tab bar');
+          }
+          assert.deepEqual(await js("[...document.querySelectorAll('.computer-steps-dialog button, .computer-steps-dialog a.btn')].filter(n => n.getClientRects().length && !n.classList.contains('modal-close-btn') && !n.classList.contains('ms-sheet-grabber')).filter(n => n.getBoundingClientRect().height < 43.5).map(n => n.textContent + ':' + n.getBoundingClientRect().height)"), [], label + ' Steps controls are 44px');
+          await capture(label + '-computer-steps');
+          await js("[...document.querySelectorAll('.computer-steps-nav .btn')].find(b => b.textContent === 'Previous').click()");
+          assert.equal(await js("document.querySelector('.computer-steps-notes').textContent"), "This step's screenshot was not kept: private field");
+          assert.ok(await js("document.querySelector('.computer-steps-image').hidden"), label + ' a private step shows no image');
+          await capture(label + '-computer-steps-private');
+          assert.deepEqual(await overflow(), [], label + ' Steps fits');
+          await js("[...document.querySelectorAll('.computer-steps-footer .btn')].find(b => b.textContent === 'Make a skill from this run').click()");
+          await waitFor("!!document.querySelector('.recording-review') && !document.querySelector('.computer-steps-dialog')");
+          await waitFor("document.querySelector('.recording-review textarea')?.value.includes('Learn more')");
+          await js("[...document.querySelectorAll('.recording-review .btn')].find(b => b.textContent === 'Discard').click()");
           demoState.computerTurn = true; demoState.moreComputerActions = false;
           await js("import('/static/js/chatStream.js').then(stream => { stream.startTurn('s1', 'Computer demo', 'Open example.com', []); })");
           if (width <= 768) {
@@ -1429,27 +1473,10 @@ app.whenReady().then(async () => {
         assert.deepEqual(await overflow(), [], label + " overflow in " + tab);
         await capture(label + "-" + tab);
       }
-      await navigate("library", { section: "vault" });
-      await js("[...document.querySelectorAll('.library-vault-modes button')].find(b => b.textContent === 'Map').click()");
-      await waitFor("document.querySelector('.vault-caption').textContent.includes('130 notes')");
-      await delay(400);
-      await capture(label + "-vault");
-      await js("document.querySelector('.vault-search').value = 'Projects index'; document.querySelector('.vault-search').dispatchEvent(new Event('input'))");
-      assert.equal(await js("document.querySelectorAll('.vault-search-result').length"), 1);
-      await js("document.querySelector('.vault-search-result').click()");
-      await waitFor("document.querySelector('.vault-panel-body').textContent.includes('connected place')");
-      assert.equal(await js("document.querySelector('.vault-note-content h1')?.textContent"), "Projects index", "Vault Markdown has a rendered heading");
-      assert.equal(await js("document.querySelector('.vault-note-content strong')?.textContent"), "connected place", "Vault Markdown has rendered emphasis");
-      assert.ok(await js("!document.querySelector('.vault-note-content').textContent.includes('status: active')"), "Vault reading view hides frontmatter");
-      assert.equal(await js("document.querySelector('.vault-note-link')?.textContent"), "the next note", "Wikilink has a readable label");
-      await js("document.querySelector('.vault-panel-actions button').click()");
-      assert.ok(await js("document.querySelector('#vault-note-editor').value.includes('status: active')"), "Edit preserves original frontmatter");
-      await js("document.querySelector('.vault-panel-actions button:nth-child(3)').click()");
-      await waitFor("!!document.querySelector('.vault-note-content h1')");
-      await capture(label + "-vault-note");
-      assert.deepEqual(await overflow(), [], label + " vault note overflow");
-      await js("document.querySelector('.vault-note-link').click()");
-      assert.equal(await js("document.querySelector('.vault-panel-header span').textContent"), "Projects note 1", "Wikilink opens its vault note");
+      // Library > Vault (Library Vault Polish, 2026-10-22): Browse, the
+      // reader and rail, Home, search, pins, History, the editor and its
+      // 409, today's note, Ask Kairos and the Map, in scripts/vault-checks.cjs.
+      await require('./vault-checks.cjs').run({ js, win, waitFor, delay, navigate, capture, overflow, writes, demoState, label });
       await navigate("home");
       await js("document.querySelector('.sidebar-settings-btn').click()");
       if (label === "mobile") {
@@ -2462,15 +2489,20 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.routines-panel .routine-row')");
     const routineStart = writes.length;
     await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Pause').click()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path)); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false), 'Pause sends enabled false');
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && w.status); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false && w.status === 200), 'Pause sends enabled false and succeeds');
     await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
     await waitFor("!!document.querySelector('.routines-panel .routine-row')");
     await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Edit').click()");
     await js("(() => { const row = document.querySelector('.routines-panel .routine-row'); const input = row.querySelector('.routine-editor input'); input.value = 'Morning postings'; input.dispatchEvent(new Event('input', { bubbles: true })); [...row.querySelectorAll('.routine-editor button')].find(b => b.textContent === 'Save').click(); })()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
+    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status); i++) await delay(50);
+    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status === 200), 'Edit saves the new name and succeeds');
+    assert.deepEqual(await js("[...document.querySelectorAll('#toast-host .toast.error')].map(t => t.textContent)"), [], 'routine Pause and Edit raise no error');
+    // Pause and Edit now really change the routine: put it back for the checks that follow.
+    assert.equal(await js("fetch('/api/tasks/g1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, name: 'New postings' }) }).then(r => r.status)"), 200);
     // Every bot surface on a phone: no sideways scroll, 44px targets.
+    await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow });
+    console.log('PASS: design canvas.');
     const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
     await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
     console.log('PASS: phone shell.');

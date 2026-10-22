@@ -1,5 +1,7 @@
 import { api, el, modelMark, openPanelDialog } from "../api.js";
 import { agentAvatar } from "../agentAvatar.js";
+import { createMascot, STATE_WORDS } from "../mascot.js";
+import * as chatStream from "../chatStream.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
 import { mountBackgroundEffect } from "../backgroundEffects.js";
@@ -164,6 +166,23 @@ export function render(container, tabId, options = {}) {
   // the text over a parchment wash on its left.
   const banner = el("div", { class: "dashboard-core", "aria-hidden": "true" });
   const nextTaskLabel = el("span", { class: "dashboard-next", text: "Checking schedule…" });
+  // Kairos beside the greeting (Kairos Mascot build spec, 2026-10-22), in
+  // the halftone finish (Mote), showing the app's aggregate state: needs you
+  // beats working beats idle (botStatus.js order). Needs you opens Agents,
+  // where the waiting items are answered; it never answers anything itself.
+  const heroMascot = createMascot({ state: "idle", finish: "halftone", decorative: true });
+  const heroMascotButton = el("button", { type: "button", class: "dashboard-mascot", disabled: true,
+    "aria-label": "Kairos, idle", onclick: () => navigate("agents") }, [heroMascot]);
+  const syncHeroMascot = () => {
+    const agentList = Array.isArray(data.agents) ? data.agents : [];
+    const state = (data.inbox?.count || 0) > 0 || agentList.some((a) => a.status === "needs_you" || a.needs_you > 0) ? "needs"
+      : agentList.some((a) => a.status === "working") || chatStream.listInFlight().some((e) => e.status === "processing") ? "thinking" : "idle";
+    if (heroMascot.getAttribute("state") !== state) heroMascot.setAttribute("state", state);
+    heroMascotButton.disabled = state !== "needs";
+    heroMascotButton.setAttribute("aria-label", state === "needs" ? "Kairos needs you. Open Agents" : `Kairos, ${STATE_WORDS[state]}`);
+    heroMascotButton.dataset.state = state;
+  };
+  const stopHeroStream = chatStream.subscribeAll(() => syncHeroMascot());
   const content = el("div", { class: "dashboard-content" });
   const header = el("header", { class: "dashboard-header" }, [
     el("div", {}, [el("div", { class: "eyebrow", text: "Overview" }), el("p", { text: new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }) })]),
@@ -173,6 +192,7 @@ export function render(container, tabId, options = {}) {
     banner,
     header,
     el("div", { class: "dashboard-intro" }, [
+      heroMascotButton,
       el("div", { class: "eyebrow", text: "Kairos, the opportune moment" }),
       el("h1", { class: "k-display" }, ["Not more time. ", el("span", { text: "The right time." })]),
       el("p", { text: "Your conversations, notes and next steps, ready for the moment you need them." }),
@@ -518,6 +538,7 @@ export function render(container, tabId, options = {}) {
         if (!rd()) agents.body.append(roster);
       }
     }
+    if (key === "agents" || key === "inbox") syncHeroMascot();
     if (key === "inbox") {
       waiting.hidden = !data.auth?.is_admin || !(value?.count > 0);
       waiting.replaceChildren(el("span", { class: "dashboard-stat-value", text: String(value?.count || 0) }), el("span", { class: "dashboard-stat-label", text: "waiting on you" }));
@@ -573,5 +594,5 @@ export function render(container, tabId, options = {}) {
   document.addEventListener("jarvis:tabs-changed", refresh);
   const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; stopHeroStream(); mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
 }

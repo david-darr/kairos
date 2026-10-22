@@ -48,6 +48,15 @@ def visible_packet(packet: dict, user: str, app_window: bool = False) -> dict | 
         # Terminal pairing prompts (core/cli_access.py) go to the app window
         # alone; a paired terminal never sees, let alone answers, the next one.
         return packet if app_window else None
+    if packet["type"] == "design_changed":
+        # The Design canvas's live redraw (routes/design_routes.py): seen by
+        # whoever may see that design, whether or not a chat changed it.
+        from core import design_store
+        try:
+            data = design_store.manifest(packet["designId"])
+        except LookupError:
+            return None
+        return packet if design_store.visible_to(data, user, auth_manager.is_admin(user)) else None
     if packet["type"] == "snapshot":
         visible = {**packet, "runs": {sid: run for sid, run in packet["runs"].items() if allowed(sid)}}
         if app_window:

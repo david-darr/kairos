@@ -1,0 +1,12 @@
+{
+  "name": "form_fill",
+  "title": "Fill a form",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/form.html. Fill in the form with name {name}, email {email} and city {city}, choose the {plan} plan, and press Save details.",
+  "variants": [
+    {"name": "Ada Lovelace", "email": "ada@example.com", "city": "London", "plan": "Pro"},
+    {"name": "Alan Turing", "email": "alan@example.org", "city": "Manchester", "plan": "Basic"}
+  ],
+  "pages": {"/form.html": "form.html"}
+}

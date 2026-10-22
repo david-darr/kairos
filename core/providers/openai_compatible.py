@@ -352,7 +352,8 @@ def _tool_messages(result, supports_images: bool, provider: str | None) -> tuple
     if not isinstance(result, tool_registry.ToolResult):
         return str(result), []
     if not result.images or not supports_images:
-        suffix = "\nScreenshots unavailable on this connection; use computer read." if result.images else ""
+        suffix = ("\nScreenshots unavailable on this connection; use computer read." if result.image_fallback is None
+                  else result.image_fallback) if result.images else ""
         return result.text + suffix, []
     images = [base64.b64encode(image).decode() for image in result.images]
     if provider == "anthropic":
@@ -363,6 +364,35 @@ def _tool_messages(result, supports_images: bool, provider: str | None) -> tuple
     else:
         parts = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}} for data in images]
     return result.text, [{"role": "user", "content": parts}]
+
+
+# Screenshot history (vault: "Agents - Computer-Use Upgrade from cua (Build
+# Spec)" 5.2, checked 2026-10-22): every computer result added an image
+# message, kept in the history and in the saved tool rounds a reconnect
+# replays, so a long computer session resent every screenshot it ever took.
+# Only the newest KEPT_SCREENSHOTS stay; older ones become a short note. The
+# note changes the history from that point, so the provider's cached prefix
+# is reused only up to it: the price of not resending the images.
+KEPT_SCREENSHOTS = 3
+SCREENSHOT_REMOVED = "(earlier screenshot removed)"
+_IMAGE_PARTS = ("image", "image_url", "input_image")
+
+
+def _is_screenshot(message: dict) -> bool:
+    """A tool result's image message (_tool_messages): images only. A person's
+    attached images always come with their text, so they are never matched."""
+    content = message.get("content")
+    return (message.get("role") == "user" and isinstance(content, list) and bool(content)
+            and all(isinstance(part, dict) and part.get("type") in _IMAGE_PARTS for part in content))
+
+
+def _trim_screenshots(messages: list[dict], keep: int = KEPT_SCREENSHOTS) -> int:
+    """Replace all but the newest `keep` screenshot messages, in place (the
+    same dicts are the kept rounds and the brain's history). Returns how many."""
+    shots = [message for message in messages if _is_screenshot(message)]
+    for message in shots[:max(0, len(shots) - keep)]:
+        message["content"] = SCREENSHOT_REMOVED
+    return max(0, len(shots) - keep)
 
 
 async def turn_events(base_url: str, model: str, api_key: Optional[str], messages: list[dict],
@@ -450,6 +480,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
     working_messages = list(messages)
     async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
         for round_num in range(MAX_TOOL_ROUNDS):
+            _trim_screenshots(working_messages)
             body = {"model": model, "messages": _request_messages(base_url, model, working_messages), "tools": tools}
             if num_ctx:
                 body["num_ctx"] = num_ctx
@@ -517,6 +548,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
                 raise
         # Ran out of rounds without a final answer (every round called a
         # tool): this used to end the stream with nothing at all.
+        _trim_screenshots(working_messages)
         content, raw = await _answer_without_tools(client, base_url, api_key, model, working_messages, num_ctx)
         usage = account(raw)
         if usage:

@@ -1,0 +1,21 @@
+<!doctype html>
+<title>Account details</title>
+<h1>Account details</h1>
+<form onsubmit="return false">
+  <p><label>Name <input id="name" aria-label="Name"></label></p>
+  <p><label>Email <input id="email" aria-label="Email"></label></p>
+  <p><label>City <input id="city" aria-label="City"></label></p>
+  <fieldset><legend>Plan</legend>
+    <label><input type="radio" name="plan" value="Basic" aria-label="Basic plan"> Basic</label>
+    <label><input type="radio" name="plan" value="Pro" aria-label="Pro plan"> Pro</label>
+  </fieldset>
+  <p><button type="button" id="save">Save details</button></p>
+</form>
+<p id="result"></p>
+<script>
+  document.getElementById('save').onclick = () => {
+    const plan = (document.querySelector('input[name=plan]:checked') || {}).value || '';
+    const value = id => document.getElementById(id).value.trim();
+    document.getElementById('result').textContent = `Saved: ${value('name')} | ${value('email')} | ${value('city')} | ${plan}`;
+  };
+</script>

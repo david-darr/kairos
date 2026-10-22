@@ -67,6 +67,10 @@ const SHOULD_SPAWN_BACKEND = !process.env.JARVIS_BACKEND_URL;
 // Only for a backend this process starts: an already-running one (a dev
 // server) was not given it and stays open to local requests. See ui-access.js.
 const UI_SECRET = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
+// The Design canvas's render worker (designRender.js): the backend this
+// process starts gets the token, and only this process can take its jobs.
+const designRender = require('./designRender');
+const RENDER_TOKEN = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
 
 let backendProcess = null;
 
@@ -227,7 +231,8 @@ function startBackend() {
       // own environment at startup, so nothing it starts inherits it.
       // JARVIS_INSTANCE tells the page which copy it is (the DEV badge).
       env: { ...process.env, JARVIS_DATA_DIR: path.join(app.getPath("userData"), "data"), JARVIS_UI_SECRET: UI_SECRET,
-             APP_PORT: String(INSTANCE.port), JARVIS_INSTANCE: INSTANCE.name, KAIROS_VERSION: app.getVersion() },
+             APP_PORT: String(INSTANCE.port), JARVIS_INSTANCE: INSTANCE.name, KAIROS_VERSION: app.getVersion(),
+             KAIROS_RENDER_TOKEN: RENDER_TOKEN },
     },
   );
   const proc = backendProcess;
@@ -521,6 +526,7 @@ async function createWindow() {
   // Before the first page loads: with accounts off, the backend answers only
   // requests carrying this (ui-access.js). The usage overlay shares the session.
   if (UI_SECRET) await session.defaultSession.cookies.set(uiCookie(BACKEND_URL, UI_SECRET));
+  if (RENDER_TOKEN) designRender.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
   await win.loadURL(BACKEND_URL);
   if (process.platform === "win32" && !screenGrab) {
     screenGrab = installScreenGrab({
@@ -576,6 +582,17 @@ ipcMain.handle('forge-preview:open', (event, id, url, rect) => fromAppWindow(eve
 ipcMain.handle('forge-preview:navigate', (event, url) => fromAppWindow(event) ? forgePreview.navigate(url) : { ok: false });
 ipcMain.handle('forge-preview:state', event => fromAppWindow(event) ? forgePreview.state() : { open: false });
 ipcMain.handle('forge-preview:external', event => fromAppWindow(event) ? forgePreview.openExternal() : { ok: false });
+// Library > Vault "Open in Obsidian" (2026-10-22). The backend builds the URL
+// from a vault-checked path; this accepts only obsidian://open?path=...
+ipcMain.handle('vault:obsidian', async (event, raw) => {
+  if (!fromAppWindow(event) || typeof raw !== 'string' || raw.length > 4000) return { ok: false };
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'obsidian:' || url.hostname !== 'open' || [...url.searchParams.keys()].join() !== 'path') return { ok: false };
+    await shell.openExternal(url.toString());
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
 ipcMain.handle('forge-terminal:external', async (event, raw) => {
   if (!fromAppWindow(event) || typeof raw !== 'string' || raw.length > 4000) return { ok: false };
   try {
@@ -801,6 +818,7 @@ app.on("before-quit", (event) => {
   // Destroyed, not hidden — a hidden view keeps running scripts and audio.
   sideBrowser.close();
   forgePreview.close();
+  designRender.stop();
   if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.destroy();
   stopBackend();
 });

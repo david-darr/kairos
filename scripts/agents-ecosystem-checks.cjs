@@ -1,6 +1,7 @@
 const assert=require('node:assert/strict');
 module.exports=async({js,waitFor,delay,navigate,win,capture,writes,demoState,agents})=>{
   const saved=structuredClone(agents);
+  // A v2 dot face still reads, as its Ajar (mascot, 2026-10-22); the village draws it as Kip.
   agents[0].role='School tutor';agents[0].avatar={form:'triangle',color:'#A25BFF',finish:'plush',face:'wink',accessory:'glasses'};
   agents[1].role='Software developer';agents[1].avatar={form:'robot',color:'#00B1FF',finish:'matte',face:'curious',accessory:'headphones'};
   const click=selector=>js(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -20,7 +21,8 @@ module.exports=async({js,waitFor,delay,navigate,win,capture,writes,demoState,age
   assert.ok(await js("document.querySelectorAll('.ecosystem-ground [data-eco-decor=tree]').length>40 && document.querySelectorAll('.ecosystem-ground [data-eco-decor=bench]').length>3 && document.querySelectorAll('.ecosystem-ground [data-eco-decor=picnic]').length>0 && document.querySelectorAll('.ecosystem-ground [data-eco-decor=garden]').length>0"),'Greenery and park furniture are rendered');
   assert.ok(await js("document.querySelector('.ecosystem-ground').getAttribute('aria-hidden')==='true' && getComputedStyle(document.querySelector('.ecosystem-ground')).pointerEvents==='none'"),'Scenery is decorative and cannot intercept map interaction');
   await waitFor("[...document.querySelectorAll('.ecosystem-profile-pixels')].every(n=>n.dataset.pixelReady==='true')");
-  assert.equal(await js("JSON.parse(document.querySelector('[data-ecosystem-key=\"agent:a1\"] .ecosystem-profile-pixels').dataset.avatarSpec).accessory"),'glasses');
+  assert.equal(await js("JSON.parse(document.querySelector('[data-ecosystem-key=\"agent:a1\"] .ecosystem-profile-pixels').dataset.avatarSpec).acc"),'spectacles');
+  assert.ok(await js("document.querySelector('[data-ecosystem-key=\"agent:a1\"] .ecosystem-sprite').style.getPropertyValue('--kip-walk').includes('data:image/svg+xml')"),'Kip walks from a strip of frames');
   assert.ok(await js("document.querySelector('[data-ecosystem-key=\"agent:a1\"] .ecosystem-profile-pixels').src.startsWith('data:image/png')"),'Actual avatar is rasterized at sprite resolution');
   assert.ok(await js("document.querySelector('[data-ecosystem-key=\"home:a1\"]').classList.contains('ecosystem-home-occupied') && document.querySelector('[data-ecosystem-key=\"agent:a1\"]').hidden"),'Nonworking agent is inside its own home');
   await fits();await capture('ecosystem-v2-desktop-overview');
@@ -32,6 +34,7 @@ module.exports=async({js,waitFor,delay,navigate,win,capture,writes,demoState,age
   await village();
   Object.assign(agents[0],{status:'working',needs_you:0,enabled:true,status_detail:'Study CS homework'});await refresh();
   await waitFor("document.querySelector('[data-ecosystem-key=\"agent:a1\"]').dataset.motion==='walking'");
+  assert.equal(await js("getComputedStyle(document.querySelector('[data-ecosystem-key=\"agent:a1\"] .ecosystem-sprite'),'::before').animationName"),'kip-play','A walking Kip steps through its frames');
   assert.equal(await js("document.querySelector('[data-ecosystem-key=\"agent:a1\"]').dataset.destination"),'school');
   await js("window.ecoActor=document.querySelector('[data-ecosystem-key=\"agent:a1\"]');window.ecoPosition=[window.ecoActor.dataset.x,window.ecoActor.dataset.y];document.querySelector('.ecosystem-viewport').focus()");
   await delay(300);
@@ -56,8 +59,8 @@ module.exports=async({js,waitFor,delay,navigate,win,capture,writes,demoState,age
   await refresh();
   await waitFor("window.ecoActor.hidden && document.querySelector('[data-ecosystem-key=\"home:a1\"]').classList.contains('ecosystem-home-occupied')");
   assert.ok(await js("[...document.querySelectorAll('.ecosystem-profile-pixels')].every(n=>getComputedStyle(n).animationName==='none')"),'Reduced motion snaps safely and removes animation');
-  agents[0].avatar={...agents[0].avatar,color:'#FA70AB',accessory:'flower'};await refresh();
-  await waitFor("JSON.parse(document.querySelector('[data-ecosystem-key=\"home:a1\"] .ecosystem-profile-pixels').dataset.avatarSpec).accessory==='flower'");
+  agents[0].avatar={version:3,character:'ajar',shape:'tall',color:'#D99A92',acc:'scarf',finish:'flat'};await refresh();
+  await waitFor("JSON.parse(document.querySelector('[data-ecosystem-key=\"home:a1\"] .ecosystem-profile-pixels').dataset.avatarSpec).acc==='scarf'");
   await js(`window.ecoFetch=window.fetch;window.ecoFail='teams';window.fetch=(url,options)=>{const path=String(url);if((window.ecoFail==='teams'&&path==='/api/swarm/systems')||(window.ecoFail==='agents'&&path==='/api/agents'))return Promise.resolve(new Response(JSON.stringify({detail:'Offline'}),{status:503,headers:{'Content-Type':'application/json'}}));return window.ecoFetch(url,options)};document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))`);
   await waitFor("document.querySelector('.ecosystem-sync').textContent.includes('Teams offline')");
   assert.equal(await js("document.querySelectorAll('.ecosystem-team').length"),1,'Known team building survives connection loss');
@@ -88,6 +91,8 @@ module.exports=async({js,waitFor,delay,navigate,win,capture,writes,demoState,age
   assert.ok(await js("Number(document.querySelector('.ecosystem-zoom-value').textContent.replace('%',''))>=85"),'Phone tap-to-focus enlarges the location');
   await capture('ecosystem-v2-phone-detail');
   await click('.ecosystem-detail .btn.primary');await waitFor("!document.querySelector('#agents-chats-panel').hidden&&!!document.querySelector('.side-chat-input')");
+  // The draft is restored as the DM mounts; wait for it rather than racing the mount.
+  await waitFor("document.querySelector('.side-chat-input')?.value==='Ecosystem draft stays'").catch(()=>{});
   assert.equal(await js("document.querySelector('.side-chat-input').value"),'Ecosystem draft stays','Phone detail action opens original DM draft');
   await village();await click('[aria-label="Fit village to screen"]');
   await click('[data-ecosystem-key="school:school"]');

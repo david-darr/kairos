@@ -215,6 +215,10 @@
 
   // Binary and HTML responses are shared by the smoke server and demo shim too.
   function media(url) {
+    // A run's kept computer step images (cua upgrade 5.4): the fixture frame.
+    if (/^\/api\/computer\/steps\/[^/]+\/\d+\/(before|after|marker)\.jpg$/.test(url.pathname) && state.computerImage) {
+      return { type: 'image/jpeg', base64: state.computerImage };
+    }
     if (url.pathname === '/api/chat/artifacts/content') {
       const artifact = artifactFor(url);
       return artifact ? { type: artifact.type || 'text/plain', body: artifact.body || '', base64: artifact.base64 } : null;
@@ -262,6 +266,7 @@
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
   function mutate(route, method, body = {}, query = {}) {
+    if (route.startsWith("/api/vault/") || route.startsWith("/api/file-checkpoints/vault-")) { const answer = vaultMutate(route, method, body); if (answer !== undefined) return answer; }
     const organization = route.match(/^\/api\/agents\/conversations\/(agent|team)\/([^/]+)$/);
     if (organization && method === 'POST') {
       const key = organization[1] + ':' + organization[2];
@@ -748,7 +753,12 @@
     if (event && method === "PATCH") { Object.assign(event, body); return event; }
     return null;
   }
+  // Scout's routine (agent a1): a real task, as on the backend, so its Pause
+  // and Edit (PATCH /api/tasks/g1) succeed; the agent's routines list shows this same record.
+  const routineG1 = { id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.",
+    schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: "a1", next_run_at: future(20) };
   const tasks = [
+    routineG1,
     { id: "t1", name: "Daily briefing", builtin_action: "routine0", enabled: true, schedule_kind: "daily", run_time: "07:00", next_run_at: future(6), last_run_at: now - 3000,
       deliver_to_channel: "discord" },
     // Running right now (roadmap phase 4): offers Stop instead of Run now.
@@ -797,30 +807,162 @@
       memory: state.agentMemories?.[id] ?? `# ${agent.name}'s notes\n\n## About this work\n- ${agent.role}\n\n## Preferences\n- 2026-10-04: remote roles only\n\n## Corrections\n\n## Notes\n`,
       memory_upkeep_journal: id === 'a1' ? [{ id: 'upkeep-demo', at: now - 1800, topic: null,
         status: state.agentUpkeepUndone ? 'undone' : 'committed', changes: [{ section: 'Notes', line: 'Old note', reason: 'expired' }] }] : [],
-      goals: [{ id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
+      goals: [id === "a1" ? routineG1 : { id: "g1", name: "New postings", prompt: "Look for new remote backend roles and say which are worth applying to.", schedule_kind: "daily", run_time: "08:00", report_when: "notable", enabled: true, agent_id: id }],
       cards: [{ id: "c9", name: "Shortlist five roles", schedule_kind: "card", status: state.agentReview ? 'review' : 'ready', agent_id: id, comments: [] }],
       inbox: agentInbox.filter((i) => i.agent_id === id), answered: [], runs: runs.c1,
       teams: [{ id: "s1", name: "Launch team", state: "active", member_id: "s1-m2", is_lead: 0 }],
       triggers: [{ id: "tr1", name: "GitHub pushes", enabled: true, auto_run: false }] };
   }
   const docs = ["Design principles", "Project research", "Ideas for next week"].map((title, i) => ({ id: "d" + (i + 1), title, updated_at: now - i * 3600 }));
-  function graph() {
-    const nodes = [{ id: "", name: "Vault", type: "folder", folder: "" }], edges = [];
-    if (state.empty) return { nodes, edges };
-    for (const [index, folder] of ["Projects", "Resources", "Daily notes", "Personal", "Learning"].entries()) {
-      nodes.push({ id: folder, name: folder, type: "folder", folder: "" });
-      edges.push({ source: "", target: folder, kind: "contains" });
+  // The Vault (Library Vault Polish, 2026-10-22): five folders of 26 notes,
+  // 30 note-to-note links, properties on most notes, dated daily notes, two
+  // links to notes that don't exist, and versions so a save can conflict.
+  const localDay = (offsetDays) => { const d = new Date(now * 1000 - offsetDays * 86400000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  // Tests reset it with `state.vault = undefined`.
+  const vaultState = () => state.vault ||= { versions: {}, content: {}, pins: ['Projects/Projects.md'], todayCreated: false, restored: false };
+  const VAULT_FOLDERS = ["Projects", "Resources", "Daily notes", "Personal", "Learning"];
+  const PROJECTS = ["kairos", "website", "garden"], STATUSES = ["active", "draft", "done"], TYPES = ["plan", "note", "reference"];
+  const VAULT_ROOT = "C:\\Users\\Alex\\Documents\\Vault";
+  function vaultNotes() {
+    const notes = [];
+    for (const [f, folder] of VAULT_FOLDERS.entries()) {
       for (let j = 0; j < 26; j++) {
-        const id = folder + "/note-" + j + ".md";
-        nodes.push({ id, name: j === 0 ? folder + " index" : folder + " note " + j, folder, type: "note" });
-        edges.push({ source: folder, target: id, kind: "contains" });
-        if (j > 0 && j % 4 === 0) edges.push({ source: id, target: folder + "/note-0.md", kind: "link" });
+        let name;
+        if (j === 0) name = folder;
+        else if (folder === "Daily notes") name = j === 1 ? "Daily Note Template" : localDay(j - 1);
+        else name = folder + " note " + j;
+        const id = folder + "/" + name + ".md";
+        const front = j % 7 === 3 ? null : { status: j === 0 ? "active" : STATUSES[(j + f) % 3],
+          project: folder === "Daily notes" ? "personal" : PROJECTS[(j + f) % 3],
+          type: j === 0 ? "index" : folder === "Daily notes" && j > 1 ? "log" : TYPES[j % 3] };
+        notes.push({ id, name, folder, j, front, mtime: now - (f * 26 + j) * 5400 - (folder === "Daily notes" ? 0 : 3 * 86400), daily: /^\d{4}-\d{2}-\d{2}$/.test(name) });
       }
     }
-    return { nodes, edges };
+    if (vaultState().todayCreated) notes.push({ id: "Daily notes/" + localDay(0) + ".md", name: localDay(0), folder: "Daily notes", j: 99,
+      front: { status: "active", project: "personal", type: "log" }, mtime: now - 30, daily: true });
+    return notes;
+  }
+  function vaultBody(note) {
+    if (vaultState().content[note.id] != null) return vaultState().content[note.id];
+    const front = note.front ? `---\nstatus: ${note.front.status}\nproject: ${note.front.project}\ntype: ${note.front.type}\n---\n` : "";
+    let body = `# ${note.name}\n\n`;
+    if (note.id === "Projects/Projects.md") {
+      body += "A **connected place** for ideas and ongoing work. See [[Projects/Projects note 1|the next note]].\n\n"
+        + "> [!note] How this folder works\n> Every project gets one note here, linked from this index.\n\n"
+        + "## Open threads\n\n- The launch checklist in [[Projects note 4]]\n- A plan that is [[Not written yet]]\n\n"
+        + "![Team photo](https://images.example.com/team.png)\n";
+    } else if (note.j === 0) body += `The index for ${note.folder}. Each note in this folder is listed here.\n`;
+    else if (note.name === "Daily Note Template") body += "## Index\n\n## Session 1\n";
+    else body += `Notes on ${note.name.toLowerCase()}: what was decided, what is open and what comes next. The **${note.folder.toLowerCase()}** work moves one step at a time.\n`;
+    if (vaultLinksBack(note)) body += `\nBack to [[${note.folder}]].\n`;
+    if (note.id === "Resources/Resources.md") body += "\nSee also [[Missing reference]].\n";
+    return front + body;
+  }
+  function vaultLinksBack(note) { return note.j > 0 && note.j % 4 === 0 && note.j < 99 && !(note.folder === "Projects" && note.j >= 20); }
+  function vaultResolve(target, notes) {
+    const t = target.toLowerCase().replace(/\.md$/, "");
+    return notes.find(n => n.id.toLowerCase().replace(/\.md$/, "") === t) || notes.find(n => n.name.toLowerCase() === t.split("/").pop()) || null;
+  }
+  function graph() {
+    const nodes = [{ id: "", name: "Vault", type: "folder" }], edges = [], missing = [];
+    if (state.empty) return { nodes, edges, missing };
+    const notes = vaultNotes();
+    for (const folder of VAULT_FOLDERS) { nodes.push({ id: folder, name: folder, type: "folder" }); edges.push({ source: "", target: folder, kind: "contains" }); }
+    for (const note of notes) {
+      const body = vaultBody(note);
+      nodes.push({ id: note.id, name: note.name, folder: note.folder, type: "note", mtime: note.mtime, size: body.length, words: body.split(/\s+/).length,
+        daily: note.daily, has_frontmatter: !!note.front, ...(note.front ? { frontmatter: note.front } : {}) });
+      edges.push({ source: note.folder, target: note.id, kind: "contains" });
+    }
+    // 30 links: every fourth note links back to its folder's index (in
+    // Projects, two of those become links out of the index instead).
+    for (const note of notes) if (vaultLinksBack(note)) edges.push({ source: note.id, target: note.folder + "/" + note.folder + ".md", kind: "link" });
+    edges.push({ source: "Projects/Projects.md", target: "Projects/Projects note 1.md", kind: "link" }, { source: "Projects/Projects.md", target: "Projects/Projects note 4.md", kind: "link" });
+    missing.push({ source: "Projects/Projects.md", target: "Not written yet" }, { source: "Resources/Resources.md", target: "Missing reference" });
+    return { nodes, edges, missing };
+  }
+  function vaultNote(path) {
+    const notes = vaultNotes();
+    const note = notes.find(n => n.id === path) || notes[0];
+    const content = vaultBody(note);
+    const links = [...new Set([...content.matchAll(/(!?)\[\[([^\]\n]+?)\]\]/g)].map(m => m[2]))].map(raw => {
+      const [targetPart, alias = ""] = raw.split("|");
+      const [target, heading = ""] = targetPart.split("#");
+      const hit = vaultResolve(target, notes);
+      return { raw, target, heading, alias, embed: false, kind: hit ? "note" : "missing", id: hit ? hit.id : null };
+    });
+    const backlinks = graph().edges.filter(e => e.kind === "link" && e.target === note.id).map(e => ({ id: e.source, snippet: `Back to [[${note.folder}]].` }));
+    return { path: note.id, content, version: vaultState().versions[note.id] || "v1", mtime: note.mtime, size: content.length, editable: true,
+      line_ending: "lf", bom: false, links, backlinks, can_edit: !state.vaultReadOnly,
+      last_change: note.id === "Projects/Projects.md" ? { when: now - 7200, label: "Chat: Connecting ideas across the vault", kairos: true }
+        : { when: note.mtime, label: "Edited outside Kairos", kairos: false } };
+  }
+  function vaultCheckpoint(id) {
+    return { id, source: id === "vault-cp1" ? "chat:s3" : "library:alex", status: "changed", created: now - 7200, roots: [{ path: VAULT_ROOT, changes: [{ path: "Projects/Projects.md",
+      before: "a".repeat(40), after: "b".repeat(40), added: 3, removed: 1,
+      restore_state: id === "vault-cp1" ? (vaultState().restored ? "restored" : "available") : "changed_since",
+      diff: "--- before/Projects/Projects.md\n+++ after/Projects/Projects.md\n@@ -5,3 +5,5 @@\n-A place for ideas.\n+A **connected place** for ideas and ongoing work.\n+\n+## Open threads\n" }] }] };
+  }
+  function vaultRoute(route, url) {
+    if (route === "/api/vault/graph") return graph();
+    if (route === "/api/vault/note") return vaultNote(url.searchParams.get("path"));
+    if (route === "/api/vault/pins") return { pins: state.empty ? [] : vaultState().pins };
+    if (route === "/api/vault/daily") return { date: localDay(0), path: "Daily notes/" + localDay(0) + ".md", exists: vaultState().todayCreated, folder: "Daily notes",
+      template: "Daily notes/Daily Note Template.md", template_exists: !state.empty, can_create: !state.vaultReadOnly };
+    if (route === "/api/vault/search") {
+      const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+      const words = q.split(/\s+/).filter(Boolean);
+      const pattern = new RegExp("(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+      const results = !q ? [] : vaultNotes().map(n => ({ n, body: vaultBody(n).replace(/^---[\s\S]*?---\n/, "") }))
+        .filter(({ body }) => words.every(w => body.toLowerCase().includes(w))).slice(0, 20)
+        .map(({ n, body }) => ({ path: n.id, title: n.name, snippet: body.replace(pattern, "\ue000$1\ue001").slice(0, 180) }));
+      return { query: q, mark: ["\ue000", "\ue001"], results };
+    }
+    if (route === "/api/vault/related") {
+      const path = url.searchParams.get("path") || "";
+      const folder = path.split("/")[0];
+      return { path, results: vaultNotes().filter(n => n.folder === folder && n.id !== path && n.j % 4 !== 0 && n.j > 1).slice(0, 5).map(n => ({ path: n.id, title: n.name, snippet: "" })) };
+    }
+    if (route === "/api/vault/activity") {
+      const path = url.searchParams.get("path");
+      if (!path) return { recent: vaultNotes().sort((a, b) => b.mtime - a.mtime).slice(0, 12).map((n, i) => ({ path: n.id, name: n.name, when: n.mtime,
+        source: i === 1 ? "chat:s3" : "outside", label: i === 1 ? "Chat: Connecting ideas across the vault" : "Edited outside Kairos", event_id: i === 1 ? "vault-cp1" : null, kairos: i === 1 })) };
+      return { path, outside: null, entries: path === "Projects/Projects.md" ? [
+        { event_id: "vault-cp1", source: "chat:s3", path, when: now - 7200, label: "Chat: Connecting ideas across the vault", added: 3, removed: 1, restore_state: vaultState().restored ? "restored" : "available", root: VAULT_ROOT, created: false },
+        { event_id: "vault-cp2", source: "library:alex", path, when: now - 3 * 86400, label: "You, in Library", added: 1, removed: 0, restore_state: "changed_since", root: VAULT_ROOT, created: false },
+      ] : [] };
+    }
+    if (route === "/api/vault/obsidian-url") return { url: "obsidian://open?path=" + encodeURIComponent(VAULT_ROOT + "\\" + url.searchParams.get("path")) };
+    if (route === "/api/file-checkpoints/vault-cp1" || route === "/api/file-checkpoints/vault-cp2") return vaultCheckpoint(route.split("/").pop());
+    return undefined;
+  }
+  function vaultMutate(route, method, body) {
+    if (route === "/api/vault/pins" && method === "PUT") { vaultState().pins = (body.pins || []).filter(p => typeof p === "string"); return { pins: vaultState().pins }; }
+    if (route === "/api/vault/note" && method === "POST") {
+      const current = vaultState().versions[body.path] || "v1";
+      if (body.version !== current) return { _status: 409, detail: "This note changed since you opened it.", code: "version_conflict", current_version: current };
+      const next = "v" + ((Number(current.slice(1)) || 1) + 1);
+      vaultState().versions[body.path] = next; vaultState().content[body.path] = body.content;
+      return { ok: true, ...vaultNote(body.path), version: next, content: body.content };
+    }
+    if (route === "/api/vault/daily" && method === "POST") {
+      const created = !vaultState().todayCreated; vaultState().todayCreated = true;
+      const path = "Daily notes/" + localDay(0) + ".md";
+      const indexPath = "Daily notes/Daily notes.md";
+      const indexBody = vaultBody(vaultNotes().find(n => n.id === indexPath));
+      return { path, created, index: created ? { path: indexPath, version: vaultState().versions[indexPath] || "v1",
+        line: `- [[${localDay(0)}]]: daily session log.`, after: "The index for Daily notes. Each note in this folder is listed here.",
+        content: indexBody + `- [[${localDay(0)}]]: daily session log.\n` } : null };
+    }
+    if (route === "/api/file-checkpoints/vault-cp1/restore" && method === "POST") { vaultState().restored = true; return { restored: body.files }; }
+    return undefined;
   }
   function fixture(url) {
     if (url.pathname === '/api/addons') return [];
+    // The Design canvas: no designs in the demo (its boards are live frames from the backend).
+    if (url.pathname === '/api/designs') return [];
+    if (url.pathname === '/api/designs/render-status') return { available: false, message: 'Needs the Kairos desktop app' };
+    if (url.pathname === '/api/design-systems') return [{ id: 'kairos', name: 'Kairos', builtin: true }];
     if (url.pathname === '/api/store/catalog') return communityCatalog();
     if (url.pathname === '/api/store/github') return { configured: state.githubConfigured !== false, signed_in: !!state.githubSignedIn, login: state.githubSignedIn ? 'alex-demo' : null };
     if (url.pathname === '/api/store/submissions') return state.empty ? [] : [
@@ -951,6 +1093,25 @@
       return (state.stoppedOwners || []).includes(owner) ? { owner, url: 'https://example.com/', title: 'Example Domain',
         closed_at: now, taken_over: false, image_url: '/static/img/computer-fixture.jpg' } : null;
     }
+    // Steps (cua upgrade 5.4): one run's kept computer actions.
+    if (route === '/api/computer/steps/r-computer') return { run_id: 'r-computer', owner: 'chat:s1', days: 7, started: now - 30, updated: now - 18,
+      steps: [
+        { step: 1, action: 'open', arguments: { url: 'https://example.com/' }, element: null, point: null, ok: true, code: null,
+          result: 'URL: https://example.com/ | Title: Example Domain | open completed.', url: 'https://example.com/', time: now - 25,
+          images: ['before.jpg', 'after.jpg'], evidence: { kept: ['action.json', 'before.jpg', 'after.jpg'], not_kept: {} } },
+        { step: 2, action: 'type', arguments: { ref: 'r1:2', text: '(private field)' }, element: { label: 'Password', tag: 'input' },
+          point: null, ok: false, code: 'private_field', time: now - 22, url: null, images: [],
+          result: 'Not typed: passwords, codes and payment details are entered by the person. Ask them to take over the computer.',
+          evidence: { kept: ['action.json'], not_kept: { 'before.jpg': 'private field', 'after.jpg': 'private field' } } },
+        { step: 3, action: 'click', arguments: { ref: 'r1:1' }, element: { label: 'Learn more', tag: 'a' }, point: { x: 640, y: 420 },
+          ok: true, code: null, result: 'URL: https://example.com/ | Title: Example Domain | click completed.', url: 'https://example.com/',
+          time: now - 18, images: ['before.jpg', 'after.jpg', 'marker.jpg'],
+          evidence: { kept: ['action.json', 'before.jpg', 'after.jpg', 'marker.jpg'], not_kept: {} } },
+      ] };
+    if (route === '/api/computer/steps/r-computer/skill') return { owner: 'chat:s1', steps: [
+      { kind: 'open', url: 'https://example.com/' }, { kind: 'click', url: 'https://example.com/', element: { label: 'Learn more', tag: 'a' } }] };
+    if (/^\/api\/computer\/[^/]+\/steps$/.test(route)) return [{ run_id: 'r-computer', owner: decodeURIComponent(route.split('/')[3]),
+      steps: 3, started: now - 30, updated: now - 18 }];
     if (/^\/api\/computer\/[^/]+\/history$/.test(route)) return { steps: url.searchParams.get('run_id') === 'r-computer' ? [
       { at: now - 25, kind: 'tool_started', name: 'computer', detail: JSON.stringify({ action: 'open', url: 'https://example.com/' }) },
       { at: now - 20, kind: 'tool_finished', name: 'computer', ok: true, detail: JSON.stringify({ action: 'open', url: 'https://example.com/',
@@ -1223,8 +1384,7 @@
       const skill = fixture(new URL('/api/skills', url)).find(item => item.slug === route.split('/')[3]);
       if (skill) return { ...skill, body: skill.body || `## When to Use\n${skill.description}\n\n## Procedure\nReview the inputs, follow the skill and report the result.` };
     }
-    if (route === "/api/vault/graph") return graph();
-    if (route === "/api/vault/note") return { content: "---\nstatus: active\n---\n# Projects index\n\nA **connected place** for ideas and ongoing work. See [[Projects/note-1|the next note]]." };
+    if (route.startsWith("/api/vault/") || route.startsWith("/api/file-checkpoints/vault-")) { const answer = vaultRoute(route, url); if (answer !== undefined) return answer; }
     if (route === "/api/email/triage") return { generated_at: now, scanned: 12, items: state.empty ? [] : [{ subject: "Project check-in this afternoon", from: "team@example.test", reason: "An upcoming meeting needs your review." }] };
     if (route === "/api/email/accounts") return [];
     if (route === "/api/channels") return [];

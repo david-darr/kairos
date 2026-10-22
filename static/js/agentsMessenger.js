@@ -2,6 +2,7 @@
 import { api, el } from './api.js';
 import { ICONS } from './icons.js';
 import { agentAvatar } from './agentAvatar.js';
+import { stateForStatus } from './mascot.js';
 import { botStatusLine } from './botStatus.js';
 import { openCreateAgent } from './agentCreation.js';
 import { mountAgentEcosystem } from './agentEcosystem.js';
@@ -119,7 +120,7 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
     for (const row of rows) {
       const { kind, item } = row, key = `${kind}:${item.id}`, label = item.name || 'Untitled team';
       const preview = row.preview || (kind === 'agent' ? 'Start a conversation' : item.mission || 'Team work chat');
-      const face = kind === 'agent' ? agentAvatar(item, 42) : el('span', { class: 'agents-team-avatar', 'aria-hidden': 'true' });
+      const face = kind === 'agent' ? agentAvatar(item, 42, stateForStatus(botStatusLine(item).state)) : el('span', { class: 'agents-team-avatar', 'aria-hidden': 'true' });
       if (kind === 'team') {
         const members = [item.lead, ...(item.specialists || [])].map(member => agents.find(a => a.id === member?.agent_id)).filter(Boolean).slice(0, 3);
         if (members.length) face.append(...members.map(member => agentAvatar(member, 26))); else face.innerHTML = ICONS.agents;

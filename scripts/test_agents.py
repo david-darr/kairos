@@ -94,23 +94,61 @@ class AgentTestCase(unittest.TestCase):
 
 
 class ProfileAndSoulTests(AgentTestCase):
-    def test_avatar_spec_is_optional_and_closed(self):
-        self.assertNotIn('avatar', self.agent)
-        self.assertEqual(web.get(f'/api/agents/{self.agent["id"]}').json()['agent']['id'], self.agent['id'])
-        valid = {'form': 'cloud', 'color': '#FA70AB', 'finish': 'plush', 'face': 'smile', 'accessory': 'flower'}
+    def test_every_bot_is_an_ajar_with_a_closed_spec(self):
+        # Kairos Mascot build spec (2026-10-22): a new bot gets its Ajar
+        # default, deterministic from its id and its colour.
+        self.assertEqual(self.agent['avatar']['version'], 3)
+        self.assertEqual(self.agent['avatar']['character'], 'ajar')
+        self.assertEqual(self.agent['avatar']['color'], self.agent['color'].upper())
+        valid = {'version': 3, 'character': 'ajar', 'shape': 'tall', 'color': '#D99A92', 'acc': 'scarf', 'finish': 'flat'}
         created = web.post('/api/agents', json={'name': 'Avatar test', 'avatar': valid})
         self.assertEqual(created.status_code, 200, created.text)
         self.addCleanup(self._remove, created.json()['id'])
         self.assertEqual(created.json()['avatar'], valid)
-        custom = {**valid, 'color': '#123ABC'}
-        saved = web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': custom})
+        saved = web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': {**valid, 'color': '#b5c7a5', 'acc': 'laurel'}})
         self.assertEqual(saved.status_code, 200, saved.text)
-        self.assertEqual(saved.json()['avatar'], custom)
-        for invalid in ({**valid, 'unknown': 'x'}, {**valid, 'form': 'octopus'},
-                        {**valid, 'face': 'angry'}, {**valid, 'color': 'red'},
-                        {**valid, 'finish': 'metal'}, {**valid, 'accessory': 'crown'}):
+        self.assertEqual(saved.json()['avatar'], {**valid, 'color': '#B5C7A5', 'acc': 'laurel'})
+        hostile = ({**valid, 'unknown': 'x'}, {**valid, 'shape': 'cloud'}, {**valid, 'acc': 'bow'},
+                   {**valid, 'acc': 'headphones'}, {**valid, 'color': 'ink'}, {**valid, 'color': '#123ABC'},
+                   {**valid, 'color': '#D99A92"/><script>alert(1)</script>'}, {**valid, 'color': 7},
+                   {**valid, 'finish': 'plush'}, {**valid, 'character': 'crab'}, {**valid, 'version': 4},
+                   {**valid, 'shape': ['round']}, 'round', [])
+        for invalid in hostile:
             with self.subTest(invalid=invalid):
-                self.assertEqual(web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': invalid}).status_code, 400)
+                self.assertIn(web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': invalid}).status_code, (400, 422))
+        self.assertEqual(agent_service.get(self.agent['id'])['avatar']['acc'], 'laurel', 'a refused spec changes nothing')
+
+    def test_a_v2_dot_face_still_validates_and_becomes_an_ajar(self):
+        legacy = {'form': 'pill', 'color': '#FA70AB', 'finish': 'plush', 'face': 'smile', 'accessory': 'glasses'}
+        saved = web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': legacy})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()['avatar'], {'version': 3, 'character': 'ajar', 'shape': 'tall',
+                                                  'color': '#D99A92', 'acc': 'spectacles', 'finish': 'flat'})
+        for invalid in ({**legacy, 'form': 'octopus'}, {**legacy, 'face': 'angry'}, {**legacy, 'color': 'red'},
+                        {**legacy, 'finish': 'metal'}, {**legacy, 'accessory': 'crown'}, {**legacy, 'unknown': 'x'}):
+            with self.subTest(invalid=invalid):
+                self.assertIn(web.patch(f'/api/agents/{self.agent["id"]}', json={'avatar': invalid}).status_code, (400, 422))
+
+    def test_existing_bots_switch_to_ajar_on_upgrade(self):
+        from services import agent_service as module
+        from core.atomic_io import read_json, write_json_atomic
+        before = read_json(module.AGENTS_FILE, {})
+        self.addCleanup(write_json_atomic, module.AGENTS_FILE, before)
+        stored = dict(before)
+        face = {'form': 'heart', 'color': '#4778FF', 'finish': 'matte', 'face': 'wink', 'accessory': 'bow'}
+        stored['old1'] = {'id': 'old1', 'name': 'Old face', 'color': '#d99a92', 'created_at': 1, 'avatar': face}
+        stored['old2'] = {'id': 'old2', 'name': 'No face', 'color': '#e88f8f', 'created_at': 2}
+        write_json_atomic(module.AGENTS_FILE, stored)
+        upgraded = module.AgentService()
+        first, second = upgraded.get('old1'), upgraded.get('old2')
+        self.assertEqual(first['avatar']['color'], '#B9D2E3', 'the dot face colour maps to the nearest pastel')
+        self.assertEqual(first['avatar_legacy'], face, 'the old face is kept, unused')
+        self.assertEqual(first['color'], '#b9d2e3', "the bot's colour follows its face")
+        self.assertEqual(second['avatar']['color'], '#D99A92', 'a bot with no face keeps its own colour')
+        self.assertNotIn('avatar_legacy', second)
+        self.assertTrue(all(module.is_ajar(agent['avatar']) for agent in read_json(module.AGENTS_FILE, {}).values()))
+        again = module.AgentService()
+        self.assertEqual(again.get('old1')['avatar'], first['avatar'], 'the migration runs once and is stable')
 
     def soul_path(self):
         from services.agent_service import AGENTS_DIR
@@ -206,11 +244,15 @@ class ProfileAndSoulTests(AgentTestCase):
         with patch("services.agent_service.read_json", side_effect=[{old["id"]: old.copy()}, []]), \
              patch.object(AgentService, "_save") as save:
             loaded = AgentService()
-        save.assert_not_called()
-        self.assertEqual(loaded.get(old["id"]), old)
+        # The one load-time rewrite is the mascot migration (David,
+        # 2026-10-22): the bot gains its Ajar and nothing else changes.
+        save.assert_called_once()
+        self.assertEqual(loaded.get(old["id"])["avatar"]["version"], 3)
+        self.assertEqual({k: v for k, v in loaded.get(old["id"]).items() if k not in ("avatar", "color")}, old)
         self.assertEqual(loaded.read_soul(old["id"])["revision"], 0)
         with patch.object(loaded, "_save"):
             self.assertEqual(loaded.update(old["id"], role=old["role"], blurb="new")["role"], old["role"])
+        old = {k: v for k, v in loaded.get(old["id"]).items() if k != "avatar"}
         self.assertIn("How to work: Be brief.", identity_block(old, ""))
         self.assertEqual(identity_block(old, "").count("How to work:"), 1)
 

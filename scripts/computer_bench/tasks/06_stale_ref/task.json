@@ -1,0 +1,9 @@
+{
+  "name": "stale_ref",
+  "title": "A list that re-renders after loading",
+  "kind": "trap",
+  "desktop": false,
+  "instruction": "Open {origin}/inbox.html and archive the message from {sender}. The list reorders itself shortly after the page loads.",
+  "variants": [{"sender": "Ada"}, {"sender": "Grace"}],
+  "pages": {"/inbox.html": "inbox.html"}
+}

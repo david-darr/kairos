@@ -71,16 +71,13 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
   await navigate('agents',{agentId:'a1',profile:true});
   await waitFor("document.querySelector('.agent-profile-sheet')?.classList.contains('is-open') || document.querySelector('.agent-profile-sheet')?.getClientRects().length>0");
   await capture('agents-messenger-profile');
-  await js(`for(const [key,value] of [['form','shield'],['style','folded'],['eyes','oval'],['mouth','grin']]) document.querySelector('.agent-profile-sheet [aria-label="Avatar '+key+'"] [data-value="'+value+'"]').click();
-    document.querySelector('.agent-profile-sheet .agent-avatar-layers button').click();
-    const accent=document.querySelector('.agent-profile-sheet [aria-label="Avatar accent color"]');accent.value='#aabbcc';accent.dispatchEvent(new Event('input'));
-    document.querySelector('.agent-profile-sheet .agent-avatar-presets .btn').click();`);
-  assert.ok(await js("document.querySelector('.agent-profile-sheet [aria-label=\"Saved look 1\"]')"),'Personal looks can be saved');
+  // The Ajar picker (mascot, 2026-10-22): body, shape and one accessory.
+  await js(`for(const [key,value] of [['shape','squircle'],['accessory','laurel'],['body','#B5C7A5']]) document.querySelector('.agent-profile-sheet [aria-label="Mascot '+key+'"] [data-value="'+value+'"]').click();`);
   const look = await js("JSON.parse(document.querySelector('.agent-profile-sheet .agent-avatar-picker-preview .agent-avatar').dataset.avatarSpec)");
-  assert.equal(look.form,'shield');assert.equal(look.eyes,'oval');assert.equal(look.mouth,'grin');assert.equal(look.accent,'#AABBCC');assert.ok(look.accessories.length);
+  assert.deepEqual(look,{version:3,character:'ajar',shape:'squircle',color:'#B5C7A5',acc:'laurel',finish:'flat'});
   await click('.agent-profile-details > .btn.primary');
-  await waitFor("document.querySelector('.agent-profile-titlebar .agent-avatar').dataset.avatarSpec.includes('shield')");
-  assert.ok(writes.some(w=>w.path==='/api/agents/a1' && JSON.parse(w.body).avatar?.eyes==='oval' && JSON.parse(w.body).avatar?.accessories?.length),'Rich avatar persists through the real profile save');
+  await waitFor("document.querySelector('.agent-profile-titlebar .agent-avatar').dataset.avatarSpec.includes('laurel')");
+  assert.ok(writes.some(w=>w.path==='/api/agents/a1' && JSON.parse(w.body).avatar?.acc==='laurel' && JSON.parse(w.body).avatar?.version===3),'The look persists through the real profile save');
   await capture('agents-messenger-custom-character');
   await navigate('home'); demoState.empty=true;
   await navigate('agents'); assert.ok(await js("!!document.querySelector('.agents-messenger-welcome') && document.querySelectorAll('.agents-rail-item').length===0"),'Empty state allows creation without fake chats');

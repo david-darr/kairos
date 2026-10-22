@@ -12,6 +12,7 @@
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="preload" href="fonts/Jost-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="demo/static/css/mascot.css">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Kairos">
 <meta property="og:url" content="https://www.kairos-agents.com/">
@@ -46,6 +47,7 @@
 <header class="hero" id="top">
   <div class="hero-art" aria-hidden="true"></div>
   <div class="wrap hero-inner">
+    <div class="hero-mascot" aria-hidden="true"></div>
     <p class="eyebrow">Free and open source <span aria-hidden="true">·</span> Windows and macOS</p>
     <h1>Not more time. <span>The right time.</span></h1>
     <p class="hero-description">Kairos is a private AI workspace on your own computer. Chat with the models you choose, keep a memory you own, and let agents work while you get on with your day.</p>
@@ -74,6 +76,25 @@
       <a href="media/kairos-ad.mp4">Watch the 30-second tour (MP4)</a>
     </video>
   </figure>
+</section>
+
+<section class="section wrap mascot-strip" id="ajar" aria-labelledby="ajar-title">
+  <div class="section-heading center"><p class="eyebrow">Meet Ajar</p><h2 id="ajar-title">The opening, <span>with a face.</span></h2></div>
+  <p class="mascot-lede">Ajar is the Kairos mark as a character: the ring's opening, the gold point resting in it, and two blinking eyes. It shows what Kairos is doing right now, and every bot you make wears its own color, shape and accessory.</p>
+  <ul class="mascot-states">
+    <li data-mascot-state="idle"><span class="mascot-slot"></span>Ready</li>
+    <li data-mascot-state="thinking"><span class="mascot-slot"></span>Working</li>
+    <li data-mascot-state="needs"><span class="mascot-slot"></span>Needs you</li>
+    <li data-mascot-state="success"><span class="mascot-slot"></span>Done</li>
+    <li data-mascot-state="error"><span class="mascot-slot"></span>Something failed</li>
+    <li data-mascot-state="sleeping"><span class="mascot-slot"></span>Resting</li>
+  </ul>
+  <ul class="mascot-bots" aria-label="Bots wear their own variant">
+    <li data-mascot-bot='{"version":3,"character":"ajar","shape":"round","color":"#B9D2E3","acc":"spectacles","finish":"flat"}'><span class="mascot-slot"></span>Research</li>
+    <li data-mascot-bot='{"version":3,"character":"ajar","shape":"tall","color":"#E8C39E","acc":"quill","finish":"flat"}'><span class="mascot-slot"></span>Writing</li>
+    <li data-mascot-bot='{"version":3,"character":"ajar","shape":"squircle","color":"#B5C7A5","acc":"laurel","finish":"flat"}'><span class="mascot-slot"></span>Lead</li>
+    <li data-mascot-bot='{"version":3,"character":"ajar","shape":"round","color":"#D9B260","acc":"rays","finish":"flat"}'><span class="mascot-slot"></span>Morning brief</li>
+  </ul>
 </section>
 
 <section class="idea wrap" id="idea" aria-labelledby="idea-title">

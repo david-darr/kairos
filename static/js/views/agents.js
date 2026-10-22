@@ -5,7 +5,8 @@ import { mountAgentChat } from "../agentChat.js";
 import { mountComputerPanel } from "../computerPanel.js";
 import { toggle } from "../settingsKit.js";
 import { mountAgentProfile } from "../agentProfile.js";
-import { agentAvatar } from "../agentAvatar.js";
+import { agentAvatar, liveAgentAvatar } from "../agentAvatar.js";
+import { stateForStatus } from "../mascot.js";
 import { botStatusLine } from "../botStatus.js";
 import { openCreateAgent } from "../agentCreation.js";
 import { openAgentItemSheet } from '../agentItemSheet.js';
@@ -492,7 +493,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     if (signature === headerSignature) return;
     headerSignature = signature;
     header.replaceChildren(el('button', { type: 'button', class: 'agent-profile-face', 'aria-label': `Open ${agent.name}’s profile`,
-      onclick: () => profile.open() }, [avatar(agent, 42), el('h2', { text: agent.name })]),
+      onclick: () => profile.open() }, [liveAgentAvatar(agent, 42, stateForStatus(botStatusLine(agent).state)), el('h2', { text: agent.name })]),
       el('button', { type: 'button', class: 'btn agent-profile-open', 'aria-label': 'Settings', title: 'Settings', onclick: () => profile.open('all') }, [
         el('span', { class: 'agent-icon', 'aria-hidden': 'true' }), el('span', { class: 'agent-profile-open-label', text: 'Settings' })]));
     header.querySelector('.agent-profile-open .agent-icon').innerHTML = ICONS.settings;

@@ -192,7 +192,7 @@ async function refresh(list) {
   }
   if (tasks.length === 0) {
     list.appendChild(emptyState({
-      icon: ICONS.tasks,
+      icon: ICONS.tasks, mascot: "sleeping",
       title: "No scheduled tasks",
       hint: "Choose a routine from the library below, or schedule your own prompt. Output can be delivered straight to Discord.",
     }));

@@ -1,6 +1,7 @@
 // One view for chat and agent computers. The stream exists only while mounted.
 import { api, el, toast } from './api.js';
 import { openRecordingReview } from './recordingReview.js';
+import { openOwnerSteps } from './computerSteps.js';
 
 export function mountComputerPanel(host, owner, initial = {}, { onClose, takeOver = false } = {}) {
   const endpoint = `/api/computer/${encodeURIComponent(owner)}`;
@@ -22,9 +23,11 @@ export function mountComputerPanel(host, owner, initial = {}, { onClose, takeOve
   const stop = el('button', { type: 'button', class: 'btn danger', text: 'Stop' });
   const toggle = el('button', { type: 'button', class: 'btn', text: control ? 'Hand back' : 'Take over' });
   const record = el('button', { type: 'button', class: 'btn computer-record', text: 'Record', hidden: !control });
+  const steps = el('button', { type: 'button', class: 'btn quiet computer-steps-button', text: 'Steps',
+    onclick: (event) => openOwnerSteps(owner, { opener: event.currentTarget }) });
   const recordingState = el('span', { class: 'computer-recording-indicator', role: 'status', text: 'Recording', hidden: !recording });
   const root = el('section', { class: 'computer-panel' }, [
-    el('div', { class: 'computer-panel-head' }, [title, el('div', { class: 'computer-actions' }, [toggle, stop, record, recordingState])]),
+    el('div', { class: 'computer-panel-head' }, [title, el('div', { class: 'computer-actions' }, [toggle, stop, record, steps, recordingState])]),
     url, time, state, stage,
   ]);
   host.replaceChildren(root);
