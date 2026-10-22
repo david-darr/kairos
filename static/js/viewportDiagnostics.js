@@ -173,7 +173,7 @@ function applyHidden() {
 }
 // theme-color: present (the app's value), removed, or transparent. iOS may read it only at launch.
 const THEMES = ['present', 'removed', 'transparent'];
-const themeOriginal = () => document.documentElement.dataset.themeColor || document.querySelector('meta[name=theme-color]')?.content || '#F3EADB';
+const themeOriginal = () => document.documentElement.dataset.themeColor || document.querySelector('meta[name=theme-color]')?.content || '';
 function themeState() {
   const meta = document.querySelector('meta[name=theme-color]');
   return !meta ? 'removed' : meta.content === 'transparent' ? 'transparent' : 'present';
@@ -223,11 +223,11 @@ export function openViewportDiagnostics() {
   overlay = document.createElement('div'); overlay.id = ID;
   overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Viewport diagnostics');
   const style = document.createElement('style');
-  style.textContent = `#${ID}{position:fixed;inset:0;z-index:2147483000;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:#fff;color:#111;font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px calc(env(safe-area-inset-bottom,0px) + 24px);box-sizing:border-box}
-#${ID} .vp-bar{position:sticky;top:calc(-8px - env(safe-area-inset-top,0px));display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 0;background:#fff;border-bottom:1px solid #ccc}
-#${ID} .vp-toggles{position:static}#${ID} button[aria-pressed=true]{background:#333;color:#fff}#${ID} button{min-height:44px;min-width:44px;padding:0 14px;font:600 15px system-ui,sans-serif;border:1px solid #888;border-radius:10px;background:#f2f2f2;color:#111}
+  style.textContent = `#${ID}{position:fixed;inset:0;z-index:2147483000;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--bg-panel-solid);color:var(--text);font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px calc(env(safe-area-inset-bottom,0px) + 24px);box-sizing:border-box}
+#${ID} .vp-bar{position:sticky;top:calc(-8px - env(safe-area-inset-top,0px));display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 0;background:var(--bg-panel-solid);border-bottom:1px solid var(--border)}
+#${ID} .vp-toggles{position:static}#${ID} button[aria-pressed=true]{background:var(--text);color:var(--bg-panel-solid)}#${ID} button{min-height:44px;min-width:44px;padding:0 14px;font:600 15px system-ui,sans-serif;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-2);color:var(--text)}
 #${ID} h2{margin:0;flex:1 1 100%;font-size:17px}#${ID} h3{margin:16px 0 4px;font-size:16px}
-#${ID} pre{margin:0;white-space:pre-wrap;word-break:break-word;font:14px/1.45 ui-monospace,Menlo,monospace}#${ID} .vp-status{font-size:13px;color:#555}`;
+#${ID} pre{margin:0;white-space:pre-wrap;word-break:break-word;font:14px/1.45 ui-monospace,Menlo,monospace}#${ID} .vp-status{font-size:13px;color:var(--text-dim)}`;
   const bar = document.createElement('div'); bar.className = 'vp-bar';
   const title = document.createElement('h2'); title.textContent = 'Viewport diagnostics (temporary)';
   const make = (label, action) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.addEventListener('click', action); return b; };

@@ -498,6 +498,23 @@ app.whenReady().then(async () => {
       await navigate('home');
       if (label === 'mobile') await js("document.querySelector('#mobile-menu-btn').click()");
       await js(label === 'mobile' ? "[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()" : "document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
+      if (width <= 768) {
+        await require('./mobile-forge-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, overflow });
+        await navigate('home');
+        await js("document.getElementById('mobile-menu-btn').click()");
+        await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
+        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview', 'phone keeps both mode controls');
+        await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
+        demoState.isAdmin = false;
+        await win.loadURL(base);
+        await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
+        await navigate('forgeHome');
+        assert.equal(await js("document.getElementById('view-content').dataset.view"), 'home', 'phone non-admin cannot route to Forge');
+        demoState.isAdmin = true; delete demoState.sessionFields;
+        await win.loadURL(base);
+        await waitFor("!!document.querySelector('#forge-mode-switch') && !!document.querySelector('.dashboard-content.is-filled')");
+        continue;
+      }
       await waitFor("document.querySelectorAll('.forge-stats .forge-stat').length === 5 && document.querySelectorAll('.forge-widget-grid > section').length === 5");
       assert.deepEqual(await js("[...document.querySelectorAll('#nav [data-tab]')].map(n => n.dataset.tab)"), ['forgeHome'], label + ' Forge navigation');
       assert.deepEqual(await js("[...document.querySelectorAll('.forge-widget-grid > section > header h2')].map(n => n.textContent)"), ['Working now', 'Running services', 'Git activity', 'Recent projects', 'Repo lifespan']);

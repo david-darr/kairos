@@ -14,7 +14,7 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
     for (const label of ['Project', 'Where it runs', 'Branch', 'Mode', 'Agent', 'Model for new session']) {
       await js(`document.querySelector('.forge-composer [aria-label=${JSON.stringify(label)}]').click()`);
       await delay(140);
-      assert.ok(await js("(() => { const m = document.querySelector('.custom-select-menu')?.getBoundingClientRect(), c = document.querySelector('.forge-composer').getBoundingClientRect(); return m && m.top >= c.bottom && m.left >= 0 && m.right <= innerWidth + 1 && m.bottom <= innerHeight - 11; })()"), `${label} opens below Forge composer within ${width}x${height}`);
+      assert.ok(await js("(() => { const m = document.querySelector('.custom-select-menu')?.getBoundingClientRect(), c = document.querySelector('.forge-composer').getBoundingClientRect(); const phone = innerWidth <= 768; return m && (phone ? m.bottom <= c.top + 2 && m.top >= 0 : m.top >= c.bottom && m.bottom <= innerHeight - 11) && m.left >= 0 && m.right <= innerWidth + 1; })()"), `${label} opens ${width <= 768 ? 'above the bottom phone' : 'below the'} Forge composer within ${width}x${height}`);
       assert.ok(await js("parseFloat(document.querySelector('.custom-select-menu').style.maxHeight) >= 100"), `${label} retains useful list space in ${width}x${height}`);
       if (label === 'Agent') await capture(`patch-forge-picker-${width}`);
       await closeMenus();

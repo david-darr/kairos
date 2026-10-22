@@ -25,6 +25,32 @@ module.exports = async ({ js, waitFor, capture, writes, demoState, label, forgeS
   await waitFor("!document.querySelector('.forge-surface-tab-group[data-surface-type=file] .forge-surface-tab').textContent.endsWith(' *')");
   assert.ok(await js("!document.querySelector('.forge-pane .forge-file-surface')._editor.state.doc.toString().includes('Reload will lose this')"), label + ' reload loses edits');
   demoState.forgeEditorConflict = false;
+  if (width <= 768) {
+    // Phone: the Git panel lives in the Changes sheet; same controller, same buttons.
+    await js(`document.querySelector('.mf-back')?.click()`);
+    await waitFor("!!document.querySelector('.forge-pane .forge-transcript-composer')");
+    await js(`document.querySelector('.mf-changes').click()`);
+    await waitFor("!!document.querySelector('.mf-git-dock')");
+    await js(`document.querySelector('.mf-git-more').open = true`);
+    await capture(label + '-forge-git');
+    await js(`[...document.querySelectorAll('.mf-git button')].find(b=>b.textContent==='Stage all').click()`);
+    await waitFor("document.querySelector('.mf-git-dock button')?.textContent.startsWith('Commit ')");
+    await js(`document.querySelector('.mf-git-dock button').click()`);
+    await waitFor("!!document.querySelector('.mf-commit')");
+    await js(`{ const input=document.querySelector('[aria-label="Commit message"]'); input.value='Human edit'; input.dispatchEvent(new Event('input')); document.querySelector('.mf-commit .forge-small-button').click(); }`);
+    await waitFor("!document.querySelector('.mf-commit')");
+    await js(`document.querySelector('.mf-git-more').open = true`);
+    for (const [action, title] of [['Push', 'Push branch?'], ['Merge back', 'Merge back?']]) {
+      const promptStart = writes.length;
+      await js(`[...document.querySelectorAll('.mf-git-more button')].find(b=>b.textContent===${JSON.stringify(action)}).click()`);
+      await waitFor(`[...document.querySelectorAll('.panel-dialog h4, dialog[open] h4, dialog[open] .ms-sheet-heading')].some(n=>n.textContent.includes(${JSON.stringify(title)}))`);
+      assert.ok(!writes.slice(promptStart).some(w=>w.path.startsWith('/api/permissions/')), label + ' ' + action + ' asks first');
+      await js(`[...document.querySelectorAll('dialog[open] button, .panel-dialog button')].find(b=>b.textContent==='Approve').click()`);
+      await waitFor("!document.querySelector('.forge-app-approval') && ![...document.querySelectorAll('.mf-git-more button')].find(b=>b.textContent==='Push').disabled");
+    }
+    await js(`document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()`);
+    await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
+  } else {
   await js(`document.querySelector('[aria-label="Open project sidebar"]').click(); document.querySelector('[data-sidebar-tab=git]').click()`);
   await waitFor("!!document.querySelector('.forge-git-content textarea')");
   await capture(label + '-forge-git');
@@ -39,6 +65,7 @@ module.exports = async ({ js, waitFor, capture, writes, demoState, label, forgeS
     assert.ok(!writes.slice(promptStart).some(w=>w.path.startsWith('/api/permissions/')), label + ' ' + action + ' asks first');
     await js(`[...document.querySelectorAll('.panel-dialog button')].find(b=>b.textContent==='Approve').click()`);
     await waitFor("!document.querySelector('.forge-app-approval') && ![...document.querySelectorAll('.forge-git-content button')].find(b=>b.textContent==='Push').disabled");
+  }
   }
   if (width <= 768) await js(`document.querySelector('[aria-label="Close project sidebar"]').click()`);
   await js(`document.querySelector('.forge-surface-tab-group[data-surface-type=session] .forge-surface-tab').click()`);

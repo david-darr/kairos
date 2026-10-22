@@ -1,3 +1,4 @@
+import { mountMobileForge } from '../mobileForge.js';
 import { mountMobileModelSheet, renderMobileCatalogMenu } from '../mobileModelSheet.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileDictation } from '../mobileDictation.js';
@@ -59,6 +60,7 @@ export function render(container, tabId, options = {}) {
   const customize = el('button', { type: 'button', class: 'btn quiet', text: 'Customize' });
   page.append(hero, el('div', { class: 'forge-toolbar' }, [el('span', { class: 'meta', text: 'Your work, in view' }), customize]), grid);
   container.append(page);
+  let phoneWorkspace = null;
   let disposed = false, dialog = null, projectSelect = null, modelSelect = null, lifespanSelect = null, projects = [], busy = false;
   // The exact model for the chosen agent (e.g. Sonnet 5, gpt-6.1-sol), from the
   // same catalog as Chat's model picker; hidden for agents without one.
@@ -91,6 +93,7 @@ export function render(container, tabId, options = {}) {
   const disposeComposer = mountMobileComposer({ composer, input: message, context: () => projects.find(item => item.id === projectSelect?.value)?.name || 'Choose a project', busy: () => starting, recording: () => composer.classList.contains('ms-dictating') });
   const drawWorking = () => {
     if (disposed) return;
+    phoneWorkspace?.update(false);
     const running = sessionGroups.flatMap(({ project, sessions }) => sessions.filter(s => !s.forge.removed && forgeRunning(s.id)).map(s => sessionRow(s, project)));
     bodies.working.replaceChildren(...(running.length ? running : [el('p', { class: 'meta', text: 'No Forge sessions running.' })]));
   };
@@ -176,7 +179,7 @@ export function render(container, tabId, options = {}) {
     try {
       const [result, groups, apps] = await Promise.all([api('/api/forge/activity'), projectSessions(projects), api('/api/forge/apps/running')]);
       if (disposed) return;
-      sessionGroups = groups; drawWorking();
+      sessionGroups = groups; phoneWorkspace.update(); drawWorking();
       bodies.services.replaceChildren(...(apps.length ? apps.map(app => {
         const group = groups.find(g => g.project.id === app.project_id), session = group?.sessions.find(s => s.id === app.session_id);
         return el('button', { class: 'dashboard-row forge-running-service', 'data-app-session': app.session_id,
@@ -282,8 +285,12 @@ export function render(container, tabId, options = {}) {
     variantSelect.addEventListener('change', () => { launchEffort = null; refreshPhoneMenu(); });
   }
   message.onkeydown = event => { if (shouldSendOnEnter(event)) { event.preventDefault(); composer.requestSubmit(); } };
+  phoneWorkspace = mountMobileForge({ page, composer, banner, toolbar: page.querySelector('.forge-toolbar'), grid, hint,
+    getState: () => { const project = projects.find(p => p.id === projectSelect?.value); return { projects, project, models, location: isolationSelect, sessions: sessionGroups.find(g => g.project.id === project?.id)?.sessions || [] }; },
+    pickProject: id => { if (!projectSelect) return; projectSelect.value = id; lifespanSelect.value = id; locationChanged(); lifespan(); }, refresh: refreshActivity, initialPage: options.mobilePage });
+  composer.addEventListener('change', phoneWorkspace.update);
   load();
   document.addEventListener('kairos:forge-apps', refreshActivity);
   const timer = setInterval(() => { if (!document.hidden) { refreshActivity(); lifespan(); } }, 30000);
-  return () => { phonePicker.dispose(); locationSheet?.close(); disposeDictation(); disposeComposer(); phone.removeEventListener('change', gatePhone); document.removeEventListener('kairos:appearance', gatePhone); disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
+  return () => { phoneWorkspace.dispose(); phonePicker.dispose(); locationSheet?.close(); disposeDictation(); disposeComposer(); phone.removeEventListener('change', gatePhone); document.removeEventListener('kairos:appearance', gatePhone); disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
 }

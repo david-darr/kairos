@@ -33,7 +33,7 @@ class Surface {
   const context = vm.createContext({
     document: { querySelector: () => modal, activeElement: {} },
     window: { getSelection: () => ({ isCollapsed: true }) },
-    innerWidth: 390, performance: { now: () => 1000 }, setTimeout: action => action(),
+    queueMicrotask: callback => callback(), innerWidth: 390, performance: { now: () => 1000 }, setTimeout: action => action(),
   });
   const shared = { mobileOn: () => enabled, reduced, haptic() {}, phone: new Surface(), go() {},
     button(label, action, className = 'ms-glass') { const node = context.document.createElement('button'); node.textContent = label; node.className = className; node.addEventListener('click', action); return node; }, edgeBlur() {} };
@@ -69,6 +69,11 @@ class Surface {
   const { mountPager } = (await load('./mobilePager.js')).namespace;
   const { phoneRoute } = (await load('./mobileShell.js')).namespace;
   assert.equal(phoneRoute('home', {}).tab, 'home', 'Home keeps the dashboard');
+  assert.equal(phoneRoute('forgeShell', { projectId: 'project' }).tab, 'forgeHome', 'Phone project entry uses the shared project screen');
+  assert.equal(phoneRoute('forgeShell', { projectId: 'project' }).options.mobilePage, 1, 'Project entry opens Sessions');
+  assert.equal(phoneRoute('forgeShell', { sessionId: 'session' }).tab, 'forgeShell', 'Session entry pushes its conversation');
+  assert.equal(phoneRoute('forgeShell', { projectId: 'project', mobileTool: 'explorer' }).tab, 'forgeShell', 'Project files remain reachable without a session');
+
   assert.equal(phoneRoute('chat', {}).tab, 'mobileLaunch');
   assert.equal(phoneRoute('chat', {}).options.mobilePage, 0);
   assert.equal(phoneRoute('chat', { mobileNew: true }).options.mobilePage, 0);
@@ -137,6 +142,7 @@ class Surface {
     get parentElement() { return this.parentNode; }
     get childElementCount() { return this.children.filter(child => child.tagName !== '#COMMENT').length; }
     get firstChild() { return this.children[0]; }
+    get firstElementChild() { return this.children.find(node => !node.tagName.startsWith('#')); }
     get nextElementSibling() { return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1]; }
     set className(value) { this._className?.split(' ').forEach(c => this.classList.remove(c)); this._className = value; value.split(' ').forEach(c => this.classList.add(c)); }
     get className() { return this._className || ''; }
@@ -260,6 +266,40 @@ class Surface {
   voiceRow.querySelectorAll('button').at(-1).click(); assert.equal(dictationDone, 1, 'Done uses the existing dictation action');
   voiceRow.querySelector('button').click(); assert.equal(dictationCancel, 1);
   disposeVoice(); assert.equal(voiceComposer.querySelector('.ms-voice-row'), null);
+  // The phone Git adapter moves live controls. Exercise staging delegation,
+  // commit-sheet input identity and desktop restoration without a renderer.
+  const { mountMobileForgeChanges } = (await load('./mobileForgeChanges.js')).namespace;
+  const git = new Element('div'), branchStatus = new Element('p'), gitActions = new Element('div');
+  doc.body.append(git); git.append(branchStatus, gitActions);
+  const stageAll = new Element('button'), unstageAll = new Element('button');
+  stageAll.textContent = 'Stage all'; unstageAll.textContent = 'Unstage all'; gitActions.append(stageAll, unstageAll);
+  let stageCalls = 0, unstageCalls = 0, diffCalls = 0, commitCalls = 0;
+  stageAll.addEventListener('click', () => stageCalls++); unstageAll.addEventListener('click', () => unstageCalls++);
+  const fileSections = ['Staged', 'Unstaged'].map(title => {
+    const section = new Element('section'), heading = new Element('strong'), row = new Element('div'), code = new Element('code');
+    section.className = 'forge-git-files'; row.className = 'forge-git-file'; heading.textContent = title; code.textContent = 'app.js';
+    row.append(code); section.append(heading, row); git.append(section); return section;
+  });
+  const gitMessage = new Element('textarea'), gitCommit = new Element('button'), gitPush = new Element('button'), gitPull = new Element('button');
+  gitMessage.value = 'Keep the real draft'; gitCommit.addEventListener('click', () => commitCalls++);
+  git.append(gitMessage, gitCommit, gitPush, gitPull);
+  const disposeGit = mountMobileForgeChanges(git, { state: { branch: 'topic', ahead: 1, behind: 0, files: [{ path: 'app.js', staged: true }] }, message: gitMessage, commit: gitCommit, push: gitPush, pull: gitPull, onDiff: path => { assert.equal(path, 'app.js'); diffCalls++; } });
+  assert.equal(stageAll.parentNode, fileSections[1]); assert.equal(unstageAll.parentNode, fileSections[0]);
+  stageAll.click(); unstageAll.click(); assert.equal(stageCalls, 1); assert.equal(unstageCalls, 1);
+  git.querySelector('.mf-file-open').click(); assert.equal(diffCalls, 1, 'Changed files delegate to the shell diff action');
+  const gitPill = git.querySelector('.mf-git-dock');
+  assert.equal(gitPill.querySelector('button').textContent, 'Commit 1');
+  gitPill.querySelector('button').click();
+  assert.ok(gitMessage.closest('.mf-commit'), 'Commit sheet contains the original textarea');
+  assert.equal(gitMessage.value, 'Keep the real draft'); assert.equal(doc.activeElement, gitMessage);
+  gitCommit.click(); assert.equal(commitCalls, 1, 'Commit keeps its existing listener');
+  enabled = false; shared.phone.emit('change');
+  assert.equal(gitMessage.parentNode, git, 'Desktop restores the live commit message');
+  assert.equal(stageAll.parentNode, gitActions); assert.equal(unstageAll.parentNode, gitActions);
+  assert.equal(git.querySelector('.mf-git-dock'), null); assert.equal(git.querySelector('.mf-file-open'), null);
+  enabled = true; shared.phone.emit('change');
+  assert.ok(git.querySelector('.mf-git-dock')); disposeGit();
+  assert.equal(gitMessage.parentNode, git); assert.equal(git.querySelector('.mf-git-dock'), null);
   const css = fs.readFileSync(path.join(__dirname, '../static/css/redesign-mobile.css'), 'utf8');
   assert.match(css, /settings-nav-item \{ min-height: 52px/); assert.match(css, /border-radius: 22px/);
   assert.match(css, /prefers-reduced-motion: reduce/); assert.match(css, /transition: border-radius 280ms/);
@@ -273,5 +313,5 @@ class Surface {
   assert.doesNotMatch(source('mobileShell.js'), /Your day|touchstart/);
   assert.match(css, /position: fixed; top: 0; left: 0; right: 0; height: calc/);
   assert.match(css, /line-height: 24px; padding-block: 10px/);
-  console.log('PASS: A1-A3 routing/pager; A4 dock delegation, keyboard and restore; A5 input/draft identity; A6 sheet focus/swipe/resize and quota boundaries; A7 grouped geometry and reduced-motion contract');
+  console.log('PASS: A1-A3 routing/pager; A4 dock delegation, keyboard and restore; A5 input/draft identity; A6 sheet focus/swipe/resize and quota boundaries; A7 grouped geometry and reduced-motion contract; Forge phone Git delegation, commit-sheet drafts and desktop restoration');
 })().catch(error => { console.error(error); process.exitCode = 1; });

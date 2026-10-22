@@ -6,7 +6,7 @@ import { button, mobileOn, go, haptic, longPress } from './mobileShared.js';
 const finished = new Map();
 const putAway = new Set();
 let snapshot = { need: [], work: [] }, host, homeSlot, expanded = false, spread = false, active = 0, signature = '';
-let sessions = [], models = [];
+let sessions = [], models = [], acceptsHome = () => true;
 let pressCleanups = [];
 const openChat = id => go('chat', { sessionId: id });
 export const attentionCount = () => snapshot.need.filter(item => !item.finished).length;
@@ -46,16 +46,16 @@ export function activityItems() {
     done: [...finished.values()].sort((a, b) => b.at - a.at).map(i => ({ title: i.title, status: i.status, go: () => { dismiss(i.key); i.go ? i.go() : openChat(i.sessionId); } })) };
 }
 export const refreshActivity = () => { signature = ''; render(); };
-export function attachActivity(slot) {
-  homeSlot = slot; signature = ''; render();
+export function attachActivity(slot, accepts = () => true) {
+  acceptsHome = accepts; homeSlot = slot; signature = ''; render();
   return () => { if (homeSlot === slot) homeSlot = null; signature = ''; render(); };
 }
 function dismiss(key) { putAway.add(key); finished.delete(key); signature = ''; render(); }
 function render() {
   if (!host) return;
   const live = [...snapshot.need.filter(i => !i.finished && !(i.kind === 'chat' && i.status !== 'processing')), ...snapshot.work]
-    .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i);
-  const done = [...finished.values()].sort((a, b) => b.at - a.at);
+    .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i).filter(acceptsHome);
+  const done = [...finished.values()].filter(acceptsHome).sort((a, b) => b.at - a.at);
   // Status outside the launch surface never floats over content: it shows as a badge on whichever entry control is
   // on screen (avatar or the conversation's back button) and as rows inside the tab sheet.
   const count = attentionCount(), total = live.length;
