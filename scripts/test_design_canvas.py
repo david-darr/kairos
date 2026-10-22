@@ -662,6 +662,72 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(remote.status_code, 404, "loopback only")
 
 
+class RouteTests(unittest.TestCase):
+    """The people-facing routes: a design is reachable only by its owner (or
+    an admin), direct edits are versions by You, undo steps back over them,
+    and Build in Forge links the new Forge session to the design."""
+
+    def setUp(self):
+        app = FastAPI()
+        app.include_router(design_routes.router)
+        app.include_router(design_routes.systems_router)
+        self.client = TestClient(app)
+
+    def test_create_edit_undo_and_link(self):
+        created = self.client.post("/api/designs", json={"title": "Blank"}).json()
+        design_id = created["id"]
+        self.assertEqual(list(created["boards"]), ["screen-1"])
+        h1 = _first(design_id, "screen-1", "h1")
+        edited = self.client.post(f"/api/designs/{design_id}/boards/screen-1/text", json={"id": h1, "text": "Hello"}).json()
+        self.assertEqual(edited["changed"], {"screen-1": [h1]})
+        self.assertEqual(design_store.versions(design_id)[0]["by"], "You")
+        self.client.post(f"/api/designs/{design_id}/board-action", json={"action": "move", "board": "screen-1", "x": 300, "y": 10})
+        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["x"], 300)
+        self.assertEqual(self.client.post(f"/api/designs/{design_id}/undo").status_code, 200)
+        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["x"], 0)
+        tokens = self.client.post(f"/api/designs/{design_id}/tokens", json={"set": {"--ds-accent": "#123456"}}).json()
+        self.assertEqual(tokens["system"]["variables"]["--ds-accent"], "#123456")
+        sid = new_chat()
+        self.assertIn(sid, self.client.post(f"/api/designs/{design_id}/link", json={"session_id": sid}).json()["chat_ids"])
+        listed = self.client.get(f"/api/designs?chat={sid}").json()
+        self.assertEqual([d["id"] for d in listed], [design_id])
+        with patch.object(design_routes.auth_manager, "is_admin", return_value=False):
+            app = FastAPI(); app.include_router(design_routes.router)
+            app.dependency_overrides[design_routes.require_user] = lambda: "someone-else"
+            other = TestClient(app)
+            self.assertEqual(other.get(f"/api/designs/{design_id}").status_code, 404)
+            self.assertEqual(other.get("/api/designs").json(), [])
+
+    def test_build_in_forge_links_the_session(self):
+        design_id = self.client.post("/api/designs", json={"title": "App"}).json()["id"]
+        sid = new_chat("forge")
+        seen = {}
+
+        def create(project_id, task, *args):
+            seen.update(project_id=project_id, task=task)
+            return {"id": sid}
+        from services import forge_sessions
+        with patch.object(forge_sessions.forge_sessions, "create", create):
+            app = FastAPI(); app.include_router(design_routes.router)
+            app.dependency_overrides[design_routes.require_admin] = lambda: "local"
+            result = TestClient(app).post(f"/api/designs/{design_id}/forge", json={"project_id": "abcdefabcdef"}).json()
+        self.assertEqual(result["session_id"], sid)
+        self.assertIn(f"design id {design_id}", seen["task"])
+        self.assertIn("design_read", seen["task"])
+        self.assertIn("which file implements which board", seen["task"])
+        self.assertIn(sid, design_store.manifest(design_id)["chat_ids"], "the Forge session can read the design")
+        self.assertIn("Design ", text(call("design_outline", {}, ctx(sid, tool_registry.CODEX), tool_registry.CODEX)))
+
+    def test_design_systems_routes(self):
+        app = FastAPI(); app.include_router(design_routes.systems_router)
+        app.dependency_overrides[design_routes.require_admin] = lambda: "local"
+        client = TestClient(app)
+        made = client.post("/api/design-systems", json={"name": "Pasted", "css": ":root{--primary:#225588;--bg:#ffffff;--text:#111111}"}).json()
+        self.assertEqual(design_systems.variables(made["tokens"])["--ds-accent"], "#225588")
+        self.assertIn(made["id"], [s["id"] for s in client.get("/api/design-systems").json()])
+        self.assertEqual(client.delete("/api/design-systems/kairos").status_code, 422)
+
+
 class ElectronWorkerTests(unittest.TestCase):
     def test_the_worker_accepts_only_board_routes(self):
         source = (REPO / "electron" / "designRender.js").read_text(encoding="utf-8")
@@ -675,7 +741,10 @@ class ElectronWorkerTests(unittest.TestCase):
 
 
 def tearDownModule():
-    shutil.rmtree(environment, ignore_errors=True)
+    # Windows will not delete a database that is still open.
+    from core import session_manager_store
+    session_manager_store.close()
+    shutil.rmtree(environment)
 
 
 if __name__ == "__main__":

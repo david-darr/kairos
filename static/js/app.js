@@ -56,9 +56,8 @@ const NAV = [
 const STUB_TABS = new Set();
 const FORGE_NAV = [
   { id: 'forgeHome', label: 'Home', icon: 'home' },
-  { id: 'design', label: 'Design', icon: 'design' },
 ];
-// Tabs both modes show; opening one keeps the current mode.
+// Tabs either mode may open without switching mode (the Design tab).
 const SHARED_TABS = new Set(['design']);
 let forgeAdmin = false;
 let appMode = 'kairos';

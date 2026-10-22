@@ -139,6 +139,7 @@ export function setArtifactContext(sessionId, sessions = context.sessions) {
   if (viewer) {
     for (const tab of viewer.tabs) {
       tab.origin.hidden = sessionId === tab.sessionId;
+      if (tab.designComposer) tab.designComposer.root.hidden = sessionId === tab.sessionId;
       tab.origin.textContent = `from ${titleFor(tab.sessionId)}`;
       tab.foreignReview.update();
     }
@@ -340,6 +341,8 @@ async function renderDesignTab(tab) {
     onOpenChat: () => goToChat(tab.sessionId),
   });
   local.root.classList.add('design-pane-composer');
+  // Beside its own chat, the chat's composer takes the chips; elsewhere this one does.
+  tab.designComposer = local; local.root.hidden = context.sessionId === tab.sessionId;
   tab.actions.append(el('button', { type: 'button', class: 'btn quiet', text: 'Open full page', onclick: () =>
     document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'design', designId } })) }));
   tab.content.viewerRoot = canvas.root;

@@ -13,7 +13,7 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
   let chips = [];
   let watching = null, unsubscribe = () => {};
   const list = el('div', { class: 'chat-reference-chips design-composer-chips', 'aria-label': 'Selected on the design' });
-  const input = el('textarea', { class: 'design-composer-input', rows: '1', maxlength: '16000', placeholder: 'Describe the change, e.g. make this button full width',
+  const input = el('textarea', { class: 'design-composer-input', rows: '1', maxlength: '16000', placeholder: 'Describe the change',
     'aria-label': 'Message to the design chat' });
   const send = el('button', { type: 'button', class: 'btn primary design-composer-send', text: 'Send', onclick: () => submit() });
   const status = el('span', { class: 'meta design-composer-status', role: 'status' });

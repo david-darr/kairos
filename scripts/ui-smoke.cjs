@@ -3,6 +3,7 @@
 // in this process, and no request can reach the running JARVIS backend.
 const { app, BrowserWindow, session } = require("electron");
 const { exitAfterFlush } = require('./electron-exit.cjs');
+const designChecks = require('./design-canvas-checks.cjs');
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -65,6 +66,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith("/api/")) {
     if (req.method === 'GET') reads.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    if (designChecks.serve(url, req, res)) return;  // The Design canvas (design-canvas-checks.cjs).
     if (url.pathname === '/api/chat/live/snapshot') {
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
     }
@@ -2471,6 +2473,8 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'); i++) await delay(50);
     assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings'), 'Edit saves the new name');
     // Every bot surface on a phone: no sideways scroll, 44px targets.
+    await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow });
+    console.log('PASS: design canvas.');
     const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
     await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
     console.log('PASS: phone shell.');

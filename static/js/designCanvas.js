@@ -260,11 +260,11 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     if (event.button === 1 || space || !onBoard || (mode === 'pan' && event.target.classList.contains('design-shield') && event.pointerType !== 'mouse')) {
       event.preventDefault();
       panning = { x: event.clientX, y: event.clientY, tx, ty, moved: false };
-      stage.setPointerCapture(event.pointerId);
+      try { stage.setPointerCapture(event.pointerId); } catch { /* A synthetic or ended pointer. */ }
       root.classList.add('design-panning');
     } else if (mode === 'pan' && event.target.classList.contains('design-shield') && event.button === 0) {
       panning = { x: event.clientX, y: event.clientY, tx, ty, moved: false, board: onBoard.dataset.slug };
-      stage.setPointerCapture(event.pointerId);
+      try { stage.setPointerCapture(event.pointerId); } catch { /* A synthetic or ended pointer. */ }
     }
   }, { signal });
   stage.addEventListener('pointermove', event => {
@@ -300,7 +300,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     event.preventDefault(); event.stopPropagation();
     const info = manifest().boards[slug]; const node = boardNodes.get(slug);
     const start = { x: event.clientX, y: event.clientY, bx: info.x, by: info.y, bw: info.w, bh: info.h };
-    const target = event.currentTarget; target.setPointerCapture(event.pointerId);
+    const target = event.currentTarget; try { target.setPointerCapture(event.pointerId); } catch { /* A synthetic or ended pointer. */ }
     root.classList.add('design-dragging'); selectBoard(slug);
     const move = e => {
       const dx = (e.clientX - start.x) / zoom, dy = (e.clientY - start.y) / zoom;
@@ -415,7 +415,16 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
       picked.ids = picked.ids.slice(0, 20);
       broadcast();
       announceSelection();
-    } else if (mode === 'comment') openCommentBox(slug, element, point, source);
+    } else if (mode === 'comment') {
+      // Shift-click adds elements to the comment being written.
+      if (data.additive && commentDraft && commentDraft.slug === slug && element) {
+        if (!commentDraft.ids.includes(element.id)) commentDraft.ids.push(element.id);
+        commentDraft.where.textContent = `${manifest().boards[slug]?.title}: ${commentDraft.ids.join(', ')}`;
+        picked = { board: slug, ids: [...commentDraft.ids], labels: [], point }; broadcast();
+        return;
+      }
+      openCommentBox(slug, element, point, source);
+    }
   }
   let lastChip = null;
   function announceSelection() {
@@ -449,19 +458,23 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   }
 
   // -- comments (pins) ----------------------------------------------------------------
+  let commentDraft = null;
   function openCommentBox(slug, element, point, source) {
     const input = el('textarea', { rows: '3', maxlength: '4000', placeholder: 'Comment', 'aria-label': 'Comment' });
     const save = el('button', { type: 'button', class: 'btn primary', text: 'Pin comment' });
     const cancel = el('button', { type: 'button', class: 'btn quiet', text: 'Cancel', onclick: () => { popover.hidden = true; sheet?.close?.(); } });
     const where = element ? `${element.id} <${element.tag}>${element.text ? ` "${element.text.slice(0, 30)}"` : ''}` : 'This spot on the board';
-    const form = el('div', { class: 'design-comment-form' }, [el('p', { class: 'meta', text: `${manifest().boards[slug]?.title}: ${where}` }), input,
+    const whereNode = el('p', { class: 'meta', text: `${manifest().boards[slug]?.title}: ${where}` });
+    const form = el('div', { class: 'design-comment-form' }, [whereNode, el('p', { class: 'meta', text: 'Shift-click to add more elements.' }), input,
       el('div', { class: 'design-row' }, [cancel, save])]);
+    commentDraft = { slug, ids: element ? [element.id] : [], where: whereNode };
     let sheet = null;
     save.onclick = async () => {
       if (!input.value.trim()) { input.focus(); return; }
       save.disabled = true;
       try {
-        const comment = await api(`/api/designs/${designId}/comments`, { method: 'POST', body: JSON.stringify({ board: slug, element_ids: element ? [element.id] : [], point, text: input.value.trim() }) });
+        const comment = await api(`/api/designs/${designId}/comments`, { method: 'POST', body: JSON.stringify({ board: slug, element_ids: commentDraft?.slug === slug ? commentDraft.ids : element ? [element.id] : [], point, text: input.value.trim() }) });
+        commentDraft = null; picked = { board: null, ids: [], labels: [], point: null };
         comments.push(comment); popover.hidden = true; sheet?.close?.(); paintPins(); broadcast();
         panelBtns.comments.textContent = `Comments (${openComments().length})`;
         if (panel.dataset.kind === 'comments') renderPanel('comments');

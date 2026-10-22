@@ -18,7 +18,7 @@
 .design-card-copy { display: grid; gap: 4px; padding: 12px 14px 14px; }
 .design-card-copy strong { font-weight: 500; }
 
-.design-page { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; min-height: 0; gap: 0; }
+.design-page { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; gap: 0; }
 .view[data-view="design"] { display: flex; flex-direction: column; }
 .view[data-view="design"] > .design-page { flex: 1; min-height: 0; }
 .design-page-header { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--hairline-soft); white-space: nowrap; }
@@ -30,7 +30,7 @@
 .design-spacer { flex: 1; }
 
 /* -- the canvas ------------------------------------------------------------ */
-.design-canvas { position: relative; display: flex; flex-direction: column; min-height: 320px; height: 100%; outline: none; background: var(--bg); color: var(--text); }
+.design-canvas { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 320px; height: 100%; outline: none; background: var(--bg); color: var(--text); }
 .design-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .design-toolbar { display: flex; align-items: center; gap: 6px 10px; padding: 6px 10px; border-bottom: 1px solid var(--hairline-soft); background: var(--bg-panel-solid); }
 .design-toolbar .btn { min-height: 34px; white-space: nowrap; flex: none; }
@@ -180,7 +180,9 @@
 /* -- phones: the redesign shell (3i) ----------------------------------------- */
 @media (max-width: 768px) {
   .design-view-toggle { display: inline-flex; }
-  .kairos-redesign .design-toolbar { position: sticky; top: 0; z-index: 5; gap: 6px; }
+  .kairos-redesign .design-toolbar { position: sticky; top: 0; z-index: 5; gap: 6px; flex-wrap: wrap; }
+  .kairos-redesign .design-page-header { overflow-x: auto; }
+  .kairos-redesign .design-list { grid-template-columns: minmax(0, 1fr); }
   .kairos-redesign .design-toolbar .btn, .kairos-redesign .design-modes .btn { min-height: 44px; min-width: 44px; }
   .kairos-redesign .design-toolbar-start { flex-basis: 100%; }
   .kairos-redesign .design-toolbar-end { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
@@ -192,6 +194,7 @@
   .kairos-redesign .design-page-header .btn, .kairos-redesign .design-chat-pick select { min-height: 44px; }
   .kairos-redesign .design-page-header .danger { display: none; }
   .kairos-redesign .design-focus { position: fixed; inset: 0; z-index: 9000; padding-top: env(safe-area-inset-top); }
+  .kairos-redesign .design-focus-bar { padding-left: 68px; }
   .kairos-redesign .design-focus-bar .btn { min-height: 44px; min-width: 44px; }
   .kairos-redesign .design-focus-stage { padding: 12px 0; }
   .kairos-redesign .design-focus-device[data-frame="phone"] { margin: 6px; box-shadow: 0 0 0 6px var(--text), var(--shadow-elevated); }
@@ -210,3 +213,4 @@
 .design-system-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px 12px; }
 .design-system-colors input[type="color"] { width: 100%; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 .design-system-pane[hidden] { display: none; }
+.design-composer[hidden] { display: none; }

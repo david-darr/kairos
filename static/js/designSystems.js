@@ -45,7 +45,7 @@ function newSystemForm(host, base) {
   const sans = el('input', { type: 'text', placeholder: 'Inter, system-ui, sans-serif', 'aria-label': 'Sans font' });
   const serif = el('input', { type: 'text', placeholder: 'Georgia, serif', 'aria-label': 'Serif font' });
   const guide = el('textarea', { rows: '3', maxlength: '4000', placeholder: 'A few lines: intent, do and don\'t', 'aria-label': 'Guide' });
-  const css = el('textarea', { rows: '4', maxlength: '400000', placeholder: ':root { --primary: #123456; --background: #ffffff; }', 'aria-label': 'CSS variables' });
+  const css = el('textarea', { rows: '4', maxlength: '400000', placeholder: ':root { --primary: ...; --background: ...; }', 'aria-label': 'CSS variables' });
   const project = el('select', { 'aria-label': 'Forge project' }, [el('option', { value: '', text: 'Choose a Forge project' })]);
   api('/api/forge/projects').then(list => list.forEach(p => project.append(el('option', { value: p.id, text: p.name })))).catch(() => { project.disabled = true; });
   const modes = el('div', { class: 'segmented-tabs', role: 'group', 'aria-label': 'Make it from' });
