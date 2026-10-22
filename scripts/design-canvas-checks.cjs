@@ -10,7 +10,9 @@ const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'core', 'design_render.py'), 'utf8');
+// Python reads its source with universal newlines, so the backend serves LF;
+// a CRLF checkout (core.autocrlf) must hash the same text or the policy blocks it.
+const source = fs.readFileSync(path.join(root, 'core', 'design_render.py'), 'utf8').replace(/\r\n/g, '\n');
 const VIEWER = source.match(/VIEWER_SCRIPT = r"""([\s\S]*?)"""/)[1];
 const HASH = 'sha256-' + crypto.createHash('sha256').update(VIEWER, 'utf8').digest('base64');
 const ID = 'd5e5e5e5e5e5';
