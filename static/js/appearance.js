@@ -292,7 +292,8 @@ function ensureCanvases() {
   shaderCanvas = document.createElement('canvas');
   for (const canvas of [imageCanvas, shaderCanvas]) {
     canvas.className = 'app-background'; canvas.setAttribute('aria-hidden', 'true');
-    document.body.prepend(canvas);
+    // An iOS Safari tab keeps page backgrounds in its in-flow layer (mobileChrome.js): a fixed one would tint its bars.
+    (document.querySelector('body > .ms-page-bleed') || document.body).prepend(canvas);
   }
   shaderCanvas.addEventListener('webglcontextlost', event => {
     event.preventDefault(); glScene = false; apply();

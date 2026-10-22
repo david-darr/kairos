@@ -431,6 +431,8 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-sheet-projects .ms-account-row { width: auto; flex: 0 0 auto; padding-inline: 12px; }
   .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
+  /* TEMPORARY (2026-10-21): the Safari page readout in the workspace sheet (mobileTabSheet.js). */
+  .kairos-redesign .ms-sheet-readout { margin: 12px 4px 0; font-size: 11px; line-height: 1.4; color: var(--rd-ink-dim); overflow-wrap: anywhere; }
 }
 
 /* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
@@ -615,10 +617,9 @@
 /* 2026-10-21: iOS Safari in a browser tab (html.ms-safari-bleed, set by
    mobileChrome.js only there). Safari 26 shows page pixels under its status
    bar and floating toolbar only while the document scrolls, so the document
-   scrolls with 1px of slack and sits at 1px; the app sticks to the top at one
-   dynamic viewport, so nothing sits behind the toolbar; the backgrounds sit in
-   an in-flow layer one large viewport tall that runs under both bars; the
-   status-bar frost sticks to the top. Vertical overscroll is off; horizontal
+   scrolls with 1px of slack and sits at 1px; the app is one dynamic viewport
+   tall from the top, so nothing sits behind the toolbar; the backgrounds sit
+   in an in-flow layer one large viewport tall that runs under both bars. Vertical overscroll is off; horizontal
    swipe-back is untouched. */
 @media (max-width: 768px) {
   html.ms-safari-bleed { height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; }
@@ -627,9 +628,14 @@
     position: relative; z-index: 0; isolation: isolate; overflow: hidden; pointer-events: none;
     height: calc(100lvh + 1px); margin-bottom: calc(-100lvh - 1px);
   }
-  html.ms-safari-bleed #app { position: sticky; top: 0; z-index: 1; height: 100dvh; }
-  html.ms-safari-bleed .ms-global-frost { position: sticky; top: 0; display: block; margin-bottom: calc(-1 * var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
+  /* No fixed or sticky element may touch the screen edges here: Safari samples
+     those for a flat bar tint (a full-screen sticky app did exactly that on
+     device, 2026-10-21). The app is in flow 1px down, so at the 1px scroll it
+     sits at the top; the frost is absolute, which Safari does not sample. */
+  html.ms-safari-bleed #app { position: relative; z-index: 1; height: 100dvh; margin-top: 1px; }
+  html.ms-safari-bleed .ms-global-frost { position: absolute; top: 1px; left: 0; right: 0; display: block; }
   html.ms-safari-bleed .ms-global-frost[hidden] { display: none; }
+  html.ms-safari-bleed .ms-page-bleed > .app-background { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; object-fit: cover; }
   html.ms-safari-bleed .ms-page-bleed > .ms-background {
     display: block; position: absolute; inset: 0; z-index: 1; border-radius: 0; opacity: .65; pointer-events: none;
   }

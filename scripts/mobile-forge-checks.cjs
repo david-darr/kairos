@@ -150,7 +150,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(writes.slice(appStart).some(w => w.path.endsWith('/app/stop')), 'Logs retains Stop app');
   await click('.mf-back');
   await tool('Explorer');
-  await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row')");
+  // The tree's rows can paint before its folders load, so wait for a folder itself.
+  await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row') && !!document.querySelector('dialog.ms-sheet .forge-tree-directory')");
   ok(await js("document.querySelector('dialog.ms-sheet').classList.contains('ms-sheet-full')"), 'Explorer is full-height');
   await js("document.querySelector('dialog.ms-sheet .forge-tree-directory').open = true");
   await waitFor("!!document.querySelector('dialog.ms-sheet [data-file-path]')");

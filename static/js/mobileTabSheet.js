@@ -110,6 +110,8 @@ export function openTabSheet(from) {
   footer.append(account, accountActions, button('Settings', () => { closeTabSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row'));
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeTabSheet(); native.click(); }, 'ms-account-row'));
+  // TEMPORARY (2026-10-21): one line of iOS Safari page state for one screenshot from David. Remove after.
+  footer.append(pageReadout());
   const { live, done } = activityItems();
   const work = document.createElement('section'); work.className = 'ms-sheet-activity'; work.setAttribute('aria-label', 'Work and updates');
   if (live.length || done.length) {
@@ -129,6 +131,24 @@ export function openTabSheet(from) {
   sheet.setAttribute('aria-modal', 'true'); sheet.showModal();
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });
+}
+
+// TEMPORARY (2026-10-21): what Safari sees. Gate inputs, scroll state, the large viewport, and every fixed or
+// sticky element at least 80% wide within 4px of the top or 3px of the bottom, with its background colour.
+function pageReadout() {
+  const probe = document.createElement('div'); probe.style.cssText = 'position:absolute;top:0;width:1px;height:100lvh;visibility:hidden;pointer-events:none';
+  document.body.append(probe); const lvh = probe.offsetHeight; probe.remove();
+  const edges = [];
+  for (const node of document.querySelectorAll('body *')) {
+    if (node.closest('.ms-tab-sheet')) continue;
+    const s = getComputedStyle(node); if (s.position !== 'fixed' && s.position !== 'sticky') continue;
+    const r = node.getBoundingClientRect(); if (!node.getClientRects().length || r.width < innerWidth * .8 || r.height < 3) continue;
+    const top = r.top <= 4 && r.bottom > 0, bottom = r.bottom >= innerHeight - 3 && r.top < innerHeight;
+    if (top || bottom) edges.push(`${node.id ? '#' + node.id : (node.className && typeof node.className === 'string' ? '.' + node.className.split(' ')[0] : node.tagName.toLowerCase())} ${s.position}${top ? ' top' : ''}${bottom ? ' bottom' : ''} ${s.backgroundColor}`);
+  }
+  const line = document.createElement('p'); line.className = 'ms-sheet-readout';
+  line.textContent = `Safari tab ${document.documentElement.classList.contains('ms-safari-bleed') ? 'on' : 'off'} · touch-callout ${!!globalThis.CSS?.supports?.('-webkit-touch-callout', 'none')} · standalone ${navigator.standalone} · scrollY ${scrollY} · scrollHeight ${document.scrollingElement?.scrollHeight} · innerHeight ${innerHeight} · visualViewport ${Math.round(visualViewport?.height || 0)} · 100lvh ${lvh} · edges: ${edges.join('; ') || 'none'}`;
+  return line;
 }
 
 export function initTabSheet() {
