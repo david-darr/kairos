@@ -1,0 +1,107 @@
+// Real Chromium and a synthetic live feed on a fresh loopback port.
+const { app, BrowserWindow, session } = require('electron');
+const { exitAfterFlush } = require('./electron-exit.cjs');
+const fs = require('node:fs');
+const path = require('node:path');
+const http = require('node:http');
+const assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..');
+const output = path.join(root, 'data/review/ask-user');
+const questionText = '<img src=x onerror="window.__pwned=1"><b>Bold?</b> Pick one';
+const optionText = '<script>window.__pwned=2</script>Yes';
+const request = { id: 'question-check', kind: 'question', tool: 'AskUserQuestion', title: 'Waiting for your response', choices: [], arguments: {}, expires_at: Date.now() / 1000 + 1800,
+  questions: [{ question: questionText, header: 'Layout', multiSelect: false, options: [{ label: optionText, description: 'Literal text' }, { label: 'No' }] },
+    { question: 'Which widgets should be on it?', header: 'Widgets', multiSelect: true, options: [{ label: 'Calendar' }, { label: 'Tasks' }, { label: 'Weather' }] }] };
+const chat = { id: 's1', title: 'Question check', model_endpoint_id: 'claude', messages: [{ role: 'user', content: 'Please ask me.' }] };
+const run = { turnId: 't1', sessionTitle: chat.title, prompt: 'Please ask me.', text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false, permission: request, revision: 1, toolSteps: [], toolEvents: [] };
+const clients = new Set(), posts = [];
+const snapshot = () => ({ type: 'snapshot', runs: { s1: run } });
+function change(permission) {
+  run.permission = permission; run.revision++;
+  for (const client of clients) client.write(`data: ${JSON.stringify({ type: 'update', sessionId: 's1', turnId: 't1', revision: run.revision, changes: { permission } })}\n\n`);
+}
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/') {
+    res.setHeader('Content-Type', 'text/html');
+    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      ['kairos-theme','style','chat','interface','redesign','redesign-mobile','question-prompt'].map(name => `<link rel="stylesheet" href="/static/css/${name}.css">`).join('') +
+      '</head><body><div id="view-content" class="view active" style="height:100dvh"></div></body></html>'); return;
+  }
+  if (url.pathname.startsWith('/api/')) {
+    if (url.pathname === '/api/chat/live/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      clients.add(res); res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+      res.on('close', () => clients.delete(res)); return;
+    }
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const data = raw ? JSON.parse(raw) : {};
+    const json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
+    if (url.pathname.endsWith('/respond')) { posts.push({ path: url.pathname, data }); return json({ status: data.skip ? 'skipped' : 'answered' }); }
+    if (url.pathname === '/api/chat/live/snapshot') return json(snapshot());
+    if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, username: 'Alex', is_admin: true });
+    if (url.pathname === '/api/sessions') return json([chat]);
+    if (url.pathname === '/api/sessions/s1') return json(chat);
+    if (url.pathname.endsWith('/context')) return json({ available: false });
+    if (url.pathname === '/api/models' || url.pathname === '/api/models/choices') return json([{id:'claude',name:'Claude Code',kind:'claude_cli',supports_images:true}]);
+    if (url.pathname.includes('catalog')) return json([]);
+    if (url.pathname === '/api/speech/status') return json({engine_available:false,models:[]});
+    return json([]);
+  }
+  const file = path.resolve(root, '.' + decodeURIComponent(url.pathname));
+  if (!file.startsWith(path.join(root, 'static') + path.sep)) { res.writeHead(404); res.end(); return; }
+  try {
+    res.setHeader('Content-Type', ({'.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[path.extname(file)] || 'application/octet-stream');
+    res.end(fs.readFileSync(file));
+  } catch { res.writeHead(404); res.end(); }
+});
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+app.setPath('userData', path.join(output, 'profile'));
+app.whenReady().then(async () => {
+  fs.mkdirSync(output, {recursive:true});
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  session.defaultSession.webRequest.onBeforeRequest((details, cb) => cb({cancel: !details.url.startsWith(base + '/') && !details.url.startsWith('about:') && !details.url.startsWith('data:')}));
+  const win = new BrowserWindow({ width: 1280, height: 900, useContentSize:true, show:false, webPreferences:{offscreen:true, contextIsolation:true, nodeIntegration:false} });
+  const js = code => win.webContents.executeJavaScript(code);
+  const waitFor = async code => { for (let i=0;i<125;i++) { if (await js(code)) return; await delay(40); } throw Error('Timed out: ' + code); };
+  const mount = async phone => {
+    await win.loadURL(base);
+    await js(`document.documentElement.dataset.appMode = 'kairos'; document.documentElement.classList.toggle('kairos-redesign', ${!!phone}); document.body.classList.toggle('kairos-redesign', ${!!phone});
+      import('/static/js/views/chat.js').then(async m => { window.cleanup = await m.render(document.querySelector('#view-content'), 'chat', {sessionId:'s1'}); })`);
+    await waitFor('!!document.querySelector(".chat-question-host .question-card")');
+  };
+  const capture = async name => { const file = path.join(output, name + '.png'); fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG()); console.log(file); };
+  try {
+    await mount(false);
+    const card = await js(`(() => { const c=document.querySelector('.question-card'), d=c.closest('.chat-composer-dock'); return { dock:!!d, before:!!(c.compareDocumentPosition(d.querySelector('.chat-input-bar')) & Node.DOCUMENT_POSITION_FOLLOWING), visible:c.getBoundingClientRect().height>0, title:c.querySelector('h2').textContent, text:c.textContent, tags:c.querySelectorAll('img,script,b').length, pwned:window.__pwned, disabled:c.querySelector('.primary').disabled }; })()`);
+    assert.equal(card.dock,true); assert.equal(card.before,true); assert.equal(card.visible,true);
+    assert.equal(card.title,'Waiting for your response'); assert.equal(card.tags,0); assert.equal(card.pwned,undefined); assert.equal(card.disabled,true);
+    assert.ok(card.text.includes('<img')); assert.ok(card.text.includes('<script>'));
+    await capture('desktop');
+    await js(`document.querySelector('.question-item input[type=radio]').click(); const t=document.querySelectorAll('.question-item')[1].querySelector('input[type=text]'); t.value='Custom widget'; t.dispatchEvent(new Event('input',{bubbles:true}));`);
+    assert.equal(await js('document.querySelector(".question-card .primary").disabled'),false);
+    await js('document.querySelector(".question-card .primary").click()');
+    await waitFor('!document.querySelector(".question-card")');
+    assert.deepEqual(posts.shift(),{path:'/api/permissions/question-check/respond',data:{answers:{[questionText]:optionText,'Which widgets should be on it?':['Custom widget']}}});
+    // The snapshot is deliberately still pending, as if reloading before the feed update.
+    await mount(false);
+    await js('document.querySelector(".question-actions button").click()');
+    await waitFor('!document.querySelector(".question-card")');
+    assert.deepEqual(posts.shift(),{path:'/api/permissions/question-check/respond',data:{skip:true}});
+    await mount(false);
+    change(null); await waitFor('!document.querySelector(".question-card")');
+    change(request); win.setContentSize(390,844); await mount(true);
+    const phone = await js(`(() => { const c=document.querySelector('.question-card'), d=c.closest('.chat-composer-dock'), r=c.getBoundingClientRect(); return {width:r.width,dock:d.getBoundingClientRect().width,height:r.height,viewport:innerHeight,buttons:[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {height:r.height,top:r.top,bottom:r.bottom}})}; })()`);
+    assert.ok(Math.abs(phone.width-phone.dock)<3); assert.ok(phone.height<=phone.viewport*.65+1);
+    for (const button of phone.buttons) { assert.ok(button.height>=44); assert.ok(button.top>=0); assert.ok(button.bottom<=phone.viewport); }
+    await capture('phone');
+    win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+    assert.equal(await js('getComputedStyle(document.querySelector(".question-pulse")).animationName'),'none');
+    console.log('ask-user Chromium checks passed');
+    win.destroy(); for (const client of clients) client.end(); server.close(); exitAfterFlush(0);
+  } catch (error) {
+    console.error(error); await capture('failure').catch(()=>{}); win.destroy(); for (const client of clients) client.end(); server.close(); exitAfterFlush(1);
+  }
+}).catch(error => {console.error(error); exitAfterFlush(1);});

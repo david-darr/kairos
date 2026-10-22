@@ -818,5 +818,81 @@ class SnapshotTests(unittest.TestCase):
                                          title=f"kairos · {name} · {theme} · {depth}", theme=term)
 
 
+
+QUESTION = {"id": "q1", "kind": "question", "questions": [
+    {"question": "Which layout?", "options": [{"label": "Tabs"}, {"label": "Columns"}]},
+    {"question": "Widgets?", "multiSelect": True, "options": [{"label": "Tasks"}, {"label": "Weather"}]},
+]}
+
+class QuestionRoutingTests(unittest.IsolatedAsyncioTestCase):
+    def app(self):
+        app = make_app()
+        view = open_view(app)
+        app.set_modal(view, dict(QUESTION))
+        return app
+
+    async def test_digit_then_other_with_multi_toggle(self):
+        app = self.app()
+        await app.answer(0)
+        self.assertEqual(app.conn.posts, [])
+        await app.answer(1)
+        app.buffer.text = "Calendar"
+        await app.submit()
+        self.assertEqual(app.buffer.text, "")
+        self.assertEqual(app.conn.posts, [("/api/permissions/q1/respond", {"answers": {"Which layout?":"Tabs", "Widgets?":["Weather","Calendar"]}})])
+
+    async def test_other_single_and_confirm_multi(self):
+        app = self.app()
+        app.buffer.text = "Custom layout"
+        await app.submit()
+        await app.answer(0)
+        await app.submit()
+        self.assertEqual(app.conn.posts[-1][1], {"answers":{"Which layout?":"Custom layout","Widgets?":["Tasks"]}})
+
+    async def test_escape_skips_all_questions(self):
+        app = self.app()
+        await app.answer(None)
+        self.assertEqual(app.conn.posts, [("/api/permissions/q1/respond", {"skip":True})])
+
+    async def test_headless_skips_without_denial(self):
+        conn = FakeConnection()
+        out, err = io.StringIO(), io.StringIO()
+        runner = headless.Headless(conn, "stream-json", "deny", out=out, err=err, stdin=io.StringIO())
+        await runner.permission(QUESTION)
+        self.assertEqual(conn.posts, [("/api/permissions/q1/respond", {"skip":True})])
+        self.assertEqual(runner.denied, [])
+        self.assertIn("kairos: skipped a question (no terminal to answer it)", err.getvalue())
+        self.assertEqual(json.loads(out.getvalue()), {"type":"question","id":"q1","result":"skipped"})
+
+    async def test_headless_question_run_exits_zero(self):
+        from kairos_cli.live import Turn, TurnEvent
+        from unittest.mock import AsyncMock
+        conn = FakeConnection()
+        out = io.StringIO()
+        runner = headless.Headless(conn, "json", "deny", out=out, err=io.StringIO(), stdin=io.StringIO())
+        turn = Turn(session_id="s1", turn_id="t1", status="done")
+        class Feed:
+            def __init__(self, conn, callback):
+                self.connected = asyncio.Event()
+                self.callback = callback
+            def start(self):
+                self.connected.set()
+                self.callback(TurnEvent("permission", "s1", turn, value=QUESTION))
+                self.callback(TurnEvent("finished", "s1", turn))
+            async def stop(self):
+                pass
+        with patch.object(headless, "LiveFeed", Feed), patch.object(chat, "start_turn", AsyncMock(return_value="t1")):
+            self.assertEqual(await runner.run("s1", "question"), 0)
+        self.assertEqual(json.loads(out.getvalue())["questions"], [{"id":"q1","result":"skipped"}])
+
+    def test_question_render_sanitizes_model_text(self):
+        request = {**QUESTION, "questions":[{"question":"Which layout?\x1b[31m", "options":[{"label":"Tabs"}]}]}
+        console = Console(file=io.StringIO(), width=90, color_system=None)
+        console.print(render.question_box(request, palettes.Palette("night", "16"), 80, {}))
+        text = console.file.getvalue()
+        self.assertIn("Which layout?", text)
+        self.assertIn("1 Tabs", text)
+        self.assertNotIn("\x1b", text)
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

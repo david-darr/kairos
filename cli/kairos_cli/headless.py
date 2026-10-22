@@ -38,6 +38,7 @@ class Headless:
         self.events: asyncio.Queue[TurnEvent] = asyncio.Queue()
         self.denied: list[dict] = []
         self.answered: list[dict] = []
+        self.questions: list[dict] = []
 
     def emit(self, kind: str, **fields) -> None:
         if self.fmt == "stream-json":
@@ -95,6 +96,7 @@ class Headless:
                             "session_id": session_id, "turn_id": turn_id, "status": status, "error": error,
                             "text": "".join(text_parts), "tool_steps": steps,
                             "permissions": {"denied": self.denied, "answered": self.answered},
+                            "questions": self.questions,
                         }, ensure_ascii=False) + "\n")
                     self.out.flush()
                     if status == "failed":
@@ -106,6 +108,19 @@ class Headless:
             await feed.stop()
 
     async def permission(self, request: dict) -> None:
+        if request.get("kind") == "question":
+            answers = None
+            terminal = self.permissions == "ask" and self.stdin.isatty() and self.err.isatty()
+            if terminal:
+                answers = await asyncio.to_thread(self._ask_question, request)
+            result = await chat.answer_question(self.conn, request["id"], answers, skip=answers is None)
+            entry = {"id": request["id"], "result": result}
+            self.questions.append(entry)
+            self.emit("question", **entry)
+            if not terminal:
+                self.err.write("kairos: skipped a question (no terminal to answer it)\n")
+                self.err.flush()
+            return
         summary = {"id": request.get("id"), "tool": one_line(request.get("tool"), 60),
                    "title": one_line(request.get("title"), 200)}
         choice = None
@@ -136,3 +151,24 @@ class Headless:
         if answer.isdigit() and 1 <= int(answer) <= len(choices):
             return choices[int(answer) - 1]
         return None
+
+
+    def _ask_question(self, request):
+        answers = {}
+        for question in request.get("questions", []):
+            self.err.write("\n" + one_line(question["question"], 2000) + "\n")
+            options = question.get("options", [])
+            for i, option in enumerate(options, 1):
+                self.err.write(f"  {i} " + one_line(option["label"], 200) + " " + one_line(option.get("description", ""), 500) + "\n")
+            self.err.write("Answer (empty skips): ")
+            self.err.flush()
+            value = self.stdin.readline().strip()
+            if not value:
+                return None
+            numbers = value.split(",") if question.get("multiSelect") else [value]
+            if all(n.strip().isdigit() and 1 <= int(n.strip()) <= len(options) for n in numbers):
+                labels = list(dict.fromkeys(options[int(n.strip()) - 1]["label"] for n in numbers))
+                answers[question["question"]] = labels if question.get("multiSelect") else labels[0]
+            else:
+                answers[question["question"]] = value
+        return answers

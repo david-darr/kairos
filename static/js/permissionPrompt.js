@@ -11,6 +11,7 @@
 //
 // Dismissing rejects. That is deliberate - closing a question must never be
 // read as agreement, and the backend denies on silence anyway.
+import { showQuestionPrompt, dismissQuestionPrompt } from './questionPrompt.js';
 import { api, el } from "./api.js";
 
 let open = null;
@@ -21,6 +22,7 @@ document.addEventListener('kairos:permission-closed', event => {
 });
 
 export function dismissPermissionPrompt(requestId = null) {
+  dismissQuestionPrompt(requestId);
   if (requestId && open?.dataset.requestId !== requestId) return;
   if (requestId && open) open.dataset.resolved = 'true';
   open?.close();
@@ -34,7 +36,9 @@ export function dismissPermissionPrompt(requestId = null) {
  * @param {{mount?: HTMLElement}} [options]  defaults to the document body, so
  *   a caller does not need a view root in scope to raise a modal.
  */
-export function showPermissionPrompt(request, onAnswered, { mount = document.body, inline = false } = {}) {
+export function showPermissionPrompt(request, onAnswered, options = {}) {
+  if (request?.kind === 'question') return showQuestionPrompt(request, onAnswered, { dock: options.dock || null, mount: options.mount || document.body });
+  const { mount = document.body, inline = false } = options;
   dismissPermissionPrompt();
   const previous = document.activeElement;
   const status = el("p", { role: "alert", class: "permission-error" });

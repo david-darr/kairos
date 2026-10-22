@@ -463,7 +463,7 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
     if (entry.permission && entry.permission.id !== shownPermission) {
       const request = entry.permission;
       shownPermission = request.id;
-      showPermissionPrompt(request, () => chatStream.clearPermission(sessionId, request.id));
+      showPermissionPrompt(request, () => chatStream.clearPermission(sessionId, request.id), request.kind === 'question' ? { dock: composerRefs?.questionHost } : {});
     } else if (!entry.permission && shownPermission) {
       dismissPermissionPrompt(shownPermission);
       shownPermission = null;
@@ -1089,6 +1089,7 @@ export async function render(container, tabId, options = {}) {
   const disposeMobileComposer = mountMobileComposer({ composer, input, attachmentHost: attachStrip,
     context: () => document.getElementById('project-picker-label')?.textContent || 'Current vault',
     busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
+  const questionHost = el('div', { class: 'chat-question-host', hidden: true, 'aria-live': 'polite' });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
   const composerHint = el('div', { class: 'composer-hint' });
   const syncComposerHint = () => {
@@ -1102,7 +1103,7 @@ export async function render(container, tabId, options = {}) {
     text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
   composerOptions.append(permissionNotice);
   const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
-  const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer]);
+  const dock = el('div', { class: 'chat-composer-dock' }, [questionHost, queueHost, attachStrip, composer]);
   const phoneComposer = matchMedia('(max-width: 768px)');
   const syncComposerMenu = () => {
     // Re-parent the same controls so state and handlers survive live resizing.
@@ -1119,7 +1120,7 @@ export async function render(container, tabId, options = {}) {
   };
   syncComposerMenu();
   phoneComposer.addEventListener('change', syncComposerMenu);
-  composerRefs = { messages, input, sendBtn, attachStrip, queueHost };
+  composerRefs = { messages, input, sendBtn, attachStrip, queueHost, questionHost };
   main.append(messages, dock);
   const timeline = mountChatTimeline(main, messages, () => activeSessionId);
   activeTimeline = timeline;

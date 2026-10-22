@@ -4,8 +4,8 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 // 2026-10-13: accept the documented script path as well as its short name.
 const suite = path.basename(process.argv[2] || '').replace(/\.cjs$/, '');
-if (!['browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks'].includes(suite)) {
-  throw new Error('Choose browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, crm-smoke, roblox-smoke, or mobile-tabs-checks');
+if (!['browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks'].includes(suite)) {
+  throw new Error('Choose browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, crm-smoke, roblox-smoke, mobile-tabs-checks, or ask-user-checks');
 }
 if (suite === 'crm-smoke') {
   require('node:fs').accessSync(path.join(__dirname, '..', 'tabs', 'crm', 'view.js'));
