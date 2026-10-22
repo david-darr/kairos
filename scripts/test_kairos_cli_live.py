@@ -407,5 +407,77 @@ class ForgeAndAgentsLive(unittest.IsolatedAsyncioTestCase):
             self.assertIn(agent["name"], result.stdout)
 
 
+@unittest.skipUnless(sys.platform == "win32", "ConPTY harness")
+class InteractiveLive(unittest.TestCase):
+    """The interactive view in a real pseudo-terminal (ConPTY through
+    pywinpty): the Phase 1 spike's checks, kept as a test. A long streamed
+    reply lands in scrollback line by line, every line exactly once, and the
+    alternate screen is never taken; a number key answers a prompt."""
+
+    def drive(self, steps, timeout=120):
+        import re
+        try:
+            from winpty import PtyProcess
+        except ImportError:
+            self.skipTest("pywinpty is not installed")
+        approver = approve_next("allow")
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "cli"), "PYTHONIOENCODING": "utf-8", "WT_SESSION": "test"}
+        process = PtyProcess.spawn([sys.executable, "-X", "utf8", "-m", "kairos_cli", "--port", str(BACKEND.port),
+                                    "--no-start", "--model", "Scripted", "--no-motion"],
+                                   dimensions=(40, 120), env=env, cwd=str(ROOT))
+        chunks = []
+        reader = threading.Thread(target=lambda: self._read(process, chunks), daemon=True)
+        reader.start()
+
+        def plain():
+            text = "".join(chunks)
+            text = re.sub(r"\x1b\][^\x07]*\x07", "", text)
+            return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
+
+        def wait_for(pattern, seconds=60):
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                if re.search(pattern, plain()):
+                    return
+                time.sleep(0.1)
+            self.fail(f"never saw {pattern!r}")
+        try:
+            for kind, value in steps:
+                if kind == "wait":
+                    wait_for(value)
+                elif kind == "send":
+                    process.write(value)
+                    time.sleep(0.3)
+        finally:
+            if process.isalive():
+                process.write("\x04")
+                time.sleep(1.5)
+            if process.isalive():
+                process.terminate(force=True)
+            approver.join(timeout=2)
+        return "".join(chunks), plain()
+
+    @staticmethod
+    def _read(process, chunks):
+        while True:
+            try:
+                chunks.append(process.read(65536))
+            except EOFError:
+                return
+
+    def test_a_long_reply_keeps_every_line_in_scrollback(self):
+        import re
+        raw, text = self.drive([("wait", "help for commands"), ("send", "lines 600\r"), ("wait", r"done in [0-9.]+s")])
+        self.assertNotIn("\x1b[?1049h", raw, "the alternate screen must not be used")
+        numbers = [int(n) for n in re.findall(r"line (\d{5}) bold and code text", text)]
+        self.assertEqual(sorted(numbers), list(range(1, 601)))
+        self.assertIn("def hello", text)
+
+    def test_a_number_key_answers_a_permission_prompt(self):
+        _, text = self.drive([("wait", "help for commands"), ("send", "ask\r"), ("wait", "Kairos wants to use Bash"),
+                              ("send", "1"), ("wait", r"The command was allowed\.")])
+        self.assertIn("Allowed: Allow once", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

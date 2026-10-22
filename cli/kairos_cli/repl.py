@@ -89,8 +89,12 @@ class Composer(Completer):
 
 
 class Repl:
-    def __init__(self, conn: Connection, palette: Palette, kip: Kip, *, motion: bool = True, instance: str = ""):
+    def __init__(self, conn: Connection, palette: Palette, kip: Kip, *, motion: bool = True, instance: str = "",
+                 open_app: bool = True):
         self.conn = conn
+        # Bringing the app window forward starts the app for this instance;
+        # off when attached by --port, since that app is not known.
+        self.open_app = open_app
         self.palette = palette
         self.kip = kip
         self.motion = motion
@@ -292,8 +296,9 @@ class Repl:
     def end_turn(self, turn) -> None:
         self.write_blocks(self.committer.finish())
         self.out(render.finished_line(turn.status, time.monotonic() - self.turn_t0, self.palette, turn.error))
-        self.kip_state = "success" if turn.status == "done" else "error"
-        self.kip_until = time.monotonic() + 2.0
+        if turn.status in ("done", "failed"):
+            self.kip_state = "success" if turn.status == "done" else "error"
+            self.kip_until = time.monotonic() + 2.0
         self.turn = None
         self.modal = None
         self.running_tools.clear()
@@ -522,9 +527,10 @@ class Repl:
             self.out(render.footer([("enter", "send"), ("alt+enter", "newline"), ("esc", "stop or reject"),
                                     ("1-4", "answer a prompt"), ("ctrl+o", "tool details"), ("ctrl+d", "quit")], self.palette))
         elif name in commands.APP_ONLY:
-            self.note(f"{commands.APP_ONLY[name]} lives in the Kairos app. Opening it now.")
-            if not launch_app(self.instance or None, background=False):
-                self.note("Open Kairos from the tray.")
+            if self.open_app and launch_app(self.instance or None, background=False):
+                self.note(f"{commands.APP_ONLY[name]} lives in the Kairos app. Opening it now.")
+            else:
+                self.note(f"{commands.APP_ONLY[name]} lives in the Kairos app. Open it from the tray.")
         elif name == "new":
             await self.switch_to(await chat.new_session(self.conn))
             if self.choices and not self.session.get("model_endpoint_id"):
@@ -551,6 +557,7 @@ class Repl:
             await self.conn.post("/api/chat/compact", {"session_id": sid})
             self.note("Compacted.", "success")
         elif name == "rewind":
+            self.session = await chat.open_session(self.conn, sid)
             messages = self.session.get("messages") or []
             last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=None)
             if last_user is None:
@@ -560,6 +567,7 @@ class Repl:
             self.session = await chat.open_session(self.conn, sid)
             self.note(f"Removed the last exchange, {len(messages) - last_user} message(s).")
         elif name == "fork":
+            self.session = await chat.open_session(self.conn, sid)
             messages = self.session.get("messages") or []
             if not messages:
                 self.note("Nothing to fork yet.")

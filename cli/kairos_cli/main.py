@@ -216,7 +216,7 @@ async def run_interactive(args, palette, first: str | None = None, forge_task: d
             Text(f"{how} · {os.path.basename(os.getcwd()) or os.getcwd()}", palette.style("meta")),
             Text("/help for commands · ctrl+d to leave", palette.style("meta")),
         ])
-        repl = Repl(conn, palette, kip, motion=motion, instance=args.instance or "")
+        repl = Repl(conn, palette, kip, motion=motion, instance=args.instance or "", open_app=not args.port)
         repl.choices = choices
         if forge_task:
             created = await forge_api.start(conn, forge_task["task"], worktree=forge_task["worktree"],
