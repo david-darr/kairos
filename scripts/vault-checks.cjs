@@ -95,7 +95,7 @@ async function run(ctx) {
     ok(await js("document.querySelector('.library-vault-browser').classList.contains('vault-phone-detail') && document.querySelector('.library-vault-sidebar').hidden"), 'phone: the note pushes in as its own page');
     ok(await js("!!document.querySelector('.vault-phone-back')"), 'phone: the note page has a back button');
     await delay(400);
-    ok(await js("!document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'"), 'phone: the tab bar steps aside on the pushed note page, as on other pushed pages');
+    ok(await js("document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"), 'phone: the pushed note page keeps the tab bar');
     eq(await js("document.querySelectorAll('.ms-dock').length"), 0, 'phone: the dock leaves with the list page');
     eq(await small('.vault-phone-detail .library-vault-reader-head button, .vault-phone-back'), [], 'phone: note controls are 44px');
     await capture(label + '-vault-note');

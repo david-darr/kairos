@@ -30,8 +30,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.dataset.tabbar === 'more'"), 'Backdrop dismisses and returns focus');
   await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
-  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'");
-  assert.ok(await js("document.querySelector('.ms-tabbar').inert && !document.querySelector('.ms-avatar')"), 'Conversation has Back first; the tab bar steps away');
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
+  assert.ok(await js("!document.querySelector('.ms-tabbar').inert && !document.querySelector('.ms-avatar') && !!document.querySelector('.ms-chat-back')?.getClientRects().length"), 'Conversation keeps Back and the tab bar');
   await js("document.querySelector('.chat-phone-tools > button').click()");
   assert.ok(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace')"), 'The conversation menu no longer opens the old workspace sheet');
   await js("document.querySelector('.chat-phone-tools > button').click()");
