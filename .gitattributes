@@ -4,3 +4,5 @@
 # skill_templates: hashes in each skill's UPSTREAM.json.
 addon_packages/** -text
 skill_templates/** -text
+# Kairos CLI snapshot goldens and recorded SSE: byte-exact fixtures.
+scripts/fixtures/kairos_cli/** -text
