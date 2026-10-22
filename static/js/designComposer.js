@@ -22,6 +22,9 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
   const root = el('div', { class: 'design-composer', role: 'group', 'aria-label': 'Ask for changes' }, [list,
     el('div', { class: 'design-composer-row' }, [input, send]), el('div', { class: 'design-composer-row design-composer-meta' }, [status, start, open])]);
   host.append(root);
+  // In use (focused, or holding a draft or chips): the phone tab bar steps aside (mobileTabBar.js).
+  const engaged = () => root.classList.toggle('is-active', root.contains(document.activeElement) || !!input.value.trim() || chips.length > 0);
+  root.addEventListener('focusin', engaged); root.addEventListener('focusout', () => setTimeout(engaged, 0));
   input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(160, input.scrollHeight)}px`; update(); });
 
@@ -33,6 +36,7 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
     list.hidden = !chips.length;
   }
   function update() {
+    engaged();
     const session = getSession();
     const entry = session ? getInFlight(session.id) : null;
     const busy = entry?.status === 'processing';

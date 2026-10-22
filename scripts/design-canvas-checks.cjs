@@ -138,13 +138,22 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     if (overflow) assert.deepEqual(await overflow(), [], `the page fits at ${width}`);
     const small = await js(`[...document.querySelectorAll('.design-toolbar .btn, .design-modes .btn, .design-composer .btn')].filter(b => b.offsetParent && b.getBoundingClientRect().height < 44).map(b => b.textContent)`);
     assert.deepEqual(small, [], `44px targets at ${width}`);
+    // The phone tab bar (mobileTabBar.js): the board list keeps it; the pager hides it.
+    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
     await capture(`design-phone-${width}`);
     await js("document.querySelectorAll('.design-list-card')[0].click()");
     await waitFor("!!document.querySelector('.design-focus iframe')");
+    await waitFor("!document.documentElement.classList.contains('ms-tabbar-up')");
     await js("(() => { const s = document.querySelector('.design-focus-stage'); const r = s.getBoundingClientRect(); const at = (t, x) => s.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: r.top + 200, isPrimary: true, bubbles: true })); at('pointerdown', r.right - 30); at('pointerup', r.left + 30); })()");
     await waitFor("/2 \\/ 3/.test(document.querySelector('.design-focus-bar strong').textContent)");
     await capture(`design-phone-pager-${width}`);
     await js("document.querySelector('.design-focus-bar [aria-label=\"Close focus\"]').click()");
+    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    // A draft in the docked composer hides the bar too.
+    await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    await waitFor("!document.documentElement.classList.contains('ms-tabbar-up')");
+    await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
   }
   win.setContentSize(1440, 900); await delay(300);
 }

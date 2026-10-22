@@ -194,7 +194,8 @@
   .kairos-redesign .design-page-header .btn, .kairos-redesign .design-chat-pick select { min-height: 44px; }
   .kairos-redesign .design-page-header .danger { display: none; }
   .kairos-redesign .design-focus { position: fixed; inset: 0; z-index: 9000; padding-top: env(safe-area-inset-top); }
-  .kairos-redesign .design-focus-bar { padding-left: 68px; }
+  .kairos-redesign .design-focus-bar { flex-wrap: nowrap; gap: 4px; }
+  .kairos-redesign .design-focus-bar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kairos-redesign .design-focus-bar .btn { min-height: 44px; min-width: 44px; }
   .kairos-redesign .design-focus-stage { padding: 12px 0; }
   .kairos-redesign .design-focus-device[data-frame="phone"] { margin: 6px; box-shadow: 0 0 0 6px var(--text), var(--shadow-elevated); }
@@ -214,3 +215,5 @@
 .design-system-colors input[type="color"] { width: 100%; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 .design-system-pane[hidden] { display: none; }
 .design-composer[hidden] { display: none; }
+/* The phone tab bar (mobileTabBar.js): the view already leaves its room for
+   the board list; the pager and an engaged composer hide it. */

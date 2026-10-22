@@ -24,14 +24,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.getElementById('mobile-view-context')"), true, 'No redundant workspace pill');
       if (width <= 768 && tab !== 'chat' && tab !== 'home') {
         assert.equal(await js(`(() => {
-          const h=document.querySelector('.view-header h2'), b=document.getElementById('mobile-menu-btn').getBoundingClientRect();
+          const h=document.querySelector('.view-header h2'), b=document.querySelector('.ms-tabbar').getBoundingClientRect();
           if (!h) return true;
           const range=document.createRange(); range.selectNodeContents(h); const r=range.getBoundingClientRect();
-          return r.left>=b.right || r.top>=b.bottom;
-        })()`), true, `${tab} title clears Menu`);
+          return r.bottom<=b.top;
+        })()`), true, `${tab} title clears the tab bar`);
       }
       if (width <= 768 && tab === 'home') {
-        assert.equal(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('.ms-shell')"), true, 'Home has the workspace avatar and dashboard');
+        assert.equal(await js("!document.getElementById('mobile-menu-btn') && !!document.querySelector('.ms-tabbar [data-tabbar=home][aria-current=page]') && !document.querySelector('.ms-shell')"), true, 'Home has the tab bar, Home current, and the dashboard');
         assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0 && !document.querySelector('.ms-your-day')"), true, 'Dashboard is directly visible');
       }
       if (tab === 'calendar') {
@@ -43,10 +43,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         assert.equal(await js("document.activeElement.classList.contains('cal-calendars-trigger') && document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar popup restores its button and hides its choices');
       }
       if (width <= 768 && tab === 'library') {
-        await js("document.getElementById('mobile-menu-btn').click()");
-        assert.equal(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), true, 'Avatar opens workspace sheet');
+        await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
+        assert.equal(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), true, 'More opens its sheet');
         await js("document.querySelector('.ms-tab-sheet').click()");
-        assert.equal(await js("document.activeElement.id"), 'mobile-menu-btn', 'Menu button regains focus');
+        assert.equal(await js("document.activeElement.dataset.tabbar"), 'more', 'More regains focus');
         await js('document.activeElement.blur()');
       }
       await capture(`interface-${label}-${tab}`);
@@ -65,10 +65,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
       const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
       assert.ok(bottomGap>=11.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
-      await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent === 'Your workspace').click()");
-      assert.equal(await js("!!document.querySelector('.ms-tab-sheet[open]') && !document.getElementById('sidebar').classList.contains('open')"), true, 'Conversation menu opens the sheet');
+      await js("document.querySelector('.chat-phone-tools > button').click()");
+      assert.equal(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace') && document.querySelector('.ms-tabbar').dataset.state === 'hidden'"), true, 'A conversation has no workspace entry and no tab bar; Back leads out');
       await capture(`interface-${label}-workspace`);
-      await js("document.querySelector('.ms-tab-sheet').click()");
+      await js("document.querySelector('.chat-phone-tools > button').click()");
 
     }
     await js("document.getElementById('chat-input').value='A draft that must survive opening menus'; document.getElementById('chat-input').dispatchEvent(new Event('input', {bubbles:true}))");
@@ -125,7 +125,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-composer-options`);
     await js("document.getElementById('chat-messages').click(); document.getElementById('chat-history-toggle').click()");
     if (width <= 768) {
-      assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility==='hidden' && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
+      assert.equal(await js("document.querySelector('.ms-tabbar').dataset.state === 'hidden' && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
     }
     await capture(`interface-${label}-history`);
     if (width <= 768) await js("document.querySelector('.chat-history-close').click()");
@@ -134,7 +134,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-settings`);
     assert.deepEqual(await overflow(), [], `${label} Settings fits`);
     if (width <= 768) {
-      assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect(), a=document.getElementById('mobile-menu-btn').getBoundingClientRect();return r.top<=1 && r.height<=a.bottom + 72 && r.top <= a.top;})()"), true, 'Settings owns one compact header without inherited page padding');
+      assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect(), a=document.querySelector('.settings-titlebar .title').getBoundingClientRect();return r.top<=1 && r.height<=a.bottom + 72 && r.top <= a.top;})()"), true, 'Settings owns one compact header without inherited page padding');
       // Phone Settings is an inset-grouped list: 22px bordered groups, rows of at least 52px, all inside the search field's width.
       assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return r.left>=s.left-1 && r.right<=s.right+1 && p.borderTopWidth==='1px' && parseFloat(p.borderTopLeftRadius)===22 && r.height>=52;});})()`), true, 'Settings rows sit in inset groups within the search width');
       await js("document.querySelector('.settings-nav-item[data-section=notifications]').click()");
