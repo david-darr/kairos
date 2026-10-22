@@ -58,6 +58,11 @@ kairos-mascot > svg { width: 100%; height: 100%; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text { animation: aj-z 3.6s ease-in infinite; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text + text { animation-delay: 1.8s; }
 }
+/* Reduced motion: nothing moves, including transitions an app-wide rule
+   might put on the shapes (found 2026-10-22: a scrollbar-color transition). */
+@media (prefers-reduced-motion: reduce) {
+  kairos-mascot, kairos-mascot * { animation: none !important; transition: none !important; }
+}
 /* Off screen, in a hidden window, or held still by its host: no movement. */
 kairos-mascot[data-offscreen] *, :root[data-page-hidden] kairos-mascot * { animation-play-state: paused !important; }
 kairos-mascot[still] * { animation: none !important; transition: none !important; }

@@ -67,7 +67,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await waitFor("!!document.querySelector('.dashboard-mascot kairos-mascot svg')");
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await delay(400);
-  assert.equal(await js("document.getAnimations().filter(a => a.effect?.target?.closest?.('kairos-mascot') && a.playState === 'running').length"), 0);
+  const runningMascot = await js("JSON.stringify(document.getAnimations().filter(a => a.effect?.target?.closest?.('kairos-mascot') && a.playState === 'running').map(a => [a.constructor.name, a.animationName || a.transitionProperty, a.effect.target.getAttribute('class'), a.effect.target.closest('kairos-mascot').parentElement.className]))");
+  assert.equal(runningMascot, '[]');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
 
 
@@ -106,6 +107,21 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     fixtures.agentInbox.splice(fixtures.agentInbox.findIndex(item => item.id === 'mascot-q'), 1);
     await js("window.Notification = window.mascotNotification; document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
   }
+
+  // -- Phone: the mascot beside the bottom tab bar (393x852) ----------------------------
+  win.setContentSize(393, 852); await delay(400);
+  await navigate('home');
+  await waitFor("!!document.querySelector('.ms-tabbar') && !!document.querySelector('.dashboard-mascot kairos-mascot svg')");
+  assert.ok(await js("(() => { const m = document.querySelector('.dashboard-mascot').getBoundingClientRect(), b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return m.width >= 44 && m.bottom <= b.top && m.right <= innerWidth && m.left >= 0; })()"), 'Home mascot clears the tab bar');
+  // The bar's Agents badge is the needs-you signal on phone: untouched, no mascot in the bar.
+  assert.equal(await js("document.querySelectorAll('.ms-tabbar kairos-mascot, .ms-tabbar .agent-mascot').length"), 0);
+  assert.ok(await js("!!document.querySelector('.ms-tabbar-item[data-tabbar=agents] .ms-tabbar-badge')"), 'the Agents badge still shows');
+  await capture('mascot-phone-home');
+  await navigate('agents', { agentId: 'a1' });
+  await waitFor("!!document.querySelector('.agent-profile-face kairos-mascot svg') || !!document.querySelector('.side-chat-input')");
+  await delay(300);
+  await capture('mascot-phone-agent-dm');
+  win.setContentSize(1440, 900); await delay(300);
 
   // -- The website: the hero character and the states strip ----------------------------
   const app = await js('location.href');

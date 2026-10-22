@@ -12,7 +12,6 @@ import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { mountMobileChrome } from './mobileChrome.js';
-import { openTabSheet } from './mobileTabSheet.js';
 import { mountMobileDock } from './mobileDock.js';
 import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
@@ -225,18 +224,16 @@ function syncMobileMenu() {
   sidebar.inert = mobileMenuMedia.matches && !open;
   if (mobileMenuMedia.matches) sidebar.setAttribute('aria-hidden', String(!open));
   else sidebar.removeAttribute('aria-hidden');
-  document.getElementById('mobile-menu-btn').removeAttribute('aria-expanded');
-  document.getElementById('mobile-menu-btn').setAttribute('aria-label', 'Open workspace tabs');
 }
 function closeMobileMenu() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('mobile-backdrop').classList.add('hidden');
   syncMobileMenu();
 }
+// Phone navigation is the bottom tab bar (mobileTabBar.js, 2026-10-22); the
+// sidebar stays hidden and inert at phone width.
 function setupMobileMenu() {
-  const btn = document.getElementById('mobile-menu-btn');
-  mountMobileChrome(btn);
-  btn.addEventListener('click', () => openTabSheet(btn));
+  mountMobileChrome();
   mobileMenuMedia.addEventListener('change', () => closeMobileMenu(false));
   syncMobileMenu();
 }

@@ -1,28 +1,27 @@
 import { api, el } from './api.js';
 import { ICON as MARK } from './brand.js';
-import { ICONS } from './icons.js';
 import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
 import { watchKeyboard } from './mobileDock.js';
-import { openTabSheet, initTabSheet } from './mobileTabSheet.js';
+import { initMoreSheet } from './mobileTabSheet.js';
 import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
+// The New / Chats page last shown, so the tab bar's Chats returns to it.
+export const chatPage = () => selectedPage;
 export const isPhoneShell = mobileOn;
 export function phoneRoute(tab, options) {
   if (mobileOn() && ['forgeShell', 'forgeProjects', 'forgeSessions'].includes(tab) && !options.sessionId && !options.mobileTool) return { tab: 'forgeHome', options: { ...options, mobilePage: 1 } };
   if (!mobileOn() || tab !== 'chat' || options.mobileConversation || options.sessionId || options.projectId) return { tab, options };
   return { tab: 'mobileLaunch', options: { ...options, mobilePage: options.mobilePage ?? 0 } };
 }
-export function initMobileShell() { initTabSheet(); initActivity(); }
+export function initMobileShell() { initMoreSheet(); initActivity(); }
 
 export function mountMobileHome({ container, content, banner, options }) {
   if (!options.mobileLaunchSurface) return { update() {}, dispose() {} };
   const shell = el('section', { class: 'ms-shell', 'aria-label': 'Launch workspace' });
-  const avatar = button('', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
-  const settings = button('', () => go('settings'), 'ms-settings ms-glass'); settings.innerHTML = ICONS.settings; settings.setAttribute('aria-label', 'Settings');
   const switcher = el('div', { class: 'ms-switch ms-glass', role: 'tablist', 'aria-label': 'Workspace pages' });
   const newTab = button('New', () => {}, 'ms-segment'), chatsTab = button('Chats', () => {}, 'ms-segment');
   [newTab, chatsTab].forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `ms-tab-${i}`; tab.setAttribute('aria-controls', `ms-page-${i}`); });
@@ -30,7 +29,8 @@ export function mountMobileHome({ container, content, banner, options }) {
   const modelChoice = el('select', { 'aria-label': 'Model for new chat', 'data-mobile-hook': 'model-picker' }, [el('option', { value: '', text: 'Choose a model' })]);
   modelChoice.addEventListener('change', () => { selectedModelId = modelChoice.value; });
   const context = el('div', { class: 'ms-context' }, [modelChoice]);
-  const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, switcher, settings]), context]);
+  // The New / Chats switch is the page's title; navigation and Settings live in the tab bar (mobileTabBar.js).
+  const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [switcher]), context]);
   const launch = el('section', { class: 'ms-page ms-launch', id: 'ms-page-0', role: 'tabpanel', 'aria-labelledby': newTab.id });
   const history = el('section', { class: 'ms-page ms-history', id: 'ms-page-1', role: 'tabpanel', 'aria-labelledby': chatsTab.id });
   const mark = el('div', { class: 'ms-mark', 'aria-hidden': 'true' }); mark.innerHTML = MARK;
@@ -105,7 +105,6 @@ export function mountMobileHome({ container, content, banner, options }) {
     container.classList.toggle('ms-home', enabled); shell.hidden = !enabled;
     if (enabled) {
       shell.prepend(banner); banner.classList.add('ms-background');
-      avatar.textContent = document.querySelector('.sidebar-avatar')?.textContent || 'K';
       detachActivity = attachActivity(activitySlot); mountLaunch();
     } else {
       releaseLaunch(); bannerAnchor.after(banner); banner.classList.remove('ms-background'); detachActivity?.(); detachActivity = null;
@@ -139,7 +138,7 @@ export function mountMobileChat(container, actions) {
   const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to workspace');
   const heading = el('div', { class: 'ms-chat-heading' }, [el('strong', { text: title.textContent }), el('small', { text: 'All chats' })]);
   const blur = edgeBlur('top'); header.prepend(blur, back, heading); refreshActivity();
-  const extras = Object.entries({ 'Your workspace': () => openTabSheet(container.querySelector('.chat-phone-tools > button')), ...actions }).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
+  const extras = Object.entries(actions).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
   menu.append(...extras);
   let projects = [];
   const main = container.querySelector('#chat-main');
