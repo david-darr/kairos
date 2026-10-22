@@ -156,7 +156,7 @@ async function run(ctx) {
   // ---- C. Calendar: Today / Month-Week / "+", and the event sheet -------------------------
   const cdp = (method, params) => win.webContents.debugger.sendCommand(method, params);
   const press = async name => {
-    const code = { Escape: 27, Tab: 9, Enter: 13 }[name];
+    const code = { Escape: 27, Tab: 9, Enter: 13, ArrowLeft: 37, ArrowRight: 39, End: 35, Home: 36 }[name];
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
     await delay(120);
@@ -326,6 +326,58 @@ async function run(ctx) {
   // ---- G. Forge project pager, pushed tools, Changes and commit sheet ---------------------
   const forgeResult = await require('./mobile-forge-checks.cjs')(ctx);
   assertions += forgeResult.assertions;
+
+  // ---- G2. Workspace sheet: the Kairos / Forge mode switch ----------------------------------
+  const modeState = () => js(`(() => { const g = document.querySelector('.ms-tab-sheet[open] .ms-mode-switch'); if (!g) return null; const radios = [...g.querySelectorAll('[role=radio]')];
+    const caption = [...g.parentElement.querySelectorAll('.ms-mode-caption')].filter(n => n.getClientRects().length).map(n => n.textContent);
+    const tile = document.querySelector('.ms-tab-sheet[open] .ms-tab-group')?.getBoundingClientRect();
+    return { role: g.getAttribute('role'), label: g.getAttribute('aria-label'), names: radios.map(n => n.textContent.trim()), checked: radios.map(n => n.getAttribute('aria-checked')),
+      tabs: radios.map(n => n.tabIndex), described: radios.map(n => document.getElementById(n.getAttribute('aria-describedby'))?.textContent || ''), caption,
+      sizes: radios.map(n => { const r = n.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }), aboveTabs: !!tile && g.getBoundingClientRect().bottom <= tile.top,
+      thumb: (() => { const t = g.querySelector('.ms-mode-thumb').getBoundingClientRect(), on = radios.find(n => n.getAttribute('aria-checked') === 'true').getBoundingClientRect(); return Math.abs(t.left - on.left) <= 6 && Math.abs(t.right - on.right) <= 6; })(),
+      readout: !!document.querySelector('.ms-sheet-readout'), mode: document.documentElement.dataset.appMode }; })()`);
+  const openSheet = async () => { await js("[...document.querySelectorAll('#mobile-menu-btn, .ms-shell .ms-avatar')].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
+  await navigate('home'); await delay(400); await openSheet();
+  let modes = await modeState();
+  eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview'], ['true', 'false'], [0, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
+  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 1 && modes.caption[0] === modes.described[0], 'Each mode has a one-line description; the checked one is shown: ' + JSON.stringify(modes));
+  ok(modes.sizes.every(Boolean) && modes.aboveTabs && modes.thumb, 'Mode options are 44px, sit at the top of the sheet, and the thumb marks Kairos: ' + JSON.stringify(modes));
+  ok(!modes.readout, 'The temporary Safari readout is gone from the sheet');
+  eq(await small('.ms-tab-sheet[open] .ms-mode-switch button'), [], 'Mode switch has no control under 44px');
+  ok(await js("![...document.querySelectorAll('.ms-tab-sheet[open] .ms-mode-row *')].some(n => n.childElementCount === 0 && n.textContent.includes(String.fromCharCode(8212)))"), 'Mode switch copy has no em dash');
+  await shot('sheet-mode-kairos');
+  // Arrow keys move focus only; nothing switches until Space or Enter.
+  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').focus()");
+  await press('ArrowRight');
+  ok(await js("document.activeElement.dataset.mode === 'forge' && document.activeElement.tabIndex === 0 && document.querySelector('.ms-mode-switch [data-mode=kairos]').tabIndex === -1 && document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.ms-tab-sheet[open]')"), 'ArrowRight moves focus to Forge without switching');
+  await press('ArrowLeft');
+  ok(await js("document.activeElement.dataset.mode === 'kairos'"), 'ArrowLeft returns focus to Kairos');
+  await press('End');
+  // Space activates the focused option (with its text, so the browser treats it as a real key press).
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await waitFor("document.documentElement.dataset.appMode === 'forge' && !document.querySelector('.ms-tab-sheet[open]') && !!document.querySelector('.mf-dashboard')");
+  ok(await js("document.getElementById('view-content').dataset.view === 'forgeHome' && !document.querySelector('.mf-project')"), 'End then Space on Forge switches modes and lands on the Forge Home overview');
+  await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
+  await openSheet();
+  modes = await modeState();
+  eq([modes.checked, modes.tabs, modes.mode], [['false', 'true'], [-1, 0], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
+  ok(modes.caption.length === 1 && modes.caption[0] === modes.described[1] && modes.thumb && modes.sizes.every(Boolean), 'Forge description shows and the thumb sits on Forge: ' + JSON.stringify(modes));
+  await shot('sheet-mode-forge');
+  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
+  ok(await js("document.querySelector('.ms-mode-switch[data-active=kairos] [data-mode=kairos][aria-checked=true]') !== null"), 'Tapping Kairos moves the thumb before the switch');
+  await waitFor("document.documentElement.dataset.appMode === 'kairos' && !document.querySelector('.ms-tab-sheet[open]') && document.getElementById('view-content').dataset.view === 'home'");
+  await waitFor("!!document.querySelector('.dashboard-content')");
+  ok(true, 'Tapping Kairos switches back and lands on the dashboard');
+  // Reduced motion: the thumb does not slide and the switch happens at once.
+  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await openSheet();
+  ok(await js("/^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-thumb')).transitionDuration) && /^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-option')).transitionDuration)"), 'Reduced motion removes the mode thumb slide');
+  ok(await js("new Promise(r => { document.querySelector('.ms-mode-switch [data-mode=forge]').click(); setTimeout(() => r(!document.querySelector('.ms-tab-sheet[open]')), 60); })"), 'Reduced motion switches without waiting for the slide');
+  await waitFor("document.documentElement.dataset.appMode === 'forge' && !!document.querySelector('.mf-dashboard')");
+  await openSheet(); await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
+  await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.getElementById('view-content').dataset.view === 'home'");
+  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(600);
@@ -540,9 +592,9 @@ async function run(ctx) {
     const r = await js(`(() => {
       const box = n => { const b = n.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
       const avatar = [...document.querySelectorAll('#mobile-menu-btn, .ms-avatar')].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden');
-      const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title')].find(n => n.getClientRects().length);
+      const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
       const v = document.getElementById('view-content');
-      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar') && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
+      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
       return { avatar: avatar && box(avatar), title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth };
@@ -566,7 +618,7 @@ async function run(ctx) {
     ok(composer && Math.abs(composer.b - (screen - gap)) <= 1, `${name}: launch composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(composer)}`);
     const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");
     ok(frost.every(b => b <= top + 0.5), `${name}: launch frost stays within the ${top}px status bar: ${frost}`);
-    await shot('fold-' + w + 'x' + screen + '-launch');
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'launch');
     // The workspace sheet reaches the true bottom.
     await js("document.querySelector('.ms-shell .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(350);
     eq(Math.round((await rect('.ms-tab-sheet')).b), screen, `${name}: workspace sheet reaches the screen bottom`);
@@ -586,14 +638,14 @@ async function run(ctx) {
     await waitFor("!!document.querySelector('.ms-sheet[open]')"); await delay(350);
     const sheet = await rect('.ms-sheet[open]');
     ok(Math.round(sheet.b) === screen && Math.abs(sheet.t - top - nudge) <= 1, `${name}: a full bottom sheet spans from the status bar (plus the nudge) to the screen bottom: ${JSON.stringify(sheet)}`);
-    await shot('fold-' + w + 'x' + screen + '-sheet');
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'sheet');
     await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('.ms-sheet[open]')");
     // Forge: the project New page, a session's composer and the Changes dock follow the same system.
     await navigate('forgeHome', { mobilePage: 0 }); await waitFor("!!document.querySelector('.mf-project')"); await js("document.getElementById('mf-tab-0').click()"); await delay(500);
     eq(Math.round((await rect('.mf-project')).b), screen, `${name}: Forge project page fills the screen`);
     const forgeBottom = await js("(() => { const b = document.querySelector('.mf-project #mf-new .ms-launch-bottom'); const kids = [...b.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height); return { box: Math.round(b.getBoundingClientRect().bottom), last: Math.round(Math.max(...kids.map(n => n.getBoundingClientRect().bottom))), composer: Math.round(document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom) }; })()");
     ok(forgeBottom.box === screen && forgeBottom.last === screen - gap && forgeBottom.composer <= screen - gap, `${name}: Forge New composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeBottom)}`);
-    await shot('fold-' + w + 'x' + screen + '-forge-new');
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-new');
     await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(400);
     await js("document.querySelector('#mf-sessions .ms-history-main').click()");
     await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')"); await delay(500);
@@ -604,14 +656,18 @@ async function run(ctx) {
     ok(Math.round(changes.sheet.b) === screen, `${name}: Changes sheet reaches the screen bottom: ${JSON.stringify(changes)}`);
     // A dock with actions sits above the home indicator; with nothing to do there is no dock at all, never an empty pill.
     ok(changes.actions ? Math.abs(changes.dock.b - (screen - dockGap)) <= 1 : changes.dock === null, `${name}: Changes dock ${changes.actions ? 'sits ' + dockGap + 'px above the screen bottom' : 'is hidden with no actions'}: ${JSON.stringify(changes)}`);
-    await shot('fold-' + w + 'x' + screen + '-forge-changes');
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-changes');
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
     if (!nudge) continue;
     // Titles and first content on every tab, Settings and one of its pages included.
-    for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents']) {
+    for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
       await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`);
-      if (tab === 'tool-store') await shot('fold-' + w + 'x' + screen + '-tool-store');
-      if (tab === 'notes') await shot('fold-' + w + 'x' + screen + '-notes-title');
+      if (tab === 'forgeHome') {
+        ok(await js("!!document.querySelector('.mf-dashboard .forge-toolbar .mf-dashboard-new') && !document.querySelector('.mf-dashboard .ms-header .mf-dashboard-new')"), `${name}: Forge Home's New session sits on the toolbar beside Customize`);
+        await shot(`fold-${w}x${screen}-${nudge ? 'iphone' : 'other'}-forge-home`);
+      }
+      if (tab === 'tool-store') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'tool-store');
+      if (tab === 'notes') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'notes-title');
     }
     await openSettings('notes'); await titleRow(`${name}: Settings`);
     await js("document.querySelector('.settings-nav-item[data-section=\"remote\"]').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'"); await delay(400);
@@ -622,7 +678,7 @@ async function run(ctx) {
     await js("[...document.querySelectorAll('#settings-content button')].find(b => b.textContent.trim() === 'Help me set up a model').click()");
     await waitFor("!!document.querySelector('.modal-panel[role=dialog][aria-modal=true]')"); await delay(300);
     await popupClear('.modal-panel[role=dialog][aria-modal=true]', `${name}: Settings sub-sheet`, top);
-    await shot('fold-' + w + 'x' + screen + '-settings-sheet');
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'settings-sheet');
     await js("document.querySelector('.modal-panel[role=dialog][aria-modal=true] button[aria-label=Close]')?.click()"); await waitFor("!document.querySelector('.modal-panel[role=dialog][aria-modal=true]')");
     await js("document.querySelector('.settings-mobile-back').click(); document.querySelector('.settings-mobile-back')?.click()"); await waitFor("!document.querySelector('.settings-mobile-page')");
     // Chat's documents, its files and the model sheet.
@@ -631,15 +687,16 @@ async function run(ctx) {
       await js("document.querySelector('.chat-phone-tools > button').click()"); await delay(200);
       await js(`[...document.querySelectorAll('.chat-phone-tools .overflow-menu button')].find(b => b.textContent.trim() === ${JSON.stringify(item)}).click()`); await delay(700);
       await popupClear(selector, `${name}: ${item}`, top);
-      await shot('fold-' + w + 'x' + screen + '-' + item.split(' ')[0].toLowerCase());
+      await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + '' + item.split(' ')[0].toLowerCase());
       await js("document.querySelectorAll('dialog[open]').forEach(d => d.close())");
     }
     await navigate('notes'); await delay(300);
     // The workspace sheet, Home's customize sheet, Tool Store details and Forge's Projects sheet.
     await js("document.getElementById('mobile-menu-btn').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(300);
-    await popupClear('.ms-tab-sheet[open]', `${name}: workspace sheet`, top); await js("document.querySelector('.ms-tab-sheet').close()");
+    await popupClear('.ms-tab-sheet[open]', `${name}: workspace sheet`, top);
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'workspace-sheet'); await js("document.querySelector('.ms-tab-sheet').close()");
     await navigate('home'); await delay(500); await js("document.querySelector('.hm-customize').click()"); await waitFor("!!document.querySelector('.hm-sheet')"); await delay(300);
-    await popupClear('.hm-sheet-root', `${name}: Home customize sheet`, top); await shot('fold-' + w + 'x' + screen + '-home-customize');
+    await popupClear('.hm-sheet-root', `${name}: Home customize sheet`, top); await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'home-customize');
     await js("[...document.querySelectorAll('.hm-sheet button')].find(b => b.textContent.trim() === 'Done')?.click()"); await delay(300);
     await navigate('tool-store'); await delay(600); await js("document.querySelector('.ts-row-hit').click()"); await delay(500);
     await popupClear('.ts-sheet-backdrop', `${name}: Tool Store details`, top);

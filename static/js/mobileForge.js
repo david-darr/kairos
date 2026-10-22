@@ -19,7 +19,7 @@ export const wantsOverview = (options = {}) => options.mobilePage == null && !op
 export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, getState, pickProject, refresh, initialPage, overview = false }) {
   if (initialPage != null) lastPage = initialPage;
   let metaVersion = 0;
-  let shell, pager, history, sheet, detachActivity, keyboard, homes = [];
+  let shell, pager, history, sheet, detachActivity, keyboard, newSession, homes = [];
   const move = (node, target) => { const home = document.createComment('Forge desktop home'); node.before(home); homes.push([node, home]); target.append(node); };
   function projects(opener) {
     const body = el('div', { class: 'mf-projects' });
@@ -62,12 +62,13 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
   function enableOverview() {
     shell = el('section', { class: 'ms-shell mf-dashboard', 'aria-label': 'Forge overview' });
     const avatar = button(document.querySelector('.sidebar-avatar')?.textContent || 'K', () => openTabSheet(avatar), 'ms-avatar ms-glass'); avatar.setAttribute('aria-label', 'Open workspace tabs');
-    const start = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'ms-settings ms-glass mf-dashboard-new');
-    start.innerHTML = ICONS.plus; start.setAttribute('aria-label', 'New session');
-    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' }), start])]);
+    // The title takes the avatar's row on the right, like every phone tab; New session joins Customize on the toolbar.
+    newSession = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'ms-settings ms-glass mf-dashboard-new');
+    newSession.innerHTML = ICONS.plus; newSession.setAttribute('aria-label', 'New session');
+    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [avatar, el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' })])]);
     const body = el('div', { class: 'mf-dashboard-body mf-overview' });
     shell.append(header, body); page.prepend(shell);
-    move(banner, shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body);
+    move(banner, shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body); toolbar.append(newSession);
     page.classList.add('mf-home');
   }
   function enable() {
@@ -98,6 +99,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
   function disable() {
     sheet?.close(); sheet = null; detachActivity?.(); keyboard?.(); keyboard = null; pager?.dispose(); history?.dispose();
     for (const [node, home] of homes) { home.after(node); home.remove(); } homes = [];
+    newSession?.remove(); newSession = null;
     banner.classList.remove('ms-background'); shell?.remove(); shell = null; page.classList.remove('mf-home');
   }
   async function loadCounts() {

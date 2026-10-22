@@ -403,7 +403,6 @@
   .kairos-redesign .dashboard-grid > * { grid-column: 1 / -1 !important; min-width: 0; }
   .kairos-redesign .ms-tab-group { margin-bottom: 20px; }
   .kairos-redesign .ms-group-label { margin: 16px 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--rd-ink-dim); }
-  .kairos-redesign .ms-mode-row [aria-pressed=true] { font-weight: 600; color: var(--rd-focus); }
   .kairos-redesign .ms-composer textarea { display: block; margin: 0; box-sizing: border-box; line-height: 24px; padding-block: 10px; }
   .kairos-redesign .ms-composer :is(.input-icon-btn, #chat-mic, #overflow-plus-btn, .ms-forge-add, .ms-forge-mic) {
     display: inline-grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; line-height: 1; flex-shrink: 0;
@@ -626,7 +625,12 @@
 @media (max-width: 768px) {
   .kairos-redesign .mf-dashboard { height: 100%; min-height: 0; }
   .kairos-redesign .mf-dashboard .ms-header { padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
-  .kairos-redesign .mf-dashboard-title { margin: 0; min-width: 0; text-align: center; font: 500 22px/1.1 var(--rd-font-title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The title sits on the avatar's row, against the right edge, as on every phone tab ("Page title" below). */
+  .kairos-redesign .mf-dashboard .ms-header-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .kairos-redesign .mf-dashboard-title { margin: 0; min-width: 0; text-align: right; font: 500 28px/44px var(--rd-font-title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .mf-dashboard .forge-toolbar { justify-content: flex-start; gap: 8px; }
+  .kairos-redesign .mf-dashboard .forge-toolbar > .meta { margin-right: auto; }
+  .kairos-redesign .mf-dashboard .forge-toolbar .mf-dashboard-new { flex: none; }
   .kairos-redesign .mf-dashboard-body {
     flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain;
     padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) max(16px, env(safe-area-inset-left, 0px));
@@ -662,7 +666,7 @@
    content starts below that row. One rule for the shared page header and the
    two pages that draw their own (Agents' bar, Settings' title bar). Pages with
    a switch in that row (Chats, Forge New/Sessions) keep the switch as their
-   title, and Forge Home keeps its own header row. */
+   title; Forge Home's own header row follows the same placement. */
 @media (max-width: 768px) {
   .kairos-redesign #view-content > .view-header:first-child h2,
   .kairos-redesign #view-content > :first-child > .view-header:first-child h2,
@@ -691,4 +695,35 @@
   .kairos-redesign .agents-rail-scrim { z-index: 1149; }
   .kairos-redesign .agents-messenger.is-rail-open .agents-chat-rail { z-index: 1150; }
   .kairos-redesign .hm-sheet { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 16px); padding-bottom: calc(28px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
+}
+
+/* Tab sheet: the app mode switch at the top of the workspace sheet (mobileTabSheet.js).
+   A segmented radio group with a sliding thumb, like the New / Chats switch; the
+   sheet-wide reduced-motion rule turns the slide off. */
+@media (max-width: 768px) {
+  .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 0 0 24px; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch {
+    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 4px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--rd-surface-2);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-thumb {
+    position: absolute; z-index: -1; inset: 4px auto 4px 4px; width: calc(50% - 4px); box-sizing: border-box;
+    border-radius: 999px; border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+    transition: transform 260ms cubic-bezier(.22, 1, .36, 1);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=forge] .ms-mode-thumb { transform: translateX(100%); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option {
+    display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; min-width: 0; padding: 0 12px;
+    border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 15px; font-weight: 500;
+    transition: color 200ms ease;
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=true] { color: var(--rd-ink); font-weight: 600; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option svg { flex: none; width: 22px; height: 22px; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=false] svg { opacity: .6; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-name small {
+    margin-left: 2px; padding: 1px 6px; border-radius: 999px; background: var(--rd-surface-2);
+    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--rd-ink-dim);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-caption { margin: 10px 4px 0; text-align: center; font-size: 13px; line-height: 1.4; color: var(--rd-ink-dim); }
 }

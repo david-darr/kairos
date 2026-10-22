@@ -1,7 +1,8 @@
-import { button, mobileOn, haptic, go } from './mobileShared.js';
+import { button, mobileOn, haptic, go, reduced } from './mobileShared.js';
 import { attentionCount, activityItems } from './mobileActivity.js';
 import { sidebarLayout } from './layout.js';
 import { ICONS } from './icons.js';
+import { ICON as KAIROS_MARK } from './brand.js';
 
 let sheet, opener, startY;
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
@@ -74,14 +75,7 @@ export function openTabSheet(from) {
     }
     grid.append(tile);
   }
-  const modeRow = document.createElement('section'); modeRow.className = 'ms-mode-row';
-  const modeLabel = document.createElement('h3'); modeLabel.className = 'ms-group-label'; modeLabel.textContent = 'Mode'; modeRow.append(modeLabel);
-  for (const source of document.querySelectorAll('#forge-mode-switch [data-mode]')) {
-    const mode = source.dataset.mode;
-    const target = button(mode === 'forge' ? 'Forge Preview' : 'Kairos', () => { closeTabSheet(); source.click(); }, 'ms-account-row');
-    target.setAttribute('aria-pressed', String(document.documentElement.dataset.appMode === mode)); modeRow.append(target);
-  }
-  modeRow.hidden = modeRow.childElementCount === 1;
+  const modeRow = modeSwitch();
   const projects = document.createElement('section'); projects.className = 'ms-sheet-projects';
   const addProject = document.querySelector('.forge-project-section .forge-icon-button');
   if (addProject) {
@@ -110,8 +104,6 @@ export function openTabSheet(from) {
   footer.append(account, accountActions, button('Settings', () => { closeTabSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row'));
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeTabSheet(); native.click(); }, 'ms-account-row'));
-  // TEMPORARY (2026-10-21): one line of iOS Safari page state for one screenshot from David. Remove after.
-  footer.append(pageReadout());
   const { live, done } = activityItems();
   const work = document.createElement('section'); work.className = 'ms-sheet-activity'; work.setAttribute('aria-label', 'Work and updates');
   if (live.length || done.length) {
@@ -127,28 +119,67 @@ export function openTabSheet(from) {
       row.append(button(`${item.title} · ${item.status}`, () => { closeTabSheet(); item.go(); }, 'ms-sheet-activity-main')); work.append(row);
     }
   }
-  panel.append(grab, heading, groups, modeRow, projects, work, footer); sheet.replaceChildren(panel);
+  panel.append(grab, heading, modeRow, groups, projects, work, footer); sheet.replaceChildren(panel);
   sheet.setAttribute('aria-modal', 'true'); sheet.showModal();
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });
 }
 
-// TEMPORARY (2026-10-21): what Safari sees. Gate inputs, scroll state, the large viewport, and every fixed or
-// sticky element at least 80% wide within 4px of the top or 3px of the bottom, with its background colour.
-function pageReadout() {
-  const probe = document.createElement('div'); probe.style.cssText = 'position:absolute;top:0;width:1px;height:100lvh;visibility:hidden;pointer-events:none';
-  document.body.append(probe); const lvh = probe.offsetHeight; probe.remove();
-  const edges = [];
-  for (const node of document.querySelectorAll('body *')) {
-    if (node.closest('.ms-tab-sheet')) continue;
-    const s = getComputedStyle(node); if (s.position !== 'fixed' && s.position !== 'sticky') continue;
-    const r = node.getBoundingClientRect(); if (!node.getClientRects().length || r.width < innerWidth * .8 || r.height < 3) continue;
-    const top = r.top <= 4 && r.bottom > 0, bottom = r.bottom >= innerHeight - 3 && r.top < innerHeight;
-    if (top || bottom) edges.push(`${node.id ? '#' + node.id : (node.className && typeof node.className === 'string' ? '.' + node.className.split(' ')[0] : node.tagName.toLowerCase())} ${s.position}${top ? ' top' : ''}${bottom ? ' bottom' : ''} ${s.backgroundColor}`);
-  }
-  const line = document.createElement('p'); line.className = 'ms-sheet-readout';
-  line.textContent = `Safari tab ${document.documentElement.classList.contains('ms-safari-bleed') ? 'on' : 'off'} · touch-callout ${!!globalThis.CSS?.supports?.('-webkit-touch-callout', 'none')} · standalone ${navigator.standalone} · scrollY ${scrollY} · scrollHeight ${document.scrollingElement?.scrollHeight} · innerHeight ${innerHeight} · visualViewport ${Math.round(visualViewport?.height || 0)} · 100lvh ${lvh} · edges: ${edges.join('; ') || 'none'}`;
-  return line;
+// The app mode switch at the top of the sheet: one segmented radio group,
+// Kairos and Forge Preview, each with its mark and a one-line description.
+// It delegates to the sidebar's own mode buttons, so Kairos still lands on
+// the dashboard and Forge on the Forge Home overview. Arrow keys move focus
+// only (manual activation): Space or Enter switches, because switching
+// closes the sheet and changes the whole app.
+const MODES = {
+  kairos: { name: 'Kairos', mark: () => KAIROS_MARK, about: 'Your assistant, chats and everyday tabs' },
+  forge: { name: 'Forge', badge: 'Preview', mark: () => ICONS.code, about: 'Coding agents working across your projects' },
+};
+function modeSwitch() {
+  const row = document.createElement('section'); row.className = 'ms-mode-row';
+  const sources = [...document.querySelectorAll('#forge-mode-switch [data-mode]')].filter(source => MODES[source.dataset.mode]);
+  row.hidden = sources.length < 2;
+  if (row.hidden) return row;
+  const active = document.documentElement.dataset.appMode === 'forge' ? 'forge' : 'kairos';
+  const group = document.createElement('div'); group.className = 'ms-mode-switch';
+  group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', 'App mode'); group.dataset.active = active;
+  const thumb = document.createElement('span'); thumb.className = 'ms-mode-thumb'; thumb.setAttribute('aria-hidden', 'true'); group.append(thumb);
+  const captions = [];
+  let switching = false;
+  const radios = sources.map(source => {
+    const mode = source.dataset.mode, info = MODES[mode];
+    const caption = document.createElement('p'); caption.className = 'ms-mode-caption'; caption.id = `ms-mode-about-${mode}`;
+    caption.textContent = info.about; caption.hidden = mode !== active; captions.push(caption);
+    const radio = button('', () => {
+      if (switching) return;
+      switching = true; haptic();
+      radios.forEach(other => { other.setAttribute('aria-checked', String(other === radio)); other.tabIndex = other === radio ? 0 : -1; });
+      captions.forEach(item => { item.hidden = item !== caption; });
+      group.dataset.active = mode;
+      // The thumb slides across before the app changes; with reduced motion it switches at once.
+      setTimeout(() => { closeTabSheet(); source.click(); }, reduced.matches ? 0 : 220);
+    }, 'ms-mode-option');
+    radio.setAttribute('role', 'radio'); radio.dataset.mode = mode;
+    radio.setAttribute('aria-checked', String(mode === active)); radio.tabIndex = mode === active ? 0 : -1;
+    radio.setAttribute('aria-describedby', caption.id);
+    radio.innerHTML = info.mark();
+    radio.firstElementChild?.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span'); name.className = 'ms-mode-name'; name.textContent = info.name; radio.append(name);
+    if (info.badge) { const badge = document.createElement('small'); badge.textContent = info.badge; name.append(' ', badge); }
+    group.append(radio);
+    return radio;
+  });
+  group.addEventListener('keydown', event => {
+    const keys = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
+    const at = radios.indexOf(document.activeElement);
+    if (at < 0 || !(event.key in keys || event.key === 'Home' || event.key === 'End')) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? radios.length - 1 : (at + keys[event.key] + radios.length) % radios.length;
+    radios.forEach((radio, i) => { radio.tabIndex = i === next ? 0 : -1; });
+    radios[next].focus();
+  });
+  row.append(group, ...captions);
+  return row;
 }
 
 export function initTabSheet() {
