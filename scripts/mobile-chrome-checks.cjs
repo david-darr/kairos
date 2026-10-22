@@ -17,7 +17,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     assert.equal(await js("document.querySelector('.ms-global-frost').getBoundingClientRect().top === 0 && getComputedStyle(document.querySelector('.ms-global-frost i')).backgroundColor === 'rgba(0, 0, 0, 0)'"), true, name + ' untinted frost begins at y=0');
     for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'agents']) {
       await navigate(tab); await delay(300);
-      await visibleBelow('#mobile-menu-btn', top + 5, tab + ' avatar clears status area');
+      await visibleBelow('.ms-tabbar', top + 5, tab + ' tab bar sits on screen, clear of the status area');
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
@@ -26,7 +26,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await js("document.querySelector('.library-document-card').click()");
     await waitFor("!!document.querySelector('.library-editor')");
     await visibleBelow('.library-editor .view-header', top, name + ' document controls clear status area');
-    assert.equal(await js("document.querySelector('.library-editor .view-header > .card-row').getBoundingClientRect().top >= document.getElementById('mobile-menu-btn').getBoundingClientRect().bottom"), true, 'Document actions clear menu');
+    await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
+    assert.equal(await js("!document.getElementById('mobile-menu-btn') && document.querySelector('.ms-tabbar').inert"), true, 'The document editor is a pushed page: no avatar and no tab bar');
     await capture(name + '-document-safe-area');
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.getElementById('chat-messages')");
