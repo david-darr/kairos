@@ -169,8 +169,33 @@ const hidden = new Set();
 function applyHidden() {
   let node = document.getElementById('vp-diag-hide');
   if (!node) { node = document.createElement('style'); node.id = 'vp-diag-hide'; document.head.append(node); }
-  node.textContent = LAYERS.filter(l => hidden.has(l.name)).map(l => l.css).join('\n');
+  node.textContent = [...LAYERS.filter(l => hidden.has(l.name)).map(l => l.css), ...LEVERS.map(l => l.states[levers[l.name]].css)].join('\n');
+  for (const l of LEVERS) l.states[levers[l.name]].after?.();
 }
+// iOS edge levers (2026-10-21): what iOS / Safari 26 may sample to paint the
+// status bar and toolbar areas. Each cycles through its states; the first is
+// the app as shipped. Root = html and body background; strips = fixed,
+// full-width, pointer-events:none bands at the top and bottom edges (Safari
+// samples fixed elements there); document scroll = the page scrolls 1px so
+// Safari can composite page pixels under its bars.
+const STRIP = 'html::before, html::after { content: ""; position: fixed; left: 0; right: 0; height: max(6px, env(safe-area-inset-top, 0px)); pointer-events: none; z-index: 2147482000; display: block !important; backdrop-filter: none; -webkit-backdrop-filter: none; mask-image: none; -webkit-mask-image: none; } html::before { top: 0; bottom: auto; } html::after { top: auto; bottom: 0; height: max(6px, env(safe-area-inset-bottom, 0px)); }';
+const LEVERS = [
+  { name: 'Root background', what: 'html and body background colour', states: {
+    'as shipped': { css: '' },
+    transparent: { css: 'html, body { background: transparent !important; }' },
+    'ink (contrast)': { css: 'html, body { background: var(--text) !important; }' } } },
+  { name: 'Edge strips', what: 'fixed full-width bands at the top and bottom edges', states: {
+    off: { css: '' },
+    transparent: { css: STRIP + ' html::before, html::after { background: transparent; }' },
+    'page colour': { css: STRIP + ' html::before, html::after { background: var(--bg); }' },
+    'ink (contrast)': { css: STRIP + ' html::before, html::after { background: var(--text); }' } } },
+  { name: 'color-scheme', what: 'the root color-scheme', states: {
+    'as shipped': { css: '' }, light: { css: ':root { color-scheme: light !important; }' }, dark: { css: ':root { color-scheme: dark !important; }' } } },
+  { name: 'Document scroll', what: 'html scrolls by 1px instead of being locked', states: {
+    off: { css: '', after: () => { if (scrollY) scrollTo(0, 0); } },
+    on: { css: 'html { overflow: hidden auto !important; } body { overflow: visible !important; } body::after { content: ""; display: block; height: 2px; }', after: () => requestAnimationFrame(() => scrollTo(0, 1)) } } },
+];
+const levers = Object.fromEntries(LEVERS.map(l => [l.name, Object.keys(l.states)[0]]));
 // theme-color: present (the app's value), removed, or transparent. iOS may read it only at launch.
 const THEMES = ['present', 'removed', 'transparent'];
 const themeOriginal = () => document.documentElement.dataset.themeColor || document.querySelector('meta[name=theme-color]')?.content || '';
@@ -187,6 +212,8 @@ function setTheme(state) {
 }
 function switchReport() {
   return [
+    ...LEVERS.map(l => `${l.name}: ${levers[l.name]} (${l.what})`),
+    `html::before ${getComputedStyle(document.documentElement, '::before').display}  html::after ${getComputedStyle(document.documentElement, '::after').display}  scrollY ${scrollY}  color-scheme ${getComputedStyle(document.documentElement).colorScheme}  html bg ${getComputedStyle(document.documentElement).backgroundColor}`,
     `theme-color meta: ${themeState()} (${document.querySelector('meta[name=theme-color]')?.content || 'none'}; app value ${themeOriginal()})`,
     ...LAYERS.map(l => {
       const nodes = [...document.querySelectorAll(l.sel)].filter(n => !n.closest('#' + ID));
@@ -248,6 +275,12 @@ export function openViewportDiagnostics() {
   const theme = make('', () => { setTheme(THEMES[(THEMES.indexOf(themeState()) + 1) % THEMES.length]); themeLabel(); render(); });
   const themeLabel = () => { theme.textContent = `theme-color: ${themeState()} (tap to change)`; theme.setAttribute('aria-pressed', String(themeState() !== 'present')); };
   themeLabel(); toggles.append(theme);
+  for (const lever of LEVERS) {
+    const names = Object.keys(lever.states);
+    const b = make('', () => { levers[lever.name] = names[(names.indexOf(levers[lever.name]) + 1) % names.length]; relabel(); applyHidden(); render(); });
+    const relabel = () => { b.textContent = `${lever.name}: ${levers[lever.name]}`; b.setAttribute('aria-pressed', String(levers[lever.name] !== names[0])); b.title = lever.what; };
+    relabel(); toggles.append(b);
+  }
   body = document.createElement('div');
   overlay.append(style, bar, toggles, body);
   overlay.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeViewportDiagnostics(); } });

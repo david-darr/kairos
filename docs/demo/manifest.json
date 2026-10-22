@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "ba44229bfd9789843d97894cdc34cd5a0cb7f318d619033fee0b5b659799351c",
+  "app.js": "6f85f0b4ea3706cad147bb57938e1aa379f8da17b86723ce509f206949aaf311",
   "fixtures.js": "8db94db9f27b7bcf54ba8dd654932c6aaf557f6d07257f303b7153804e72e2b4",
   "index.html": "a8b53b2f2feb9ddf2b8a6ad50564534e76da301bdcf9058cdf14d17603c4d1bc",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -685,7 +685,7 @@
   "static/js/vendor/pdf.mjs": "91e29f812c593904e8d48d022db5ddf93e3443575d4765ac9bfbb42494cfbd8d",
   "static/js/vendor/pdf.worker.mjs": "df3bf6bf6b8b8dac8a4042d8c4ecf1cf21e1d197e0fe231c192122409eba656b",
   "static/js/vendor/xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
-  "static/js/viewportDiagnostics.js": "e38f3ab4f60f347a419b9b6b049d6013c3a623e1e965d9339777e9332eb7062c",
+  "static/js/viewportDiagnostics.js": "87429e4d07dae781d9199c7cce436e8c654ade819a173a4e1bee4a60c68c9d58",
   "static/js/views/agents.js": "bbf27d37d88f5b3f8f6962ad548343d2240b4f69e094445333337354fb9a978c",
   "static/js/views/appearancePanel.js": "e433fd7fb8c98947e366480465235fd7ca5abfdd56c4709d74f570ef11443fc2",
   "static/js/views/calendar.js": "188cb76b15ab0e81924dbc5fbac3e66231b978c87f9c3f472896c8b630184463",
