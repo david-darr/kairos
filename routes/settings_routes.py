@@ -70,6 +70,7 @@ async def get_settings(user: str = Depends(require_admin)) -> dict:
         "disabled_tools": raw["disabled_tools"],
         "auto_compact": raw["auto_compact"],
         "computer_use": raw["computer_use"],
+        "computer_steps_days": raw.get("computer_steps_days", 7),
         "helper_endpoint_id": raw["helper_endpoint_id"],
         "helper_endpoint": _helper_summary(),
     }
@@ -97,6 +98,22 @@ async def set_computer_use(body: SetComputerUseRequest, user: str = Depends(requ
     value = body.model_dump()
     settings_store.update_settings(computer_use=value)
     return {"ok": True, "computer_use": value}
+
+
+class SetComputerStepsRequest(BaseModel):
+    days: int
+
+
+@router.post("/computer-steps")
+async def set_computer_steps(body: SetComputerStepsRequest, user: str = Depends(require_admin)) -> dict:
+    """Settings > Computer use: how long models' computer steps are kept
+    (core/computer_trajectory.py); 0 keeps none and deletes what is kept."""
+    if body.days not in (0, 1, 7, 30):
+        raise HTTPException(422, "keep computer steps for 0, 1, 7 or 30 days")
+    settings_store.update_settings(computer_steps_days=body.days)
+    from core import computer_trajectory
+    computer_trajectory.sweep()
+    return {"ok": True, "computer_steps_days": body.days}
 
 
 @router.post("/auto-compact")

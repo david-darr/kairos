@@ -7,10 +7,10 @@ import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from core import computer, computer_image, sandbox, session_manager_store as store
+from core import computer, computer_image, computer_trajectory, sandbox, session_manager_store as store
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_admin, require_user
 from core.session_manager_store import get_session_header
@@ -62,6 +62,68 @@ async def status(user: str = Depends(require_admin)) -> dict:
             "image_ready": await computer_image.image_ready() if available else False,
             "desktop_image_ready": await computer_image.image_ready(desktop=True) if available else False,
             "profiles": profiles}
+
+
+# A run's computer steps (core/computer_trajectory.py): the same access as the
+# computer itself, checked against the owner the run was kept for.
+def _trajectory(run_id: str, user: str) -> dict:
+    try:
+        meta = computer_trajectory.meta(run_id)
+    except ValueError:
+        meta = None
+    if meta is None:
+        raise HTTPException(404, "no computer steps were kept for this run")
+    _access(meta["owner"], user)
+    return meta
+
+
+@router.get("/steps/{run_id}")
+async def trajectory_steps(run_id: str, user: str = Depends(require_user)) -> JSONResponse:
+    meta = _trajectory(run_id, user)
+    result = {**meta, "steps": computer_trajectory.steps(run_id), "days": computer_trajectory.retention_days()}
+    if meta["owner"].startswith("agent:"):
+        agent = agent_service.get(meta["owner"][6:])
+        result.update(agent_id=agent and agent["id"], agent_name=agent and agent["name"])
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/steps/{run_id}/{number}/{name}")
+async def trajectory_image(run_id: str, number: int, name: str, user: str = Depends(require_user)):
+    _trajectory(run_id, user)
+    path = computer_trajectory.image(run_id, number, name)
+    if path is None:
+        raise HTTPException(404, "this step's image was not kept")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/steps/{run_id}/export")
+async def trajectory_export(run_id: str, user: str = Depends(require_user)) -> Response:
+    _trajectory(run_id, user)
+    return Response(computer_trajectory.export(run_id), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="computer-steps-{run_id}.zip"', "Cache-Control": "no-store"})
+
+
+@router.get("/steps/{run_id}/skill")
+async def trajectory_skill(run_id: str, user: str = Depends(require_user)) -> dict:
+    """Make a skill from this run: its successful actions as recorded steps,
+    for the same review and curator scan as a recorded demonstration."""
+    meta = _trajectory(run_id, user)
+    steps = computer_trajectory.skill_steps(run_id)
+    if not steps:
+        raise HTTPException(409, "this run has no successful computer actions to make a skill from")
+    result = {"steps": steps, "owner": meta["owner"]}
+    if meta["owner"].startswith("agent:"):
+        agent = agent_service.get(meta["owner"][6:])
+        if agent:
+            result.update(agent_id=agent["id"], agent_name=agent["name"])
+    return result
+
+
+@router.get("/{owner}/steps")
+async def owner_trajectories(owner: str, user: str = Depends(require_user)) -> list[dict]:
+    _access(owner, user)
+    computer_trajectory.sweep_soon()
+    return computer_trajectory.runs_for(owner)[:20]
 
 
 @router.get("/{owner}/frames")

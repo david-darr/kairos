@@ -1,0 +1,12 @@
+{
+  "name": "multi_page",
+  "title": "Navigate a multi-page flow",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/step1.html. Choose {shipping} shipping, go on, enter the postcode {postcode}, go on, and press Finish on the review page.",
+  "variants": [
+    {"shipping": "Express", "postcode": "AB1 2CD"},
+    {"shipping": "Standard", "postcode": "ZX9 8YW"}
+  ],
+  "pages": {"/step1.html": "step1.html", "/step2.html": "step2.html", "/step3.html": "step3.html"}
+}

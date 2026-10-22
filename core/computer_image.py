@@ -58,6 +58,9 @@ def desktop_dockerfile() -> str:
         "    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\\n"
         "    openbox xdotool pcmanfm mousepad atril ristretto \\\n"
         "    libreoffice-writer libreoffice-calc libreoffice-impress fonts-dejavu-core \\\n"
+        # The accessibility bus and its Python bindings (desktop read by ref),
+        # and LibreOffice's GTK3 front end, which is what publishes to it.
+        "    at-spi2-core dbus-x11 python3-gi gir1.2-atspi-2.0 libatk-bridge2.0-0t64 libreoffice-gtk3 \\\n"
         "    && rm -rf /var/lib/apt/lists/*\n"
         "RUN printf '%s\\n' \\\n"
         + "".join(f"    '{requirement}' \\\n" for requirement in requirements)

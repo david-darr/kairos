@@ -1,0 +1,11 @@
+<!doctype html>
+<title>Delivery: 2 of 3</title>
+<h1>Delivery address</h1>
+<p><label>Postcode <input id="code" aria-label="Postcode"></label></p>
+<p><button type="button" id="next">Next</button></p>
+<script>
+  document.getElementById('next').onclick = () => {
+    const ship = new URLSearchParams(location.search).get('ship') || '';
+    location.href = 'step3.html?ship=' + encodeURIComponent(ship) + '&code=' + encodeURIComponent(document.getElementById('code').value.trim());
+  };
+</script>

@@ -1,0 +1,12 @@
+{
+  "name": "editor_save",
+  "title": "Write and save a text file (desktop)",
+  "kind": "task",
+  "desktop": true,
+  "instruction": "On the agent desktop, open the text editor, write the line \"{text}\", and save it as {path}.",
+  "variants": [
+    {"text": "Kairos benchmark note", "path": "/profile/Documents/bench-note.txt"},
+    {"text": "Tides follow the moon", "path": "/profile/Documents/tides.txt"}
+  ],
+  "pages": {}
+}

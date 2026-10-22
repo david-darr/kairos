@@ -1,0 +1,9 @@
+{
+  "name": "search_article",
+  "title": "Search, open a result, act on it",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/help.html, search for \"{term}\", open the article about it, and press Mark as read.",
+  "variants": [{"term": "tides", "title": "How tides work"}, {"term": "compass", "title": "Using a compass"}],
+  "pages": {"/help.html": "help.html", "/article.html": "article.html"}
+}

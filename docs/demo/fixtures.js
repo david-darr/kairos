@@ -215,6 +215,10 @@
 
   // Binary and HTML responses are shared by the smoke server and demo shim too.
   function media(url) {
+    // A run's kept computer step images (cua upgrade 5.4): the fixture frame.
+    if (/^\/api\/computer\/steps\/[^/]+\/\d+\/(before|after|marker)\.jpg$/.test(url.pathname) && state.computerImage) {
+      return { type: 'image/jpeg', base64: state.computerImage };
+    }
     if (url.pathname === '/api/chat/artifacts/content') {
       const artifact = artifactFor(url);
       return artifact ? { type: artifact.type || 'text/plain', body: artifact.body || '', base64: artifact.base64 } : null;
@@ -1089,6 +1093,25 @@
       return (state.stoppedOwners || []).includes(owner) ? { owner, url: 'https://example.com/', title: 'Example Domain',
         closed_at: now, taken_over: false, image_url: '/static/img/computer-fixture.jpg' } : null;
     }
+    // Steps (cua upgrade 5.4): one run's kept computer actions.
+    if (route === '/api/computer/steps/r-computer') return { run_id: 'r-computer', owner: 'chat:s1', days: 7, started: now - 30, updated: now - 18,
+      steps: [
+        { step: 1, action: 'open', arguments: { url: 'https://example.com/' }, element: null, point: null, ok: true, code: null,
+          result: 'URL: https://example.com/ | Title: Example Domain | open completed.', url: 'https://example.com/', time: now - 25,
+          images: ['before.jpg', 'after.jpg'], evidence: { kept: ['action.json', 'before.jpg', 'after.jpg'], not_kept: {} } },
+        { step: 2, action: 'type', arguments: { ref: 'r1:2', text: '(private field)' }, element: { label: 'Password', tag: 'input' },
+          point: null, ok: false, code: 'private_field', time: now - 22, url: null, images: [],
+          result: 'Not typed: passwords, codes and payment details are entered by the person. Ask them to take over the computer.',
+          evidence: { kept: ['action.json'], not_kept: { 'before.jpg': 'private field', 'after.jpg': 'private field' } } },
+        { step: 3, action: 'click', arguments: { ref: 'r1:1' }, element: { label: 'Learn more', tag: 'a' }, point: { x: 640, y: 420 },
+          ok: true, code: null, result: 'URL: https://example.com/ | Title: Example Domain | click completed.', url: 'https://example.com/',
+          time: now - 18, images: ['before.jpg', 'after.jpg', 'marker.jpg'],
+          evidence: { kept: ['action.json', 'before.jpg', 'after.jpg', 'marker.jpg'], not_kept: {} } },
+      ] };
+    if (route === '/api/computer/steps/r-computer/skill') return { owner: 'chat:s1', steps: [
+      { kind: 'open', url: 'https://example.com/' }, { kind: 'click', url: 'https://example.com/', element: { label: 'Learn more', tag: 'a' } }] };
+    if (/^\/api\/computer\/[^/]+\/steps$/.test(route)) return [{ run_id: 'r-computer', owner: decodeURIComponent(route.split('/')[3]),
+      steps: 3, started: now - 30, updated: now - 18 }];
     if (/^\/api\/computer\/[^/]+\/history$/.test(route)) return { steps: url.searchParams.get('run_id') === 'r-computer' ? [
       { at: now - 25, kind: 'tool_started', name: 'computer', detail: JSON.stringify({ action: 'open', url: 'https://example.com/' }) },
       { at: now - 20, kind: 'tool_finished', name: 'computer', ok: true, detail: JSON.stringify({ action: 'open', url: 'https://example.com/',

@@ -1,0 +1,9 @@
+{
+  "name": "settings_toggles",
+  "title": "Set three switches and apply",
+  "kind": "task",
+  "desktop": false,
+  "instruction": "Open {origin}/settings.html. Turn email alerts {email}, dark mode {dark} and the weekly digest {digest}, then press Apply settings.",
+  "variants": [{"email": "off", "dark": "on", "digest": "on"}, {"email": "on", "dark": "on", "digest": "off"}],
+  "pages": {"/settings.html": "settings.html"}
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<title>Canvas</title>
+<style>html, body { margin: 0; overflow: hidden; } #board { display: block; } #result { position: fixed; left: 8px; top: 8px; font: 14px sans-serif; }</style>
+<canvas id="board" width="1280" height="800"></canvas>
+<div id="result"></div>
+<script>
+  // Each page name has its own place for the circle; nothing on the page says where.
+  const places = { '/canvas-1.html': [913, 517], '/canvas-2.html': [210, 655], '/canvas-3.html': [1180, 120] };
+  const [x, y] = places[location.pathname] || [640, 400];
+  const board = document.getElementById('board');
+  const draw = board.getContext('2d');
+  draw.fillStyle = '#f4f1ea'; draw.fillRect(0, 0, 1280, 800);
+  draw.fillStyle = '#4a6fa5'; draw.fillRect(x - 300 < 0 ? x + 120 : x - 300, y - 30 > 700 ? 640 : y + 60, 90, 60);
+  draw.beginPath(); draw.arc(x, y, 22, 0, Math.PI * 2); draw.fillStyle = '#d0302a'; draw.fill();
+  board.addEventListener('click', event => {
+    const hit = Math.hypot(event.clientX - x, event.clientY - y) <= 24;
+    document.getElementById('result').textContent = hit ? 'Hit the circle' : `Missed at ${event.clientX},${event.clientY}`;
+  });
+</script>

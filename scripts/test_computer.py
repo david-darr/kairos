@@ -1355,6 +1355,505 @@ class RenderingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rounds[-1]["role"], "user")
 
 
+class SteppedProc(FakeProc):
+    """A fake driver whose inspected element, URL and errors change per call."""
+
+    def __init__(self):
+        super().__init__()
+        self.elements, self.errors, self.urls = [], {}, {}
+
+    def reply(self, cmd):
+        action = cmd["action"]
+        if action in self.errors:
+            return {"id": cmd["id"], "error": self.errors.pop(action)}
+        if action == "inspect" and self.elements:
+            self.element = self.elements.pop(0)
+        if action in self.urls:
+            self.next_url = self.urls.pop(action)
+        if action == "verify":
+            checks = [{"check": key, "expected": value, "met": key != "text_absent", "found": "seen"}
+                      for key, value in cmd["expect"].items()]
+            return {"id": cmd["id"], "url": self.url, "title": "Example", "checks": checks}
+        result = super().reply(cmd)
+        if action == "click" and cmd.get("ref"):
+            result["point"] = {"x": 40, "y": 50}
+        if action == "read":
+            result.update(snapshot="r2", total_elements=1)
+            if cmd.get("since"):
+                result.pop("elements"); result.pop("text")
+                result["diff"] = {"since": "r1", "added": [{"ref": "r2:1", "tag": "a", "label": "New"}], "changed": [],
+                                  "removed": [], "text_added": ["Saved"], "text_removed": [], "counts": [1, 0, 0, 1, 0]}
+        return result
+
+
+class ContractTests(unittest.IsolatedAsyncioTestCase):
+    """The action contract (vault: Agents - Computer-Use Upgrade from cua, 5.2)
+    against the real guards in core/computer.py, with a fake driver."""
+
+    async def asyncSetUp(self):
+        self.procs = []
+
+        async def factory(*args, **kwargs):
+            proc = SteppedProc()
+            self.procs.append(proc)
+            return proc
+
+        self.manager = computer.ComputerManager(factory)
+        self.patches = [patch("core.computer.sandbox.available", new=AsyncMock(return_value=(True, ""))),
+                        patch("core.computer.sandbox_egress.ensure", new=AsyncMock()),
+                        patch("core.computer.computer_image.ensure_image", new=AsyncMock(return_value="kairos-computer:fake"))]
+        self.decide = patch("core.computer.permissions.decide", new=AsyncMock(return_value=permissions.Decision("allow")))
+        for item in self.patches: item.start()
+        self.ask = self.decide.start()
+        self.ctx = tool_registry.ToolContext(session_id="s1", is_admin=True, turn_taint=TurnTaint())
+        await self.manager.act("chat:s1", "open", {"url": "https://example.com/"}, self.ctx)
+        self.proc = self.procs[0]
+
+    async def asyncTearDown(self):
+        await self.manager.close_all()
+        for item in self.patches: item.stop()
+        self.decide.stop()
+
+    def ran(self, *actions):
+        return [c for c in self.proc.calls if c["action"] in actions]
+
+    async def steps(self, steps):
+        return await self.manager.act("chat:s1", "steps", {"steps": steps}, self.ctx)
+
+    async def test_every_step_is_checked_before_the_first_runs(self):
+        count = len(self.proc.calls)
+        cases = ([{"action": "type", "ref": "r1:1", "text": "x"}] * 17,
+                 [{"action": "type", "ref": "r1:1", "text": "x"}, {"action": "open", "url": "https://other.com/"}],
+                 [{"action": "type", "ref": "r1:1", "text": "x"}, {"action": "click"}],
+                 [{"action": "type", "ref": "r1:1", "text": "x"}, {"action": "steps", "steps": []}],
+                 [{"action": "type", "ref": "r1:1", "text": "x"}, {"action": "key", "key": "Enter", "url": "x"}],
+                 [{"action": "type", "ref": "r1:1", "text": 5}], [{"action": "scroll", "dy": "down"}], [], "click")
+        for steps in cases:
+            result = await self.steps(steps)
+            self.assertTrue(result["text"].startswith("Not run:"), result["text"])
+            self.assertIn("Nothing ran.", result["text"])
+            self.assertEqual(result["code"], "bad_arguments")
+        self.assertEqual(len(self.proc.calls), count, "an invalid batch sends nothing to the computer")
+
+    async def test_a_guard_in_step_two_stops_the_batch_and_step_one_stays_done(self):
+        typed = {"tag": "input", "label": "Name"}
+        cases = (
+            ("person_only", {"tag": "button", "label": "Place order", "signals": ["Place order"]}, None, None),
+            ("private_field", {"tag": "input", "type": "password", "label": "Password"}, None, None),
+            ("opaque_frame", {"opaque_frame": True, "tag": "iframe"}, None, None),
+            ("not_approved", {"tag": "button", "label": "Delete item", "signals": ["Delete item"]}, "deny", None),
+            ("stale_ref", None, None, "[stale_ref] That ref is from an older read (r1). Read again."),
+            ("site_not_approved", {"tag": "a", "label": "Elsewhere"}, "deny-host", None),
+        )
+        for code, second, decision, error in cases:
+            with self.subTest(code):
+                self.proc.calls.clear()
+                self.proc.url = "https://example.com/"
+                self.proc.elements = [typed] + ([second] if second else [])
+                original = self.proc.reply
+                if error:  # the second inspect is refused by the driver
+                    seen = {"n": 0}
+                    def reply(cmd, original=original, seen=seen):
+                        if cmd["action"] == "inspect":
+                            seen["n"] += 1
+                            if seen["n"] == 2:
+                                return {"id": cmd["id"], "error": error}
+                        return original(cmd)
+                    self.proc.reply = reply
+                if decision == "deny":
+                    self.ask.return_value = permissions.Decision("deny", "No")
+                if decision == "deny-host":
+                    self.proc.urls["click"] = "https://other.com/"
+                    self.ask.return_value = permissions.Decision("deny", "No")
+                result = await self.steps([{"action": "type", "ref": "r1:1", "text": "Ada"},
+                                           {"action": "type" if code == "private_field" else "click", "ref": "r1:2",
+                                            "text": "secret"},
+                                           {"action": "type", "ref": "r1:3", "text": "never"}])
+                self.ask.return_value = permissions.Decision("allow")
+                if error:
+                    self.proc.reply = original
+                self.assertEqual(result["code"], code, result["text"])
+                self.assertTrue(result["text"].startswith("Stopped: at step 2 of 3. Steps: 1 of 3 ran."), result["text"])
+                self.assertIn("Step 1 already ran and was not undone.", result["text"])
+                self.assertIn(f"(code: {code})", result["text"])
+                typed_calls = [c for c in self.ran("type")]
+                self.assertEqual([c["text"] for c in typed_calls], ["Ada"], "only step 1 typed")
+                self.assertNotIn("never", json.dumps(self.proc.calls))
+                if code not in ("site_not_approved",):
+                    self.assertFalse(self.ran("click"), "the guarded control was not pressed")
+
+    async def test_a_new_host_ends_the_batch_after_that_step(self):
+        self.proc.urls["click"] = "https://other.com/"
+        result = await self.steps([{"action": "click", "ref": "r1:1"}, {"action": "type", "ref": "r1:2", "text": "no"}])
+        self.assertNotIn("code", result)
+        self.assertTrue(result["text"].startswith("URL: https://other.com/ | Steps: 1 of 2 ran."), result["text"])
+        self.assertIn("the page moved to other.com", result["text"])
+        self.assertFalse(self.ran("type"))
+
+    async def test_a_batch_ends_with_one_observation(self):
+        result = await self.steps([{"action": "type", "ref": "r1:1", "text": "Ada"}, {"action": "key", "key": "Tab"},
+                                   {"action": "scroll", "dy": 200}, {"action": "wait", "seconds": 0}])
+        self.assertTrue(result["text"].startswith("URL: https://example.com/ | Steps: 4 of 4 ran."))
+        self.assertEqual(len(result["images"]), 1)
+        reads = self.ran("read")
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0]["since"], "latest")
+        self.assertIn("Changes since r1 (now r2): 1 added", result["text"])
+        self.assertIn("UNTRUSTED", result["text"])
+
+    async def test_read_arguments_and_verify(self):
+        result = await self.manager.act("chat:s1", "read", {"query": "email", "max_elements": 5}, self.ctx)
+        self.assertEqual({k: self.ran("read")[-1][k] for k in ("query", "max_elements")}, {"query": "email", "max_elements": 5})
+        self.assertIn("Snapshot r2.", result["text"])
+        for bad in ({"since": "yesterday"}, {"max_elements": 0}, {"max_elements": 500}, {"query": ["x"]}):
+            refused = await self.manager.act("chat:s1", "read", bad, self.ctx)
+            self.assertEqual(refused["code"], "bad_arguments")
+        met = await self.manager.act("chat:s1", "verify", {"expect": {"url_contains": "example", "text_present": "Hi"}}, self.ctx)
+        self.assertTrue(met["met"])
+        self.assertIn("Verify: met.", met["text"])
+        self.assertEqual(met["images"], [])
+        missed = await self.manager.act("chat:s1", "verify", {"expect": {"text_absent": "Error"}}, self.ctx)
+        self.assertFalse(missed["met"])
+        self.assertIn('text_absent "Error": not met (seen)', missed["text"])
+        for bad in (None, {}, {"colour": "red"}, {"element": {"name": "x"}}, {"text_present": ""}):
+            refused = await self.manager.act("chat:s1", "verify", {"expect": bad}, self.ctx)
+            self.assertEqual(refused["code"], "bad_arguments", bad)
+
+    async def test_refusal_codes_and_the_registry_shows_them(self):
+        self.proc.elements = [{"tag": "button", "label": "Buy now", "signals": ["Buy now"]}]
+        stopped = await self.manager.act("chat:s1", "click", {"ref": "r1:1"}, self.ctx)
+        self.assertEqual(stopped["code"], "person_only")
+        self.assertTrue(stopped["text"].startswith("Stopped before pressing 'Buy now'"))
+        for text, code in (("Not opened: No URL: x", "site_not_approved"), ("Not run: the agent desktop is off.", "needs_desktop"),
+                           (computer._opaque_frame_message(), "opaque_frame"), ("URL: x | click completed.", None),
+                           ("Not run: the person has control of the computer.", "person_in_control")):
+            self.assertEqual(computer.refusal_code(text), code, text)
+        with patch("core.settings.get_setting", return_value={"enabled": True}), \
+             patch("core.computer.manager.act", new=AsyncMock(side_effect=computer.ComputerRefusal("That ref is old.", "stale_ref"))):
+            text = await tool_registry.call("computer", {"action": "click", "ref": "r1:1"}, self.ctx, "openai")
+        self.assertEqual(text, "Not run: That ref is old. (code: stale_ref)")
+        with patch("core.settings.get_setting", return_value={"enabled": True}), \
+             patch("core.computer.manager.act", new=AsyncMock(return_value={"text": "Stopped before pressing 'Pay'", "images": [], "code": "person_only"})), \
+             patch("core.permissions.record_tool_use") as audit:
+            result = await tool_registry.call("computer", {"action": "click", "ref": "r1:1"}, self.ctx, "openai")
+        self.assertTrue(result.text.endswith("\n(code: person_only)"))
+        self.assertEqual(audit.call_args.args[0], "tool refused")
+
+    async def test_a_coded_driver_error_becomes_a_refusal_with_its_code(self):
+        self.proc.errors["inspect"] = "[stale_ref] That ref is from an older read (r6). Use r7:12 or read again."
+        with self.assertRaises(computer.ComputerRefusal) as raised:
+            await self.manager.act("chat:s1", "click", {"ref": "r6:12"}, self.ctx)
+        self.assertEqual(raised.exception.code, "stale_ref")
+        self.assertEqual(str(raised.exception), "That ref is from an older read (r6). Use r7:12 or read again.")
+        self.assertFalse(self.ran("click"))
+
+
+class DesktopContractTests(unittest.IsolatedAsyncioTestCase):
+    """Desktop refs (cua upgrade 5.3) through the same guards, fake driver."""
+
+    async def asyncSetUp(self):
+        self.desktop = patch("core.computer._desktop_enabled", return_value=True)
+        self.desktop.start()
+        await ContractTests.asyncSetUp(self)
+        self.control = {}
+        self.focused = {"element": {}, "defaults": []}
+        original = self.proc.reply
+
+        def reply(cmd):
+            if cmd["action"] == "desktop_inspect":
+                return {"id": cmd["id"], "element": self.control, "note": ""}
+            if cmd["action"] == "desktop_focused":
+                return {"id": cmd["id"], **self.focused}
+            if cmd["action"] == "desktop_ref_input":
+                return {"id": cmd["id"], "how": "action click", "url": self.proc.url, "title": "", "screenshot": base64.b64encode(PNG).decode()}
+            if cmd["action"] == "desktop_read":
+                return {"id": cmd["id"], "snapshot": "d1", "url": self.proc.url, "title": "", "total_elements": 1,
+                        "window": {"title": "Untitled 1", "app": "soffice"}, "text": "Window: Untitled 1 (soffice)",
+                        "elements": [{"ref": "d1:1", "tag": "push button", "label": "Save"}],
+                        "screenshot": base64.b64encode(PNG).decode()}
+            return original(cmd)
+        self.proc.reply = reply
+
+    async def asyncTearDown(self):
+        await ContractTests.asyncTearDown(self)
+        self.desktop.stop()
+
+    ran = ContractTests.ran
+
+    async def test_desktop_refs_read_act_and_route_without_a_desktop_flag(self):
+        read = await self.manager.act("chat:s1", "read", {"desktop": True}, self.ctx)
+        self.assertIn("[d1:1] push button Save", read["text"])
+        self.assertIn("desktop window content", read["text"])
+        self.assertTrue(self.ctx.turn_taint.tainted)
+        self.control = {"tag": "push button", "role": "push button", "label": "Save", "app": "soffice", "signals": ["Save"]}
+        clicked = await self.manager.act("chat:s1", "click", {"ref": "d1:1"}, self.ctx)
+        self.assertIn("by action click", clicked["text"])
+        sent = self.ran("desktop_ref_input")[-1]
+        self.assertEqual((sent["ref"], sent["kind"], sent["expected"]), ("d1:1", "click", self.control))
+
+    async def test_desktop_labels_go_through_the_press_guard(self):
+        for label, code in (("Send", "person_only"), ("Buy now", "person_only"), ("Delete Sheet", "not_approved")):
+            self.ask.return_value = permissions.Decision("deny", "No")
+            self.control = {"tag": "menu item", "role": "menu item", "label": label, "app": "soffice", "signals": [label]}
+            result = await self.manager.act("chat:s1", "click", {"ref": "d1:1"}, self.ctx)
+            self.assertEqual(result["code"], code, result["text"])
+            if code == "person_only":
+                self.assertIn(f"Stopped before pressing '{label}' on the desktop (soffice)", result["text"])
+        self.assertFalse(self.ran("desktop_ref_input"), "no guarded control was pressed")
+        self.ask.return_value = permissions.Decision("allow")
+
+    async def test_desktop_password_fields_and_enter_on_a_default_button(self):
+        self.control = {"tag": "password text", "role": "password text", "label": "Password", "app": "soffice", "private": True, "signals": []}
+        refused = await self.manager.act("chat:s1", "type", {"ref": "d1:1", "text": "secret"}, self.ctx)
+        self.assertEqual(refused["code"], "private_field")
+        self.focused = {"element": {"tag": "password text", "label": "Password", "private": True}, "defaults": []}
+        for action, args in (("type", {"text": "secret"}), ("key", {"key": "a"})):
+            result = await self.manager.act("chat:s1", action, {"desktop": True, **args}, self.ctx)
+            self.assertEqual(result["code"], "private_field", action)
+        tabbed = await self.manager.act("chat:s1", "key", {"desktop": True, "key": "Tab"}, self.ctx)
+        self.assertNotIn("code", tabbed)
+        self.focused = {"element": {"tag": "text", "label": "To"}, "defaults": [{"tag": "push button", "label": "Send now"}]}
+        stopped = await self.manager.act("chat:s1", "key", {"desktop": True, "key": "Return"}, self.ctx)
+        self.assertEqual(stopped["code"], "person_only")
+        self.assertIn("'Send now'", stopped["text"])
+        self.assertNotIn("secret", json.dumps([c for c in self.proc.calls if c["action"] == "desktop_input"]))
+
+
+def real_png(color=(40, 90, 160)):
+    output = io.BytesIO()
+    Image.new("RGB", (1280, 800), color).save(output, "PNG")
+    return output.getvalue()
+
+
+class TrajectoryTests(unittest.TestCase):
+    """Kept computer steps (cua upgrade 5.4): what is kept, for how long, for whom."""
+
+    def setUp(self):
+        from core import computer_trajectory
+        self.t = computer_trajectory
+        self.root = environment / ("trajectories-" + uuid.uuid4().hex[:6])
+        self.days = patch("core.settings.get_setting", side_effect=lambda key: {"computer_steps_days": 7}.get(key))
+        self.days.start()
+
+    def tearDown(self):
+        self.days.stop()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def keep(self, run_id="run1", owner="chat:a", action="click", args=None, result=None, before=None):
+        result = result or {"text": "URL: https://example.com/ | Title: x | click completed.", "images": [real_png()],
+                            "point": {"x": 100, "y": 120}, "element": {"label": "More", "tag": "a"}}
+        return self.t.record(owner, run_id, action, args or {"action": action, "ref": "r1:1"}, result,
+                             before or real_png((200, 200, 200)), root=self.root)
+
+    def test_a_step_keeps_action_images_marker_and_evidence(self):
+        self.assertEqual(self.keep(), 1)
+        step = self.t.steps("run1", self.root)[0]
+        self.assertEqual(step["images"], ["before.jpg", "after.jpg", "marker.jpg"])
+        self.assertEqual(step["url"], "https://example.com/")
+        self.assertEqual(step["point"], {"x": 100, "y": 120})
+        self.assertTrue(step["ok"])
+        self.assertEqual(step["evidence"]["kept"], ["action.json", "before.jpg", "after.jpg", "marker.jpg"])
+        with Image.open(self.t.image("run1", 1, "marker.jpg", self.root)) as marker:
+            self.assertGreater(marker.convert("RGB").getpixel((100, 120))[0], 150)
+        self.assertNotIn("action", step["arguments"])
+
+    def test_private_fields_keep_no_text_and_no_image(self):
+        for result in ({"text": "Not typed: passwords, codes and payment details are entered by the person.", "code": "private_field"},
+                       {"text": "URL: x | type completed.", "images": [real_png()], "element": {"tag": "input", "type": "password"}},
+                       {"text": "URL: x | Desktop type completed.", "images": [real_png()], "element": {"role": "password text"}}):
+            number = self.keep(action="type", args={"ref": "r1:2", "text": "hunter2"}, result=result)
+            step = self.t.steps("run1", self.root)[number - 1]
+            self.assertEqual(step["arguments"]["text"], "(private field)")
+            self.assertEqual(step["images"], [])
+            self.assertEqual(step["evidence"]["not_kept"], {"before.jpg": "private field", "after.jpg": "private field"})
+        self.assertNotIn("hunter2", self.t.export("run1", self.root).decode("latin-1"))
+
+    def test_bounds_owner_and_off(self):
+        with patch.object(self.t, "STEP_LIMIT", 3):
+            numbers = [self.keep() for _ in range(5)]
+        self.assertEqual(numbers, [1, 2, 3, None, None])
+        self.assertIsNone(self.keep(owner="chat:b"), "a run belongs to one owner")
+        with patch.object(self.t, "RUN_BYTES", 1):
+            self.keep(run_id="run2")
+            number = self.keep(run_id="run2")
+        self.assertEqual(self.t.steps("run2", self.root)[number - 1]["evidence"]["not_kept"]["after.jpg"], "this run reached its size limit")
+        for bad in ("../x", "a/b", "", "x" * 65):
+            self.assertIsNone(self.keep(run_id=bad))
+        with patch("core.settings.get_setting", return_value=0):
+            self.assertIsNone(self.keep(run_id="run3"))
+        self.assertFalse((self.root / "run3").exists())
+
+    def test_retention_deletes_old_runs_and_off_deletes_all(self):
+        self.keep(run_id="old")
+        self.keep(run_id="new")
+        meta = json.loads((self.root / "old" / "meta.json").read_text())
+        meta["updated"] -= 8 * 86400
+        (self.root / "old" / "meta.json").write_text(json.dumps(meta))
+        self.assertEqual(self.t.sweep(root=self.root), 1)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["new"])
+        with patch("core.settings.get_setting", return_value=0):
+            self.assertEqual(self.t.sweep(root=self.root), 1)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_skill_steps_take_only_successful_actions(self):
+        self.keep(action="open", args={"url": "https://example.com/?token=abc"}, result={"text": "URL: https://example.com/ | open completed."})
+        self.keep(action="read", args={}, result={"text": "URL: https://example.com/ | read completed.", "state": {"snapshot": "r1"}})
+        self.keep()
+        self.keep(action="click", result={"text": "Stopped before pressing 'Buy now'", "code": "person_only"})
+        self.keep(action="type", args={"ref": "r1:2", "text": "Ada"}, result={"text": "URL: x | type completed.", "element": {"label": "Name"}})
+        self.keep(action="type", args={"ref": "r1:3", "text": "hunter2"}, result={"text": "Not typed", "code": "private_field"})
+        shaped = self.t.skill_steps("run1", self.root)
+        self.assertEqual([s["kind"] for s in shaped], ["open", "click", "type"])
+        self.assertEqual(shaped[2]["text"], "Ada")
+        self.assertEqual(shaped[1]["element"]["label"], "More")
+
+    def test_routes_check_the_runs_owner_and_never_cache(self):
+        self.keep(run_id="chatrun", owner="chat:a")
+        self.keep(run_id="agentrun", owner="agent:c")
+        app = FastAPI(); app.include_router(computer_routes.router)
+        app.dependency_overrides[computer_routes.require_user] = lambda: "alice"
+        client = TestClient(app)
+        with patch.object(computer_routes.computer_trajectory, "ROOT", self.root), \
+             patch.object(computer_routes.auth_manager, "is_admin", return_value=False), \
+             patch.object(computer_routes, "get_session_header",
+                          side_effect=lambda ident: ({"owner_user": "alice" if ident == "a" else "bob"}, 0)), \
+             patch.object(computer_routes.agent_service, "get", return_value={"id": "c", "name": "Scout"}):
+            steps = client.get("/api/computer/steps/chatrun")
+            self.assertEqual(steps.status_code, 200)
+            self.assertEqual(steps.headers["cache-control"], "no-store")
+            self.assertEqual(len(steps.json()["steps"]), 1)
+            image = client.get("/api/computer/steps/chatrun/1/marker.jpg")
+            self.assertEqual((image.status_code, image.headers["content-type"], image.headers["cache-control"]),
+                             (200, "image/jpeg", "no-store"))
+            self.assertEqual(client.get("/api/computer/steps/chatrun/1/action.json").status_code, 404)
+            self.assertEqual(client.get("/api/computer/steps/chatrun/9/after.jpg").status_code, 404)
+            exported = client.get("/api/computer/steps/chatrun/export")
+            import zipfile
+            names = zipfile.ZipFile(io.BytesIO(exported.content)).namelist()
+            self.assertIn("chatrun/step-0001/action.json", names)
+            self.assertEqual(client.get("/api/computer/steps/chatrun/skill").json()["steps"][0]["kind"], "click")
+            for path in ("/api/computer/steps/agentrun", "/api/computer/steps/agentrun/1/after.jpg",
+                         "/api/computer/steps/agentrun/export", "/api/computer/steps/agentrun/skill", "/api/computer/agent:c/steps"):
+                self.assertEqual(client.get(path).status_code, 403, path)
+            self.assertEqual(client.get("/api/computer/steps/nothing").status_code, 404)
+            self.assertEqual(client.get("/api/computer/steps/..%2Fx").status_code, 404)
+            self.assertEqual([r["run_id"] for r in client.get("/api/computer/chat:a/steps").json()], ["chatrun"])
+            with patch.object(computer_routes.auth_manager, "is_admin", return_value=True):
+                detail = client.get("/api/computer/steps/agentrun").json()
+                self.assertEqual((detail["agent_id"], detail["agent_name"]), ("c", "Scout"))
+        client.close()
+
+    def test_chat_delete_and_settings_route(self):
+        from core.session_manager import session_manager
+        self.keep(run_id="gone", owner="chat:s9")
+        with patch.object(self.t, "ROOT", self.root), patch("core.session_manager.store.delete_session"):
+            session_manager.delete_session("s9")
+        self.assertFalse((self.root / "gone").exists())
+        app = FastAPI(); app.include_router(settings_routes.router)
+        app.dependency_overrides[settings_routes.require_admin] = lambda: "alice"
+        client = TestClient(app)
+        self.days.stop()
+        try:
+            from core import settings
+            saved = settings.get_setting("computer_steps_days")
+            self.assertEqual(settings.DEFAULTS["computer_steps_days"], 7)
+            self.assertEqual(client.post("/api/settings/computer-steps", json={"days": 3}).status_code, 422)
+            self.assertEqual(client.post("/api/settings/computer-steps", json={"days": 30}).json()["computer_steps_days"], 30)
+            self.assertEqual(client.get("/api/settings").json()["computer_steps_days"], 30)
+            settings.update_settings(computer_steps_days=saved)
+        finally:
+            self.days.start()
+            client.close()
+
+
+class DriverContractTests(unittest.TestCase):
+    """The driver's own ref, diff and verify rules, run from its source."""
+
+    def setUp(self):
+        module = ast.parse(SOURCE)
+        names = {"row_key", "row_state", "suggest_ref", "resolve_ref", "diff_rows", "diff_lines", "query_rows", "verify_checks"}
+        functions = [node for node in module.body if isinstance(node, ast.FunctionDef) and node.name in names]
+        self.d = {"re": re}
+        exec(compile(ast.Module(body=functions, type_ignores=[]), "driver contract", "exec"), self.d)
+
+    def test_refs_resolve_only_in_the_live_snapshot(self):
+        rows = [{"ref": "r7:1", "tag": "button", "label": "Delete item"}, {"ref": "r7:2", "tag": "button", "label": "Archive"}]
+        snap = {"id": "r7", "stale": "", "rows": rows}
+        history = {"r6": {"1": {"ref": "r6:1", "tag": "button", "label": "Archive"}}}
+        resolve = self.d["resolve_ref"]
+        self.assertEqual(resolve("r7:2", snap, history), ("2", ""))
+        self.assertEqual(resolve("2", snap, history), ("2", "Ref 2 was taken from the current read, r7."))
+        with self.assertRaisesRegex(ValueError, r"^\[stale_ref\] That ref is from an older read \(r6\)\. Use r7:2 or read again\.$"):
+            resolve("r6:1", snap, history)
+        with self.assertRaisesRegex(ValueError, r"^\[stale_ref\] That ref is from an older read \(r5\)\. Read again\.$"):
+            resolve("r5:1", snap, history)
+        stale = {**snap, "stale": "the page navigated"}
+        for ref in ("r7:1", "1", "r6:1"):
+            with self.assertRaisesRegex(ValueError, r"^\[stale_ref\]"):
+                resolve(ref, stale, history)
+        for ref in ("1", "r1:1"):
+            with self.assertRaisesRegex(ValueError, r"^\[stale_ref\]"):
+                resolve(ref, {"id": None, "stale": "", "rows": []}, {})
+        for ref in ("seven", "r7:", "7:1", "button"):
+            with self.assertRaisesRegex(ValueError, r"^\[bad_arguments\]"):
+                resolve(ref, snap, history)
+
+    def test_diffs_and_queries(self):
+        old = [{"ref": "r1:1", "tag": "input", "label": "Email", "value": ""}, {"ref": "r1:2", "tag": "a", "label": "Gone"},
+               {"ref": "r1:3", "tag": "button", "label": "Save"}]
+        new = [{"ref": "r2:1", "tag": "input", "label": "Email", "value": "a@b.c"}, {"ref": "r2:2", "tag": "button", "label": "Save"},
+               {"ref": "r2:3", "tag": "a", "label": "New"}]
+        added, changed, removed = self.d["diff_rows"](old, new)
+        self.assertEqual([r["label"] for r in added], ["New"])
+        self.assertEqual([r["ref"] for r in changed], ["r2:1"])
+        self.assertEqual([r["ref"] for r in removed], ["r1:2"])
+        self.assertEqual(self.d["diff_lines"]("a\nb\nb\nc", "a\nb\nc\nd\n"), (["d"], ["b"]))
+        self.assertEqual([r["ref"] for r in self.d["query_rows"](new, "EMAIL")], ["r2:1"])
+        under = [{"ref": "r3:1", "tag": "button", "label": "Check", "heading": "Answer"}, {"ref": "r3:2", "tag": "a", "label": "Home"}]
+        self.assertEqual([r["ref"] for r in self.d["query_rows"](under, "answer")], ["r3:1"], "a section's controls match its heading")
+
+    def test_verify_reports_what_it_found(self):
+        checks = self.d["verify_checks"]({"url_contains": "done", "title_contains": "Order", "text_present": "Thanks",
+                                          "text_absent": "Error", "element": {"role": "button", "name": "Pay"}},
+                                         {"url": "https://x/done", "title": "Home", "text": "Thanks for waiting\nError 5",
+                                          "element_count": 0})
+        self.assertEqual([c["met"] for c in checks], [True, False, True, False, False])
+        self.assertEqual(checks[1]["found"], "title is Home")
+        self.assertIn("Thanks for waiting", checks[2]["found"])
+        self.assertEqual(checks[4]["found"], "0 matching elements")
+
+
+class ScreenshotHistoryTests(unittest.TestCase):
+    def test_only_the_newest_three_screenshots_are_kept(self):
+        attachment = {"role": "user", "content": [{"type": "text", "text": "look"}, {"type": "image_url", "image_url": {"url": "x"}}]}
+        shots = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:{i}"}}]} for i in range(5)]
+        native = {"role": "user", "content": [{"type": "image", "source": {}}]}
+        messages = [attachment, *shots[:2], {"role": "tool", "content": "seen"}, native, *shots[2:]]
+        self.assertEqual(openai_compatible._trim_screenshots(messages), 3)
+        self.assertEqual([m["content"] for m in shots[:2]], [openai_compatible.SCREENSHOT_REMOVED] * 2)
+        self.assertEqual(native["content"], openai_compatible.SCREENSHOT_REMOVED)
+        self.assertTrue(all(isinstance(m["content"], list) for m in shots[2:]))
+        self.assertIsInstance(attachment["content"], list, "a person's attachment is never trimmed")
+        self.assertEqual(openai_compatible._trim_screenshots(messages), 0)
+
+    def test_a_long_tool_loop_sends_at_most_three_screenshots(self):
+        call = {"id": "c1", "function": {"name": "computer", "arguments": '{"action":"screenshot"}'}}
+        replies = [{"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [dict(call, id=f"c{i}")]}}]}
+                   for i in range(openai_compatible.MAX_TOOL_ROUNDS)] + [{"choices": [{"message": {"role": "assistant", "content": "done"}}]}]
+        history = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"old{i}"}}]} for i in range(4)]
+        sent = []
+        async def post(client, url, key, body):
+            sent.append(sum(1 for m in body["messages"] if openai_compatible._is_screenshot(m)))
+            return replies[len(sent) - 1]
+        async def run():
+            with patch("core.providers.openai_compatible._post_chat", new=post):
+                return [item async for item in openai_compatible.turn_events("https://local", "m", None,
+                    [{"role": "user", "content": "look"}, *history], tools=[{"type": "function", "function": {"name": "computer"}}],
+                    tool_executor=AsyncMock(return_value=tool_registry.ToolResult("seen", [PNG])), supports_images=True, stream=False)]
+        asyncio.run(run())
+        self.assertTrue(sent and max(sent) <= 3, sent)
+
+
 def tearDownModule():
     from core import session_manager_store
     session_manager_store.close()

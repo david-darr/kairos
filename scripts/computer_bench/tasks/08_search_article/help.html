@@ -1,0 +1,19 @@
+<!doctype html>
+<title>Help centre</title>
+<h1>Help centre</h1>
+<p><label>Search the help <input id="term" aria-label="Search the help"></label> <button type="button" id="go">Search</button></p>
+<h2>Results</h2>
+<ul id="results"><li>Type a word and press Search.</li></ul>
+<script>
+  const articles = [['tides', 'How tides work'], ['compass', 'Using a compass'], ['knots', 'Tying knots'],
+    ['tidepools', 'Exploring tidepools'], ['maps', 'Reading maps']];
+  document.getElementById('go').onclick = () => {
+    const term = document.getElementById('term').value.trim().toLowerCase();
+    const found = articles.filter(([slug, title]) => term && (slug.includes(term) || title.toLowerCase().includes(term)));
+    const list = document.getElementById('results');
+    list.replaceChildren(...(found.length ? found.map(([slug, title]) => {
+      const item = document.createElement('li'); const link = document.createElement('a');
+      link.href = 'article.html?a=' + slug; link.textContent = title; item.append(link); return item;
+    }) : [Object.assign(document.createElement('li'), { textContent: 'Nothing found.' })]));
+  };
+</script>

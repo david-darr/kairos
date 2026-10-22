@@ -1,0 +1,9 @@
+{
+  "name": "calc_cell",
+  "title": "Put a value in a spreadsheet cell (desktop)",
+  "kind": "task",
+  "desktop": true,
+  "instruction": "On the agent desktop, open LibreOffice Calc and put {value} in cell {cell}.",
+  "variants": [{"cell": "B2", "value": "42"}, {"cell": "D5", "value": "1789"}],
+  "pages": {}
+}

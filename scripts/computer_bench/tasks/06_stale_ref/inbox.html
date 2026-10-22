@@ -1,0 +1,22 @@
+<!doctype html>
+<title>Inbox</title>
+<h1>Inbox</h1>
+<ul id="list"></ul>
+<p id="result"></p>
+<script>
+  const render = senders => {
+    const list = document.getElementById('list');
+    list.replaceChildren(...senders.map(sender => {
+      const item = document.createElement('li');
+      item.append(`Message from ${sender} `);
+      const archive = document.createElement('button');
+      archive.textContent = `Archive message from ${sender}`;
+      archive.onclick = () => { document.getElementById('result').textContent = 'Archived: ' + sender; };
+      item.append(archive);
+      return item;
+    }));
+  };
+  render(['Ada', 'Grace', 'Alan']);
+  // The trap: the rows move after a read taken right away.
+  setTimeout(() => render(['Margaret', 'Alan', 'Grace', 'Ada']), 1500);
+</script>

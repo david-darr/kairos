@@ -539,6 +539,9 @@ class AgentService:
         if Path(DATA_DIR).resolve() not in root.parents or root not in target.parents:
             raise ValueError("profile path is outside Kairos data")
         shutil.rmtree(target, ignore_errors=True)
+        # Its computer steps go with its logins (vault: Agents - Computer-Use Upgrade from cua, 5.4).
+        from core import computer_trajectory
+        computer_trajectory.delete_owner(f"agent:{agent_id}")
 
     def _require(self, agent_id: str) -> dict:
         agent = self._agents.get(agent_id)

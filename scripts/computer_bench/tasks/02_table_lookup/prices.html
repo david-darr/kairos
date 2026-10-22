@@ -1,0 +1,25 @@
+<!doctype html>
+<title>Price list</title>
+<h1>Price list</h1>
+<table id="prices"><thead><tr><th>Product</th><th>Price</th><th>Stock</th></tr></thead><tbody></tbody></table>
+<h2>Answer</h2>
+<p><label>Answer <input id="answer" aria-label="Answer"></label> <button type="button" id="check">Check</button></p>
+<p id="result"></p>
+<script>
+  const items = [['Red mug', '9.99'], ['Blue mug', '10.49'], ['Steel pan', '27.00'], ['Teal kettle', '34.50'],
+    ['Glass jar', '4.25'], ['Oak shelf', '88.10'], ['Pine shelf', '61.30'], ['Wool rug', '120.00'], ['Desk lamp', '22.75'],
+    ['Floor lamp', '54.00'], ['Teal teapot', '18.40'], ['Oak stool', '45.60'], ['Clay pot', '7.80'], ['Linen towel', '12.20'],
+    ['Cotton towel', '8.90'], ['Wall clock', '31.15'], ['Table clock', '19.95'], ['Teal cup', '6.30'], ['Oak table', '310.00'],
+    ['Pine table', '205.50'], ['Bread bin', '16.40'], ['Kettle descaler', '3.10'], ['Shelf brackets', '5.55'],
+    ['Mug tree', '11.00'], ['Spice rack', '14.75'], ['Knife block', '29.99'], ['Chopping board', '13.45'],
+    ['Salad bowl', '17.20'], ['Butter dish', '9.15'], ['Egg cup', '2.40']];
+  const body = document.querySelector('#prices tbody');
+  for (const [name, price] of items) {
+    const row = body.insertRow();
+    row.insertCell().textContent = name; row.insertCell().textContent = '$' + price;
+    row.insertCell().textContent = String((name.length * 7) % 23);
+  }
+  document.getElementById('check').onclick = () => {
+    document.getElementById('result').textContent = 'Answer recorded: ' + document.getElementById('answer').value.trim().replace(/^\$/, '');
+  };
+</script>

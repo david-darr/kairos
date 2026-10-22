@@ -1,0 +1,16 @@
+<!doctype html>
+<title>Article</title>
+<h1 id="heading"></h1>
+<p id="body"></p>
+<p><button type="button" id="read">Mark as read</button></p>
+<p id="result"></p>
+<script>
+  const articles = { tides: ['How tides work', 'The moon pulls the sea into two bulges.'],
+    compass: ['Using a compass', 'The needle points to magnetic north.'], knots: ['Tying knots', 'Start with a reef knot.'],
+    tidepools: ['Exploring tidepools', 'Look under the rocks.'], maps: ['Reading maps', 'Contours show height.'] };
+  const [title, body] = articles[new URLSearchParams(location.search).get('a')] || ['Not found', ''];
+  document.title = title;
+  document.getElementById('heading').textContent = title;
+  document.getElementById('body').textContent = body;
+  document.getElementById('read').onclick = () => { document.getElementById('result').textContent = 'Marked read: ' + title; };
+</script>
