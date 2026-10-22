@@ -124,11 +124,14 @@ def openai_shaped(data: dict) -> dict:
     """Ollama's native reply as the OpenAI shape (`choices[0].message`,
     `usage`), so callers keep one parsing path."""
     message = data.get("message", {})
-    usage = {
-        "prompt_tokens": data.get("prompt_eval_count", 0),
-        "completion_tokens": data.get("eval_count", 0),
-        "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
-    }
+    # Ollama leaves prompt_eval_count out when the prompt came from its
+    # cache; a missing count stays missing rather than becoming 0
+    # (2026-10-22, per-run in/out tokens). The total keeps its old sum.
+    usage = {"total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0)}
+    if "prompt_eval_count" in data:
+        usage["prompt_tokens"] = data["prompt_eval_count"]
+    if "eval_count" in data:
+        usage["completion_tokens"] = data["eval_count"]
     return {"choices": [{"message": message}], "usage": usage}
 
 

@@ -107,7 +107,10 @@ LEGACY_INDEX_FILE = os.path.join(DATA_DIR, "sessions_index.json")
 LEGACY_CHANNEL_FILE = os.path.join(DATA_DIR, "channel_sessions.json")
 LEGACY_BACKUP_DIR = os.path.join(DATA_DIR, "sessions.pre-sqlite-backup")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
+# Columns schema v8 added to `runs`, for upgrading an older database.
+RUN_V8_COLUMNS = (("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("cache_write_tokens", "INTEGER"),
+                  ("first_output_at", "REAL"), ("last_output_at", "REAL"))
 RUNS_KEPT = 5000
 
 # meta key written as the import's last step; see _legacy_import_done().
@@ -200,7 +203,15 @@ CREATE TABLE IF NOT EXISTS runs (
     total_tokens      INTEGER,
     cache_read_tokens INTEGER,
     usage_complete    INTEGER NOT NULL DEFAULT 0,
-    detail            TEXT
+    detail            TEXT,
+    -- Schema v8 (2026-10-22): the reply's own tokens and timing, each null
+    -- when the provider did not report it. input_tokens is the whole input
+    -- the requests carried, cached part included (Usage.prompt_tokens).
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    cache_write_tokens INTEGER,
+    first_output_at    REAL,
+    last_output_at     REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_session ON runs (session_id, started_at);
@@ -369,6 +380,16 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
 
     # v4 adds only the runs table, v5 only the deliveries table, v6 only the
     # helpers table and v7 only run_events, all created by _SCHEMA above.
+
+    if version < 8:
+        # v8 keeps each run's input, output and cache-write tokens and when
+        # its first and last output arrived (David, 2026-10-22: in/out and
+        # tok/s in the CLI). Older runs keep null: nothing is back-filled.
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        with conn:
+            for name, kind in RUN_V8_COLUMNS:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {kind}")
 
     with conn:
         conn.execute(
@@ -676,7 +697,8 @@ def delete_all_sessions() -> None:
 
 _RUN_COLUMNS = ("id", "parent_id", "surface", "session_id", "agent_id", "task_id", "endpoint_id", "model",
                 "started_at", "ended_at", "outcome", "stop_confirmed", "tool_calls", "total_tokens",
-                "cache_read_tokens", "usage_complete", "detail")
+                "cache_read_tokens", "usage_complete", "detail", "input_tokens", "output_tokens",
+                "cache_write_tokens", "first_output_at", "last_output_at")
 
 
 def record_run(run: dict, timeline: Optional[list] = None) -> None:

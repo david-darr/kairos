@@ -219,6 +219,16 @@ class Usage:
                      total_tokens=self.total_tokens + other.total_tokens, requests=self.requests + other.requests)
 
 
+def tokens_per_second(run: dict) -> Optional[float]:
+    """Output tokens over the time from the first output to the last, for a
+    run row. None unless both are known and the window is real: a reply
+    that arrived in one piece has no measurable rate."""
+    output, first, last = run.get("output_tokens"), run.get("first_output_at"), run.get("last_output_at")
+    if not output or first is None or last is None or last - first <= 0:
+        return None
+    return round(output / (last - first), 1)
+
+
 def total(usages) -> Optional[Usage]:
     """The sum of a run's usage events, or None when none was reported."""
     found = [u for u in usages if u is not None]
@@ -350,6 +360,10 @@ class Tally:
     timeline: list = field(default_factory=list)
     _tools: dict = field(default_factory=dict)
     dropped: int = 0
+    # When the reply's first and last output text arrived (schema v8), for
+    # tok/s. Visible text only: a run that shows none keeps both None.
+    first_output_at: Optional[float] = None
+    last_output_at: Optional[float] = None
 
     def step(self, kind: str, name: Optional[str] = None, ok: Optional[bool] = None, detail="",
              seconds: Optional[float] = None) -> None:
@@ -362,6 +376,11 @@ class Tally:
     def add(self, item: RunEvent) -> None:
         if item.kind is EventKind.TEXT:
             self.parts.append(item.data["text"])
+            if item.data["text"]:
+                now = time.time()
+                if self.first_output_at is None:
+                    self.first_output_at = now
+                self.last_output_at = now
         elif item.kind is EventKind.USAGE:
             self.usages.append(item.data["usage"])
         elif item.kind is EventKind.TOOL_STARTED:
@@ -416,6 +435,11 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "tool_calls": tally.tool_calls, "total_tokens": usage.total_tokens if usage else None,
             "cache_read_tokens": usage.cache_read_tokens if usage else None,
             "usage_complete": int(tally.usage_complete), "detail": (detail or "")[:500],
+            # Schema v8: null wherever the provider said nothing.
+            "input_tokens": usage.prompt_tokens if usage else None,
+            "output_tokens": usage.output_tokens if usage else None,
+            "cache_write_tokens": usage.cache_write_tokens if usage else None,
+            "first_output_at": tally.first_output_at, "last_output_at": tally.last_output_at,
         }, timeline)
     except Exception:
         logger.exception("could not record run %s", context.run_id)

@@ -407,7 +407,20 @@ class ModelTests(unittest.TestCase):
         self.assertEqual((metrics["seconds"], metrics["tokens"], metrics["cached_percent"], metrics["tools"]),
                          (9.0, 113000, 70, 2))
         self.assertIsNone(metrics["cost"])
-        self.assertIsNone(metrics["tok_per_s"])
+        self.assertIsNone(metrics["tok_per_s"], "no output tokens or timing: no rate")
+        self.assertIsNone(metrics["input"])
+        newer = model.run_metrics({**run, "input_tokens": 100000, "output_tokens": 50, "first_output_at": 101.0,
+                                   "last_output_at": 103.0})
+        self.assertEqual((newer["input"], newer["output"], newer["cached_percent"], newer["tok_per_s"]),
+                         (100000, 50, 79, 25.0), "cached share of the input once input is known")
+        self.assertEqual(model.run_metrics({**run, "tokens_per_second": 31.5})["tok_per_s"], 31.5,
+                         "the backend's own figure wins")
+        self.assertEqual(model.rate_series([{"started_at": 2, "tokens_per_second": 9.0},
+                                            {"started_at": 1, "output_tokens": 10, "first_output_at": 0.0,
+                                             "last_output_at": 0.0}]), [None, 9.0])
+        self.assertEqual(model.session_totals([{"total_tokens": 5, "input_tokens": 3, "output_tokens": None},
+                                               {"total_tokens": 7, "input_tokens": None, "output_tokens": 2}]),
+                         {"tokens": 12, "input": 3, "output": 2})
         self.assertIsNone(model.run_metrics({"started_at": 1, "ended_at": 2, "total_tokens": None,
                                              "cache_read_tokens": None})["cached_percent"])
         self.assertIsNone(model.run_metrics(None))
@@ -486,7 +499,7 @@ class FullScreenRenderTests(unittest.TestCase):
         lines, clicks = app.main_lines(120, 40)
         text = self.text(lines)
         for expected in ("You ·", "hello", "Kairos ·", "1 action ▸", "Hi. What are we working on?",
-                         "9.0s · 113k tokens · 70% cached · 1 tool · cost n/a · tok/s n/a", "Fork", "Copy"):
+                         "9.0s · 113k tokens · 70% cached · tok/s n/a · 1 tool · cost n/a", "Fork", "Copy"):
             self.assertIn(expected, text)
         self.assertNotIn("read_file", text)          # collapsed until asked
         row = next(r for r, regions in clicks.items() if len(regions) == 2)
@@ -502,7 +515,25 @@ class FullScreenRenderTests(unittest.TestCase):
         reply.feed("ok\n")
         reply.finish("done")
         open_view(app, [reply])
-        self.assertIn("tokens n/a · cost n/a · tok/s n/a", self.text(app.main_lines(120, 40)[0]))
+        self.assertIn("tokens n/a · tok/s n/a · cost n/a", self.text(app.main_lines(120, 40)[0]))
+
+    def test_in_out_cached_and_tok_s_when_the_run_has_them(self):
+        from kairos_cli import model
+        from kairos_cli.model import ReplyItem
+        app = make_app()
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.feed("ok\n")
+        reply.finish("done")
+        reply.metrics = model.run_metrics({"started_at": 1.0, "ended_at": 7.0, "total_tokens": 1000,
+                                           "cache_read_tokens": 630, "input_tokens": 900, "output_tokens": 100,
+                                           "first_output_at": 2.0, "last_output_at": 6.0, "usage_complete": 1})
+        open_view(app, [reply])
+        self.assertIn("6.0s · 900 in · 100 out · 70% cached · 25 tok/s · cost n/a",
+                      self.text(app.main_lines(140, 40)[0]))
+        app.view.runs = [{"started_at": 1.0, "total_tokens": 1000, "input_tokens": 900, "output_tokens": 100,
+                          "tokens_per_second": 25.0}]
+        status = "".join(fragment[1] for fragment in app.status_line())
+        self.assertIn("900 in · 100 out · 25 tok/s · cost n/a", status)
 
     def test_a_running_reply_shows_the_working_line_and_its_tail(self):
         from kairos_cli.model import ReplyItem

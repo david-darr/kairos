@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from core import helpers, session_manager_store as store
+from core import helpers, runs, session_manager_store as store
 from core.middleware import require_admin
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -39,7 +39,7 @@ async def list_runs(session_id: Optional[str] = None, task_id: Optional[str] = N
                     outcome: Optional[str] = None, limit: int = 100, user: str = Depends(require_admin)) -> list[dict]:
     if outcome and outcome not in ("finished", "failed", "stopped"):
         raise HTTPException(status_code=400, detail="outcome is finished, failed or stopped")
-    return [{**run, "label": _label(run)}
+    return [{**run, "label": _label(run), "tokens_per_second": runs.tokens_per_second(run)}
             for run in store.find_runs(session_id=session_id, task_id=task_id, agent_id=agent_id, outcome=outcome,
                                        limit=limit)]
 
@@ -52,7 +52,8 @@ async def get_run(run_id: str, user: str = Depends(require_admin)) -> dict:
     run = store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    detail = {**run, "label": _label(run), "steps": store.run_events(run_id),
+    detail = {**run, "label": _label(run), "tokens_per_second": runs.tokens_per_second(run),
+              "steps": store.run_events(run_id),
               "parent": None, "children": store.find_runs(parent_id=run_id, limit=50),
               "helpers": [{k: h[k] for k in ("id", "goal", "status", "tokens", "error")}
                           for h in helpers.batch_rows_for_run(run_id)],

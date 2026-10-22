@@ -20,16 +20,18 @@ from .sanitize import clean, one_line
 METRICS_SOURCES = {
     "duration": "run started_at/ended_at (GET /api/runs?session_id=)",
     "tokens": "run total_tokens: the provider's own total, input and output together",
-    "cached": "run cache_read_tokens / total_tokens",
+    "in_out": "run input_tokens (the whole input, cached part included) and output_tokens (schema v8)",
+    "cached": "run cache_read_tokens / input_tokens (or / total_tokens for runs before schema v8)",
+    "tok_per_s": "run tokens_per_second: output_tokens over first-to-last output time (schema v8)",
     "tools": "run tool_calls",
     "context": "GET /api/sessions/{id}/context (used_tokens, capacity_tokens, percent)",
     "plan": "GET /api/models/quotas (subscription windows: used_percent, resets_at)",
     "branch": "git in the chat's folder (the Forge worktree, or where kairos started)",
-    "stream": "characters per second of the reply as it arrived here (measured by the CLI, not tokens)",
     "tokens_per_hour": "the session's runs today, total_tokens bucketed by start hour",
     "missing": ["cost (no price or spend field anywhere in the API)",
-                "tokens in / out split per reply (runs keep only total_tokens; output_tokens is not stored)",
-                "tok/s (needs output tokens and their timing)",
+                "tok/s for a reply that arrived in one piece (Codex hands its reply over whole; "
+                "plain requests too): there is no window to divide by",
+                "in / out for runs recorded before schema v8, or from a provider that did not report them",
                 "prompt-cache timer (no cache expiry is reported)",
                 "steering a running turn (no route takes text into a running turn)",
                 "GPU or card memory totals (only Ollama's per-model size_vram, when Ollama runs)"],
@@ -171,19 +173,47 @@ def run_metrics(run: dict | None) -> dict | None:
     if not run:
         return None
     started, ended = run.get("started_at"), run.get("ended_at")
-    total, cached = run.get("total_tokens"), run.get("cache_read_tokens")
+    total, cached, inputs = run.get("total_tokens"), run.get("cache_read_tokens"), run.get("input_tokens")
+    base = inputs if inputs else total
     return {
         "seconds": (ended - started) if started and ended else None,
         "tokens": total,
-        "cached_percent": round(cached / total * 100) if total and cached is not None else None,
+        "input": inputs,
+        "output": run.get("output_tokens"),
+        "cache_write": run.get("cache_write_tokens"),
+        "cached_percent": round(cached / base * 100) if base and cached is not None else None,
         "tools": run.get("tool_calls"),
         "complete": bool(run.get("usage_complete")),
         "outcome": run.get("outcome"),
         "model": run.get("model"),
+        "tok_per_s": run.get("tokens_per_second", tokens_per_second(run)),
         # Not in the API: shown as n/a, never estimated.
         "cost": None,
-        "tok_per_s": None,
     }
+
+
+def tokens_per_second(run: dict) -> float | None:
+    """The backend's formula (core/runs.py tokens_per_second), for a row
+    that did not carry it: output tokens over first-to-last output time,
+    only when both exist."""
+    output, first, last = run.get("output_tokens"), run.get("first_output_at"), run.get("last_output_at")
+    if not output or first is None or last is None or last - first <= 0:
+        return None
+    return round(output / (last - first), 1)
+
+
+def session_totals(runs: list[dict]) -> dict:
+    """The chat's tokens: total, and in/out over the runs that reported them."""
+    def summed(key):
+        values = [r[key] for r in runs if r.get(key) is not None]
+        return sum(values) if values else None
+    return {"tokens": summed("total_tokens"), "input": summed("input_tokens"), "output": summed("output_tokens")}
+
+
+def rate_series(runs: list[dict]) -> list:
+    """tok/s per reply, oldest first; None where a reply has no rate."""
+    ordered = sorted(runs, key=lambda r: r.get("started_at") or 0)
+    return [r.get("tokens_per_second", tokens_per_second(r)) for r in ordered]
 
 
 def tokens_per_hour_today(runs: list[dict], now: float | None = None) -> list[int] | None:

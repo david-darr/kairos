@@ -721,12 +721,17 @@ class KairosApp:
         parts = []
         if m.get("seconds") is not None:
             parts.append(f"{m['seconds']:.0f}s" if m["seconds"] >= 10 else f"{m['seconds']:.1f}s")
-        parts.append(f"{widgets.human_tokens(m.get('tokens'))} tokens" if m else "tokens n/a")
+        if m.get("input") is not None or m.get("output") is not None:
+            parts.append(f"{widgets.human_tokens(m.get('input'))} in")
+            parts.append(f"{widgets.human_tokens(m.get('output'))} out")
+        else:
+            parts.append(f"{widgets.human_tokens(m.get('tokens'))} tokens" if m else "tokens n/a")
         if m.get("cached_percent") is not None:
             parts.append(f"{m['cached_percent']}% cached")
+        parts.append(f"{m['tok_per_s']:.0f} tok/s" if m.get("tok_per_s") else "tok/s n/a")
         if m.get("tools"):
             parts.append(f"{m['tools']} tool{'s' if m['tools'] != 1 else ''}")
-        parts += ["cost n/a", "tok/s n/a"]
+        parts.append("cost n/a")
         left = [("", " " * GUTTER), (s.fg("gold"), "▪ "), (s.fg("meta"), " · ".join(parts))]
         if m and not m.get("complete"):
             left.append((s.fg("meta"), " (partial usage)"))
@@ -894,19 +899,26 @@ class KairosApp:
         else:
             lines.append([("", "  "), (s.fg("meta"), "n/a: no reply today reported token usage")])
         lines.append([])
-        reply = next((i for i in reversed(view.items) if isinstance(i, ReplyItem) and i.samples), None)
-        lines.append(label("stream · last reply · characters per second, measured here"))
-        if reply:
-            lines.append([("", "  ")] + widgets.sparkline(reply.stream_rate(40), 40, s))
+        rates = model.rate_series(runs)
+        known = [r for r in rates if r]
+        lines.append(label("tok/s · per reply · this chat"))
+        if known:
+            lines.append([("", "  ")] + widgets.sparkline([r or 0 for r in rates][-40:], 40, s) +
+                         [(s.fg("dim"), f"  last {known[-1]:.0f} · best {max(known):.0f} · "
+                                        f"{len(known)} of {len(rates)} replies measured")])
         else:
-            lines.append([("", "  "), (s.fg("meta"), "n/a: no reply streamed in this terminal yet")])
-        lines.append([("", "  "), (s.fg("meta"), "tok/s n/a: the backend keeps no output token counts or timings")])
+            lines.append([("", "  "), (s.fg("meta"), "n/a: no reply here has both output tokens and a streaming window")])
+        totals = model.session_totals(runs)
+        lines.append([("", "  "), (s.fg("meta"), "in "), (s.fg("dim"), widgets.human_tokens(totals["input"])),
+                      (s.fg("meta"), " · out "), (s.fg("dim"), widgets.human_tokens(totals["output"])),
+                      (s.fg("meta"), " · total "), (s.fg("dim"), widgets.human_tokens(totals["tokens"]))])
         lines.append([])
         lines.append([("", "  ")] + self.context_bar(view, 30))
         lines.append([])
         lines.append(label("not reported by the backend"))
         for item in model.METRICS_SOURCES["missing"]:
-            lines.append([("", "  "), (s.fg("meta"), "· " + item)])
+            for index, part in enumerate(wrap(item, max(30, self.width - SIDEBAR - 10))):
+                lines.append([("", "  "), (s.fg("meta"), ("· " if index == 0 else "  ") + part)])
         self.open_screen("usage", lines=lines)
 
     async def safe(self, path: str):
@@ -984,11 +996,18 @@ class KairosApp:
         s = self.s
         view = self.view
         branch = self.branch()
-        tokens = sum(r.get("total_tokens") or 0 for r in (view.runs if view else [])) if view and view.runs else None
+        totals = model.session_totals(view.runs if view else [])
         endpoint = next((c for c in self.choices if c["id"] == self.session.get("model_endpoint_id")), {})
         window = model.plan_window(self.quotas, endpoint.get("kind"))
         out = [(s.fg("gold"), " ⎇ "), (s.fg("dim"), branch or "no branch"), (s.fg("meta"), "   ")]
-        out += [(s.fg("dim"), f"{widgets.human_tokens(tokens)} tokens" if tokens is not None else "tokens n/a"),
+        if totals["input"] is not None or totals["output"] is not None:
+            out += [(s.fg("dim"), f"{widgets.human_tokens(totals['input'])} in · "
+                                  f"{widgets.human_tokens(totals['output'])} out")]
+        else:
+            out += [(s.fg("dim"), f"{widgets.human_tokens(totals['tokens'])} tokens" if totals["tokens"] is not None
+                     else "tokens n/a")]
+        rates = [r for r in model.rate_series(view.runs if view else []) if r]
+        out += [(s.fg("meta"), " · "), (s.fg("dim"), f"{rates[-1]:.0f} tok/s" if rates else "tok/s n/a"),
                 (s.fg("meta"), " · cost n/a · ")]
         out += [(s.fg("meta"), "plan ")]
         if window:

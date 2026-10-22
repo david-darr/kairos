@@ -80,15 +80,13 @@ async def _anthropic_post(client: httpx.AsyncClient, model: str, key: str,
               "function": {"name": block["name"], "arguments": json.dumps(block.get("input") or {})}}
              for block in data.get("content", []) if block.get("type") == "tool_use"]
     usage = data.get("usage") or {}
-    input_tokens = usage.get("input_tokens", 0)
-    cache_read = usage.get("cache_read_input_tokens", 0)
-    cache_write = usage.get("cache_creation_input_tokens", 0)
-    output_tokens = usage.get("output_tokens", 0)
+    # Each part only as Anthropic reported it (2026-10-22: per-run in/out
+    # tokens); the total keeps its old arithmetic.
+    parts = {key: usage[key] for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
+                                         "output_tokens") if isinstance(usage.get(key), int)}
     return {"choices": [{"message": {"role": "assistant", "content": text, "tool_calls": calls,
                                      "_anthropic_content": data.get("content") or []}}],
-            "usage": {"input_tokens": input_tokens, "cache_read_input_tokens": cache_read,
-                      "cache_creation_input_tokens": cache_write, "output_tokens": output_tokens,
-                      "total_tokens": input_tokens + cache_read + cache_write + output_tokens}}
+            "usage": {**parts, "total_tokens": sum(parts.values())}}
 
 
 def _responses_input(messages: list[dict]) -> list[dict]:

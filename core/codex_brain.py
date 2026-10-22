@@ -632,11 +632,14 @@ class CodexBrain:
                 # _extract_total_tokens() prefers an explicit "total_tokens"
                 # and returns early, so it never sees these and cannot
                 # double-count them.
+                # The parts are kept only as Codex reported them (2026-10-22,
+                # per-run in/out tokens): a field it left out stays None
+                # rather than a 0 that would read as measured.
                 self.last_usage = {
                     "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-                    "input_tokens": usage.get("input_tokens", 0),
-                    "cached_input_tokens": usage.get("cached_input_tokens", 0),
-                    "output_tokens": usage.get("output_tokens", 0),
+                    "input_tokens": usage.get("input_tokens"),
+                    "cached_input_tokens": usage.get("cached_input_tokens"),
+                    "output_tokens": usage.get("output_tokens"),
                 }
             elif etype in ("error", "turn.failed"):
                 failure = event.get("message") or (event.get("error") or {}).get("message") or "Codex could not complete this turn"

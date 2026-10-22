@@ -23,7 +23,12 @@ function clock(seconds) {
 
 export function runSummary(run) {
   const took = run.ended_at && run.started_at ? `${Math.max(0, Math.round(run.ended_at - run.started_at))}s` : "";
+  // In and out (schema v8, 2026-10-22) only where the provider reported
+  // them; tok/s only when the backend could measure it (routes/run_routes.py).
+  const split = run.input_tokens != null && run.output_tokens != null
+    ? `${run.input_tokens.toLocaleString()} in, ${run.output_tokens.toLocaleString()} out` : "";
   return [run.model, took, run.total_tokens != null ? `${run.total_tokens.toLocaleString()} tokens` : "tokens not reported",
+    split, run.tokens_per_second != null ? `${run.tokens_per_second} tok/s` : "",
     run.tool_calls ? `${run.tool_calls} tool${run.tool_calls === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
 }
 

@@ -52,9 +52,11 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
     words = text.split()
     command = words[0].lower() if words else ""
     reply: list[str] = []
+    times: list[float] = []
 
     async def say(piece: str, pause: float = 0.0):
         reply.append(piece)
+        times.append(time.time())
         if pause:
             await asyncio.sleep(pause)
         return piece
@@ -112,10 +114,10 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
     else:
         yield await say("You said: " + text + "\n")
     session_manager.append_message(session_id, "assistant", "".join(reply))
-    _record_usage(session_id, text, "".join(reply), started)
+    _record_usage(session_id, text, "".join(reply), started, times)
 
 
-def _record_usage(session_id: str, prompt: str, reply: str, started: float) -> None:
+def _record_usage(session_id: str, prompt: str, reply: str, started: float, times: list) -> None:
     """The scripted model reports usage the way a provider does, so runs and
     the context meter have data: about four characters a token, and a
     growing prompt cache. Only for this test backend."""
@@ -132,6 +134,8 @@ def _record_usage(session_id: str, prompt: str, reply: str, started: float) -> N
         "started_at": started, "ended_at": time.time(), "outcome": "finished", "stop_confirmed": None,
         "tool_calls": 1 if prompt.startswith("tool") else 0, "total_tokens": prompt_tokens + output_tokens,
         "cache_read_tokens": cached, "usage_complete": 1, "detail": "",
+        "input_tokens": prompt_tokens, "output_tokens": output_tokens, "cache_write_tokens": None,
+        "first_output_at": times[0] if times else None, "last_output_at": times[-1] if times else None,
     }, [])
     usage = {"input_tokens": prompt_tokens - cached, "cache_read_input_tokens": cached, "output_tokens": output_tokens}
     if session.get("model_endpoint_id"):

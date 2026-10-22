@@ -486,7 +486,9 @@ class InteractiveLive(unittest.TestCase):
             self.assertIn(part, screen.text())
         self.send("lines 300\r")
         self.wait_for("line 00300")
-        self.wait_for("cost n/a · tok/s n/a")
+        # The reply's metrics line: in/out and tok/s from its run (schema v8).
+        self.wait_for(" out · ")
+        self.wait_for("tok/s · ")
         seen = set()
         for _ in range(60):
             seen.update(int(n) for n in re.findall(r"line (\d{5}) bold and code text", self.screen().text()))
