@@ -32,6 +32,24 @@ def calendar_items(user, start, end):
     return crm_service.calendar_events(user, start, end)
 
 
+def task_items(user, query):
+    from .service import key
+    words = key(query).split()
+    tasks = [t for t in crm_service.tasks(user) if t["status"] not in ("done", "dismissed")
+             and all(w in key(" ".join(str(t.get(k) or "") for k in ("title", "notes", "contact", "project"))) for w in words)]
+    tasks.sort(key=lambda t: (t.get("due_date") or "9999", t["created_at"]))
+    return [{k: t.get(k) for k in ("id", "title", "status", "priority", "due_date", "contact", "project")} for t in tasks[:20]]
+
+
+def task_context(user, task_id):
+    from .work import _facts, _sources
+    try:
+        task = crm_service.task(user, task_id)
+    except KeyError:
+        return None
+    return f"Kairos CRM task ID: {task['id']}\n" + _facts(task) + "\n\n" + _sources(user, task)
+
+
 def home_cards(user):
     zone = ZoneInfo(crm_service.settings(user)["timezone"])
     now = datetime.now(zone)

@@ -445,6 +445,58 @@ async def _list_tasks(args, ctx):
     return "\n".join(memory_tools.describe_task(t) for t in memory_tools.list_tasks()) or "No tasks configured."
 
 
+def _tab_task_owner(ctx):
+    from core.auth import auth_enabled, SINGLE_USER
+    from core.session_manager import session_manager
+    if not auth_enabled():
+        return SINGLE_USER
+    # An admin flag is not a task-owner identity. Never expose another user's
+    # private records through an ownerless chat or background agent.
+    return (session_manager.get_session(ctx.session_id) or {}).get("owner_user") if ctx.session_id else None
+
+
+@register("list_tab_tasks",
+    "Find open tasks in enabled Kairos tabs, including CRM. Use this for CRM follow-ups, not list_tasks (scheduled jobs). "
+    "Search by task title, person or project, then read_tab_task for the full requirements. Read-only.",
+    _object({"query": _str("Task title, person or project; omit to list open tasks"),
+             "tab": _str("Optional tab slug returned by this tool")}), core=True)
+async def _list_tab_tasks(args, ctx):
+    import json
+    from core import tab_hooks
+    from core.untrusted import wrap_untrusted
+    owner = _tab_task_owner(ctx)
+    if not owner:
+        return "Task lookup requires a chat with an authenticated owner."
+    query, slug = args.get("query", ""), args.get("tab")
+    if not isinstance(query, str) or (slug is not None and not isinstance(slug, str)):
+        return "Enter a text query and optional tab slug."
+    items = await tab_hooks.task_items(owner, query, slug)
+    if items and ctx.turn_taint:
+        ctx.turn_taint.mark("tab task summaries")
+    return wrap_untrusted("tab task summaries", json.dumps(items, ensure_ascii=False)) if items else "No matching open tasks in enabled tabs. Check the tab is enabled and the task title."
+
+
+@register("read_tab_task",
+    "Read one owned task's current requirements, notes and source evidence from an enabled Kairos tab such as CRM. "
+    "Use tab and task_id returned by list_tab_tasks. This does not change its status.",
+    _object({"tab": _str("Tab slug from list_tab_tasks"), "task_id": _str("Exact task ID from list_tab_tasks")}, ("tab", "task_id")), core=True)
+async def _read_tab_task(args, ctx):
+    from core import tab_hooks
+    from core.untrusted import wrap_untrusted
+    owner = _tab_task_owner(ctx)
+    if not owner:
+        return "Task lookup requires a chat with an authenticated owner."
+    slug, task_id = args.get("tab"), args.get("task_id")
+    if not isinstance(slug, str) or not isinstance(task_id, str) or len(task_id) > 200:
+        return "Enter the tab slug and task ID returned by list_tab_tasks."
+    text = await tab_hooks.task_context(owner, slug, task_id)
+    if text is None:
+        return "Task not found for this chat's owner, or its tab is disabled."
+    if ctx.turn_taint:
+        ctx.turn_taint.mark("tab task requirements and source evidence")
+    return wrap_untrusted("tab task requirements and source evidence", text)
+
+
 @register(
     "list_upcoming_events",
     "List upcoming Calendar events and due-dated Notes for the next 14 days. Use this for "
