@@ -270,35 +270,54 @@ REQUEST = {"id": "req1", "tool": "Bash", "title": "Run a command", "target": "py
                        {"id": "reject", "label": "Reject", "behavior": "deny"}]}
 
 
+def make_app(conn=None, theme="night", depth="16"):
+    from kairos_cli.tui import KairosApp
+    pal = palettes.Palette(theme, depth)
+    app = KairosApp(conn or FakeConnection(), pal, mascot.Kip(pal, motion=False), motion=False, cwd=str(ROOT))
+    app.conn.status = {"instance": "test"}
+    return app
+
+
+def open_view(app, items=(), session=None):
+    from kairos_cli.model import SessionView
+    view = SessionView(session or {"id": "s1", "title": "A chat", "model_endpoint_id": "m1", "permission_mode": "base"})
+    view.items = list(items)
+    app.views[view.id] = view
+    app.tabs.append(view.id)
+    app.active = view.id
+    return view
+
+
 class PermissionRoutingTests(unittest.IsolatedAsyncioTestCase):
-    def repl(self, conn):
-        from kairos_cli.repl import Repl
-        repl = Repl(conn, palettes.Palette("night", "16"), mascot.Kip(palettes.Palette("night", "16")))
-        repl.modal = dict(REQUEST)
-        return repl
+    def app(self, conn):
+        from kairos_cli.model import ReplyItem
+        app = make_app(conn)
+        view = open_view(app, [ReplyItem(turn_id="t1", ts=0)])
+        app.set_modal(view, dict(REQUEST))
+        return app, view
 
     async def test_each_number_sends_its_own_choice_id(self):
         for index, expected in enumerate(["once", "session", "forever", "reject"]):
             conn = FakeConnection()
-            repl = self.repl(conn)
-            await repl.answer(index)
+            app, view = self.app(conn)
+            await app.answer(index)
             self.assertEqual(conn.posts, [("/api/permissions/req1/answer", {"choice": expected})])
-            self.assertIsNone(repl.modal)
+            self.assertIsNone(app.modal)
 
     async def test_escape_rejects_and_a_bad_number_sends_nothing(self):
         conn = FakeConnection()
-        repl = self.repl(conn)
-        await repl.answer(7)
+        app, view = self.app(conn)
+        await app.answer(7)
         self.assertEqual(conn.posts, [])
-        await repl.answer(None)
+        await app.answer(None)
         self.assertEqual(conn.posts, [("/api/permissions/req1/answer", {"choice": "reject"})])
 
     async def test_answered_in_the_app_first(self):
         conn = FakeConnection(gone=True)
-        repl = self.repl(conn)
-        await repl.answer(0)
-        self.assertIsNone(repl.modal)
-        self.assertIn("Answered in the app", "".join(repl.pending))
+        app, view = self.app(conn)
+        await app.answer(0)
+        self.assertIsNone(app.modal)
+        self.assertIn("Answered in the app.", view.reply.notes)
 
 
 class HeadlessDecisionTests(unittest.IsolatedAsyncioTestCase):
@@ -326,6 +345,209 @@ class ModelMatchTests(unittest.TestCase):
         self.assertEqual(chat.match_model(choices, "a1")["id"], "a1")
         self.assertEqual(chat.match_model(choices, "sonnet")["id"], "a1")
         self.assertIsNone(chat.match_model(choices, "zzz"))
+
+
+class WidgetTests(unittest.TestCase):
+    """The full-screen view's pieces (kairos_cli/widgets.py)."""
+
+    def plain(self, fragments):
+        return "".join(text for _, text in fragments)
+
+    def test_bars_dither_the_empty_part_and_never_invent(self):
+        from kairos_cli import widgets
+        s = widgets.Styles(palettes.Palette("night", "truecolor"))
+        self.assertEqual(self.plain(widgets.bar(0.5, 10, s)), "█████" + "⡪⢕⡪⢕⡪")
+        self.assertEqual(self.plain(widgets.bar(None, 4, s)), "⢕⡪⢕⡪")      # no number: texture only
+        self.assertEqual(self.plain(widgets.bar(1.7, 4, s)), "████")
+        self.assertEqual(widgets.width_of(widgets.bar(0.33, 17, s)), 17)
+
+    def test_charts_are_solid_columns(self):
+        from kairos_cli import widgets
+        s = widgets.Styles(palettes.Palette("night", "truecolor"))
+        self.assertEqual(self.plain(widgets.sparkline([0, 1, 2, 4], 6, s)), "··" + " ▂▄█")
+        rows = [self.plain(r) for r in widgets.histogram([0, 2, 4], 2, s)]
+        self.assertEqual(rows, ["  █", " ██", "▔▔▔"])
+
+    def test_the_ring_is_whole_when_idle_and_open_when_working(self):
+        from kairos_cli import widgets
+        s = widgets.Styles(palettes.Palette("night", "truecolor"))
+        idle = self.plain(widgets.ring(None, s))
+        working = {self.plain(widgets.ring(t / 8, s)) for t in range(8)}
+        self.assertEqual(len(idle), 2)
+        self.assertNotIn(idle, working)
+        self.assertEqual(len(working), 8)
+
+    def test_styles_use_the_fixed_tables(self):
+        from kairos_cli import widgets
+        self.assertEqual(widgets.Styles(palettes.Palette("night", "truecolor")).fg("text"), "fg:#F3EADB")
+        self.assertEqual(widgets.Styles(palettes.Palette("night", "256")).fg("text"), "fg:#ffd7d7")   # index 224
+        self.assertEqual(widgets.Styles(palettes.Palette("night", "16")).fg("danger"), "fg:ansibrightred")
+        self.assertEqual(widgets.Styles(palettes.Palette("night", "none")).fg("text"), "")
+
+    def test_halftone_fields(self):
+        from kairos_cli import widgets
+        s = widgets.Styles(palettes.Palette("night", "truecolor"))
+        full = widgets.field(4, 2, lambda x, y: 1.0, s)
+        empty = widgets.field(4, 2, lambda x, y: 0.0, s)
+        self.assertEqual(self.plain(full[0]), "⣿⣿⣿⣿")
+        self.assertEqual(self.plain(empty[0]), "    ")
+        dune = "".join(self.plain(r) for r in widgets.field(20, 6, widgets.dune, s))
+        self.assertTrue(dune.strip())
+
+
+class ModelTests(unittest.TestCase):
+    """Data for the full-screen view (kairos_cli/model.py): only backend
+    fields, and n/a where there are none."""
+
+    def test_metrics_come_from_the_run_and_cost_is_never_invented(self):
+        from kairos_cli import model
+        run = {"started_at": 100.0, "ended_at": 109.0, "total_tokens": 113000, "cache_read_tokens": 79100,
+               "tool_calls": 2, "usage_complete": 1, "outcome": "finished"}
+        metrics = model.run_metrics(run)
+        self.assertEqual((metrics["seconds"], metrics["tokens"], metrics["cached_percent"], metrics["tools"]),
+                         (9.0, 113000, 70, 2))
+        self.assertIsNone(metrics["cost"])
+        self.assertIsNone(metrics["tok_per_s"])
+        self.assertIsNone(model.run_metrics({"started_at": 1, "ended_at": 2, "total_tokens": None,
+                                             "cache_read_tokens": None})["cached_percent"])
+        self.assertIsNone(model.run_metrics(None))
+
+    def test_a_reply_finds_its_run(self):
+        from kairos_cli import model
+        runs = [{"id": "a", "started_at": 100, "ended_at": 110}, {"id": "b", "started_at": 200, "ended_at": 230}]
+        self.assertEqual(model.match_run(229, runs)["id"], "b")
+        self.assertEqual(model.match_run(111, runs)["id"], "a")
+        self.assertIsNone(model.match_run(150, runs))
+
+    def test_tokens_per_hour_today(self):
+        import datetime
+        from kairos_cli import model
+        now = datetime.datetime(2026, 10, 22, 15, 0).timestamp()
+
+        def at(hour):
+            return datetime.datetime(2026, 10, 22, hour, 5).timestamp()
+        runs = [{"started_at": at(9), "total_tokens": 100}, {"started_at": at(9), "total_tokens": 50},
+                {"started_at": at(14), "total_tokens": 7}, {"started_at": at(14), "total_tokens": None},
+                {"started_at": now - 86400 * 2, "total_tokens": 999}]
+        hours = model.tokens_per_hour_today(runs, now)
+        self.assertEqual((hours[9], hours[14], sum(hours)), (150, 7, 157))
+        self.assertIsNone(model.tokens_per_hour_today([{"started_at": at(9), "total_tokens": None}], now))
+
+    def test_plans_only_for_subscriptions(self):
+        from kairos_cli import model
+        quotas = {"providers": [{"provider": "claude", "windows": [{"name": "5-hour", "used_percent": 35, "resets_at": 1},
+                                                                   {"name": "weekly", "used_percent": 61, "resets_at": 2}]}]}
+        self.assertEqual(model.plan_window(quotas, "claude_cli")["name"], "weekly")
+        self.assertIsNone(model.plan_window(quotas, "api"))
+        self.assertIsNone(model.plan_window(quotas, "codex_cli"))
+        self.assertEqual(model.resets_in(1000 + 5 * 86400 + 30, now=1000), "↺5d")
+
+    def test_the_projects_tree(self):
+        from kairos_cli import model
+        sessions = [{"id": "c1", "title": "Hero copy", "project_id": "p1", "updated_at": 5},
+                    {"id": "c2", "title": "Loose chat", "updated_at": 9, "launch_dir": str(ROOT)},
+                    {"id": "c3", "title": "Older chat", "updated_at": 1},
+                    {"id": "f1", "title": "Fix parser", "is_forge": True, "updated_at": 7}]
+        nodes = model.build_tree(sessions, [{"id": "fp", "name": "parser-repo"}],
+                                 {"fp": [{"id": "f1", "title": "Fix parser", "forge": {}}]},
+                                 [{"id": "p1", "name": "Website launch"}], "c1", {"c1"}, {"f1"}, set(), str(ROOT))
+        self.assertEqual([(n.kind, n.label) for n in nodes],
+                         [("group", "parser-repo"), ("session", "Fix parser"), ("group", "Website launch"),
+                          ("session", "Hero copy"), ("group", "chats"), ("session", "Loose chat"),
+                          ("session", "Older chat")])
+        self.assertTrue(nodes[1].busy and nodes[3].active and nodes[2].active)
+        collapsed = model.build_tree(sessions, [], {}, [{"id": "p1", "name": "Website launch"}], None, set(), set(),
+                                     {"project:p1"})
+        self.assertEqual([n.label for n in collapsed][:2], ["Website launch", "chats"])
+
+    def test_untrusted_titles_are_plain(self):
+        from kairos_cli import model
+        nodes = model.build_tree([{"id": "x", "title": "\x1b[2Jevil\x07 title", "updated_at": 1}], [], {}, [], None,
+                                 set(), set(), set())
+        self.assertEqual(nodes[1].label, "evil title")
+
+
+class FullScreenRenderTests(unittest.TestCase):
+    """What the transcript draws, without a terminal."""
+
+    def text(self, lines):
+        return "\n".join("".join(fragment[1] for fragment in line) for line in lines)
+
+    def test_turns_have_headers_actions_and_a_metrics_line(self):
+        from kairos_cli.model import ReplyItem, UserItem
+        app = make_app()
+        reply = ReplyItem(turn_id="t", ts=1_700_000_000)
+        reply.feed("Hi. What are we working on?\n")
+        reply.steps.append({"phase": "finished", "name": "read_file", "summary": "a.py", "ok": True, "seconds": 0.4})
+        reply.finish("done")
+        reply.metrics = {"seconds": 9.0, "tokens": 113000, "cached_percent": 70, "tools": 1, "complete": True,
+                         "cost": None, "tok_per_s": None}
+        open_view(app, [UserItem("hello", 1_700_000_000), reply])
+        lines, clicks = app.main_lines(120, 40)
+        text = self.text(lines)
+        for expected in ("You ·", "hello", "Kairos ·", "1 action ▸", "Hi. What are we working on?",
+                         "9.0s · 113k tokens · 70% cached · 1 tool · cost n/a · tok/s n/a", "Fork", "Copy"):
+            self.assertIn(expected, text)
+        self.assertNotIn("read_file", text)          # collapsed until asked
+        row = next(r for r, regions in clicks.items() if len(regions) == 2)
+        self.assertIn("Fork", self.text([lines[row]]))
+        actions_row = next(r for r, regions in clicks.items() if len(regions) == 1)
+        clicks[actions_row][0][2]()                  # click "1 action"
+        self.assertIn("read_file", self.text(app.main_lines(120, 40)[0]))
+
+    def test_no_run_means_n_a(self):
+        from kairos_cli.model import ReplyItem
+        app = make_app()
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.feed("ok\n")
+        reply.finish("done")
+        open_view(app, [reply])
+        self.assertIn("tokens n/a · cost n/a · tok/s n/a", self.text(app.main_lines(120, 40)[0]))
+
+    def test_a_running_reply_shows_the_working_line_and_its_tail(self):
+        from kairos_cli.model import ReplyItem
+        app = make_app()
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.feed("first line\nhalf a li")
+        open_view(app, [reply])
+        text = self.text(app.main_lines(120, 40)[0])
+        self.assertIn("first line", text)
+        self.assertIn("half a li", text)
+        self.assertIn("Writing", text)
+        self.assertIn("chars/s", text)
+
+    def test_the_empty_state_and_the_status_line(self):
+        app = make_app(depth="truecolor")
+        open_view(app, [])
+        text = self.text(app.main_lines(130, 40)[0])
+        self.assertIn("The right moment, in your terminal.", text)
+        self.assertIn("type to start", text)
+        status = "".join(fragment[1] for fragment in app.status_line())
+        self.assertIn("cost n/a", status)
+        self.assertIn("plan ", status)
+        self.assertIn("context ", status)
+
+    def test_search_scrolls_to_a_match(self):
+        from kairos_cli.model import NoteItem
+        app = make_app()
+        open_view(app, [NoteItem(f"note {i}") for i in range(80)])
+        app.scroll_info = (60, 80, 20)
+        app.find("note 3")
+        self.assertIsNotNone(app.search_hit)
+        self.assertIn("note 3", self.text([app.main_lines(120, 20)[0][app.search_hit]]))
+        self.assertGreater(app.view.scroll, 0)
+
+
+class ScreenEmulatorTests(unittest.TestCase):
+    def test_reads_back_what_a_full_screen_app_drew(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from kairos_cli_vt import Screen
+        screen = Screen(20, 4)
+        screen.feed("before\r\n\x1b[?1049h\x1b[2J\x1b[2;3Hhello\x1b[1;1H\x1b[31mtop\x1b[0m\x1b]0;title\x07")
+        self.assertTrue(screen.ever_alternate)
+        self.assertEqual(screen.text().splitlines()[:2], ["top", "  hello"])
+        screen.feed("\x1b[?1049l")
+        self.assertEqual(screen.text().splitlines()[0], "before")
 
 
 # -- snapshots --------------------------------------------------------------------------
@@ -371,7 +593,7 @@ def screens(pal):
 
 class SnapshotTests(unittest.TestCase):
     def test_main_screens_in_light_dark_256_and_16_colours(self):
-        from kairos_cli.repl import COLOR_SYSTEMS
+        from kairos_cli.tui import COLOR_SYSTEMS
         svg_dir = os.environ.get("KAIROS_CLI_SNAPSHOT_SVG")
         SNAPSHOTS.mkdir(parents=True, exist_ok=True)
         for theme, depth in VARIANTS:

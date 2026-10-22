@@ -21,15 +21,18 @@ COMMANDS = [
     ("revert", "<file>", "Put one file back as it was"),
     ("agents", "[reply|dismiss <n> [text]]", "Agents and their inbox"),
     ("permissions", "", "Standing grants and this chat's mode"),
+    ("models", "", "Model connections, usage and what this computer reports"),
+    ("usage", "", "This chat's tokens per hour today, stream rate and context"),
+    ("copy", "", "Copy the last reply to the clipboard"),
     ("tools", "", "Show the last reply's tool steps in full"),
-    ("clear", "", "Clear the screen"),
+    ("clear", "", "Clear this tab's view (the chat stays)"),
     ("quit", "", "Leave (the chat stays in Kairos)"),
 ]
 APP_ONLY = {
     "capture": "Screen capture", "computer": "Computer use", "store": "The Tool Store",
     "settings": "Settings", "vault": "The vault", "memory": "Memory", "skills": "Skills",
     "workspace": "Workspaces", "demo": "The demo", "setup": "Setup", "shortcuts": "Shortcuts",
-    "find": "Find", "terminal": "The terminal panel", "models": "Model connections", "star": "Starring",
+    "find": "Find", "terminal": "The terminal panel", "star": "Starring",
     "delete": "Deleting chats",
 }
 NAMES = [name for name, _, _ in COMMANDS] + ["exit"]

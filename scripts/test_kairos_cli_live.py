@@ -419,74 +419,102 @@ class ForgeAndAgentsLive(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(sys.platform == "win32", "ConPTY harness")
 class InteractiveLive(unittest.TestCase):
-    """The interactive view in a real pseudo-terminal (ConPTY through
-    pywinpty): the Phase 1 spike's checks, kept as a test. A long streamed
-    reply lands in scrollback line by line, every line exactly once, and the
-    alternate screen is never taken; a number key answers a prompt."""
+    """The full-screen view in a real pseudo-terminal (ConPTY through
+    pywinpty), read back through a small screen emulator
+    (scripts/kairos_cli_vt.py). It runs on the alternate screen (the 2026-10-22
+    amendment), so history scrolls inside it: a long reply must be reachable
+    line by line with PgUp, and a number key must answer a prompt."""
 
-    def drive(self, steps, timeout=120):
-        import re
+    COLS, ROWS = 160, 45
+
+    def start(self, extra=()):
         try:
             from winpty import PtyProcess
         except ImportError:
             self.skipTest("pywinpty is not installed")
-        approver = approve_next("allow")
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from kairos_cli_vt import Screen
+        self.Screen = Screen
+        self.approver = approve_next("allow")
         env = {**os.environ, "PYTHONPATH": str(ROOT / "cli"), "PYTHONIOENCODING": "utf-8", "WT_SESSION": "test"}
-        process = PtyProcess.spawn([sys.executable, "-X", "utf8", "-m", "kairos_cli", "--port", str(BACKEND.port),
-                                    "--no-start", "--model", "Scripted", "--no-motion"],
-                                   dimensions=(40, 120), env=env, cwd=str(ROOT))
-        chunks = []
-        reader = threading.Thread(target=lambda: self._read(process, chunks), daemon=True)
-        reader.start()
+        self.process = PtyProcess.spawn([sys.executable, "-X", "utf8", "-m", "kairos_cli", "--port", str(BACKEND.port),
+                                         "--no-start", "--model", "Scripted", "--no-motion", *extra],
+                                        dimensions=(self.ROWS, self.COLS), env=env, cwd=str(ROOT))
+        self.chunks = []
+        threading.Thread(target=self._read, daemon=True).start()
+        self.addCleanup(self.stop)
 
-        def plain():
-            text = "".join(chunks)
-            text = re.sub(r"\x1b\][^\x07]*\x07", "", text)
-            return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
-
-        def wait_for(pattern, seconds=60):
-            deadline = time.time() + seconds
-            while time.time() < deadline:
-                if re.search(pattern, plain()):
-                    return
-                time.sleep(0.1)
-            self.fail(f"never saw {pattern!r}")
-        try:
-            for kind, value in steps:
-                if kind == "wait":
-                    wait_for(value)
-                elif kind == "send":
-                    process.write(value)
-                    time.sleep(0.3)
-        finally:
-            if process.isalive():
-                process.write("\x04")
-                time.sleep(1.5)
-            if process.isalive():
-                process.terminate(force=True)
-            approver.join(timeout=2)
-        return "".join(chunks), plain()
-
-    @staticmethod
-    def _read(process, chunks):
+    def _read(self):
         while True:
             try:
-                chunks.append(process.read(65536))
+                self.chunks.append(self.process.read(65536))
             except EOFError:
                 return
 
-    def test_a_long_reply_keeps_every_line_in_scrollback(self):
+    def stop(self):
+        if self.process.isalive():
+            self.process.write("\x04")
+            time.sleep(1.5)
+        if self.process.isalive():
+            self.process.terminate(force=True)
+        self.approver.join(timeout=2)
+
+    def screen(self):
+        screen = self.Screen(self.COLS, self.ROWS)
+        screen.feed("".join(self.chunks))
+        return screen
+
+    def wait_for(self, text, seconds=60):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if text in self.screen().text():
+                return
+            time.sleep(0.2)
+        self.fail(f"never saw {text!r}:\n{self.screen().text()}")
+
+    def send(self, keys, pause=0.4):
+        self.process.write(keys)
+        time.sleep(pause)
+
+    def test_the_layout_and_a_long_reply_scrolled_inside_the_app(self):
         import re
-        raw, text = self.drive([("wait", "help for commands"), ("send", "lines 600\r"), ("wait", r"done in [0-9.]+s")])
-        self.assertNotIn("\x1b[?1049h", raw, "the alternate screen must not be used")
-        numbers = [int(n) for n in re.findall(r"line (\d{5}) bold and code text", text)]
-        self.assertEqual(sorted(numbers), list(range(1, 601)))
-        self.assertIn("def hello", text)
+        self.start()
+        self.wait_for("Projects")
+        screen = self.screen()
+        self.assertTrue(screen.ever_alternate, "the full-screen view uses the alternate screen")
+        for part in ("Projects", "[alt+p] projects", "effort", "cost n/a", "context", "The right moment"):
+            self.assertIn(part, screen.text())
+        self.send("lines 300\r")
+        self.wait_for("line 00300")
+        self.wait_for("cost n/a · tok/s n/a")
+        seen = set()
+        for _ in range(60):
+            seen.update(int(n) for n in re.findall(r"line (\d{5}) bold and code text", self.screen().text()))
+            if 1 in seen:
+                break
+            self.send("\x1b[5~", 0.3)          # PgUp
+        self.assertEqual(seen, set(range(1, 301)), "every line is reachable by scrolling")
+        self.send("\x1b[1;5F", 0.5)            # ctrl+end: back to the newest
+        self.assertIn("line 00300", self.screen().text())
 
     def test_a_number_key_answers_a_permission_prompt(self):
-        _, text = self.drive([("wait", "help for commands"), ("send", "ask\r"), ("wait", "Kairos wants to use Bash"),
-                              ("send", "1"), ("wait", r"The command was allowed\.")])
-        self.assertIn("Allowed: Allow once", text)
+        self.start()
+        self.wait_for("Projects")
+        self.send("ask\r")
+        self.wait_for("Kairos wants to use Bash")
+        self.assertIn("1-9 answers the prompt above", self.screen().text())
+        self.send("1")
+        self.wait_for("The command was allowed.")
+        self.assertIn("Allowed: Allow once", self.screen().text())
+
+    def test_typing_while_a_reply_runs_queues_the_message(self):
+        self.start()
+        self.wait_for("Projects")
+        self.send("slow 3\r")
+        self.wait_for("tick 2")
+        self.send("hello after\r")
+        self.wait_for("queued · hello after")
+        self.wait_for("You said: hello after", seconds=30)
 
 
 if __name__ == "__main__":

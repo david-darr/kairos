@@ -17,11 +17,8 @@ import argparse
 import asyncio
 import os
 import sys
-import time
 
-from rich.console import Console, Group
-from rich.live import Live
-from rich.table import Table
+from rich.console import Console
 from rich.text import Text
 
 from . import __version__, chat, forge as forge_api, render
@@ -87,46 +84,15 @@ def build_parser(sub: str | None = None) -> argparse.ArgumentParser:
 
 
 def stderr_console(palette) -> Console:
-    from .repl import COLOR_SYSTEMS
+    from .tui import COLOR_SYSTEMS
     return Console(file=sys.stderr, color_system=COLOR_SYSTEMS[palette.depth], theme=palette.theme(),
                    highlight=False, markup=False, emoji=False)
 
 
 def stdout_console(palette) -> Console:
-    from .repl import COLOR_SYSTEMS
+    from .tui import COLOR_SYSTEMS
     return Console(color_system=COLOR_SYSTEMS[palette.depth], theme=palette.theme(), highlight=False,
                    markup=False, emoji=False)
-
-
-def welcome(palette, kip: Kip, width: int, seconds: float, lines: list[Text], sky: bool = True):
-    """The launch screen: a halftone sky over Kip, the wordmark and tagline.
-    The sky is drawn only on truecolour terminals with motion on (spec 4.5)."""
-    sky = render.halftone_sky(min(width - 4, 76), 3, palette, seconds=seconds) if sky else []
-    right = render.wordmark(palette) + [Text(render.TAGLINE, palette.style("dim", italic=True)), Text("")] + lines
-    grid = Table.grid(padding=(0, 3))
-    banner = kip.banner("idle", seconds)
-    if banner:
-        grid.add_column(no_wrap=True)
-    grid.add_column()
-    if banner:
-        grid.add_row(Text("\n").join(banner), Group(*right))
-    else:
-        grid.add_row(Group(*right))
-    return Group(*[Text("  ").append_text(line) for line in sky], *([Text("")] if sky else []), grid, Text(""))
-
-
-def show_welcome(console: Console, palette, kip: Kip, motion: bool, lines: list[Text]) -> None:
-    width = console.size.width
-    if motion and palette.truecolor and console.is_terminal:
-        with Live(welcome(palette, kip, width, 0.0, lines), console=console, refresh_per_second=16,
-                  transient=False) as live:
-            start = time.monotonic()
-            while (elapsed := time.monotonic() - start) < 1.3:
-                live.update(welcome(palette, kip, width, elapsed, lines))
-                time.sleep(1 / 16)
-            live.update(welcome(palette, kip, width, 1.3, lines))
-    else:
-        console.print(welcome(palette, kip, width, 10.0, lines, sky=motion and palette.truecolor))
 
 
 async def connect(args, palette, interactive: bool) -> Connection:
@@ -148,7 +114,7 @@ async def connect(args, palette, interactive: bool) -> Connection:
     return conn
 
 
-async def pick_session(conn: Connection, args, interactive: bool, repl=None) -> dict:
+async def pick_session(conn: Connection, args, interactive: bool) -> dict:
     if args.cont:
         found = await chat.latest_here(conn)
         if found:
@@ -158,8 +124,8 @@ async def pick_session(conn: Connection, args, interactive: bool, repl=None) -> 
         if not found:
             raise KairosError(f"No chat matches {one_line(args.resume, 60)}.")
         return found
-    if args.resume == "" and interactive and repl is not None:
-        found = await repl.pick_session()
+    if args.resume == "" and interactive:
+        found = await chat.latest_here(conn)
         if found:
             return found
     if args.resume == "" and not interactive:
@@ -201,34 +167,26 @@ async def run_headless(args, palette) -> int:
 
 
 async def run_interactive(args, palette, first: str | None = None, forge_task: dict | None = None) -> int:
-    from .repl import Repl
+    """The full-screen view (vault spec, Amendment 2026-10-22)."""
+    from .tui import KairosApp
     motion = not args.no_motion and palette.truecolor
     kip = Kip(palette, enabled=not args.no_mascot, motion=motion, ascii_only=palette.depth == "none")
-    console = stdout_console(palette)
     conn = await connect(args, palette, interactive=True)
     try:
         choices = await chat.model_choices(conn)
-        status = conn.status
-        where = f"{'Kairos (' + status['instance'] + ')' if status.get('instance') else 'Kairos'} · {conn.base_url}"
-        how = "paired in the app" if conn.paired else "signed in" if status.get("auth_enabled") else "open dev server"
-        show_welcome(console, palette, kip, motion, [
-            Text(where, palette.style("dim")),
-            Text(f"{how} · {os.path.basename(os.getcwd()) or os.getcwd()}", palette.style("meta")),
-            Text("/help for commands · ctrl+d to leave", palette.style("meta")),
-        ])
-        repl = Repl(conn, palette, kip, motion=motion, instance=args.instance or "", open_app=not args.port)
-        repl.choices = choices
+        app = KairosApp(conn, palette, kip, motion=motion, instance=args.instance or "", open_app=not args.port)
         if forge_task:
             created = await forge_api.start(conn, forge_task["task"], worktree=forge_task["worktree"],
                                             mode=forge_task["mode"])
             session = await ensure_model(conn, created, args.model, choices)
             first = forge_task["task"]
         else:
-            session = await pick_session(conn, args, interactive=True, repl=repl)
+            session = await pick_session(conn, args, interactive=True)
             session = await ensure_model(conn, session, args.model, choices)
-        if not session.get("model_endpoint_id") and choices:
-            console.print(Text("  This chat has no model yet. Choose one with /model.", palette.style("warn")))
-        return await repl.run(session, choices, first_prompt=first)
+        if args.resume == "":
+            # Open with the resume picker over the chat this folder was in.
+            asyncio.get_running_loop().call_later(0.5, lambda: asyncio.ensure_future(app.command("resume", "")))
+        return await app.run(session, choices, first_prompt=first)
     finally:
         await conn.close()
 

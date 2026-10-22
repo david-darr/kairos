@@ -47,6 +47,7 @@ def _chunks(text: str, size: int = 7):
 
 async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, reference_context="",
                       references=None, claimed=False, **_):
+    started = time.time()
     session_manager.append_message(session_id, "user", text)
     words = text.split()
     command = words[0].lower() if words else ""
@@ -111,6 +112,32 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
     else:
         yield await say("You said: " + text + "\n")
     session_manager.append_message(session_id, "assistant", "".join(reply))
+    _record_usage(session_id, text, "".join(reply), started)
+
+
+def _record_usage(session_id: str, prompt: str, reply: str, started: float) -> None:
+    """The scripted model reports usage the way a provider does, so runs and
+    the context meter have data: about four characters a token, and a
+    growing prompt cache. Only for this test backend."""
+    import uuid
+    from core import session_manager_store, token_usage
+    session = session_manager.get_session(session_id) or {}
+    history = sum(len(m.get("content") or "") for m in session.get("messages") or [] if isinstance(m.get("content"), str))
+    prompt_tokens = 1200 + history // 4
+    output_tokens = max(1, len(reply) // 4)
+    cached = int(prompt_tokens * 0.7) if len(session.get("messages") or []) > 2 else 0
+    session_manager_store.record_run({
+        "id": uuid.uuid4().hex, "parent_id": None, "surface": f"chat:{session_id}", "session_id": session_id,
+        "agent_id": None, "task_id": None, "endpoint_id": session.get("model_endpoint_id"), "model": "scripted-1",
+        "started_at": started, "ended_at": time.time(), "outcome": "finished", "stop_confirmed": None,
+        "tool_calls": 1 if prompt.startswith("tool") else 0, "total_tokens": prompt_tokens + output_tokens,
+        "cache_read_tokens": cached, "usage_complete": 1, "detail": "",
+    }, [])
+    usage = {"input_tokens": prompt_tokens - cached, "cache_read_input_tokens": cached, "output_tokens": output_tokens}
+    if session.get("model_endpoint_id"):
+        token_usage.record_usage(session["model_endpoint_id"], usage)
+    session_manager.set_context_state(session_id, token_usage.build_context_state(
+        usage, {"effective": 200000, "estimated": False, "source": "scripted"}, "scripted-1"))
 
 
 chat_service.stream_message = fake_stream
