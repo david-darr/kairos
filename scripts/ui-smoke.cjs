@@ -990,7 +990,12 @@ app.whenReady().then(async () => {
           await js("[...document.querySelectorAll('.computer-steps-tabs .btn')].find(b => b.textContent === 'Click').click()");
           await waitFor("document.querySelector('.computer-steps-image')?.src.endsWith('/3/marker.jpg') && document.querySelector('.computer-steps-image').naturalWidth > 0");
           await waitFor("document.getAnimations().filter(a => a.playState === 'running' && a.effect?.target?.closest?.('.modal-backdrop')).length === 0");
-          if (label === 'mobile') assert.ok(await js("document.querySelector('.computer-steps-dialog').classList.contains('ms-sheet-surface')"), 'Steps is a sheet on phone');
+          if (label === 'mobile') {
+            assert.ok(await js("document.querySelector('.computer-steps-dialog').classList.contains('ms-sheet-surface')"), 'Steps is a sheet on phone');
+            // The phone tab bar stays under the sheet: its footer is on top and fully on screen.
+            assert.ok(await js("!!document.elementFromPoint(innerWidth / 2, innerHeight - 24)?.closest('.computer-steps-dialog, .modal-backdrop')"), 'Steps sheet covers the tab bar');
+            assert.ok(await js("(() => { const r = document.querySelector('.computer-steps-footer').getBoundingClientRect(); return r.bottom <= innerHeight && document.elementFromPoint(r.left + r.width / 2, r.bottom - 6)?.closest('.computer-steps-footer'); })()"), 'Steps footer is reachable above the tab bar');
+          }
           assert.deepEqual(await js("[...document.querySelectorAll('.computer-steps-dialog button, .computer-steps-dialog a.btn')].filter(n => n.getClientRects().length && !n.classList.contains('modal-close-btn') && !n.classList.contains('ms-sheet-grabber')).filter(n => n.getBoundingClientRect().height < 43.5).map(n => n.textContent + ':' + n.getBoundingClientRect().height)"), [], label + ' Steps controls are 44px');
           await capture(label + '-computer-steps');
           await js("[...document.querySelectorAll('.computer-steps-nav .btn')].find(b => b.textContent === 'Previous').click()");
