@@ -7,7 +7,9 @@ import { mountForeignReview } from './artifactForeignReview.js';
 import { reviewsChanged } from './artifactReview.js';
 
 const GENERATED = /^\/generated-(?:images|files)\/[^/?#]+$/;
-const ARTIFACT_URL = /^(?:\/generated-(?:images|files)\/[^/?#]+|\/chat-files\/[a-f0-9]{24})$/;
+const ARTIFACT_URL = /^(?:\/generated-(?:images|files)\/[^/?#]+|\/chat-files\/[a-f0-9]{24}|\/designs\/[a-f0-9]{12})$/;
+// A design opens as a Design tab in this pane (designCanvas.js).
+const DESIGN_URL = /^\/designs\/([a-f0-9]{12})$/;
 const TAGS = ['p', 'br', 'strong', 'em', 'del', 's', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'input'];
 
 export async function copyText(text) {
@@ -43,7 +45,9 @@ export function highlightCode(code, raw, language = 'text') {
   if (raw.length < 100000 && hljs.getLanguage(language)) code.innerHTML = hljs.highlight(raw, { language, ignoreIllegals: true }).value;
 }
 
-export function renderMessageBody(body, text, sessionId, rich = true, { live = false } = {}) {
+// `remoteImage(url, alt)`: a caller that wants remote images offered rather
+// than dropped (the Vault reader's click-to-load) returns the node to show.
+export function renderMessageBody(body, text, sessionId, rich = true, { live = false, remoteImage = null } = {}) {
   body._rawText = text;
   body.classList.toggle('chat-prose', rich);
   if (!rich) { body.textContent = text; return; }
@@ -75,6 +79,19 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
       card.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
       card.addEventListener('auxclick', event => { if (event.button === 1) { event.preventDefault(); openArtifact(sessionId, url, filename, card, { background: true }); } });
       node.replaceWith(card);
+    } else if (node.tagName === 'A' && DESIGN_URL.test(url) && sessionId) {
+      const designId = url.match(DESIGN_URL)[1];
+      const title = (label || 'Design').replace(/^Design:\s*/, '');
+      const detail = el('span', { text: 'Design · Open beside the chat' });
+      const card = el('button', { type: 'button', class: 'artifact-card design-card-link', 'aria-label': `Open design ${title}`, onclick: () => openDesignTab(sessionId, designId, card) }, [
+        el('span', { class: 'artifact-icon', text: 'DSGN' }),
+        el('span', { class: 'artifact-info' }, [el('strong', { text: title }), detail]),
+        el('span', { class: 'artifact-arrow', text: '↗', 'aria-hidden': 'true' }),
+      ]);
+      api(`/api/designs/${designId}`).then(d => { detail.textContent = `${d.title} · ${d.boards ? Object.keys(d.boards).length : 0} boards · Open`; }).catch(() => { detail.textContent = 'Design · no longer available'; });
+      node.replaceWith(card);
+    } else if (node.tagName === 'IMG' && remoteImage && /^https?:\/\//i.test(url)) {
+      node.replaceWith(remoteImage(url, label || ''));
     } else if (node.tagName === 'IMG') {
       node.replaceWith(document.createTextNode(label || '[Image]'));
     } else if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) {
@@ -126,6 +143,7 @@ export function setArtifactContext(sessionId, sessions = context.sessions) {
   if (viewer) {
     for (const tab of viewer.tabs) {
       tab.origin.hidden = sessionId === tab.sessionId;
+      if (tab.designComposer) tab.designComposer.root.hidden = sessionId === tab.sessionId;
       tab.origin.textContent = `from ${titleFor(tab.sessionId)}`;
       tab.foreignReview.update();
     }
@@ -197,7 +215,8 @@ export async function mountArtifactPane(host) {
         let removed = 0;
         await Promise.all(current.tabs.slice().map(async tab => {
           try {
-            await api(`/api/chat/artifacts?${new URLSearchParams({ session_id: tab.sessionId, url: tab.url })}`);
+            if (DESIGN_URL.test(tab.url)) await api(`/api/designs/${tab.url.match(DESIGN_URL)[1]}`);
+            else await api(`/api/chat/artifacts?${new URLSearchParams({ session_id: tab.sessionId, url: tab.url })}`);
             if (current.tabs.includes(tab)) tab.foreignReview.resume();
           }
           catch (error) { if (/^(400|404):/.test(error.message) && current.tabs.includes(tab)) { removed++; closeTab(current, tab); } }
@@ -295,8 +314,53 @@ function restoreScroll(tab) {
 }
 
 function ensureRendered(tab) {
-  if (!tab.ready) tab.ready = renderArtifact(tab);
+  if (!tab.ready) tab.ready = DESIGN_URL.test(tab.url) ? renderDesignTab(tab) : renderArtifact(tab);
   return tab.ready;
+}
+
+// A design in the Documents pane: the canvas, compact. Selections become chips
+// in this chat's composer when the design belongs to this chat; otherwise they
+// go to the tab's own composer, which sends to the design's linked chat.
+async function renderDesignTab(tab) {
+  const [{ mountDesignCanvas }, { mountDesignComposer }, { reviewComposer }] = await Promise.all([
+    import('./designCanvas.js'), import('./designComposer.js'), import('./artifactReview.js')]);
+  tab.content.replaceChildren();
+  tab.content.classList.add('design-pane-content');
+  const designId = tab.url.match(DESIGN_URL)[1];
+  let local = null;
+  const ownChat = () => { const c = reviewComposer(); return c && c.sessionId() === tab.sessionId ? c : null; };
+  const toComposer = (item, previous) => {
+    const main = ownChat();
+    if (main) { if (item) main.add(item, previous); return; }
+    local.setSelection(item, previous);
+  };
+  const canvas = mountDesignCanvas(tab.content, {
+    designId, compact: true,
+    onSelection: toComposer,
+    onComments: items => { const main = ownChat(); if (main) items.forEach(item => main.add(item)); else local.addComments(items); },
+    onLoaded: data => { tab.detail.textContent = `Design · ${Object.keys(data.boards).length} boards · v${data.version}`; },
+  });
+  local = mountDesignComposer(tab.content, {
+    getSession: () => ({ id: tab.sessionId, title: titleFor(tab.sessionId) }),
+    onOpenChat: () => goToChat(tab.sessionId),
+  });
+  local.root.classList.add('design-pane-composer');
+  // Beside its own chat, the chat's composer takes the chips; elsewhere this one does.
+  tab.designComposer = local; local.root.hidden = context.sessionId === tab.sessionId;
+  tab.actions.append(el('button', { type: 'button', class: 'btn quiet', text: 'Open full page', onclick: () =>
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'design', designId } })) }));
+  tab.content.viewerRoot = canvas.root;
+  tab.design = canvas;
+  const dispose = () => { canvas.dispose(); local.dispose(); };
+  tab.controller.signal.addEventListener('abort', dispose, { once: true });
+  await canvas.ready;
+  return canvas.root;
+}
+
+export async function openDesignTab(sessionId, designId, opener) {
+  let title = 'Design';
+  try { title = (await api(`/api/designs/${designId}`)).title || title; } catch { toast('That design is no longer available.', 'error'); return; }
+  await openArtifact(sessionId, `/designs/${designId}`, title, opener);
 }
 
 function closeTab(current, tab) {
@@ -448,6 +512,7 @@ function addTab(current, sessionId, url, name, saved = {}) {
   saved = { comments, note: typeof saved.note === 'string' ? saved.note.slice(0, 16000) : '', queued: false,
     status: interrupted ? 'Not sent: the app closed before these could send. Press Send.' : '' };
   if (GENERATED.test(url)) name = name.replace(/^[a-f0-9]{12}_/, '');
+  else if (DESIGN_URL.test(url) && !/^Design/.test(name)) name = `Design: ${name}`;
   const id = `artifact-tab-${++nextTabId}`;
   const controller = new AbortController();
   const detail = el('span', { class: 'artifact-detail', text: 'Document preview' });
@@ -486,7 +551,7 @@ function addTab(current, sessionId, url, name, saved = {}) {
       fetchOriginVersions(current, sessionId, true);
     },
   }, saved);
-  tab.review = mountArtifactReview(tab);
+  tab.review = DESIGN_URL.test(url) ? null : mountArtifactReview(tab);
   row.insertBefore(versionPicker, close); actions.append(newer);
   versionPicker.onchange = () => switchArtifactVersion(current, tab, versionPicker.value);
   newer.onclick = () => switchArtifactVersion(current, tab, tab.versions.at(-1));

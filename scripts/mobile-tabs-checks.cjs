@@ -36,22 +36,30 @@ async function run(ctx) {
   await resize(390, 844);
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
 
-  const checkAvatar = async tab => {
-    const avatar = await rect('#mobile-menu-btn');
-    ok(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('#mobile-menu-btn .menu-stroke')"), tab + ' has workspace avatar');
-    ok(avatar && avatar.l <= 44 && avatar.t <= 16 && avatar.w === 44 && avatar.h === 44, tab + ' avatar stays top-left');
-    // The avatar floats: it must not take a column from the page, and the top frost is a light, masked blur from y=0.
-    ok(await js("document.getElementById('mobile-menu-btn').getBoundingClientRect().width === 44 && getComputedStyle(document.getElementById('mobile-menu-btn')).position === 'fixed' && document.getElementById('view-content').getBoundingClientRect().left === 0"), tab + ' avatar floats and leaves the page full width');
+  // 2026-10-22 (David): a liquid-glass tab bar at the bottom replaces the top-left avatar and its workspace sheet.
+  const MORE = "document.querySelector('.ms-tabbar [data-tabbar=more]')";
+  const barState = () => js("document.querySelector('.ms-tabbar')?.dataset.state || null");
+  const barCurrent = () => js("document.querySelector('.ms-tabbar')?.dataset.state === 'shown' ? document.querySelector('.ms-tabbar [aria-current=page]')?.dataset.tabbar || null : 'hidden'");
+  // The bar follows the page on the next frame (mobileTabBar.js); two frames later it has settled.
+  const frames = () => js("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))");
+  const barShown = async () => { await frames(); await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown' && getComputedStyle(document.querySelector('.ms-tabbar')).transform === 'none'"); };
+  const barGone = () => waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden' && getComputedStyle(document.querySelector('.ms-tabbar')).visibility === 'hidden'");
+  const noAvatar = () => js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar, .menu-stroke')");
+  const checkChrome = async (tab, current = 'more') => {
+    ok(await noAvatar(), tab + ' has no avatar or hamburger');
+    if (current === 'hidden') { await barGone(); ok(await barCurrent() === 'hidden', tab + ' hides the tab bar'); }
+    else { await barShown(); eq(await barCurrent(), current, tab + ' marks ' + current + ' on the tab bar'); }
+    ok(await js("document.getElementById('view-content').getBoundingClientRect().left === 0"), tab + ' page keeps the full width');
     const frost = await js("(() => { const n = document.querySelector('.ms-global-frost'); const i = n.querySelector('i'); const s = getComputedStyle(i); return { top: n.getBoundingClientRect().top, bg: s.backgroundColor, blur: parseFloat((s.backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), mask: s.maskImage.includes('linear-gradient'), shown: getComputedStyle(n).visibility !== 'hidden' }; })()");
     ok(frost.top === 0 && frost.shown && frost.mask && frost.blur <= 8 && /rgba\(0, 0, 0, 0\)|transparent/.test(frost.bg), tab + ' frost starts at y=0 as a light, masked, untinted blur: ' + JSON.stringify(frost));
     // 2026-10-21 (David, on device): the frost covers only the status bar area (safe area + a short fade), and the older tinted strip is gone.
     const band = await js("(() => { const n = document.querySelector('.ms-global-frost'); const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;top:0;height:var(--mobile-safe-top, env(safe-area-inset-top, 0px))'; document.body.append(probe); const safe = probe.getBoundingClientRect().height; probe.remove(); return { height: n.getBoundingClientRect().height, safe, blur: parseFloat((getComputedStyle(n.querySelector('i')).backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), strip: getComputedStyle(document.documentElement, '::after').display }; })()");
     ok(band.height <= band.safe + 0.5 && band.blur <= 1 && band.strip === 'none', tab + ' frost ends at the bottom of the status bar area, light, with no tinted strip: ' + JSON.stringify(band));
-    // No header control or title may sit under the avatar (a title may share its row, beside it).
-    ok(await js("(() => { const a = document.getElementById('mobile-menu-btn').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, p, button, input, a, small, span')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.textContent.trim() + n.getAttribute('aria-label') !== '').every(n => { const r = n.getBoundingClientRect(); return r.width === 0 || r.height === 0 || r.right <= a.left + 0.5 || r.left >= a.right - 0.5 || r.bottom <= a.top + 0.5 || r.top >= a.bottom - 0.5; }); })()"), tab + ' headers clear avatar');
+    // With the avatar gone, nothing in a page header is drawn under the tab bar either.
+    if (current !== 'hidden') ok(await js("(() => { const a = document.querySelector('.ms-tabbar').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, button, input')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => n.getBoundingClientRect().bottom <= a.top + 0.5); })()"), tab + ' header controls sit clear of the tab bar');
   };
-  for (const tab of ['home', 'agents', 'tool-store', 'school']) {
-    await navigate(tab); await delay(500); await checkAvatar(tab);
+  for (const [tab, current] of [['home', 'home'], ['agents', 'agents'], ['tool-store', 'more'], ['school', 'more']]) {
+    await navigate(tab); await delay(500); await checkChrome(tab, current);
   }
   const centeredComposer = async (selector, expanded = false) => {
     await delay(450); // the composer morph settles before its geometry is read
@@ -79,20 +87,21 @@ async function run(ctx) {
     await navigate(tab);
     await waitFor("document.querySelectorAll('.ms-dock').length === 1");
     await delay(250);
-    ok(await js("document.getElementById('mobile-menu-btn').classList.contains('ms-avatar') && !document.querySelector('#mobile-menu-btn .menu-stroke')"), tab + ' has avatar instead of hamburger');
-    const avatar = await rect('#mobile-menu-btn');
-    ok(avatar && avatar.l <= 44 && avatar.t <= 16 && avatar.w === 44 && avatar.h === 44, tab + ' avatar is top-left with a 44px target');
+    ok(await noAvatar(), tab + ' has the tab bar instead of an avatar or hamburger');
+    eq(await barCurrent(), tab === 'calendar' ? 'calendar' : 'more', tab + ' marks its item on the tab bar');
+    const tabbar = await rect('.ms-tabbar');
+    ok(tabbar && Math.abs(tabbar.b - (844 - 12)) <= 1 && tabbar.l >= 15.5 && tabbar.r <= 390 - 15.5 && tabbar.h === 62, tab + ' tab bar floats 12px above the bottom with 16px sides: ' + JSON.stringify(tabbar));
     const label = tab + ' dock';
     eq(await docks(), 1, label + ' mounts exactly once');
     ok(await js("document.querySelector('.ms-dock').parentElement === document.body"), label + ' lives outside the animating view');
-    const early = await rect('.ms-dock'); ok(early && early.b >= 844 - 14 && early.b <= 844 - 11, label + ' is already in place on arrival: ' + JSON.stringify(early));
+    const early = await rect('.ms-dock'); ok(early && Math.abs(early.b - (tabbar.t - 10)) <= 1, label + ' is already in place on arrival, 10px above the tab bar: ' + JSON.stringify(early));
     const info = await dockInfo();
     if (want.input instanceof RegExp) ok(want.input.test(info.input), label + ' search is the page search: ' + info.input);
     else if (want.input) eq(info.input, want.input, label + ' search placeholder');
     else ok(!info.inputInDock, label + ' has no search field');
     ok(info.buttons.some(b => b.label === want.plus && b.text === '+'), label + ' has a "+" named ' + want.plus + ': ' + JSON.stringify(info.buttons));
     const d = await rect('.ms-dock');
-    ok(d && d.l >= 11 && d.r <= 379 && d.h >= 50 && d.b <= 844 - 11 && d.b >= 844 - 14, label + ' sits in the thumb zone with margins ' + JSON.stringify(d));
+    ok(d && d.l >= 11 && d.r <= 379 && d.h >= 50 && Math.abs(d.b - (tabbar.t - 10)) <= 1 && !hit(d, tabbar), label + ' sits in the thumb zone, above the tab bar, with margins ' + JSON.stringify(d));
     eq(await small('.ms-dock button, .ms-dock input'), [], label + ' controls are 44px');
     ok(await noSideways(), label + ' does not scroll sideways');
     eq(await overflow(), [], label + ' no overflow');
@@ -248,6 +257,7 @@ async function run(ctx) {
   await waitFor("!!document.querySelector('.library-editor textarea')");
   await delay(250);
   eq(await docks(), 0, 'The dock leaves while the editor is open');
+  await barGone(); ok(await barCurrent() === 'hidden', 'The tab bar steps aside for the pushed editor');
   ok(writes.slice(viewWritesBefore).some(w => w.method === 'POST' && w.path === '/api/documents'), 'Dock + creates through the existing route');
   eq(await small('.library-editor button, .library-editor input'), [], 'Editor controls are 44px');
   await shot('library-editor');
@@ -262,20 +272,20 @@ async function run(ctx) {
   await js("[...document.querySelectorAll('.confirm-panel .btn, .panel-dialog .btn')].find(b => /Discard/.test(b.textContent)).click()");
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length >= 3");
   eq(await docks(), 1, 'The dock returns once after Back');
+  await barShown(); eq(await barCurrent(), 'more', 'The tab bar slides back after the editor');
   await libTab('Vault');
   await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.ms-dock input')");
-  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");
+  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree summary').length > 0");
   await delay(400);
-  eq((await dockInfo()).buttons, [], 'Vault dock is search only, no invented create');
-  eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Find a note or folder', 'Vault Browse search lives in the dock');
-  await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length > 0");
-  const treeBefore = await js("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length");
+  // Library Vault Polish (2026-10-22): the dock's "+" is Today's note, the only create.
+  eq((await dockInfo()).buttons.map(b => b.label), ["Today's note"], "Vault dock offers Today's note and nothing else");
+  eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Search vault', 'Vault Browse search lives in the dock');
   await type('.ms-dock input', 'Daily');
   await delay(300);
-  const treeAfter = await js("document.querySelectorAll('.library-vault-tree button, .library-vault-tree [role=treeitem]').length");
-  ok(treeAfter > 0 && treeAfter <= treeBefore, 'Vault dock search narrows the tree');
+  ok(await js("[...document.querySelectorAll('.vault-group-names .library-vault-note')].length > 0 && [...document.querySelectorAll('.vault-group-names .library-vault-note')].every(b => /daily/i.test(b.textContent))"), 'Vault dock search narrows the list to matching names');
   await shot('library-vault');
-  await js("[...document.querySelectorAll('.segmented-tab, [role=tab], button')].find(b => b.textContent.trim() === 'Map')?.click()");
+  await type('.ms-dock input', '');
+  await js("[...document.querySelectorAll('.vault-mode-pill')].find(b => b.textContent.trim() === 'Map')?.click()");
   await delay(600);
   ok(await docks() <= 1, 'Vault Map keeps one dock at most');
   await libTab('Google Drive');
@@ -336,7 +346,7 @@ async function run(ctx) {
       sizes: radios.map(n => { const r = n.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }), aboveTabs: !!tile && g.getBoundingClientRect().bottom <= tile.top,
       thumb: (() => { const t = g.querySelector('.ms-mode-thumb').getBoundingClientRect(), on = radios.find(n => n.getAttribute('aria-checked') === 'true').getBoundingClientRect(); return Math.abs(t.left - on.left) <= 6 && Math.abs(t.right - on.right) <= 6; })(),
       readout: !!document.querySelector('.ms-sheet-readout'), mode: document.documentElement.dataset.appMode }; })()`);
-  const openSheet = async () => { await js("[...document.querySelectorAll('#mobile-menu-btn, .ms-shell .ms-avatar')].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
+  const openSheet = async () => { await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
   await navigate('home'); await delay(400); await openSheet();
   let modes = await modeState();
   eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview'], ['true', 'false'], [0, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
@@ -381,13 +391,17 @@ async function run(ctx) {
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(600);
-  await js("document.querySelector('.ms-dock').style.setProperty('--ms-keyboard', '300px')");
+  // A 300px keyboard (visualViewport shortened): the tab bar steps aside and the dock lands on the keyboard.
+  await js("(() => { window.__realVV = window.visualViewport; Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => ({ height: innerHeight - 300, offsetTop: 0, width: innerWidth, addEventListener() {}, removeEventListener() {} }) }); dispatchEvent(new Event('resize')); })()");
+  await barGone();
   const lifted = await rect('.ms-dock');
-  ok(Math.abs(lifted.b - (844 - 300 - 12)) <= 1, 'The dock rides above the keyboard: ' + JSON.stringify(lifted));
-  await js("document.querySelector('.ms-dock').style.removeProperty('--ms-keyboard')");
+  ok(Math.abs(lifted.b - (844 - 300 - 12)) <= 1 && !(await js("document.documentElement.classList.contains('ms-tabbar-up')")), 'With the keyboard up the tab bar steps aside and the dock rides the keyboard: ' + JSON.stringify(lifted));
+  await js("(() => { Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__realVV }); dispatchEvent(new Event('resize')); })()");
+  await barShown();
+  ok(Math.abs((await rect('.ms-dock')).b - ((await rect('.ms-tabbar')).t - 10)) <= 1, 'Keyboard down: the bar slides back and the dock returns above it');
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '34px')");
-  const safe = await rect('.ms-dock');
-  ok(Math.abs(safe.b - (844 - 34)) <= 1, 'The dock clears a 34px bottom safe area: ' + JSON.stringify(safe));
+  const safe = await rect('.ms-dock'), safeBar = await rect('.ms-tabbar');
+  ok(Math.abs(safeBar.b - (844 - 34)) <= 1 && Math.abs(safe.b - (safeBar.t - 10)) <= 1, 'The tab bar clears a 34px bottom safe area and the dock sits above it: ' + JSON.stringify([safe, safeBar]));
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await delay(150);
@@ -468,7 +482,7 @@ async function run(ctx) {
   const backBtn = () => js("document.querySelector('.settings-mobile-back').click()");
   const visibleItems = () => js("[...document.querySelectorAll('.settings-nav-item')].filter(n => n.getClientRects().length).map(n => n.dataset.section)");
   await openSettings('notes');
-  await checkAvatar('settings');
+  await checkChrome('settings', 'hidden');
   eq(await mview(), 'list', 'Settings opens on its list');
   const nav = await rect('#settings-nav');
   ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
@@ -558,6 +572,10 @@ async function run(ctx) {
   await js("document.querySelector('.settings-window .settings-titlebar-btn[title=Close]')?.click()");
   await resize(390, 844);
 
+  // ---- T. The tab bar: every tab, selection, More, hiding, glass, badges, reduced motion -----
+  // (scripts/mobile-tabbar-checks.cjs; its assertions count here through ok and eq.)
+  await require('./mobile-tabbar-checks.cjs')({ ...ctx, ok, eq, rect, hit, small, noSideways, barState, barCurrent, barShown, barGone, noAvatar, MORE, shot, resize, cdp, press });
+
   // 2026-10-21 (David, iPhone home-screen app, 393x852): iOS gives a home-screen app a layout viewport
   // short by the status bar (100dvh = innerHeight = fixed inset:0 = 793) while 100lvh is the screen (852).
   // Electron cannot shorten its own viewport, so each case sets the window to the layout viewport and
@@ -570,13 +588,13 @@ async function run(ctx) {
     ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0, 12],
     ['browser or Android (no fold)', 393, 852, 852, 47, 34, 0],
   ];
-  // 2026-10-21 (David): popups sit cleanly above the page, titles share the avatar's row on the right,
+  // 2026-10-21 (David): popups sit cleanly above the page, titles sit on the top row on the right,
   // and no tab's first content starts above the bottom of that row.
   const popupClear = async (selector, label, top) => {
     const r = await js(`(() => {
       const pop = [...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.getClientRects().length); if (!pop) return { open: false };
       const pr = pop.getBoundingClientRect(), bad = [];
-      for (const n of document.querySelectorAll('#mobile-menu-btn, .ms-avatar, .ms-chat-back, .chat-mobile-header button, .ms-header button, .mf-session-header button, #view-content .view-header h2, .ms-chat-heading')) {
+      for (const n of document.querySelectorAll('.ms-tabbar-item, .ms-chat-back, .chat-mobile-header button, .ms-header button, .mf-session-header button, #view-content .view-header h2, .ms-chat-heading')) {
         if (pop.contains(n) || !n.getClientRects().length || getComputedStyle(n).visibility === 'hidden') continue;
         const b = n.getBoundingClientRect(), x = (b.left + b.right) / 2, y = (b.top + b.bottom) / 2;
         if (x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) continue;
@@ -588,22 +606,23 @@ async function run(ctx) {
     })()`);
     ok(r.open && !r.bad.length && r.ownHit && r.ownTop >= top, `${label}: sits above the page, its own header clear of the status bar and of the page header: ${JSON.stringify(r)}`);
   };
-  const titleRow = async (label) => {
+  // The top row: 44px tall, 6px under the status bar (plus the nudge). With the avatar gone it holds the title alone.
+  const titleRow = async (label, rowTop) => {
     const r = await js(`(() => {
       const box = n => { const b = n.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
-      const avatar = [...document.querySelectorAll('#mobile-menu-btn, .ms-avatar')].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden');
+      const row = { l: 0, r: 16, t: ${rowTop}, b: ${rowTop} + 44 };
       const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
       const v = document.getElementById('view-content');
       const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { avatar: avatar && box(avatar), title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth };
+      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth };
     })()`);
     if (r.title) {
-      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.avatar.t + r.avatar.b) / 2) <= 1 && Math.abs(r.title.r - (r.width - 16)) <= 1 && r.title.l >= r.avatar.r,
-        `${label}: the title shares the avatar's row, on the right: ${JSON.stringify(r)}`);
+      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.r - (r.width - 16)) <= 1 && r.title.l >= r.row.r - 0.5,
+        `${label}: the title sits on the top row, on the right: ${JSON.stringify(r)}`);
     }
-    ok(!r.first || r.first.t >= r.avatar.b - 0.5, `${label}: the first content starts below the avatar's row: ${JSON.stringify(r.first)} avatar ${JSON.stringify(r.avatar)}`);
+    ok(!r.first || r.first.t >= r.row.b - 0.5, `${label}: the first content starts below the top row: ${JSON.stringify(r.first)} row ${JSON.stringify(r.row)}`);
   };
   for (const [name, w, layout, screen, top, bottom, nudge] of devices) {
     await resize(w, layout);
@@ -612,26 +631,32 @@ async function run(ctx) {
     await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
     const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
     eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
-    const avatarTop = (await rect('.ms-shell .ms-header .ms-avatar')).t;
-    eq(Math.round(avatarTop), top + nudge + 6, `${name}: launch avatar clears the status bar by 6px plus the ${nudge}px nudge`);
+    const switchTop = (await rect('.ms-shell .ms-header .ms-switch')).t;
+    eq(Math.round(switchTop), top + nudge + 6, `${name}: the launch switch clears the status bar by 6px plus the ${nudge}px nudge`);
+    ok(await noAvatar(), `${name}: no avatar on the launch page`);
+    await barShown();
+    const bar = await rect('.ms-tabbar');
+    ok(Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 16) <= 1 && Math.abs(bar.r - (w - 16)) <= 1, `${name}: the tab bar sits ${gap}px above the true screen bottom, 16px from each side: ${JSON.stringify(bar)}`);
     const composer = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
-    ok(composer && Math.abs(composer.b - (screen - gap)) <= 1, `${name}: launch composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(composer)}`);
+    ok(composer && Math.abs(composer.b - (bar.t - 10)) <= 1, `${name}: launch composer sits 10px above the tab bar: ${JSON.stringify(composer)}`);
     const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");
     ok(frost.every(b => b <= top + 0.5), `${name}: launch frost stays within the ${top}px status bar: ${frost}`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'launch');
-    // The workspace sheet reaches the true bottom.
-    await js("document.querySelector('.ms-shell .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(350);
-    eq(Math.round((await rect('.ms-tab-sheet')).b), screen, `${name}: workspace sheet reaches the screen bottom`);
+    // The More sheet reaches the true bottom.
+    await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(350);
+    eq(Math.round((await rect('.ms-tab-sheet')).b), screen, `${name}: the More sheet reaches the screen bottom`);
     await js("document.querySelector('.ms-tab-sheet').close()");
     // A conversation's composer.
     await navigate('chat', { mobileConversation: true }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
+    await barGone();
     const chat = await rect('.ms-conversation .ms-composer');
-    ok(Math.abs(chat.b - (screen - gap)) <= 1, `${name}: conversation composer bottom sits ${gap}px above the screen bottom: ${JSON.stringify(chat)}`);
+    ok(Math.abs(chat.b - (screen - gap)) <= 1, `${name}: the bar steps aside and the conversation composer sits ${gap}px above the screen bottom: ${JSON.stringify(chat)}`);
     ok(Math.round((await rect('#view-content')).b) === screen, `${name}: conversation fills the screen`);
     // A docked tab: the fixed dock and a bottom sheet.
     await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
-    const dock = await rect('.ms-dock');
-    ok(Math.abs(dock.b - (screen - gap)) <= 1, `${name}: fixed dock bottom sits ${gap}px above the screen bottom: ${JSON.stringify(dock)}`);
+    await barShown();
+    const dock = await rect('.ms-dock'), dockBar = await rect('.ms-tabbar');
+    ok(Math.abs(dockBar.b - (screen - gap)) <= 1 && Math.abs(dock.b - (dockBar.t - 10)) <= 1, `${name}: the fixed dock sits 10px above the tab bar, which sits ${gap}px above the screen bottom: ${JSON.stringify([dock, dockBar])}`);
     const globalFrost = await rect('.ms-global-frost');
     ok(!globalFrost || globalFrost.b <= top + 0.5, `${name}: page frost stays within the status bar`);
     await js("import('/static/js/mobileSheet.js').then(m => { const p = document.createElement('p'); p.textContent = 'Fold check'; window.__foldSheet = m.openMobileSheet({ title: 'Fold check', content: p, fullHeight: true }); })");
@@ -644,24 +669,29 @@ async function run(ctx) {
     await navigate('forgeHome', { mobilePage: 0 }); await waitFor("!!document.querySelector('.mf-project')"); await js("document.getElementById('mf-tab-0').click()"); await delay(500);
     eq(Math.round((await rect('.mf-project')).b), screen, `${name}: Forge project page fills the screen`);
     const forgeBottom = await js("(() => { const b = document.querySelector('.mf-project #mf-new .ms-launch-bottom'); const kids = [...b.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height); return { box: Math.round(b.getBoundingClientRect().bottom), last: Math.round(Math.max(...kids.map(n => n.getBoundingClientRect().bottom))), composer: Math.round(document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom) }; })()");
-    ok(forgeBottom.box === screen && forgeBottom.last === screen - gap && forgeBottom.composer <= screen - gap, `${name}: Forge New composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeBottom)}`);
+    await barShown();
+    const forgeBar = await rect('.ms-tabbar');
+    ok(forgeBottom.box === screen && Math.abs(forgeBottom.last - (forgeBar.t - 10)) <= 1 && forgeBottom.composer <= forgeBar.t - 10, `${name}: Forge New composer sits above the tab bar: ${JSON.stringify([forgeBottom, forgeBar])}`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-new');
     await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(400);
     await js("document.querySelector('#mf-sessions .ms-history-main').click()");
     await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')"); await delay(500);
+    await barGone();
     const forgeChat = await rect('.mf-session .forge-transcript-composer');
-    ok(forgeChat && Math.abs(forgeChat.b - (screen - gap)) <= 1, `${name}: Forge session composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeChat)}`);
+    ok(forgeChat && Math.abs(forgeChat.b - (screen - gap)) <= 1, `${name}: the bar steps aside and the Forge session composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeChat)}`);
     await js("document.querySelector('.mf-changes').click()"); await waitFor("!!document.querySelector('dialog.ms-sheet[open] .mf-git-dock')"); await delay(400);
     const changes = { sheet: await rect('dialog.ms-sheet[open]'), dock: await rect('.mf-git-dock'), actions: await js("document.querySelectorAll('.mf-git-dock button').length") }, dockGap = Math.max(8, bottom);
     ok(Math.round(changes.sheet.b) === screen, `${name}: Changes sheet reaches the screen bottom: ${JSON.stringify(changes)}`);
     // A dock with actions sits above the home indicator; with nothing to do there is no dock at all, never an empty pill.
     ok(changes.actions ? Math.abs(changes.dock.b - (screen - dockGap)) <= 1 : changes.dock === null, `${name}: Changes dock ${changes.actions ? 'sits ' + dockGap + 'px above the screen bottom' : 'is hidden with no actions'}: ${JSON.stringify(changes)}`);
+    ok(await barState() === 'hidden' && !(await js("document.documentElement.classList.contains('ms-tabbar-up')")), `${name}: no tab bar under the Changes dock`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-changes');
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
     if (!nudge) continue;
     // Titles and first content on every tab, Settings and one of its pages included.
     for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
-      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`);
+      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + 6);
+      ok(await noAvatar(), `${name}: ${tab} has no avatar`);
       if (tab === 'forgeHome') {
         ok(await js("!!document.querySelector('.mf-dashboard .forge-toolbar .mf-dashboard-new') && !document.querySelector('.mf-dashboard .ms-header .mf-dashboard-new')"), `${name}: Forge Home's New session sits on the toolbar beside Customize`);
         await shot(`fold-${w}x${screen}-${nudge ? 'iphone' : 'other'}-forge-home`);
@@ -669,9 +699,9 @@ async function run(ctx) {
       if (tab === 'tool-store') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'tool-store');
       if (tab === 'notes') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'notes-title');
     }
-    await openSettings('notes'); await titleRow(`${name}: Settings`);
+    await openSettings('notes'); await titleRow(`${name}: Settings`, top + nudge + 6);
     await js("document.querySelector('.settings-nav-item[data-section=\"remote\"]').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'"); await delay(400);
-    await titleRow(`${name}: a Settings page`);
+    await titleRow(`${name}: a Settings page`, top + nudge + 6);
     // A Settings sub-sheet: the model setup guide.
     await js("document.querySelector('.settings-mobile-back').click()"); await delay(300);
     await js("document.querySelector('.settings-nav-item[data-section=\"add-models\"]').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'"); await delay(400);
@@ -691,10 +721,10 @@ async function run(ctx) {
       await js("document.querySelectorAll('dialog[open]').forEach(d => d.close())");
     }
     await navigate('notes'); await delay(300);
-    // The workspace sheet, Home's customize sheet, Tool Store details and Forge's Projects sheet.
-    await js("document.getElementById('mobile-menu-btn').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(300);
-    await popupClear('.ms-tab-sheet[open]', `${name}: workspace sheet`, top);
-    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'workspace-sheet'); await js("document.querySelector('.ms-tab-sheet').close()");
+    // The More sheet, Home's customize sheet, Tool Store details and Forge's Projects sheet.
+    await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(300);
+    await popupClear('.ms-tab-sheet[open]', `${name}: More sheet`, top);
+    await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'more-sheet'); await js("document.querySelector('.ms-tab-sheet').close()");
     await navigate('home'); await delay(500); await js("document.querySelector('.hm-customize').click()"); await waitFor("!!document.querySelector('.hm-sheet')"); await delay(300);
     await popupClear('.hm-sheet-root', `${name}: Home customize sheet`, top); await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'home-customize');
     await js("[...document.querySelectorAll('.hm-sheet button')].find(b => b.textContent.trim() === 'Done')?.click()"); await delay(300);

@@ -110,24 +110,26 @@ class VaultMemory(MemoryBackend):
                 conn.execute("INSERT OR REPLACE INTO notes (path, mtime, size) VALUES (?, ?, ?)", (path, *on_disk[path]))
         return len(changed) + len(removed)
 
-    def search(self, query: str, limit: int = 5) -> list[dict]:
+    def search(self, query: str, limit: int = 5, marks: tuple[str, str] = ("", ""), any_word: bool = False) -> list[dict]:
         """Every word must match first; failing that, any word, ranked by how
-        many and how rare (as the compacted-chat search does)."""
+        many and how rare (as the compacted-chat search does). `marks` wrap
+        each matched term in the snippet (the Library highlights them);
+        `any_word` skips the every-word pass (the Library's "related")."""
         if not self.is_available():
             return []
         with self._lock:
             conn = self._connect()
             try:
                 self.refresh(conn)
-                for joiner in (" AND ", " OR "):
+                for joiner in ((" OR ",) if any_word else (" AND ", " OR ")):
                     match = _fts_query(query, joiner)
                     if not match:
                         return []
                     try:
                         rows = conn.execute(
-                            f"""SELECT path, title, snippet(notes_fts, 2, '', '', '...', 24) AS snippet
+                            f"""SELECT path, title, snippet(notes_fts, 2, ?, ?, '...', 24) AS snippet
                                 FROM notes_fts WHERE notes_fts MATCH ? ORDER BY {_RANK} LIMIT ?""",
-                            (match, limit)).fetchall()
+                            (marks[0], marks[1], match, limit)).fetchall()
                     except sqlite3.OperationalError as e:
                         logger.error("vault search failed for %r (%s)", query, e)
                         return []

@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld("jarvis", {
   forgeTerminal: {
     openExternal: url => ipcRenderer.invoke('forge-terminal:external', url),
   },
+  // Library > Vault "Open in Obsidian" (2026-10-22): an obsidian://open URL
+  // only; the main process re-checks its shape.
+  vault: {
+    openInObsidian: url => ipcRenderer.invoke('vault:obsidian', url),
+  },
   forgePreview: {
     open: (id, url, bounds) => ipcRenderer.invoke('forge-preview:open', id, url, bounds),
     navigate: url => ipcRenderer.invoke('forge-preview:navigate', url),

@@ -2,6 +2,7 @@ import { api, el, toast, confirmDialog, emptyState } from "../api.js";
 import { ICONS } from "../icons.js";
 import { createVaultExplorer } from "../vaultExplorer.js";
 import { createVaultGraph } from "../vaultGraph.js";
+import { createVaultStore } from "../vaultStore.js";
 import { renderGoogleWorkspace } from "../googleWorkspace.js";
 
 // Library tab (Phase 7, David's ask 2026-09-01 "let's move on to the next
@@ -14,8 +15,9 @@ let activeSection = "documents";
 let activeVaultView = null;
 
 export async function render(container, tabId, options = {}) {
-  if (["vault", "documents", "google"].includes(options.section)) activeSection = options.section;
-  if (activeSection === "vault") renderVault(container);
+  if (["vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
+  if (activeSection === "designs") await renderDesigns(container);
+  else if (activeSection === "vault") renderVault(container, options.vaultPath || null);
   else if (activeSection === "google") renderGoogle(container);
   else await renderList(container);
   return () => disposeVault();
@@ -33,23 +35,36 @@ function libraryChrome(container, current) {
       el("div", { class: "sub", text: current === "vault"
         ? "Browse and read the notes in your connected Vault."
         : current === "google" ? "Your connected Google Drive, Sheets, and Forms."
+        : current === "designs" ? "Every design: open one to change it, comment on it, or export it."
         : "A home for your references, drafts, and ideas worth keeping." }),
     ]),
   ]);
   const tabs = el("div", { class: "segmented-tabs library-tabs", role: "group", "aria-label": "Library section" });
-  for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"]]) {
+  for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"], ["designs", "Designs"]]) {
     const button = el("button", { type: "button", class: "segmented-tab" + (id === current ? " active" : ""),
       text: label, "aria-pressed": id === current ? "true" : "false" });
     button.addEventListener("click", async () => {
       if (id === current) return;
       if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
       if (id === "vault") renderVault(container);
+      else if (id === "designs") await renderDesigns(container);
       else if (id === "google") renderGoogle(container);
       else await renderList(container);
     });
     tabs.append(button);
   }
   return [header, tabs];
+}
+
+// Library > Designs (the Design canvas): the Design tab's list, here too.
+async function renderDesigns(container) {
+  disposeVault();
+  activeSection = "designs";
+  const [header, tabs] = libraryChrome(container, "designs");
+  const host = el("div", { class: "design-home" });
+  container.replaceChildren(header, tabs, host);
+  const { renderDesignList } = await import("./design.js");
+  await renderDesignList(host);
 }
 
 function renderGoogle(container) {
@@ -59,41 +74,27 @@ function renderGoogle(container) {
   renderGoogleWorkspace(container, header, tabs);
 }
 
-function renderVault(container) {
+function renderVault(container, open = null) {
   disposeVault();
   activeSection = "vault";
   container.replaceChildren();
   const [header, tabs] = libraryChrome(container, "vault");
-  const modes = el("div", { class: "segmented-tabs library-vault-modes", role: "group", "aria-label": "Vault view" });
+  // Library Vault Polish (2026-10-22): one header. Home and Map are pills in
+  // the Vault's own sidebar head, and both modes share one loaded vault.
   const host = el("div", { class: "library-vault-host" });
-  container.append(el("div", { class: "library-vault-page" }, [
-    header, tabs,
-    el("div", { class: "library-vault-intro" }, [
-      el("div", {}, [el("h3", { text: "Vault" }), el("p", { text: "Your Markdown notes, organized by folder. Open Map to explore their connections." })]),
-      modes,
-    ]),
-    host,
-  ]));
-  let mode = "browse";
-  const drawModes = () => {
-    modes.replaceChildren();
-    for (const [id, label] of [["browse", "Browse"], ["map", "Map"]]) {
-      const button = el("button", { type: "button", class: "segmented-tab" + (mode === id ? " active" : ""),
-        text: label, "aria-pressed": mode === id ? "true" : "false" });
-      button.addEventListener("click", async () => {
-        if (mode === id) return;
-        if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
-        disposeVault();
-        mode = id;
-        drawModes();
-        host.replaceChildren();
-        activeVaultView = mode === "browse" ? createVaultExplorer(host) : createVaultGraph(host);
-      });
-      modes.append(button);
-    }
+  container.append(el("div", { class: "library-vault-page" }, [header, tabs, host]));
+  const store = createVaultStore();
+  const browse = (path = null) => {
+    disposeVault();
+    host.dataset.mode = "browse";
+    activeVaultView = createVaultExplorer(host, { store, open: path, onMap: (focus, depth, select) => map(focus, depth, select) });
   };
-  drawModes();
-  activeVaultView = createVaultExplorer(host);
+  const map = (focus = null, depth = 1, select = null) => {
+    disposeVault();
+    host.dataset.mode = "map";
+    activeVaultView = createVaultGraph(host, { store, focus, depth, select, onBrowse: path => browse(path) });
+  };
+  browse(open);
 }
 
 function section(title, description, icon, body) {

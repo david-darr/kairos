@@ -51,7 +51,7 @@ class Surface {
       node.append(...children); return node;
     } }, './brand.js': { ICON: '' }, './icons.js': { ICONS: {} },
     './mobileHistory.js': { mountHistory() {} },
-    './mobileTabSheet.js': { openTabSheet() {}, initTabSheet() {} },
+    './mobileTabSheet.js': { openMoreSheet() {}, initMoreSheet() {} },
     './mobileActivity.js': { initActivity() {}, attachActivity() {}, activityMetadata() {}, refreshActivity() {} },
   };
   const cache = new Map();
@@ -306,10 +306,13 @@ class Surface {
   assert.ok(mutationObservers.every(observer => !observer.active), 'All mounted observers disconnect');
   const source = name => fs.readFileSync(path.join(__dirname, '../static/js', name), 'utf8');
   assert.doesNotMatch(source('app.js'), /registerMobileDrawer/);
-  assert.match(source('mobileChrome.js'), /open workspace tabs/i);
-  assert.match(source('mobileTabSheet.js'), /sidebarLayout\(sources/);
+  assert.match(source('mobileChrome.js'), /mountTabBar\(\)/);
+  assert.doesNotMatch(source('mobileChrome.js') + source('mobileShell.js') + source('mobileForge.js') + source('app.js'), /openTabSheet|ms-avatar|mobile-menu-btn/, 'The avatar and its workspace sheet are gone');
+  assert.match(source('mobileTabBar.js'), /\.ms-conversation:not\(\.ms-launch-chat\)', '\.ms-live-chat', '\.mf-session'/, 'The bar steps aside in conversations and Forge sessions');
+  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar'\]\)/, 'More lists the tabs the bar does not');
+  assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);
-  assert.match(source('mobileShell.js'), /'Your workspace':/);
+  assert.doesNotMatch(source('mobileShell.js'), /'Your workspace':/);
   assert.doesNotMatch(source('mobileShell.js'), /Your day|touchstart/);
   assert.match(css, /position: fixed; top: 0; left: 0; right: 0; height: calc/);
   assert.match(css, /line-height: 24px; padding-block: 10px/);

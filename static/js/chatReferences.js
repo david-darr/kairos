@@ -6,7 +6,10 @@ import { agentAvatar } from './agentHandoff.js';
 import { bindReviewComposer, reviewsChanged, reviewKey, openReview } from './artifactReview.js';
 
 const MAX_REFERENCES = 5;
-const KINDS = { file: 'File', note: 'Vault note', chat: 'Chat', agent: 'Agent', skill: 'Skill', tool: 'Tool', automation: 'Automation', document: 'Document', artifact_comment: 'Comment' };
+const KINDS = { file: 'File', note: 'Vault note', chat: 'Chat', agent: 'Agent', skill: 'Skill', tool: 'Tool', automation: 'Automation', document: 'Document', artifact_comment: 'Comment', design_comment: 'Design' };
+// Selected or pinned design elements (designSelection.js) count with artifact comments, not references.
+const isComment = kind => kind === 'artifact_comment' || kind === 'design_comment';
+const designKey = item => JSON.stringify([item.design_id, item.board, item.element_ids, item.comment || '', item.point || null]);
 const GROUPS = { agent: 'Agents', skill: 'Skills', tool: 'Tools', automation: 'Automations', document: 'Documents', file: 'Files', note: 'Notes', chat: 'Chats' };
 let pickerNumber = 0;
 
@@ -50,9 +53,11 @@ export function mountChatReferences(input, inputTop, getSessionId) {
   let requestNumber = 0;
   let filterKind = null;
 
-  const key = item => item.kind === 'artifact_comment' ? reviewKey(item) : `${item.kind}:${item.session_id || ''}:${item.id}`;
+  const key = item => item.kind === 'artifact_comment' ? reviewKey(item) : item.kind === 'design_comment' ? designKey(item) : `${item.kind}:${item.session_id || ''}:${item.id}`;
   const getSelected = () => selected.map(item => item.kind === 'artifact_comment'
     ? { kind: item.kind, url: item.url, comment: item.comment, picks: [...item.picks], label: item.label }
+    : item.kind === 'design_comment'
+    ? { kind: item.kind, design_id: item.design_id, board: item.board, element_ids: [...(item.element_ids || [])], point: item.point || null, comment: item.comment || '', comment_id: item.comment_id || null, label: item.label }
     : { kind: item.kind, id: item.id, session_id: item.session_id, label: item.label, color: item.color, avatar_spec: item.avatar_spec });
   const hide = () => {
     const wasOpen = !list.hidden;
@@ -80,6 +85,9 @@ export function mountChatReferences(input, inputTop, getSessionId) {
         name.textContent = item.label; comment.textContent = item.comment;
         label.append(name, comment);
         label.addEventListener('click', () => openReview(item, getSessionId(), label).catch(error => toast(error.message, 'error')));
+      } else if (item.kind === 'design_comment') {
+        chip.classList.add('design-select-chip'); label.textContent = `${KINDS[item.kind]} · ${item.label}`;
+        label.title = item.comment || 'Selected on the design; say in your message what to change.';
       } else label.textContent = `${KINDS[item.kind]} · ${item.label}`;
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -100,9 +108,9 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     if (!KINDS[item.kind]) return false;
     const index = previous ? selected.findIndex(ref => key(ref) === key(previous)) : -1;
     if (index < 0 && selected.some(ref => key(ref) === key(item))) return true;
-    const isComment = item.kind === 'artifact_comment';
-    if (index < 0 && selected.filter(ref => (ref.kind === 'artifact_comment') === isComment).length >= (isComment ? 10 : MAX_REFERENCES)) {
-      toast(isComment ? 'Add at most 10 artifact comments per message' : 'Select at most 5 references', 'error'); return false;
+    const comment = isComment(item.kind);
+    if (index < 0 && selected.filter(ref => isComment(ref.kind) === comment).length >= (comment ? 10 : MAX_REFERENCES)) {
+      toast(comment ? 'Add at most 10 comments or selections per message' : 'Select at most 5 references', 'error'); return false;
     }
     if (index < 0) selected.push(item); else selected[index] = item;
     paintChips();
@@ -171,7 +179,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
     clearTimeout(timer);
     const before = input.value.slice(0, input.selectionStart);
     const match = /(^|\s)@([^@\n]{0,80})$/.exec(before);
-    if (!match || selected.filter(ref => ref.kind !== 'artifact_comment').length >= MAX_REFERENCES || input.selectionStart !== input.selectionEnd) {
+    if (!match || selected.filter(ref => !isComment(ref.kind)).length >= MAX_REFERENCES || input.selectionStart !== input.selectionEnd) {
       requestNumber++;
       hide();
       return;
@@ -209,7 +217,7 @@ export function mountChatReferences(input, inputTop, getSessionId) {
   };
   const openPicker = ({ kind = null } = {}) => {
     if (input.disabled) return;
-    if (selected.filter(ref => ref.kind !== 'artifact_comment').length >= MAX_REFERENCES) {
+    if (selected.filter(ref => !isComment(ref.kind)).length >= MAX_REFERENCES) {
       toast('Select at most 5 references', 'error'); return;
     }
     hide();

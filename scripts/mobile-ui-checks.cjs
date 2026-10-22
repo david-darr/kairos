@@ -10,9 +10,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   const setDraft = (selector, text) => js(`(() => { const i = document.querySelector(${JSON.stringify(selector)}); i.focus(); i.value = ${JSON.stringify(text)}; i.setSelectionRange(i.value.length, i.value.length); i.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await navigate('notes'); await resize(390, 844);
   assert.ok(await js("document.getElementById('sidebar').inert && document.getElementById('sidebar').getAttribute('aria-hidden') === 'true'"), 'Old sidebar stays inaccessible on phone');
-  await js("document.getElementById('mobile-menu-btn').click()");
-  assert.ok(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), 'Avatar focuses workspace sheet');
-  assert.equal(await js("document.getElementById('mobile-menu-btn').getAttribute('aria-controls')"), 'ms-workspace-sheet');
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
+  const MORE = "document.querySelector('.ms-tabbar [data-tabbar=more]')";
+  await js(MORE + ".focus(); " + MORE + ".click()");
+  assert.ok(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), 'More focuses its sheet');
+  assert.equal(await js(MORE + ".getAttribute('aria-controls')"), 'ms-more-sheet');
   assert.ok(await js(`(() => {
     const sheet = document.querySelector('.ms-tab-sheet[open]');
     const controls = [...sheet.querySelectorAll('button, a[href]')].filter(n => !n.disabled && n.getClientRects().length);
@@ -23,15 +25,16 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   })()`), 'Sheet traps Tab in both directions');
   await capture('mobile-workspace-focus');
   await key('.ms-tab-sheet', { key: 'Escape' });
-  assert.equal(await js('document.activeElement.id'), 'mobile-menu-btn');
-  await js("document.getElementById('mobile-menu-btn').click(); document.querySelector('.ms-tab-sheet').click()");
-  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.id === 'mobile-menu-btn'"), 'Backdrop dismisses and returns focus');
+  assert.equal(await js('document.activeElement.dataset.tabbar'), 'more');
+  await js(MORE + ".click(); document.querySelector('.ms-tab-sheet').click()");
+  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement.dataset.tabbar === 'more'"), 'Backdrop dismisses and returns focus');
   await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
-  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'hidden', 'Conversation has Back first');
-  await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent === 'Your workspace').click()");
-  assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open]')"), 'Conversation menu opens workspace');
-  await key('.ms-tab-sheet', { key: 'Escape' });
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'");
+  assert.ok(await js("document.querySelector('.ms-tabbar').inert && !document.querySelector('.ms-avatar')"), 'Conversation has Back first; the tab bar steps away');
+  await js("document.querySelector('.chat-phone-tools > button').click()");
+  assert.ok(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace')"), 'The conversation menu no longer opens the old workspace sheet');
+  await js("document.querySelector('.chat-phone-tools > button').click()");
   await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Conversations and projects')).click()");
   assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('chat-sessions').contains(document.activeElement)"), 'History drawer keeps its focus behavior');
   await js("document.querySelector('.chat-history-close').click()");
@@ -78,7 +81,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     assert.deepEqual(await overflow(), [], name + ' no horizontal overflow');
     assert.ok(await js("(() => { const r = document.getElementById('chat-send').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()"), name + ' Send stays in the viewport');
     if (width <= 768) {
-      assert.deepEqual(await js(`Array.from(document.querySelectorAll('#mobile-menu-btn, #chat-history-toggle, .ms-chat-back, .chat-phone-tools > button, .ms-chat-capsule button, #chat-send, #chat-mic, #chat-openmic, #overflow-plus-btn, .chat-summary-trigger, .chat-header-model #model-picker-btn')).filter(n => !n.hidden && n.getClientRects().length).filter(n => { const r=n.getBoundingClientRect(); return r.width < 43.99 || r.height < 43.99; }).map(n => ({id:n.id, width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height}))`), [], name + ' touch actions have 44px targets (allowing subpixel rounding)');
+      assert.deepEqual(await js(`Array.from(document.querySelectorAll('#chat-history-toggle, .ms-chat-back, .chat-phone-tools > button, .ms-chat-capsule button, #chat-send, #chat-mic, #chat-openmic, #overflow-plus-btn, .chat-summary-trigger, .chat-header-model #model-picker-btn')).filter(n => !n.hidden && n.getClientRects().length).filter(n => { const r=n.getBoundingClientRect(); return r.width < 43.99 || r.height < 43.99; }).map(n => ({id:n.id, width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height}))`), [], name + ' touch actions have 44px targets (allowing subpixel rounding)');
       assert.ok(await js("document.querySelector('.composer-hint').textContent.includes('Return for a new line')"));
     } else assert.ok(await js("document.querySelector('.composer-hint').textContent.includes('Enter to send')"));
     await capture('mobile-pass-' + name);

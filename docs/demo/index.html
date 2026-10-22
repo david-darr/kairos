@@ -32,6 +32,7 @@
 <link rel="stylesheet" href="static/css/redesign-settings.css">
 <link rel="stylesheet" href="static/css/redesign-notes.css">
 <link rel="stylesheet" href="static/css/redesign-library.css">
+<link rel="stylesheet" href="static/css/vault.css">
 <link rel="stylesheet" href="static/css/redesign-calendar.css">
 <link rel="stylesheet" href="static/css/redesign-email.css">
 <link rel="stylesheet" href="static/css/redesign-tasks.css">
@@ -44,7 +45,9 @@
 <link rel="stylesheet" href="static/css/redesign-welcome.css">
 <link rel="stylesheet" href="static/css/redesign-overlays.css">
 <link rel="stylesheet" href="static/css/redesign-agents.css">
+<link rel="stylesheet" href="static/css/design-canvas.css">
 <link rel="stylesheet" href="static/css/redesign-mobile.css">
+<link rel="stylesheet" href="static/css/redesign-tabbar.css">
 </head>
 <body>
   <!-- The desktop window's title bar (style.css .titlebar): drag anywhere on
@@ -53,12 +56,9 @@
        browser tab. -->
   <header id="titlebar" class="titlebar"><div class="titlebar-brand" id="titlebar-brand"></div><span class="titlebar-tab" id="titlebar-tab"></span></header>
   <div id="app">
-    <!-- Mobile-only (David's ask 2026-09-01, "similar UX/UI as Claude and
-         ChatGPT's mobile apps") — sidebar becomes a slide-out drawer below
-         the responsive breakpoint; this button + backdrop toggle it. Both
-         stay display:none above the breakpoint (see style.css), so they're
-         inert on desktop. -->
-    <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu"></button>
+    <!-- Phone navigation is the bottom tab bar (static/js/mobileTabBar.js,
+         2026-10-22), which replaced the menu button that lived here. The
+         backdrop stays for the sidebar's own close path. -->
     <div id="mobile-backdrop" class="mobile-backdrop hidden"></div>
     <div id="sidebar">
       <div class="sidebar-header">

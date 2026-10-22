@@ -60,6 +60,7 @@ from routes import (
     run_routes,
     notification_routes,
 )
+from routes import design_routes  # The Design canvas (vault: Design Canvas (Build Spec))
 from core import llamacpp_engine
 from services import chat_service, mobile_notifications, skills_service, swarm_service
 
@@ -243,6 +244,9 @@ app.include_router(hook_routes.router)
 app.include_router(tool_routes.router)
 app.include_router(run_routes.router)
 app.include_router(notification_routes.router)
+app.include_router(design_routes.router)
+app.include_router(design_routes.systems_router)
+app.include_router(design_routes.render_router)
 
 # Developer Mode (David's ask 2026-09-01) — the only app.py edit a custom
 # tab ever needs. Eligible folder tabs and approved legacy routes get

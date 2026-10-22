@@ -117,6 +117,9 @@ class ToolResult:
     text: str
     images: list[bytes]
     audit_url: str | None = None
+    # What a model that cannot see images is told instead (None: the
+    # computer tool's note). The design snapshot's text already says it all.
+    image_fallback: str | None = None
 
 
 def _object(properties: Optional[dict] = None, required: tuple = ()) -> dict:
@@ -162,7 +165,19 @@ def specs(surface: str, is_admin: bool = False, agent: bool = False, helper: boo
     return [s for s in _REGISTRY.values() if addons.tool_available(s.name) and surface in s.surfaces and (is_admin or not s.admin_only)
             and (agent or not s.agent_only) and (not helper or helper_tool(s))
             and (not read_only or s.effect == READ)
-            and (s.name != 'forge_app_logs' or session_id is None or forge_session(session_id))]
+            and (s.name != 'forge_app_logs' or session_id is None or forge_session(session_id))
+            and (surface != CODEX or design_gate(s, session_id))]
+
+
+def design_gate(spec: ToolSpec, session_id: str | None) -> bool:
+    """The Design canvas's editing tools are listed for a chat only once a
+    design is linked to it (core/design_tools.py), so chats that never
+    design pay no tokens for them. Listing only: call() still accepts them,
+    and each checks the chat's own link."""
+    if not session_id or not spec.name.startswith('design_') or spec.name in ('design_create', 'design_system_save'):
+        return True
+    from core import design_tools
+    return design_tools.linked(session_id) or design_tools.design_mode(session_id)
 
 
 def forge_session(session_id):
@@ -282,7 +297,10 @@ def cli_usage(spec: ToolSpec) -> str:
     return " ".join([spec.name, *flags])
 
 
-def _shown(spec: ToolSpec, small_window: bool) -> bool:
+def _shown(spec: ToolSpec, small_window: bool, session_id: str | None = None) -> bool:
+    if spec.name == 'design_create' and small_window and session_id:
+        from core import design_tools  # Offered directly while the chat is in Design mode.
+        return design_tools.design_mode(session_id)
     return not small_window or spec.core or spec.agent_only
 
 
@@ -291,14 +309,15 @@ def openai_tools(is_admin: bool = False, agent: bool = False, small_window: bool
     """The OpenAI function-calling list for one session: every tool, or on a
     small window only the core ones (the rest: deferred_tools)."""
     return [{"type": "function", "function": {"name": s.name, "description": s.description, "parameters": s.schema}}
-            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id) if _shown(s, small_window)]
+            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id)
+            if _shown(s, small_window, session_id) and (small_window or design_gate(s, session_id))]
 
 
 def deferred_tools(is_admin: bool = False, agent: bool = False, helper: bool = False,
                    read_only: bool = False, session_id: str | None = None) -> dict[str, dict]:
     """A small window's hidden tools, as core/tool_search.py catalog entries."""
     return {s.name: {"server": "kairos", "name": s.name, "description": s.description, "schema": s.schema}
-            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id) if not _shown(s, True)}
+            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id) if not _shown(s, True, session_id)}
 
 
 def _fields(args: dict, key: str) -> tuple[str, dict]:
@@ -1529,3 +1548,7 @@ async def _roblox_assets(args, ctx):
     from core import roblox_assets
     try: return json.dumps(roblox_assets.model_tool(ctx.session_id, **args), ensure_ascii=False)
     except (ValueError, TypeError) as exc: return str(exc)
+
+
+# The Design canvas's tools register themselves into this table.
+from core import design_tools  # noqa: E402,F401

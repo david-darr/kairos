@@ -44,6 +44,15 @@ def visible_packet(packet: dict, user: str) -> dict | None:
             return True
         except HTTPException:
             return False
+    if packet["type"] == "design_changed":
+        # The Design canvas's live redraw (routes/design_routes.py): seen by
+        # whoever may see that design, whether or not a chat changed it.
+        from core import design_store
+        try:
+            data = design_store.manifest(packet["designId"])
+        except LookupError:
+            return None
+        return packet if design_store.visible_to(data, user, auth_manager.is_admin(user)) else None
     if packet["type"] == "snapshot":
         return {**packet, "runs": {sid: run for sid, run in packet["runs"].items() if allowed(sid)}}
     return packet if allowed(packet["sessionId"]) else None

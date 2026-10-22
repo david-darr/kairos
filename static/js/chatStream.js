@@ -76,6 +76,11 @@ function _snapshot(packet) {
 
 function _packet(packet) {
   if (packet.type === 'snapshot') { _snapshot(packet); return; }
+  // The Design canvas redraws the boards a change touched (designCanvas.js).
+  if (packet.type === 'design_changed') {
+    if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('kairos:design-changed', { detail: packet }));
+    return;
+  }
   const sessionId = packet.sessionId;
   if (packet.type === 'started') { _mergeRun(sessionId, packet.run); return; }
   const entry = _inflight.get(sessionId);

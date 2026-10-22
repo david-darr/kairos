@@ -8,7 +8,7 @@ import { runSlashCommand, mountSlashSuggestions } from "../slashCommands.js";
 import { isComposingKey, shouldSendOnEnter } from '../composerKeyboard.js';
 import { registerMobileDrawer, isMainDrawerZone } from '../mobileDrawers.js';
 import * as chatStream from "../chatStream.js";
-import { renderMessageBody, copyText, hideArtifact, mountArtifactPane, setArtifactContext, showArtifactPane } from "../chatContent.js";
+import { renderMessageBody, copyText, hideArtifact, mountArtifactPane, setArtifactContext, showArtifactPane, openDesignTab } from "../chatContent.js";
 import { openBrowser, closeBrowser, suppressBrowser, releaseBrowser } from "../browserPane.js";
 import { openChatFiles, closeChatFiles, refreshChatFiles } from "../chatFilesPane.js";
 import { openChatComputer, closeChatComputer, updateChatComputer } from "../chatComputerPane.js";
@@ -922,9 +922,19 @@ export async function render(container, tabId, options = {}) {
   compactBtn.title = "Compact this chat";
   compactBtn.setAttribute("aria-label", "Compact this chat to free up context");
   compactBtn.hidden = true;
+  // Design mode (the Design canvas, 2026-10-22): the design-canvas skill on
+  // the chat's first message and design_create offered directly.
+  const designItem = menuItem(ICONS.design || ICON_DOC, 'Design mode', async () => {
+    closeMenu(overflowMenu);
+    const target = activeSessionId || (await createSession({ preserveAttachments: true })).id;
+    const now = await api(`/api/designs/mode/${target}`).catch(() => ({ design_mode: false }));
+    const next = await api(`/api/designs/mode/${target}`, { method: 'POST', body: JSON.stringify({ on: !now.design_mode }) }).catch(() => null);
+    if (next) { designItem.setAttribute('aria-pressed', String(next.design_mode)); toast(next.design_mode ? 'Design mode on: describe the screens you want.' : 'Design mode off', 'success'); }
+  });
+  designItem.setAttribute('aria-pressed', 'false');
   const extraTools = el('details', { class: 'composer-extra-tools' }, [
     el('summary', { text: 'More tools' }),
-    captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, compactBtn,
+    captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, designItem, compactBtn,
   ]);
   const overflowWrap = el("div", { class: "overflow-wrapper" }, [overflowBtn, overflowMenu, fileInput, cameraInput]);
 
@@ -1326,6 +1336,8 @@ export async function render(container, tabId, options = {}) {
   if (disposed || !container.isConnected) return cleanup;
   await mountArtifactPane(container);
   if (disposed || !container.isConnected) return cleanup;
+  // A design opened beside its chat (Design canvas: Design view, design chats).
+  if (options.openDesign && options.sessionId) openDesignTab(options.sessionId, options.openDesign).catch(() => {});
   // Landed: from here on, gaining or losing messages dissolves the background.
   backdropInstant = false;
   backdrop.ready.then(() => options.transitionReady?.());
@@ -1369,6 +1381,14 @@ export async function render(container, tabId, options = {}) {
     } catch (e) {
       console.error("chat: pending handoff failed", e);
     }
+  }
+
+  // Library > Vault "Ask Kairos" (2026-10-22): a new chat with the note
+  // attached as a reference chip and the composer focused. Nothing is sent;
+  // the server fences and taint-marks the note when David sends.
+  if (Array.isArray(options.references) && options.references.length && chatReferences && !options.mobileLaunch) {
+    for (const reference of options.references.slice(0, 5)) chatReferences.add(reference);
+    input.focus();
   }
 
   // Unmount (David's ask 2026-09-12): app.js's switchTab() calls this

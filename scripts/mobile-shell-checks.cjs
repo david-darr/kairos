@@ -36,14 +36,16 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await home();
   assert.deepEqual(await overflow(), [], 'Launch surface has no overflow');
   assert.equal(await js("document.querySelector('.ms-shell h1').textContent"), 'What should we work on?');
-  assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row > *')].map(n => n.className.split(' ')[0])"), ['ms-avatar', 'ms-switch', 'ms-settings'], 'Header is avatar, New/Chats switch and Settings');
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row > *')].map(n => n.className.split(' ')[0])"), ['ms-switch'], 'The header row is the New/Chats switch alone; navigation and Settings live on the tab bar');
   assert.equal(Math.round((await rect('.ms-mark')).w), 84, 'Centered mark is 84px');
   assert.ok(await js("document.querySelector('.ms-background')?.getClientRects().length > 0"), 'The backdrop runs full bleed behind the launch surface');
-  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'hidden', 'The avatar replaces the hamburger');
+  assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar')"), true, 'No avatar and no hamburger: the tab bar navigates');
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
   assert.equal(await js("document.getElementById('chat-input').placeholder"), 'Plan, ask, build…');
   const rest = await rect('.ms-composer');
   assert.ok(rest.h >= 48 && rest.h <= 56, `Composer rests as a pill (${rest.h}px)`);
   assert.ok(rest.b <= 844 - 12 + 1, 'Composer clears the bottom edge');
+  assert.ok(rest.b <= (await rect('.ms-tabbar')).y - 8 + 1, 'Composer sits above the tab bar');
   assert.deepEqual(await small(), [], 'Launch controls are at least 44px');
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-header .ms-blur-top i')).backdropFilter.includes('blur')"), true, 'The header has a gradual edge blur');
   assert.equal(await js("document.querySelectorAll('.ms-header .ms-blur-top i').length"), 6, 'Edge blur is built from six layers');
@@ -180,18 +182,20 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === " + ids.length);
 
-  // ---- A3: tab sheet
+  // ---- A3: the More sheet (opened from the tab bar)
   await js("document.getElementById('ms-tab-0').click()"); await delay(400);
-  await js("document.querySelector('.ms-header .ms-avatar').focus(); document.querySelector('.ms-header .ms-avatar').click()");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').focus(); document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
   await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   await delay(400);
-  const navTabs = await js("[...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab)");
+  const onBar = ['home', 'chat', 'agents', 'calendar'];
+  const navTabs = (await js("[...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab)")).filter(t => !onBar.includes(t));
   const tiles = await js("[...document.querySelectorAll('.ms-tab-sheet .ms-tab-tile')].map(n => n.dataset.tab || n.textContent.trim())");
-  assert.deepEqual(tiles.slice(0, navTabs.length), navTabs, 'Tiles follow the sidebar order');
+  assert.deepEqual(tiles, navTabs, 'Tiles follow the sidebar order, less the tabs on the bar');
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-tab-grid')).gridTemplateColumns.split(' ').length"), 3, 'Three columns');
   assert.equal(await js("document.querySelector('.ms-tab-sheet').getAttribute('aria-modal')"), 'true');
-  // The tile mirrors the sidebar badge, whatever count earlier checks left in the inbox.
-  assert.equal(await js("document.querySelector('.ms-tab-tile[data-tab=agents] .nav-badge')?.textContent.trim() || ''"), await js("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent.trim() || ''"), 'Agents tile shows the sidebar badge');
+  assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-expanded')"), 'true', 'More announces the open sheet');
+  // The bar's Agents mirrors the sidebar badge, whatever count earlier checks left in the inbox.
+  assert.equal(await js("(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-tabbar [data-tabbar=agents] .ms-tabbar-badge'))"), await js("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent.trim() || ''"), 'The Agents item on the bar shows the sidebar badge');
   assert.ok(await js("[...document.querySelectorAll('.ms-tab-sheet .ms-account-row')].some(n => n.textContent.trim() === 'Settings')"), 'Settings row is present');
   assert.deepEqual(await small(), [], 'Tab sheet targets are at least 44px');
   assert.deepEqual(await overflow(), []);
@@ -203,32 +207,35 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'})); true");
   await press('Escape', 'Escape', 27); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Escape closes the sheet');
-  assert.equal(await js("document.activeElement.classList.contains('ms-avatar')"), true, 'Focus returns to the avatar');
+  assert.equal(await js("document.activeElement.dataset.tabbar"), 'more', 'Focus returns to More');
+  assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-expanded')"), 'false', 'More announces the closed sheet');
   // Backdrop and downward swipe
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Backdrop taps close the sheet');
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   await swipe('.ms-sheet-heading', 200, 300, 0, 110); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'A downward swipe closes the sheet');
-  await js("document.querySelector('.ms-header .ms-avatar').click()");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
   await waitFor("document.querySelector('.ms-tab-sheet[open]')");
-  assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-group .ms-group-label')].map(n => n.textContent)"), ['Top', 'Workspace', 'Intelligence'], 'Sheet has the saved sidebar groups');
-  await js("document.querySelector('.ms-tab-tile[data-tab=home]').click()"); await delay(450);
-  assert.equal(await js("!!document.querySelector('.dashboard-hero') && !document.querySelector('.ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home tile opens dashboard and Customize');
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-group .ms-group-label')].map(n => n.textContent)"), ['Workspace', 'Intelligence'], 'Sheet has the saved sidebar groups (the top group is all on the bar)');
+  await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
+  await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()"); await delay(450);
+  assert.equal(await js("!!document.querySelector('.dashboard-hero') && !document.querySelector('.ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home on the bar opens dashboard and Customize');
   await home();
   // Tiles navigate
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   await js("document.querySelector('.ms-tab-tile[data-tab=notes]').click()");
   await waitFor("document.documentElement.dataset.view === 'notes'");
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true);
-  assert.equal(await js("getComputedStyle(document.getElementById('mobile-menu-btn')).visibility"), 'visible', 'Other tabs show the workspace avatar');
+  await waitFor("document.querySelector('.ms-tabbar [aria-current=page]')?.dataset.tabbar === 'more'");
+  assert.ok(true, 'Other tabs keep the tab bar, with More current');
   await home();
 
   // A custom tab follows its saved group/order and hidden tabs stay out.
   await js("import('/static/js/layout.js').then(m => { window.__phoneLayout = m.getLayout(); const next = m.getLayout(); for (const ids of Object.values(next.groups)) { const at = ids.indexOf('school'); if (at >= 0) ids.splice(at, 1); } next.groups.workspace.unshift('school'); next.hiddenTabs.push('cookbook'); m.saveLayout(next); })");
   await waitFor("!!document.querySelector('#nav [data-tab=school]') && !document.querySelector('#nav [data-tab=cookbook]')");
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('.ms-tab-sheet[open]')");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('.ms-tab-sheet[open]')");
   assert.equal(await js("document.querySelector('.ms-tab-group[data-group=workspace] .ms-tab-tile').dataset.tab"), 'school', 'Custom tab is first in its saved group');
   assert.equal(await js("!!document.querySelector('.ms-tab-sheet [data-tab=cookbook]')"), false, 'Hidden tabs stay out');
   await js("document.querySelector('.ms-tab-sheet').click(); import('/static/js/layout.js').then(m => { m.saveLayout(window.__phoneLayout); delete window.__phoneLayout; })");
@@ -239,14 +246,16 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await live('s1'); await delay(800);
   await navigate('notes'); await delay(600);
   assert.equal(await js("[...document.querySelectorAll('.ms-activity')].some(n => !n.hidden && n.getClientRects().length)"), false, 'No floating updates pill on other tabs');
-  assert.equal(await js("!!document.querySelector('#mobile-menu-btn > .ms-avatar-badge:not([hidden])')"), true, 'The workspace avatar carries the status badge');
+  await waitFor("!!document.querySelector('.ms-tabbar [data-tabbar=home] > .ms-tabbar-badge:not([hidden])')");
+  assert.match(await js("document.querySelector('.ms-tabbar [data-tabbar=home]').getAttribute('aria-label')"), /^Home, \d+ (need you|working)$/, 'Home on the bar carries the status badge and says it');
   await navigate('chat', { mobileConversation: true, sessionId: 's2' });
   await waitFor("!!document.querySelector('.ms-conversation .ms-chat-back')"); await delay(500);
   assert.equal(await js("[...document.querySelectorAll('.ms-activity')].some(n => !n.hidden && n.getClientRects().length)"), false, 'No floating pill in a conversation');
   assert.equal(await js("!!document.querySelector('.ms-chat-back > .ms-avatar-badge:not([hidden])')"), true, 'Back carries the status badge');
   await js("document.querySelector('.ms-chat-back').click()"); await delay(600);
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
-  assert.ok(await js("document.querySelectorAll('.ms-sheet-activity-row').length >= 1"), 'The tab sheet lists working and waiting items');
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
+  assert.ok(await js("document.querySelectorAll('.ms-sheet-activity-row').length >= 1"), 'The More sheet lists working and waiting items');
   const icons = await js("Object.fromEntries([...document.querySelectorAll('.ms-tab-tile')].map(n => [n.dataset.tab || n.textContent.trim(), n.querySelector('svg')?.innerHTML]))");
   const vals = Object.values(icons);
   assert.equal(new Set(vals).size, vals.length, 'Every tab tile has its own icon');
@@ -324,7 +333,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await page(), 1, 'Reduced motion still switches pages');
   await swipe('.ms-history-list', 300, 700, 140); await delay(500);
   assert.equal(await page(), 0, 'A swipe switches without continuous dragging');
-  await js("document.querySelector('.ms-header .ms-avatar').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-tab-sheet')).animationName"), 'none', 'The sheet appears without sliding');
   await press('Escape', 'Escape', 27); await delay(250);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
@@ -337,7 +346,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     assert.deepEqual(await small(), [], `${name} launch targets are 44px`);
     const bar = await rect('.ms-composer');
     assert.ok(bar.b <= h && bar.x >= 0 && bar.r <= w, `${name} composer stays on screen`);
-    assert.ok((await rect('.ms-header .ms-avatar')).y >= 0 && (await rect('.ms-settings')).r <= w, `${name} header stays on screen`);
+    assert.ok((await rect('.ms-header .ms-switch')).y >= 0 && (await rect('.ms-header .ms-switch')).r <= w, `${name} header stays on screen`);
+    const tabbar = await rect('.ms-tabbar');
+    assert.ok(tabbar && tabbar.x >= 0 && tabbar.r <= w && tabbar.b <= h && bar.b <= tabbar.y - 8 + 1, `${name} tab bar fits below the composer: ${JSON.stringify([tabbar, bar])}`);
     await js("document.getElementById('ms-tab-1').click()"); await delay(400);
     assert.deepEqual(await overflow(), [], `${name} chats fit`);
     await capture(`shell-${name}-chats`);
@@ -351,7 +362,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     await navigate('home'); await delay(500);
     assert.equal(await js("(() => { const s = document.querySelector('.ms-shell'); return !!s && !s.hidden && s.getClientRects().length > 0; })()"), false, `${w}px Home keeps the dashboard`);
     assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0"), true, `${w}px shows the dashboard overview`);
-    if (!phone) assert.equal(await js("[...document.querySelectorAll('.ms-activity, .ms-tab-sheet[open]')].every(n => n.hidden || !n.getClientRects().length)"), true, 'No phone chrome on desktop');
+    if (!phone) assert.equal(await js("[...document.querySelectorAll('.ms-activity, .ms-tab-sheet[open], .ms-tabbar')].every(n => n.hidden || !n.getClientRects().length)"), true, 'No phone chrome (tab bar included) on desktop');
   }
   await resize(1440, 900);
 };
