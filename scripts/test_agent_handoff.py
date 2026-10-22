@@ -450,6 +450,33 @@ class CoordinationTests(unittest.TestCase):
         self.assertIn("Peer result", self.brain.prompt)
         self.assertNotIn("recent statements in other threads", self.brain.prompt)
 
+    def test_default_model_resume_runs_inside_a_file_checkpoint(self):
+        """A resumed bot's vault edits are its chat's turn, not "Edited outside Kairos"."""
+        from core import file_checkpoints
+        self.assignment()
+        req = self.assigned_cards()[0]["requester"]
+        seen = {"sources": [], "inside": False, "ran_inside": None}
+
+        @asynccontextmanager
+        async def recording(source, workspace=None):
+            seen["sources"].append(source)
+            seen["inside"] = True
+            try:
+                yield
+            finally:
+                seen["inside"] = False
+
+        original = self.brain.events
+
+        async def events(prompt, stream=True):
+            seen["ran_inside"] = seen["inside"]
+            async for item in original(prompt, stream):
+                yield item
+        with patch.object(file_checkpoints, "around_turn", recording), patch.object(self.brain, "events", events):
+            asyncio.run(agent_handoff._resume(req, "Peer result"))
+        self.assertEqual(seen["sources"], [f"chat:{self.source}"])
+        self.assertTrue(seen["ran_inside"], "the model's turn ran inside the checkpoint")
+
 
 if __name__ == "__main__":
     try:
