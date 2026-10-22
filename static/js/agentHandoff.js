@@ -8,7 +8,7 @@ import { agentAvatar as dotAvatar } from './agentAvatar.js';
 const STATUS = { queued: 'Queued', working: 'Working', needs_you: 'Needs you', done: 'Done', failed: 'Failed' };
 
 export function agentAvatar(name, color, id, spec, size = 28) {
-  const avatar = dotAvatar({ id: id || name, avatar: spec }, size);
+  const avatar = dotAvatar({ id: id || name, avatar: spec, color }, size);
   avatar.classList.add('handoff-avatar');
   return avatar;
 }

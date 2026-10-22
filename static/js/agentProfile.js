@@ -189,7 +189,7 @@ export function mountAgentProfile(root, initial, models, channels, onSaved) {
   // A field has one DOM node. Switching modes moves it, preserving its value.
   // Separate save buttons avoid moving the same button between sections.
   const sectionSave = () => el('button', { class: 'btn primary', type: 'button', text: 'Save profile', onclick: () => save.click() });
-  const characterGroup = group({ title: 'Character', description: 'Its body colour, shape and one accessory. The gold point and the eyes stay Kairos.' }, [picker.root]);
+  const characterGroup = group({ title: 'Character', description: 'Its body color, shape and one accessory. The gold point and the eyes stay Kairos.' }, [picker.root]);
   const identityGroup = group({ title: 'Identity', description: 'How this bot introduces itself and works.' }, [identity, instruction]);
   const modelGroup = group({ title: 'Model', description: 'Connection, version and effort.' }, [modelField]);
   details.append(pageHeader('Details', 'The essentials for this bot.'), characterGroup, identityGroup, modelGroup, save);

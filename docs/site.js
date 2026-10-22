@@ -14,6 +14,19 @@ if (art) import("./demo/static/js/dither.js")
   .then(({ mountDither }) => mountDither(art, "img/hero-figure.webp", { cell: 4, focusX: 0.62, focusY: 1, develop: 900 }))
   .catch(() => {});
 
+// -- the mascot ----------------------------------------------------------
+// Ajar (static/js/mascot.js, the demo's copy): in the hero and the states
+// strip. Opened from disk, where modules don't load, the strip stays hidden.
+import("./demo/static/js/mascot.js").then(({ createMascot }) => {
+  document.documentElement.classList.add("has-mascot");
+  const hero = document.querySelector(".hero-mascot");
+  if (hero) hero.append(createMascot({ state: "idle" }));
+  document.querySelectorAll("[data-mascot-state] .mascot-slot").forEach((slot) =>
+    slot.append(createMascot({ state: slot.parentElement.dataset.mascotState })));
+  document.querySelectorAll("[data-mascot-bot] .mascot-slot").forEach((slot) =>
+    slot.append(createMascot({ spec: JSON.parse(slot.parentElement.dataset.mascotBot) })));
+}).catch(() => {});
+
 // -- navigation ----------------------------------------------------------
 const nav = document.querySelector(".site-nav");
 const menu = document.querySelector(".menu-button");
