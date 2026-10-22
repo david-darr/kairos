@@ -107,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     // whole point of reproducing it here is that a CSP difference between
     // fixture and product hides exactly this class of bug.
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https:");
-    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
+    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"><link rel="stylesheet" href="/static/css/mascot.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
   }
   if (url.pathname.startsWith('/api/')) {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -527,6 +527,9 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.chat-activity')?.dataset.state==='waiting'");
     await js("document.querySelector('.chat-activity summary').click()");
     assert.equal(await js("document.querySelectorAll('.chat-activity li[data-state=done]').length"), 1);
+    // The mascot is the marker while it streams (Kairos Mascot build spec, 2026-10-22).
+    assert.equal(await js("document.querySelector('.chat-activity-marker kairos-mascot').getAttribute('state')"), 'thinking');
+    assert.notEqual(await js("getComputedStyle(document.querySelector('.chat-activity-marker kairos-mascot')).display"), 'none');
     await capture('chat-activity-waiting');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{name:'prefers-reduced-motion',value:'reduce'}] });
     assert.equal(await js("getComputedStyle(document.querySelector('.chat-activity-marker')).animationName"), 'none');
@@ -552,6 +555,9 @@ app.whenReady().then(async () => {
     pending.res.end('data: {"done":true}\n\n'); pending = null;
     await waitFor("document.querySelector('#chat-send').dataset.mode!=='stop'");
     assert.equal(await js("document.querySelector('.chat-activity')?.dataset.state"), 'done');
+    assert.equal(await js("document.querySelector('.chat-activity-marker kairos-mascot').getAttribute('state')"), 'success', 'success once on completion');
+    await js("window.mascotSettled = new Promise(r => document.querySelector('.chat-activity-marker kairos-mascot').addEventListener('mascot-settled', r, { once: true }))");
+    await waitFor("document.querySelector('.chat-activity-marker kairos-mascot').getAttribute('state') === 'idle'");
     await open('s2');
     assert.equal(await js("document.querySelectorAll('.msg.assistant').length"), 1, 'Finished retention never duplicates a persisted reply');
     // Truncated SSE must fail, not masquerade as a successful reply.
@@ -561,6 +567,14 @@ app.whenReady().then(async () => {
     pending.res.end(); pending = null;
     await waitFor("!!document.querySelector('.msg-interrupted')");
     assert.equal(await js("[...document.querySelectorAll('.chat-activity')].at(-1).dataset.state"), 'failed');
+    assert.equal(await js("[...document.querySelectorAll('.chat-activity-marker kairos-mascot')].at(-1).getAttribute('state')"), 'error', 'a failed turn shows the error pose');
+    // With the switch off the marker is the glyph again.
+    // The switch's contract is the root attribute (appearance.js sets it); set it directly so this page keeps its look.
+    await js("document.documentElement.dataset.mascot = 'off'");
+    assert.equal(await js("getComputedStyle([...document.querySelectorAll('.chat-activity-marker kairos-mascot')].at(-1)).display"), 'none');
+    assert.equal(await js("[...document.querySelectorAll('.chat-activity-glyph')].at(-1).textContent"), '!');
+    await capture('chat-activity-mascot-off');
+    await js("document.documentElement.dataset.mascot = 'on'");
     assert.equal(await js("document.querySelectorAll('.msg.assistant').length"), 2);
 
     // -- stopping a running turn (David's ask 2026-09-15, the foundation the

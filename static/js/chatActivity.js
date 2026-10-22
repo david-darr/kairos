@@ -1,11 +1,20 @@
 import { el } from './api.js';
 import { stepRow } from './runTimeline.js';
+import { createMascot } from './mascot.js';
+
+// The marker is Kairos's mascot while the switch is on (Kairos Mascot build
+// spec, 2026-10-22): thinking while the reply streams, success once when it
+// completes (it settles to idle by itself), error on a failed turn. The glyph
+// beside it is the marker as before; mascot.css shows one or the other.
+const MASCOT_STATE = { sending: 'thinking', waiting: 'thinking', responding: 'thinking', done: 'success', failed: 'error', stopped: 'idle' };
 
 // This is transport progress, not a model's private reasoning. Each state
 // comes from the real stream and survives view remounts through chatStream.
 export function createChatActivity() {
   const label = el('span', { class: 'chat-activity-label', role: 'status', 'aria-live': 'polite' });
-  const marker = el('span', { class: 'chat-activity-marker', 'aria-hidden': 'true' });
+  const glyph = el('span', { class: 'chat-activity-glyph' });
+  const mascot = createMascot({ state: 'thinking', size: 22 });
+  const marker = el('span', { class: 'chat-activity-marker', 'aria-hidden': 'true' }, [glyph, mascot]);
   const summary = el('summary', {}, [marker, label, el('span', { class: 'chat-activity-chevron', text: '⌄', 'aria-hidden': 'true' })]);
   const list = el('ol', { class: 'chat-activity-steps' });
   const rows = ['Request sent', 'Response started', 'Response complete'].map(text => {
@@ -25,7 +34,8 @@ export function createChatActivity() {
     if (state === previous) return;
     previous = state; node.dataset.state = state;
     label.textContent = { sending: 'Sending request', waiting: 'Waiting for response', responding: 'Receiving response', done: 'Response complete', failed: 'Response interrupted' }[state];
-    marker.textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : state === 'stopped' ? '■' : '';
+    glyph.textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : state === 'stopped' ? '■' : '';
+    mascot.setAttribute('state', MASCOT_STATE[state]);
     const complete = [!!entry.connected, !!entry.text, state === 'done'];
     rows.forEach((row, index) => {
       row.dataset.state = complete[index] ? 'done' : state === 'failed' ? 'stopped' : index === complete.findIndex(value => !value) ? 'active' : 'pending';

@@ -40,6 +40,12 @@ export function renderAppearancePanel(content, _status, page) {
       el('strong', { text: title }), el('span', { text: subtitle })]);
     styleButtons.set(style, button); chatStyles.append(button);
   }
+  // Show the mascot (Kairos Mascot build spec, 2026-10-22).
+  const mascot = toggle({ label: 'Show the mascot', onChange: (on) => { updateAppearance({ mascot: on }); sync(); } });
+  mascot.id = 'appearance-mascot';
+  const mascotSection = el('div', { class: 'appearance-mascot-setting' }, [
+    group({}, [row({ title: 'Show the mascot', description: 'Kairos on Home, in the chat while it works, on empty pages and in calls. Off shows the plain markers. Bots keep their faces.', control: mascot })]),
+  ]);
   const chatStyleSection = el('section', { class: 'appearance-chat-style-setting' }, [
     el('h3', { text: 'Chat style' }), chatStyles,
     el('p', { class: 'meta', text: 'Terminal changes how chats look, not what Kairos can do. Type /terminal in a chat to switch.' }),
@@ -275,7 +281,7 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  root.append(previewFrame, modes, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, redesignSection, overlaySection, status);
+  root.append(previewFrame, modes, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, mascotSection, redesignSection, overlaySection, status);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
@@ -283,6 +289,7 @@ export function renderAppearancePanel(content, _status, page) {
     for (const [style, button] of styleButtons) button.setAttribute('aria-pressed', String(style === value.chatStyle));
     palette.hidden = value.mode === 'default'; imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
+    mascot.checked = value.mascot;
     effectSection.hidden = !['default', 'color'].includes(value.mode);
     for (const [effect, { input }] of effectChoices) input.checked = value.backgroundEffect === effect;
     const effectPrefs = value.effectOptions[value.backgroundEffect];

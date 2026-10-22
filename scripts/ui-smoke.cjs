@@ -355,6 +355,14 @@ app.whenReady().then(async () => {
       for (const line of found) console.log('  ' + line);
       exitAfterFlush(0); return;
     }
+    // The mascot (Kairos Mascot build spec, 2026-10-22): scripts/mascot-checks.cjs.
+    if (process.argv.includes('--mascot-only')) {
+      await require('./mascot-checks.cjs')({ js, waitFor, delay, navigate, win, capture, demoState, writes });
+      assert.deepEqual(errors, [], 'Mascot renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['mascot'], errors }, null, 2));
+      console.log('PASS: mascot on Home, empty states, Agents, the call, the village and notifications.');
+      console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
       assert.deepEqual(errors, []);
@@ -461,6 +469,7 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
     console.log('PASS: Home tab cards hidden by default, Layout show/reorder, reload/off/on persistence, native sections, endpoint failure and phone overflow.');
     await require('./home-card-checks.cjs')({ js, win, waitFor, capture, navigate, demoState, delay });
+    await require('./mascot-checks.cjs')({ js, waitFor, delay, navigate, win, capture, demoState, writes });
     if (process.argv.includes('--home-tab-cards-only')) {
       assert.deepEqual(errors, [], 'No renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({passed:true, checks:['Home tab cards'], errors}, null, 2));
