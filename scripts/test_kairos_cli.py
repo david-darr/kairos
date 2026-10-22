@@ -831,6 +831,23 @@ class QuestionRoutingTests(unittest.IsolatedAsyncioTestCase):
         app.set_modal(view, dict(QUESTION))
         return app
 
+    async def test_digit_shortcuts_only_with_empty_question_buffer(self):
+        app = self.app()
+        keys = app.bindings()
+        digit = keys.get_bindings_for_keys(("2",))[0]
+        self.assertTrue(digit.filter(), "An empty question buffer offers option shortcuts")
+        app.buffer.insert_text("In ")
+        self.assertFalse(digit.filter(), "Digits in an Other answer must reach the input buffer")
+        app.buffer.insert_text("2 weeks")
+        await app.submit()
+        await app.answer(0)
+        await app.submit()
+        self.assertEqual(app.conn.posts[-1][1], {"answers": {
+            "Which layout?": "In 2 weeks", "Widgets?": ["Tasks"]}})
+        app.set_modal(app.view, dict(REQUEST))
+        app.buffer.text = "existing draft"
+        self.assertTrue(digit.filter(), "Permission shortcuts still work with a draft")
+
     async def test_digit_then_other_with_multi_toggle(self):
         app = self.app()
         await app.answer(0)

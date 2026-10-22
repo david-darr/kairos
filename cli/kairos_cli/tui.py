@@ -1657,6 +1657,8 @@ class KairosApp:
     def bindings(self) -> KeyBindings:
         keys = KeyBindings()
         modal = Condition(lambda: bool(self.view and self.view.__dict__.get("modal")) and not self.screen)
+        # Other answers need digits to reach the buffer once typing has started.
+        option_shortcuts = modal & Condition(lambda: self.modal.get("kind") != "question" or not self.buffer.text)
         working = Condition(lambda: bool(self.view and self.view.working))
         picker = Condition(lambda: self.screen == "picker")
         sidebar = Condition(lambda: self.sidebar_mode)
@@ -1666,7 +1668,7 @@ class KairosApp:
         run = self.spawn
 
         for digit in "123456789":
-            @keys.add(digit, filter=modal, eager=True)
+            @keys.add(digit, filter=option_shortcuts, eager=True)
             def _(event, digit=digit):
                 run(self.answer(int(digit) - 1))
 

@@ -33,7 +33,7 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     const item = el('fieldset', { class: 'question-item' }, [legend]);
     const options = [];
     function choice(label, description = '') {
-      const input = el('input', { type: q.multiSelect ? 'checkbox' : 'radio', name: `question-${request.id}-${i}` });
+      const input = el('input', { type: q.multiSelect ? 'checkbox' : 'radio', name: `question-${request.id}-${i}`, 'aria-label': label });
       input.addEventListener('change', update);
       const row = el('label', { class: 'question-option' }, [input, el('span', {}, [el('span', { text: label }), description ? el('span', { class: 'question-description', text: description }) : null])]);
       item.append(row);

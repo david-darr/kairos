@@ -12,13 +12,16 @@ const optionText = '<script>window.__pwned=2</script>Yes';
 const request = { id: 'question-check', kind: 'question', tool: 'AskUserQuestion', title: 'Waiting for your response', choices: [], arguments: {}, expires_at: Date.now() / 1000 + 1800,
   questions: [{ question: questionText, header: 'Layout', multiSelect: false, options: [{ label: optionText, description: 'Literal text' }, { label: 'No' }] },
     { question: 'Which widgets should be on it?', header: 'Widgets', multiSelect: true, options: [{ label: 'Calendar' }, { label: 'Tasks' }, { label: 'Weather' }] }] };
-const chat = { id: 's1', title: 'Question check', model_endpoint_id: 'claude', messages: [{ role: 'user', content: 'Please ask me.' }] };
-const run = { turnId: 't1', sessionTitle: chat.title, prompt: 'Please ask me.', text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false, permission: request, revision: 1, toolSteps: [], toolEvents: [] };
+const startedAt = Date.now() / 1000;
+const chat = { id: 's1', title: 'Question check', model_endpoint_id: 'claude', messages: [{ role: 'user', content: 'Please ask me.', ts: startedAt }] };
+let run = { turnId: 't1', sessionTitle: chat.title, prompt: 'Please ask me.', text: '', startedAt, status: 'processing', stopping: false, permission: request, revision: 1, toolSteps: [], toolEvents: [] };
 const clients = new Set(), posts = [];
-const snapshot = () => ({ type: 'snapshot', runs: { s1: run } });
+let liveConnections = 0;
+const snapshot = () => ({ type: 'snapshot', runs: run ? { s1: run } : {} });
+const broadcast = packet => { for (const client of clients) client.write(`data: ${JSON.stringify(packet)}\n\n`); };
 function change(permission) {
   run.permission = permission; run.revision++;
-  for (const client of clients) client.write(`data: ${JSON.stringify({ type: 'update', sessionId: 's1', turnId: 't1', revision: run.revision, changes: { permission } })}\n\n`);
+  broadcast({ type: 'update', sessionId: 's1', turnId: run.turnId, revision: run.revision, changes: { permission } });
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -31,7 +34,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/api/')) {
     if (url.pathname === '/api/chat/live/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
-      clients.add(res); res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+      liveConnections++; clients.add(res); res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
       res.on('close', () => clients.delete(res)); return;
     }
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -39,11 +42,12 @@ const server = http.createServer(async (req, res) => {
     const json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
     if (url.pathname.endsWith('/respond')) { posts.push({ path: url.pathname, data }); return json({ status: data.skip ? 'skipped' : 'answered' }); }
     if (url.pathname === '/api/chat/live/snapshot') return json(snapshot());
-    if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, username: 'Alex', is_admin: true });
+    if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, setup_required: false, username: 'Alex', is_admin: true });
     if (url.pathname === '/api/sessions') return json([chat]);
     if (url.pathname === '/api/sessions/s1') return json(chat);
     if (url.pathname.endsWith('/context')) return json({ available: false });
     if (url.pathname === '/api/models' || url.pathname === '/api/models/choices') return json([{id:'claude',name:'Claude Code',kind:'claude_cli',supports_images:true}]);
+    if (url.pathname === '/api/models/catalog') return json({ claude_cli: [] });
     if (url.pathname.includes('catalog')) return json([]);
     if (url.pathname === '/api/speech/status') return json({engine_available:false,models:[]});
     return json([]);
@@ -65,13 +69,24 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 1280, height: 900, useContentSize:true, show:false, webPreferences:{offscreen:true, contextIsolation:true, nodeIntegration:false} });
   const js = code => win.webContents.executeJavaScript(code);
   const waitFor = async code => { for (let i=0;i<125;i++) { if (await js(code)) return; await delay(40); } throw Error('Timed out: ' + code); };
-  const mount = async phone => {
+  const mount = async (phone, expectQuestion = true) => {
+    const connectionsBefore = liveConnections;
     await win.loadURL(base);
     await js(`document.documentElement.dataset.appMode = 'kairos'; document.documentElement.classList.toggle('kairos-redesign', ${!!phone}); document.body.classList.toggle('kairos-redesign', ${!!phone});
-      import('/static/js/views/chat.js').then(async m => { window.cleanup = await m.render(document.querySelector('#view-content'), 'chat', {sessionId:'s1'}); })`);
-    await waitFor('!!document.querySelector(".chat-question-host .question-card")');
+      // The normal app connects the shared feed before mounting views.
+      import('/static/js/chatStream.js').then(async stream => {
+        await stream.connect();
+        const m = await import('/static/js/views/chat.js');
+        window.cleanup = await m.render(document.querySelector('#view-content'), 'chat', {sessionId:'s1'});
+      })`);
+    for (let i=0;liveConnections===connectionsBefore;i++) { if (i===125) throw Error('Live feed did not connect'); await delay(40); }
+    await waitFor('document.querySelector("#chat-messages")?.dataset.sessionId === "s1" && !!window.cleanup');
+    if (expectQuestion) {
+      assert.equal(await js(`import('/static/js/chatStream.js').then(m => m.getInFlight('s1')?.permission?.id)`), request.id, 'Snapshot loaded before chat opens');
+      await waitFor('!!document.querySelector(".chat-question-host .question-card")');
+    }
   };
-  const capture = async name => { const file = path.join(output, name + '.png'); fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG()); console.log(file); };
+  const capture = async name => { await js("Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))"); await delay(300); const file = path.join(output, name + '.png'); fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG()); console.log(file); };
   try {
     await mount(false);
     const card = await js(`(() => { const c=document.querySelector('.question-card'), d=c.closest('.chat-composer-dock'); return { dock:!!d, before:!!(c.compareDocumentPosition(d.querySelector('.chat-input-bar')) & Node.DOCUMENT_POSITION_FOLLOWING), visible:c.getBoundingClientRect().height>0, title:c.querySelector('h2').textContent, text:c.textContent, tags:c.querySelectorAll('img,script,b').length, pwned:window.__pwned, disabled:c.querySelector('.primary').disabled }; })()`);
@@ -99,6 +114,27 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     assert.equal(await js('getComputedStyle(document.querySelector(".question-pulse")).animationName'),'none');
+
+    // An already-open chat must attach remote turns without a reload.
+    // Each mount starts idle so a leftover per-turn listener cannot hide the bug.
+    for (const permission of [request, null]) {
+      run = null;
+      await mount(false, false);
+      assert.equal(await js('!!document.querySelector("[data-live-turn], .question-card")'), false);
+      run = { turnId: permission ? 'remote-question' : 'remote-reply', sessionTitle: chat.title,
+        prompt: 'Started on another device', text: '', startedAt: Date.now()/1000,
+        status: 'processing', stopping: false, permission, revision: 1, toolSteps: [], toolEvents: [] };
+      broadcast({ type: 'started', sessionId: 's1', run });
+      await waitFor(`import('/static/js/chatStream.js').then(m => m.getInFlight('s1')?.turnId === ${JSON.stringify(run.turnId)})`);
+      if (permission) {
+        await waitFor('!!document.querySelector(".chat-question-host .question-card")');
+        assert.equal(await js('!!document.querySelector(".chat-composer-dock .question-card")'), true);
+      } else {
+        run.text = 'Reply from another device'; run.revision++;
+        broadcast({ type: 'chunk', sessionId: 's1', turnId: run.turnId, revision: run.revision, chunk: run.text });
+        await waitFor('document.querySelector("[data-live-turn] .msg-body")?.textContent.includes("Reply from another device")');
+      }
+    }
     console.log('ask-user Chromium checks passed');
     win.destroy(); for (const client of clients) client.end(); server.close(); exitAfterFlush(0);
   } catch (error) {

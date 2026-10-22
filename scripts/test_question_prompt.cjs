@@ -39,6 +39,8 @@ const request = { id: 'q', questions: [
   const [skip, submit] = card.querySelectorAll('button');
   assert.equal(submit.disabled, true);
   const inputs = card.querySelectorAll('input');
+  assert.deepEqual(inputs.filter(n => n.attrs.type !== 'text').map(n => n.attrs['aria-label']),
+    ['<script>Yes</script>', 'Other', 'Tasks', 'Other']);
   inputs[0].checked = true; inputs[0].fire('change');
   inputs[5].value = 'Calendar'; inputs[5].fire('input');
   assert.equal(submit.disabled, false);

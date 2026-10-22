@@ -598,7 +598,9 @@ export async function render(container, tabId, options = {}) {
   // anyway means a future bug in that call order fails safe (no leaked
   // listeners) instead of silently accumulating one per tab visit.
   activeUnsubscribers = [];
-  const mountSubscriptions = activeUnsubscribers;
+  const turnSubscriptions = activeUnsubscribers;
+  // Keep the remote-start listener alive when switching chats clears turn subscriptions.
+  const mountSubscriptions = [];
   // Every fresh landing on the Chat tab starts at the welcome state, even
   // if a session was open the last time this tab was visited — matches a
   // typical chat app's "new chat by default" convention rather than
@@ -828,7 +830,7 @@ export async function render(container, tabId, options = {}) {
     const replyCard = messageCard('assistant', '');
     replyCard.dataset.liveTurn = 'true';
     messages.appendChild(replyCard);
-    mountSubscriptions.push(attachToInFlight(sessionId, messages, replyCard, replyCard.querySelector('.msg-body'),
+    activeUnsubscribers.push(attachToInFlight(sessionId, messages, replyCard, replyCard.querySelector('.msg-body'),
       document.getElementById('chat-send')));
   }));
   const handoffs = watchAgentHandoffs(messages, () => activeSessionId, () => syncChatLayout(messages));
@@ -1325,7 +1327,8 @@ export async function render(container, tabId, options = {}) {
     // A live microphone must never outlive the view that owns it.
     if (openMic) { openMic.stop(); openMic = null; }
     mountSubscriptions.forEach((unsub) => unsub());
-    if (activeUnsubscribers === mountSubscriptions) activeUnsubscribers = [];
+    turnSubscriptions.forEach((unsub) => unsub());
+    if (activeUnsubscribers === turnSubscriptions) activeUnsubscribers = [];
   };
   options.registerCleanup?.(cleanup);
 
