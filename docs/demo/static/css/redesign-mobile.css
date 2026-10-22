@@ -402,7 +402,6 @@
   .kairos-redesign .dashboard-grid > * { grid-column: 1 / -1 !important; min-width: 0; }
   .kairos-redesign .ms-tab-group { margin-bottom: 20px; }
   .kairos-redesign .ms-group-label { margin: 16px 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--rd-ink-dim); }
-  .kairos-redesign .ms-mode-row [aria-pressed=true] { font-weight: 600; color: var(--rd-focus); }
   .kairos-redesign .ms-composer textarea { display: block; margin: 0; box-sizing: border-box; line-height: 24px; padding-block: 10px; }
   .kairos-redesign .ms-composer :is(.input-icon-btn, #chat-mic, #overflow-plus-btn, .ms-forge-add, .ms-forge-mic) {
     display: inline-grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; line-height: 1; flex-shrink: 0;
@@ -431,8 +430,6 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-sheet-projects .ms-account-row { width: auto; flex: 0 0 auto; padding-inline: 12px; }
   .kairos-redesign .ms-sheet-projects > .ms-account-row { width: 100%; }
-  /* TEMPORARY (2026-10-21): the Safari page readout in the workspace sheet (mobileTabSheet.js). */
-  .kairos-redesign .ms-sheet-readout { margin: 12px 4px 0; font-size: 11px; line-height: 1.4; color: var(--rd-ink-dim); overflow-wrap: anywhere; }
 }
 
 /* Tool Store keeps its own sticky header; its title row starts beside the avatar, under the safe area. */
@@ -661,4 +658,35 @@
   .kairos-redesign .mf-dashboard .forge-widget-body .dashboard-row { min-height: 44px; width: 100%; }
   .kairos-redesign .mf-dashboard :is(svg, table) { max-width: 100%; }
   .kairos-redesign .mf-dashboard .forge-ranked { display: block; overflow-x: auto; }
+}
+
+/* Tab sheet: the app mode switch at the top of the workspace sheet (mobileTabSheet.js).
+   A segmented radio group with a sliding thumb, like the New / Chats switch; the
+   sheet-wide reduced-motion rule turns the slide off. */
+@media (max-width: 768px) {
+  .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 0 0 24px; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch {
+    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 4px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--rd-surface-2);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-thumb {
+    position: absolute; z-index: -1; inset: 4px auto 4px 4px; width: calc(50% - 4px); box-sizing: border-box;
+    border-radius: 999px; border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+    transition: transform 260ms cubic-bezier(.22, 1, .36, 1);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=forge] .ms-mode-thumb { transform: translateX(100%); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option {
+    display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; min-width: 0; padding: 0 12px;
+    border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 15px; font-weight: 500;
+    transition: color 200ms ease;
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=true] { color: var(--rd-ink); font-weight: 600; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option svg { flex: none; width: 22px; height: 22px; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=false] svg { opacity: .6; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-name small {
+    margin-left: 2px; padding: 1px 6px; border-radius: 999px; background: var(--rd-surface-2);
+    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--rd-ink-dim);
+  }
+  .kairos-redesign .ms-tab-sheet .ms-mode-caption { margin: 10px 4px 0; text-align: center; font-size: 13px; line-height: 1.4; color: var(--rd-ink-dim); }
 }

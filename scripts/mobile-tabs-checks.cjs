@@ -156,7 +156,7 @@ async function run(ctx) {
   // ---- C. Calendar: Today / Month-Week / "+", and the event sheet -------------------------
   const cdp = (method, params) => win.webContents.debugger.sendCommand(method, params);
   const press = async name => {
-    const code = { Escape: 27, Tab: 9, Enter: 13 }[name];
+    const code = { Escape: 27, Tab: 9, Enter: 13, ArrowLeft: 37, ArrowRight: 39, End: 35, Home: 36 }[name];
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
     await delay(120);
@@ -326,6 +326,58 @@ async function run(ctx) {
   // ---- G. Forge project pager, pushed tools, Changes and commit sheet ---------------------
   const forgeResult = await require('./mobile-forge-checks.cjs')(ctx);
   assertions += forgeResult.assertions;
+
+  // ---- G2. Workspace sheet: the Kairos / Forge mode switch ----------------------------------
+  const modeState = () => js(`(() => { const g = document.querySelector('.ms-tab-sheet[open] .ms-mode-switch'); if (!g) return null; const radios = [...g.querySelectorAll('[role=radio]')];
+    const caption = [...g.parentElement.querySelectorAll('.ms-mode-caption')].filter(n => n.getClientRects().length).map(n => n.textContent);
+    const tile = document.querySelector('.ms-tab-sheet[open] .ms-tab-group')?.getBoundingClientRect();
+    return { role: g.getAttribute('role'), label: g.getAttribute('aria-label'), names: radios.map(n => n.textContent.trim()), checked: radios.map(n => n.getAttribute('aria-checked')),
+      tabs: radios.map(n => n.tabIndex), described: radios.map(n => document.getElementById(n.getAttribute('aria-describedby'))?.textContent || ''), caption,
+      sizes: radios.map(n => { const r = n.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }), aboveTabs: !!tile && g.getBoundingClientRect().bottom <= tile.top,
+      thumb: (() => { const t = g.querySelector('.ms-mode-thumb').getBoundingClientRect(), on = radios.find(n => n.getAttribute('aria-checked') === 'true').getBoundingClientRect(); return Math.abs(t.left - on.left) <= 6 && Math.abs(t.right - on.right) <= 6; })(),
+      readout: !!document.querySelector('.ms-sheet-readout'), mode: document.documentElement.dataset.appMode }; })()`);
+  const openSheet = async () => { await js("[...document.querySelectorAll('#mobile-menu-btn, .ms-shell .ms-avatar')].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
+  await navigate('home'); await delay(400); await openSheet();
+  let modes = await modeState();
+  eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview'], ['true', 'false'], [0, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
+  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 1 && modes.caption[0] === modes.described[0], 'Each mode has a one-line description; the checked one is shown: ' + JSON.stringify(modes));
+  ok(modes.sizes.every(Boolean) && modes.aboveTabs && modes.thumb, 'Mode options are 44px, sit at the top of the sheet, and the thumb marks Kairos: ' + JSON.stringify(modes));
+  ok(!modes.readout, 'The temporary Safari readout is gone from the sheet');
+  eq(await small('.ms-tab-sheet[open] .ms-mode-switch button'), [], 'Mode switch has no control under 44px');
+  ok(await js("![...document.querySelectorAll('.ms-tab-sheet[open] .ms-mode-row *')].some(n => n.childElementCount === 0 && n.textContent.includes(String.fromCharCode(8212)))"), 'Mode switch copy has no em dash');
+  await shot('sheet-mode-kairos');
+  // Arrow keys move focus only; nothing switches until Space or Enter.
+  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').focus()");
+  await press('ArrowRight');
+  ok(await js("document.activeElement.dataset.mode === 'forge' && document.activeElement.tabIndex === 0 && document.querySelector('.ms-mode-switch [data-mode=kairos]').tabIndex === -1 && document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.ms-tab-sheet[open]')"), 'ArrowRight moves focus to Forge without switching');
+  await press('ArrowLeft');
+  ok(await js("document.activeElement.dataset.mode === 'kairos'"), 'ArrowLeft returns focus to Kairos');
+  await press('End');
+  // Space activates the focused option (with its text, so the browser treats it as a real key press).
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+  await waitFor("document.documentElement.dataset.appMode === 'forge' && !document.querySelector('.ms-tab-sheet[open]') && !!document.querySelector('.mf-dashboard')");
+  ok(await js("document.getElementById('view-content').dataset.view === 'forgeHome' && !document.querySelector('.mf-project')"), 'End then Space on Forge switches modes and lands on the Forge Home overview');
+  await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
+  await openSheet();
+  modes = await modeState();
+  eq([modes.checked, modes.tabs, modes.mode], [['false', 'true'], [-1, 0], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
+  ok(modes.caption.length === 1 && modes.caption[0] === modes.described[1] && modes.thumb && modes.sizes.every(Boolean), 'Forge description shows and the thumb sits on Forge: ' + JSON.stringify(modes));
+  await shot('sheet-mode-forge');
+  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
+  ok(await js("document.querySelector('.ms-mode-switch[data-active=kairos] [data-mode=kairos][aria-checked=true]') !== null"), 'Tapping Kairos moves the thumb before the switch');
+  await waitFor("document.documentElement.dataset.appMode === 'kairos' && !document.querySelector('.ms-tab-sheet[open]') && document.getElementById('view-content').dataset.view === 'home'");
+  await waitFor("!!document.querySelector('.dashboard-content')");
+  ok(true, 'Tapping Kairos switches back and lands on the dashboard');
+  // Reduced motion: the thumb does not slide and the switch happens at once.
+  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await openSheet();
+  ok(await js("/^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-thumb')).transitionDuration) && /^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-option')).transitionDuration)"), 'Reduced motion removes the mode thumb slide');
+  ok(await js("new Promise(r => { document.querySelector('.ms-mode-switch [data-mode=forge]').click(); setTimeout(() => r(!document.querySelector('.ms-tab-sheet[open]')), 60); })"), 'Reduced motion switches without waiting for the slide');
+  await waitFor("document.documentElement.dataset.appMode === 'forge' && !!document.querySelector('.mf-dashboard')");
+  await openSheet(); await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
+  await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.getElementById('view-content').dataset.view === 'home'");
+  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(600);
@@ -602,11 +654,6 @@ async function run(ctx) {
   eq(await edges(), [], 'Safari tab: no fixed or sticky element touches the screen edges on the launch view');
   ok(await js("[...document.querySelectorAll('.app-background')].every(n => n.parentElement.classList.contains('ms-page-bleed'))"), 'Safari tab: the appearance canvases live in the background layer, not fixed');
   await shot('safari-bleed-launch');
-  // TEMPORARY readout for one device screenshot (mobileTabSheet.js).
-  await js("document.querySelector('.ms-shell .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-sheet-readout')");
-  const readout = await js("document.querySelector('.ms-sheet-readout').textContent");
-  ok(/Safari tab on/.test(readout) && /scrollY 1 /.test(readout) && /edges: none$/.test(readout), 'Workspace sheet shows the Safari page readout: ' + readout);
-  await js("document.querySelector('.ms-tab-sheet').close()");
   // It returns to 1px after any scroll that reaches 0, and on pageshow.
   await js("scrollTo(0, 0)"); await delay(400);
   eq(await js("scrollY"), 1, 'Safari tab: a scroll back to 0 settles at 1px');
@@ -624,9 +671,6 @@ async function run(ctx) {
   await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-dashboard')"); await delay(500);
   ok(await js("document.querySelector('.forge-banner')?.parentElement?.classList.contains('ms-page-bleed') && !document.querySelector('.mf-project')"), 'Safari tab: Forge Home is the overview and its picture lives in the background layer');
   eq(await edges(), [], 'Safari tab: no fixed or sticky element touches the screen edges on Forge Home');
-  await js("document.querySelector('.mf-dashboard .ms-avatar').click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-sheet-readout')");
-  ok(/edges: none$/.test(await js("document.querySelector('.ms-sheet-readout').textContent")), 'Safari tab: the readout on Forge Home reports edges: none');
-  await js("document.querySelector('.ms-tab-sheet').close()");
   await shot('safari-bleed-forge-overview');
   await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer')"); await delay(300);
   ok(await js("!document.querySelector('.ms-page-bleed .forge-banner')"), 'Safari tab: leaving Forge takes its picture back');
