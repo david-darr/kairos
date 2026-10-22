@@ -1345,73 +1345,6 @@ input[type="checkbox"]:checked::after {
 .documents-menu-empty { padding: 14px 10px; color: var(--text-dim); font-size: 11px; }
 .documents-menu-summary:focus-visible, .documents-menu-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Library's optional Vault Map (first built 2026-09-01, "kind of similar to the
-   VAULT tab in our original jarvis kiosk, however stylized to match our new
-   jarvis-app") — ported layout from the kiosk's own vault-graph CSS, but
-   restyled onto this app's actual design tokens/primitives (frontend-style.md)
-   instead of the kiosk's hand-rolled hex/rgba values, which happened to
-   already be nearly the same cyan hue. */
-.vault-graph-wrap {
-  position: relative; flex: 1; min-height: 360px; width: 100%; padding: 0;
-  background: var(--bg-panel-solid); border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
-}
-#vault-graph-canvas {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  background: transparent; cursor: grab; touch-action: none;
-}
-#vault-graph-canvas.dragging { cursor: grabbing; }
-.vault-panel {
-  display: none; position: absolute; top: 12px; right: 12px; bottom: 12px;
-  width: 420px; min-width: 240px; max-width: min(800px, calc(100% - 24px));
-  flex-direction: column; overflow: hidden; z-index: 4;
-  background: var(--bg-panel-solid); box-shadow: var(--shadow-elevated);
-}
-.vault-panel.open { display: flex; }
-.vault-panel-resize-handle {
-  position: absolute; top: 0; left: -4px; bottom: 0; width: 8px;
-  cursor: ew-resize; z-index: 3;
-}
-.vault-panel-resize-handle:hover, .vault-panel-resize-handle.dragging { background: var(--accent); opacity: 0.3; }
-.vault-panel-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 10px 12px; border-bottom: 1px solid var(--border);
-  font-size: 12px; color: var(--text);
-}
-.vault-panel-actions { display: flex; gap: 6px; }
-.vault-panel-actions .btn { padding: 4px 8px; font-size: 10px; }
-.vault-panel-breadcrumb {
-  display: none; flex-wrap: wrap; gap: 2px; align-items: center;
-  padding: 6px 12px; border-bottom: 1px solid var(--border);
-  font-size: 11px; color: var(--text-dim);
-}
-.vault-panel-breadcrumb.show { display: flex; }
-.vault-breadcrumb-crumb { cursor: pointer; }
-.vault-breadcrumb-crumb:hover { color: var(--text); text-decoration: underline; }
-.vault-breadcrumb-crumb.current { color: var(--text); cursor: default; text-decoration: none; }
-.vault-breadcrumb-sep { opacity: 0.5; padding: 0 2px; }
-.vault-panel-body {
-  flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px;
-  font-size: 12px; line-height: 1.6; color: var(--text-dim);
-  white-space: pre-wrap; word-break: break-word;
-}
-.vault-note-content {
-  white-space: normal; word-break: normal;
-  max-width: 68ch; margin: 0 auto; padding: 8px 10px 24px;
-  font-size: 13px; line-height: 1.75;
-}
-.vault-note-link {
-  border: 0; padding: 0; background: none; color: var(--accent);
-  font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
-}
-.vault-note-link:hover { color: var(--text); }
-.vault-note-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.vault-child-row { cursor: pointer; padding: 4px 0; }
-.vault-child-row:hover { color: var(--text); }
-#vault-note-editor {
-  width: 100%; height: 100%; min-height: 300px;
-  font-size: 12px; line-height: 1.6; padding: 8px; resize: none;
-}
-
 /* Centered on the same column as the messages/composer (David's ask
    2026-09-03) — it sits between them, so a full-width strip would break
    the single-column alignment. */
@@ -1802,49 +1735,6 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 .google-sheet-grid input { width: 100%; min-width: 78px; padding: 7px; border: 1px solid var(--border); border-radius: 0; background: transparent; font-size: 11px; }
 .google-form-responses pre { padding: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: auto; font-size: 11px; }
 @media (max-width: 760px) { .google-browser { display: flex; flex-direction: column; } .google-file-list { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); } .google-detail { max-height: none; } }
-.library-vault-page { width: 100%; max-width: var(--library-max); margin: 0 auto; padding-bottom: 24px; }
-.library-vault-page .view-header { margin-bottom: 20px; }
-.library-vault-intro { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 24px 0 14px; }
-.library-vault-intro h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
-.library-vault-intro p { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
-.library-vault-modes { margin: 0; }
-.library-vault-host { width: 100%; }
-.library-vault-browser { display: grid; grid-template-columns: minmax(230px, 310px) minmax(0, 1fr); height: min(72vh, 780px); min-height: 500px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); overflow: hidden; }
-.library-vault-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 10px; border-right: 1px solid var(--border); }
-.library-vault-sidebar-head { display: flex; gap: 6px; margin-bottom: 8px; }
-.library-vault-search { min-width: 0; flex: 1; }
-.library-vault-sidebar > .meta { padding: 2px 8px 10px; }
-.library-vault-tree { min-height: 0; overflow: auto; padding-right: 2px; }
-.library-vault-folder { min-width: 0; }
-.library-vault-folder-summary, .library-vault-note { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 35px; padding: 7px 8px; border: 0; border-radius: 7px; background: none; color: var(--text-dim); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.library-vault-folder-summary { list-style: none; color: var(--text); }
-.library-vault-folder-summary::-webkit-details-marker { display: none; }
-.library-vault-folder-summary > span:nth-child(2), .library-vault-note > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.library-vault-folder-summary:hover, .library-vault-note:hover, .library-vault-note.active { background: var(--accent-dim); color: var(--text); }
-.library-vault-children { margin-left: 15px; padding-left: 7px; border-left: 1px solid var(--border); }
-.library-vault-mark { display: grid; place-items: center; flex: none; width: 17px; height: 17px; color: var(--text-faint); }
-.library-vault-mark svg { width: 16px; height: 16px; }
-.library-vault-note.active .library-vault-mark { color: var(--accent); }
-.library-vault-reader { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.library-vault-reader-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 15px 20px; border-bottom: 1px solid var(--border); }
-.library-vault-reader-title { min-width: 0; }
-.library-vault-reader-title h3 { margin: 2px 0 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
-.library-vault-reader-actions { display: flex; align-items: center; gap: 6px; }
-.library-vault-reading { flex: 1; overflow: auto; padding: 24px min(5vw, 42px); font-size: 13px; line-height: 1.7; }
-.library-vault-reading > * { max-width: 72ch; margin-left: auto; margin-right: auto; }
-.library-vault-editor { flex: 1; min-height: 0; width: 100%; padding: 22px; border: 0; border-radius: 0; resize: none; background: var(--bg-panel); color: var(--text); font: inherit; font-size: 13px; line-height: 1.65; }
-.library-vault-empty { display: grid; place-content: center; justify-items: center; flex: 1; padding: 32px; color: var(--text-dim); text-align: center; font-size: 13px; }
-.library-vault-empty svg { width: 28px; height: 28px; color: var(--text-faint); }
-.library-vault-empty h3 { margin: 12px 0 2px; color: var(--text); font-size: 16px; font-weight: 600; }
-.library-vault-empty p { max-width: 32ch; margin: 0; }
-.library-vault-host .vault-graph-wrap { height: min(72vh, 780px); min-height: 500px; }
-@media (max-width: 768px) {
-  .library-vault-browser { display: flex; flex-direction: column; height: auto; min-height: 0; }
-  .library-vault-sidebar { max-height: 280px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .library-vault-reader { min-height: 420px; }
-  .library-vault-reading { padding: 18px; }
-  .library-vault-host .vault-graph-wrap { height: 65vh; min-height: 450px; }
-}
 @media (max-width: 600px) {
   .library-section-summary { padding: 14px; }
   .library-section-copy small { display: none; }
@@ -1853,7 +1743,6 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 }
 .settings-nav-item { border: none; background: transparent; text-align: left; width: 100%; font-family: inherit; }
 .cal-day { border: none; text-align: left; font-family: inherit; }
-.vault-breadcrumb-crumb { color: inherit; font: inherit; border: none; padding: 2px; background: none; }
 .cal-grid { border-radius: 12px; }
 .cal-month-label { font-size: 17px; font-weight: 500; }
 .cal-day-panel-title { color: var(--text); font-size: 16px; }
@@ -2073,18 +1962,6 @@ button.dashboard-row:hover { background: var(--surface-2); }
 .dashboard-section-body .model-setup-empty .dashboard-icon svg { width: 40px; height: 40px; }
 .dashboard-section :is(button,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
 
-/* Knowledge constellation controls stay legible and usable above the canvas. */
-.vault-toolbar { position: absolute; top: 16px; left: 16px; right: 16px; z-index: 2; display: flex; align-items: center; gap: 8px; pointer-events: none; }
-.vault-toolbar > * { pointer-events: auto; }
-.vault-search { width: 220px; max-width: 45%; background: var(--bg-panel-solid); }
-.vault-search-results { position: absolute; z-index: 3; top: 62px; left: 16px; width: 300px; max-width: calc(100% - 32px); max-height: 240px; overflow: auto; padding: 6px; background: var(--bg-panel-solid); border: 1px solid var(--border-strong); border-radius: 10px; }
-.vault-search-results:empty { display: none; }
-.vault-search-result { display: block; width: 100%; text-align: left; padding: 9px; color: var(--text-dim); background: none; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
-.vault-search-result:hover { background: var(--accent-dim); color: var(--text); }
-.vault-caption { position: absolute; left: 20px; bottom: 16px; right: 20px; pointer-events: none; color: var(--text-faint); font-size: 11px; display: flex; justify-content: space-between; gap: 14px; }
-.vault-child-row { display: block; text-align: left; width: 100%; background: none; border: none; color: var(--text-dim); font-family: inherit; font-size: 13px; padding: 8px 4px; }
-.vault-panel-body { font-size: 13px; line-height: 1.8; }
-
 @media (min-width: 769px) and (max-width: 1100px) {
   :root { --sidebar-width: 176px; }
   .view { padding: 26px 24px; }
@@ -2279,12 +2156,6 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .settings-content { padding: 18px 16px; }
   .cal-day { min-height: 65px; padding: 4px; }
   .cal-event-pill { font-size: 9px; padding: 2px; }
-  .vault-toolbar { flex-wrap: wrap; gap: 6px; top: 12px; left: 12px; right: 12px; }
-  .vault-search { max-width: 100%; flex: 1; min-width: 120px; }
-  .vault-toolbar .btn { padding: 7px 10px; font-size: 11px; }
-  .vault-caption { font-size: 10px; flex-direction: column; gap: 2px; }
-  .vault-panel { inset: 8px; width: auto !important; max-width: none; min-width: 0; }
-  .vault-panel-resize-handle { display: none; }
   #chat-progress-host { top: calc(var(--titlebar-h) + 68px); right: 12px; max-width: calc(100vw - 24px); max-height: calc(100dvh - var(--titlebar-h) - 80px); }
 }
 

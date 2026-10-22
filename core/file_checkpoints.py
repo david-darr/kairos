@@ -123,24 +123,25 @@ def _snapshot(root: Path) -> tuple[str, dict[str, str], list[str]]:
             skipped.append(name)
             logger.warning("checkpoint skipped %s: %s", path, exc)
 
-    def tree(items: dict[str, str]) -> str:
-        entries: dict[str, dict[str, str] | str] = {}
-        for name, oid in items.items():
-            parts = name.split("/")
-            branch = entries
-            for part in parts[:-1]:
-                branch = branch.setdefault(part, {})  # type: ignore[assignment]
-            branch[parts[-1]] = oid
-        def encode(branch: dict) -> str:
-            out = bytearray()
-            for name, value in sorted(branch.items(), key=lambda pair: pair[0].encode() + (b"/" if isinstance(pair[1], dict) else b"")):
-                is_dir = isinstance(value, dict)
-                child = encode(value) if is_dir else value
-                out.extend(("40000" if is_dir else "100644").encode() + b" " + name.encode() + b"\0" + bytes.fromhex(child))
-            return _object(repo, "tree", bytes(out))
-        return encode(entries)
+    return _tree(repo, manifest), manifest, skipped
 
-    return tree(manifest), manifest, skipped
+
+def _tree(repo: Path, items: dict[str, str]) -> str:
+    entries: dict[str, dict[str, str] | str] = {}
+    for name, oid in items.items():
+        parts = name.split("/")
+        branch = entries
+        for part in parts[:-1]:
+            branch = branch.setdefault(part, {})  # type: ignore[assignment]
+        branch[parts[-1]] = oid
+    def encode(branch: dict) -> str:
+        out = bytearray()
+        for name, value in sorted(branch.items(), key=lambda pair: pair[0].encode() + (b"/" if isinstance(pair[1], dict) else b"")):
+            is_dir = isinstance(value, dict)
+            child = encode(value) if is_dir else value
+            out.extend(("40000" if is_dir else "100644").encode() + b" " + name.encode() + b"\0" + bytes.fromhex(child))
+        return _object(repo, "tree", bytes(out))
+    return encode(entries)
 
 
 def _commit(repo: Path, tree_oid: str, event_id: str, phase: str) -> str:
@@ -234,6 +235,38 @@ async def around_turn(source: str, workspace: str | None = None):
                     raise
             except Exception:
                 logger.exception("could not finish file checkpoint %s", event["id"])
+
+
+def record_file_write(source: str, root: str, name: str, before: bytes | None, after: bytes, write) -> dict:
+    """One person's own edit to one file (a Library save, 2026-10-22), kept
+    as a checkpoint like a model turn so it shows in Settings > File
+    checkpoints and the note's History, and restores the same way. The
+    before image is stored and the event saved BEFORE `write` runs, so a
+    crash mid-write still leaves the previous text recoverable."""
+    root_path = Path(root).resolve()
+    repo = _repo(root_path)
+    name = name.replace("\\", "/")
+    before_oid = _object(repo, "blob", before) if before is not None else None
+    event = {"id": uuid.uuid4().hex, "created": time.time(), "source": source, "status": "running",
+             "roots": [{"path": str(root_path), "before_skipped": []}]}
+    root_info = event["roots"][0]
+    root_info["before"] = _commit(repo, _tree(repo, {name: before_oid} if before_oid else {}), event["id"], "before")
+    _save(event)
+    try:
+        write()
+    except Exception:
+        root_info.update(changes=[], after_skipped=[], created_unprotected=[])
+        event.update(status="unchanged", finished=time.time(), error="The write failed; nothing changed.")
+        _save(event)
+        raise
+    after_oid = _object(repo, "blob", after)
+    root_info["after"] = _commit(repo, _tree(repo, {name: after_oid}), event["id"], "after")
+    root_info.update(changes=[{"path": name, "before": before_oid, "after": after_oid}] if before_oid != after_oid else [],
+                     after_skipped=[], created_unprotected=[])
+    event["status"] = "changed" if root_info["changes"] else "unchanged"
+    event["finished"] = time.time()
+    _save(event)
+    return event
 
 
 def list_events(limit: int = 100, source: str | None = None) -> list[dict]:

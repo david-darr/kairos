@@ -43,7 +43,9 @@ export function highlightCode(code, raw, language = 'text') {
   if (raw.length < 100000 && hljs.getLanguage(language)) code.innerHTML = hljs.highlight(raw, { language, ignoreIllegals: true }).value;
 }
 
-export function renderMessageBody(body, text, sessionId, rich = true, { live = false } = {}) {
+// `remoteImage(url, alt)`: a caller that wants remote images offered rather
+// than dropped (the Vault reader's click-to-load) returns the node to show.
+export function renderMessageBody(body, text, sessionId, rich = true, { live = false, remoteImage = null } = {}) {
   body._rawText = text;
   body.classList.toggle('chat-prose', rich);
   if (!rich) { body.textContent = text; return; }
@@ -75,6 +77,8 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
       card.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
       card.addEventListener('auxclick', event => { if (event.button === 1) { event.preventDefault(); openArtifact(sessionId, url, filename, card, { background: true }); } });
       node.replaceWith(card);
+    } else if (node.tagName === 'IMG' && remoteImage && /^https?:\/\//i.test(url)) {
+      node.replaceWith(remoteImage(url, label || ''));
     } else if (node.tagName === 'IMG') {
       node.replaceWith(document.createTextNode(label || '[Image]'));
     } else if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) {
