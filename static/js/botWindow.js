@@ -5,7 +5,8 @@
 // is the at-a-glance bot surface now that the sidebar no longer lists bots.
 // Monocode's floating window is macOS-only; this one is built for Windows.
 import { botStatus, botStatusLine, compareStatus } from './botStatus.js';
-import { agentAvatar } from './agentAvatar.js';
+import { agentAvatar, avatarSpec, avatarUrl } from './agentAvatar.js';
+import { stateForStatus } from './mascot.js';
 
 const POLL_MS = 15000;
 const SHOWN = new Set(['needs_you', 'working', 'teammate']);
@@ -58,6 +59,11 @@ export function render(host, agents, { openAgent = () => {} } = {}) {
       item.append(button);
     }
     item.dataset.state = state;
+    // The face takes the bot's pose: needs you, working, idle or asleep (mascot, 2026-10-22).
+    const face = item.querySelector('.agent-mascot'), pose = stateForStatus(line.state), spec = JSON.stringify(avatarSpec(agent));
+    if (face && (face.dataset.pose !== pose || face.dataset.avatarSpec !== spec)) {
+      face.dataset.pose = pose; face.dataset.avatarSpec = spec; face.firstElementChild.src = avatarUrl(JSON.parse(spec), pose);
+    }
     item.querySelector('.bot-window-name').textContent = agent.name;
     item.querySelector('.bot-window-line').textContent = line.text;
     item.querySelector('button').setAttribute('aria-label', `${agent.name}: ${line.text}`);

@@ -4,7 +4,7 @@
 // Agents surface, the call screen, the village and the notification icon.
 // The chat marker's stream (thinking, success, idle, error) is in chat-smoke.
 const assert = require('node:assert/strict');
-module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, writes }) => {
+module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, writes, fixtures }) => {
   const setMascot = on => js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mascot: ${on} }))`);
   const shown = selector => js(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); return !!n && n.getClientRects().length > 0 && getComputedStyle(n).display !== 'none'; })()`);
 
@@ -61,5 +61,40 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   assert.equal(await js("document.getAnimations().filter(a => a.effect?.target?.closest?.('kairos-mascot') && a.playState === 'running').length"), 0);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
 
-  if (module.exports.agents) await module.exports.agents({ js, waitFor, delay, navigate, win, capture, demoState, writes });
+
+  // -- Bots: every face is an Ajar ------------------------------------------------------
+  await navigate('agents', { agentId: 'a1' });
+  await waitFor("!!document.querySelector('.agents-rail-item.agent-tile .agent-mascot img')");
+  assert.equal(await js("document.querySelectorAll('.agent-dot-avatar img[src^=\"data:image/svg+xml\"]').length > 0 && [...document.querySelectorAll('.agent-mascot')].every(n => JSON.parse(n.dataset.avatarSpec).version === 3)"), true, 'every face is a v3 Ajar');
+  // Scout needs the person, Archivist works: the rail faces take those poses.
+  assert.equal(await js("document.querySelector('.agents-rail-item[data-key=\"agent:a1\"] .agent-mascot').dataset.pose"), 'needs');
+  assert.equal(await js("document.querySelector('.agents-rail-item[data-key=\"agent:a2\"] .agent-mascot').dataset.pose"), 'thinking');
+  assert.equal(await js("[...document.querySelectorAll('.agent-mascot img')].some(i => decodeURIComponent(i.src).includes('<filter'))"), false, 'no SVG filters in any face');
+  // The open conversation's header is the one live bot face.
+  await waitFor("!!document.querySelector('.agent-profile-face kairos-mascot svg.ajar')");
+  assert.equal(await js("document.querySelector('.agent-profile-face kairos-mascot').getAttribute('state')"), 'needs');
+  assert.equal(await js("document.querySelector('.agent-profile-face kairos-mascot').getAttribute('aria-hidden')"), 'true', 'decorative beside its text status');
+  assert.ok(await js("document.querySelectorAll('kairos-mascot').length <= 12"), 'live mascots stay few');
+  await capture('mascot-agents-dm');
+  // Roster polls keep the same face nodes (no flicker).
+  await js("window.mascotFace = document.querySelector('.agents-rail-item[data-key=\"agent:a2\"] .agent-mascot img'); window.mascotSrc = window.mascotFace.src; document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
+  await delay(600);
+  assert.equal(await js("document.querySelector('.agents-rail-item[data-key=\"agent:a2\"] .agent-mascot img').src === window.mascotSrc"), true, 'a poll draws the same face');
+
+  // -- Notifications carry the bot's face --------------------------------------------------
+  await js(`window.mascotNotes = []; window.mascotNotification = window.Notification;
+    window.Notification = class { constructor(title, options) { window.mascotNotes.push({ title, options }); } static get permission() { return 'granted'; } static requestPermission() { return Promise.resolve('granted'); } close() {} }; true`);
+  try {
+    // The watcher learns the backlog first; a new question then notifies.
+    await js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
+    await delay(600);
+    fixtures.agentInbox.push({ id: 'mascot-q', agent_id: 'a2', kind: 'question', status: 'open', created_at: Date.now() / 1000, title: 'Which folder?', body: '' });
+    await js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
+    await waitFor("window.mascotNotes.length > 0");
+    assert.equal(await js("window.mascotNotes[0].title"), 'Archivist needs you');
+    assert.ok(await js("String(window.mascotNotes[0].options.icon || '').startsWith('data:image/png')"), 'the icon is the face of the bot, rasterized');
+  } finally {
+    fixtures.agentInbox.splice(fixtures.agentInbox.findIndex(item => item.id === 'mascot-q'), 1);
+    await js("window.Notification = window.mascotNotification; document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
+  }
 };

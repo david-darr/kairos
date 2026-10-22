@@ -13,6 +13,12 @@
   --bw-line: var(--k-hairline);
   --bw-gold: var(--k-gold-text);
   --bw-green: var(--k-success);
+  /* The working tokens the mascot's faces read (css/mascot.css), from the
+     same base variables. */
+  --point: var(--k-gold); --text: var(--k-ink); --text-dim: var(--k-ink-dim); --text-faint: var(--k-ink-faint);
+  --bg-panel-solid: var(--k-surface); --accent: var(--k-gold-text); --danger: var(--k-danger);
+  --m-shadow: color-mix(in srgb, var(--k-ink) 13%, transparent);
+  --m-line: color-mix(in srgb, var(--k-ink) 35%, transparent);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }

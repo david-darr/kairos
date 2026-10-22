@@ -18,6 +18,8 @@ import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 
 import { mountForgeRail } from './forgeRail.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
+import { mascotPng } from './mascot.js';
+import { avatarSpec } from './agentAvatar.js';
 
 let forgeRailCleanup = () => {};
 restoreSidebar();
@@ -245,17 +247,22 @@ let agentBadgeTimer = null;
 // Native notifications for new bot items, one per bot per poll (botNotifications.js).
 // Electron and browsers both support the Notification API; in Electron no
 // permission prompt appears, and a click brings the app window forward.
+// The icon is the bot's own face in its needs-you pose (Kairos Mascot build
+// spec, 2026-10-22), rasterized once per look; phone push stays generic.
+let notifiedAgents = [];
 const botInboxWatcher = watchBotInbox({
-  names: async () => Object.fromEntries((await api('/api/agents').catch(() => [])).map(agent => [agent.id, agent.name])),
+  names: async () => { notifiedAgents = await api('/api/agents').catch(() => []); return Object.fromEntries(notifiedAgents.map(agent => [agent.id, agent.name])); },
   focusedAgentId: () => {
     if (!document.hasFocus()) return null;
     const messenger = document.querySelector('.agents-messenger');
     return messenger ? messenger.dataset.agentId || null : activeAgentId;
   },
-  show: ({ agentId, title, body }) => {
+  show: async ({ agentId, kind, title, body }) => {
     if (!('Notification' in window) || Notification.permission === 'denied') return;
+    const agent = notifiedAgents.find(a => a.id === agentId);
+    const icon = await mascotPng(avatarSpec(agent || { id: agentId }), kind === 'needs_you' ? 'needs' : 'success', 64).catch(() => null);
     const notify = () => {
-      const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false });
+      const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false, ...(icon ? { icon } : {}) });
       note.onclick = () => {
         window.jarvis?.showWindow?.(); window.focus();
         document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } }));

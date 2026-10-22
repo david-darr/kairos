@@ -85,6 +85,12 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js("document.querySelector('[aria-label=\"Call mode\"]').value='local';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'").catch(async error=>{ console.log(await js("({error:document.querySelector('.agent-call-error').textContent,state:document.querySelector('.agent-call').dataset.state,opened:window.__callTest.opened,values:[...document.querySelectorAll('.agent-call input')].map(n=>n.value)})")); throw error; });
+  // The bot's Ajar replaces the orb (mascot, 2026-10-22): it listens, reading the orb's level.
+  assert.equal(await js("document.querySelector('.agent-call-orb kairos-mascot').getAttribute('state')"),'listening','The call mascot listens');
+  assert.ok(await js("getComputedStyle(document.querySelector('.agent-call-orb kairos-mascot')).display!=='none'&&getComputedStyle(document.querySelector('.agent-call-orb-core')).display==='none'"),'Ajar replaces the orb');
+  await js("window.__eyeQuiet=document.querySelector('.agent-call-orb .aj-eye').getBoundingClientRect().height;document.querySelector('.agent-call-orb kairos-mascot').style.setProperty('--level','1')");await delay(300);
+  assert.ok(await js("document.querySelector('.agent-call-orb .aj-eye').getBoundingClientRect().height>window.__eyeQuiet*1.08"),'Eyes widen with the listening level');
+  await js("document.querySelector('.agent-call-orb kairos-mascot').style.removeProperty('--level')");
   await capture('agents-call-active');
   await js("window.__callAppearance=import('/static/js/appearance.js').then(m=>({mode:m.getAppearance().mode,color:m.getAppearance().color}))");
   await js("import('/static/js/appearance.js').then(m=>m.updateAppearance({mode:'color',color:'#192331'}))");
@@ -120,6 +126,12 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js("document.querySelectorAll('.agent-call select[aria-label=\"Call voice\"] option').length"),1,'Only local device voices are offered');
   await js("window.__callTest.current.dispatchEvent(new Event('boundary'));true;");
   assert.equal(await js("document.querySelector('.agent-call-orb').style.getPropertyValue('--word')"),'1','Real word events drive the speaking orb');
+  assert.equal(await js("document.querySelector('.agent-call-orb kairos-mascot').getAttribute('state')"),'speaking','The call mascot speaks');
+  await js("window.__eyeLoud=document.querySelector('.agent-call-orb .aj-eye').getBoundingClientRect().height;document.querySelector('.agent-call-orb kairos-mascot').style.setProperty('--word','1')");await delay(300);
+  assert.ok(await js("parseFloat(getComputedStyle(document.querySelector('.agent-call-orb .aj-voice')).opacity)>.4"),'The halo swells with the voice');
+  assert.ok(await js("document.querySelector('.agent-call-orb .aj-eye').getBoundingClientRect().height<window.__eyeLoud*.9"),'Eyes squash while speaking');
+  await capture('agents-call-speaking');
+  await js("document.querySelector('.agent-call-orb kairos-mascot').style.removeProperty('--word')");
   const before=writes.filter(w=>w.path==='/api/chat/live').length;
   await js('window.__callTest.level=.7'); await delay(1600); await js('window.__callTest.level=0');
   assert.equal(writes.filter(w=>w.path==='/api/chat/live').length,before,'Assistant playback cannot record another utterance');

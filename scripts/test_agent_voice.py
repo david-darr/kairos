@@ -171,11 +171,12 @@ class Organization(unittest.TestCase):
             agent_conversations.change('david', 'agent:a1', 'read', 1, 'two')
             self.assertEqual(agent_conversations.agent_threads('david', [{'id': 'a1'}])['agents'][0]['unread'], 0)
 
-    def test_avatar_v2_preserves_legacy_and_rejects_bad_layers(self):
+    def test_avatar_v2_still_validates_as_ajar_and_rejects_bad_layers(self):
+        # Kairos Mascot (2026-10-22): a v2 dot face is accepted and stored as Ajar.
         legacy = {'form': 'cloud', 'color': '#FA70AB', 'finish': 'plush', 'face': 'smile', 'accessory': 'flower'}
-        self.assertEqual(validate_avatar(legacy), legacy)
+        self.assertEqual(validate_avatar(legacy, 'a1')['color'], '#D99A92')
         rich = {**legacy, 'version': 2, 'form': 'shield', 'style': 'folded', 'eyes': 'oval', 'mouth': 'none', 'accent': '#123abc', 'accessories': ['hat', 'glasses']}
-        self.assertEqual(validate_avatar(rich)['accent'], '#123ABC')
+        self.assertEqual(validate_avatar(rich, 'a1')['acc'], 'spectacles')
         for bad in [{'version': 3}, {'version': True}, {'eyes': 'javascript'}, {'mouth': 'angry'}, {'accessories': ['hat', 'hat']}, {'accessories': [{}]}, {'accessories': ['none']}, {'accent': 'red'}]:
             with self.subTest(bad=bad), self.assertRaises(ValueError): validate_avatar({**rich, **bad})
 

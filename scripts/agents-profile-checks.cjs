@@ -46,10 +46,10 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.ok(await js("document.querySelector('.agent-profile-tabs').dataset.active === 'library' && document.querySelector('.agent-profile-tab.active').textContent === 'Library'"), 'segment arrow moves the tab indicator');
   await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
   const avatarStart = writes.length;
-  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Avatar form\"] [data-value=heart]').click()");
+  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Mascot accessory\"] [data-value=quill]').click()");
   await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
-  await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('heart')");
-  assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.form === 'heart'), 'profile saves avatar');
+  await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('quill')");
+  assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.acc === 'quill'), 'profile saves the look');
   await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Connection"]'); n.value='m2'; n.dispatchEvent(new Event('change')); })()`);
   await waitFor("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-fast')");
   assert.ok(await js("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Fast')"), 'profile shows catalog version names');
@@ -113,14 +113,14 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   agents[1].color = null;
   delete agents[1].avatar;
   await navigate('agents', { agentId:'a2', agentTab:'work' });
-  await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar img')");
-  const firstAvatar = await js("document.querySelector('.agent-header .agent-dot-avatar img').src");
+  await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar')");
+  const firstAvatar = await js("document.querySelector('.agent-header .agent-dot-avatar').dataset.avatarSpec");
   for (let reload = 0; reload < 2; reload++) {
     await win.loadURL(win.webContents.getURL());
     await waitFor("!!document.querySelector('.dashboard-core')");
     await navigate('agents', { agentId:'a2', agentTab:'work' });
-    await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar img')");
-    assert.equal(await js("document.querySelector('.agent-header .agent-dot-avatar img').src"), firstAvatar,
+    await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar')");
+    assert.equal(await js("document.querySelector('.agent-header .agent-dot-avatar').dataset.avatarSpec"), firstAvatar,
       'missing-avatar default is stable across reloads');
   }
 
