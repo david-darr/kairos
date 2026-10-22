@@ -26,6 +26,7 @@ from core.tool_registry import (ALL, CLAUDE, CODEX, OPENAI, READ, WRITE, ToolCon
                                 register)
 from core.untrusted import wrap_untrusted
 
+BRAND_OVERRIDES = 3  # More token overrides than this in one call get a note.
 LINKED_TOOLS = frozenset({"design_outline", "design_read", "design_add_board", "design_edit", "design_boards",
                           "design_tokens", "design_snapshot", "design_comments", "design_export"})
 MAX_READ = 40 * 1024
@@ -120,7 +121,8 @@ NEXT_STEPS = ("Next: design_outline (see ids), design_edit (change elements by i
 
 
 @register("design_create",
-          "Create a design (a canvas of HTML boards in a design system) linked to this chat. " + SKILL_HINT + " "
+          "Design screens, app UI, a mockup or wireframe, an onboarding flow, a landing page or slides on Kairos's Design "
+          "canvas: create a design (HTML boards in a design system) linked to this chat. " + SKILL_HINT + " "
           "Pass the screens as boards: [{title, frame, html}], frame one of phone, tablet, desktop, browser, slide, none. "
           "Each html is a fragment (no <html>/<head>) styled with var(--ds-...) tokens; no scripts. "
           "Use data-kd-goto=\"<board slug>\" on a button to link screens. Returns the design id and a link to include in your reply.",
@@ -379,7 +381,8 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
 @register("design_tokens",
           "Read the design's tokens (the --ds-* variables boards use), or change some for this design with set "
           "{\"--ds-accent\": \"#...\"}, switch the whole design to another system with system=<id>, or clear=true "
-          "to drop this design's changes. Every board restyles at once.",
+          "to drop this design's changes. Every board restyles at once. Keep the design system's tokens unless the "
+          "person asks for a different look or palette.",
           _object({"design_id": _ID, "set": {"type": "object", "description": "Token values to change"},
                    "system": _str("Switch to this design system id"), "clear": {"type": "boolean"}}),
           surfaces=ALL, effect=WRITE)
@@ -420,7 +423,13 @@ def tokens_change(data: dict, args: dict, *, by: str, session_id: Optional[str],
     result = design_store.change(data["id"], edit, by=by, tool="design_tokens", session_id=session_id, user_edit=user_edit)
     if result.get("unchanged"):
         return "Nothing changed."
-    return f"Version {result['version']}: {result['summary']}. Every board uses the new values."
+    text = f"Version {result['version']}: {result['summary']}. Every board uses the new values."
+    changed = len(args.get("set") or {})
+    if not user_edit and changed > BRAND_OVERRIDES:
+        # Guidance, not a block (2026-10-22): a model restyling a whole system unasked loses the brand.
+        text += (f"\nNote: this overrode {changed} of the design system's tokens. Keep the system's look unless the "
+                 "person asked for a different look or palette; design_tokens clear=true puts it back.")
+    return text
 
 
 @register("design_snapshot",

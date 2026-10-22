@@ -728,6 +728,45 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(client.delete("/api/design-systems/kairos").status_code, 422)
 
 
+class RoutingTests(unittest.TestCase):
+    """A design request reaches the canvas on every model (live check 2026-10-22:
+    Claude built an HTML file instead, never seeing design_create)."""
+
+    def test_every_chat_model_is_told_to_use_the_canvas(self):
+        from core import system_prompt
+        line = "To design screens, pages or slides, use the Design canvas: design_create, then design_edit by id."
+        for name, prompt in (("claude", system_prompt.for_claude()), ("external", system_prompt.for_external()),
+                             ("codex", system_prompt.for_codex("py", "cli.py"))):
+            self.assertIn(line, prompt, name)
+        self.assertNotIn(line, system_prompt.HELPER_PROMPT, "helpers cannot write")
+
+    def test_tool_search_finds_design_create(self):
+        from core import tool_search
+        catalog = tool_registry.deferred_tools(True, session_id=new_chat())
+        for query in ("design", "screens", "onboarding", "mockup", "design an onboarding flow", "landing page mockup"):
+            hits = json.loads(tool_search.search(catalog, query, 5))
+            self.assertEqual(hits[0]["name"], "design_create", query)
+        self.assertEqual(json.loads(tool_search.search(catalog, "create task", 3))[0]["name"], "create_task")
+        # Claude Code searches the MCP tool's own name and description.
+        spec = next(s for s in tool_registry.specs(tool_registry.CLAUDE, True) if s.name == "design_create")
+        for word in ("Design screens", "mockup", "wireframe", "onboarding", "landing page", "slides"):
+            self.assertIn(word, spec.description)
+
+    def test_overriding_many_tokens_gets_a_brand_note(self):
+        sid = new_chat()
+        create(sid, boards=[{"title": "One", "frame": "phone"}])
+        few = text(call("design_tokens", {"set": {"--ds-accent": "#225588"}}, ctx(sid)))
+        self.assertNotIn("Keep the system's look", few)
+        many = text(call("design_tokens", {"set": {"--ds-bg": "#101418", "--ds-text": "#F2F4F8", "--ds-surface": "#1B2026",
+                                                    "--ds-accent": "#55AA88"}}, ctx(sid)))
+        self.assertIn("overrode 4 of the design system's tokens", many)
+        self.assertIn("unless the person asked for a different look", many)
+        spec = next(s for s in tool_registry.specs(tool_registry.OPENAI, True) if s.name == "design_tokens")
+        self.assertIn("unless the person asks for a different look or palette", spec.description)
+        skill = (REPO / "skill_templates" / "design-canvas" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Keep the design system's look", skill)
+
+
 class ElectronWorkerTests(unittest.TestCase):
     def test_the_worker_accepts_only_board_routes(self):
         source = (REPO / "electron" / "designRender.js").read_text(encoding="utf-8")
