@@ -91,3 +91,65 @@ async def revoke_terminal(terminal_id: str, request: Request) -> dict:
     if not cli_access.revoke(terminal_id):
         raise HTTPException(status_code=404, detail="No such terminal.")
     return {"ok": True}
+
+
+# -- revealing a chat's files from the terminal ----------------------------------
+
+files_router = APIRouter(prefix="/api/cli", tags=["cli"])
+
+
+class RevealBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: Annotated[str, Field(min_length=1, max_length=100)]
+    url: Annotated[str, Field(max_length=600)] | None = None
+    forge_path: Annotated[str, Field(max_length=600)] | None = None
+
+
+@files_router.post("/local-path")
+async def local_path(body: RevealBody, request: Request) -> dict:
+    """The local path of one of this chat's own files, so a paired terminal
+    on this computer can show it in the file manager (David, 2026-10-22).
+
+    Only for a paired Kairos CLI on loopback: the app window and remote
+    clients never get local paths from here. The file must be one the
+    backend already says belongs to the chat: an artifact or chat file
+    through core/chat_artifacts.py's access rules, or a file a Forge session
+    changed, by its path in that session's changes. Nothing is built from
+    model text, and anything outside the generated-files folders or the
+    chat's workspace is refused."""
+    from pathlib import Path
+
+    from core import image_gen
+    from core.auth import auth_manager
+    from services import chat_live
+
+    terminal = cli_access.current(request) if cli_access.request_allowed(request) else None
+    if terminal is None:
+        raise HTTPException(status_code=403, detail="Only a paired Kairos terminal on this computer can ask for file paths.")
+    session = chat_live.require_session(body.session_id, "local")
+    if bool(body.url) == bool(body.forge_path):
+        raise HTTPException(status_code=400, detail="Give one of url or forge_path.")
+    if body.url:
+        from core import chat_artifacts
+        target, _ = chat_artifacts.resolve(body.session_id, body.url)
+    else:
+        if not session.get("forge") or not auth_manager.is_admin("local"):
+            raise HTTPException(status_code=404, detail="This chat is not a Forge session.")
+        from services.forge_sessions import confined, forge_sessions
+        try:
+            root = forge_sessions.workspace(body.session_id)
+            changed = {row["path"] for row in forge_sessions.changes(body.session_id)["files"]}
+            if body.forge_path not in changed:
+                raise HTTPException(status_code=404, detail="That file is not among this session's changes.")
+            target = confined(root, body.forge_path)
+        except (ValueError, KeyError, OSError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+    target = Path(target).resolve()
+    roots = [Path(image_gen.GENERATED_FILES_DIR).resolve(), Path(image_gen.GENERATED_DIR).resolve()]
+    if session.get("workspace_dir"):
+        roots.append(Path(session["workspace_dir"]).resolve())
+    if not any(target.is_relative_to(root) for root in roots):
+        raise HTTPException(status_code=403, detail="That file is outside the generated-files folder and this chat's workspace.")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="The file is no longer there.")
+    return {"path": str(target), "name": target.name}

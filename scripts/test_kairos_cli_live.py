@@ -417,6 +417,60 @@ class ForgeAndAgentsLive(unittest.IsolatedAsyncioTestCase):
             self.assertIn(agent["name"], result.stdout)
 
 
+class ModelsAndFilesLive(unittest.IsolatedAsyncioTestCase):
+    """Specific models through --model, and file paths for a paired terminal
+    only, against the real backend."""
+
+    def test_model_and_effort_by_name(self):
+        result = cli("--model", "sonnet 5", "--effort", "high", "-p", "hello", "--output-format", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session_id = json.loads(result.stdout)["session_id"]
+        with app_window() as window:
+            session = window.get(f"/api/sessions/{session_id}").json()
+        self.assertEqual((session["model_override"], session["model_effort"]), ("claude-sonnet-5", "high"))
+        refused = cli("--model", "sonnet 5", "--effort", "ultra", "-p", "hello")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("does not offer the ultra effort", refused.stderr)
+        unknown = cli("--model", "gemini 9", "-p", "hello")
+        self.assertEqual(unknown.returncode, 1)
+        self.assertIn("No model matches", unknown.stderr)
+
+    async def test_forge_file_paths_only_for_changed_files(self):
+        conn = await paired(self)
+        try:
+            folder = tempfile.mkdtemp(prefix="kairos-cli-files-")
+            for command in (["git", "init", "-q", "-b", "main"], ["git", "config", "user.email", "t@example.com"],
+                            ["git", "config", "user.name", "Test"]):
+                subprocess.run(command, cwd=folder, check=True)
+            Path(folder, "a.txt").write_text("before\n", encoding="utf-8")
+            Path(folder, "untouched.txt").write_text("same\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=folder, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "first"], cwd=folder, check=True)
+            choices = await chat.model_choices(conn)
+            session = await forge.start(conn, "change a", folder=folder,
+                                        model_endpoint_id=next(c["id"] for c in choices if c["name"] == "Scripted model"))
+            await chat.start_turn(conn, session["id"], "edit a.txt after")
+            for _ in range(100):
+                if Path(folder, "a.txt").read_text(encoding="utf-8") == "after\n":
+                    break
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(1)
+            ok = await conn.client.post("/api/cli/local-path", json={"session_id": session["id"], "forge_path": "a.txt"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(os.path.normcase(ok.json()["path"]), os.path.normcase(str(Path(folder, "a.txt").resolve())))
+            for path, status in (("untouched.txt", 404), ("../outside.txt", 404), ("C:/Windows/win.ini", 404)):
+                with self.subTest(path=path):
+                    response = await conn.client.post("/api/cli/local-path",
+                                                      json={"session_id": session["id"], "forge_path": path})
+                    self.assertEqual(response.status_code, status, response.text)
+            with app_window() as window:
+                refused = window.post("/api/cli/local-path", json={"session_id": session["id"], "forge_path": "a.txt"})
+            self.assertEqual(refused.status_code, 403, "the app window gets no local paths")
+        finally:
+            await conn.close()
+            remove_tree(folder)
+
+
 @unittest.skipUnless(sys.platform == "win32", "ConPTY harness")
 class InteractiveLive(unittest.TestCase):
     """The full-screen view in a real pseudo-terminal (ConPTY through
@@ -436,7 +490,9 @@ class InteractiveLive(unittest.TestCase):
         from kairos_cli_vt import Screen
         self.Screen = Screen
         self.approver = approve_next("allow")
-        env = {**os.environ, "PYTHONPATH": str(ROOT / "cli"), "PYTHONIOENCODING": "utf-8", "WT_SESSION": "test"}
+        self.reveal_log = os.path.join(tempfile.mkdtemp(prefix="kairos-cli-reveal-"), "reveal.log")
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "cli"), "PYTHONIOENCODING": "utf-8", "WT_SESSION": "test",
+               "KAIROS_CLI_REVEAL_LOG": self.reveal_log}
         self.process = PtyProcess.spawn([sys.executable, "-X", "utf8", "-m", "kairos_cli", "--port", str(BACKEND.port),
                                          "--no-start", "--model", "Scripted", "--no-motion", *extra],
                                         dimensions=(self.ROWS, self.COLS), env=env, cwd=str(ROOT))
@@ -508,6 +564,22 @@ class InteractiveLive(unittest.TestCase):
         self.send("1")
         self.wait_for("The command was allowed.")
         self.assertIn("Allowed: Allow once", self.screen().text())
+
+    def test_a_generated_file_is_a_chip_that_shows_it_in_the_file_manager(self):
+        self.start()
+        self.wait_for("Projects")
+        self.send("file report.md hello\r")
+        self.wait_for("▤ report.md")
+        self.wait_for("click or alt+f")
+        time.sleep(1.0)                        # the chip's path resolves
+        self.send("\x1bf", 1.0)                # alt+f selects the newest chip
+        self.send("\r", 1.5)                   # enter shows it
+        with open(self.reveal_log, encoding="utf-8") as handle:
+            command = json.loads(handle.read().splitlines()[-1])
+        self.assertEqual(command[0], "explorer.exe")
+        self.assertTrue(command[1].startswith("/select,"))
+        self.assertTrue(command[1].endswith("_report.md"))
+        self.assertIn("generated_files", command[1])
 
     def test_typing_while_a_reply_runs_queues_the_message(self):
         self.start()

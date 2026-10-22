@@ -49,6 +49,7 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         for module in (auth_routes, chat_routes, cli_routes, permission_routes, remote_routes, session_routes,
                        system_routes):
             self.app.include_router(module.router)
+        self.app.include_router(cli_routes.files_router)
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://test")
         self.feed, _ = chat_live.subscribe()
 
@@ -276,6 +277,88 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         token = {cli_access.HEADER: await self.paired_token()}
         with patch.dict(os.environ, {"AUTH_ENABLED": "true"}):
             self.assertEqual((await self.client.get("/api/sessions", headers=token)).status_code, 401)
+
+
+class RevealPathTests(PairingTests):
+    """POST /api/cli/local-path: a chat's own file, for a paired terminal on
+    this computer only, inside the generated-files folders or the chat's
+    workspace, and never from a path the caller makes up."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        from core import chat_files, image_gen
+        from core.session_manager import session_manager
+        self.session_manager = session_manager
+        self.session = session_manager.create_session("Files", owner_user="local")
+        os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+        self.name = "a1b2c3d4e5f6_report.md"
+        with open(os.path.join(image_gen.GENERATED_FILES_DIR, self.name), "w", encoding="utf-8") as handle:
+            handle.write("# report\n")
+        with open(os.path.join(image_gen.GENERATED_FILES_DIR, "ffffffffffff_other.md"), "w", encoding="utf-8") as handle:
+            handle.write("not this chat's\n")
+        self.url = f"/generated-files/{self.name}"
+        session_manager.register_artifact(self.session["id"], self.url)
+        # A chat file whose root is outside the chat's workspace (the vault).
+        self.vault = tempfile.mkdtemp(dir=environment.name)
+        with open(os.path.join(self.vault, "notes.md"), "w", encoding="utf-8") as handle:
+            handle.write("vault note\n")
+        record = chat_files._local_record(self.vault, "notes.md", "created")
+        session_manager.register_chat_file(self.session["id"], record)
+        self.vault_url = f"/chat-files/{record['id']}"
+
+    async def ask(self, body, headers=None, client=None):
+        return await (client or self.client).post("/api/cli/local-path", json=body, headers=headers or {})
+
+    async def test_a_paired_terminal_gets_its_chats_generated_file(self):
+        token = {cli_access.HEADER: await self.paired_token()}
+        response = await self.ask({"session_id": self.session["id"], "url": self.url}, token)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["path"].endswith(self.name))
+
+    async def test_only_a_paired_terminal_on_loopback(self):
+        body = {"session_id": self.session["id"], "url": self.url}
+        self.assertEqual((await self.ask(body)).status_code, 403, "no credential")
+        self.assertEqual((await self.ask(body, APP_WINDOW)).status_code, 403, "the app window gets no local paths")
+        self.assertEqual((await self.ask(body, {cli_access.HEADER: "kcli_guess"})).status_code, 403)
+        token = {cli_access.HEADER: await self.paired_token()}
+        remote = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app, client=("192.168.1.20", 5000)),
+                                   base_url="http://test")
+        async with remote:
+            self.assertEqual((await self.ask(body, token, remote)).status_code, 403)
+
+    async def test_files_the_chat_does_not_own_and_made_up_paths_are_refused(self):
+        token = {cli_access.HEADER: await self.paired_token()}
+        sid = self.session["id"]
+        cases = [
+            ({"session_id": sid, "url": "/generated-files/ffffffffffff_other.md"}, 404),     # not this chat's
+            ({"session_id": sid, "url": "/generated-files/../sessions.db"}, 400),
+            ({"session_id": sid, "url": "/generated-files/..%2F..%2Fauth.json"}, 400),
+            ({"session_id": sid, "url": "file:///C:/Windows/win.ini"}, 400),
+            ({"session_id": sid, "url": "C:\\Windows\\win.ini"}, 400),
+            ({"session_id": sid, "url": "/chat-files/" + "0" * 24}, 404),
+            ({"session_id": sid, "url": self.vault_url}, 403),                               # outside both roots
+            ({"session_id": sid, "forge_path": "notes.md"}, 404),                             # not a Forge chat
+            ({"session_id": sid}, 400),
+            ({"session_id": "nope", "url": self.url}, 404),
+        ]
+        for body, status in cases:
+            with self.subTest(body=body):
+                response = await self.ask(body, token)
+                self.assertEqual(response.status_code, status, response.text)
+                self.assertNotIn("path", response.json())
+
+    async def test_a_deleted_file_is_not_revealed(self):
+        from core import image_gen
+        token = {cli_access.HEADER: await self.paired_token()}
+        os.remove(os.path.join(image_gen.GENERATED_FILES_DIR, self.name))
+        response = await self.ask({"session_id": self.session["id"], "url": self.url}, token)
+        self.assertEqual(response.status_code, 404)
+
+
+# The reveal tests reuse the pairing setup, not its tests.
+for _name in [n for n in dir(PairingTests) if n.startswith("test_")]:
+    if _name not in RevealPathTests.__dict__:
+        setattr(RevealPathTests, _name, None)
 
 
 class LaunchFolderTests(unittest.IsolatedAsyncioTestCase):

@@ -16,6 +16,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "cli"))
@@ -579,6 +580,168 @@ class ScreenEmulatorTests(unittest.TestCase):
         self.assertEqual(screen.text().splitlines()[:2], ["top", "  hello"])
         screen.feed("\x1b[?1049l")
         self.assertEqual(screen.text().splitlines()[0], "before")
+
+
+CONNECTIONS = [{"id": "cl", "name": "Claude", "kind": "claude_cli", "model": ""},
+               {"id": "cx", "name": "Codex", "kind": "codex_cli", "model": ""},
+               {"id": "lo", "name": "Local", "kind": "local", "model": "qwen3"}]
+EFFORTS = [{"effort": "low", "description": "fast"}, {"effort": "high", "description": "deep"}]
+CATALOGS = {"cl": [{"id": "claude-opus-5-5", "display_name": "Opus 5.5", "supported_efforts": EFFORTS},
+                   {"id": "claude-sonnet-5-5", "display_name": "Sonnet 5.5", "supported_efforts": EFFORTS},
+                   {"id": "claude-haiku-5-5", "display_name": "Haiku 5.5", "supported_efforts": []}],
+            "cx": [{"id": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "supported_efforts": EFFORTS},
+                   {"id": "gpt-6.1-luna", "display_name": "GPT-6.1-Luna", "supported_efforts": EFFORTS},
+                   {"id": "gpt-6-sol", "display_name": "GPT-6-Sol", "supported_efforts": EFFORTS}]}
+
+
+class ModelChoiceTests(unittest.IsolatedAsyncioTestCase):
+    """Specific models, exactly as the app's picker lists them."""
+
+    def opts(self):
+        from kairos_cli import models
+        return models.options(CONNECTIONS, CATALOGS)
+
+    def test_the_options_are_the_apps(self):
+        labels = [o.label for o in self.opts()]
+        self.assertEqual(labels, ["Claude (connection default)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5",
+                                  "Codex (connection default)", "GPT-6.1-Sol", "GPT-6.1-Luna", "GPT-6-Sol",
+                                  "Local (connection default)"])
+
+    def test_matching_by_the_names_people_say(self):
+        from kairos_cli import models
+        cases = {"sonnet 5.5": ("claude-sonnet-5-5", None), "Opus 5.5": ("claude-opus-5-5", None),
+                 "sol 6.1": ("gpt-6.1-sol", None), "sol 6.1 high": ("gpt-6.1-sol", "high"),
+                 "opus 5.5 effort low": ("claude-opus-5-5", "low"), "gpt-6-sol": ("gpt-6-sol", None),
+                 "luna": ("gpt-6.1-luna", None), "Local": (None, None)}
+        for text, (model_id, effort) in cases.items():
+            with self.subTest(text=text):
+                option, said, problem = models.match(self.opts(), text)
+                self.assertIsNotNone(option, problem)
+                self.assertEqual((option.model_id, said), (model_id, effort))
+        option, _, problem = models.match(self.opts(), "sol")
+        self.assertIsNone(option)
+        self.assertIn("More than one model matches", problem)
+        self.assertIsNone(models.match(self.opts(), "gemini")[0])
+        self.assertIsNone(models.match(self.opts(), "haiku 5.5 high")[0], "Haiku offers no effort levels")
+
+    async def test_apply_sends_what_the_app_sends(self):
+        from kairos_cli import models
+        conn = FakeConnection()
+        opus = next(o for o in self.opts() if o.model_id == "claude-opus-5-5")
+        await models.apply(conn, "s1", opus, "high")
+        self.assertEqual(conn.posts, [("/api/sessions/s1/model", {"model_endpoint_id": "cl",
+                                                                  "model_override": "claude-opus-5-5", "effort": "high"})])
+        with self.assertRaises(Exception):
+            await models.apply(conn, "s1", opus, "ultra")
+        default = next(o for o in self.opts() if o.endpoint_id == "lo")
+        await models.apply(conn, "s1", default)
+        self.assertEqual(conn.posts[-1][1], {"model_endpoint_id": "lo", "model_override": None, "effort": None})
+
+    def test_the_real_name_in_the_border(self):
+        from kairos_cli import models
+        self.assertEqual(models.label({"model_endpoint_id": "cx", "model_override": "gpt-6.1-sol"}, CONNECTIONS, CATALOGS),
+                         "GPT-6.1-Sol")
+        self.assertEqual(models.label({"model_endpoint_id": "lo"}, CONNECTIONS, CATALOGS), "qwen3")
+        self.assertEqual(models.label({"model_endpoint_id": "cx", "model_override": "custom-x"}, CONNECTIONS, CATALOGS),
+                         "custom-x")
+        app = make_app()
+        app.choices, app.catalogs = CONNECTIONS, CATALOGS
+        open_view(app, [], {"id": "s1", "title": "c", "model_endpoint_id": "cl", "model_override": "claude-sonnet-5-5",
+                            "model_effort": "high", "permission_mode": "base"})
+        border = "".join(fragment[1] for fragment in app.composer_top())
+        self.assertIn("Sonnet 5.5", border)
+        self.assertIn("effort high", border)
+
+    def test_completion_in_the_composer_and_the_shell(self):
+        from prompt_toolkit.document import Document
+        from kairos_cli import models
+        from kairos_cli.tui import Composer
+        app = make_app()
+        app.choices, app.catalogs = CONNECTIONS, CATALOGS
+        open_view(app, [], {"id": "s1", "title": "c", "model_endpoint_id": "cl", "model_override": "claude-opus-5-5"})
+        found = [c.text for c in Composer(app).get_completions(Document("/model son"), None)]
+        self.assertEqual(found, ["Sonnet 5.5"])
+        found = [c.text for c in Composer(app).get_completions(Document("/effort h"), None)]
+        self.assertEqual(found, ["high"])
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.dict(os.environ, {"LOCALAPPDATA": folder, "XDG_CACHE_HOME": folder}):
+            models.remember(self.opts())
+            self.assertEqual(models.complete("gpt-6.1"), ["GPT-6.1-Luna", "GPT-6.1-Sol", "gpt-6.1-luna", "gpt-6.1-sol"])
+            cached = json.loads(models.cache_file().read_text(encoding="utf-8"))
+            self.assertTrue(all(isinstance(n, str) for n in cached))
+            self.assertNotIn("Claude", cached, "names only, no connection records")
+
+
+class FileChipTests(unittest.IsolatedAsyncioTestCase):
+    def test_the_file_manager_commands_take_the_path_as_one_argument(self):
+        from kairos_cli import reveal
+        path = r"C:\Users\x\gen files\a b.md"
+        self.assertEqual(reveal.command_for(path, "win32"), ["explorer.exe", "/select," + path])
+        self.assertEqual(reveal.command_for("/u/x/a b.md", "darwin"), ["open", "-R", "/u/x/a b.md"])
+        self.assertEqual(reveal.command_for("/u/x/a b.md", "linux"), ["xdg-open", str(Path("/u/x/a b.md").parent)])
+        with self.assertRaises(ValueError):
+            reveal.reveal("relative/path.md")
+
+    async def test_a_chip_reveals_only_the_backends_path(self):
+        from kairos_cli import reveal
+        from kairos_cli.model import ReplyItem
+
+        class Conn(FakeConnection):
+            async def post(self, path, body=None, **kwargs):
+                self.posts.append((path, body))
+                return {"path": str(ROOT / "README.md"), "name": "README.md"}
+        conn = Conn()
+        app = make_app(conn)
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.feed("Saved [x](C:/Windows/evil.exe).\n")
+        reply.finish("done")
+        reply.files = [{"name": "report.md", "url": "/generated-files/abc_report.md", "origin": "generated"}]
+        view = open_view(app, [reply])
+        with tempfile.TemporaryDirectory() as folder:
+            log = os.path.join(folder, "reveal.log")
+            with patch.dict(os.environ, {"KAIROS_CLI_REVEAL_LOG": log}):
+                await app.reveal_chip(view, reply.files[0])
+            command = json.loads(open(log, encoding="utf-8").read().splitlines()[0])
+        self.assertEqual(conn.posts, [("/api/cli/local-path", {"session_id": "s1", "url": "/generated-files/abc_report.md"})])
+        self.assertEqual(command, reveal.command_for(str(ROOT / "README.md")))
+        self.assertNotIn("evil", json.dumps(command), "nothing from the reply's text")
+
+    async def test_a_refused_chip_opens_nothing(self):
+        from kairos_cli.connection import KairosError
+        from kairos_cli.model import ReplyItem
+
+        class Conn(FakeConnection):
+            async def post(self, path, body=None, **kwargs):
+                raise KairosError("That file is outside the generated-files folder and this chat's workspace.")
+        app = make_app(Conn())
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.finish("done")
+        reply.files = [{"name": "notes.md", "url": "/chat-files/" + "a" * 24, "origin": "created"}]
+        view = open_view(app, [reply])
+        with tempfile.TemporaryDirectory() as folder:
+            log = os.path.join(folder, "reveal.log")
+            with patch.dict(os.environ, {"KAIROS_CLI_REVEAL_LOG": log}):
+                await app.reveal_chip(view, reply.files[0])
+            self.assertFalse(os.path.exists(log))
+        self.assertIn("outside", app.notice)
+
+    def test_chips_render_clickable_with_an_osc8_link_once_resolved(self):
+        from kairos_cli.model import ReplyItem
+        app = make_app()
+        reply = ReplyItem(turn_id="t", ts=1)
+        reply.feed("Done.\n")
+        reply.finish("done")
+        reply.files = [{"name": "report.md", "url": "/generated-files/a_report.md", "origin": "generated",
+                        "path": str(ROOT / "README.md")},
+                       {"name": "app.py", "forge_path": "app.py", "origin": "changed"}]
+        open_view(app, [reply])
+        lines, clicks = app.main_lines(140, 40)
+        row = next(i for i, line in enumerate(lines) if "report.md" in "".join(f[1] for f in line))
+        fragments = lines[row]
+        self.assertIn("± app.py", "".join(f[1] for f in fragments))
+        escapes = [f[1] for f in fragments if f[0] == "[ZeroWidthEscape]"]
+        self.assertEqual(escapes, ["\x1b]8;;" + (ROOT / "README.md").as_uri() + "\x1b\\", "\x1b]8;;\x1b\\"])
+        self.assertEqual(len(clicks[row]), 2)
 
 
 # -- snapshots --------------------------------------------------------------------------

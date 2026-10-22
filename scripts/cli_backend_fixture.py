@@ -13,6 +13,7 @@ Prompts it understands (the first word decides):
     lines N          stream N numbered lines, with a code fence and a table
     ask              raise a permission request, then say what was decided
     tool             a Forge-style tool step, started then finished
+    file NAME TEXT   write a generated file and link it, as a document tool does
     edit NAME TEXT   write NAME in a Forge session's folder (checkpointed)
     slow N           stream for N seconds, so a test can stop it
     fail             end the turn with an error
@@ -38,6 +39,30 @@ cli_access.PAIRS_PER_MINUTE = int(os.environ.get("KAIROS_TEST_PAIRS_PER_MINUTE",
 FAKE_NAME = "Scripted model"
 if not any(e.get("name") == FAKE_NAME for e in model_endpoints.list_endpoints()):
     model_endpoints.create_endpoint(FAKE_NAME, base_url="http://127.0.0.1:9/v1", model="scripted-1", kind="api")
+# Claude Code and Codex connections, so the model picker has real catalogs
+# (core/model_catalog.py's own lists). Every reply still comes from the
+# script below; nothing here reaches a provider or reads a credential:
+# discovery returns the local catalog, and quota readings are scripted.
+for _name, _kind in (("Claude", "claude_cli"), ("Codex", "codex_cli")):
+    if not any(e.get("name") == _name for e in model_endpoints.list_endpoints()):
+        model_endpoints.create_endpoint(_name, kind=_kind)
+
+from core import model_catalog, model_discovery, quota_usage  # noqa: E402
+
+
+async def _local_catalog(endpoint, force=False):
+    return model_catalog.list_models(endpoint.get("kind")) if endpoint.get("kind") in ("claude_cli", "codex_cli") else []
+
+
+async def _scripted_quotas(force_provider=None):
+    return {"providers": [{"provider": "claude", "status": "ok", "note": "", "stale": False,
+                           "windows": [{"name": "5-hour", "used_percent": 35.0, "resets_at": time.time() + 3 * 3600},
+                                       {"name": "weekly", "used_percent": 12.0, "resets_at": time.time() + 5 * 86400}]}],
+            "recorded": []}
+
+
+model_discovery.list_for_endpoint = _local_catalog
+quota_usage.get_usage_overlay_async = _scripted_quotas
 
 
 def _chunks(text: str, size: int = 7):
@@ -101,6 +126,16 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
             async with file_checkpoints.around_turn(f"chat:{session_id}", folder):
                 (Path(folder) / words[1]).write_text(" ".join(words[2:]) + "\n", encoding="utf-8")
             yield await say(f"Wrote {words[1]}.\n")
+    elif command == "file" and len(words) >= 3:
+        import secrets
+        from core import image_gen
+        os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+        stored = f"{secrets.token_hex(6)}_{os.path.basename(words[1])}"
+        with open(os.path.join(image_gen.GENERATED_FILES_DIR, stored), "w", encoding="utf-8") as handle:
+            handle.write(" ".join(words[2:]) + "\n")
+        url = f"/generated-files/{stored}"
+        session_manager.register_artifact(session_id, url)
+        yield await say(f"Saved [{os.path.basename(words[1])}]({url}).\n")
     elif command == "slow":
         seconds = float(words[1]) if len(words) > 1 else 10
         deadline = time.monotonic() + seconds

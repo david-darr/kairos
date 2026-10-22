@@ -48,7 +48,7 @@ from prompt_toolkit.utils import get_cwidth
 from rich.console import Console
 from rich.text import Text
 
-from . import chat, commands, forge, model, render, widgets
+from . import chat, commands, forge, model, models, render, reveal, widgets
 from .connection import Connection, KairosError, launch_app
 from .live import LiveFeed, TurnEvent
 from .mascot import Kip
@@ -106,6 +106,19 @@ def wrap(text: str, width: int) -> list[str]:
                 line = candidate
         out.append(line)
     return out
+
+
+def chip_name(row: dict) -> str:
+    """A file's name as the app shows it: a generated file without the
+    random prefix its stored name carries (core/chat_artifacts.py)."""
+    import re
+    name = one_line(row.get("name"), 60)
+    return re.sub(r"^[a-f0-9]{12}_", "", name) if row.get("origin") == "generated" else name
+
+
+def osc8(target: str) -> str:
+    """An OSC 8 hyperlink edge: the target, or empty to end the link."""
+    return "\x1b]8;;" + target + "\x1b\\"
 
 
 class Lines(UIControl):
@@ -169,6 +182,18 @@ class Composer(Completer):
         if self.app.screen or self.app.mode != "chat":
             return
         text = document.text_before_cursor
+        if text.startswith("/model ") or text.startswith("/effort "):
+            command, _, typed = text.partition(" ")
+            app = self.app
+            if command == "/model":
+                names = sorted({o.name for o in app.model_options() if o.model_id})
+            else:
+                option = app.current_option()
+                names = [e["effort"] for e in option.efforts] if option else []
+            for name in names:
+                if name.casefold().startswith(typed.casefold()) or typed.casefold() in name.casefold():
+                    yield Completion(name, start_position=-len(typed), display=name)
+            return
         if text.startswith("/") and " " not in text:
             for name, args, about in commands.COMMANDS:
                 if name.startswith(text[1:].lower()):
@@ -206,6 +231,7 @@ class KairosApp:
         self.tabs: list[str] = []
         self.active: str | None = None
         self.choices: list[dict] = []
+        self.catalogs: dict[str, list[dict]] = {}
         self.sessions: list[dict] = []
         self.forge_projects: list[dict] = []
         self.forge_sessions: dict[str, list] = {}
@@ -229,6 +255,8 @@ class KairosApp:
         self.scroll_info = (0, 0, 0)
         self.cache: dict = {}
         self.answered: set = set()
+        self.file_mode = False
+        self.file_index = 0
         self.feed = LiveFeed(conn, self.on_event, self.on_feed_state)
         self.buffer = Buffer(multiline=True, completer=Composer(self), complete_while_typing=True)
         self.lines = Lines(self)
@@ -366,6 +394,7 @@ class KairosApp:
                 reply.metrics = model.run_metrics(run)
                 break
         await self.refresh_context(view)
+        await self.attach_files(view, reply)
         view.touch()
         self.invalidate()
         if view.queued and not view.working:
@@ -422,6 +451,7 @@ class KairosApp:
                 view.runs = runs
             await self.refresh_context(view)
             self.views[session_id] = view
+            await self.attach_history_files(view)
             # A turn already running in this chat (started in the app).
             turn = self.feed.book.turns.get(session_id)
             if turn and turn.status == "processing":
@@ -619,8 +649,8 @@ class KairosApp:
     def item_lines(self, item, width: int):
         s = self.s
         body = width - GUTTER - 2
-        if isinstance(item, ReplyItem) and item.status == "processing":
-            return self.reply_lines(item, width)
+        if isinstance(item, ReplyItem) and (item.status == "processing" or item.files):
+            return self.reply_lines(item, width)      # live, or chips that change state
         key = (id(item), width, getattr(item, "expanded", None), item.metrics is not None
                if isinstance(item, ReplyItem) else None, len(getattr(item, "blocks", []) or []),
                len(item.__dict__.get("notes", [])))
@@ -674,6 +704,11 @@ class KairosApp:
         for block in item.blocks:
             for line in rich_lines(render.render_block(block, self.palette), self.palette, body + 2):
                 lines.append([("", "  ")] + line)
+        if item.files:
+            row, regions = self.chip_line(item, width)
+            lines.append([])
+            lines.append(row)
+            clicks[len(lines) - 1] = regions
         if item.status == "processing":
             tail = item.committer.tail()
             if tail:
@@ -708,6 +743,125 @@ class KairosApp:
             lines.append([])
             lines.append(self.metrics_line(item, width, clicks, len(lines)))
         return lines, clicks
+
+    # -- file chips -------------------------------------------------------------------
+
+    async def attach_files(self, view: SessionView, reply: ReplyItem) -> None:
+        """The files this reply produced, as the backend lists them for the
+        chat: new chat files and generated artifacts, and for a Forge session
+        the files it has changed. Never taken from the reply's text."""
+        found: list[dict] = []
+        try:
+            rows = await self.conn.get("/api/chat/files", params={"session_id": view.id}) or []
+        except KairosError:
+            rows = []
+        since = (reply.ts or 0) - 2
+        for row in rows:
+            if row.get("origin") == "attachment" or not row.get("exists"):
+                continue
+            if row.get("origin") == "generated":
+                # A generated file's listing carries the chat's time, not its
+                # own: it belongs to the reply that links it.
+                keep = bool(row.get("url")) and row["url"] in reply.text
+            else:
+                keep = (row.get("created_at") or 0) >= since
+            if keep:
+                found.append({"name": chip_name(row), "url": row.get("url"), "origin": row.get("origin")})
+        if view.session.get("forge"):
+            try:
+                changes = await forge.changes(self.conn, view.id)
+                for row in (changes.get("files") or [])[:8]:
+                    if not row.get("binary") or row.get("untracked"):
+                        found.append({"name": one_line(row.get("path"), 60), "forge_path": row.get("path"),
+                                      "origin": "changed"})
+            except KairosError:
+                pass
+        seen = set()
+        reply.files = [f for f in found if not ((f.get("url") or f.get("forge_path")) in seen
+                                                or seen.add(f.get("url") or f.get("forge_path")))][:10]
+        for chip in reply.files:
+            self.spawn(self.resolve_chip(view, chip))
+
+    async def attach_history_files(self, view: SessionView) -> None:
+        """Chips for earlier replies: the chat's generated files, each on
+        the reply that links it."""
+        try:
+            rows = await self.conn.get("/api/chat/files", params={"session_id": view.id}) or []
+        except KairosError:
+            return
+        generated = [r for r in rows if r.get("origin") == "generated" and r.get("exists") and r.get("url")]
+        for item in view.items:
+            if isinstance(item, ReplyItem) and not item.files:
+                item.files = [{"name": chip_name(r), "url": r["url"], "origin": "generated"}
+                              for r in generated if r["url"] in item.text][:10]
+                for chip in item.files:
+                    self.spawn(self.resolve_chip(view, chip))
+
+    async def resolve_chip(self, view: SessionView, chip: dict) -> str | None:
+        """The chip's local path, from the backend's checked route."""
+        if chip.get("path"):
+            return chip["path"]
+        body = {"session_id": view.id}
+        body.update({"url": chip["url"]} if chip.get("url") else {"forge_path": chip["forge_path"]})
+        try:
+            result = await self.conn.post("/api/cli/local-path", body)
+        except KairosError as error:
+            chip["refused"] = str(error)
+            return None
+        chip["path"] = result["path"]
+        view.touch()
+        self.invalidate()
+        return chip["path"]
+
+    async def reveal_chip(self, view: SessionView, chip: dict) -> None:
+        path = await self.resolve_chip(view, chip)
+        if not path:
+            self.say(chip.get("refused") or "Kairos would not hand out that file's location.", "warn")
+            return
+        try:
+            reveal.reveal(path)
+        except (OSError, ValueError) as error:
+            self.say(f"Could not open the file manager: {error}", "danger")
+            return
+        where = {"win32": "File Explorer", "darwin": "Finder"}.get(sys.platform, "the file manager")
+        self.say(f"Showing {chip['name']} in {where}.", "success")
+
+    def chips(self) -> list[tuple[ReplyItem, dict]]:
+        view = self.view
+        return [(item, chip) for item in (view.items if view else []) if isinstance(item, ReplyItem)
+                for chip in item.files]
+
+    def chip_line(self, item: ReplyItem, width: int):
+        s = self.s
+        out = [("", " " * GUTTER)]
+        regions = []
+        selected = None
+        if self.file_mode:
+            all_chips = self.chips()
+            if 0 <= self.file_index < len(all_chips):
+                selected = all_chips[self.file_index][1]
+        x = GUTTER
+        for chip in item.files:
+            icon = {"changed": "±", "generated": "▤", "created": "▤"}.get(chip.get("origin"), "▤")
+            label = f" {icon} {widgets.fit(chip['name'], 40)} "
+            style = s.fg("accent", "underline") + (" reverse" if chip is selected else "")
+            # The link's edges sit on the brackets, cells that are always
+            # drawn with the chip, so the terminal sees both or neither.
+            if chip.get("path"):
+                out.append(("[ZeroWidthEscape]", osc8(reveal.file_uri(chip["path"]))))
+            out.append((s.fg("gold"), "⟦"))
+            out.append((style, label))
+            if chip.get("path"):
+                out.append(("[ZeroWidthEscape]", osc8("")))
+            out.append((s.fg("gold"), "⟧"))
+            span = get_cwidth(label) + 2
+            regions.append((x, x + span, (lambda c: lambda: self.spawn(self.reveal_chip(self.view, c)))(chip)))
+            out.append(("", " "))
+            x += span + 1
+            if x > width - 20:
+                break
+        out.append((s.fg("meta"), "  click or alt+f to show in the file manager"))
+        return out, regions
 
     def toggle(self, item: ReplyItem) -> None:
         item.expanded = not item.expanded
@@ -755,7 +909,7 @@ class KairosApp:
         words = [rich_lines(line, self.palette, 60)[0] for line in render.wordmark(self.palette)]
         words.append([(s.fg("dim", "italic"), render.TAGLINE)])
         words.append([])
-        model_name = chat.model_label(self.session, self.choices) if self.session else "no chat"
+        model_name = models.label(self.session, self.choices, self.catalogs) if self.session else "no chat"
         words.append([(s.fg("meta"), "model  "), (s.fg("text"), model_name)])
         words.append([(s.fg("meta"), "folder "), (s.fg("text"), widgets.fit(self.cwd, 50))])
         words.append([])
@@ -780,10 +934,13 @@ class KairosApp:
         lines = [[("", "  "), (s.fg("meta"), title)], []]
         if self.screen == "picker":
             needle = self.buffer.text.casefold()
-            rows = [r for r in data.get("rows", []) if needle in r[0].casefold()]
+            rows = [r for r in data.get("rows", []) if needle in f"{r[0]} {r[1]}".casefold()]
             data["filtered"] = rows
             data["index"] = min(data.get("index", 0), max(0, len(rows) - 1))
-            for index, (label, detail_text, _value) in enumerate(rows[: height - 4]):
+            # Two lines a row; keep the selected row in view.
+            capacity = max(1, (height - 6) // 2)
+            first = max(0, min(data["index"] - capacity // 2, len(rows) - capacity))
+            for index, (label, detail_text, _value) in enumerate(rows[first: first + capacity], start=first):
                 sel = index == data["index"]
                 lines.append([("", "  "), (s.fg("gold"), "› " if sel else "  "),
                               (s.fg("text", "bold" if sel else ""), widgets.fit(label, 50).ljust(52)),
@@ -940,7 +1097,7 @@ class KairosApp:
         elif self.screen == "picker":
             parts = [(s.fg("accent"), " filter ")]
         else:
-            parts = [(s.fg("text", "bold"), " " + chat.model_label(session, self.choices)), (s.fg("meta"), " · "),
+            parts = [(s.fg("text", "bold"), " " + models.label(session, self.choices, self.catalogs)), (s.fg("meta"), " · "),
                      (s.fg("dim"), f"effort {effort}"), (s.fg("meta"), " · "),
                      (s.fg("warn" if mode == "auto" else "dim"), f"{mode} ")]
         used = widgets.width_of(parts) + 3
@@ -966,6 +1123,8 @@ class KairosApp:
             text = "a reply is running · enter queues this for when it ends · esc stops it"
         elif self.mode == "search":
             text = "type, then enter finds the next match up · esc ends"
+        elif self.screen == "picker":
+            text = "type to filter · ↑↓ · enter chooses · esc closes"
         else:
             text = "message Kairos · / commands · @ " + ("files" if self.is_forge else "notes")
         return [(self.s.fg("meta"), text)]
@@ -1225,7 +1384,7 @@ class KairosApp:
                 rows = sorted(await chat.list_sessions(self.conn), key=lambda r: r.get("updated_at") or 0, reverse=True)
                 self.open_screen("picker", title="resume a chat",
                                  rows=[(one_line(r.get("title") or "Chat", 60),
-                                        f"{chat.model_label(r, self.choices)} · {r.get('message_count', 0)} messages · {chat.age(r.get('updated_at'))}",
+                                        f"{models.label(r, self.choices, self.catalogs)} · {r.get('message_count', 0)} messages · {chat.age(r.get('updated_at'))}",
                                         r["id"]) for r in rows[:200]],
                                  on_pick=self.open_session)
         elif name == "rename":
@@ -1236,23 +1395,9 @@ class KairosApp:
             await self.reload_active()
             await self.refresh_sidebar()
         elif name == "model":
-            self.choices = await chat.model_choices(self.conn)
-
-            async def pick(choice):
-                await chat.set_model(self.conn, self.view.id, choice)
-                await self.reload_active()
-                self.say(f"Model: {one_line(choice.get('name'), 60)}", "success")
-            if rest:
-                choice = chat.match_model(self.choices, rest)
-                if not choice:
-                    self.say(f"No single model matches {one_line(rest, 40)}.", "warn")
-                    return
-                await pick(choice)
-            else:
-                self.open_screen("picker", title="choose a model",
-                                 rows=[(one_line(c.get("name") or c["id"], 50),
-                                        f"{one_line(c.get('model') or 'default', 40)} · {c.get('kind')}", c) for c in self.choices],
-                                 on_pick=pick)
+            await self.choose_model(rest)
+        elif name == "effort":
+            await self.choose_effort(rest)
         elif name == "models":
             await self.models_screen()
         elif name == "usage":
@@ -1346,6 +1491,73 @@ class KairosApp:
             self.say(f"No command /{one_line(name, 30)}. Try /help.", "warn")
         self.invalidate()
 
+    def model_options(self) -> list:
+        return models.options(self.choices, self.catalogs)
+
+    def current_option(self):
+        session = self.session
+        for option in self.model_options():
+            if option.endpoint_id == session.get("model_endpoint_id") and option.model_id == (session.get("model_override") or None):
+                return option
+        return None
+
+    async def set_option(self, option, effort=None) -> None:
+        await models.apply(self.conn, self.view.id, option, effort)
+        await self.reload_active()
+        self.say(f"Model: {option.name}" + (f" · effort {effort}" if effort else ""), "success")
+
+    async def choose_model(self, rest: str) -> None:
+        """/model: every model the app's picker offers, inside each
+        connection (kairos_cli/models.py); then the effort, where offered."""
+        self.choices, self.catalogs = await models.load(self.conn)
+        opts = self.model_options()
+        if rest:
+            option, effort, problem = models.match(opts, rest)
+            if option is None:
+                self.say(problem, "warn")
+                return
+            await self.set_option(option, effort)
+            return
+
+        async def picked(option):
+            if option.efforts:
+                rows = [("provider default" + (f" ({option.default_effort})" if option.default_effort else ""), "", None)]
+                rows += [(e["effort"], one_line(e.get("description") or "", 80), e["effort"]) for e in option.efforts]
+
+                async def with_effort(effort):
+                    await self.set_option(option, effort)
+                self.open_screen("picker", title=f"effort for {option.name}", rows=rows, on_pick=with_effort)
+            else:
+                await self.set_option(option)
+        current = self.current_option()
+        rows = []
+        for option in opts:
+            detail = " · ".join(x for x in (option.connection if option.model_id else "the connection's own setting",
+                                            option.model_id or "", option.description,
+                                            "effort " + "/".join(e["effort"] for e in option.efforts) if option.efforts else "")
+                                if x)
+            same = current is not None and (option.endpoint_id, option.model_id) == (current.endpoint_id, current.model_id)
+            rows.append((("● " if same else "  ") + option.label, detail, option))
+        index = next((i for i, row in enumerate(rows) if row[0].startswith("● ")), 0)
+        self.open_screen("picker", title="choose a model", rows=rows, on_pick=picked, index=index)
+
+    async def choose_effort(self, rest: str) -> None:
+        self.choices, self.catalogs = await models.load(self.conn)
+        option = self.current_option()
+        if option is None or not option.efforts:
+            self.say("This chat's model offers no effort levels.", "warn")
+            return
+        if rest:
+            effort = None if rest.strip().lower() in ("default", "none") else rest.strip().lower()
+            await self.set_option(option, effort)
+            return
+        rows = [("provider default", "", None)] + [(e["effort"], one_line(e.get("description") or "", 80), e["effort"])
+                                                  for e in option.efforts]
+
+        async def chosen(effort):
+            await self.set_option(option, effort)
+        self.open_screen("picker", title=f"effort for {option.name}", rows=rows, on_pick=chosen)
+
     async def agents(self, rest: str) -> None:
         words = rest.split(maxsplit=2)
         inbox = await self.conn.get("/api/agents/inbox")
@@ -1381,6 +1593,7 @@ class KairosApp:
         sidebar = Condition(lambda: self.sidebar_mode)
         screen = Condition(lambda: self.screen is not None)
         search = Condition(lambda: self.mode == "search")
+        files = Condition(lambda: self.file_mode)
         run = self.spawn
 
         for digit in "123456789":
@@ -1392,7 +1605,10 @@ class KairosApp:
         # escape must wait the short ttimeoutlen to be told apart.
         @keys.add("escape")
         def _(event):
-            if self.sidebar_mode:
+            if self.file_mode:
+                self.file_mode = False
+                self.notice = ""
+            elif self.sidebar_mode:
                 self.sidebar_mode = False
             elif self.screen:
                 self.close_screen()
@@ -1405,7 +1621,7 @@ class KairosApp:
                 run(self.stop())
             self.invalidate()
 
-        @keys.add("enter", filter=~sidebar)
+        @keys.add("enter", filter=~sidebar & ~files)
         def _(event):
             run(self.submit())
 
@@ -1495,6 +1711,35 @@ class KairosApp:
         def _(event):
             self.copy_mode = not self.copy_mode
             self.invalidate()
+
+        @keys.add("escape", "f")
+        def _(event):
+            chips = self.chips()
+            if not chips:
+                self.say("No files in this chat's replies yet.")
+                return
+            self.file_mode = True
+            self.file_index = len(chips) - 1
+            self.say(f"{chips[-1][1]['name']} · ←→ choose · enter shows it · esc ends", "meta", 3600)
+
+        @keys.add("left", filter=files)
+        @keys.add("s-tab", filter=files)
+        def _(event):
+            self.file_index = max(0, self.file_index - 1)
+            self.invalidate()
+
+        @keys.add("right", filter=files)
+        @keys.add("tab", filter=files)
+        def _(event):
+            self.file_index = min(len(self.chips()) - 1, self.file_index + 1)
+            self.invalidate()
+
+        @keys.add("enter", filter=files, eager=True)
+        def _(event):
+            chips = self.chips()
+            if 0 <= self.file_index < len(chips):
+                run(self.reveal_chip(self.view, chips[self.file_index][1]))
+            self.file_mode = False
 
         @keys.add("c-f")
         def _(event):
@@ -1588,6 +1833,10 @@ class KairosApp:
 
     async def run(self, first_session: dict, choices: list[dict], first_prompt: str | None = None) -> int:
         self.choices = choices
+        try:
+            self.choices, self.catalogs = await models.load(self.conn)
+        except KairosError:
+            self.catalogs = {}
         self.feed.start()
         await asyncio.wait_for(self.feed.connected.wait(), timeout=20)
         await asyncio.gather(self.refresh_sidebar(), self.refresh_quotas())

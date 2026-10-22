@@ -63,6 +63,10 @@ class ReplyItem:
     ended: float | None = None
     samples: list = field(default_factory=list)        # (monotonic time, characters)
     text: str = ""
+    # File chips: files the backend lists for this chat that this reply
+    # produced (GET /api/chat/files, or a Forge session's changes). Each is
+    # {"name", "url" or "forge_path", "origin", "path" once resolved}.
+    files: list = field(default_factory=list)
 
     def feed(self, text: str) -> None:
         self.text += text

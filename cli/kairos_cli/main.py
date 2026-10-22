@@ -21,16 +21,17 @@ import sys
 from rich.console import Console
 from rich.text import Text
 
-from . import __version__, chat, forge as forge_api, render
+from . import __version__, chat, forge as forge_api, models, render
 from .connection import Connection, KairosError, attach
 from .mascot import Kip
 from .palette import choose
 from .sanitize import one_line
 
-SUBCOMMANDS = ("status", "login", "agents", "forge")
+SUBCOMMANDS = ("status", "login", "agents", "forge", "completion")
 
 
-VALUE_OPTIONS = {"--instance", "--port", "--theme", "--color", "--model", "--output-format", "--permissions"}
+VALUE_OPTIONS = {"--instance", "--port", "--theme", "--color", "--model", "--effort", "--output-format",
+                 "--permissions", "--complete-models"}
 
 
 def find_subcommand(argv: list[str]) -> tuple[str | None, int]:
@@ -63,7 +64,12 @@ def build_parser(sub: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--no-motion", action="store_true", help="no animation")
     parser.add_argument("--no-mascot", action="store_true", help="hide Kip")
     parser.add_argument("--no-start", action="store_true", help="do not start the app when it is not running")
-    parser.add_argument("--model", help="model for this chat (name, model id or connection id)")
+    parser.add_argument("--model", help="the model for this chat, as the app's picker names it: "
+                                        "\"sonnet 5.5\", \"sol 6.1\", a model id, or a connection")
+    parser.add_argument("--effort", help="reasoning effort, where the chosen model offers it")
+    if sub == "completion":
+        parser.add_argument("shell", choices=("powershell", "bash"))
+        return parser
     if sub == "forge":
         parser.add_argument("task", nargs="+")
         parser.add_argument("--worktree", action="store_true", help="work in an isolated Forge worktree")
@@ -133,13 +139,18 @@ async def pick_session(conn: Connection, args, interactive: bool) -> dict:
     return await chat.new_session(conn)
 
 
-async def ensure_model(conn: Connection, session: dict, wanted: str | None, choices: list[dict]) -> dict:
+async def ensure_model(conn: Connection, session: dict, wanted: str | None, choices: list[dict],
+                       effort: str | None = None) -> dict:
+    """--model and --effort, matched against exactly what the app's picker
+    offers (kairos_cli/models.py)."""
     if wanted:
-        choice = chat.match_model(choices, wanted)
-        if not choice:
-            raise KairosError(f"No single model matches {one_line(wanted, 40)}. Names: "
-                              + ", ".join(one_line(c.get("name"), 30) for c in choices[:12]))
-        await chat.set_model(conn, session["id"], choice)
+        connections, catalogs = await models.load(conn)
+        option, said_effort, problem = models.match(models.options(connections, catalogs), wanted)
+        if option is None:
+            raise KairosError(problem)
+        await models.apply(conn, session["id"], option, effort or said_effort)
+    elif effort:
+        raise KairosError("--effort needs --model.")
     return await chat.open_session(conn, session["id"])
 
 
@@ -155,7 +166,7 @@ async def run_headless(args, palette) -> int:
     try:
         choices = await chat.model_choices(conn)
         session = await pick_session(conn, args, interactive=False)
-        session = await ensure_model(conn, session, args.model, choices)
+        session = await ensure_model(conn, session, args.model, choices, args.effort)
         if not session.get("model_endpoint_id"):
             raise KairosError("This chat has no model. Pass --model <name>.")
         permissions = args.permissions
@@ -178,11 +189,11 @@ async def run_interactive(args, palette, first: str | None = None, forge_task: d
         if forge_task:
             created = await forge_api.start(conn, forge_task["task"], worktree=forge_task["worktree"],
                                             mode=forge_task["mode"])
-            session = await ensure_model(conn, created, args.model, choices)
+            session = await ensure_model(conn, created, args.model, choices, args.effort)
             first = forge_task["task"]
         else:
             session = await pick_session(conn, args, interactive=True)
-            session = await ensure_model(conn, session, args.model, choices)
+            session = await ensure_model(conn, session, args.model, choices, args.effort)
         if args.resume == "":
             # Open with the resume picker over the chat this folder was in.
             asyncio.get_running_loop().call_later(0.5, lambda: asyncio.ensure_future(app.command("resume", "")))
@@ -256,6 +267,11 @@ async def run_login(args, palette) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["--complete-models"]:
+        # Shell tab completion: names from the local cache, no pairing.
+        for name in models.complete(argv[1] if len(argv) > 1 else ""):
+            print(name)
+        return 0
     sub, index = find_subcommand(argv)
     if sub:
         argv = argv[:index] + argv[index + 1:]
@@ -264,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
     palette = choose(None if args.theme == "auto" else args.theme, args.color,
                      probe=not headless and sys.stdout.isatty())
     try:
+        if sub == "completion":
+            print(models.POWERSHELL if args.shell == "powershell" else models.BASH)
+            return 0
         if sub == "status":
             return asyncio.run(run_status(args, palette))
         if sub == "agents":
