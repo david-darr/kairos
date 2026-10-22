@@ -562,8 +562,10 @@ async function run(ctx) {
     const forgeChat = await rect('.mf-session .forge-transcript-composer');
     ok(forgeChat && Math.abs(forgeChat.b - (screen - gap)) <= 1, `${name}: Forge session composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeChat)}`);
     await js("document.querySelector('.mf-changes').click()"); await waitFor("!!document.querySelector('dialog.ms-sheet[open] .mf-git-dock')"); await delay(400);
-    const changes = { sheet: await rect('dialog.ms-sheet[open]'), dock: await rect('.mf-git-dock') }, dockGap = Math.max(8, bottom);
-    ok(Math.round(changes.sheet.b) === screen && Math.abs(changes.dock.b - (screen - dockGap)) <= 1, `${name}: Changes sheet reaches the screen bottom with its dock ${dockGap}px above it: ${JSON.stringify(changes)}`);
+    const changes = { sheet: await rect('dialog.ms-sheet[open]'), dock: await rect('.mf-git-dock'), actions: await js("document.querySelectorAll('.mf-git-dock button').length") }, dockGap = Math.max(8, bottom);
+    ok(Math.round(changes.sheet.b) === screen, `${name}: Changes sheet reaches the screen bottom: ${JSON.stringify(changes)}`);
+    // A dock with actions sits above the home indicator; with nothing to do there is no dock at all, never an empty pill.
+    ok(changes.actions ? Math.abs(changes.dock.b - (screen - dockGap)) <= 1 : changes.dock === null, `${name}: Changes dock ${changes.actions ? 'sits ' + dockGap + 'px above the screen bottom' : 'is hidden with no actions'}: ${JSON.stringify(changes)}`);
     await shot('fold-' + w + 'x' + screen + '-forge-changes');
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   }

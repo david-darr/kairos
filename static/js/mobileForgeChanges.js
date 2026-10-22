@@ -46,6 +46,8 @@ export function mountMobileForgeChanges(content, { state, message, commit, push,
     const prepare = button('Commit options', () => openCommit(prepare)); prepare.disabled = stage?.disabled || false;
     // The original Commit all changes path stays available for unstaged files.
     if (state.files.length && !staged) dock.append(prepare);
+    // Nothing to stage, commit or sync: no dock at all, rather than an empty pill.
+    dock.hidden = !dock.childElementCount;
     const extra = el('details', { class: 'mf-git-more' }, [el('summary', { text: 'Branch and sync options' })]);
     for (const node of [...content.children].filter(node => node !== sections[0] && node !== sections[1] && node !== content.firstElementChild)) {
       const a = document.createComment('Git control home'); node.before(a); anchors.push([node, a]); extra.append(node);

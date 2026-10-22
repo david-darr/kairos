@@ -600,6 +600,7 @@
   .kairos-redesign .mf-git .forge-git-files:not(:has(.forge-git-file)) > .forge-small-button { display: none; }
   .kairos-redesign .mf-git .forge-git-file > .forge-small-button { border-radius: 999px; padding-inline: 14px; }
   .kairos-redesign .mf-git-dock { margin-top: auto; }
+  .kairos-redesign .mf-git-dock[hidden] { display: none; }
   .kairos-redesign .ms-sheet-body > .mf-tool { height: 100%; }
   .kairos-redesign .ms-sheet-body:has(> .mf-tool) { padding-bottom: 0; }
   .kairos-redesign .mf-tool > .forge-sidebar-panel { padding-bottom: max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
