@@ -202,6 +202,22 @@ async function renderComputerUsePanel(body) {
         control: toggle({ checked: !!config.allow_reactions, label: 'Let the computer like, follow and react for you',
           onChange: on => save({ allow_reactions: on }) }) }),
     ]),
+    // Models' computer steps (cua upgrade 5.4): kept for review, then deleted.
+    group({ title: 'Steps' }, [row({ title: 'Keep computer steps',
+      description: "Each model action's before and after screenshots, for the Steps view. Private fields are never kept. Steps go with their chat or agent.",
+      control: (() => {
+        const days = customSelect({ class: 'computer-steps-days', 'aria-label': 'Keep computer steps' }, [
+          el('option', { value: '7', text: 'Keep computer steps for 7 days' }), el('option', { value: '1', text: 'For 1 day' }),
+          el('option', { value: '30', text: 'For 30 days' }), el('option', { value: '0', text: 'Do not keep them' })]);
+        days.value = String(settings.computer_steps_days ?? 7);
+        days.addEventListener('change', async () => {
+          try {
+            await api('/api/settings/computer-steps', { method: 'POST', body: JSON.stringify({ days: Number(days.value) }) });
+            toast('Computer steps updated', 'success');
+          } catch (problem) { toast(problem.message, 'error'); }
+        });
+        return days;
+      })() })]),
     group({ title: 'Docker' }, [row({ title: status.docker_available ? 'Ready' : 'Unavailable',
       description: status.docker_available ? ((status.image_ready ? 'Computer image is ready.' : 'The computer image will be prepared on first use.')
         + (status.desktop_image_ready ? ' Desktop image is ready.' : ' The desktop image will be prepared on first use.'))

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from core import computer_image, permissions, sandbox, sandbox_browser, sandbox_egress
+from core import computer_image, computer_trajectory, permissions, sandbox, sandbox_browser, sandbox_egress
 from core.computer_driver import SOURCE
 from core.untrusted import wrap_untrusted
 from core.constants import DATA_DIR
@@ -56,6 +56,8 @@ BOOTSTRAP = ("import json, sys; m = json.loads(sys.stdin.readline()); exec(compi
 # Spec)" 5.2): a batch of at most MAX_STEPS ordinary actions, each through
 # the same checks as a single call.
 MAX_STEPS = 16
+# Model actions whose step keeps a before image (computer_trajectory).
+TRACED_ACTIONS = ("open", "click", "type", "key", "scroll", "back", "launch")
 STEP_ACTIONS = ("click", "type", "key", "scroll", "wait")
 STEP_KEYS = {"action", "ref", "x", "y", "text", "key", "dx", "dy", "seconds", "desktop"}
 EXPECT_KEYS = ("url_contains", "title_contains", "text_present", "text_absent", "element")
@@ -151,14 +153,14 @@ class Computer:
 
 class ComputerManager:
     def __init__(self, process_factory=None, clock=None, fixtures: dict | None = None,
-                 approved_hosts: tuple = (), record: bool = True):
+                 approved_hosts: tuple = (), trajectories: Path | None = None):
         self.process_factory = process_factory or asyncio.create_subprocess_exec
         self.clock = clock or time.monotonic
         # Only the benchmark harness passes these: its own fixture pages, the
         # fixture host already approved, and no trajectories of its own runs.
         self.fixtures = fixtures or {}
         self.approved_hosts = set(approved_hosts)
-        self.record = record
+        self.trajectories = trajectories  # None: Kairos's own trajectory folder
         self._computers: dict[str, Computer] = {}
         self._closed: dict[str, tuple[float, dict]] = {}
         self._lock = asyncio.Lock()
@@ -458,14 +460,42 @@ class ComputerManager:
     async def act(self, owner: str, action: str, args: dict, ctx) -> dict:
         """One model action, or a batch (`steps`). A refusal's reply gains a
         `code`; a driver refusal raises ComputerRefusal with its code."""
-        if action == "steps":
-            result = await self._steps(owner, args, ctx)
-        else:
-            result = await self._act_one(owner, action, args, ctx)
+        run_id = _trajectory_run(owner, ctx) if action not in ("steps", "done") else None
+        before, not_before = (await self._before(owner, action, args)) if run_id and action in TRACED_ACTIONS else (None, "")
+        try:
+            if action == "steps":
+                result = await self._steps(owner, args, ctx)
+            else:
+                result = await self._act_one(owner, action, args, ctx)
+        except ValueError as error:
+            if run_id:
+                failed = {"text": f"Not run: {error}", "code": getattr(error, "code", None) or "failed"}
+                await asyncio.to_thread(computer_trajectory.record, owner, run_id, action, args, failed, before,
+                                        not_before, self.trajectories)
+            raise
         code = result.get("code") or refusal_code(result["text"])
         if code:
             result["code"] = code
+        if run_id:
+            await asyncio.to_thread(computer_trajectory.record, owner, run_id, action, args, result, before,
+                                    not_before, self.trajectories)
         return result
+
+    async def _before(self, owner: str, action: str, args: dict) -> tuple[bytes | None, str]:
+        """The target as it is just before a model action, for its step's
+        before image; never while the person has control."""
+        c = self._computers.get(owner)
+        if c is None:
+            return None, "the computer was not running yet"
+        if c.taken_over:
+            return None, "the person had control of the computer"
+        desktop = c.desktop and (args.get("desktop") is True or action == "launch"
+                                 or re.fullmatch(r"d\d+:\d+", str(args.get("ref") or "")) is not None)
+        try:
+            reply = await self._command(c, "capture", desktop=desktop)
+            return base64.b64decode(reply.get("screenshot") or ""), ""
+        except (ValueError, sandbox.SandboxUnavailable):
+            return None, "the before image could not be taken"
 
     async def _steps(self, owner: str, args: dict, ctx) -> dict:
         """Run up to MAX_STEPS click/type/key/scroll/wait actions with one
@@ -1054,6 +1084,19 @@ def _labels(info: dict) -> list[str]:
 def _private(info: dict) -> bool:
     autocomplete = info.get("autocomplete") or ""
     return (info.get("tag") == "input" and info.get("type") == "password") or autocomplete in PRIVATE_FIELDS or autocomplete.startswith("cc-")
+
+
+def _trajectory_run(owner: str, ctx) -> str | None:
+    """The run a step belongs to: the run in progress, else one per owner
+    and day. None when steps are not kept."""
+    if computer_trajectory.retention_days() <= 0:
+        return None
+    from core import runs
+    context = runs.current_for(getattr(ctx, "session_id", None))
+    if context is not None:
+        return context.run_id
+    import hashlib
+    return "adhoc-" + hashlib.sha256(owner.encode()).hexdigest()[:10] + time.strftime("-%Y%m%d")
 
 
 def _desktop_control(row: dict) -> dict:

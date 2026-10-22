@@ -841,7 +841,82 @@ class DesktopSemanticsLiveTests(unittest.TestCase):
         asyncio.run(check())
 
 
+@unittest.skipUnless(DOCKER_UP, "Docker is not running")
+class TrajectoryLiveTests(unittest.TestCase):
+    """An agent's computer run kept as evidence (cua upgrade 5.4)."""
+
+    def test_an_agent_run_keeps_step_folders_markers_and_no_private_text(self):
+        from core import computer, computer_trajectory, runs
+        from core.turn_taint import TurnTaint
+        from services.agent_service import agent_service
+        from PIL import Image
+        import io, json as jsonlib, re as regex
+        root = Path(tempfile.mkdtemp(prefix="trajectories-"))
+        agent = agent_service.create("Trajectory check")
+        owner = "agent:" + agent["id"]
+
+        async def check():
+            manager = computer.ComputerManager(fixtures=CONTRACT_PAGES, approved_hosts=("bench.kairos.test",), trajectories=root)
+            ctx = tool_registry.ToolContext(agent_id=agent["id"], is_admin=True, turn_taint=TurnTaint())
+            context = runs.RunContext("task", agent_id=agent["id"])
+            token = runs.CURRENT.set(context)
+            act = lambda action, **args: manager.act(owner, action, args, ctx)
+            try:
+                await act("open", url="https://bench.kairos.test/send.html")
+                read = await act("read")
+                ref = lambda label: regex.search(r"\[(r\d+:\d+)\] [^\n]*" + label, read["text"]).group(1)
+                await act("type", ref=ref("To field"), text="ada@example.com")
+                refused = await act("type", ref=ref("Password"), text="never-kept-secret")
+                self.assertEqual(refused["code"], "private_field")
+                await act("click", ref=ref("Preview"))
+                stopped = await act("click", ref=ref("Send"))
+                self.assertEqual(stopped["code"], "person_only")
+                return context.run_id
+            finally:
+                runs.CURRENT.reset(token)
+                await manager.close_all()
+        try:
+            run_id = asyncio.run(check())
+            folder = root / run_id
+            names = sorted(path.name for path in folder.iterdir())
+            self.assertEqual(names, ["meta.json", "step-0001", "step-0002", "step-0003", "step-0004", "step-0005", "step-0006"])
+            self.assertEqual(jsonlib.loads((folder / "meta.json").read_text())["owner"], owner)
+            steps = computer_trajectory.steps(run_id, root)
+            self.assertEqual([s["action"] for s in steps], ["open", "read", "type", "type", "click", "click"])
+            self.assertTrue((folder / "step-0002" / "state.json").exists(), "a read keeps its rows")
+            private = steps[3]
+            self.assertEqual(private["arguments"]["text"], "(private field)")
+            self.assertEqual(private["images"], [])
+            self.assertEqual(private["evidence"]["not_kept"]["after.jpg"], "private field")
+            self.assertNotIn("never-kept-secret", "".join(p.read_text(errors="ignore") for p in folder.rglob("*.json")))
+            preview = steps[4]
+            self.assertEqual(preview["images"], ["before.jpg", "after.jpg", "marker.jpg"])
+            point = preview["point"]
+            with Image.open(folder / "step-0005" / "marker.jpg") as marker:
+                red, green, blue = marker.convert("RGB").getpixel((point["x"], point["y"]))
+            self.assertGreater(red, 150); self.assertLess(green, 90); self.assertLess(blue, 90)
+            with Image.open(folder / "step-0005" / "before.jpg") as before:
+                self.assertEqual(before.size, (1280, 800))
+            self.assertEqual(steps[5]["code"], "person_only")
+            self.assertIn("before.jpg", steps[5]["images"])
+            self.assertEqual(steps[2]["arguments"]["text"], "ada@example.com")
+            shaped = computer_trajectory.skill_steps(run_id, root)
+            self.assertEqual([s["kind"] for s in shaped], ["open", "type", "click"])
+            self.assertEqual(shaped[2]["element"]["label"], "Preview")
+            with patch.object(agent_service, "_require", return_value={}), \
+                 patch.object(computer_trajectory, "ROOT", root):
+                agent_service.forget_logins(agent["id"])
+            self.assertFalse(folder.exists(), "Forget logins deletes the agent's steps")
+        finally:
+            agent_service.delete(agent["id"])
+            shutil.rmtree(root, ignore_errors=True)
+
+
 CONTRACT_PAGES = {
+    "/send.html": {"body": "<title>Mail</title><h1>New message</h1><label>To field <input aria-label='To field'></label>"
+                   "<label>Password <input type=password aria-label='Password'></label>"
+                   "<p id=state>Draft</p><button onclick=\"state.textContent='Previewed'\">Preview</button>"
+                   "<div style='height:300px'></div><button onclick=\"state.textContent='Sent'\">Send</button>"},
     "/form.html": {"body": "<title>Form</title><h1>Sign up</h1><form onsubmit='return false'>"
                    + "".join(f"<label>{name} field <input aria-label='{name} field' name='{name.lower()}'></label><br>"
                              for name in ("First", "Last", "Email", "City", "Notes"))

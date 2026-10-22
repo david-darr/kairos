@@ -1,4 +1,5 @@
 import { api, el } from "./api.js";
+import { openComputerSteps } from "./computerSteps.js";
 
 // A run's timeline (roadmap phase 8, 2026-10-06; routes/run_routes.py): what
 // one model run did, step by step - the tools it used and how each went,
@@ -59,7 +60,7 @@ export async function mountComputerHistory(card, sessionId, runId) {
   const detail = await api(`/api/computer/${encodeURIComponent('chat:' + sessionId)}/history?run_id=${encodeURIComponent(runId)}`).catch(() => null);
   if (!holder.isConnected) return;
   if (!detail?.steps?.length) { holder.remove(); return; }
-  holder.append(el('details', { open: true }, [el('summary', { text: 'Computer activity' }), runTimeline(detail)]));
+  holder.append(el('details', { open: true }, [el('summary', { text: 'Computer activity' }), runTimeline({ ...detail, id: runId })]));
 }
 
 export function runTimeline(detail) {
@@ -72,6 +73,11 @@ export function runTimeline(detail) {
   if (delivery) links.push(`Delivery: ${delivery.status}${delivery.attempts ? `, ${delivery.attempts} attempt${delivery.attempts === 1 ? "" : "s"}` : ""}`);
   if (detail.detail) links.push(`Note: ${detail.detail}`);
   for (const line of links) host.append(el("div", { class: "meta run-link", text: line }));
+  // The run's kept computer steps (core/computer_trajectory.py), when it used the computer.
+  if (detail.id && detail.steps?.some(step => computerDetail(step))) {
+    host.append(el("button", { type: "button", class: "btn quiet run-steps-open", text: "Steps",
+      onclick: (event) => openComputerSteps(detail.id, { opener: event.currentTarget }) }));
+  }
   if (!detail.steps?.length) host.append(el("div", { class: "meta", text: "No steps recorded for this run (no tools used, or it ran before timelines existed)." }));
   for (const step of detail.steps || []) host.append(stepRow(step));
   return host;

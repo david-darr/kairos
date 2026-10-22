@@ -1619,6 +1619,153 @@ class DesktopContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", json.dumps([c for c in self.proc.calls if c["action"] == "desktop_input"]))
 
 
+def real_png(color=(40, 90, 160)):
+    output = io.BytesIO()
+    Image.new("RGB", (1280, 800), color).save(output, "PNG")
+    return output.getvalue()
+
+
+class TrajectoryTests(unittest.TestCase):
+    """Kept computer steps (cua upgrade 5.4): what is kept, for how long, for whom."""
+
+    def setUp(self):
+        from core import computer_trajectory
+        self.t = computer_trajectory
+        self.root = environment / ("trajectories-" + uuid.uuid4().hex[:6])
+        self.days = patch("core.settings.get_setting", side_effect=lambda key: {"computer_steps_days": 7}.get(key))
+        self.days.start()
+
+    def tearDown(self):
+        self.days.stop()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def keep(self, run_id="run1", owner="chat:a", action="click", args=None, result=None, before=None):
+        result = result or {"text": "URL: https://example.com/ | Title: x | click completed.", "images": [real_png()],
+                            "point": {"x": 100, "y": 120}, "element": {"label": "More", "tag": "a"}}
+        return self.t.record(owner, run_id, action, args or {"action": action, "ref": "r1:1"}, result,
+                             before or real_png((200, 200, 200)), root=self.root)
+
+    def test_a_step_keeps_action_images_marker_and_evidence(self):
+        self.assertEqual(self.keep(), 1)
+        step = self.t.steps("run1", self.root)[0]
+        self.assertEqual(step["images"], ["before.jpg", "after.jpg", "marker.jpg"])
+        self.assertEqual(step["url"], "https://example.com/")
+        self.assertEqual(step["point"], {"x": 100, "y": 120})
+        self.assertTrue(step["ok"])
+        self.assertEqual(step["evidence"]["kept"], ["action.json", "before.jpg", "after.jpg", "marker.jpg"])
+        with Image.open(self.t.image("run1", 1, "marker.jpg", self.root)) as marker:
+            self.assertGreater(marker.convert("RGB").getpixel((100, 120))[0], 150)
+        self.assertNotIn("action", step["arguments"])
+
+    def test_private_fields_keep_no_text_and_no_image(self):
+        for result in ({"text": "Not typed: passwords, codes and payment details are entered by the person.", "code": "private_field"},
+                       {"text": "URL: x | type completed.", "images": [real_png()], "element": {"tag": "input", "type": "password"}},
+                       {"text": "URL: x | Desktop type completed.", "images": [real_png()], "element": {"role": "password text"}}):
+            number = self.keep(action="type", args={"ref": "r1:2", "text": "hunter2"}, result=result)
+            step = self.t.steps("run1", self.root)[number - 1]
+            self.assertEqual(step["arguments"]["text"], "(private field)")
+            self.assertEqual(step["images"], [])
+            self.assertEqual(step["evidence"]["not_kept"], {"before.jpg": "private field", "after.jpg": "private field"})
+        self.assertNotIn("hunter2", self.t.export("run1", self.root).decode("latin-1"))
+
+    def test_bounds_owner_and_off(self):
+        with patch.object(self.t, "STEP_LIMIT", 3):
+            numbers = [self.keep() for _ in range(5)]
+        self.assertEqual(numbers, [1, 2, 3, None, None])
+        self.assertIsNone(self.keep(owner="chat:b"), "a run belongs to one owner")
+        with patch.object(self.t, "RUN_BYTES", 1):
+            self.keep(run_id="run2")
+            number = self.keep(run_id="run2")
+        self.assertEqual(self.t.steps("run2", self.root)[number - 1]["evidence"]["not_kept"]["after.jpg"], "this run reached its size limit")
+        for bad in ("../x", "a/b", "", "x" * 65):
+            self.assertIsNone(self.keep(run_id=bad))
+        with patch("core.settings.get_setting", return_value=0):
+            self.assertIsNone(self.keep(run_id="run3"))
+        self.assertFalse((self.root / "run3").exists())
+
+    def test_retention_deletes_old_runs_and_off_deletes_all(self):
+        self.keep(run_id="old")
+        self.keep(run_id="new")
+        meta = json.loads((self.root / "old" / "meta.json").read_text())
+        meta["updated"] -= 8 * 86400
+        (self.root / "old" / "meta.json").write_text(json.dumps(meta))
+        self.assertEqual(self.t.sweep(root=self.root), 1)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["new"])
+        with patch("core.settings.get_setting", return_value=0):
+            self.assertEqual(self.t.sweep(root=self.root), 1)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_skill_steps_take_only_successful_actions(self):
+        self.keep(action="open", args={"url": "https://example.com/?token=abc"}, result={"text": "URL: https://example.com/ | open completed."})
+        self.keep(action="read", args={}, result={"text": "URL: https://example.com/ | read completed.", "state": {"snapshot": "r1"}})
+        self.keep()
+        self.keep(action="click", result={"text": "Stopped before pressing 'Buy now'", "code": "person_only"})
+        self.keep(action="type", args={"ref": "r1:2", "text": "Ada"}, result={"text": "URL: x | type completed.", "element": {"label": "Name"}})
+        self.keep(action="type", args={"ref": "r1:3", "text": "hunter2"}, result={"text": "Not typed", "code": "private_field"})
+        shaped = self.t.skill_steps("run1", self.root)
+        self.assertEqual([s["kind"] for s in shaped], ["open", "click", "type"])
+        self.assertEqual(shaped[2]["text"], "Ada")
+        self.assertEqual(shaped[1]["element"]["label"], "More")
+
+    def test_routes_check_the_runs_owner_and_never_cache(self):
+        self.keep(run_id="chatrun", owner="chat:a")
+        self.keep(run_id="agentrun", owner="agent:c")
+        app = FastAPI(); app.include_router(computer_routes.router)
+        app.dependency_overrides[computer_routes.require_user] = lambda: "alice"
+        client = TestClient(app)
+        with patch.object(computer_routes.computer_trajectory, "ROOT", self.root), \
+             patch.object(computer_routes.auth_manager, "is_admin", return_value=False), \
+             patch.object(computer_routes, "get_session_header",
+                          side_effect=lambda ident: ({"owner_user": "alice" if ident == "a" else "bob"}, 0)), \
+             patch.object(computer_routes.agent_service, "get", return_value={"id": "c", "name": "Scout"}):
+            steps = client.get("/api/computer/steps/chatrun")
+            self.assertEqual(steps.status_code, 200)
+            self.assertEqual(steps.headers["cache-control"], "no-store")
+            self.assertEqual(len(steps.json()["steps"]), 1)
+            image = client.get("/api/computer/steps/chatrun/1/marker.jpg")
+            self.assertEqual((image.status_code, image.headers["content-type"], image.headers["cache-control"]),
+                             (200, "image/jpeg", "no-store"))
+            self.assertEqual(client.get("/api/computer/steps/chatrun/1/action.json").status_code, 404)
+            self.assertEqual(client.get("/api/computer/steps/chatrun/9/after.jpg").status_code, 404)
+            exported = client.get("/api/computer/steps/chatrun/export")
+            import zipfile
+            names = zipfile.ZipFile(io.BytesIO(exported.content)).namelist()
+            self.assertIn("chatrun/step-0001/action.json", names)
+            self.assertEqual(client.get("/api/computer/steps/chatrun/skill").json()["steps"][0]["kind"], "click")
+            for path in ("/api/computer/steps/agentrun", "/api/computer/steps/agentrun/1/after.jpg",
+                         "/api/computer/steps/agentrun/export", "/api/computer/steps/agentrun/skill", "/api/computer/agent:c/steps"):
+                self.assertEqual(client.get(path).status_code, 403, path)
+            self.assertEqual(client.get("/api/computer/steps/nothing").status_code, 404)
+            self.assertEqual(client.get("/api/computer/steps/..%2Fx").status_code, 404)
+            self.assertEqual([r["run_id"] for r in client.get("/api/computer/chat:a/steps").json()], ["chatrun"])
+            with patch.object(computer_routes.auth_manager, "is_admin", return_value=True):
+                detail = client.get("/api/computer/steps/agentrun").json()
+                self.assertEqual((detail["agent_id"], detail["agent_name"]), ("c", "Scout"))
+        client.close()
+
+    def test_chat_delete_and_settings_route(self):
+        from core.session_manager import session_manager
+        self.keep(run_id="gone", owner="chat:s9")
+        with patch.object(self.t, "ROOT", self.root), patch("core.session_manager.store.delete_session"):
+            session_manager.delete_session("s9")
+        self.assertFalse((self.root / "gone").exists())
+        app = FastAPI(); app.include_router(settings_routes.router)
+        app.dependency_overrides[settings_routes.require_admin] = lambda: "alice"
+        client = TestClient(app)
+        self.days.stop()
+        try:
+            from core import settings
+            saved = settings.get_setting("computer_steps_days")
+            self.assertEqual(settings.DEFAULTS["computer_steps_days"], 7)
+            self.assertEqual(client.post("/api/settings/computer-steps", json={"days": 3}).status_code, 422)
+            self.assertEqual(client.post("/api/settings/computer-steps", json={"days": 30}).json()["computer_steps_days"], 30)
+            self.assertEqual(client.get("/api/settings").json()["computer_steps_days"], 30)
+            settings.update_settings(computer_steps_days=saved)
+        finally:
+            self.days.start()
+            client.close()
+
+
 class DriverContractTests(unittest.TestCase):
     """The driver's own ref, diff and verify rules, run from its source."""
 
