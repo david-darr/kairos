@@ -46,7 +46,7 @@ async function run(ctx) {
     ok(frost.top === 0 && frost.shown && frost.mask && frost.blur <= 8 && /rgba\(0, 0, 0, 0\)|transparent/.test(frost.bg), tab + ' frost starts at y=0 as a light, masked, untinted blur: ' + JSON.stringify(frost));
     // 2026-10-21 (David, on device): the frost covers only the status bar area (safe area + a short fade), and the older tinted strip is gone.
     const band = await js("(() => { const n = document.querySelector('.ms-global-frost'); const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;top:0;height:var(--mobile-safe-top, env(safe-area-inset-top, 0px))'; document.body.append(probe); const safe = probe.getBoundingClientRect().height; probe.remove(); return { height: n.getBoundingClientRect().height, safe, blur: parseFloat((getComputedStyle(n.querySelector('i')).backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), strip: getComputedStyle(document.documentElement, '::after').display }; })()");
-    ok(band.height <= band.safe + 0.5 && band.blur <= 4 && band.strip === 'none', tab + ' frost ends at the bottom of the status bar area, light, with no tinted strip: ' + JSON.stringify(band));
+    ok(band.height <= band.safe + 0.5 && band.blur <= 1 && band.strip === 'none', tab + ' frost ends at the bottom of the status bar area, light, with no tinted strip: ' + JSON.stringify(band));
     // No header control or title may sit under the avatar (a title may share its row, beside it).
     ok(await js("(() => { const a = document.getElementById('mobile-menu-btn').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, p, button, input, a, small, span')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.textContent.trim() + n.getAttribute('aria-label') !== '').every(n => { const r = n.getBoundingClientRect(); return r.width === 0 || r.height === 0 || r.right <= a.left + 0.5 || r.left >= a.right - 0.5 || r.bottom <= a.top + 0.5 || r.top >= a.bottom - 0.5; }); })()"), tab + ' headers clear avatar');
   };
@@ -686,6 +686,8 @@ async function run(ctx) {
     await shot('fold-' + w + 'x' + screen + '-sheet');
     await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('.ms-sheet[open]')");
   }
+  // Outside an iOS home-screen app (navigator.standalone), theme-color still tints the browser and Android toolbars.
+  eq(await js("document.querySelector('meta[name=theme-color]')?.content"), '#F3EADB', 'Browser keeps theme-color');
   await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.setProperty('--native-safe-bottom', '0px'); })()");
   await resize(390, 844);
 

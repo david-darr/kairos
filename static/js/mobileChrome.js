@@ -3,6 +3,13 @@ import { refreshActivity } from './mobileActivity.js';
 
 // One persistent entry control covers built-in views, Settings and custom tabs.
 export function mountMobileChrome(avatar) {
+  // iOS home-screen app only (navigator.standalone exists only there): the
+  // status bar is translucent, so theme-color has nothing to tint, and iOS 26
+  // may mix it into its own top edge haze (2026-10-21, David on device). The
+  // browser and Android keep it; Android's installed app also has the
+  // manifest theme_color. The value stays on <html> for the diagnostics.
+  const theme = document.querySelector('meta[name=theme-color]');
+  if (navigator.standalone === true && theme) { document.documentElement.dataset.themeColor = theme.content; theme.remove(); }
   const frost = edgeBlur('top'); frost.classList.add('ms-global-frost');
   document.body.append(frost);
   const sync = () => {

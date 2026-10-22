@@ -69,6 +69,7 @@ function measure() {
     return `${side.padEnd(6)} env ${side === 'left' || side === 'right' ? s.paddingLeft : s.paddingTop}   --mobile-safe-${side} ${getComputedStyle(mobile).paddingTop}`;
   }));
   [...probes, full, ...insets.flatMap(([, a, b]) => [a, b])].forEach(n => n.remove());
+  section('Switches', switchReport());
   const html = document.documentElement, shell = document.querySelector('.ms-shell');
   section('Custom properties', [
     `html --ms-page-height: ${getComputedStyle(html).getPropertyValue('--ms-page-height').trim() || '(unset)'}`,
@@ -149,18 +150,50 @@ function render() {
   status.textContent = 'Measured ' + new Date().toLocaleTimeString();
 }
 
-const LAYERS = {
-  'Status-bar frost': '.ms-blur-top, .ms-global-frost { display: none !important; }',
-  'Glass pills': '.ms-glass, .ms-chat-capsule::before { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
-  'Background wash': '.ms-background::after, .dashboard-core::after { display: none !important; }',
-  'Background dots': '.ms-background { visibility: hidden !important; }',
-  'Sky backdrop': '.kairos-redesign-backdrop { visibility: hidden !important; }',
-};
+// Each switch names exactly what it hides; the Switches section counts its targets
+// and checks the computed result, so a switch that matches nothing shows up as such.
+const LAYERS = [
+  { name: 'Status-bar frost', what: 'display:none on .ms-blur-top and .ms-global-frost', sel: '.ms-blur-top, .ms-global-frost',
+    css: '.ms-blur-top, .ms-global-frost { display: none !important; }', done: n => getComputedStyle(n).display === 'none' },
+  { name: 'Glass pills', what: 'backdrop blur off on .ms-glass pills and the chat capsule', sel: '.ms-glass',
+    css: '.ms-glass, .ms-chat-capsule::before { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
+    done: n => { const s = getComputedStyle(n); return (s.backdropFilter || 'none') === 'none' && (s.webkitBackdropFilter || 'none') === 'none'; } },
+  { name: 'Background wash', what: 'the ::after wash over the launch and Home pictures', sel: '.dashboard-core',
+    css: '.ms-background::after, .dashboard-core::after { display: none !important; }', done: n => getComputedStyle(n, '::after').display === 'none' },
+  { name: 'Background dots', what: 'the launch picture (.ms-background), dots and all', sel: '.ms-background',
+    css: '.ms-background { visibility: hidden !important; }', done: n => getComputedStyle(n).visibility === 'hidden' },
+  { name: 'Sky backdrop', what: 'the page sky behind every view (.kairos-redesign-backdrop)', sel: '.kairos-redesign-backdrop',
+    css: '.kairos-redesign-backdrop { visibility: hidden !important; }', done: n => getComputedStyle(n).visibility === 'hidden' },
+];
 const hidden = new Set();
 function applyHidden() {
   let node = document.getElementById('vp-diag-hide');
   if (!node) { node = document.createElement('style'); node.id = 'vp-diag-hide'; document.head.append(node); }
-  node.textContent = [...hidden].map(name => LAYERS[name]).join('\n');
+  node.textContent = LAYERS.filter(l => hidden.has(l.name)).map(l => l.css).join('\n');
+}
+// theme-color: present (the app's value), removed, or transparent. iOS may read it only at launch.
+const THEMES = ['present', 'removed', 'transparent'];
+const themeOriginal = () => document.documentElement.dataset.themeColor || document.querySelector('meta[name=theme-color]')?.content || '#F3EADB';
+function themeState() {
+  const meta = document.querySelector('meta[name=theme-color]');
+  return !meta ? 'removed' : meta.content === 'transparent' ? 'transparent' : 'present';
+}
+function setTheme(state) {
+  const value = themeOriginal(); document.documentElement.dataset.themeColor = value;
+  document.querySelectorAll('meta[name=theme-color]').forEach(n => n.remove());
+  if (state === 'removed') return;
+  const meta = document.createElement('meta'); meta.name = 'theme-color'; meta.content = state === 'transparent' ? 'transparent' : value;
+  document.head.append(meta);
+}
+function switchReport() {
+  return [
+    `theme-color meta: ${themeState()} (${document.querySelector('meta[name=theme-color]')?.content || 'none'}; app value ${themeOriginal()})`,
+    ...LAYERS.map(l => {
+      const nodes = [...document.querySelectorAll(l.sel)].filter(n => !n.closest('#' + ID));
+      const state = hidden.has(l.name) ? `ON: ${nodes.filter(l.done).length}/${nodes.length} hidden` : `off: ${nodes.length} targets`;
+      return `${l.name}: ${state}\n    ${l.what}`;
+    }),
+  ];
 }
 
 let frame = 0;
@@ -202,15 +235,19 @@ export function openViewportDiagnostics() {
   bar.append(title, make('Refresh', render), make('Copy', copy), make('Close', closeViewportDiagnostics), status);
   // Layer switches: hide one top layer, close this screen and look. They last until the app reloads.
   const toggles = document.createElement('div'); toggles.className = 'vp-bar vp-toggles';
-  const label = document.createElement('h3'); label.textContent = 'Hide a layer, then Close to look'; label.style.flex = '1 1 100%';
+  const label = document.createElement('h3'); label.textContent = 'Switch a layer, then Close to look (lasts until the app reloads)'; label.style.flex = '1 1 100%';
   toggles.append(label);
-  for (const [name, css] of Object.entries(LAYERS)) {
-    const b = make(name, () => {
-      const on = !hidden.has(name); on ? hidden.add(name) : hidden.delete(name);
-      b.setAttribute('aria-pressed', String(on)); applyHidden();
+  for (const layer of LAYERS) {
+    const b = make('', () => {
+      const on = !hidden.has(layer.name); on ? hidden.add(layer.name) : hidden.delete(layer.name);
+      relabel(); applyHidden(); render();
     });
-    b.setAttribute('aria-pressed', String(hidden.has(name))); toggles.append(b);
+    const relabel = () => { b.textContent = `${hidden.has(layer.name) ? 'Hidden' : 'Hide'}: ${layer.name}`; b.setAttribute('aria-pressed', String(hidden.has(layer.name))); b.title = layer.what; };
+    relabel(); toggles.append(b);
   }
+  const theme = make('', () => { setTheme(THEMES[(THEMES.indexOf(themeState()) + 1) % THEMES.length]); themeLabel(); render(); });
+  const themeLabel = () => { theme.textContent = `theme-color: ${themeState()} (tap to change)`; theme.setAttribute('aria-pressed', String(themeState() !== 'present')); };
+  themeLabel(); toggles.append(theme);
   body = document.createElement('div');
   overlay.append(style, bar, toggles, body);
   overlay.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeViewportDiagnostics(); } });

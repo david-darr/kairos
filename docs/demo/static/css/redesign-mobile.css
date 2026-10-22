@@ -453,11 +453,13 @@
      edge, so the avatar and header controls below it stay sharp. */
   .kairos-redesign .ms-global-frost,
   .kairos-redesign .ms-blur-top { height: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
+  /* 2026-10-21 (David): lighter and higher still: 1px, clear by about the
+     clock's baseline (60% of the safe area). */
   .kairos-redesign .ms-blur-top i {
     height: 100%; background: transparent;
-    backdrop-filter: blur(1.5px); -webkit-backdrop-filter: blur(1.5px);
-    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 70%);
-    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 70%);
+    backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px);
+    mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 60%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0%, transparent 60%);
   }
   .kairos-redesign #mobile-menu-btn.ms-avatar { z-index: 1100; }
   .kairos-redesign .ms-global-frost { z-index: 54; }
