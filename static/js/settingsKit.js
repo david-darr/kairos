@@ -1,5 +1,21 @@
 import { el } from "./api.js";
 
+// Consume entrances after the first rendered frame. Forward-filled CSS
+// animations otherwise remain in getAnimations() and replay when a search or
+// mode switch reveals these children again. Only wait for our direct children,
+// never a control or decorative preview's own animation.
+export function staggerEntrance(container) {
+  container.classList.add('rd-stagger');
+  requestAnimationFrame(() => {
+    const entrances = container.getAnimations({ subtree: true }).filter(animation =>
+      animation.effect?.target?.parentElement === container &&
+      ['rd-rise', 'rd-opacity'].includes(animation.animationName));
+    Promise.allSettled(entrances.map(animation => animation.finished)).then(() => {
+      container.classList.remove('rd-stagger');
+    });
+  });
+}
+
 // The building blocks every Settings page is made of (redesign 2026-10-05,
 // after Hermes's desktop settings, Codex and Claude): a page header, quiet
 // groups of rows with hairline dividers, and one row shape - label and a

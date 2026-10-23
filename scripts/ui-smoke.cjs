@@ -921,7 +921,7 @@ app.whenReady().then(async () => {
     // Sub-pixel layout (zoom, scrollbars) can land a hair off the nominal width, so compare within a pixel.
     const nearWidth = (actual, nominal, message) => assert.ok(Math.abs(actual - nominal) <= 1, `${message || 'Sidebar width'}: expected ${nominal}, got ${actual}`);
     const railWidth = () => js("Math.round(document.querySelector('#sidebar').getBoundingClientRect().width)");
-    nearWidth(await railWidth(), 204);
+    nearWidth(await railWidth(), 248);
     const transitionProperties = await js(`(async () => {
       const rail = document.querySelector('#sidebar');
       document.querySelector('#sidebar-toggle').click();
@@ -969,8 +969,8 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     // Wait for the 260 ms width transition to settle rather than a fixed delay.
-    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 204) <= 1");
-    nearWidth(await railWidth(), 204, "Keyboard expands sidebar");
+    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 248) <= 1");
+    nearWidth(await railWidth(), 248, "Keyboard expands sidebar");
     await js("document.activeElement.blur()");
     // Page widths on a wide desktop.
     const previousSize = win.getContentSize();

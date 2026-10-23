@@ -1,7 +1,7 @@
 import { el } from '../api.js';
 import { EFFECTS, ART_PIECES } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
-import { group, row, toggle } from '../settingsKit.js';
+import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
   resetAppearance, setAppearancePreview, halftoneSource, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
 
@@ -17,7 +17,9 @@ export function renderAppearancePanel(content, _status, page) {
   const root = el('section', { class: 'appearance-panel' });
   const status = el('p', { class: 'appearance-status meta', role: 'status', 'aria-live': 'polite' });
   const preview = el('canvas', { width: '640', height: '280', 'aria-hidden': 'true' });
-  const previewFrame = el('div', { class: 'appearance-preview' }, [preview,
+  const previewScene = el('div', { class: 'appearance-preview-scene', 'aria-hidden': 'true' });
+  let previewSceneKey = '', stopPreviewScene = null;
+  const previewFrame = el('div', { class: 'appearance-preview' }, [preview, previewScene,
     el('div', { class: 'appearance-preview-copy' }, [el('span', { text: 'KAIROS' }), el('strong', { text: 'Not more time. The right time.' })]),
     el('span', { class: 'appearance-preview-badge', text: 'Live preview' }),
   ]);
@@ -76,7 +78,16 @@ export function renderAppearancePanel(content, _status, page) {
     const focusBtn = el('button', { type: 'button', class: 'appearance-halftone-thumb-btn', 'aria-label': `Set the focus point for ${title}` }, [thumb]);
     focusBtn.addEventListener('click', (event) => {
       const box = focusBtn.getBoundingClientRect();
-      setHalftoneFocus(slot, (event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+      const keyboard = !event.detail && !event.clientX && !event.clientY;
+      setHalftoneFocus(slot, keyboard ? .5 : (event.clientX - box.left) / box.width, keyboard ? .5 : (event.clientY - box.top) / box.height);
+      sync();
+    });
+    focusBtn.addEventListener('keydown', event => {
+      const delta = { ArrowLeft: [-.05, 0], ArrowRight: [.05, 0], ArrowUp: [0, -.05], ArrowDown: [0, .05] }[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      const info = getAppearance().halftoneSlots[slot];
+      setHalftoneFocus(slot, Math.max(0, Math.min(1, info.focusX + delta[0])), Math.max(0, Math.min(1, info.focusY + delta[1])));
       sync();
     });
     const upload = el('input', { type: 'file', id: `appearance-halftone-${slot}`, accept: 'image/png,image/jpeg,image/webp' });
@@ -167,6 +178,7 @@ export function renderAppearancePanel(content, _status, page) {
     input.addEventListener('input', () => { updateAppearance({ [key]: Number(input.value) / 100 }); sync(); });
     let drag = null;
     input.addEventListener('pointerdown', event => {
+      if (key === 'tint' && document.documentElement.classList.contains('kairos-redesign')) return;
       if (event.button !== 0) return;
       event.preventDefault(); input.focus(); input.setPointerCapture(event.pointerId);
       drag = { x: event.clientX, y: event.clientY, value: Number(input.value) };
@@ -281,7 +293,25 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  root.append(previewFrame, modes, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, mascotSection, redesignSection, overlaySection, status);
+  // Keep the original controls and show/hide owners. These headings and
+  // containers only give the redesign its board layout; Classic keeps its frame.
+  const modeSection = el('section', { class: 'appearance-background-setting' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Background style' }), modes,
+  ]);
+  halftoneSection.prepend(el('h3', { class: 'rd-appearance-label', text: 'Halftone backgrounds' }));
+  imageOptions.prepend(el('h3', { class: 'rd-appearance-label', text: 'Your image' }));
+  shaderOptions.prepend(el('h3', { class: 'rd-appearance-label', text: 'Flow' }));
+  for (const [heading, text] of [[palette.querySelector('.title'), 'Color'], [imageOptions.querySelector('h3'), 'Image'], [shaderOptions.querySelector('h3'), 'Flow']]) {
+    heading.append(el('span', { class: 'rd-appearance-tag', text }));
+  }
+  const effectControls = el('div', { class: 'appearance-effect-controls' });
+  effectSection.insertBefore(effectControls, pieceRow);
+  effectControls.append(pieceRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
+  const characterSection = el('div', { class: 'appearance-character-setting' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Kip and classic look' }), mascotSection, redesignSection,
+  ]);
+  root.append(previewFrame, modeSection, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, characterSection, overlaySection, status);
+  for (const list of [modes, effectGrid, chatStyles, halftoneSection.querySelector('.appearance-halftone-grid')]) staggerEntrance(list);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
@@ -298,6 +328,13 @@ export function renderAppearancePanel(content, _status, page) {
     tint.value = effectPrefs.tint; effectMotion.checked = effectPrefs.motion;
     piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated';
     const nextPreviewSource = halftoneSource('home');
+    previewScene.hidden = !['default', 'color'].includes(value.mode) || !value.halftone;
+    const homeFocus = value.halftoneSlots.home;
+    const sceneKey = `${nextPreviewSource}:${homeFocus.focusX}:${homeFocus.focusY}`;
+    if (sceneKey !== previewSceneKey) {
+      stopPreviewScene?.(); previewSceneKey = sceneKey;
+      stopPreviewScene = mountBackgroundEffect(previewScene, nextPreviewSource, { preview: true, focusX: homeFocus.focusX, focusY: homeFocus.focusY });
+    }
     if (nextPreviewSource !== effectPreviewSource) {
       effectPreviewStops.forEach(stop => stop()); effectPreviewSource = nextPreviewSource;
       effectPreviewStops = [...effectChoices].map(([effect, { thumb }]) =>

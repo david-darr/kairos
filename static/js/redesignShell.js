@@ -210,7 +210,7 @@ function mount() {
   row.addEventListener("click", () => (open ? closeFlyout(true) : openFlyout()));
 
   const flyout = document.createElement("div");
-  flyout.id = "rd-flyout"; flyout.className = "rd-flyout"; flyout.hidden = true;
+  flyout.id = "rd-flyout"; flyout.className = "rd-flyout rd-menu-in"; flyout.hidden = true;
   flyout.setAttribute("role", "region"); flyout.setAttribute("aria-label", "Updates");
   flyout.innerHTML = `<div class="rd-flyout-head"><span class="rd-flyout-title">Updates</span>
     <button type="button" class="rd-flyout-close" aria-label="Close updates">${ICON_CLOSE}</button></div>

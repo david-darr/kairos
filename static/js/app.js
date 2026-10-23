@@ -332,10 +332,15 @@ async function buildSidebar() {
     document.querySelector('.sidebar-header').after(control);
   }
   const brand = document.getElementById("brand");
+  brand.setAttribute('role', 'img'); brand.setAttribute('aria-label', 'Kairos');
   brand.innerHTML = WORDMARK;
   brand.firstElementChild.classList.add("brand-wordmark");
   brand.firstElementChild.setAttribute("role", "img");
   brand.firstElementChild.setAttribute("aria-label", "Kairos");
+  const redesignBrand = document.createElement('span');
+  redesignBrand.className = 'rd-sidebar-brand'; redesignBrand.setAttribute('aria-hidden', 'true');
+  redesignBrand.innerHTML = `<svg width="26" height="26" viewBox="0 0 40 40"><circle cx="20" cy="21" r="15" fill="currentColor"/><circle cx="30" cy="10" r="7" class="rd-kip-cut"/><circle cx="30" cy="10" r="3.4" class="rd-kip-point"/><rect x="13" y="16" width="4" height="9" rx="2" class="rd-kip-cut"/><rect x="21" y="16" width="4" height="9" rx="2" class="rd-kip-cut"/></svg><span>KAIROS</span>`;
+  brand.append(redesignBrand);
   // In the desktop app the wordmark lives in the title bar instead.
   const titlebarBrand = document.getElementById("titlebar-brand");
   if (titlebarBrand) titlebarBrand.innerHTML = brand.innerHTML;
@@ -352,6 +357,7 @@ async function buildSidebar() {
 
   forgeRailCleanup();
   const nav = document.getElementById("nav");
+  nav.classList.toggle('rd-stagger', !matchMedia('(max-width: 768px)').matches);
   // Cleared before rebuilding — buildSidebar() now also runs whenever
   // Approved and enabled tabs supply their own sidebar manifests.
   const customTabs = await api("/api/system/custom-tabs").catch(() => []);
@@ -370,10 +376,11 @@ async function buildSidebar() {
   if (appMode === 'forge') for (const item of FORGE_NAV) items.set(item.id, { ...item, svg: ICONS[item.icon] });
   for (const group of groups) {
     if (!group.ids.length) continue;
-    if (group.label) {
+    if (group.label || group.id === 'main') {
       const label = document.createElement("div");
       label.className = "nav-group-label";
       label.textContent = group.label;
+      if (!group.label) { label.textContent = 'Kairos'; label.classList.add('rd-nav-heading'); }
       nav.appendChild(label);
     }
     for (const id of group.ids) {
@@ -429,7 +436,7 @@ async function buildSidebarFooter() {
   card.append(avatar, userName);
 
   const menu = document.createElement("div");
-  menu.className = "overflow-menu hidden";
+  menu.className = "overflow-menu rd-menu-in hidden";
   menu.style.cssText = "position:absolute;bottom:calc(100% + 6px);left:0;min-width:170px;";
 
   // No stored multi-account sessions exist to actually swap accounts without
