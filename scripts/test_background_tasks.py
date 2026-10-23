@@ -311,13 +311,11 @@ class RegistryTests(unittest.TestCase):
 
     @patch('core.chat_tasks.time.time', return_value=1792710310)
     def test_probe_progress_transcript_and_terminal_notes(self, _clock):
-        path = Path(__file__).resolve().parents[1] / 'data/review/bg-tasks/claude-probe.jsonl'
+        """Replay a sanitized fixture captured from Claude Code 2.1.280 on 2026-10-22."""
+        path = Path(__file__).resolve().parent / 'fixtures' / 'claude_background_probe.jsonl'
         progress_seen = False
         for raw in path.read_text(encoding='utf-8').splitlines():
-            try:
-                record = json.loads(raw)
-            except json.JSONDecodeError:
-                continue  # The supplied probe's first init line was clipped.
+            record = json.loads(raw)
             cls = record.pop('cls'); record.pop('t', None)
             chat_tasks.claude_message(self.sid, message(cls, **record))
             if cls == 'TaskProgressMessage':
