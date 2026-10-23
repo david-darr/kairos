@@ -31,6 +31,15 @@ async def home_tab_cards(user: str = Depends(require_user)) -> dict:
     return {"cards": await tab_hooks.home_cards(user)}
 
 
+@custom_views_router.get("/api/home/week")
+async def home_week(week: str | None = Query(None), user: str = Depends(require_user)) -> dict:
+    from services.home_week import home_week as summarize_week
+    try:
+        return summarize_week(user, week)
+    except (ValueError, OverflowError, OSError):
+        raise HTTPException(status_code=422, detail="week must be a valid YYYY-MM-DD date")
+
+
 @router.get("/status")
 async def status(user: str = Depends(require_user)) -> dict:
     """Live mission-control health strip (David's ask 2026-09-02) — cheap,

@@ -21,7 +21,7 @@
   --rd-line-strong: var(--hairline);
   --rd-focus: var(--accent);
   /* Shape and depth */
-  --rd-radius-card: 20px;
+  --rd-radius-card: 26px;
   --rd-radius-field: 14px;
   --rd-radius-pill: 999px;
   --rd-shadow: 0 1px 2px rgba(var(--shade-rgb), .04), 0 10px 28px rgba(var(--shade-rgb), .07);
@@ -62,7 +62,7 @@
 .kairos-redesign[data-view="forgeHome"] .kairos-redesign-backdrop { display: none; }
 
 /* -- Cards and panels -------------------------------------------------------
-   Soft surfaces: 20px radius, a gold hairline at ~.28 alpha, a quiet shadow. */
+   Soft surfaces: 26px radius, a gold hairline at ~.28 alpha, a quiet shadow. */
 .kairos-redesign :is(.card, .glass, .dashboard-section, .library-section, .automation-card, .agent-tile, .set-group) {
   background-color: var(--rd-surface);
   border: 1px solid var(--rd-line);

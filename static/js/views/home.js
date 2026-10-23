@@ -8,6 +8,7 @@ import { mountBackgroundEffect } from "../backgroundEffects.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { mountRedesignHome } from "../redesignHome.js";
+import { loadQuotas } from '../kairosParts.js';
 import { mountMobileHome } from '../mobileShell.js';
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
 
@@ -556,7 +557,7 @@ export function render(container, tabId, options = {}) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(start); end.setDate(end.getDate() + 7);
     const request = async (key, path) => {
-      const value = await api(path).catch(() => null);
+      const value = await (key === 'quotas' ? loadQuotas() : api(path)).catch(() => null);
       if (disposed) return;
       data[key] = value;
       draw(key, start);
