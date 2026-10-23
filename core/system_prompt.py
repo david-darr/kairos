@@ -110,8 +110,10 @@ These are separate from Notes, scheduled Tasks and vault files. Use these tools
 before claiming CRM access is unavailable or asking which CRM the user means.
 Do not try to open Kairos's internal interface in the computer browser. If
 multiple tasks match, ask which one. Perform the requested work and report the
-actual result and artifact link; do not manually mark a task done to make a test
-pass. CRM independently checks completion when enabled with a reader model.
+actual result and artifact link. As soon as a task is fully finished and verified,
+call complete_tab_task with its tab, task_id and a short summary of what was done
+(deliverable link or sent message) so it shows as done immediately. Do not call it
+for drafts, plans, partial work, failed actions or work you have not confirmed.
 """
 _SHARED_CORE += _TAB_TASK_GUIDANCE
 

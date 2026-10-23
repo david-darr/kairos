@@ -543,6 +543,29 @@ async def _read_tab_task(args, ctx):
     return wrap_untrusted("tab task requirements and source evidence", text)
 
 
+@register("complete_tab_task",
+    "Mark one owned task in an enabled Kairos tab such as CRM as done, right after you have fully finished it. "
+    "Only call this when the whole task is actually complete and verified (file created, email sent, reply logged). "
+    "Never for drafts, plans, partial progress, failed actions or work you only assume is done.",
+    _object({"tab": _str("Tab slug from list_tab_tasks"), "task_id": _str("Exact task ID from list_tab_tasks"),
+             "summary": _str("What you completed, with the deliverable link or sent message, shown on the task")},
+            ("tab", "task_id", "summary")), effect=WRITE, core=True)
+async def _complete_tab_task(args, ctx):
+    from core import tab_hooks
+    owner = _tab_task_owner(ctx)
+    if not owner:
+        return "Task updates require a chat with an authenticated owner."
+    slug, task_id, summary = args.get("tab"), args.get("task_id"), args.get("summary")
+    if (not isinstance(slug, str) or not isinstance(task_id, str) or len(task_id) > 200
+            or not isinstance(summary, str) or not summary.strip()):
+        return "Enter the tab slug, task ID from list_tab_tasks and a summary of the completed work."
+    receipt = {"kind": "agent", "actor": "assistant", "quote": summary.strip()[:1000],
+               "session_id": ctx.session_id, "agent_id": ctx.agent_id,
+               "run_id": ctx.assignment_run_id, "card_id": ctx.source_card_id}
+    result = await tab_hooks.complete_task(owner, slug, task_id, receipt)
+    return result or "Task not found for this chat's owner, or its tab is disabled."
+
+
 @register(
     "list_upcoming_events",
     "List upcoming Calendar events and due-dated Notes for the next 14 days. Use this for "

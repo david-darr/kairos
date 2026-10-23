@@ -401,6 +401,19 @@ class CRMService:
             self._finish(task, receipt)
             return True
 
+    def agent_complete(self, owner, task_id, receipt):
+        """An owner's agent reports it finished the task; no reader-model wait."""
+        with self.transaction():
+            task = self._data["tasks"].get(task_id)
+            if not task or task["owner"] != owner:
+                raise KeyError(task_id)
+            if task["status"] == "done":
+                return "already_done"
+            if task["status"] not in ("active", "in_progress", "waiting", "needs_review"):
+                return task["status"]
+            self._finish(task, receipt)
+            return "done"
+
     def queue_completion(self, owner, turn):
         with self.transaction():
             queue = self._data.setdefault("completion_queue", {})

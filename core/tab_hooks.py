@@ -285,6 +285,17 @@ async def task_context(user, slug, task_id):
     return result if len(result) <= 24000 else result[:24000] + "\n[Task context truncated; ask for the remaining requirements before assuming the full scope.]"
 
 
+async def complete_task(user, slug, task_id, receipt):
+    """An owner's agent closes one task it finished; the tab validates state."""
+    entry = tab_folders._registered.get(slug)
+    if entry is None or "complete_task" not in entry["_metadata"].get("hooks", []):
+        return None
+    if not await _invoke(slug, "policy", tab_folders._allowed, entry):
+        return None
+    result = await _declared(entry, "complete_task", user, task_id, copy.deepcopy(receipt))
+    return result[:500] if isinstance(result, str) and result.strip() else None
+
+
 async def home_cards(user):
     from core.home_cards import validate_cards
     entries = list(tab_folders._registered.values())

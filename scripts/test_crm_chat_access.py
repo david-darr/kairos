@@ -113,6 +113,53 @@ class ChatTaskAccessTests(unittest.IsolatedAsyncioTestCase):
             await completion.check("local", [self.task], turn)
             self.assertEqual(self.store.task("local", self.task["id"])["status"], "done")
 
+    async def test_agent_marks_finished_task_done_immediately_without_reader_model(self):
+        args = {"tab": "crm", "task_id": self.task["id"],
+                "summary": "Created soccer-curriculum.pdf with all eight sessions"}
+        text = await self.call("complete_tab_task", args, tool_registry.ToolContext(session_id="autonomous-help"))
+        self.assertIn("Marked CRM task done", text)
+        task = self.store.task("local", self.task["id"])
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["completion"]["kind"], "agent")
+        self.assertEqual(task["completion"]["session_id"], "autonomous-help")
+        self.assertIn("soccer-curriculum.pdf", task["completion"]["quote"])
+        self.assertIn("already done", await self.call("complete_tab_task", args))
+        self.assertEqual(self.store.task("bob", self.other["id"])["status"], "active")
+        # Reopening stays the person's call, and the agent can close it again later.
+        self.store.update_task("local", self.task["id"], {"status": "active"})
+        self.assertIn("Marked CRM task done", await self.call("complete_tab_task", args))
+
+    async def test_agent_completion_is_owner_scoped_and_needs_enabled_tab_and_summary(self):
+        args = {"tab": "crm", "task_id": self.other["id"], "summary": "Done"}
+        self.assertIn("not found", await self.call("complete_tab_task", args))
+        self.assertEqual(self.store.task("bob", self.other["id"])["status"], "active")
+        mine = {"tab": "crm", "task_id": self.task["id"], "summary": "  "}
+        self.assertIn("summary", await self.call("complete_tab_task", mine))
+        with patch("core.auth.auth_enabled", return_value=True):
+            text = await self.call("complete_tab_task", {**mine, "summary": "Done"}, tool_registry.ToolContext(is_admin=True))
+            self.assertIn("authenticated owner", text)
+        settings.update_settings(enabled_tab_templates=[])
+        await self.call("complete_tab_task", {**mine, "summary": "Done"})
+        self.assertEqual(self.store.task("local", self.task["id"])["status"], "active")
+
+    async def test_dismissed_task_is_not_reopened_as_done_and_read_only_chats_cannot_write(self):
+        self.store.update_task("local", self.task["id"], {"status": "dismissed"})
+        args = {"tab": "crm", "task_id": self.task["id"], "summary": "Done"}
+        self.assertIn("not changed", await self.call("complete_tab_task", args))
+        self.store.update_task("local", self.task["id"], {"status": "active"})
+        await self.call("complete_tab_task", args, tool_registry.ToolContext(read_only=True))
+        self.assertEqual(self.store.task("local", self.task["id"])["status"], "active")
+        names = {s.name for s in tool_registry.specs(tool_registry.CODEX, is_admin=False, read_only=True)}
+        self.assertNotIn("complete_tab_task", names)
+
+    async def test_scheduled_routine_owner_can_complete_its_task(self):
+        with patch("core.auth.auth_enabled", return_value=True):
+            ctx = tool_registry.ToolContext(agent_id="crm-agent", owner_user="local")
+            text = await self.call("complete_tab_task",
+                {"tab": "crm", "task_id": self.task["id"], "summary": "Created the PDF"}, ctx)
+        self.assertIn("Marked CRM task done", text)
+        self.assertEqual(self.store.task("local", self.task["id"])["completion"]["agent_id"], "crm-agent")
+
     def test_codex_cli_backend_route_uses_turn_token_and_can_read_task(self):
         app = FastAPI()
         app.include_router(tool_routes.router)
@@ -138,10 +185,11 @@ class ChatTaskAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_all_model_surfaces_and_codex_instructions_offer_the_tools(self):
         for surface in (tool_registry.CLAUDE, tool_registry.CODEX, tool_registry.OPENAI):
             names = {s.name for s in tool_registry.specs(surface, is_admin=False)}
-            self.assertTrue({"list_tab_tasks", "read_tab_task"} <= names)
+            self.assertTrue({"list_tab_tasks", "read_tab_task", "complete_tab_task"} <= names)
         cli = system_prompt.for_codex("python.exe", "hive_mind_cli.py")
         self.assertIn("list_tab_tasks", cli)
         self.assertIn("read_tab_task", cli)
+        self.assertIn("complete_tab_task", cli)
         self.assertIn("built-in CRM", cli)
 
 
