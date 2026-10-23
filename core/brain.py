@@ -272,6 +272,7 @@ class Brain:
         # Escape hatch for whatever this hardcoded baseline doesn't cover —
         # see core/settings.py's extra_allowed_tools for why this exists.
         allowed_tools.extend(settings_store.get_setting("extra_allowed_tools") or [])
+        allowed_tools = [tool for tool in allowed_tools if tool != "AskUserQuestion"]
         if self.is_admin:
             allowed_tools.extend(("Bash", "PowerShell"))
         else:
@@ -435,6 +436,8 @@ class Brain:
         """
         if self._self_turn:
             return PermissionResultDeny(message='No approval channel is open for a background turn.', interrupt=False)
+        if tool_name == "AskUserQuestion":
+            return await self._ask_person(arguments)
         if self.read_only and not self._plan_tool(tool_name):
             return PermissionResultDeny(message='Forge Plan mode is read-only.', interrupt=False)
         rule_content = None
@@ -472,9 +475,27 @@ class Brain:
         # refused and why rather than silently failing or trying again.
         return PermissionResultDeny(message=decision.reason, interrupt=False)
 
+    async def _ask_person(self, arguments):
+        arguments = arguments if isinstance(arguments, dict) else {}
+        questions = permissions.normalize_questions(arguments.get("questions"))
+        if questions is None:
+            return PermissionResultDeny(message="AskUserQuestion needs 1 to 4 questions, each with question text and at most 8 distinct options.", interrupt=False)
+        nobody = ("Nobody is watching this run live, so a question cannot be answered here. Use agent_ask to put it in the person's inbox, then finish what you can."
+                  if self.agent_id else "Nobody is here to answer questions in this run. Continue with your best judgment and say what you assumed.")
+        if not self.surface.startswith("chat:"):
+            return PermissionResultDeny(message=nobody, interrupt=False)
+        outcome = await permissions.ask(surface=self.surface, tool="AskUserQuestion", questions=questions)
+        if outcome.status == "answered":
+            return PermissionResultAllow(updated_input={**arguments, "answers": outcome.answers})
+        messages = {
+            "skipped": "The person skipped this question without answering. Continue with your best judgment and say what you assumed, or ask again in plain text.",
+            "timeout": "Nobody answered within 30 minutes. Continue with your best judgment and say what you assumed.",
+        }
+        return PermissionResultDeny(message=messages.get(outcome.status, nobody), interrupt=False)
+
     @staticmethod
     def _plan_tool(name: str) -> bool:
-        return name in {'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch'} or tool_registry.read_tool(name)
+        return name in {'AskUserQuestion', 'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch'} or tool_registry.read_tool(name)
 
     def fence_roots(self) -> list[str]:
         """Where Claude's file tools may reach in anything but an admin chat:
@@ -666,86 +687,98 @@ class Brain:
         has_text = False
         untrusted_tool_ids: dict[str, str] = {}
         open_tools: set[str] = set()
-        while True:
-            try:
-                message = await asyncio.wait_for(
-                    response_iter.__anext__(), timeout=TURN_MESSAGE_TIMEOUT_SECONDS
-                )
-            except StopAsyncIteration:
-                raise RuntimeError("Claude Code ended before reporting completion")
-            except asyncio.TimeoutError:
-                raise RuntimeError("Claude Code timed out waiting for a response")
+        pending_next = None
+        try:
+            while True:
+                try:
+                    pending_next = asyncio.ensure_future(response_iter.__anext__())
+                    while True:
+                        done, _ = await asyncio.wait({pending_next}, timeout=TURN_MESSAGE_TIMEOUT_SECONDS)
+                        if done:
+                            message = pending_next.result()
+                            pending_next = None
+                            break
+                        if not permissions.waiting(self.surface):
+                            raise asyncio.TimeoutError
+                except StopAsyncIteration:
+                    raise RuntimeError("Claude Code ended before reporting completion")
+                except asyncio.TimeoutError:
+                    raise RuntimeError("Claude Code timed out waiting for a response")
 
-            self._observe(message)
-            if isinstance(message, StreamEvent):
-                if message.parent_tool_use_id:
-                    continue
-                event = message.event
-                if event.get("type") == "message_start":
-                    streamed_blocks = {}
-                elif event.get("type") == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
-                    chunk = event["delta"].get("text", "")
-                    index = event.get("index", 0)
-                    if chunk:
-                        if index not in streamed_blocks and has_text:
-                            yield runs.text("\n\n")
-                        streamed_blocks[index] = streamed_blocks.get(index, "") + chunk
-                        has_text = True
-                        yield runs.text(chunk)
-            # Claude's native WebFetch/WebSearch, file reads, and connected
-            # MCP servers do not all pass through JARVIS's own tool registry.
-            # Pair tool requests with their results so only returned content
-            # taints the rest of this turn.
-            for block in getattr(message, "content", ()) or ():
-                block_type = type(block).__name__
-                if block_type == "ToolUseBlock":
-                    name = getattr(block, "name", "") or ""
-                    block_id = getattr(block, "id", None)
-                    tool_input = getattr(block, "input", {}) or {}
-                    if block_id and block_id not in open_tools:
-                        open_tools.add(block_id)
-                        yield runs.tool_started(block_id, name, tool_input)
-                    if block_id and name.startswith("mcp__"):
-                        untrusted_tool_ids[block_id] = "MCP output"
-                    elif block_id and name in ("WebFetch", "WebSearch"):
-                        untrusted_tool_ids[block_id] = "web content"
-                    elif block_id and name == "Read":
-                        path = tool_input.get("file_path") or tool_input.get("path")
-                        if isinstance(path, str) and _untrusted_claude_read_path(
-                                path, self.cwd_override or self.vault_dir):
-                            untrusted_tool_ids[block_id] = "file content"
-                elif block_type == "ToolResultBlock":
-                    tool_use_id = getattr(block, "tool_use_id", None)
-                    source = untrusted_tool_ids.pop(tool_use_id, None)
-                    if source and not getattr(block, "is_error", False):
-                        self.turn_taint.mark(source)
-                    if tool_use_id in open_tools:
-                        open_tools.discard(tool_use_id)
-                        yield runs.tool_finished(tool_use_id, not getattr(block, "is_error", False),
-                                                 getattr(block, "content", ""))
-            if isinstance(message, AssistantMessage) and not getattr(message, 'parent_tool_use_id', None):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        if block.text in streamed_blocks.values():
-                            continue
-                        if has_text:
-                            yield runs.text("\n\n")
-                        has_text = True
-                        yield runs.text(block.text)
-            if type(message).__name__ == "RateLimitEvent":
-                quota = runs.claude_quota(message)
-                if quota:
-                    yield runs.event(runs.EventKind.QUOTA, **quota)
-            if isinstance(message, ResultMessage):
-                self.last_usage = message.usage
-                self.cli_session_id = message.session_id or self.cli_session_id
-                if message.is_error:
-                    raise RuntimeError("Claude Code reported an unsuccessful turn")
-                usage = runs.usage_event(message.usage)
-                if usage:
-                    yield usage
-                yield runs.result(usage is not None, cli_session_id=self.cli_session_id)
-                break
+                self._observe(message)
+                if isinstance(message, StreamEvent):
+                    if message.parent_tool_use_id:
+                        continue
+                    event = message.event
+                    if event.get("type") == "message_start":
+                        streamed_blocks = {}
+                    elif event.get("type") == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
+                        chunk = event["delta"].get("text", "")
+                        index = event.get("index", 0)
+                        if chunk:
+                            if index not in streamed_blocks and has_text:
+                                yield runs.text("\n\n")
+                            streamed_blocks[index] = streamed_blocks.get(index, "") + chunk
+                            has_text = True
+                            yield runs.text(chunk)
+                # Claude's native WebFetch/WebSearch, file reads, and connected
+                # MCP servers do not all pass through JARVIS's own tool registry.
+                # Pair tool requests with their results so only returned content
+                # taints the rest of this turn.
+                for block in getattr(message, "content", ()) or ():
+                    block_type = type(block).__name__
+                    if block_type == "ToolUseBlock":
+                        name = getattr(block, "name", "") or ""
+                        block_id = getattr(block, "id", None)
+                        tool_input = getattr(block, "input", {}) or {}
+                        if block_id and block_id not in open_tools:
+                            open_tools.add(block_id)
+                            yield runs.tool_started(block_id, name, tool_input)
+                        if block_id and name.startswith("mcp__"):
+                            untrusted_tool_ids[block_id] = "MCP output"
+                        elif block_id and name in ("WebFetch", "WebSearch"):
+                            untrusted_tool_ids[block_id] = "web content"
+                        elif block_id and name == "Read":
+                            path = tool_input.get("file_path") or tool_input.get("path")
+                            if isinstance(path, str) and _untrusted_claude_read_path(
+                                    path, self.cwd_override or self.vault_dir):
+                                untrusted_tool_ids[block_id] = "file content"
+                    elif block_type == "ToolResultBlock":
+                        tool_use_id = getattr(block, "tool_use_id", None)
+                        source = untrusted_tool_ids.pop(tool_use_id, None)
+                        if source and not getattr(block, "is_error", False):
+                            self.turn_taint.mark(source)
+                        if tool_use_id in open_tools:
+                            open_tools.discard(tool_use_id)
+                            yield runs.tool_finished(tool_use_id, not getattr(block, "is_error", False),
+                                                     getattr(block, "content", ""))
+                if isinstance(message, AssistantMessage) and not getattr(message, 'parent_tool_use_id', None):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            if block.text in streamed_blocks.values():
+                                continue
+                            if has_text:
+                                yield runs.text("\n\n")
+                            has_text = True
+                            yield runs.text(block.text)
+                if type(message).__name__ == "RateLimitEvent":
+                    quota = runs.claude_quota(message)
+                    if quota:
+                        yield runs.event(runs.EventKind.QUOTA, **quota)
+                if isinstance(message, ResultMessage):
+                    self.last_usage = message.usage
+                    self.cli_session_id = message.session_id or self.cli_session_id
+                    if message.is_error:
+                        raise RuntimeError("Claude Code reported an unsuccessful turn")
+                    usage = runs.usage_event(message.usage)
+                    if usage:
+                        yield usage
+                    yield runs.result(usage is not None, cli_session_id=self.cli_session_id)
+                    break
+        finally:
+            if pending_next is not None:
+                pending_next.cancel()
+                await asyncio.gather(pending_next, return_exceptions=True)
 
     async def disconnect(self) -> None:
         if self._idle and self._idle is not asyncio.current_task():

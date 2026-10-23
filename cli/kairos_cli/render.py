@@ -476,3 +476,24 @@ def table_of(rows: list[list[str]], headers: list[str], palette: Palette) -> Tab
     for row in rows:
         table.add_row(*[Text(one_line(cell, 80), palette.style("text")) for cell in row])
     return Padding(table, (0, 0, 0, 2))
+
+
+def question_box(request, palette, width, state, note=""):
+    questions = request.get("questions") or []
+    index = min(state.get("index", 0), len(questions) - 1)
+    question = questions[index] if questions else {}
+    body = Text()
+    if len(questions) > 1:
+        body.append(f"{index + 1} of {len(questions)}\n", palette.style("dim"))
+    body.append(one_line(question.get("question"), 2000) + "\n", palette.style("text", bold=True))
+    for i, option in enumerate(question.get("options", []), 1):
+        mark = "[x] " if i - 1 in state.get("toggles", set()) else ""
+        body.append(f"{i} {mark}" + one_line(option.get("label"), 200) + "\n", palette.style("accent"))
+        if option.get("description"):
+            body.append("  " + one_line(option["description"], 500) + "\n", palette.style("dim"))
+    body.append("1-9 toggle, enter to confirm" if question.get("multiSelect") else "1-9 choose", palette.style("dim"))
+    body.append("\ntype an answer and press enter for Other\nesc to skip", palette.style("dim"))
+    if note:
+        body.append("\n" + one_line(note, 400), palette.style("warn"))
+    return Panel(body, title=Text(" Waiting for your response "), title_align="left",
+                 border_style=palette.style("gold"), box=box.ROUNDED, width=min(width - 2, 100), padding=(0, 1))

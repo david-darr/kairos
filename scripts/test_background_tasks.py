@@ -111,7 +111,10 @@ class BackgroundStreamTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(brain._idle.done(), 'Reader must survive the last terminal task')
                     for item in (message('SystemMessage', subtype='init'), AssistantMessage([TextBlock('both answered')], 'fake'), result()):
                         await brain._client.queue.put(item)
-                    await asyncio.sleep(.03)
+                    for _ in range(100):  # the self-started turn is read on the reader's own schedule
+                        if saved:
+                            break
+                        await asyncio.sleep(.01)
                     self.assertEqual(saved, ['both answered'])
                     await asyncio.wait_for(brain.settle_background(), .2)
                     self.assertEqual(await brain.run_turn('next'), 'real reply')
