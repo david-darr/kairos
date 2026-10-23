@@ -22,6 +22,7 @@ let unavailable = false;
 // The synthetic backend, shared with the website's demo (demo/fixtures.js).
 const demoState = { empty: false };
 let sessionDelay = 0;
+let authStatusDelay = 0;
 const writes = [];
 const reads = [];
 const now = Date.now() / 1000;
@@ -109,6 +110,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/api/sessions" && sessionDelay) await delay(sessionDelay);
+    if (url.pathname === "/api/auth/status" && authStatusDelay) await delay(authStatusDelay);
     if (url.pathname === '/api/chat/artifacts' && (demoState.staleArtifacts || []).includes(url.searchParams.get('url'))) {
       res.writeHead(404, { 'Content-Type': 'application/json' }); res.end('{"detail":"File no longer available"}'); return;
     }
@@ -1825,6 +1827,10 @@ app.whenReady().then(async () => {
         await js("document.querySelector('.settings-mobile-back').click()");
         await waitFor("document.querySelector('#view-content.settings-mobile-page')?.dataset.mobileView === 'list'");
       }
+      if (label === "desktop") {
+        await js("document.querySelector(\".settings-titlebar-btn[title='Close']\")?.click()");
+        await waitFor("!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
+      }
       await navigate("tasks");
       await js("document.querySelector('.sidebar-settings-btn').click()");
       if (label === "mobile") {
@@ -1848,6 +1854,47 @@ app.whenReady().then(async () => {
         .catch(async error => { throw new Error(label + ' ' + error.message + ' State: ' + JSON.stringify(await js("({ view: document.querySelector('#view-content')?.dataset.view, cls: document.querySelector('#view-content')?.className, mobileView: document.querySelector('#view-content')?.dataset.mobileView, modalOpen: !!document.querySelector('.modal-backdrop:not(.hidden) .settings-window'), blocker: !!document.querySelector('.confirm-panel, dialog[open]'), root: document.documentElement.dataset.view })"))); });
       assert.equal(await js("document.querySelector('#view-content').dataset.view"), "tasks", label + " leaving Settings stays on the tab you were on");
       assert.ok(await js("document.querySelector('.nav-item[data-tab=tasks]').classList.contains('active')"), label + " and that tab is still highlighted");
+      if (label === "desktop") {
+        await js("document.querySelector('.sidebar-settings-btn').click()");
+        await waitFor("!!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
+        authStatusDelay = 600;
+        try {
+          await js(`(() => {
+            window.__authAnswered = false;
+            window.__authRequested = false;
+            window.__settingsOriginalFetch = window.fetch;
+            window.fetch = async function (...args) {
+              const authStatus = new URL(args[0] instanceof Request ? args[0].url : args[0], location.href).pathname === '/api/auth/status';
+              if (authStatus) window.__authRequested = true;
+              const response = await window.__settingsOriginalFetch.apply(this, args);
+              if (authStatus) {
+                // Wait for the body too so the pending open can resume before the assertion.
+                const json = response.json.bind(response);
+                response.json = async () => {
+                  const body = await json();
+                  window.__authAnswered = true;
+                  return body;
+                };
+              }
+              return response;
+            };
+            document.querySelector('.sidebar-settings-btn').click();
+          })()`);
+          await waitFor("window.__authRequested === true");
+          await js(`document.querySelector(".settings-titlebar-btn[title='Close']").click()`);
+          await waitFor("window.__authAnswered === true");
+          assert.ok(await js("!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')"),
+            "desktop a Settings open cancelled before it loads stays closed");
+        } finally {
+          authStatusDelay = 0;
+          await js(`(() => {
+            if (window.__settingsOriginalFetch) window.fetch = window.__settingsOriginalFetch;
+            delete window.__settingsOriginalFetch;
+            delete window.__authRequested;
+            delete window.__authAnswered;
+          })()`);
+        }
+      }
     }
     win.setContentSize(1440, 900);
     const navigationWriteBaseline = writes.length;

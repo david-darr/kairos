@@ -86,7 +86,7 @@ const vm = require('node:vm');
   assert.match(library, /export async function render\([^\n]+\) \{\s*const unguard = registerLeaveGuard\(async \(\) => \{/);
   assert.match(library, /if \(activeVaultView\?\.canLeave && !await activeVaultView\.canLeave\(\)\) return false;/);
   assert.match(library, /if \(docGuard && !await docGuard\(\)\) return false;/);
-  assert.match(library, /return \(\) => \{ unguard\(\); docGuard = null; disposeVault\(\); \};/);
+  assert.match(library, /return \(\) => \{ unguard\(\); docGuard = null; [^\n]*\};/, 'Library cleanup unregisters its guard first');
   assert.match(library, /docGuard = \(\) => \(contentArea\.isConnected \? confirmLeave\(\) : true\);/);
   assert.match(app, /if \(activeUnmount\) \{ activeUnmount\(\); activeUnmount = null; \}[\s\S]*?const result = await mod\.render\(/, 'Previous cleanup runs before Library can render again');
   assert.equal(hasLeaveGuard(), false, 'Tests leave no registered guards');

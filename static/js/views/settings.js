@@ -245,6 +245,8 @@ let pillEl = null;
 let activeSectionId = "add-models";
 let cachedStatus = null;
 let renderVersion = 0;
+// Invalidate pending opens when Settings is closed, minimized, or opened again.
+let openVersion = 0;
 // The phone layout (renderMobilePage) while it is on screen: its top bar, the
 // way out, and the current sub-page's way back. null on desktop.
 let mobile = null;
@@ -258,10 +260,12 @@ export async function render(container) {
 }
 
 export async function openSettingsWindow(section) {
+  const version = ++openVersion;
   mobile = null;
   if (SECTION_GROUPS.some(group => group.sections.some(item => item.id === section))) activeSectionId = section;
   if (pillEl) { pillEl.remove(); pillEl = null; }
   cachedStatus = await api("/api/auth/status");
+  if (version !== openVersion) return;
   const modal = getModal();
   modal.classList.remove("hidden");
   hidePageBehind();
@@ -343,11 +347,13 @@ export async function renderMobilePage(container, section, onExit) {
 // Closing leaves you on the tab you had open (David, 2026-10-05: it used to
 // jump to Home). The window floats over that tab, so hiding it is enough.
 function closeSettingsWindow() {
+  openVersion++;
   if (modalEl) modalEl.classList.add("hidden");
   restorePageBehind();
 }
 
 function minimizeSettingsWindow() {
+  openVersion++;
   if (modalEl) modalEl.classList.add("hidden");
   // Minimized leaves only a small pill on screen, so the page behind is
   // meant to be visible again — same as closing, from the pane's side.
