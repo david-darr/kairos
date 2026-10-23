@@ -328,7 +328,7 @@ async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_ad
         return task_service.create_task(body.name, body.prompt, body.schedule_kind, run_time=body.run_time,
                                         interval_seconds=body.interval_seconds, agent_id=agent_id,
                                         report_when=body.report_when, time_zone=body.time_zone,
-                                        weekdays=body.weekdays)
+                                        weekdays=body.weekdays, owner_user=user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -338,7 +338,7 @@ async def add_card(agent_id: str, body: CardBody, user: str = Depends(require_ad
     _require(agent_id)
     try:
         return task_service.create_task(body.name, body.prompt, "card", status=body.status or "ready",
-                                        agent_id=agent_id)
+                                        agent_id=agent_id, owner_user=user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

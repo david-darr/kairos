@@ -23,7 +23,8 @@ def _context(request: Request) -> tool_registry.ToolContext:
         raise HTTPException(403, "This tool access has expired; it lasts one turn")
     return tool_registry.ToolContext(session_id=grant.session_id, is_admin=grant.is_admin,
                                      turn_taint=grant.turn_taint, agent_id=grant.agent_id, model=grant.model, read_only=grant.read_only,
-                                     assignment_run_id=grant.assignment_run_id, source_card_id=grant.source_card_id)
+                                     assignment_run_id=grant.assignment_run_id, source_card_id=grant.source_card_id,
+                                     owner_user=grant.owner_user)
 
 
 async def _mcp_tool(name, arguments, request, ctx):

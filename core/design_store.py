@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from core import design_html, design_systems
+from core import design_formats, design_html, design_systems
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
@@ -223,6 +223,24 @@ def _slug(title: str, taken) -> str:
     return slug
 
 
+def board_specs(args: dict) -> list[dict]:
+    """The format a board is made in, checked and sized (core/design_formats.py):
+    one spec, or two for a website's desktop and mobile pair."""
+    return design_formats.resolve(args.get("format"), size=args.get("size"), orientation=args.get("orientation"),
+                                  w=args.get("w"), h=args.get("h"), frame=args.get("frame"))
+
+
+def reflow(draft: dict) -> None:
+    """Rows by format, in board order (design_formats.layout), for designs on
+    the auto layout: every design made with formats, and an older one once it
+    is fitted or a board is dragged or resized on the canvas."""
+    if draft.get("layout") != "auto" or not draft.get("boards"):
+        return
+    order = [slug for slug, _ in ordered_boards(draft)]
+    for slug, (x, y) in design_formats.layout(draft["boards"], order).items():
+        draft["boards"][slug]["x"], draft["boards"][slug]["y"] = x, y
+
+
 def frame_size(frame: str, w=None, h=None) -> tuple[int, int]:
     if frame not in FRAMES:
         raise ValueError(f"frame must be one of {', '.join(FRAMES)}.")
@@ -258,7 +276,8 @@ def starter_html(frame: str, title: str) -> str:
 
 
 def create(title: str, *, owner: Optional[str], chat_key_: Optional[str], by: str,
-           design_system: Optional[str] = None, boards: Optional[list] = None, source: str = "") -> tuple[dict, list[str]]:
+           design_system: Optional[str] = None, boards: Optional[list] = None, source: str = "",
+           session_id: Optional[str] = None) -> tuple[dict, list[str]]:
     title = (title or "").strip()[:120] or "Untitled design"
     system = design_systems.get(design_system or design_systems.BUILTIN_ID)
     if system is None:
@@ -268,7 +287,7 @@ def create(title: str, *, owner: Optional[str], chat_key_: Optional[str], by: st
     folder = _folder(design_id)
     data = {"v": 1, "id": design_id, "title": title, "owner": owner, "chat_ids": [chat_key_] if chat_key_ else [],
             "visible_to": [], "design_system": system["id"], "token_overrides": {}, "boards": {}, "notes": [],
-            "version": 0, "created": _now(), "updated": _now(), "source": source[:200] or None}
+            "version": 0, "created": _now(), "updated": _now(), "source": source[:200] or None, "layout": "auto"}
     (folder / "boards").mkdir(parents=True)
     (folder / "versions").mkdir()
     (folder / "assets").mkdir()
@@ -280,28 +299,54 @@ def create(title: str, *, owner: Optional[str], chat_key_: Optional[str], by: st
 
     def build(draft: dict, files: dict) -> tuple[list[str], str]:
         made = []
-        for board in starters or [{"title": "Screen 1", "frame": "phone"}]:
+        for board in starters or [{"title": "Screen 1", "format": "app", "size": "phone", "orientation": "portrait"}]:
             if not isinstance(board, dict):
-                raise ValueError("Each starter board is an object {title, frame, html}.")
-            slug, more = _add_board(draft, files, board.get("title") or f"Screen {len(made) + 1}",
-                                    board.get("frame") or "phone", board.get("html"), w=board.get("w"), h=board.get("h"))
-            made.append(slug)
-            notes.extend(f"{slug}: {n}" for n in more)
+                raise ValueError("Each starter board is an object {title, format, orientation, html}.")
+            name = board.get("title") or f"Screen {len(made) + 1}"
+            try:
+                specs = board_specs(board)
+            except ValueError as error:
+                raise ValueError(f"Board \"{name}\": {error}") from None
+            for slug, more in add_boards(draft, files, name, specs, board.get("html"), mobile_html=board.get("mobile_html")):
+                made.append(slug)
+                notes.extend(f"{slug}: {n}" for n in more)
         return made, f"Created with {len(made)} board{'s' if len(made) != 1 else ''}"
     try:
-        result = change(design_id, build, by=by, tool="design_create")
+        result = change(design_id, build, by=by, tool="design_create", session_id=session_id)
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
     return result["manifest"], notes + result["notes"]
 
 
-def _add_board(draft: dict, files: dict, title: str, frame: str, source: Optional[str], *, after: Optional[str] = None,
+def add_boards(draft: dict, files: dict, title: str, specs: list[dict], source: Optional[str], *,
+               after: Optional[str] = None, mobile_html: Optional[str] = None) -> list[tuple[str, list[str]]]:
+    """One board per spec. A website pair adds its desktop board, then its
+    mobile board "<title> (mobile)", which starts from mobile_html or, without
+    it, from the desktop HTML with a note to rework it for 390 wide."""
+    made = []
+    pair = len(specs) > 1
+    own_mobile = isinstance(mobile_html, str) and bool(mobile_html.strip())
+    for spec in specs:
+        mobile = pair and spec.get("size") == "mobile"
+        name = f"{title} (mobile)" if mobile else title
+        slug, notes = _add_board(draft, files, name, spec, mobile_html if mobile and own_mobile else source, after=after)
+        if mobile and not own_mobile and isinstance(source, str) and source.strip():
+            notes = notes + ["The mobile board starts as a copy of the desktop HTML: rework it for 390 wide with "
+                             "design_edit (or pass mobile_html)."]
+        made.append((slug, notes))
+        after = slug
+    return made
+
+
+def _add_board(draft: dict, files: dict, title: str, spec, source: Optional[str], *, after: Optional[str] = None,
                w=None, h=None) -> tuple[str, list[str]]:
     if len(draft["boards"]) >= MAX_BOARDS:
         raise ValueError(f"A design holds at most {MAX_BOARDS} boards. Start a new design for more.")
     title = (str(title or "").strip() or "Board")[:80]
-    width, height = frame_size(frame, w, h)
+    if isinstance(spec, str):  # An old frame name: phone, tablet, desktop, browser or slide.
+        spec = board_specs({"frame": spec, "w": w, "h": h})[0]
+    width, height = int(spec["w"]), int(spec["h"])
     slug = _slug(title, draft["boards"].keys() | files.keys())
     x, y = next_slot(draft, width, height)
     order = max([b.get("order", 0) for b in draft["boards"].values()] or [0]) + 1
@@ -310,9 +355,15 @@ def _add_board(draft: dict, files: dict, title: str, frame: str, source: Optiona
         if ref is None:
             raise LookupError(f"No board `{after}` to add after.")
         order = ref.get("order", 0) + 0.5
-    draft["boards"][slug] = {"title": title, "x": x, "y": y, "w": width, "h": height, "frame": frame, "order": order}
+    board = {"title": title, "x": x, "y": y, "w": width, "h": height, "frame": spec.get("frame") or "none",
+             "order": order, "format": spec.get("format"), "size": spec.get("size"), "orientation": spec.get("orientation")}
+    if spec.get("grow"):
+        board["min_h"] = int(spec.get("min_h") or height)
+    draft["boards"][slug] = board
     _renumber(draft)
-    text, _, notes = design_html.normalize(source if isinstance(source, str) and source.strip() else starter_html(frame, title))
+    reflow(draft)
+    text, _, notes = design_html.normalize(source if isinstance(source, str) and source.strip()
+                                           else starter_html(board["frame"], title))
     files[slug] = text
     return slug, notes
 
@@ -323,10 +374,15 @@ def _renumber(draft: dict) -> None:
 
 
 def change(design_id: str, edit: Callable[[dict, dict], tuple], *, by: str, tool: str,
-           session_id: Optional[str] = None, user_edit: bool = False) -> dict:
+           session_id: Optional[str] = None, user_edit: bool = False, quiet: bool = False) -> dict:
     """Run one edit as one version. `edit(draft_manifest, files)` changes the
     draft and puts new board HTML in `files` ({slug: html}; None deletes);
-    it returns (anything, summary). Raises without writing on any error."""
+    it returns (anything, summary). Raises without writing on any error.
+
+    quiet: a derived layout change only (a growing board's measured height),
+    written without a version; listeners still hear it, marked quiet."""
+    if quiet:
+        return _quiet_change(design_id, edit, by=by, tool=tool)
     with _lock(design_id):
         folder = _folder(design_id)
         data = manifest(design_id)
@@ -385,8 +441,54 @@ def change(design_id: str, edit: Callable[[dict, dict], tuple], *, by: str, tool
             "manifest": draft, "notes": [], "unchanged": False}
 
 
+def _quiet_change(design_id: str, edit: Callable[[dict, dict], tuple], *, by: str, tool: str) -> dict:
+    with _lock(design_id):
+        data = manifest(design_id)
+        draft = copy.deepcopy(data)
+        files: dict = {}
+        result, text = edit(draft, files)
+        if files:
+            raise ValueError("A quiet change touches the layout only.")
+        if draft == data:
+            return {"result": result, "summary": text, "version": data.get("version", 0), "changed": {},
+                    "boards_changed": [], "manifest": data, "notes": ["Nothing changed."], "unchanged": True}
+        write_json_atomic(str(_folder(design_id) / "design.json"), draft)
+    packet = {"designId": design_id, "version": data.get("version", 0), "boards": [], "changed": {}, "by": by,
+              "tool": tool, "summary": text, "sessionId": None, "manifestChanged": True, "addressed": [], "quiet": True}
+    for listener in list(_listeners):
+        try:
+            listener(packet)
+        except Exception:
+            pass
+    return {"result": result, "summary": text, "version": data.get("version", 0), "changed": {}, "boards_changed": [],
+            "manifest": draft, "notes": [], "unchanged": False}
+
+
+def fit_height(design_id: str, slug: str, height) -> dict:
+    """A growing board (website, email) as tall as its content: the canvas
+    measures the rendered page and reports it here. Never below the board's
+    minimum height; the rows below move to make room. No version: it is the
+    content's height, not an edit."""
+    def edit(draft, files):
+        board = draft["boards"].get(slug)
+        if board is None:
+            raise LookupError(f"No board `{slug}`.")
+        if not design_formats.grows(board):
+            raise ValueError("Only website and email boards grow with their content.")
+        try:
+            content = max(60, min(8000, int(height)))
+        except (TypeError, ValueError):
+            raise ValueError("height is whole pixels.") from None
+        board["content_h"] = content
+        board["h"] = max(int(board.get("min_h") or 0), content)
+        reflow(draft)
+        return board["h"], f"{slug} fits its content"
+    return change(design_id, edit, by="Kairos", tool="fit_height", quiet=True)
+
+
 def _manifest_snapshot(data: dict) -> dict:
-    return {key: copy.deepcopy(data.get(key)) for key in ("title", "boards", "notes", "design_system", "token_overrides")}
+    return {key: copy.deepcopy(data.get(key)) for key in ("title", "boards", "notes", "design_system",
+                                                         "token_overrides", "layout")}
 
 
 # -- versions -------------------------------------------------------------------

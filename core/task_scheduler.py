@@ -25,7 +25,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from typing import Optional
 
-from core import events, file_checkpoints, helpers, logs as log_files, outbox, runs, token_usage
+from core import events, file_checkpoints, helpers, logs as log_files, outbox, runs, token_usage, task_scope
 from core.brain import Brain
 from core.builtin_tasks import BUILTIN_TASKS
 from services.agent_service import AdmissionDenied, agent_service, is_silent
@@ -118,6 +118,11 @@ async def complete(brain, prompt: str, task: dict, surface: str) -> str:
     task_service.note_run(task.get("id"), context.run_id)
     try:
         outcome = await runs.complete(brain, prompt, context, tally=tally)
+        try:
+            from core import tab_hooks
+            await tab_hooks.emit_task_run(task, context.run_id, prompt, outcome.text)
+        except Exception:
+            logger.exception("Passive tab background receipt failed")
     finally:
         if endpoint_id and tally.usage is not None:
             try:
@@ -229,7 +234,7 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
         # Every background surface enters here, before claiming work or
         # connecting a model. The context owns admission through recording
         # failures/stops and disconnecting (Agents 2.0, 2026-10-13).
-        with (agent_service.run(task["agent_id"], card_id=task["id"] if card else None,
+        with task_scope.bind(task), (agent_service.run(task["agent_id"], card_id=task["id"] if card else None,
                                 task_id=None if card else task["id"])
               if task.get("agent_id") else nullcontext([])) as raised:
             if card and task.get("status") != "running":

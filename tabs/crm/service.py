@@ -412,7 +412,7 @@ class CRMService:
                      and t["created_at"] <= turn["at"]
                      and (not turn.get("task_id") or t["id"] == turn["task_id"])
                      and turn["at"] > t.get("completion_not_before", 0)]
-            text = key(str(turn.get("message") or "") + " " + str(turn.get("reply") or ""))
+            text = key(str(turn.get("message") or "") + " " + str(turn.get("reply") or "") + " " + str(turn.get("request") or ""))
             words = set(text.split())
             generic = {"the", "and", "for", "this", "that", "with", "from", "send", "sent", "done", "task", "please"}
             def relevant(task):

@@ -141,7 +141,7 @@ async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)
             body.name, body.prompt, body.schedule_kind, body.run_at, body.interval_seconds,
             deliver_to_channel=body.deliver_to_channel, run_time=body.run_time,
             depends_on=body.depends_on, status=body.status, endpoint_id=body.endpoint_id,
-            time_zone=body.time_zone, weekdays=body.weekdays,
+            time_zone=body.time_zone, weekdays=body.weekdays, owner_user=user,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -157,6 +157,9 @@ async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends
             fields[key] = getattr(body, key)
     _check_endpoint(fields.get("endpoint_id"))
     try:
+        existing = task_service.get_task(task_id)
+        if existing and existing.get("agent_id"):
+            task_service.bind_owner(task_id, user)
         return task_service.update_task(task_id, **fields)
     except KeyError:
         raise HTTPException(status_code=404, detail="task not found")

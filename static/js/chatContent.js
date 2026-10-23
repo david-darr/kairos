@@ -1,5 +1,6 @@
 import { api, el, toast, openOptionMenu, closeOptionMenu } from './api.js';
 import { marked, DOMPurify, hljs } from './vendor/chat-vendor.js';
+import { installDesignAutoOpen } from './designAutoOpen.js';
 import { mountChatPane } from './chatPaneLayout.js';
 import { renderArtifact, loadingSkeleton } from './artifactViewer.js';
 import { mountArtifactReview } from './artifactReview.js';
@@ -347,8 +348,8 @@ async function renderDesignTab(tab) {
   local.root.classList.add('design-pane-composer');
   // Beside its own chat, the chat's composer takes the chips; elsewhere this one does.
   tab.designComposer = local; local.root.hidden = context.sessionId === tab.sessionId;
-  tab.actions.append(el('button', { type: 'button', class: 'btn quiet', text: 'Open full page', onclick: () =>
-    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'design', designId } })) }));
+  tab.actions.append(el('button', { type: 'button', class: 'btn quiet', text: 'Open in Library', onclick: () =>
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'designs', designId } })) }));
   tab.content.viewerRoot = canvas.root;
   tab.design = canvas;
   const dispose = () => { canvas.dispose(); local.dispose(); };
@@ -357,11 +358,35 @@ async function renderDesignTab(tab) {
   return canvas.root;
 }
 
-export async function openDesignTab(sessionId, designId, opener) {
+export async function openDesignTab(sessionId, designId, opener, options = {}) {
   let title = 'Design';
   try { title = (await api(`/api/designs/${designId}`)).title || title; } catch { toast('That design is no longer available.', 'error'); return; }
-  await openArtifact(sessionId, `/designs/${designId}`, title, opener);
+  await openArtifact(sessionId, `/designs/${designId}`, title, opener, options);
 }
+
+// The pane opens with the design as soon as it exists (designAutoOpen.js).
+const PENDING_TEXT = 'Starting the design. Its boards appear here as the model makes them.';
+installDesignAutoOpen({
+  currentSession: () => document.querySelector('.chat-layout') ? context.sessionId : null,
+  isOpen: (sessionId, designId) => !!viewer?.tabs.some(tab => tab.url === `/designs/${designId}`),
+  openDesign: (sessionId, designId) => openDesignTab(sessionId, designId, null, { quiet: true }).catch(() => {}),
+  showPlaceholder(sessionId) {
+    const host = document.querySelector('.chat-layout');
+    if (!host || viewer?.tabs.length) return;
+    const current = viewer || createViewer(host, sessionId, null);
+    attachViewer(current, host);
+    current.empty.dataset.designPending = sessionId;
+    current.empty.querySelector('h2').textContent = 'Design';
+    current.empty.querySelector('p').textContent = PENDING_TEXT;
+  },
+  clearPlaceholder(sessionId) {
+    if (viewer?.empty.dataset.designPending !== sessionId) return;
+    delete viewer.empty.dataset.designPending;
+    viewer.empty.querySelector('h2').textContent = 'Documents';
+    viewer.empty.querySelector('p').textContent = 'Use + to open a document.';
+    if (!viewer.tabs.length) hideArtifact();
+  },
+});
 
 function closeTab(current, tab) {
   const index = current.tabs.indexOf(tab);
@@ -480,20 +505,21 @@ async function switchArtifactVersion(current, tab, url) {
   await tab.ready;
 }
 
-export async function openArtifact(sessionId, url, name, opener, { background = false } = {}) {
+export async function openArtifact(sessionId, url, name, opener, { background = false, quiet = false } = {}) {
   const host = document.querySelector('.chat-layout');
   if (!host) return;
   const current = viewer || createViewer(host, sessionId, opener);
   attachViewer(current, host);
   current.opener = opener || current.opener;
   const existing = current.tabs.find(tab => tab.url === url && tab.sessionId === sessionId);
-  if (existing) { if (!background) activateTab(current, existing, true); await existing.ready; return; }
+  if (existing) { if (!background) activateTab(current, existing, !quiet); await existing.ready; return; }
   if (current.tabs.length >= 20) { toast('Keep at most 20 documents open. Close a tab to open another.'); return; }
   const tab = addTab(current, sessionId, url, name);
   tab.foreignReview.resume();
   if (!background || !current.active) {
     activateTab(current, tab);
-    current.controls.querySelector('[aria-label="Close file preview"]').focus({ preventScroll: true });
+    // Opened for you (a design as it is made) keeps your focus where it is.
+    if (!quiet) current.controls.querySelector('[aria-label="Close file preview"]').focus({ preventScroll: true });
   }
   savePane();
   await tab.ready;

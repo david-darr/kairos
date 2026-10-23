@@ -9,7 +9,10 @@ import { getInFlight, startTurn, subscribe } from './chatStream.js';
 
 const keyOf = item => JSON.stringify([item.design_id, item.board, item.element_ids, item.comment || '', item.point || null]);
 
-export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat }) {
+// An unsent message stays with its design while you go elsewhere, like a chat's draft.
+const drafts = new Map();
+
+export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat, draftKey = null }) {
   let chips = [];
   let watching = null, unsubscribe = () => {};
   const list = el('div', { class: 'chat-reference-chips design-composer-chips', 'aria-label': 'Selected on the design' });
@@ -26,7 +29,11 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
   const engaged = () => root.classList.toggle('is-active', root.contains(document.activeElement) || !!input.value.trim() || chips.length > 0);
   root.addEventListener('focusin', engaged); root.addEventListener('focusout', () => setTimeout(engaged, 0));
   input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } });
-  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(160, input.scrollHeight)}px`; update(); });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto'; input.style.height = `${Math.min(160, input.scrollHeight)}px`; update();
+    if (draftKey) { if (input.value.trim()) drafts.set(draftKey, input.value); else drafts.delete(draftKey); }
+  });
+  if (draftKey && drafts.has(draftKey)) input.value = drafts.get(draftKey);
 
   function paint() {
     list.replaceChildren(...chips.map(item => el('span', { class: 'chat-reference-chip design-select-chip' }, [
@@ -53,7 +60,7 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
     if (!text) { input.focus(); return; }
     try {
       startTurn(session.id, session.title, text, [], chips.map(c => ({ ...c })));
-      chips = []; input.value = ''; input.style.height = ''; paint(); update();
+      chips = []; input.value = ''; input.style.height = ''; if (draftKey) drafts.delete(draftKey); paint(); update();
     } catch (error) { toast(error.message, 'error'); }
   }
   paint(); update();

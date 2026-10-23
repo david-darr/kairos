@@ -57,6 +57,7 @@ Declare only hooks you implement in `hooks.py`. Exact callable signatures
 - `stop()`: release background resources when removed, changed or shutting down; return nothing.
 - `on_message(source, message)`: passive consumer of copied inbound dictionaries; return ignored.
 - `on_chat_turn(user, turn)`: passive receipt for a successful completed chat run owned by `user`; return ignored. `turn` contains `id` (run ID), `session_id`, `message`, `reply`, `at` (finish timestamp), and recorded `actions` (`name`, `ok`, `detail`). It does not fire for failed/stopped runs or ownerless chats when accounts are enabled. Treat all text as untrusted evidence. Queue slow model work and return immediately; recheck `api.is_on` and ownership before writing.
+- `on_task_run(user, turn)`: passive receipt for a successful scheduled task, agent routine or card. Fields: `id`, `kind="routine"`, `routine_id`, `agent_id`, `message` (empty), `request` (run prompt, context only), `reply`, `at` and recorded `actions`. Owner comes from the admitted background run, never model arguments. Failed/stopped or unidentified-owner runs do not emit. Queue model checks and return promptly; inspect real action evidence before claiming completion. The prompt and agent memory must never be treated as a user completion report.
 - `calendar_items(user, start, end)`: return a list of calendar item dictionaries for this user and range.
 - `home_cards(user)`: return a list of at most two Home card dictionaries for this user.
 - `task_items(user, query)`: return at most 20 owned open task summaries, filtered by query. Fields: `id`, `title`, `status`, `priority`, `due_date`, `contact`, `project`. Used by the read-only `list_tab_tasks` model tool. No model or network calls.
@@ -145,7 +146,7 @@ Module functions (call as `tab_api.<name>`):
 - `document(document_id)`: read one Library document.
 - `backlog_card(card_id)`: read a work card.
 - `backlog_result(card_id)`: latest successful assignment output and actual recorded actions (`id`, `at`, `output`, `actions`), or `None`; a finished run alone does not prove the full goal was fulfilled.
-- `create_backlog_card(title, description, agent_id)`: create a backlog card for an agent.
+- `create_backlog_card(title, description, agent_id, owner_user=None)`: create a backlog card for an agent; pass the authenticated task owner for owner-scoped background reads.
 - `delete_backlog_card(card_id)`: delete a work card.
 - `unregister_sync(slug)`: remove a tab's sync providers; the loader handles this on retirement. Do not unregister other tabs.
 
@@ -240,7 +241,7 @@ folder survives app updates; removing/replacing source keeps saved tab data.
 
 Before handing it over, run this checklist using the files you wrote:
 
-- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `calendar_items`, `home_cards`, `task_items` and `task_context`; check their signatures above.
+- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `on_task_run`, `calendar_items`, `home_cards`, `task_items` and `task_context`; check their signatures above.
 - If using `home_cards`, check shapes, text/number limits, unique stable IDs, at most two cards, owner filtering and cheap reads. Verify hidden-by-default cards, Layout controls and off/on placement.
 - Check `routes.py` exposes `router`, owns its API prefix and authenticates endpoints.
 - Check all Kairos imports use only `core.tab_api`; local imports are relative.

@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from core import design_html, design_store, design_systems
+from core import design_formats, design_html, design_store, design_systems
 from core.tool_registry import (ALL, CLAUDE, CODEX, OPENAI, READ, WRITE, ToolContext, ToolResult, _object, _str,
                                 register)
 from core.untrusted import wrap_untrusted
@@ -32,6 +32,17 @@ LINKED_TOOLS = frozenset({"design_outline", "design_read", "design_add_board", "
 MAX_READ = 40 * 1024
 SKILL_HINT = "Read the design-canvas skill first (read_skill design-canvas)."
 FRAMES = list(design_store.FRAMES)
+FORMATS = design_formats.FORMAT_IDS
+FORMAT_HELP = ("Pick the format from the request: " + design_formats.catalog_text() + ". "
+               "A website is always a desktop board (1440 wide) and a mobile board (390 wide); their height grows "
+               "with the content, so never set a page's height or an odd width. format custom with w and h only when "
+               "the person asked for exact pixel dimensions.")
+_FORMAT = {"type": "string", "enum": FORMATS, "description": "The board's format, from the request (see the tool description)"}
+_ORIENTATION = {"type": "string", "enum": list(design_formats.ORIENTATIONS),
+                "description": "portrait or landscape (square for a square social post); ignored for website and email"}
+_SIZE = _str("Optional size within the format: website pair (default), desktop or mobile; app phone or tablet; "
+             "poster 2:3, 3:4, a-series, 18x24 or 11x17; social post or story; print letter or a4; banner header, "
+             "leaderboard, billboard, linkedin or skyscraper")
 
 _ID = _str("The design id from design_create (optional when this chat has one design)")
 _BOARD = _str("Board slug from design_outline (a title or its number, e.g. \"2\", also works)")
@@ -87,6 +98,14 @@ def _link(data: dict) -> str:
     return f"[Design: {title}](/designs/{data['id']})"
 
 
+def _size_text(info: dict) -> str:
+    """"Website · Desktop 1440 wide, height grows (now 2310)", "Poster · 2:3 portrait 1200x1800"."""
+    name = design_formats.label(info)
+    if design_formats.grows(info):
+        return f"{name} {info['w']} wide, height grows with the content (now {info['h']})"
+    return f"{name} {info['w']}x{info['h']}"
+
+
 def _notes(notes: list[str]) -> str:
     return ("\nNotes:\n" + "\n".join(f"- {n}" for n in notes[:12])) if notes else ""
 
@@ -121,18 +140,23 @@ NEXT_STEPS = ("Next: design_outline (see ids), design_edit (change elements by i
 
 
 @register("design_create",
-          "Design screens, app UI, a mockup or wireframe, an onboarding flow, a landing page or slides on Kairos's Design "
-          "canvas: create a design (HTML boards in a design system) linked to this chat. " + SKILL_HINT + " "
-          "Pass the screens as boards: [{title, frame, html}], frame one of phone, tablet, desktop, browser, slide, none. "
+          "Design screens, app UI, a mockup or wireframe, an onboarding flow, a website or landing page, a poster, "
+          "slides, a social post, a print page, a banner or an email on Kairos's Design canvas: create a design (HTML "
+          "boards in a design system) linked to this chat. " + SKILL_HINT + " "
+          "Pass the first board or two as boards: [{title, format, orientation, size?, html, mobile_html?}], then add "
+          "the rest one at a time with design_add_board so the person watches the design build. " + FORMAT_HELP + " "
           "Each html is a fragment (no <html>/<head>) styled with var(--ds-...) tokens; no scripts. "
           "Use data-kd-goto=\"<board slug>\" on a button to link screens. Returns the design id and a link to include in your reply.",
           _object({"title": _str("Design title"),
                     "design_system": _str("Design system id (default kairos)"),
-                    "boards": {"type": "array", "description": "Starter boards, in order (at most 12)",
+                    "boards": {"type": "array", "description": "Starter boards, in order (at most 12; a website page counts as its desktop and mobile pair)",
                                "items": {"type": "object", "properties": {
-                                   "title": {"type": "string"}, "frame": {"type": "string", "enum": FRAMES},
-                                   "html": {"type": "string"}, "w": {"type": "integer"}, "h": {"type": "integer"}},
-                                   "required": ["title"]}}},
+                                   "title": {"type": "string"}, "format": _FORMAT, "orientation": _ORIENTATION,
+                                   "size": _SIZE, "html": {"type": "string"},
+                                   "mobile_html": _str("website only: the page's mobile (390 wide) HTML"),
+                                   "w": {"type": "integer", "description": "format custom only"},
+                                   "h": {"type": "integer", "description": "format custom only"}},
+                                   "required": ["title", "format", "orientation"]}}},
                    ("title",)),
           surfaces=ALL, effect=WRITE)
 @_guard
@@ -148,11 +172,12 @@ async def _design_create(args, ctx):
         from core.auth import SINGLE_USER
         owner = SINGLE_USER
     data, notes = design_store.create(args.get("title") or "", owner=owner, chat_key_=key, by=_by(ctx),
-                                      design_system=args.get("design_system"), boards=args.get("boards"))
+                                      design_system=args.get("design_system"), boards=args.get("boards"),
+                                      session_id=ctx.session_id)
     lint = []
     for slug, _ in design_store.ordered_boards(data):
         lint += [f"{slug}: {n}" for n in _lint(data, slug)]
-    boards = "\n".join(f"- {slug}: \"{info['title']}\" ({info['frame']} {info['w']}x{info['h']})"
+    boards = "\n".join(f"- {slug}: \"{info['title']}\" ({_size_text(info)})"
                        for slug, info in design_store.ordered_boards(data))
     return (f"Created design {data['id']} \"{data['title']}\" (version {data['version']}, design system "
             f"{data['design_system']}).\nBoards:\n{boards}{_notes(notes + lint)}\n"
@@ -173,7 +198,7 @@ async def _design_outline(args, ctx):
                  "Boards (in order):"]
         for n, (slug, info) in enumerate(design_store.ordered_boards(data), 1):
             count = len(design_html.index(design_html.parse(design_store.board_html(data["id"], slug))))
-            lines.append(f"{n}. {slug}: \"{info['title']}\" {info['frame']} {info['w']}x{info['h']}, {count} elements")
+            lines.append(f"{n}. {slug}: \"{info['title']}\" {_size_text(info)}, {count} elements")
         open_comments = [c for c in design_store.comments(data["id"]) if c["status"] == "open"]
         if open_comments:
             lines.append(f"{len(open_comments)} open comment(s); design_comments lists them.")
@@ -184,7 +209,7 @@ async def _design_outline(args, ctx):
     slug = design_store.find_board(data, args["board"])
     root = design_html.parse(design_store.board_html(data["id"], slug))
     info = data["boards"][slug]
-    head = f"Board {slug} \"{info['title']}\" ({info['frame']} {info['w']}x{info['h']}), version {data.get('version')}:"
+    head = f"Board {slug} \"{info['title']}\" ({_size_text(info)}), version {data.get('version')}:"
     return wrap_untrusted("design content", head + "\n" + design_html.outline(root))
 
 
@@ -211,27 +236,35 @@ async def _design_read(args, ctx):
 
 
 @register("design_add_board",
-          "Add one board to a design, placed in the next free slot. frame: phone, tablet, desktop, browser, slide "
-          "or none (custom w, h). html is optional: without it the board starts empty with the system's base styles.",
-          _object({"design_id": _ID, "title": _str("Board title"),
-                   "frame": {"type": "string", "enum": FRAMES}, "html": _str("Board HTML fragment, no scripts"),
+          "Add one board to a design, laid out in its format's row. format and orientation as for design_create: "
+          "website (a desktop and mobile pair, height grows), app, poster, slides, social, print, banner, email; "
+          "custom w and h only for exact sizes the person gave. html is optional: without it the board starts empty "
+          "with the system's base styles.",
+          _object({"design_id": _ID, "title": _str("Board title"), "format": _FORMAT, "orientation": _ORIENTATION,
+                   "size": _SIZE, "html": _str("Board HTML fragment, no scripts"),
+                   "mobile_html": _str("website only: the page's mobile (390 wide) HTML"),
                    "after": _str("Optional board slug to place it after"),
-                   "w": {"type": "integer"}, "h": {"type": "integer"}}, ("title", "frame")),
+                   "w": {"type": "integer", "description": "format custom only"},
+                   "h": {"type": "integer", "description": "format custom only"}}, ("title", "format", "orientation")),
           surfaces=ALL, effect=WRITE)
 @_guard
 async def _design_add_board(args, ctx):
     data = _design(args, ctx)
     after = design_store.find_board(data, args["after"]) if args.get("after") else None
 
+    specs = design_store.board_specs(args)
+
     def edit(draft, files):
-        slug, notes = design_store._add_board(draft, files, args.get("title"), args.get("frame") or "phone",
-                                              args.get("html"), after=after, w=args.get("w"), h=args.get("h"))
-        return (slug, notes), f"Added board {draft['boards'][slug]['title']}"
+        made = design_store.add_boards(draft, files, args.get("title"), specs, args.get("html"), after=after,
+                                       mobile_html=args.get("mobile_html"))
+        return made, "Added board " + ", ".join(draft["boards"][slug]["title"] for slug, _ in made)
     result = design_store.change(data["id"], edit, by=_by(ctx), tool="design_add_board", session_id=ctx.session_id)
-    slug, notes = result["result"]
-    info = result["manifest"]["boards"][slug]
-    return (f"Added board {slug} \"{info['title']}\" ({info['frame']} {info['w']}x{info['h']}) as version "
-            f"{result['version']}.{_notes(notes + _lint(result['manifest'], slug))}")
+    lines, notes = [], []
+    for slug, more in result["result"]:
+        info = result["manifest"]["boards"][slug]
+        lines.append(f"{slug} \"{info['title']}\" ({_size_text(info)})")
+        notes += [f"{slug}: {n}" for n in more + _lint(result["manifest"], slug)]
+    return f"Added board {' and '.join(lines)} as version {result['version']}.{_notes(notes)}"
 
 
 @register("design_edit",
@@ -280,14 +313,18 @@ async def _design_edit(args, ctx):
 
 @register("design_boards",
           "Manage boards: action rename {board, title}, duplicate {board}, delete {board}, reorder {board, order "
-          "(1 = first)}, move {board, x, y}, resize {board, frame or w, h}, note {text, x, y} adds a canvas label, "
-          "delete_note {note_id}, rename_design {title}.",
+          "(1 = first)}, move {board, x, y} (on the row layout this moves the board along its format's row), "
+          "resize {board, w or h} (a fixed format keeps its ratio; a website or email board changes height only), "
+          "fit_format {board, format?, size?, orientation?} puts a board made before formats into its nearest "
+          "format (no board: every such board), note {text, x, y} adds a canvas label, delete_note {note_id}, "
+          "rename_design {title}.",
           _object({"design_id": _ID,
                    "action": {"type": "string", "enum": ["rename", "duplicate", "delete", "reorder", "move", "resize",
-                                                         "note", "delete_note", "rename_design"]},
+                                                         "fit_format", "note", "delete_note", "rename_design"]},
                    "board": _BOARD, "title": _str(), "order": {"type": "integer"},
                    "x": {"type": "integer"}, "y": {"type": "integer"}, "w": {"type": "integer"}, "h": {"type": "integer"},
-                   "frame": {"type": "string", "enum": FRAMES}, "text": _str("Note text"), "note_id": _str()},
+                   "format": _FORMAT, "size": _SIZE, "orientation": _ORIENTATION,
+                   "text": _str("Note text"), "note_id": _str()},
                   ("action",)),
           surfaces=ALL, effect=WRITE)
 @_guard
@@ -301,7 +338,8 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
     """Shared by the tool and the canvas (whole-board drag and resize)."""
     action = args.get("action")
     needs_board = action in ("rename", "duplicate", "delete", "reorder", "move", "resize")
-    slug = design_store.find_board(data, args.get("board") or "") if needs_board else None
+    slug = design_store.find_board(data, args.get("board") or "") if needs_board or (
+        action == "fit_format" and args.get("board")) else None
 
     def edit(draft, files):
         boards = draft["boards"]
@@ -312,9 +350,13 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
             boards[slug]["title"] = title
             return slug, f"Renamed {slug} to {title}"
         if action == "duplicate":
-            new, _ = design_store._add_board(draft, files, f"{boards[slug]['title']} copy", boards[slug]["frame"],
-                                             design_store.board_html(data["id"], slug), after=slug,
-                                             w=boards[slug]["w"], h=boards[slug]["h"])
+            spec = {k: boards[slug].get(k) for k in ("format", "size", "orientation", "frame", "w", "h", "min_h")}
+            spec["grow"] = design_formats.grows(boards[slug])
+            new, _ = design_store._add_board(draft, files, f"{boards[slug]['title']} copy", spec,
+                                             design_store.board_html(data["id"], slug), after=slug)
+            for key in ("content_h",):
+                if boards[slug].get(key):
+                    boards[new][key] = boards[slug][key]
             return new, f"Duplicated {slug} as {new}"
         if action == "delete":
             if len(boards) <= 1:
@@ -322,6 +364,7 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
             del boards[slug]
             files[slug] = None
             design_store._renumber(draft)
+            design_store.reflow(draft)
             return slug, f"Deleted board {slug}"
         if action == "reorder":
             order = args.get("order")
@@ -331,23 +374,55 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
             ordered.insert(min(order - 1, len(ordered)), slug)
             for n, name in enumerate(ordered, 1):
                 boards[name]["order"] = n
+            design_store.reflow(draft)
             return slug, f"Moved {slug} to position {order}"
         if action == "move":
-            boards[slug]["x"] = design_store._int(args.get("x"), boards[slug]["x"], -100000, 100000)
-            boards[slug]["y"] = design_store._int(args.get("y"), boards[slug]["y"], -100000, 100000)
-            return slug, f"Moved {slug} on the canvas"
+            x = design_store._int(args.get("x"), boards[slug]["x"], -100000, 100000)
+            y = design_store._int(args.get("y"), boards[slug]["y"], -100000, 100000)
+            if draft.get("layout") != "auto" and not args.get("reflow"):
+                boards[slug]["x"], boards[slug]["y"] = x, y
+                return slug, f"Moved {slug} on the canvas"
+            # The row layout: a board moves along its format's row. Where it is
+            # dropped picks its place among that row's boards; the rest reflow.
+            draft["layout"] = "auto"
+            key = design_formats.section_key(boards[slug])
+            ordered = [s for s, _ in design_store.ordered_boards(draft)]
+            row = [s for s in ordered if s != slug and design_formats.section_key(boards[s]) == key]
+            centre = x + boards[slug]["w"] / 2
+            before = next((s for s in row if centre < boards[s]["x"] + boards[s]["w"] / 2), None)
+            rest = [s for s in ordered if s != slug]
+            at = rest.index(before) if before else (rest.index(row[-1]) + 1 if row else len(rest))
+            rest.insert(at, slug)
+            for n, name in enumerate(rest, 1):
+                boards[name]["order"] = n
+            design_store.reflow(draft)
+            return slug, f"Moved {slug} to place {rest.index(slug) + 1}"
         if action == "resize":
-            frame = args.get("frame") or boards[slug]["frame"]
-            if frame not in design_store.FRAMES:
-                raise ValueError(f"frame must be one of {', '.join(design_store.FRAMES)}.")
-            if args.get("w") or args.get("h"):
-                # A custom size keeps the board's frame (its device chrome).
-                w = design_store._int(args.get("w"), boards[slug]["w"], 120, 4000)
-                h = design_store._int(args.get("h"), boards[slug]["h"], 120, 8000)
-            else:
-                w, h = design_store.frame_size(frame)
-            boards[slug].update(frame=frame, w=w, h=h)
+            if args.get("frame") and not (args.get("w") or args.get("h")):
+                raise ValueError("resize takes w or h; to change a board's format use fit_format.")
+            w, h, min_h = design_formats.resize(boards[slug], args.get("w"), args.get("h"))
+            boards[slug].update(w=w, h=h)
+            if min_h is not None:
+                boards[slug]["min_h"] = min_h
+            if draft.get("layout") == "auto" or args.get("reflow"):
+                draft["layout"] = "auto"
+                design_store.reflow(draft)
             return slug, f"Resized {slug} to {w}x{h}"
+        if action == "fit_format":
+            targets = [slug] if slug else [s for s, b in design_store.ordered_boards(draft) if not b.get("format")]
+            if not targets:
+                raise ValueError("Every board already has a format.")
+            chosen = None
+            if args.get("format"):
+                chosen = design_store.board_specs(args)
+                if len(chosen) > 1:
+                    raise ValueError("Fit one board at a time to desktop or mobile: pass size desktop or mobile.")
+                chosen = chosen[0]
+            for name in targets:
+                boards[name].update(design_formats.fit(boards[name], chosen))
+            draft["layout"] = "auto"
+            design_store.reflow(draft)
+            return targets, ("Fitted " + ", ".join(f"{t} to {design_formats.label(boards[t])}" for t in targets[:6]))
         if action == "note":
             text = (args.get("text") or "").strip()[:300]
             if not text:

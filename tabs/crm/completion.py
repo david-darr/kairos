@@ -32,6 +32,7 @@ an external action (send, book, change files, submit, purchase), requires_action
 must be true and a successful relevant recorded action must support completion.
 An assistant saying done without action evidence is insufficient for those tasks.
 Recorded actions may fail or do something unrelated: check their details.
+work_request is background request context, never a user completion report.
 For user-reported completion requires_action is false. If context is incomplete
 or there is doubt, return no completion. Never invent task IDs or quotes."""
 
@@ -51,6 +52,8 @@ def _input(tasks, turn, endpoint):
     facts = [{k: (str(t.get(k) or "")[:300]) for k in ("id", "title", "notes", "project", "contact")} for t in tasks]
     actions = [{k: a.get(k) for k in ("name", "ok", "detail")} for a in turn.get("actions", [])[-8:]]
     payload = {"tasks": facts, "actions": actions}
+    if turn.get("kind") == "routine":
+        payload["work_request"] = str(turn.get("request") or "")[:4000]
     limit = tab_api.model_context_size(endpoint) or 16384
     budget = limit - len(SYSTEM.encode()) - len(json.dumps(payload).encode()) - 2000
     if budget < 512:
@@ -111,7 +114,8 @@ async def check(owner, tasks, turn, *, kind="chat", card_id=None):
             if actor == "assistant" and requires_action and not any(a.get("ok") is True for a in turn.get("actions", [])):
                 continue
             decisions.append((task, {"kind": kind, "actor": actor, "quote": quote,
-                "session_id": turn.get("session_id"), "run_id": turn["id"], "card_id": card_id}))
+                "session_id": turn.get("session_id"), "run_id": turn["id"], "card_id": card_id,
+                "routine_id": turn.get("routine_id"), "agent_id": turn.get("agent_id")}))
         if not api.is_on:
             return
         for task, receipt in decisions:

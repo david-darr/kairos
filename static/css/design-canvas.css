@@ -19,8 +19,15 @@
 .design-card-copy strong { font-weight: 500; }
 
 .design-page { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; gap: 0; }
-.view[data-view="design"] { display: flex; flex-direction: column; }
-.view[data-view="design"] > .design-page { flex: 1; min-height: 0; }
+/* A design open full page inside Library (David, 2026-10-22). */
+.view.library-design-open { display: flex; flex-direction: column; overflow: hidden; }
+.view.library-design-open > .design-page { flex: 1; min-height: 0; }
+.design-model-host { position: relative; min-width: 0; }
+.design-model-picker { position: relative; }
+.design-model-btn { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-model-menu { top: calc(100% + 6px); bottom: auto; right: 0; width: 320px; max-height: min(440px, 60vh); white-space: normal; }
+.design-model-menu[hidden] { display: none; }
+.design-model-menu .model-effort-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 4px 4px; }
 .design-page-header { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--hairline-soft); white-space: nowrap; }
 .design-page-header > .btn { flex: none; }
 .design-page-canvas { position: relative; min-height: 0; display: flex; }
@@ -37,7 +44,8 @@
 .design-toolbar-start { display: flex; align-items: baseline; gap: 10px; min-width: 60px; flex: 1 1 auto; overflow: hidden; }
 .design-system-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .design-title { margin: 0; font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.design-toolbar-end { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.design-toolbar-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; min-width: 0; }
+.design-toolbar { flex-wrap: wrap; }
 .design-modes { display: inline-flex; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 999px; }
 @media (max-width: 1100px) { .design-system-name { display: none; } }
 .design-modes .btn { border-radius: 999px; }
@@ -58,7 +66,7 @@
 
 .design-board { position: absolute; }
 .design-board-title { position: absolute; left: 0; right: 0; display: flex; align-items: baseline; gap: .7em; padding: 0 2px;
-  font-size: calc(14px / var(--design-zoom, 1)); line-height: 1.5; white-space: nowrap; overflow: hidden; cursor: move; user-select: none; color: var(--text); }
+  font-size: min(calc(14px / var(--design-zoom, 1)), 120px); line-height: 1.5; white-space: nowrap; overflow: hidden; cursor: move; user-select: none; color: var(--text); }
 .design-board-name { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .design-board-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .design-board-name { font-weight: 500; }
@@ -96,6 +104,25 @@
 .design-board[data-frame="slide"] .design-chrome { border-radius: 2px; box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-elevated); }
 .design-board[data-frame="none"] .design-chrome, .design-board[data-frame="desktop"] .design-chrome { box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-elevated); }
 
+/* Rows by format (core/design_formats.py): a label above each row; neighbours
+   glide while a board is dragged or resized, the board itself follows the pointer. */
+.design-section-label { position: absolute; transform: translate(calc(-100% - min(28px / var(--design-zoom, 1), 60px)), calc(-100% - min(8px / var(--design-zoom, 1), 20px)));
+  color: var(--text-dim); font: 500 min(calc(11px / var(--design-zoom, 1)), 100px) / 1.5 var(--font-sans); letter-spacing: .08em; text-transform: uppercase;
+  text-align: right; white-space: nowrap; pointer-events: none; }
+.design-canvas-compact .design-section-label { display: none; }
+/* Titles and row labels keep their screen size until they would no longer fit
+   between rows (ROW_GAP + TITLE_GAP, 354 canvas px): past that they shrink with
+   the canvas (the caps above), and when too small to read they step aside,
+   row labels first, then board titles. Nothing overlaps at any zoom. */
+.design-canvas[data-zoom-tier="small"] .design-section-label,
+.design-canvas[data-zoom-tier="tiny"] .design-section-label,
+.design-canvas[data-zoom-tier="tiny"] .design-board-title { visibility: hidden; }
+.design-reflowing .design-board { transition: left .2s var(--ease-out), top .2s var(--ease-out); }
+.design-reflowing .design-board.design-lifted { transition: none; z-index: 2; }
+.design-board.design-lifted .design-board-body { box-shadow: var(--shadow-lifted); }
+.design-format-menu { max-height: min(60vh, 520px); overflow: auto; }
+.design-menu-heading { padding: 8px 12px 2px; color: var(--text-dim); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.design-fit-format[hidden] { display: none; }
 .design-note { position: absolute; max-width: 900px; color: var(--text); font: 500 28px var(--font-sans); white-space: pre-wrap; }
 .design-note-title1 { font-size: 64px; font-family: var(--font-display); font-style: italic; }
 .design-pin { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0; border: 2px solid var(--bg-panel-solid); border-radius: 50% 50% 50% 4px;
@@ -174,7 +201,7 @@
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) {
-  .design-world.design-animate, .design-card { transition: none; }
+  .design-world.design-animate, .design-card, .design-reflowing .design-board { transition: none; }
 }
 
 /* -- phones: the redesign shell (3i) ----------------------------------------- */
@@ -185,13 +212,21 @@
   .kairos-redesign .design-list { grid-template-columns: minmax(0, 1fr); }
   .kairos-redesign .design-toolbar .btn, .kairos-redesign .design-modes .btn { min-height: 44px; min-width: 44px; }
   .kairos-redesign .design-toolbar-start { flex-basis: 100%; }
-  .kairos-redesign .design-toolbar-end { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  .kairos-redesign .design-toolbar-end { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
   .kairos-redesign .design-modes { flex-wrap: nowrap; }
   .kairos-redesign .design-canvas [aria-label="Fit all boards (Shift+1)"], .kairos-redesign .design-zoom, .kairos-redesign .design-resize { display: none; }
   .kairos-redesign .design-panel:not(.design-panel-sheet) { display: none; }
   .kairos-redesign .design-panel-sheet { width: auto; border: 0; padding: 0; }
   .kairos-redesign .design-page-header { padding: 6px 10px; }
   .kairos-redesign .design-page-header .btn, .kairos-redesign .design-chat-pick select { min-height: 44px; }
+  .kairos-redesign .design-page-header { flex-wrap: wrap; overflow: visible; white-space: normal; row-gap: 6px; }
+  .kairos-redesign .design-page-header .design-spacer { display: none; }
+  .kairos-redesign .design-chat-pick { flex: 1 1 auto; min-width: 0; }
+  .kairos-redesign .design-chat-pick select { flex: 1; min-width: 0; max-width: none; }
+  .kairos-redesign .design-model-host { flex: 1 1 50%; min-width: 0; }
+  .kairos-redesign .design-model-btn { width: 100%; max-width: none; justify-content: flex-start; }
+  .kairos-redesign .design-model-menu { position: fixed; top: auto; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: auto; }
+  .kairos-redesign .design-model-menu .model-picker-item, .kairos-redesign .design-model-menu .model-effort-btn { min-height: 44px; }
   .kairos-redesign .design-page-header .danger { display: none; }
   .kairos-redesign .design-focus { position: fixed; inset: 0; z-index: 9000; padding-top: env(safe-area-inset-top); }
   .kairos-redesign .design-focus-bar { flex-wrap: nowrap; gap: 4px; }

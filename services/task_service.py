@@ -132,7 +132,7 @@ class TaskService:
     @staticmethod
     def visible_to(task: dict, user: Optional[str], is_admin: bool = False) -> bool:
         # Existing tasks are shared. Honor ownership on scoped/imported tasks.
-        owner = task.get("owner") or task.get("user_id") or task.get("created_by")
+        owner = task.get("owner_user") or task.get("owner") or task.get("user_id") or task.get("created_by")
         return bool(is_admin or (not task.get("admin_only") and (not owner or owner == user)))
 
     def create_task(
@@ -158,6 +158,7 @@ class TaskService:
         time_zone: Optional[str] = None,
         weekdays: Optional[list[int]] = None,
         origin_session_id: Optional[str] = None,
+        owner_user: Optional[str] = None,
     ) -> dict:
         if schedule_kind not in ("once", "interval", "daily", "card"):
             raise ValueError("schedule_kind must be 'once', 'interval', 'daily' or 'card'")
@@ -248,9 +249,26 @@ class TaskService:
                          "claimed_until": None, "comments": []})
         if origin_session_id is not None and schedule_kind != "card":
             task["origin_session_id"] = origin_session_id
+        if owner_user is not None:
+            task["owner_user"] = owner_user
         self._tasks[task_id] = task
         self._save_tasks()
         return task
+
+    def bind_owner(self, task_id: str, user: str) -> None:
+        """An explicit UI edit adopts an old ownerless routine while idle."""
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        if any(task.get(k) for k in ("owner_user", "owner", "user_id", "created_by")):
+            return
+        if task.get("run_started_at") or task.get("status") == "running":
+            raise ValueError("Stop this routine before saving its owner")
+        if task.get("origin_session_id"):
+            from core.session_manager import session_manager
+            user = (session_manager.get_session(task["origin_session_id"]) or {}).get("owner_user") or user
+        task["owner_user"] = user
+        self._save_tasks()
 
     def update_task(self, task_id: str, **fields) -> dict:
         task = self._tasks.get(task_id)

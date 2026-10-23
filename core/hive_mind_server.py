@@ -55,8 +55,10 @@ def get_hive_mind_server(exclude_session_id: str | None = None, is_admin: bool =
     tool signature is fixed at server-creation time) — Brain passes its own
     session id in by building a fresh server per connection instead of one
     shared global instance, so a session never "finds" its own history."""
+    from core import task_scope
     ctx = tool_registry.ToolContext(session_id=exclude_session_id, is_admin=is_admin, turn_taint=turn_taint,
-                                    agent_id=agent_id, read_only=tool_registry.session_read_only(exclude_session_id))
+                                    agent_id=agent_id, read_only=tool_registry.session_read_only(exclude_session_id),
+                                    owner_user=task_scope.current_owner(agent_id))
     # `only`: a narrower server for one purpose (scripts/computer_bench.py
     # offers Claude the computer alone).
     chosen = [spec for spec in tool_registry.specs(tool_registry.CLAUDE, is_admin, agent=bool(agent_id), read_only=ctx.read_only, session_id=exclude_session_id or '')

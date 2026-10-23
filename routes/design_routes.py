@@ -16,8 +16,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from core import (design_comments, design_export, design_html, design_render, design_render_bridge, design_store,
-                  design_systems, design_tools)
+from core import (design_comments, design_export, design_formats, design_html, design_render, design_render_bridge,
+                  design_store, design_systems, design_tools)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_admin, require_user
 
@@ -50,15 +50,47 @@ def _fail(error: Exception):
 def _client(data: dict) -> dict:
     from core.session_manager import session_manager
     out = design_store.summary(data)
-    out.update(boards=data.get("boards", {}), notes=data.get("notes", []),
-               token_overrides=data.get("token_overrides") or {},
-               order=[slug for slug, _ in design_store.ordered_boards(data)])
+    order = [slug for slug, _ in design_store.ordered_boards(data)]
+    boards = {}
+    for slug, info in data.get("boards", {}).items():
+        # What the canvas needs to keep a board true to its format: its label,
+        # its ratio (fixed formats), whether it grows (website, email), and for
+        # a board made before formats, its nearest format ("Fit to format").
+        extra = {"format_label": design_formats.label(info), "ratio": design_formats.ratio(info),
+                 "grows": design_formats.grows(info), "section": design_formats.section_key(info)}
+        if not info.get("format"):
+            guess = design_formats.infer(info)
+            extra["format_guess"] = ({k: guess[k] for k in ("format", "size", "orientation", "w", "h")}
+                                     | {"label": design_formats.label(guess)}) if guess else None
+        boards[slug] = {**info, **extra}
+    out.update(boards=boards, notes=data.get("notes", []), token_overrides=data.get("token_overrides") or {},
+               order=order, layout=data.get("layout") or "free",
+               sections=design_formats.sections(data.get("boards", {}), order) if data.get("layout") == "auto" else [],
+               formats=_formats())
     out["chats"] = [{"id": sid, "title": (session_manager.get_session(sid) or {}).get("title") or "Chat"}
                     for sid in out["chat_ids"] if session_manager.get_session(sid)]
     system = design_systems.get(out["design_system"]) or design_systems.builtin()
     out["system"] = {"id": system["id"], "name": system["name"],
                      "variables": design_systems.variables(system["tokens"], data.get("token_overrides")),
                      "defaults": design_systems.variables(system["tokens"])}
+    return out
+
+
+def _formats() -> list[dict]:
+    """The format menu (Add board, Fit to format), from design_formats."""
+    out = []
+    for fid, spec in design_formats.FORMATS.items():
+        if fid == "custom":
+            continue
+        options = []
+        for size, info in spec["sizes"].items():
+            orientations = [info["only"]] if info.get("only") else list(spec["orientations"]) or [None]
+            for orientation in orientations:
+                board = design_formats.resolve(fid, size=size, orientation=orientation)[0]
+                options.append({"format": fid, "size": size, "orientation": orientation,
+                                "label": design_formats.label(board), "w": board["w"], "h": board["h"],
+                                "grows": bool(board["grow"])})
+        out.append({"id": fid, "label": spec["label"], "options": options})
     return out
 
 
@@ -98,7 +130,10 @@ def _bind_loop():
 class CreateDesign(BaseModel):
     title: str = Field(default="Untitled design", max_length=120)
     design_system: Optional[str] = None
-    frame: str = "phone"
+    frame: Optional[str] = None
+    format: Optional[str] = None
+    size: Optional[str] = None
+    orientation: Optional[str] = None
     session_id: Optional[str] = None
 
 
@@ -126,9 +161,12 @@ async def create_design(body: CreateDesign, user: str = Depends(require_user)) -
     if body.session_id:
         _owns_chat(body.session_id, user)
     try:
+        board = {"title": "Screen 1", "format": body.format, "size": body.size, "orientation": body.orientation,
+                 "frame": body.frame}
+        if not body.format and not body.frame:
+            board.update(format="app", size="phone", orientation="portrait")
         data, _ = design_store.create(body.title, owner=user, chat_key_=body.session_id, by="You",
-                                      design_system=body.design_system,
-                                      boards=[{"title": "Screen 1", "frame": body.frame}])
+                                      design_system=body.design_system, boards=[board])
     except (ValueError, LookupError) as error:
         _fail(error)
     return _client(data)
@@ -326,22 +364,44 @@ async def board_thumb(design_id: str, slug: str, user: str = Depends(require_use
 
 class AddBoard(BaseModel):
     title: str = Field(default="New board", max_length=80)
-    frame: str = "phone"
+    frame: Optional[str] = None
+    format: Optional[str] = None
+    size: Optional[str] = None
+    orientation: Optional[str] = None
+    w: Optional[int] = None
+    h: Optional[int] = None
     after: Optional[str] = None
 
 
 @router.post("/{design_id}/boards")
 async def add_board(design_id: str, body: AddBoard, user: str = Depends(require_user)) -> dict:
-    data = _design(design_id, user)
+    _design(design_id, user)
 
     def edit(draft, files):
-        slug, _ = design_store._add_board(draft, files, body.title, body.frame, None, after=body.after)
-        return slug, f"Added board {body.title}"
+        made = design_store.add_boards(draft, files, body.title, design_store.board_specs(body.model_dump()), None,
+                                       after=body.after)
+        return [slug for slug, _ in made], f"Added board {body.title}"
     try:
         result = design_store.change(design_id, edit, by="You", tool="add_board", user_edit=True)
     except (ValueError, LookupError) as error:
         _fail(error)
-    return {"slug": result["result"], "design": _client(result["manifest"])}
+    return {"slug": result["result"][0], "slugs": result["result"], "design": _client(result["manifest"])}
+
+
+class FitHeight(BaseModel):
+    h: int = Field(ge=1, le=100000)
+
+
+@router.post("/{design_id}/boards/{slug}/fit-height")
+async def fit_height(design_id: str, slug: str, body: FitHeight, user: str = Depends(require_user)) -> dict:
+    """A website or email board measured by the canvas: as tall as its content
+    (no version; the rows below move)."""
+    _design(design_id, user)
+    try:
+        result = design_store.fit_height(design_id, slug, body.h)
+    except (ValueError, LookupError) as error:
+        _fail(error)
+    return {"h": result["manifest"]["boards"][slug]["h"], "design": _client(result["manifest"])}
 
 
 class BoardAction(BaseModel):
@@ -354,6 +414,10 @@ class BoardAction(BaseModel):
     w: Optional[int] = None
     h: Optional[int] = None
     frame: Optional[str] = None
+    format: Optional[str] = None
+    size: Optional[str] = None
+    orientation: Optional[str] = None
+    reflow: Optional[bool] = None
     text: Optional[str] = None
     note_id: Optional[str] = None
 

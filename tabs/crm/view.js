@@ -256,7 +256,7 @@ export async function render(container) {
       const receipt = updated.completion;
       completionNote.hidden = !receipt || updated.status !== "done";
       const completionText = receipt && updated.status === "done"
-        ? (receipt.kind === "manual" ? "Marked done by you." : `Completed automatically from ${receipt.kind === "sent_email" ? "the daily Sent-mail check" : receipt.kind === "assignment" ? "the linked assignment" : receipt.kind === "source" ? "a source confirmation" : receipt.kind === "reply" ? "a sent reply" : "chat"}. ${receipt.quote || ""}`) : "";
+        ? (receipt.kind === "manual" ? "Marked done by you." : `Completed automatically from ${receipt.kind === "routine" ? "a scheduled task or agent run" : receipt.kind === "sent_email" ? "the daily Sent-mail check" : receipt.kind === "assignment" ? "the linked assignment" : receipt.kind === "source" ? "a source confirmation" : receipt.kind === "reply" ? "a sent reply" : "chat"}. ${receipt.quote || ""}`) : "";
       completionLink.hidden = updated.status !== "done" || receipt?.kind !== "sent_email" || !receipt?.url;
       if (completionNote.textContent !== completionText) completionNote.textContent = completionText;
     };

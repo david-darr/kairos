@@ -22,7 +22,7 @@ import secrets
 import time
 from typing import Optional
 
-from core import design_render, design_store
+from core import design_formats, design_render, design_store
 
 TOKEN = os.environ.pop("KAIROS_RENDER_TOKEN", None) or None
 JOB_SECONDS = 45
@@ -105,8 +105,11 @@ async def render(design_id: str, slug: str, kind: str = "png", *, scale: int = 1
         path += f"&v={int(version)}"
     future = asyncio.get_running_loop().create_future()
     _pending[job_id] = future
+    # A website or email board grows with its content: the window measures the
+    # page and renders it whole, even if no canvas has measured it yet.
     await _q().put({"id": job_id, "kind": kind, "path": path, "w": int(meta["w"]), "h": int(meta["h"]),
-                    "scale": 2 if scale == 2 else 1})
+                    "scale": 2 if scale == 2 else 1, "grow": design_formats.grows(meta),
+                    "min_h": int(meta.get("min_h") or 0)})
     try:
         result = await asyncio.wait_for(future, timeout=JOB_SECONDS)
     except asyncio.TimeoutError:
@@ -117,7 +120,22 @@ async def render(design_id: str, slug: str, kind: str = "png", *, scale: int = 1
         raise RuntimeError("The render window returned something other than a PNG.")
     if kind == "pdf" and not result.startswith(b"%PDF"):
         raise RuntimeError("The render window returned something other than a PDF.")
+    if kind == "png" and not version and design_formats.grows(meta):
+        _keep_height(design_id, slug, result, 2 if scale == 2 else 1)
     return result
+
+
+def _keep_height(design_id: str, slug: str, png: bytes, scale: int) -> None:
+    """A website or email board's page, measured by the render window: the
+    PNG is as tall as the page (electron/designRender.js), so the board takes
+    that height even if no canvas has shown it live yet (a tall page stays a
+    thumbnail at the zoom that fits it). No version; the rows below move."""
+    try:
+        height = int.from_bytes(png[16:24][4:], "big") // scale  # IHDR: width at bytes 16-19, height at 20-23.
+        if height >= 60:
+            design_store.fit_height(design_id, slug, height)
+    except (LookupError, ValueError):
+        pass
 
 
 async def thumbnail(design_id: str, slug: str) -> Optional[bytes]:

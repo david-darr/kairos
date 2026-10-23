@@ -209,8 +209,10 @@ class ExternalBrain:
             session_id=self.session_id or '') if tool["function"]["name"] not in have)
 
     def _context(self) -> tool_registry.ToolContext:
+        from core import task_scope
         return tool_registry.ToolContext(self.session_id, self.is_admin, self.allow_user_tab_source,
-                                         self.turn_taint, self.agent_id, model=self.model, helper=self.helper, read_only=self.read_only)
+                                         self.turn_taint, self.agent_id, model=self.model, helper=self.helper, read_only=self.read_only,
+                                         owner_user=task_scope.current_owner(self.agent_id))
 
     async def _call_mcp(self, name: str, args: dict) -> str:
         """A third-party tool: asked about first, like Claude's MCP calls,

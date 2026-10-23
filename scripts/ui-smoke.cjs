@@ -329,6 +329,12 @@ app.whenReady().then(async () => {
     // --mascot-off runs the suite with Settings > Appearance > Show the mascot off (saved, so reloads keep it).
     const mascotOff = () => process.argv.includes('--mascot-off') ? js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })") : null;
     await mascotOff();
+    if (process.argv.includes('--design-only')) {  // The Design canvas alone (design-canvas-checks.cjs).
+      await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow, liveRuns, liveFinish, writes });
+      assert.deepEqual(errors, [], 'Design canvas renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['design canvas'], errors }, null, 2));
+      console.log('PASS: design canvas.'); console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
       assert.deepEqual(errors, [], 'Agents call renderer errors');
@@ -2514,7 +2520,7 @@ app.whenReady().then(async () => {
     // Pause and Edit now really change the routine: put it back for the checks that follow.
     assert.equal(await js("fetch('/api/tasks/g1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, name: 'New postings' }) }).then(r => r.status)"), 200);
     // Every bot surface on a phone: no sideways scroll, 44px targets.
-    await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow });
+    await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow, liveRuns, liveFinish, writes });
     console.log('PASS: design canvas.');
     const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
     await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });

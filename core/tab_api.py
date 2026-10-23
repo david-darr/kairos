@@ -335,9 +335,9 @@ def backlog_result(card_id):
                         if step.get("kind") == "tool_finished"] if run_id else []}
 
 
-def create_backlog_card(title, description, agent_id):
+def create_backlog_card(title, description, agent_id, owner_user=None):
     from services.task_service import task_service
-    return task_service.create_task(title, description, "card", status="backlog", agent_id=agent_id)
+    return task_service.create_task(title, description, "card", status="backlog", agent_id=agent_id, owner_user=owner_user)
 
 
 def delete_backlog_card(card_id):

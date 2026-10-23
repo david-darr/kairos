@@ -11,20 +11,46 @@ A design is a canvas of boards. Each board is one plain HTML fragment (no
 edits address elements by those ids. For visual direction first, read
 `ui-ux-pro-max` and call `ui_design` (action `design_system` for a new look).
 
+## Formats: pick one from the request
+
+Every board is made in a named format, at that format's own size. Read what
+the person asked for and pick the format; never invent a width or height.
+
+| Request | format | orientation | size |
+|---|---|---|---|
+| website, landing page, web page, homepage | `website` | (none) | `pair` (default: desktop 1440 wide AND mobile 390 wide), or `desktop` / `mobile` |
+| app, app screens, onboarding, mobile UI | `app` | `portrait` (or `landscape`) | `phone` 390x844 (default) or `tablet` 820x1180 |
+| poster, flyer, print ad | `poster` | `portrait` or `landscape` | `2:3` (default), `3:4`, `a-series`, `18x24`, `11x17` |
+| slides, deck, presentation | `slides` | `landscape` | `16:9` 1920x1080, one board per slide |
+| Instagram or social post, story | `social` | `square` 1:1, `portrait` 4:5, `landscape` 1.91:1 | `post` (default) or `story` 9:16 |
+| letter, one-pager, resume, printed page | `print` | `portrait` or `landscape` | `letter` (default) or `a4` |
+| web banner, ad unit, cover image | `banner` | `landscape` | `header` 3:1 (default), `leaderboard`, `billboard`, `linkedin`, `skyscraper` |
+| email, newsletter | `email` | (none) | 600 wide |
+| exact pixel sizes the person gave | `custom` | (none) | pass `w` and `h` |
+
+- A website is always a pair: each page gets a desktop board and a mobile
+  board. Pass the desktop HTML as `html` and the mobile HTML as
+  `mobile_html` (without it the mobile board starts as a copy to rework).
+- Website and email boards are a fixed width and grow with their content.
+  Never set their height; write the page and it becomes as tall as it is.
+- `custom` only when the person named exact dimensions.
+
 ## Workflow
 
-1. `design_create` with every screen as a board: `{title, frame, html}`.
-   Frames: `phone` 390x844, `tablet` 820x1180, `desktop` 1440x900,
-   `browser` (desktop in browser chrome), `slide` 1920x1080, `none` (w, h).
-2. Put the design link the tool returns in your reply.
-3. Check your work: `design_outline` (text) and the lint notes in each result;
+1. `design_create` with the first board (or the first page's pair):
+   `{title, format, orientation, size?, html, mobile_html?}`.
+2. Add the other boards one at a time with `design_add_board` (same fields).
+   The person watches the design build beside the chat as you go.
+3. Put the design link the tool returns in your reply.
+4. Check your work: `design_outline` (text) and the lint notes in each result;
    `design_snapshot` shows a board as an image if you can read images.
-4. Change things with `design_edit`, never by recreating the design or
+5. Change things with `design_edit`, never by recreating the design or
    rewriting a board. One call may carry up to 20 operations on one board.
-5. More screens: `design_add_board`. Rename, duplicate, delete, reorder or
-   move boards: `design_boards`. Colours and type for the whole design:
-   `design_tokens`. Comments the user pinned: `design_comments`.
-6. Files: `design_export` with `html` (offline zip), `png`, `pdf` or `pptx`.
+6. Rename, duplicate, delete, reorder or move boards: `design_boards`.
+   Boards sit in rows by format; `resize` keeps a fixed format's ratio and
+   changes a website board's height only. Colours and type for the whole
+   design: `design_tokens`. Comments the user pinned: `design_comments`.
+7. Files: `design_export` with `html` (offline zip), `png`, `pdf` or `pptx`.
 
 ## design_edit operations
 
@@ -66,7 +92,7 @@ changes nothing and says what is valid; read it and try again.
 
 ## Skeletons
 
-Phone screen:
+App phone screen (format app, orientation portrait):
 
 ```html
 <main style="display: flex; flex-direction: column; min-height: 844px; padding: var(--ds-space-7) var(--ds-space-5) var(--ds-space-6); background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans)">
@@ -78,7 +104,7 @@ Phone screen:
 </main>
 ```
 
-Landing section (desktop):
+Website desktop section (format website; its mobile pair stacks the columns):
 
 ```html
 <section style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--ds-space-7); align-items: center; min-height: 900px; padding: var(--ds-space-8); background: var(--ds-bg); color: var(--ds-text)">
@@ -89,7 +115,7 @@ Landing section (desktop):
 </section>
 ```
 
-Slide:
+Slide (format slides, orientation landscape):
 
 ```html
 <section style="display: flex; flex-direction: column; justify-content: center; width: 1920px; height: 1080px; padding: 0 160px; background: var(--ds-bg); color: var(--ds-text)">

@@ -41,7 +41,6 @@ const NAV = [
   { id: "home", label: "Home", icon: "home" },
   { id: "chat", label: "Chats", icon: "chats" },
   { id: "agents", label: "Agents", icon: "agents" },
-  { id: "design", label: "Design", icon: "design" },  // The Design canvas, its own tab beside Forge (David, 2026-10-22).
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "library", label: "Library", icon: "library" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
@@ -60,8 +59,9 @@ const STUB_TABS = new Set();
 const FORGE_NAV = [
   { id: 'forgeHome', label: 'Home', icon: 'home' },
 ];
-// Tabs either mode may open without switching mode (the Design tab).
-const SHARED_TABS = new Set(['design']);
+// Tabs either mode may open without switching mode (none since the Design tab
+// moved into Library, David 2026-10-22).
+const SHARED_TABS = new Set();
 let forgeAdmin = false;
 let appMode = 'kairos';
 try { appMode = localStorage.getItem('kairos:app-mode') === 'forge' ? 'forge' : 'kairos'; } catch { /* Device storage is optional. */ }
@@ -133,6 +133,8 @@ export function switchTab(tabId, options = {}) {
 }
 
 function switchTabNow(tabId, options) {
+  // Designs live in Library > Designs (David, 2026-10-22): the old Design tab and its links open there.
+  if (tabId === 'design') { options = { ...options, section: 'designs' }; tabId = 'library'; }
   ({ tab: tabId, options } = phoneRoute(tabId, options));
   if (tabId === 'forgeSession') tabId = 'forgeShell';
   if (tabId === 'forgeShell' && activeTab === 'forgeShell' && modules.forgeShell) {
@@ -635,13 +637,16 @@ async function startApp() {
       window.jarvis.screenGrab.replyQuickDraft(draft.requestId, { ok: false, error: error.message });
     }
   });
-  // A design link: #/design/<id> (the Design tab keeps it in the address).
-  const designLink = /^#\/design\/([a-f0-9]{12})$/.exec(location.hash);
+  // A design link: #/library/designs/<id>, or the older #/design/<id>; both open in Library > Designs.
+  const DESIGN_LINK = /^#\/(?:design|library\/designs)\/([a-f0-9]{12})$/;
+  const designLink = DESIGN_LINK.exec(location.hash);
   window.addEventListener('hashchange', () => {
-    const match = /^#\/design\/([a-f0-9]{12})$/.exec(location.hash);
-    if (match) switchTab('design', { designId: match[1] });
+    const match = DESIGN_LINK.exec(location.hash);
+    if (match && !(activeTab === 'library' && document.querySelector(`.design-page[data-design-id="${match[1]}"]`))) {
+      switchTab('library', { section: 'designs', designId: match[1] });
+    }
   });
-  if (designLink) await switchTab('design', { designId: designLink[1] });
+  if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
   else if (!await openNotificationChat(location.href)) {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');

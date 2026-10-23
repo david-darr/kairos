@@ -20,19 +20,35 @@ export async function render(container, tabId, options = {}) {
   const unguard = registerLeaveGuard(async () => {
     if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return false;
     if (docGuard && !await docGuard()) return false;
+    // An open design with an unsent message, chips or unsaved token changes (views/design.js).
+    if (designModule?.canLeaveDesign && !await designModule.canLeaveDesign()) return false;
     return true;
   });
   if (["vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
-  if (activeSection === "designs") await renderDesigns(container);
+  if (activeSection === "designs" && options.designId) await renderDesign(container, options.designId, options);
+  else if (activeSection === "designs") await renderDesigns(container);
   else if (activeSection === "vault") renderVault(container, options.vaultPath || null);
   else if (activeSection === "google") renderGoogle(container);
   else await renderList(container);
-  return () => { unguard(); docGuard = null; disposeVault(); };
+  return () => { unguard(); docGuard = null; disposeVault(); closeDesignPage(); };
 }
+
+let designModule = null;
+function closeDesignPage() { designModule?.closeDesign(); }
 
 function disposeVault() {
   activeVaultView?.destroy();
   activeVaultView = null;
+  closeDesignPage();
+}
+
+// One design, full page inside Library (David, 2026-10-22: the Design tab
+// merged into Library). Its back button returns to Library > Designs.
+async function renderDesign(container, designId, options = {}) {
+  disposeVault();
+  activeSection = "designs";
+  designModule = await import("./design.js");
+  await designModule.openDesignPage(container, designId, options);
 }
 
 function libraryChrome(container, current) {
@@ -63,15 +79,15 @@ function libraryChrome(container, current) {
   return [header, tabs];
 }
 
-// Library > Designs (the Design canvas): the Design tab's list, here too.
+// Library > Designs (the Design canvas): every design, the home for designs.
 async function renderDesigns(container) {
   disposeVault();
   activeSection = "designs";
   const [header, tabs] = libraryChrome(container, "designs");
   const host = el("div", { class: "design-home" });
   container.replaceChildren(header, tabs, host);
-  const { renderDesignList } = await import("./design.js");
-  await renderDesignList(host);
+  designModule = await import("./design.js");
+  await designModule.renderDesignList(host);
 }
 
 function renderGoogle(container) {
