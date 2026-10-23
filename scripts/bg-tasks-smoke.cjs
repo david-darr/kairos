@@ -37,6 +37,33 @@ app.whenReady().then(async () => {
     await delay(150);
     fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG());
   };
+  const checkNoteSpacing = async phone => {
+    const metrics = await js(`(() => {
+      const runs = [...document.querySelectorAll('#chat-messages > .bg-task-notes')];
+      const heights = [], steps = [], innerGaps = [], outerGaps = [];
+      for (const run of runs) {
+        const notes = [...run.children].map(n => n.getBoundingClientRect());
+        heights.push(...notes.map(n => n.height));
+        for (let i = 1; i < notes.length; i++) {
+          steps.push(notes[i].top - notes[i - 1].top);
+          innerGaps.push(notes[i].top - notes[i - 1].bottom);
+        }
+        const rect = run.getBoundingClientRect();
+        if (run.previousElementSibling?.matches('.msg')) outerGaps.push(rect.top - run.previousElementSibling.getBoundingClientRect().bottom);
+        if (run.nextElementSibling?.matches('.msg')) outerGaps.push(run.nextElementSibling.getBoundingClientRect().top - rect.bottom);
+      }
+      return { runs: runs.length, heights, steps, innerGaps, outerGaps };
+    })()`, 'Measure transcript notes');
+    assert(metrics.runs && metrics.steps.length && metrics.outerGaps.length, 'Measure consecutive notes and neighbouring message cards');
+    assert(metrics.outerGaps.every(gap => gap >= 0 && gap <= (phone ? 20 : 16)), 'Small run-to-message gaps: ' + JSON.stringify(metrics));
+    if (phone) {
+      assert(metrics.heights.every(height => Math.abs(height - 44) < .5), 'Phone notes are 44px tall: ' + JSON.stringify(metrics));
+      assert(metrics.innerGaps.every(gap => Math.abs(gap) < .5), 'Phone notes have no extra gap: ' + JSON.stringify(metrics));
+    } else {
+      assert(metrics.steps.every(step => step <= 28), 'Desktop note tops are at most 28px apart: ' + JSON.stringify(metrics));
+    }
+    console.log((phone ? 'Phone' : 'Desktop') + ' note spacing: ' + JSON.stringify(metrics));
+  };
   const mount = async () => {
     await wait("document.querySelector('#view-content')?.children.length > 0 && !document.querySelector('#view-content').textContent.includes('Loading...')");
     await js(`document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'chat', sessionId: ${JSON.stringify(sid)} } }))`, 'Navigate to chat');
@@ -68,8 +95,8 @@ app.whenReady().then(async () => {
     await wait(`document.querySelector(${JSON.stringify(survey)}) && document.querySelector(${JSON.stringify(command)}) && document.querySelector(${JSON.stringify(agent)})`);
     assert(await js("[...document.querySelectorAll('.bg-task-status')].some(n => n.textContent === 'Running')"), 'List contains Running rows');
     const before = await js("[...document.querySelectorAll('.bg-task-elapsed')].map(n => n.textContent).join(',')");
-    await delay(1100);
-    assert.notEqual(await js("[...document.querySelectorAll('.bg-task-elapsed')].map(n => n.textContent).join(',')"), before, 'Elapsed time ticks');
+    // The display updates once a second; allow up to three ticks for the whole seconds to change.
+    await wait(`[...document.querySelectorAll('.bg-task-elapsed')].map(n => n.textContent).join(',') !== ${JSON.stringify(before)}`, 3500);
     await capture('desktop-list');
     assert(await js("document.querySelector('.bg-tasks-panel').textContent.includes('<img src=x onerror=alert(1)>')"), 'XSS label is literal text');
     assert.equal(await js("document.querySelectorAll('.bg-tasks-panel img').length + window.bgAlerts"), 0, 'XSS label creates no images or alerts');
@@ -111,7 +138,17 @@ app.whenReady().then(async () => {
     assert(await js("document.querySelectorAll('#chat-messages .bg-followup-caption').length >= 2", 'Follow-up captions'), 'Both follow-ups have After background work captions');
     assert(await js("document.querySelectorAll('.bg-task-note').length >= 4"), 'Transcript has completion notes');
     assert.equal(await js('window.bgAlerts'), 0, 'No alerts after follow-ups');
+    // Reload to check historical insertion as well as the live notes above.
+    await reload();
+    await wait("document.querySelectorAll('.bg-task-note').length >= 4");
+    await checkNoteSpacing(false);
+    // The reloaded chat fades in; let it settle with the notes in view before capturing.
+    await js("document.querySelector('.bg-task-notes')?.scrollIntoView({ block: 'center' })"); await delay(900);
     await capture('desktop-transcript-notes');
+    win.setContentSize(390, 844); await reload();
+    await wait("document.querySelectorAll('.bg-task-note').length >= 4");
+    await checkNoteSpacing(true);
+    await capture('phone-transcript-notes');
     console.log('PASS: background pill/list/detail, transcript notes, follow-ups, reload, XSS text, phone sheet and agent timeline');
     win.destroy(); app.exit(0);
   } catch (error) {

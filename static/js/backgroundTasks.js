@@ -154,8 +154,21 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
       const available = items.some(i => i.id === note.id);
       const element = available ? button(label, () => open(note.id), 'bg-task-note') : node('div', 'bg-task-note', label);
       if (!available) element.setAttribute('role', 'note'); element.dataset.bgNote = key; element.dataset.ts = String(note.at);
-      const after = historical ? [...messages.children].find(card => Number(card.dataset.ts) > note.at) : null;
-      messages.insertBefore(element, after || null);
+      const entries = [...messages.children].flatMap(child => child.matches('.bg-task-notes') ? [...child.children] : [child]);
+      const after = historical ? entries.find(card => Number(card.dataset.ts) > note.at) : null;
+      if (after?.parentElement.matches('.bg-task-notes')) {
+        after.parentElement.insertBefore(element, after);
+      } else {
+        const blocks = [...messages.children];
+        const previous = blocks[after ? blocks.indexOf(after) - 1 : blocks.length - 1];
+        let run = previous?.matches('.bg-task-notes') ? previous : null;
+        if (!run) {
+          run = node('div', 'bg-task-notes');
+          run.setAttribute('role', 'note');
+          messages.insertBefore(run, after || null);
+        }
+        run.append(element);
+      }
     }
     if (pinned) scroll.scrollTop = scroll.scrollHeight;
   }

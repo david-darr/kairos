@@ -1,7 +1,6 @@
 """Isolated regression coverage for stream-owned background work."""
 import asyncio
 import os
-import tempfile
 import unittest
 import uuid
 import json
@@ -13,9 +12,10 @@ from unittest.mock import patch, AsyncMock
 from pathlib import Path
 from types import SimpleNamespace
 
-test_dir = Path(__file__).resolve().parents[1] / 'data' / ('bg-test-' + uuid.uuid4().hex)
-test_dir.mkdir(parents=True)
-fixture = SimpleNamespace(name=str(test_dir))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.test_data_support import TestDataDirectory
+fixture = TestDataDirectory(prefix='bg-test-')
+test_dir = Path(fixture.name)
 os.environ['JARVIS_DATA_DIR'] = fixture.name
 
 from core.brain import Brain
@@ -73,6 +73,7 @@ class ScriptedClient:
     async def disconnect(self):
         for job in self.jobs:
             job.cancel()
+        await asyncio.gather(*self.jobs, return_exceptions=True)
 
 
 class BackgroundStreamTests(unittest.IsolatedAsyncioTestCase):
@@ -549,6 +550,7 @@ class DerivedTests(unittest.TestCase):
         from core import settings
         app = FastAPI(); app.include_router(router)
         client = TestClient(app)
+        self.addCleanup(client.close)
         self.sid = session_manager.create_session(owner_user='alice')['id']
         for user in ('alice', 'bob', 'admin'):
             auth_manager.create_user(user, 'scripted-test-password', is_admin=user == 'admin')
@@ -638,6 +640,10 @@ assert socket.getaddrinfo('127.0.0.1', 8457)
 '''
         process = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=15)
         self.assertEqual(process.returncode, 0, process.stderr)
+
+
+def tearDownModule():
+    fixture.cleanup()
 
 
 if __name__ == '__main__':

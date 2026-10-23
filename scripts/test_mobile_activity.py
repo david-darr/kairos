@@ -5,20 +5,16 @@ import asyncio
 import json
 import os
 import sys
-import tempfile
 import time
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-native_mkdir = os.mkdir
-# Python 3.12's Windows 0700 directory ACL excludes the restricted test
-# process token. Keep the workspace's inherited ACL for synthetic fixtures.
-with patch("tempfile._os.mkdir", side_effect=lambda path, mode=0o777: native_mkdir(path, 0o777)):
-    fixture = tempfile.TemporaryDirectory(prefix="kairos-mobile-test-", dir=Path(__file__).resolve().parents[1])
-os.environ["JARVIS_DATA_DIR"] = fixture.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.test_data_support import TestDataDirectory
+fixture = TestDataDirectory(prefix="kairos-mobile-test-")
+os.environ["JARVIS_DATA_DIR"] = fixture.name
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -391,11 +387,9 @@ class MobileTests(unittest.IsolatedAsyncioTestCase):
                 await mobile_notifications.deliver_due(client)
         self.assertEqual(sent, [], "queued while an admin, refused once they are not")
 
+def tearDownModule():
+    fixture.cleanup()
+
+
 if __name__ == "__main__":
-    try:
-        unittest.main(verbosity=2)
-    finally:
-        if session_manager_store._conn:
-            session_manager_store._conn.close()
-            session_manager_store._conn = None
-        fixture.cleanup()
+    unittest.main(verbosity=2)

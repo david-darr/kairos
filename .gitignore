@@ -13,6 +13,10 @@ data/
 .kairos-mobile-runtime/
 # Isolated mobile and renderer fixtures, not release source.
 kairos-mobile-test-*/
+# Test data roots.
+ask-user-*/
+model-setup-*/
+scripts/jarvis-tab-approval-*/
 scripts/.test-runtime/
 
 # Secrets
