@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "42a32e377a8da3175fed3e825d52b5a8d6049f3c2e482fc3e4e82a34e1e6e063",
+  "app.js": "b1274aa58c7b44514771e1af87ad7a680e51dc0b3a2f052c486b27f9928aeef4",
   "fixtures.js": "18aa62234f9cadfc94998a60f502911a27e31486a0c30a7ba0bf27d33ebffd68",
   "index.html": "c5c0b8c1f218fa16b993355db46c3256c0c5be540852a22f83c6e079d9d8b10d",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -384,7 +384,7 @@
   "static/js/agentProfile.js": "1aad3e68e4cb0a4c53f3996569bd03df1ab6c82fc9e3ee3366095b156875acc4",
   "static/js/agentsMessenger.js": "8f1c4344b6d7e1d4e4d09ef794b007c32e2761b6e9e89aaae52ed54b4dd35ada",
   "static/js/api.js": "ace7fdadd4cff05990e4c9a5adf4f3222d01acc3cc04e299609c2f672e101953",
-  "static/js/app.js": "16317b307bbbaddd42495308f31a769343ff27a697c693c60f7adbde847f1983",
+  "static/js/app.js": "8c43151207db8aaadc6b56f56d31aff73a8cfdf9690e96cd2bebdc5db5270ed9",
   "static/js/appearance.js": "aabfd7b4fcef3c71c67b0243ee726657d22efa4d3f2a52aab0b42bec3dd864b0",
   "static/js/artifactForeignReview.js": "ab903c90601c4397ba5dcd03993ddd239e3732f265f4630d14ea67f3898d1c80",
   "static/js/artifactReview.js": "f5a77ba3c44da219fc4e0b4bf08baafcdd7a77ab622109fdf0463a00e48feac8",
@@ -444,6 +444,7 @@
   "static/js/icons.js": "33b21258a7fca53dd84d41b6c7c61a1043d2e2f8d49f1141b2e84b50b823891d",
   "static/js/kip.js": "c5fd93993d7b600fac8bfe81a3f9524d22e876ba966f48a7a488f932db979556",
   "static/js/layout.js": "43e11195cfda7922645d8d8d9e5bc9f4655c298b661ce4555c99f35f1593d94e",
+  "static/js/leaveGuard.js": "eeaaa71c5e6dacf4f4ebda2a29823db6450b7e4aae9f2853f10b4f666d236a1f",
   "static/js/mascot.js": "6c60ff1ae78f677a6460fc151c5317f63115204492066f111484058dee53b19a",
   "static/js/menuFit.js": "08828e1055981ab3a5d4c6b8449468e8ef3cdf6de727127ceed7c865241f9d03",
   "static/js/mobileActivity.js": "8a5ced672c2949e5ccf663a2191bf43656058f836f755efbcfed1474f61d2170",
@@ -719,7 +720,7 @@
   "static/js/views/forgeShell.js": "36fafdd964269100a4d948e64a9dbf7e79c29957481db2c849dc4af45776bf30",
   "static/js/views/home.js": "0099f82b42b34862bfa7c836beebaee96c869537a3e949138fdceb4534508cf5",
   "static/js/views/layoutPanel.js": "079549c480b8f671af9e82d003037aa73919825cf293434f88c68ad3f47995aa",
-  "static/js/views/library.js": "e725f60732961099823be3b0b65755615c5d1b74ef6127a6bf1218c155b68178",
+  "static/js/views/library.js": "bcf4f3a1308066e9c72dfeceb2a0791c537f59d54efca2cfb8be789916dd1a8c",
   "static/js/views/mobileLaunch.js": "a5872b9d87e27c219b140095c39655e1b3622c3a03cd1c945ffc7c57c85c5c16",
   "static/js/views/notes.js": "80a1b1c775c853c501128527631bc4cdbf9548b5d1642f5b965c7b5bfc02f85b",
   "static/js/views/settings.js": "e9308331c291d0b762f0dc9395c6d0a65f4bda261c3451a36cfdcc1d28cd5df5",
