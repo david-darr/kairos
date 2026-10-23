@@ -1,4 +1,5 @@
 import { keepReadingPosition } from '../chatScrollAnchor.js';
+import { mountBackgroundTasks } from '../backgroundTasks.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
@@ -85,7 +86,7 @@ function entering(card) { card.classList.add('msg-enter'); return card; }
 
 function messageCard(role, text, ts, status = 'complete', imageSources = [], failure = null) {
   const agent = failure && renderAgentHandoff(failure, activeSessionId);
-  if (agent) return agent;
+  if (agent) { agent.dataset.ts = String(ts || Date.now() / 1000); return agent; }
   const time = new Date((ts || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const body = el("div", { class: "msg-body" });
   renderMessageBody(body, text, activeSessionId, role === 'assistant');
@@ -99,6 +100,7 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   const actions = el("div", { class: "msg-actions" }, [copyBtn, el("span", { class: "msg-time", text: time })]);
 
   const card = el("div", { class: `msg ${role}` }, [body, actions]);
+  if (failure?.background_followup) card.insertBefore(el('div', { class: 'bg-followup-caption', text: 'After background work' }), body);
   if (role === 'assistant') {
     const mark = el('span', { class: 'chat-author-mark', 'aria-hidden': 'true' });
     mark.innerHTML = KAIROS_MARK;
@@ -126,6 +128,7 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
         ? 'The message could not be completed. Check its attachments and references before retrying.'
         : `${label} failed. ${partial ? 'The partial attempt was saved; choose another model to continue.' : 'Choose another model to retry.'}` }));
   }
+  card.dataset.ts = String(ts || Date.now() / 1000);
   return card;
 }
 
@@ -384,6 +387,7 @@ const pausedQueues = new Set();      // sessionIds whose queue waits for Resume
 // dissolve while the view is still landing (e.g. opening a chat from Home).
 let activeBackdrop = null;
 let backdropInstant = false;
+let activeBackgroundTasks = null;
 let composerRefs = null;             // { messages, input, sendBtn, attachStrip, queueHost } of the mounted view
 
 function renderQueue() {
@@ -1092,6 +1096,10 @@ export async function render(container, tabId, options = {}) {
   const disposeMobileComposer = mountMobileComposer({ composer, input, attachmentHost: attachStrip,
     context: () => document.getElementById('project-picker-label')?.textContent || 'Current vault',
     busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
+  const bgHost = el('div', { class: 'bg-tasks', hidden: true });
+  const backgroundTasks = activeBackgroundTasks = mountBackgroundTasks({ host: bgHost, messages, getSessionId: () => activeSessionId, onOpenComputer: () => { syncComputer().then(showComputer); } });
+  const backgroundFollowup = event => { if (event.detail.sessionId === activeSessionId) { const msg = event.detail.message; messages.appendChild(messageCard('assistant', msg.content, msg.ts, 'complete', [], msg)); } };
+  document.addEventListener('kairos:bg-followup', backgroundFollowup);
   const questionHost = el('div', { class: 'chat-question-host', hidden: true, 'aria-live': 'polite' });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
   const composerHint = el('div', { class: 'composer-hint' });
@@ -1106,7 +1114,7 @@ export async function render(container, tabId, options = {}) {
     text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
   composerOptions.append(permissionNotice);
   const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
-  const dock = el('div', { class: 'chat-composer-dock' }, [questionHost, queueHost, attachStrip, composer]);
+  const dock = el('div', { class: 'chat-composer-dock' }, [bgHost, questionHost, queueHost, attachStrip, composer]);
   const phoneComposer = matchMedia('(max-width: 768px)');
   const syncComposerMenu = () => {
     // Re-parent the same controls so state and handlers survive live resizing.
@@ -1289,6 +1297,7 @@ export async function render(container, tabId, options = {}) {
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    backgroundTasks.dispose(); if (activeBackgroundTasks === backgroundTasks) activeBackgroundTasks = null; document.removeEventListener('kairos:bg-followup', backgroundFollowup);
     disposeVoiceRow(); disposeMic(); disposeMobileChat(); disposeMobileComposer(); mobileModelSheet.dispose();
     document.removeEventListener('kairos:models-changed', onModelsChanged);
     handoffs.dispose();
@@ -2755,6 +2764,7 @@ async function openSession(sessionId, sessionsList, messages) {
   // page reload or a switch between chats — not only after a fresh turn.
   refreshContextMeter(sessionId);
   await refreshSessions(sessionsList, messages);
+  if (activeSessionId === sessionId) activeBackgroundTasks?.setSession(sessionId);
 }
 
 // Overlay's click-to-jump entry point (David's ask 2026-09-12) — app.js's

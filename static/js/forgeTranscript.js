@@ -1,4 +1,7 @@
 import { keepReadingPosition } from './chatScrollAnchor.js';
+import { mountComputerPanel } from './computerPanel.js';
+import { openPanelDialog } from './api.js';
+import { mountBackgroundTasks } from './backgroundTasks.js';
 import { mountMobileDictation } from './mobileDictation.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { mobileOn, phone, button, PLUS_ICON } from './mobileShared.js';
@@ -53,6 +56,7 @@ function createTranscript(options) {
   let disposed = false, following = true, heldUntil = 0, refreshVersion = 0;
   let files = [], checkpoints = [], refreshing = false;
   let modelStatus, modeControl, sendControl, inputControl;
+  let backgroundTasks;
   let backdrop, disposeMobileComposer = () => {}, disposePhoneControls = () => {};
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const jump = el('button', { class: 'forge-jump btn', text: 'Jump to latest', hidden: true, onclick: () => {
@@ -105,8 +109,10 @@ function createTranscript(options) {
     const chips = el('div', { class: 'forge-composer-chips' }, [tools, ...(modeControl ? [modeControl] : [])]);
     const composer = el('div', { class: 'forge-transcript-composer' }, [context, inputTop,
       el('div', { class: 'forge-transcript-footer' }, [chips, queueButton, send])]);
+    const bgHost = el('div', { class: 'bg-tasks', hidden: true });
+    backgroundTasks = mountBackgroundTasks({ host: bgHost, messages: documentBody, getSessionId: () => id, onOpenComputer: async () => { const rows = await api('/api/computer'); const info = rows.find(row => row.owner === `chat:${id}`); if (!info) return; const body = el('div'); const view = mountComputerPanel(body, `chat:${id}`, info); openPanelDialog({ title: 'Computer', body, onClose: () => view.dispose() }); } });
     root.replaceChildren(el('div', { class: 'forge-transcript-layout' }, [
-      el('div', { class: 'forge-transcript-scroll' }, [messages, jump]), queueList, composer,
+      el('div', { class: 'forge-transcript-scroll' }, [messages, jump]), bgHost, queueList, composer,
     ]));
     const footer = composer.querySelector('.forge-transcript-footer');
     let toolsSheet;
@@ -132,6 +138,7 @@ function createTranscript(options) {
       const prompt = el('section', { class: 'forge-prompt', 'aria-label': 'Your prompt' }, [content, more]);
       const clampObserver = new ResizeObserver(() => { more.hidden = !content.classList.contains('expanded') && content.scrollHeight <= content.clientHeight + 1; });
       clampObserver.observe(content); prompt._observer = clampObserver;
+      prompt.dataset.ts = String(message?.ts || Date.now() / 1000);
       return prompt;
     }
     const prose = el('div', { class: 'forge-prose' }); renderMessageBody(prose, text, id, true);
@@ -143,7 +150,9 @@ function createTranscript(options) {
     const review = el('div', { class: 'forge-turn-review', hidden: true });
     const error = el('p', { class: 'forge-transcript-error', role: 'status', hidden: true });
     const turn = el('section', { class: 'forge-turn', 'aria-label': 'Agent response' }, [prose, fold, error, review]);
+    if (message?.background_followup) turn.prepend(el('div', { class: 'bg-followup-caption', text: 'After background work' }));
     const state = { prose, turn, fold, label, glyph, steps, review, error, events: [], startedAt: message?.ts, runId: message?.run_id };
+    turn.dataset.ts = String(message?.ts || Date.now() / 1000);
     states.set(prose, state); return turn;
   }
   function setBusy(busy) {
@@ -299,6 +308,7 @@ function createTranscript(options) {
       el('button', { class: 'forge-small-button', text: 'Review', onclick: () => options.onChanges?.() }));
   }
   async function history(session) {
+    backgroundTasks?.setSession(id);
     try {
       const runs = (await api(`/api/runs?${new URLSearchParams({ session_id: id, limit: '500' })}`)).filter(r => r.surface === 'chat').sort((a, b) => a.started_at - b.started_at);
       // Replies carry run_id. Older replies use the preceding user message's
@@ -332,11 +342,14 @@ function createTranscript(options) {
       await refresh();
     } catch (error) { if (!disposed) modelStatus.textContent = `Tool history could not load: ${error.message}`; }
   }
+  const followup = event => { if (event.detail.sessionId === id) { const msg = event.detail.message; documentBody.append(card('assistant', msg.content, msg)); refresh(); follow(); } };
+  document.addEventListener('kairos:bg-followup', followup);
   const reviewChanged = () => { if (!refreshing) refresh(); };
   document.addEventListener('kairos:forge-review', reviewChanged);
   return {
     messages: documentBody, mount, card, paint, history, follow, setBusy,
     dispose() {
+      backgroundTasks?.dispose(); document.removeEventListener('kairos:bg-followup', followup);
       disposeAnchor(); disposePhoneControls(); disposeMobileComposer(); backdrop?.dispose();
       disposed = true; ++refreshVersion; clearInterval(ticker); observer.disconnect(); unsubscribe();
       documentBody.querySelectorAll('.forge-prompt').forEach(node => node._observer?.disconnect());

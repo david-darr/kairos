@@ -79,9 +79,11 @@ function _snapshot(packet) {
   for (const [sessionId, entry] of _inflight) {
     if (!(sessionId in incoming) && entry.status === 'processing' && entry.turnId) _recoverMissing(sessionId, entry);
   }
+  if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent('kairos:live-snapshot', { detail: packet }));
 }
 
 function _packet(packet) {
+  if (['bg_tasks', 'bg_followup'].includes(packet.type)) { if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent(packet.type === 'bg_tasks' ? 'kairos:bg-tasks' : 'kairos:bg-followup', { detail: packet })); return; }
   if (packet.type === 'snapshot') { _snapshot(packet); return; }
   if (packet.type === 'cli_pair') { _cliPair('kairos:cli-pair', packet.request); return; }
   if (packet.type === 'cli_pair_closed') { _cliPair('kairos:cli-pair-closed', { id: packet.id }); return; }

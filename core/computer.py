@@ -148,6 +148,7 @@ class Computer:
     cast_fps: int = 0
     recording: bool = False
     recording_id: str | None = None
+    started_at: float = field(default_factory=time.time)
     steps: list[dict] = field(default_factory=list)
 
 
@@ -174,7 +175,7 @@ class ComputerManager:
     def running(self) -> list[dict]:
         return [{"owner": c.owner, "url": c.url, "title": c.title, "last_action": c.last_action_at,
                  "taken_over": c.taken_over, "waiting_model": c.waiting_model, "desktop": c.desktop,
-                 "recording": c.recording}
+                 "recording": c.recording, "started_at": c.started_at, "steps": c.steps[-20:]}
                 for c in self._computers.values()]
 
     def screenshot(self, owner: str) -> bytes | None:

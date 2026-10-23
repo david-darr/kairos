@@ -683,6 +683,9 @@ def delete_all_sessions() -> None:
     """Backs the admin "wipe chats" action."""
     with _LOCK:
         conn = _connect()
+        from core import chat_tasks
+        for row in conn.execute('SELECT id FROM sessions').fetchall():
+            chat_tasks.forget(row['id'])
         with conn:
             conn.execute("DELETE FROM messages_fts")
             conn.execute("DELETE FROM messages")
