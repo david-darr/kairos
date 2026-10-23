@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "5a609aeab09f41fcca4db164f7d8ab85f1657bb0a6ea080b93637289617ed9ab",
+  "app.js": "97d94e73a7d24c58b87226fd96878340b04746d018c0499e9fbe2d26556cf771",
   "fixtures.js": "18aa62234f9cadfc94998a60f502911a27e31486a0c30a7ba0bf27d33ebffd68",
   "index.html": "c14bcb65ce940dde40738c9a11512e8bb6f413cab29a19effa553c810ff7f594",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -414,7 +414,7 @@
   "static/js/chatFind.js": "88e6b8ef667e9f5a967b5ec17b736f14240f46aef926910e3d0be96ac8b8c5c7",
   "static/js/chatPaneLayout.js": "04b25b1e4e54f2d1cfc13a53f3e9cddc9176aa0bdd8d14d92bff6b07130a039f",
   "static/js/chatReferences.js": "a53433bfb18cc029bcf4e85108ac54a572ea93a901f9ec448dd085da9a329be0",
-  "static/js/chatScrollAnchor.js": "71c300b92ebf961ae32d96680dd8b018b65e6fb6105ae17820f1887401cb8ce0",
+  "static/js/chatScrollAnchor.js": "11cba2f191c6c8595159d312509d8e5224a2e90c4250c2f16e689dad6e6fa27e",
   "static/js/chatStream.js": "2783770222aaf53fbd7e5b0d08d6919483a2ec565bac9e600c211b0f1f0cd203",
   "static/js/chatTimeline.js": "816b66ac1b86abaa77321af98d122bdc839874ca0aa1243717b0e226ace0ad68",
   "static/js/cliPair.js": "2baede5f091f64a1f73f10a18046ac67c4df777db5d21da3965a0e3f861cb832",

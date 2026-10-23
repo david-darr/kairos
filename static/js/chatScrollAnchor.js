@@ -5,7 +5,7 @@ export function holdReadingPositions() {
 }
 
 export function keepReadingPosition(scroller, { pinned } = {}) {
-  let lastWidth = scroller.clientWidth, atBottom = true, anchor = null, frame = 0;
+  let lastWidth = null, atBottom = true, anchor = null, frame = 0;
   let held = false, heldUntil = 0, releaseTimer = 0;
   const candidates = '.msg, .forge-prompt, .forge-turn, .msg-body > *, .chat-prose > *, .forge-prose > *, .artifact-card, li, tr, pre';
   function lineTop(node, offset) {
@@ -68,6 +68,7 @@ export function keepReadingPosition(scroller, { pinned } = {}) {
   scheduleCapture();
   const observer = new ResizeObserver(() => {
     const width = scroller.clientWidth;
+    if (lastWidth === null) { lastWidth = width; return; }
     if (width === lastWidth) return;
     if (held) {
       clearTimeout(releaseTimer);
