@@ -7,6 +7,8 @@ import { initMoreSheet } from './mobileTabSheet.js';
 import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
 import { emptyState } from './kairosParts.js';
 import * as chatStream from './chatStream.js';
+import { openMobileSheet } from './mobileSheet.js';
+import { openNotifications } from './mobileActions.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
@@ -30,14 +32,22 @@ export function mountMobileHome({ container, content, banner, options }) {
   let pager;
   const newChat = button('+', () => { pager.select(0); (launchHost?.querySelector('#chat-input') || input).focus(); }, 'rd-chat-round');
   newChat.setAttribute('aria-label', 'New chat');
-  const historyButton = button('…', () => { pager.select(1); history.querySelector('input[type=search]')?.focus(); }, 'rd-chat-round');
-  historyButton.setAttribute('aria-label', 'Search and filter chats');
+  let actionsSheet;
+  const chatActions = button('…', () => {
+    const actions = el('nav', { class: 'ms-quick-create', 'aria-label': 'Chat actions' });
+    actions.append(
+      button('Search and filter chats', () => { actionsSheet.close(); pager.select(1); history.querySelector('input[type=search]')?.focus(); }, 'ms-account-row'),
+      button('Notifications', () => { actionsSheet.close(); openNotifications(chatActions); }, 'ms-account-row'));
+    actionsSheet = openMobileSheet({ title: 'Chat actions', content: actions, opener: chatActions });
+  }, 'rd-chat-round');
+  chatActions.setAttribute('aria-label', 'Chat actions');
+  chatActions.setAttribute('aria-haspopup', 'dialog');
   const modelChoice = el('select', { 'aria-label': 'Model for new chat', 'data-mobile-hook': 'model-picker' }, [el('option', { value: '', text: 'Choose a model' })]);
   modelChoice.addEventListener('change', () => { selectedModelId = modelChoice.value; });
   const context = el('div', { class: 'ms-context' }, [modelChoice]);
   // Chats owns the title and switch; global navigation stays in the tab bar.
   const header = el('header', { class: 'ms-header rd-chats-header' }, [edgeBlur('top'),
-    el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, historyButton])]), switcher, context]);
+    el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, chatActions])]), switcher, context]);
   const launch = el('section', { class: 'ms-page ms-launch', id: 'ms-page-0', role: 'tabpanel', 'aria-labelledby': newTab.id });
   const history = el('section', { class: 'ms-page ms-history', id: 'ms-page-1', role: 'tabpanel', 'aria-labelledby': chatsTab.id });
   const intro = emptyState({ mascotState: 'sleeping', title: 'What should we work on?', text: 'Kip is resting until you need it.' });
@@ -157,6 +167,7 @@ export function mountMobileHome({ container, content, banner, options }) {
     }
     if (key === 'sessions') activityMetadata(value, null);
   }, dispose() {
+    actionsSheet?.close();
     disposed = true; detachIntro(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
     dockSize.disconnect(); dockState.disconnect();

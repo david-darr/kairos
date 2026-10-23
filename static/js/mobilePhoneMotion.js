@@ -52,7 +52,8 @@ export function mountPhoneMotion() {
         projects.setAttribute('aria-label', 'Projects'); projects.title = 'Projects';
         projects.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/></svg>';
       }
-      if (!header.querySelector('.ms-notifications-open')) {
+      // Chats owns its two actions and offers Notifications in its actions sheet.
+      if (!header.closest('.rd-chats-header') && !header.querySelector('.ms-notifications-open')) {
         const bell = button('Updates', () => openNotifications(bell), 'ms-notifications-open'); bell.setAttribute('aria-label', 'Notifications');
         bell.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v6l2 3H4l2-3V9M10 21h4"/></svg>`; header.append(bell);
       }
