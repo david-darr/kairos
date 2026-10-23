@@ -190,6 +190,8 @@ async def _get_brain(session_id: str, endpoint: dict, is_admin: bool = False) ->
         session_manager.set_claude_session(session_id, None)
         brain = _build_brain(endpoint, session_id=session_id, is_admin=is_admin)
         await brain.connect()
+    from services.chat_background import attach
+    attach(session_id, brain, endpoint, is_admin)
     _brains[session_id] = brain
     return brain, True
 
@@ -559,6 +561,8 @@ def _hand_off_references(session_id: str, text: str, attachment_ids: list[str] |
 async def _send_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                         is_admin: bool = False, reference_context: str = "",
                         references: list[dict] | None = None) -> str:
+    from services.chat_background import settle
+    await settle(session_id)
     handed = _hand_off_references(session_id, text, attachment_ids, is_admin, reference_context, references)
     if handed is not None:
         return "\n".join(f"Handed to {event['agent_name']}." + (f" {event['note']}" if event['note'] else "") for event in handed)
@@ -638,6 +642,8 @@ async def stream_message(session_id: str, text: str, attachment_ids: list[str] |
 async def _stream_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                           is_admin: bool = False, reference_context: str = "",
                           references: list[dict] | None = None) -> AsyncIterator[str]:
+    from services.chat_background import settle
+    await settle(session_id)
     handed = _hand_off_references(session_id, text, attachment_ids, is_admin, reference_context, references)
     if handed is not None:
         yield {"handoffs": handed}

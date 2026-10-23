@@ -67,6 +67,10 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith("/api/")) {
     if (req.method === 'GET') reads.push({ path: url.pathname, query: Object.fromEntries(url.searchParams) });
     if (designChecks.serve(url, req, res)) return;  // The Design canvas (design-canvas-checks.cjs).
+    // A chat's background tasks (static/js/backgroundTasks.js): none in the demo.
+    if (/^\/api\/chat\/background\/[^/]+$/.test(url.pathname)) {
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ items: [], notes: [] })); return;
+    }
     if (url.pathname === '/api/chat/live/snapshot') {
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(liveSnapshot())); return;
     }

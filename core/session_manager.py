@@ -633,6 +633,8 @@ class SessionManager:
         manager.forget(f"chat:{session_id}")
         from core import computer_trajectory
         computer_trajectory.delete_owner(f"chat:{session_id}")
+        from core import chat_tasks
+        chat_tasks.forget(session_id)
         store.delete_session(session_id)
 
     def get_channel_session_id(self, channel_key: str) -> Optional[str]:

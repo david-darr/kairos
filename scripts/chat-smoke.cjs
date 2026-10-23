@@ -234,6 +234,7 @@ const server = http.createServer(async (req, res) => {
       }
       return json({ rules: [], audit: [] });
     }
+    if (/^\/api\/chat\/background\/[^/]+$/.test(url.pathname)) return json({ items: [], notes: [] });
     console.warn('chat-smoke: missing fixture ' + url.pathname);
     res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ detail: 'Missing fixture: ' + url.pathname })); return;
   }

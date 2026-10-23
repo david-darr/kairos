@@ -153,6 +153,7 @@ async def lifespan(_app: FastAPI):
     await tab_hooks.reconcile()
     # Turns off pulled community installs (services/store_catalog.py).
     start_store_watch()
+    from services import background_tasks; background_tasks.start()
     task_scheduler.start()
     await discord_channel.start()
     # Every other messaging platform (core/connectors), each supervised so a
@@ -188,6 +189,7 @@ async def lifespan(_app: FastAPI):
             await computer.manager.close_all()
             await remote_access.stop()
             await agent_calls.shutdown()
+            await background_tasks.stop()
             task_scheduler.stop()
             await discord_channel.stop()
             await connector_hub.stop_all()
@@ -209,6 +211,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(auth_routes.router)
 app.include_router(session_routes.router)
 app.include_router(chat_routes.router)
+from routes import background_task_routes; app.include_router(background_task_routes.router)
 app.include_router(skills_routes.router)
 app.include_router(notes_routes.router)
 app.include_router(task_routes.router)

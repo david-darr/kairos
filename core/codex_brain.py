@@ -520,6 +520,8 @@ class CodexBrain:
             async for item in self._consume_process(proc, stderr_task, is_fresh_thread, user_text):
                 yield item
         finally:
+            from core import chat_tasks
+            chat_tasks.end_source(self.session_id, 'codex', 'Ended with the Codex turn')
             tool_access.revoke(tool_token)
             stopped = await _kill_process_tree(proc)
             # A self-healing retry (see _consume_process) ran its own process
@@ -582,6 +584,14 @@ class CodexBrain:
                 progress = latest
 
     async def _consume_process(self, proc, stderr_task, is_fresh_thread, user_text):
+        try:
+            async for item in self._consume_process_events(proc, stderr_task, is_fresh_thread, user_text):
+                yield item
+        finally:
+            from core import chat_tasks
+            chat_tasks.end_source(self.session_id, 'codex', 'Ended with the Codex turn')
+
+    async def _consume_process_events(self, proc, stderr_task, is_fresh_thread, user_text):
         has_text = False
         completed = False
         failure = None
@@ -596,6 +606,9 @@ class CodexBrain:
                 continue  # codex occasionally logs non-JSON noise lines; ignore rather than fail the turn
 
             etype = event.get("type")
+            if self.session_id and etype in ('item.started', 'item.updated', 'item.completed'):
+                from core import chat_tasks
+                chat_tasks.codex_item(self.session_id, event.get('item') or {}, etype)
             if etype == "thread.started" and self.thread_id is None:
                 self.thread_id = event["thread_id"]
                 if self.session_id and not self.forge:
