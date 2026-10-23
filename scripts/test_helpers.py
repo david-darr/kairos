@@ -19,7 +19,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-_DATA = tempfile.TemporaryDirectory(prefix="jarvis-helpers-test-", ignore_cleanup_errors=True)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts.test_data_support import TestDataDirectory
+_DATA = TestDataDirectory(prefix="jarvis-helpers-test-")
 os.environ["JARVIS_DATA_DIR"] = _DATA.name
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -393,6 +395,7 @@ class SettingTests(unittest.TestCase):
 
 def tearDownModule():
     store.close()
+    _DATA.cleanup()
 
 
 if __name__ == "__main__":

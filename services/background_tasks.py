@@ -71,7 +71,7 @@ def _source_groups():
             latest[ident] = {k: receipt.get(k) for k in ('ran_at', 'started_at', 'outcome')}
     for card in task_service.list_tasks():
         is_card = card.get('schedule_kind') == 'card'
-        sid = ((agent_handoff.requester(card) or {}).get('session_id') if is_card else card.get('origin_session_id'))
+        sid = ((agent_handoff.requester(card) or {}).get('session_id') or card.get('origin_session_id'))
         if not sid:
             continue
         receipt = latest.get(card['id'], {})
@@ -121,7 +121,7 @@ def _derive(sid, sources=None):
     for card, receipt, updated in sources['cards']:
         ident = card['id']
         if card.get('schedule_kind') == 'card':
-            if (agent_handoff.requester(card) or {}).get('session_id') != sid:
+            if ((agent_handoff.requester(card) or {}).get('session_id') or card.get('origin_session_id')) != sid:
                 continue
             status = {'backlog': 'queued', 'ready': 'queued', 'running': 'running', 'review': 'done', 'done': 'done', 'blocked': 'failed'}.get(card.get('status'), 'queued')
             if status != 'failed' and agent_service.open_items_for_card(ident):
@@ -130,7 +130,9 @@ def _derive(sid, sources=None):
             comments = card.get('comments') or []
             last = comments[-1] if comments else {}
             activity = last.get('text', '') if last.get('kind') not in ('result', 'error') else ''
-            add('card:' + ident, 'agent', 'kairos', f"{agent.get('name') or 'Agent'}: {card.get('name') or ''}", status,
+            kind = 'agent' if card.get('agent_id') else 'task'
+            label = f"{agent.get('name') or 'Agent'}: {card.get('name') or ''}" if kind == 'agent' else card.get('name')
+            add('card:' + ident, kind, 'kairos', label, status,
                 activity, card.get('run_started_at') or receipt.get('started_at'),
                 updated if status in chat_tasks.TERMINAL else None, view='timeline',
                 agent=agent.get('name') or '', card=card.get('name') or '', status=card.get('status'))
@@ -254,7 +256,7 @@ async def _watch():
             cutoff = time.time() - 1800
             candidates = {sid for sid, source in groups.items() if
                           source['helpers'] or source['computers'] or source['apps'] or
-                          any(card.get('schedule_kind') == 'card' or card.get('run_started_at') or
+                          any(card.get('enabled') or card.get('schedule_kind') == 'card' or card.get('run_started_at') or
                               (not card.get('enabled') and (receipt.get('ran_at') or 0) >= cutoff)
                               for card, receipt, end in source['cards'])}
             for sid, items in list(_derived.items()):
