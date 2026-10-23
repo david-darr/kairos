@@ -58,6 +58,14 @@ Completion uses the existing version guard, stores the exact quote and message/a
 
 `scripts/test_crm_daily.py` exercises daily persistence/catch-up, real reconciliation flow with simulated mailbox/model responses, recipient and ownership matching, stale evidence, reopens, concurrent edits, quoted history, disabled sources, context limits and Sent-folder discovery. No real mailbox or outbound send is used.
 
+### Scheduled agent work (1.3)
+
+Successful background tasks, daily agent routines and cards now emit the generic `on_task_run(user, turn)` hook after the recorded model run finishes. CRM queues that output and its real recorded tool results through the existing completion checker. It does not require the routine to be linked to one CRM task, and can recognize multiple matching tasks. Failed, stopped and ownerless runs with accounts enabled are excluded. The run prompt and agent memory are request context, never a user's completion report; only the new assistant output and action evidence can establish completion. Existing whole-task, version, reopen, selected-reader and enabled-tab guards still apply. Receipts retain routine, agent and run IDs.
+
+New routines created through the agent page record the signed-in creator. Trusted background scope snapshots that owner before connecting a model and carries it through Claude's MCP context, local/API tool context and Codex's turn token. Models cannot supply another owner through tool arguments. Existing routines with a known origin chat can use its owner; old ownerless routines on account-enabled installations need an explicit idle edit/save on the routine to bind the signed-in owner. An existing owner is not reassigned on another admin's save. Local installations with accounts off continue to use `local`. This does not grant admin or outbound-action permission to a background agent.
+
+Configure the agent's Daily CRM work routine, then use Run now to test it before relying on the schedule. Restart the source dev instance to load this connection; the earlier private `2.1.1-crm.1` installer predates it. `scripts/test_crm_routines.py` exercises the full scheduler-to-tool-token-to-hook-to-checker path with simulated models, alongside failed/stopped/partial work, reopened tasks, ownership isolation and daily occurrence deduplication.
+
 Active, reviewed CRM deadlines appear through the `calendar_items` hook. Calendar PATCHes the returned `toggle_url` with `completed`, updating CRM status; completed work remains in CRM's Done view. Assignment creates a backlog card in the existing Work Board and requires a separate Ready/Run action.
 
 CRM also declares `home_cards(user)`. It supplies a list card, Follow-ups,

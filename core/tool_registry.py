@@ -84,6 +84,8 @@ class ToolContext:
     read_only: bool = False
     assignment_run_id: Optional[str] = None
     source_card_id: Optional[str] = None
+    # Captured from an admitted routine, never model-supplied tool arguments.
+    owner_user: Optional[str] = None
 
     @property
     def permission_surface(self) -> str:
@@ -452,7 +454,8 @@ def _tab_task_owner(ctx):
         return SINGLE_USER
     # An admin flag is not a task-owner identity. Never expose another user's
     # private records through an ownerless chat or background agent.
-    return (session_manager.get_session(ctx.session_id) or {}).get("owner_user") if ctx.session_id else None
+    return ((session_manager.get_session(ctx.session_id) or {}).get("owner_user")
+            if ctx.session_id else ctx.owner_user)
 
 
 @register("list_tab_tasks",
@@ -645,7 +648,7 @@ async def _create_task(args, ctx):
         run_at=args.get("run_at"), interval_seconds=args.get("interval_seconds"),
         deliver_to_channel=args.get("deliver_to_channel"),
         run_time=args.get("run_time"), depends_on=args.get("depends_on"), status=args.get("status"),
-        agent_id=ctx.agent_id, origin_session_id=ctx.session_id,
+        agent_id=ctx.agent_id, origin_session_id=ctx.session_id, owner_user=_tab_task_owner(ctx),
         time_zone=args.get("time_zone"), weekdays=args.get("weekdays"),
     )
     return f"Created task {task['id']}: {task['name']}"

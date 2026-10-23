@@ -28,6 +28,10 @@ async def on_chat_turn(user, turn):
     completion.capture(user, turn)
 
 
+async def on_task_run(user, turn):
+    completion.capture(user, turn)
+
+
 def calendar_items(user, start, end):
     return crm_service.calendar_events(user, start, end)
 

@@ -45,6 +45,7 @@ class Grant:
     # 2026-10-15: one scoped MCP catalog per turn, discarded with its grant.
     integration_ids: tuple[str, ...] | None = None
     read_only: bool = False
+    owner_user: str | None = None
     mcp_catalog: dict = field(default_factory=dict, compare=False)
     mcp_lock: asyncio.Lock = field(default_factory=asyncio.Lock, compare=False)
 
@@ -54,7 +55,7 @@ _grants: dict[str, Grant] = {}
 
 def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = None,
           model: Optional[str] = None, integration_ids=None, read_only: bool = False) -> str:
-    from core import runs
+    from core import runs, task_scope
     from services.agent_service import agent_service
     context = runs.current_for(session_id)
     active = agent_service._current.get() or {}
@@ -65,7 +66,8 @@ def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = N
     folder = str(SCREEN_ROOT / secrets.token_hex(8))
     _grants[token] = Grant(session_id, bool(is_admin), agent_id, model, now + TOKEN_LIFETIME_SECONDS,
                            TurnTaint(), folder, context.run_id if context else None, active.get("card_id"),
-                           tuple(integration_ids) if integration_ids is not None else None, read_only)
+                           tuple(integration_ids) if integration_ids is not None else None, read_only,
+                           owner_user=task_scope.current_owner(agent_id))
     return token
 
 

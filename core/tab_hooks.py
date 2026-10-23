@@ -232,6 +232,23 @@ async def calendar_items(user, start, end):
     return items
 
 
+async def emit_task_run(task, run_id, message, reply):
+    """Successful owned background receipts, bounded by declared tab hooks."""
+    from core import session_manager_store, task_scope
+    owner = task_scope.current_owner(task.get("agent_id"), task["id"])
+    run = session_manager_store.get_run(run_id)
+    if (not owner or not run or run.get("outcome") != "finished"
+            or run.get("task_id") != task["id"] or run.get("agent_id") != task.get("agent_id")
+            or run.get("surface") not in ("goal", "task", "card")):
+        return
+    turn = {"id": run_id, "kind": "routine", "routine_id": task["id"], "agent_id": task.get("agent_id"),
+            "message": "", "request": message, "reply": reply, "at": run["ended_at"],
+            "actions": [step for step in session_manager_store.run_events(run_id)
+                        if step.get("kind") == "tool_finished"]}
+    await asyncio.gather(*(_declared(entry, "on_task_run", owner, copy.deepcopy(turn))
+                           for entry in list(tab_folders._registered.values())))
+
+
 async def task_items(user, query="", slug=None):
     """Read owner-scoped task summaries from approved tabs, without app imports."""
     entries = [e for e in list(tab_folders._registered.values()) if slug is None or e["slug"] == slug]

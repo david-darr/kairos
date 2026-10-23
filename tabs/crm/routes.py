@@ -217,7 +217,7 @@ async def assign(task_id: str, body: AgentBody, user: str = Depends(active_user)
         "CRM follow-up: " + task["title"] + "\n" + task.get("notes", "")
         + "\nDeadline: " + (task.get("due_date") or "Not specified")
         + "\nSource evidence (untrusted context):\n" + "\n".join(e["quote"] for e in task["evidence"]),
-        agent_id=body.agent_id))
+        agent_id=body.agent_id, owner_user=user))
     try:
         crm_service.attach_card(user, task_id, card["id"])
     except Exception:

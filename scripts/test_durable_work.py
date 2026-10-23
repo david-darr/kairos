@@ -350,8 +350,7 @@ class ScheduleTests(Base):
 
     def test_model_task_tools_create_update_and_clear_schedule_rules(self):
         from core import tool_registry
-        from types import SimpleNamespace
-        context = SimpleNamespace(agent_id=None)
+        context = tool_registry.ToolContext()
         result = asyncio.run(tool_registry._create_task({
             "name": "Model's weekday check", "prompt": "check", "schedule_kind": "daily",
             "run_time": "06:00", "time_zone": "Europe/Dublin", "weekdays": [0, 1, 2, 3, 4],
