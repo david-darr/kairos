@@ -466,23 +466,55 @@ def normalize_questions(raw) -> list[dict] | None:
     return result
 
 
-async def ask(*, surface, tool, questions, timeout=QUESTION_TIMEOUT_SECONDS) -> QuestionOutcome:
+def _open_question(*, surface, tool, questions, timeout):
     queue = _channels.get(surface)
     if queue is None:
-        return QuestionOutcome("unavailable", reason="Nobody is here to answer questions in this run.")
+        return None, None
     request = Request(id=uuid.uuid4().hex, surface=surface, tool=tool, target=None,
                       arguments={}, title="Waiting for your response", description="", choices=[],
                       kind="question", questions=questions, expires_at=time.time() + timeout)
     _pending[request.id] = request
+    queue.put_nowait(request.payload())
+    return request, queue
+
+
+def _close_question(request, queue):
+    if request and _pending.pop(request.id, None) is not None:
+        if _channels.get(request.surface) is queue:
+            queue.put_nowait({"permission_closed": request.id})
+
+
+async def _wait_question(request, queue, timeout):
+    if request is None:
+        return QuestionOutcome("unavailable", reason="Nobody is here to answer questions in this run.")
     try:
-        await queue.put(request.payload())
         return await asyncio.wait_for(asyncio.shield(request.answer), timeout=timeout)
     except asyncio.TimeoutError:
         return QuestionOutcome("timeout", reason="Nobody answered within 30 minutes.")
     finally:
-        _pending.pop(request.id, None)
-        if _channels.get(surface) is queue:
-            queue.put_nowait({"permission_closed": request.id})
+        _close_question(request, queue)
+
+
+async def ask(*, surface, tool, questions, timeout=QUESTION_TIMEOUT_SECONDS) -> QuestionOutcome:
+    request, queue = _open_question(surface=surface, tool=tool, questions=questions, timeout=timeout)
+    return await _wait_question(request, queue, timeout)
+
+
+def ask_later(*, surface, agent_id, raw_questions, tool, timeout=QUESTION_TIMEOUT_SECONDS) -> asyncio.Task:
+    """Enqueue before returning, then apply the same policy as ask_person."""
+    questions, refusal = _prepare_question(surface, agent_id, raw_questions, tool)
+    request, queue = (None, None) if refusal else _open_question(
+        surface=surface, tool=tool, questions=questions, timeout=timeout)
+
+    async def wait():
+        if refusal:
+            return refusal
+        return _question_message(await _wait_question(request, queue, timeout), agent_id)
+
+    task = asyncio.create_task(wait())
+    # Cancellation before the coroutine starts must close the card too.
+    task.add_done_callback(lambda _: _close_question(request, queue))
+    return task
 
 
 def waiting(surface: str) -> bool:
@@ -516,3 +548,35 @@ def respond(request_id, *, answers: dict | None, skip: bool, user: str) -> str |
     _save(data)
     request.answer.set_result(QuestionOutcome(status, answers=None if skip else cleaned))
     return None
+
+
+def _nobody_message(agent_id):
+    return ("Nobody is watching this run live, so a question cannot be answered here. Use agent_ask to put it in the person's inbox, then finish what you can."
+            if agent_id else "Nobody is here to answer questions in this run. Continue with your best judgment and say what you assumed.")
+
+
+def _prepare_question(surface, agent_id, raw_questions, tool):
+    questions = normalize_questions(raw_questions)
+    if questions is None:
+        return None, QuestionOutcome("malformed", reason=f"{tool} needs 1 to 4 questions, each with question text and at most 8 distinct options.")
+    if not surface.startswith("chat:"):
+        return None, QuestionOutcome("unavailable", reason=_nobody_message(agent_id))
+    return questions, None
+
+
+def _question_message(outcome, agent_id):
+    if outcome.status == "answered":
+        return outcome
+    messages = {
+        "skipped": "The person skipped this question without answering. Continue with your best judgment and say what you assumed, or ask again in plain text.",
+        "timeout": "Nobody answered within 30 minutes. Continue with your best judgment and say what you assumed.",
+    }
+    return QuestionOutcome(outcome.status, reason=messages.get(outcome.status, _nobody_message(agent_id)))
+
+
+async def ask_person(*, surface: str, agent_id: str | None, raw_questions, tool: str) -> QuestionOutcome:
+    """Shared question policy for native Claude and registry tools."""
+    questions, refusal = _prepare_question(surface, agent_id, raw_questions, tool)
+    if refusal:
+        return refusal
+    return _question_message(await ask(surface=surface, tool=tool, questions=questions), agent_id)

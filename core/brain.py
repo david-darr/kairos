@@ -477,21 +477,11 @@ class Brain:
 
     async def _ask_person(self, arguments):
         arguments = arguments if isinstance(arguments, dict) else {}
-        questions = permissions.normalize_questions(arguments.get("questions"))
-        if questions is None:
-            return PermissionResultDeny(message="AskUserQuestion needs 1 to 4 questions, each with question text and at most 8 distinct options.", interrupt=False)
-        nobody = ("Nobody is watching this run live, so a question cannot be answered here. Use agent_ask to put it in the person's inbox, then finish what you can."
-                  if self.agent_id else "Nobody is here to answer questions in this run. Continue with your best judgment and say what you assumed.")
-        if not self.surface.startswith("chat:"):
-            return PermissionResultDeny(message=nobody, interrupt=False)
-        outcome = await permissions.ask(surface=self.surface, tool="AskUserQuestion", questions=questions)
+        outcome = await permissions.ask_person(surface=self.surface, agent_id=self.agent_id,
+                                               raw_questions=arguments.get("questions"), tool="AskUserQuestion")
         if outcome.status == "answered":
             return PermissionResultAllow(updated_input={**arguments, "answers": outcome.answers})
-        messages = {
-            "skipped": "The person skipped this question without answering. Continue with your best judgment and say what you assumed, or ask again in plain text.",
-            "timeout": "Nobody answered within 30 minutes. Continue with your best judgment and say what you assumed.",
-        }
-        return PermissionResultDeny(message=messages.get(outcome.status, nobody), interrupt=False)
+        return PermissionResultDeny(message=outcome.reason, interrupt=False)
 
     @staticmethod
     def _plan_tool(name: str) -> bool:

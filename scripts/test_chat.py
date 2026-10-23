@@ -439,7 +439,7 @@ class ChatTests(unittest.TestCase):
             second_prompt = launches[1][2].stdin.data.decode()
             self.assertIn("First request", second_prompt)
             self.assertIn("First reply", second_prompt)
-            self.assertIn("Ask questions in your normal reply", second_prompt)
+            self.assertIn("use ask_user rather than asking in plain text.", second_prompt)
 
         asyncio.run(run())
 

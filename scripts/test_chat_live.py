@@ -159,6 +159,35 @@ class LiveChatTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_for(lambda: chat_live.snapshot()["runs"][self.session_id]["status"] == "done")
             chat_live.unsubscribe(viewer)
 
+    async def test_a_waiting_question_survives_text_that_follows_it(self):
+        # Codex asks, writes "I'm waiting for your answer", and its process
+        # ends while the question is still open (core/codex_questions.py).
+        from core import permissions
+        session_id = self.session_id
+
+        class AskingBrain(GatedBrain):
+            async def events(self, prompt):
+                self.task = permissions.ask_later(surface=f"chat:{session_id}", agent_id=None, tool="ask_user",
+                                                  raw_questions=[{"question": "Which one?", "options": [{"label": "A"}]}])
+                await asyncio.sleep(0)
+                yield runs.text("Waiting for your answer.")
+                outcome = await self.task
+                yield runs.text(f" Got {outcome.answers['Which one?']}.")
+                yield runs.result(True)
+
+        brain = AskingBrain()
+        with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(brain, False))):
+            chat_live.start(session_id, "Ask me", [], True, "", [])
+            run = lambda: chat_live.snapshot()["runs"][session_id]
+            await self.wait_for(lambda: run()["text"] == "Waiting for your answer." and run()["permission"])
+            await asyncio.sleep(0.05)
+            question = run()["permission"]
+            self.assertEqual(question["kind"], "question")
+            self.assertIsNone(permissions.respond(question["id"], answers={"Which one?": "A"}, skip=False, user="local"))
+            await self.wait_for(lambda: run()["status"] == "done")
+            self.assertIsNone(run()["permission"])
+            self.assertEqual(run()["text"], "Waiting for your answer. Got A.")
+
 
 if __name__ == "__main__":
     try:

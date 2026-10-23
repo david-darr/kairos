@@ -53,7 +53,7 @@ import sys
 import time
 import tomllib
 
-from core import image_gen, tool_access
+from core import image_gen, tool_access, codex_questions
 from core.constants import BASE_DIR, REPO_CODE_DIRS
 from core.codex_features import disabled_feature_args
 from core.custom_tabs import USER_TABS_DIR, ensure_user_tab_dirs
@@ -291,6 +291,7 @@ class CodexBrain:
         # that keeps a silent-but-working Codex turn from being killed.
         self._rollout_file: str | None = None
         self._stop_confirmed = True
+        self._cancelled = False
 
     @staticmethod
     def _codex_path() -> str:
@@ -430,9 +431,11 @@ class CodexBrain:
         """Stopping a Codex turn is killing its process tree. Closing the
         turn's events already did that (their finally); otherwise it is done
         here. Confirmed only on evidence: see _kill_process_tree."""
+        self._cancelled = True
+        await codex_questions.clear(self.session_id)
         proc = self._proc
         if proc is None:
-            return runs.StopResult(True, "no Codex process was running")
+            return runs.StopResult(self._stop_confirmed, "no Codex process was running")
         if proc.returncode is None:
             self._stop_confirmed = await _kill_process_tree(proc)
         if self._stop_confirmed:
@@ -440,18 +443,53 @@ class CodexBrain:
         return runs.StopResult(False, "Codex's process was killed, but its whole process tree could not be confirmed stopped")
 
     async def events(self, user_text: str, stream: bool = True):
-        """The turn as typed events (core/runs.py): each finished message,
-        each tool Codex ran (started and finished), the turn's usage, then
-        RESULT. Codex sends whole messages either way, so `stream` changes
-        nothing here."""
+        """Keep the Kairos turn open while no Codex process is needed."""
+        await codex_questions.clear(self.session_id)
+        self._cancelled = False
+        result = None
+        try:
+            if self.forge:
+                self.thread_id = None
+                if self.session_id and (session_manager.get_session(self.session_id) or {}).get("codex_thread_id"):
+                    session_manager.set_codex_thread_id(self.session_id, None)
+            prompt = user_text
+            while not self._cancelled:
+                async with contextlib.aclosing(self._run_process(prompt)) as process_events:
+                    async for item in process_events:
+                        if item.kind == runs.EventKind.RESULT:
+                            result = item
+                        else:
+                            yield item
+                if self._cancelled:
+                    return
+                tasks = codex_questions.take(self.session_id)
+                if not tasks:
+                    if result:
+                        yield result
+                    return
+                codex_questions.next_round(self.session_id)
+                messages = []
+                for task in tasks:
+                    outcome = await task
+                    if self._cancelled:
+                        return
+                    if outcome.status == "answered":
+                        lines = [f"- {question}: {', '.join(answer) if isinstance(answer, list) else answer}"
+                                 for question, answer in outcome.answers.items()]
+                        messages.append("The person answered your ask_user question:\n" + "\n".join(lines) + "\nContinue.")
+                    else:
+                        messages.append("Your ask_user question got no answer: " + outcome.reason)
+                prompt = "\n\n".join(messages)
+                yield runs.text("\n\n")
+        except asyncio.CancelledError:
+            if not self._cancelled:
+                raise
+        finally:
+            await codex_questions.clear(self.session_id)
+
+    async def _run_process(self, user_text: str):
+        """One CLI invocation, shared by normal turns, answers and retries."""
         codex = self._codex_path()
-        if self.forge:
-            # The brain is cached across turns; never resume its last thread.
-            # Clear an older persisted ID as well, so a restarted Forge chat
-            # cannot accidentally reuse it.
-            self.thread_id = None
-            if self.session_id and (session_manager.get_session(self.session_id) or {}).get("codex_thread_id"):
-                session_manager.set_codex_thread_id(self.session_id, None)
         is_fresh_thread = self.thread_id is None
         args = self._build_args(codex)
 
@@ -512,11 +550,12 @@ class CodexBrain:
             tool_access.revoke(tool_token)
             raise
         self._proc = proc
-        proc.stdin.write(prompt.encode("utf-8"))
-        proc.stdin.write_eof()
-
         stderr_task = asyncio.create_task(proc.stderr.read())
         try:
+            if self._cancelled:
+                return
+            proc.stdin.write(prompt.encode("utf-8"))
+            proc.stdin.write_eof()
             async for item in self._consume_process(proc, stderr_task, is_fresh_thread, user_text):
                 yield item
         finally:
@@ -528,6 +567,8 @@ class CodexBrain:
             # and recorded its own stop; this older one must not overwrite it.
             if self._proc is proc:
                 self._stop_confirmed = stopped
+                if stopped:
+                    self._proc = None
             if not stderr_task.done():
                 stderr_task.cancel()
             await asyncio.gather(stderr_task, return_exceptions=True)
@@ -565,11 +606,20 @@ class CodexBrain:
         working. Raises RuntimeError once it is genuinely silent."""
         deadline = time.monotonic() + CODEX_SILENT_HARD_LIMIT_SECONDS
         progress = self._rollout_progress()
+        was_waiting = False
+        from core import permissions
         while True:
             try:
                 return await asyncio.wait_for(proc.stdout.readline(),
                                               timeout=CODEX_MESSAGE_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
+                # A person's response can take longer than Codex's silence limit.
+                waiting = bool(self.session_id and permissions.waiting(f"chat:{self.session_id}"))
+                if waiting or was_waiting:
+                    deadline = time.monotonic() + CODEX_SILENT_HARD_LIMIT_SECONDS
+                    progress = self._rollout_progress()
+                    was_waiting = waiting
+                    continue
                 latest = self._rollout_progress()
                 if latest is None or latest == progress:
                     raise RuntimeError(
@@ -661,6 +711,7 @@ class CodexBrain:
         rc = await proc.wait()
         stderr_tail = await _stderr_tail(stderr_task)
         if failure or rc != 0 or not completed:
+            await codex_questions.clear(self.session_id, reset_rounds=False)
             # Every one of these used to be reported as a fixed sentence with
             # the CLI's own words thrown away, so a failing Codex chat left
             # nothing in the logs to diagnose it with — found live
@@ -689,7 +740,9 @@ class CodexBrain:
                 self.thread_id = None
                 if self.session_id:
                     session_manager.set_codex_thread_id(self.session_id, None)
-                async with contextlib.aclosing(self.events(user_text)) as retry:
+                if self._cancelled:
+                    return
+                async with contextlib.aclosing(self._run_process(user_text)) as retry:
                     async for item in retry:
                         yield item
                 return

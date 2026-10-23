@@ -157,9 +157,12 @@ DEFERRED_TOOLS_ADDENDUM = (
     "with kairos_tool_call.")
 
 
+ASK_USER_GUIDANCE = "When you need the person to choose or clarify before continuing, use ask_user rather than asking in plain text."
+
+
 def for_external(is_admin: bool = False, allow_user_tab_source: bool = False, computer_available: bool = True) -> str:
     tab_access = _EXTERNAL_CUSTOM_TABS_ADDENDUM if allow_user_tab_source else ""
-    return _SHARED_CORE + _EXTERNAL_ADDENDUM + tab_access + (_EXTERNAL_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
+    return _SHARED_CORE + _EXTERNAL_ADDENDUM + "\n\n" + ASK_USER_GUIDANCE + tab_access + (_EXTERNAL_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
 
 
 # Codex CLI, Phase 1 (added 2026-09-11): full hive-mind tool parity via a
@@ -209,7 +212,9 @@ def _codex_core(python_exe: str, cli_script: str, full_access: bool = False, is_
 To reach it, run this exact command through your shell tool, substituting one of the subcommands below for <command> and its flags. The leading `&` is required — PowerShell parses two adjacent quoted strings as an expression, not a command, without it:
 & "{python_exe}" "{cli_script}" <command> [flags...]
 
-Ask questions in your normal reply so they appear in Kairos. Do not use Codex's own input or approval UI to ask the user anything; Kairos cannot display those prompts.
+{ASK_USER_GUIDANCE}
+Never use request_user_input or Codex's own approval UI; Kairos cannot display those.
+ask_user puts your question on screen and returns at once: then end your turn with one short line, and the answer arrives as your next message.
 
 Available subcommands (a true|false flag alone means true; ID,ID is a comma-separated list; add --args_json with a JSON object for anything structured; --help after a subcommand shows its arguments):
 {_codex_commands(is_admin, agent, session_id)}
