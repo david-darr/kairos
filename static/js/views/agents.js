@@ -414,7 +414,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   // keep one source of truth.
   const more = el('button', { type: 'button', class: 'agent-more', 'aria-label': 'More', title: 'More',
     'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'agent-more-menu' });
-  more.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
+  more.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></svg>';
   const moreMenu = el('div', { class: 'agent-more-menu', id: 'agent-more-menu', role: 'menu', 'aria-label': 'Go to', hidden: true });
   const places = [['chat', 'Chat and conversations', chatTab], ['work', 'Work', workTab], ['routines', 'Routines', routinesTab], ['memory', 'Memory', memoryTab]];
   const closeMore = (refocus = true) => {
@@ -427,6 +427,10 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       class: 'agent-more-item', 'aria-checked': String(root.dataset.agentTab === name), 'data-place': name,
       text: name === 'work' ? button.textContent : label,
       onclick: () => { closeMore(false); show(name); if (name === 'chat') openConversations(); else more.focus(); } })));
+    // The phone has no Info button (the board's top bar is Back, Call, More);
+    // its live status, model and next routines open from here.
+    if (workspace && phoneCard()) moreMenu.append(el('button', { type: 'button', role: 'menuitem', class: 'agent-more-item', 'data-place': 'info',
+      text: 'Status and info', onclick: () => { closeMore(false); show('chat'); if (!root.classList.contains('is-info-open')) info.click(); more.focus(); } }));
     moreMenu.hidden = false; more.setAttribute('aria-expanded', 'true');
     (moreMenu.querySelector('[aria-checked=true]') || moreMenu.firstChild).focus();
   };
@@ -472,7 +476,20 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
-  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, el('div', { class: 'agent-topbar-tools' }, [header, ...(workspace ? [info] : []), more, moreMenu])]),
+  // Phone (Kairos Mobile v2 DM board): the bot's face and name leave the top bar
+  // and become the card under it. The same node moves, so the profile face keeps
+  // its handlers; on a desktop it goes back to the top bar.
+  const dmCard = el('section', { class: 'agent-dm-card', 'aria-label': 'About this bot' });
+  const tools = el('div', { class: 'agent-topbar-tools' }, [header, ...(workspace ? [info] : []), more, moreMenu]);
+  const phoneCard = () => matchMedia('(max-width: 768px)').matches && document.documentElement.classList.contains('kairos-redesign');
+  const placeHeader = () => {
+    if (phoneCard()) { if (header.parentNode !== dmCard) dmCard.append(header); }
+    else if (header.parentNode !== tools) tools.prepend(header);
+  };
+  const phoneMedia = matchMedia('(max-width: 768px)');
+  phoneMedia.addEventListener('change', placeHeader); document.addEventListener('kairos:appearance', placeHeader);
+  cleanups.push(() => { phoneMedia.removeEventListener('change', placeHeader); document.removeEventListener('kairos:appearance', placeHeader); });
+  root.append(el('div', { class: 'agent-conversation-topbar' }, [back, menu, segments, tools]), dmCard,
     ...(creationNotice ? [el('p', { class: 'agent-create-notice', role: 'alert', text: creationNotice })] : []),
     el('div', { class: 'agent-conversation-layout' }, [side, chatHost]), workHost, routinesHost, memoryHost);
   const giveJob = () => {
@@ -489,11 +506,18 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       ...detail.cards.filter(card => card.status === 'running').map(card => [card.id, card]),
       ...detail.runs.filter(run => run.outcome === 'running' && run.task_id).map(run => [run.task_id, { id: run.task_id }]),
     ]);
-    const signature = JSON.stringify([agent, [...stoppable.keys()]]);
+    const routines = detail.goals.filter(routine => routine.enabled).length;
+    const signature = JSON.stringify([agent, [...stoppable.keys()], routines]);
     if (signature === headerSignature) return;
     headerSignature = signature;
+    const line = botStatusLine(agent);
+    const stateLabel = line.state === 'idle' ? (agent.status === 'capped' ? STATUS.capped : 'Ready') : line.state === 'teammate' ? 'With a teammate'
+      : line.state === 'queued' ? 'Queued' : STATUS[line.state] || line.text;
     header.replaceChildren(el('button', { type: 'button', class: 'agent-profile-face', 'aria-label': `Open ${agent.name}’s profile`,
-      onclick: () => profile.open() }, [liveAgentAvatar(agent, 42, stateForStatus(botStatusLine(agent).state)), el('h2', { text: agent.name })]),
+      onclick: () => profile.open() }, [liveAgentAvatar(agent, 42, stateForStatus(line.state)), el('h2', { text: agent.name }),
+      el('span', { class: 'agent-dm-role', text: agent.role || 'Your agent' })]),
+      el('div', { class: 'agent-dm-pills' }, [el('span', { class: 'agent-dm-pill', text: stateLabel }),
+        ...(routines ? [el('span', { class: 'agent-dm-pill', text: `${routines} ${routines === 1 ? 'routine' : 'routines'}` })] : [])]),
       el('button', { type: 'button', class: 'btn agent-profile-open', 'aria-label': 'Settings', title: 'Settings', onclick: () => profile.open('all') }, [
         el('span', { class: 'agent-icon', 'aria-hidden': 'true' }), el('span', { class: 'agent-profile-open-label', text: 'Settings' })]));
     header.querySelector('.agent-profile-open .agent-icon').innerHTML = ICONS.settings;
@@ -536,7 +560,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
         const key = `waiting:${kind}:${item.id}`; keys.add(key);
         const node = reconcile(key, [item, agent.avatar], () => {
           const card = make(item, agent, redraw); card.classList.add('agent-approval-card');
-          card.prepend(el('div', { class: 'agent-blocked-status', text: kind === 'review' ? 'Work · Waiting for review' : 'Bot · Waiting for you' }));
+          const phone = phoneCard();
+          card.prepend(el('div', { class: 'agent-blocked-status', text: kind === 'review' ? (phone ? 'Waiting for your review' : 'Work · Waiting for review') : (phone ? 'Waiting for your response' : 'Bot · Waiting for you') }));
           return card;
         });
         if (node.parentNode !== activity) activity.append(node);
@@ -609,6 +634,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   }
 
   drawHeader(detail.agent);
+  placeHeader();
   drawWork();
   show(tab);
   if (profileOpen) profile.open();

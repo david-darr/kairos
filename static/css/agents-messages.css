@@ -196,3 +196,8 @@
   .agent-call .agent-call-hold-hint { display: none; }
 }
 @media(prefers-reduced-motion:reduce) { .agent-call-orb,.agent-call-orb-core,.agent-call-orb::before { animation: none !important; transition: none !important; transform: none !important; } }
+
+/* Phone-only pieces of the redesigned Agents list and DM (Kairos Mobile v2).
+   Hidden everywhere until redesign-agents.css shows them on a redesigned phone. */
+.agents-phone-actions, .agents-phone-top, .agents-phone-listhead, .agents-row-role, .agent-dm-card, .agent-dm-role,
+.agent-dm-pills, .agent-call-open-icon, .agents-rail-lists .rd-empty-state { display: none; }
