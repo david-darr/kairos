@@ -1,3 +1,4 @@
+import { keepReadingPosition } from '../chatScrollAnchor.js';
 import { mountBackgroundTasks } from '../backgroundTasks.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
@@ -1145,6 +1146,7 @@ export async function render(container, tabId, options = {}) {
   syncBeam();
 
   container.append(sessionsPanel, sessionsBackdrop, main);
+  const disposeAnchor = keepReadingPosition(messages);
   const redesignChat = mountRedesignChat(container);  // redesignChat.js; inert with the preview off
   // A second chat beside this one (static/js/sideChat.js).
   const disposeSideChat = mountSideChat(container, {
@@ -1335,6 +1337,7 @@ export async function render(container, tabId, options = {}) {
     closeBrowser();
     // A live microphone must never outlive the view that owns it.
     if (openMic) { openMic.stop(); openMic = null; }
+    disposeAnchor();
     mountSubscriptions.forEach((unsub) => unsub());
     turnSubscriptions.forEach((unsub) => unsub());
     if (activeUnsubscribers === turnSubscriptions) activeUnsubscribers = [];
