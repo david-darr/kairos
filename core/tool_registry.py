@@ -645,7 +645,7 @@ async def _create_task(args, ctx):
         run_at=args.get("run_at"), interval_seconds=args.get("interval_seconds"),
         deliver_to_channel=args.get("deliver_to_channel"),
         run_time=args.get("run_time"), depends_on=args.get("depends_on"), status=args.get("status"),
-        agent_id=ctx.agent_id,
+        agent_id=ctx.agent_id, origin_session_id=ctx.session_id,
         time_zone=args.get("time_zone"), weekdays=args.get("weekdays"),
     )
     return f"Created task {task['id']}: {task['name']}"

@@ -44,6 +44,9 @@ def visible_packet(packet: dict, user: str, app_window: bool = False) -> dict | 
             return True
         except HTTPException:
             return False
+    if packet['type'] in ('bg_tasks', 'bg_followup'):
+        from services.background_tasks import owner_allowed
+        return packet if owner_allowed(packet.get('sessionId'), user) else None
     if packet["type"] in APP_ONLY_PACKETS:
         # Terminal pairing prompts (core/cli_access.py) go to the app window
         # alone; a paired terminal never sees, let alone answers, the next one.
@@ -283,3 +286,19 @@ async def shutdown() -> None:
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def broadcast_owner(packet: dict) -> None:
+    """Owner-filtered by visible_packet; skips mobile notification projection."""
+    for queue in tuple(_subscribers):
+        if queue.full():
+            while not queue.empty():
+                queue.get_nowait()
+            queue.put_nowait(snapshot())
+        else:
+            queue.put_nowait(deepcopy(packet))
+
+
+def broadcast_followup(session_id: str, message: dict) -> None:
+    broadcast_owner({'type': 'bg_followup', 'sessionId': session_id,
+                     'message': {key: message.get(key) for key in ('role', 'content', 'ts', 'run_id', 'background_followup')}})
