@@ -4,6 +4,7 @@ import { openMoreSheet } from './mobileTabSheet.js';
 import { keyboardLift } from './mobileDock.js';
 import { chatPage } from './mobileShell.js';
 import { rememberedProject } from './mobileForge.js';
+import { openQuickCreate } from './mobileActions.js';
 import { badgeCounts } from './mobileActivity.js';
 
 // The phone tab bar stays on every phone page. It steps aside only for the
@@ -146,7 +147,10 @@ export function mountTabBar() {
   if (bar) return bar;
   bar = document.createElement('nav'); bar.className = 'ms-tabbar'; bar.setAttribute('aria-label', 'Tabs');
   glass = document.createElement('div'); glass.className = 'ms-tabbar-glass';
-  bar.append(glass); document.body.append(bar);
+  const create = document.createElement('button'); create.type = 'button'; create.className = 'ms-tabbar-create';
+  create.textContent = '+'; create.setAttribute('aria-label', 'Quick create'); create.setAttribute('aria-haspopup', 'dialog');
+  create.addEventListener('click', () => openQuickCreate(create));
+  bar.append(glass, create); document.body.append(bar);
   // The page on screen, the pager page, the agents badge and the pushed
   // pages all live in the DOM; one observer, coalesced to a frame.
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] });

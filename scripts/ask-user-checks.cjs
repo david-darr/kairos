@@ -28,7 +28,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/') {
     res.setHeader('Content-Type', 'text/html');
     res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">' +
-      ['kairos-theme','style','chat','interface','redesign','redesign-mobile','question-prompt'].map(name => `<link rel="stylesheet" href="/static/css/${name}.css">`).join('') +
+      ['kairos-theme','style','chat','question-prompt','interface','redesign','redesign-motion','redesign-mobile','redesign-tabbar'].map(name => `<link rel="stylesheet" href="/static/css/${name}.css">`).join('') +
       '</head><body><div id="view-content" class="view active" style="height:100dvh"></div></body></html>'); return;
   }
   if (url.pathname.startsWith('/api/')) {
@@ -61,7 +61,8 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404); res.end(); }
 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-app.setPath('userData', path.join(output, 'profile'));
+// Interrupted runs must not hold the next run's Chromium profile lock.
+app.setPath('userData', path.join(output, 'profile-' + process.pid));
 app.whenReady().then(async () => {
   fs.mkdirSync(output, {recursive:true});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -73,6 +74,8 @@ app.whenReady().then(async () => {
   const mount = async (phone, expectQuestion = true) => {
     const connectionsBefore = liveConnections;
     await win.loadURL(base);
+    if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
     await js(`document.documentElement.dataset.appMode = 'kairos'; document.documentElement.classList.toggle('kairos-redesign', ${!!phone}); document.body.classList.toggle('kairos-redesign', ${!!phone});
       // The normal app connects the shared feed before mounting views.
       import('/static/js/chatStream.js').then(async stream => {
@@ -87,7 +90,16 @@ app.whenReady().then(async () => {
       await waitFor('!!document.querySelector(".chat-question-host .question-card")');
     }
   };
-  const capture = async name => { await js("Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))"); await delay(300); const file = path.join(output, name + '.png'); fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG()); console.log(file); };
+  const settleAnimations = async () => {
+    let timeout;
+    try {
+      await Promise.race([
+        js("Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))"),
+        new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('Finite UI animations did not settle within 5 seconds')), 5000); }),
+      ]);
+    } finally { clearTimeout(timeout); }
+  };
+  const capture = async name => { await settleAnimations(); await delay(300); const file = path.join(output, name + '.png'); fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG()); console.log(file); };
   try {
     await mount(false);
     const card = await js(`(() => { const c=document.querySelector('.question-card'), d=c.closest('.chat-composer-dock'); return { dock:!!d, before:!!(c.compareDocumentPosition(d.querySelector('.chat-input-bar')) & Node.DOCUMENT_POSITION_FOLLOWING), visible:c.getBoundingClientRect().height>0, title:c.querySelector('h2').textContent, text:c.textContent, tags:c.querySelectorAll('img,script,b').length, pwned:window.__pwned, disabled:c.querySelector('.primary').disabled }; })()`);
@@ -108,11 +120,24 @@ app.whenReady().then(async () => {
     await mount(false);
     change(null); await waitFor('!document.querySelector(".question-card")');
     change(request); win.setContentSize(390,844); await mount(true);
-    const phone = await js(`(() => { const c=document.querySelector('.question-card'), d=c.closest('.chat-composer-dock'), r=c.getBoundingClientRect(); return {width:r.width,dock:d.getBoundingClientRect().width,height:r.height,viewport:innerHeight,buttons:[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {height:r.height,top:r.top,bottom:r.bottom}})}; })()`);
-    assert.ok(Math.abs(phone.width-phone.dock)<3); assert.ok(phone.height<=phone.viewport*.65+1);
+    await waitFor('!!document.querySelector(".chat-question-host dialog[open].ms-sheet-surface")');
+    await settleAnimations();
+    assert.equal(await js(`document.querySelector('.chat-activity').open`), false, 'Transport details start collapsed');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.chat-activity-steps')).animationName`), 'none', 'Collapsed transport details have no pending entrance');
+    await js(`document.querySelector('.chat-activity').open = true`);
+    assert.equal(await js(`getComputedStyle(document.querySelector('.chat-activity-steps')).animationName`), 'activity-reveal', 'Opening transport details preserves their entrance');
+    await settleAnimations();
+    await js(`document.querySelector('.chat-activity').open = false`);
+    await settleAnimations();
+    const phone = await js(`(() => { const c=document.querySelector('.question-card'), s=c.closest('dialog'), r=c.getBoundingClientRect(), sr=s.getBoundingClientRect(); return {left:r.left,right:r.right,sheetLeft:sr.left,sheetRight:sr.right,sheetBottom:sr.bottom,sheetWidth:sr.width,viewportWidth:innerWidth,height:r.height,viewport:innerHeight,buttons:[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {height:r.height,top:r.top,bottom:r.bottom}})}; })()`);
+    // Phase 3 presents phone questions as full-width sheets. Their cards keep
+    // the chat host and height cap, but no longer match the inset composer's width.
+    assert.ok(Math.abs(phone.sheetWidth-phone.viewportWidth)<1);
+    assert.ok(Math.abs(phone.sheetBottom-phone.viewport)<1);
+    assert.ok(phone.left>=phone.sheetLeft && phone.right<=phone.sheetRight);
+    assert.ok(phone.height<=phone.viewport*.65+1);
     for (const button of phone.buttons) { assert.ok(button.height>=44); assert.ok(button.top>=0); assert.ok(button.bottom<=phone.viewport); }
     await capture('phone');
-    win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     assert.equal(await js('getComputedStyle(document.querySelector(".question-pulse")).animationName'),'none');
 

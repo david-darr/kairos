@@ -7,7 +7,11 @@ let sheetId = 0;
 export function mountSheetSurface(panel, close) {
   panel.classList.add('ms-sheet-surface');
   const grabber = button('', close, 'ms-sheet-grabber');
-  const gate = () => { grabber.hidden = !mobileOn(); };
+  const gate = () => {
+    const on = mobileOn(); grabber.hidden = !on;
+    panel.classList.toggle('rd-sheet-in', on);
+    if (panel.parentElement?.classList.contains('modal-backdrop')) panel.parentElement.classList.toggle('rd-scrim-in', on);
+  };
   gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
   grabber.setAttribute('aria-label', 'Close sheet'); panel.prepend(grabber);
   let start = null;
@@ -22,7 +26,7 @@ export function mountSheetSurface(panel, close) {
   // Pointer capture keeps a downward drag on the grabber as it leaves its hit area.
   const capture = event => { grabber.setPointerCapture?.(event.pointerId); };
   grabber.addEventListener('pointerdown', capture);
-  return () => { phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); grabber.remove(); panel.classList.remove('ms-sheet-surface'); };
+  return () => { phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); grabber.remove(); panel.classList.remove('ms-sheet-surface', 'rd-sheet-in'); };
 }
 
 export function openMobileSheet({ title, content, opener = document.activeElement, fullHeight = false, onClose }) {

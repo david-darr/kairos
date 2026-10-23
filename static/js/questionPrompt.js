@@ -11,6 +11,7 @@ document.addEventListener('kairos:permission-closed', event => dismissQuestionPr
 
 export function showQuestionPrompt(request, onAnswered, { dock = null, mount = document.body } = {}) {
   dismissQuestionPrompt();
+  const phoneSheet = document.documentElement?.classList.contains('kairos-redesign') && matchMedia('(max-width: 768px)').matches;
   const previous = document.activeElement;
   let sending = false, expired = false, removed = false, timer;
   const error = el('p', { role: 'alert', class: 'question-error' });
@@ -58,15 +59,33 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
   });
   const footer = el('footer', { class: 'question-footer' }, [error,
     el('p', { class: 'muted', text: request.expires_at ? `Waiting until ${new Date(request.expires_at * 1000).toLocaleTimeString()}` : '' }),
-    dock ? null : el('p', { class: 'muted', text: 'Closing skips the question.' }),
+    dock && !phoneSheet ? null : el('p', { class: 'muted', text: 'Closing skips the question.' }),
     el('div', { class: 'question-actions' }, [skip, submit])]);
   const card = el('section', { class: 'question-card', role: 'region', 'aria-labelledby': headingId }, [head, body, footer]);
-  const dialog = dock ? null : el('dialog', { class: 'question-dialog' }, [card]);
+  const dialog = dock && !phoneSheet ? null : el('dialog', { class: 'question-dialog' }, [card]);
+  let disposeSurface = () => {};
+  if (dialog && phoneSheet) {
+    // The docked/desktop question has no phone gesture dependency.
+    import('./mobileSheet.js').then(({ mountSheetSurface }) => {
+      if (!removed) disposeSurface = mountSheetSurface(dialog, closePhoneSheet);
+    });
+    head.append(el('button', { type: 'button', class: 'ms-sheet-close', text: 'Close', onclick: closePhoneSheet }));
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const r = dialog.getBoundingClientRect();
+      if (event.clientY < r.top || event.clientX < r.left || event.clientX > r.right || event.clientY > r.bottom) closePhoneSheet();
+    });
+  }
+  function closePhoneSheet() {
+    if (expired) dismissQuestionPrompt(request.id); else send(true);
+  }
   function dismiss() {
-    const hadFocus = card.contains(document.activeElement);
+    const hadFocus = (dialog || card).contains(document.activeElement);
     removed = true;
     clearTimeout(timer);
+    disposeSurface();
     if (dialog) { dialog.close(); dialog.remove(); } else { card.remove(); dock.hidden = true; dock.replaceChildren(); }
+    if (dialog && dock) dock.hidden = true;
     if (hadFocus && previous?.isConnected) previous.focus();
   }
   async function send(isSkip) {
@@ -87,12 +106,15 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
   if (dialog) {
     dialog.addEventListener('cancel', event => { event.preventDefault(); send(true); });
     dialog.addEventListener('close', () => { if (!removed) send(true); });
-    mount.append(dialog); dialog.showModal();
+    // Keep the chat's live region and composer ownership on phones too. The
+    // native dialog supplies the top layer without moving the card out of its host.
+    if (dock) { dock.replaceChildren(dialog); dock.hidden = false; } else mount.append(dialog);
+    dialog.showModal();
   } else { dock.replaceChildren(card); dock.hidden = false; }
   current = { id: request.id, dismiss };
   if (request.expires_at) timer = setTimeout(() => {
     expired = true;
-    for (const input of card.querySelectorAll('input, button')) input.disabled = true;
+    for (const input of card.querySelectorAll('input, button')) if (input.className !== 'ms-sheet-close') input.disabled = true;
     error.textContent = 'This question has expired.';
   }, Math.max(0, request.expires_at * 1000 - Date.now()));
   if (!previous?.isContentEditable && !previous?.matches('input, textarea')) card.querySelector('input')?.focus();

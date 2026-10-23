@@ -36,7 +36,18 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await home();
   assert.deepEqual(await overflow(), [], 'Launch surface has no overflow');
   assert.equal(await js("document.querySelector('.ms-shell h1').textContent"), 'What should we work on?');
-  assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row > *')].map(n => n.className.split(' ')[0])"), ['ms-switch'], 'The header row is the New/Chats switch alone; navigation and Settings live on the tab bar');
+  const launchHeader = await js(`(() => {
+    const header = document.querySelector('.ms-shell .ms-header'), row = header.querySelector('.ms-header-row');
+    const sw = row.querySelector('.ms-switch'), h = header.getBoundingClientRect(), s = sw?.getBoundingClientRect();
+    const buttons = [...row.querySelectorAll('button')].filter(n => !sw?.contains(n) && n.getClientRects().length);
+    return { switchInHeader: !!s && s.top >= h.top && s.bottom <= h.bottom && s.left >= 0 && s.right <= innerWidth,
+      extras: [...row.children].filter(n => n !== sw && !n.matches('h1, h2, .ms-root-title') && !n.matches('button')).length,
+      buttons: buttons.map(n => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, radius: getComputedStyle(n).borderRadius }; }) };
+  })()`);
+  assert.ok(launchHeader.switchInHeader, 'The New/Chats switch exists inside the header area and stays on screen');
+  assert.equal(launchHeader.extras, 0, 'The launch header contains only its switch, title and header buttons');
+  assert.ok(launchHeader.buttons.length <= 2, 'The launch header allows at most two action buttons');
+  for (const b of launchHeader.buttons) assert.ok(b.width >= 44 && b.height >= 44 && b.left >= 0 && b.right <= 390 && b.top >= 0 && b.bottom <= 844 && parseFloat(b.radius) >= b.height / 2, 'Header actions are round, touch sized and on screen: ' + JSON.stringify(b));
   assert.equal(Math.round((await rect('.ms-mark')).w), 84, 'Centered mark is 84px');
   assert.ok(await js("document.querySelector('.ms-background')?.getClientRects().length > 0"), 'The backdrop runs full bleed behind the launch surface');
   assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar')"), true, 'No avatar and no hamburger: the tab bar navigates');
@@ -192,7 +203,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   const navTabs = (await js("[...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab)")).filter(t => !onBar.includes(t));
   const tiles = await js("[...document.querySelectorAll('.ms-tab-sheet .ms-tab-tile')].map(n => n.dataset.tab || n.textContent.trim())");
   assert.deepEqual(tiles, navTabs, 'Tiles follow the sidebar order, less the tabs on the bar');
-  assert.equal(await js("getComputedStyle(document.querySelector('.ms-tab-grid')).gridTemplateColumns.split(' ').length"), 3, 'Three columns');
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-grid')].map(n => getComputedStyle(n).gridTemplateColumns.split(' ').length)"), [4, 4], 'Workspace and Intelligence each use the MoreSheet board\'s four columns');
   assert.equal(await js("document.querySelector('.ms-tab-sheet').getAttribute('aria-modal')"), 'true');
   assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-expanded')"), 'true', 'More announces the open sheet');
   // The bar's Agents mirrors the sidebar badge, whatever count earlier checks left in the inbox.
@@ -335,7 +346,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await swipe('.ms-history-list', 300, 700, 140); await delay(500);
   assert.equal(await page(), 0, 'A swipe switches without continuous dragging');
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
-  assert.equal(await js("getComputedStyle(document.querySelector('.ms-tab-sheet')).animationName"), 'none', 'The sheet appears without sliding');
+  const moreMotion = await js(`(() => {
+    const node = document.querySelector('.ms-tab-sheet'), style = getComputedStyle(node);
+    return { name: style.animationName, duration: style.animationDuration, transform: style.transform, transition: style.transitionDuration,
+      frames: node.getAnimations().filter(a => a.effect?.target === node).flatMap(a => a.effect.getKeyframes()).map(f => ({ transform: f.transform || 'none', opacity: f.opacity })) };
+  })()`);
+  assert.equal(moreMotion.name, 'rd-opacity', 'Reduced motion uses the shared sheet fade');
+  assert.equal(moreMotion.duration, '0.12s', 'More fades for 120ms under reduced motion');
+  assert.deepEqual(moreMotion.frames.map(f => f.opacity), ['0', '1'], 'More animates opacity only');
+  assert.ok(moreMotion.transform === 'none' && /^0s(, 0s)*$/.test(moreMotion.transition) && moreMotion.frames.length >= 2 && moreMotion.frames.every(f => f.transform === 'none'), 'More appears without sliding: ' + JSON.stringify(moreMotion));
   await press('Escape', 'Escape', 27); await delay(250);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
 

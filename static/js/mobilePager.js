@@ -6,7 +6,9 @@ export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) 
   let index = initial, gesture = null, suppress = false;
   const paint = progress => host.style.setProperty('--ms-page', progress);
   const select = next => {
+    const previous = index;
     index = Math.max(0, Math.min(1, next));
+    if (previous !== index && mobileOn()) pages[index].classList.add('rd-enter-rise');
     if (pages[1 - index].contains(document.activeElement)) document.activeElement.blur?.();
     host.classList.remove('ms-dragging'); paint(index);
     pages.forEach((page, i) => { page.inert = i !== index; page.setAttribute('aria-hidden', String(i !== index)); });
