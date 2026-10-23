@@ -516,3 +516,22 @@ def respond(request_id, *, answers: dict | None, skip: bool, user: str) -> str |
     _save(data)
     request.answer.set_result(QuestionOutcome(status, answers=None if skip else cleaned))
     return None
+
+
+async def ask_person(*, surface: str, agent_id: str | None, raw_questions, tool: str) -> QuestionOutcome:
+    """Shared question policy for native Claude and registry tools."""
+    questions = normalize_questions(raw_questions)
+    if questions is None:
+        return QuestionOutcome("malformed", reason=f"{tool} needs 1 to 4 questions, each with question text and at most 8 distinct options.")
+    nobody = ("Nobody is watching this run live, so a question cannot be answered here. Use agent_ask to put it in the person's inbox, then finish what you can."
+              if agent_id else "Nobody is here to answer questions in this run. Continue with your best judgment and say what you assumed.")
+    if not surface.startswith("chat:"):
+        return QuestionOutcome("unavailable", reason=nobody)
+    outcome = await ask(surface=surface, tool=tool, questions=questions)
+    if outcome.status == "answered":
+        return outcome
+    messages = {
+        "skipped": "The person skipped this question without answering. Continue with your best judgment and say what you assumed, or ask again in plain text.",
+        "timeout": "Nobody answered within 30 minutes. Continue with your best judgment and say what you assumed.",
+    }
+    return QuestionOutcome(outcome.status, reason=messages.get(outcome.status, nobody))

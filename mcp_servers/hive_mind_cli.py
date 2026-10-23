@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx  # noqa: E402
 
+from core.permissions import QUESTION_TIMEOUT_SECONDS  # noqa: E402
 from core import tool_registry, tool_search  # noqa: E402
 
 
@@ -118,7 +119,7 @@ def call(name: str, args: dict) -> str:
         raise RuntimeError("Kairos's tools work only when Kairos itself starts Codex "
                            "(JARVIS_API_BASE and JARVIS_TOOL_TOKEN are not set).")
     response = httpx.post(f"{api_base}/tools/{name}", json={"arguments": args},
-                          headers={"X-JARVIS-Tool-Token": token}, timeout=180.0)
+                          headers={"X-JARVIS-Tool-Token": token}, timeout=QUESTION_TIMEOUT_SECONDS + 60 if name == "ask_user" else 180.0)
     response.raise_for_status()
     return response.json()["result"]
 

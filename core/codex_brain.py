@@ -565,11 +565,20 @@ class CodexBrain:
         working. Raises RuntimeError once it is genuinely silent."""
         deadline = time.monotonic() + CODEX_SILENT_HARD_LIMIT_SECONDS
         progress = self._rollout_progress()
+        was_waiting = False
+        from core import permissions
         while True:
             try:
                 return await asyncio.wait_for(proc.stdout.readline(),
                                               timeout=CODEX_MESSAGE_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
+                # A person's response can take longer than Codex's silence limit.
+                waiting = bool(self.session_id and permissions.waiting(f"chat:{self.session_id}"))
+                if waiting or was_waiting:
+                    deadline = time.monotonic() + CODEX_SILENT_HARD_LIMIT_SECONDS
+                    progress = self._rollout_progress()
+                    was_waiting = waiting
+                    continue
                 latest = self._rollout_progress()
                 if latest is None or latest == progress:
                     raise RuntimeError(

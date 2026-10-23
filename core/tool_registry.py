@@ -152,6 +152,38 @@ def register(name: str, description: str, schema: dict, surfaces: frozenset = AL
 HELPER_BLOCKED = frozenset({"delegate", "helper_results", "forge_app_logs"})
 
 
+# Helpers cannot interrupt their parent with a question.
+HELPER_BLOCKED = HELPER_BLOCKED | {"ask_user"}
+
+
+@register(
+    "ask_user",
+    "Ask the person to choose or clarify before you continue, and wait for their answer. Shows a card with your options; they can always type their own answer or skip, so never add an Other option. 1 to 4 questions.",
+    _object({"questions": {"type": "array", "minItems": 1, "maxItems": 4, "items":
+        _object({"question": _str(), "header": _str("A 1-3 word label."),
+                 "options": {"type": "array", "maxItems": 8, "items":
+                     _object({"label": _str(), "description": _str()}, ("label",))},
+                 "multiSelect": {"type": "boolean", "default": False}}, ("question",))}}, ("questions",)),
+    surfaces=frozenset({OPENAI, CODEX}), effect=READ, core=True,
+)
+async def _ask_user(args, ctx):
+    import json
+    from core import permissions
+    questions = args.get("questions")
+    if isinstance(questions, str):
+        try:
+            questions = json.loads(questions)
+        except ValueError:
+            questions = None
+    outcome = await permissions.ask_person(surface=ctx.permission_surface, agent_id=ctx.agent_id,
+                                           raw_questions=questions, tool="ask_user")
+    if outcome.status != "answered":
+        return outcome.reason
+    lines = [f"- {question}: {', '.join(answer) if isinstance(answer, list) else answer}"
+             for question, answer in outcome.answers.items()]
+    return "The person answered:\n" + "\n".join(lines) + "\nContinue with these answers."
+
+
 def helper_tool(spec: ToolSpec) -> bool:
     """What a helper may use: the read tools and the sandboxed browser."""
     return (spec.effect == READ or spec.name == "browse") and not spec.agent_only and spec.name not in HELPER_BLOCKED

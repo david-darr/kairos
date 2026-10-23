@@ -196,7 +196,7 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
     """A small window shows only the core tools; the rest are found through
     the bridge and run exactly as before (2026-10-06, vault note "Local
     Model Fit (Build Spec)")."""
-    CORE = {"search_sessions", "search_vault", "read_vault_file", "list_notes", "create_note", "update_note",
+    CORE = {"ask_user", "search_sessions", "search_vault", "read_vault_file", "list_notes", "create_note", "update_note",
             "list_tasks", "list_tab_tasks", "read_tab_task", "list_upcoming_events", "search_skills", "read_skill", "ui_design"}
     BRIDGE = {"kairos_tool_search", "kairos_tool_describe", "kairos_tool_call"}
 
