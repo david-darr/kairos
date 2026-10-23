@@ -32,6 +32,7 @@ const { createDesktopLog } = require("./desktop-log");
 const { createUiSecret, uiCookie, browserHandoffUrl } = require("./ui-access");
 const { resolveInstance } = require("./instance");
 const { wantsBackground } = require("./launch-flags");
+const { installChatWindows } = require('./chat-windows');
 
 // Which copy this is (electron/instance.js): the real app, or a named
 // development instance with its own data folder, lock and port. Decided
@@ -81,6 +82,9 @@ let backendProcess = null;
 // behave; the tray icon is how you get it back or genuinely quit.
 let tray = null;
 let mainWindow = null;
+const chatWindows = installChatWindows({ ipcMain, BrowserWindow, app, screen, fs, path, backendUrl: BACKEND_URL,
+  preload: path.join(__dirname, 'preload.js'), icon: windowIcon, createBrowser: sideBrowser.createBrowser,
+  isMainSender: event => fromAppWindow(event) && event.senderFrame === mainWindow.webContents.mainFrame });
 let isQuitting = false;
 let usageOverlay = null;
 let screenGrab = null;
@@ -670,46 +674,43 @@ ipcMain.handle("google:open-sign-in", async (event, url) => {
   return true;
 });
 
-ipcMain.handle("browser:open", (event, url, bounds) => {
-  if (!fromAppWindow(event)) return { ok: false, reason: "denied" };
-  return sideBrowser.open(url, bounds);
-});
-ipcMain.handle("browser:navigate", (event, url) => {
-  if (!fromAppWindow(event)) return { ok: false, reason: "denied" };
-  return sideBrowser.navigate(url);
-});
+const browserFor = event => fromAppWindow(event) ? sideBrowser : chatWindows.browserFor(event);
+ipcMain.handle("browser:open", (event, url, bounds) => browserFor(event)?.open(url, bounds) || { ok: false, reason: 'denied' });
+ipcMain.handle("browser:navigate", (event, url) => browserFor(event)?.navigate(url) || { ok: false, reason: 'denied' });
 ipcMain.handle("browser:external", async (event, rawUrl) => {
-  if (!fromAppWindow(event)) return { ok: false };
-  if (rawUrl === undefined) return sideBrowser.openExternal();
-  return sideBrowser.openExternalUrl(rawUrl);
+  const browser = browserFor(event);
+  if (!browser) return { ok: false };
+  if (rawUrl === undefined) return browser.openExternal();
+  return browser.openExternalUrl(rawUrl);
 });
-ipcMain.handle("browser:state", (event) => (fromAppWindow(event) ? sideBrowser.state() : { open: false }));
+ipcMain.handle("browser:state", event => browserFor(event)?.state() || { open: false });
 // Fire-and-forget controls. Each is a no-op when the pane isn't open, so the
 // renderer never has to track lifecycle to avoid an error.
-for (const [channel, fn] of [
-  ["browser:back", () => sideBrowser.goBack()],
-  ["browser:forward", () => sideBrowser.goForward()],
-  ["browser:reload", () => sideBrowser.reload()],
-  ["browser:close", () => sideBrowser.close()],
+for (const [channel, method] of [
+  ["browser:back", 'goBack'],
+  ["browser:forward", 'goForward'],
+  ["browser:reload", 'reload'],
+  ["browser:close", 'close'],
 ]) {
-  ipcMain.on(channel, (event) => { if (fromAppWindow(event)) fn(); });
+  ipcMain.on(channel, event => browserFor(event)?.[method]());
 }
 // The window controls drawn over the page (Windows) follow its Appearance:
 // the page sends its background and text colors whenever they change.
 const HEX = /^#[0-9a-f]{6}$/i;
 ipcMain.on("window:title-bar", (event, color, symbolColor) => {
-  if (!fromAppWindow(event) || !HEX.test(color) || !HEX.test(symbolColor)) return;
-  mainWindow.setBackgroundColor(color);
-  if (process.platform === "win32") mainWindow.setTitleBarOverlay({ color, symbolColor });
+  if (!(fromAppWindow(event) || chatWindows.owns(event)) || !HEX.test(color) || !HEX.test(symbolColor)) return;
+  const win = fromAppWindow(event) ? mainWindow : chatWindows.windowFor(event);
+  win.setBackgroundColor(color);
+  if (process.platform === "win32") win.setTitleBarOverlay({ color, symbolColor });
 });
 
 ipcMain.on("browser:bounds", (event, rect) => {
-  if (fromAppWindow(event)) sideBrowser.setBounds(rect);
+  browserFor(event)?.setBounds(rect);
 });
 // The pane is a native layer above the HTML, so this is how Settings,
 // modals, and menus get to appear over it — z-index cannot.
 ipcMain.on("browser:visible", (event, visible) => {
-  if (fromAppWindow(event)) sideBrowser.setVisible(visible);
+  browserFor(event)?.setVisible(visible);
 });
 
 // -- auto-update (David's ask 2026-09-03: "work like any other mainstream

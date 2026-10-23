@@ -2,6 +2,8 @@ import { api, el, toast, openOptionMenu, closeOptionMenu } from './api.js';
 import { marked, DOMPurify, hljs } from './vendor/chat-vendor.js';
 import { installDesignAutoOpen } from './designAutoOpen.js';
 import { mountChatPane } from './chatPaneLayout.js';
+import { desktopPanes } from './chatPaneStack.js';
+import { openChatDesign, designPaneOpen } from './chatDesignPane.js';
 import { renderArtifact, loadingSkeleton } from './artifactViewer.js';
 import { mountArtifactReview } from './artifactReview.js';
 import { mountForeignReview } from './artifactForeignReview.js';
@@ -141,6 +143,7 @@ function savePane() {
 
 export function setArtifactContext(sessionId, sessions = context.sessions) {
   context = { sessionId, sessions };
+  document.dispatchEvent(new CustomEvent('kairos:chat-session', { detail: { sessionId } }));
   if (viewer) {
     for (const tab of viewer.tabs) {
       tab.origin.hidden = sessionId === tab.sessionId;
@@ -178,7 +181,7 @@ export function hideArtifact({ navigation = false } = {}) {
   savePane();
 }
 function attachViewer(current, host) {
-  if (current.layout && current.panel.parentElement === host) return;
+  if (current.layout && current.panel.closest('.chat-layout') === host) return;
   // mountChatPane closes the prior pane; move the live document only after
   // that registration has released the region.
   current.panel.classList.add('artifact-panel', 'artifact-viewer');
@@ -204,7 +207,12 @@ export async function mountArtifactPane(host) {
     try {
       let saved;
       try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { /* Invalid or disabled storage. */ }
-      const tabs = Array.isArray(saved?.tabs) ? saved.tabs.slice(0, 20).filter(tab => typeof tab?.sessionId === 'string' && typeof tab.name === 'string' && typeof tab.url === 'string' && tab.url.length <= 500 && ARTIFACT_URL.test(tab.url)) : [];
+      let tabs = Array.isArray(saved?.tabs) ? saved.tabs.slice(0, 20).filter(tab => typeof tab?.sessionId === 'string' && typeof tab.name === 'string' && typeof tab.url === 'string' && tab.url.length <= 500 && ARTIFACT_URL.test(tab.url)) : [];
+      if (desktopPanes(host)) {
+        const design = tabs.find(tab => DESIGN_URL.test(tab.url));
+        tabs = tabs.filter(tab => !DESIGN_URL.test(tab.url));
+        if (design && design.sessionId === context.sessionId) await openChatDesign(design.sessionId, design.url.match(DESIGN_URL)[1]);
+      }
       if (tabs.length && !viewer) {
         const current = createViewer(host);
         current.maximized = !!saved.maximized;
@@ -359,6 +367,11 @@ async function renderDesignTab(tab) {
 }
 
 export async function openDesignTab(sessionId, designId, opener, options = {}) {
+  const host = document.querySelector('.chat-layout');
+  if (host && desktopPanes(host)) {
+    if (viewer?.empty.dataset.designPending) hideArtifact();
+    return openChatDesign(sessionId, designId);
+  }
   let title = 'Design';
   try { title = (await api(`/api/designs/${designId}`)).title || title; } catch { toast('That design is no longer available.', 'error'); return; }
   await openArtifact(sessionId, `/designs/${designId}`, title, opener, options);
@@ -368,7 +381,7 @@ export async function openDesignTab(sessionId, designId, opener, options = {}) {
 const PENDING_TEXT = 'Starting the design. Its boards appear here as the model makes them.';
 installDesignAutoOpen({
   currentSession: () => document.querySelector('.chat-layout') ? context.sessionId : null,
-  isOpen: (sessionId, designId) => !!viewer?.tabs.some(tab => tab.url === `/designs/${designId}`),
+  isOpen: (sessionId, designId) => designPaneOpen(sessionId, designId) || !!viewer?.tabs.some(tab => tab.url === `/designs/${designId}`),
   openDesign: (sessionId, designId) => openDesignTab(sessionId, designId, null, { quiet: true }).catch(() => {}),
   showPlaceholder(sessionId) {
     const host = document.querySelector('.chat-layout');
@@ -430,6 +443,8 @@ function createViewer(host, sessionId, opener) {
   });
   current.onKey = event => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
+    const focusedPane = event.target.closest?.('.chat-stacked-pane');
+    if (focusedPane && focusedPane !== current.panel) return;
     if (!current.layout || !current.panel.isConnected) return;
     event.preventDefault();
     if (current.active?.review?.leave()) return;

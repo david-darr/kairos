@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
 
 module.exports = async function checkChatForgePatch({ js, win, waitFor, capture, delay, navigate }) {
+  const widthKey = await js("import('/static/js/chatPaneStack.js').then(m => m.paneStorageKey('kairos:chat-pane-width'))");
+  const execute = js;
+  js = code => execute(code.replaceAll("'kairos:chat-pane-width'", JSON.stringify(widthKey)));
   const closeMenus = () => js("import('/static/js/api.js').then(m => m.closeOptionMenu())");
   const closeDocuments = () => js("import('/static/js/chatContent.js').then(m => m.closeArtifact())");
   win.setContentSize(1440, 900);

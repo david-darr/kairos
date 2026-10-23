@@ -37,6 +37,10 @@
 
 const { WebContentsView, session, shell } = require("electron");
 
+// Each detached chat owns its native view; closing it cannot close the
+// main window's browser. The isolated site session and all gates are shared.
+function createBrowser() {
+
 // persist: so a signed-in site survives closing the pane, matching what a
 // browser does. Deliberately NOT the app's default session — that separation
 // is the cookie-isolation guarantee above, not an implementation detail.
@@ -334,7 +338,7 @@ async function captureStill() {
   return view.webContents.capturePage();
 }
 
-module.exports = {
+return {
   PARTITION, attach, open, navigate, setBounds, setVisible,
   goBack, goForward, reload, openExternal, openExternalUrl, close, isOpen, state, captureStill,
   // Exported for scripts/browser-smoke.cjs, which asserts the blocking rules
@@ -347,3 +351,5 @@ module.exports = {
   _denyDevicePermission: denyDevicePermission,
   _webContents: () => (view && !view.webContents.isDestroyed() ? view.webContents : null),
 };
+}
+module.exports = Object.assign(createBrowser(), { createBrowser });

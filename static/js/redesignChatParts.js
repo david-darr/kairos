@@ -1,7 +1,8 @@
-import { api, el } from './api.js';
+import { el } from './api.js';
 import { emptyState } from './kairosParts.js';
 import { createMascot } from './mascot.js';
 import * as chatStream from './chatStream.js';
+import { mountConversations } from './redesignConversations.js';
 
 export function chatAge(timestamp) {
   if (!Number.isFinite(Number(timestamp)) || !timestamp) return '';
@@ -43,90 +44,24 @@ export function mountChatParts(container) {
     dock.before(idleLayout);
     idleLayout.append(idle, dock);
   }
-  const search = el('input', { type: 'search', class: 'rd-chat-search', placeholder: 'Search chats', 'aria-label': 'Search conversations' });
-  const recent = el('h2', { class: 'rd-chat-recent', text: 'Recent' });
-  let working = workingChats([], () => {}), disposed = false, revision = 0, cachedSessions = [], liveKey = '', firstRows = true;
-  const heading = el('h2', { class: 'rd-chat-panel-title', text: 'Conversations' });
-  panel.prepend(heading, search, working, recent);
-  list.before(working, recent);
-  const originals = new Map();
-  const filter = () => {
-    const query = search.value.trim().toLowerCase();
-    for (const row of list.querySelectorAll('.session-item')) row.hidden = !row.dataset.title?.toLowerCase().includes(query);
-  };
-  search.addEventListener('input', filter);
+  const disposeConversations = mountConversations(container);
   const enabled = () => document.documentElement.classList.contains('kairos-redesign');
   const sync = () => {
     idle.hidden = !enabled() || !main.classList.contains('is-empty');
     const busy = chatStream.listInFlight().some(entry => entry.status === 'processing');
     idle.querySelector('p').textContent = busy ? 'Start something new while your other work continues.' : 'Kip is resting until you need it.';
     idle.querySelector('kairos-mascot')?.setAttribute('state', busy ? 'idle' : 'sleeping');
-    for (const node of [heading, search, recent, working]) node.hidden = !enabled() || (node === working && !node.querySelector('button'));
-    if (!enabled()) {
-      for (const row of list.querySelectorAll('.session-item')) row.hidden = false;
-      for (const [row, nodes] of originals) { if (row.isConnected) row.replaceChildren(...nodes); }
-      originals.clear(); list.classList.remove('rd-stagger');
-    } else { decorate(); drawWorking(); }
   };
-  function decorate() {
-    for (const row of list.querySelectorAll('.session-item')) {
-      if (originals.has(row)) continue;
-      const nodes = [...row.childNodes]; originals.set(row, nodes);
-      const title = row.dataset.title || row.title || 'Untitled conversation';
-      row.replaceChildren(el('span', { class: 'rd-chat-initial', text: Array.from(title.trim())[0] || 'K', 'aria-hidden': 'true' }),
-        el('span', { class: 'rd-chat-row-title' }, nodes));
-    }
-    for (const row of originals.keys()) if (!row.isConnected) originals.delete(row);
-    filter();
-  }
-  async function metadata() {
-    const current = ++revision;
-    if (!enabled()) return;
-    decorate();
-    try {
-      const sessions = await api('/api/sessions');
-      if (disposed || current !== revision || !enabled()) return;
-      cachedSessions = sessions;
-      for (const row of list.querySelectorAll('.session-item')) {
-        const session = sessions.find(session => session.id === row.dataset.sessionId);
-        row.querySelector('.rd-chat-row-age')?.remove();
-        if (session) row.append(el('small', { class: 'rd-chat-row-age', text: chatAge(session.updated_at) }));
-      }
-      drawWorking();
-    } catch { /* Titles remain usable when metadata is unavailable. */ }
-  }
-  function drawWorking() {
-    const visible = cachedSessions.filter(session => list.querySelector(`[data-session-id="${CSS.escape(session.id)}"]`));
-    const next = workingChats(visible, id => list.querySelector(`[data-session-id="${CSS.escape(id)}"]`)?.click());
-    next.hidden ||= !enabled();
-    working.replaceWith(next); working = next;
-  }
-  // Observe direct row replacement only, never streamed prose or our own row decoration.
-  const rows = new MutationObserver(() => {
-    if (!enabled()) return;
-    if (list.querySelector('.session-item')) {
-      if (firstRows) list.classList.add('rd-stagger'); else list.classList.remove('rd-stagger');
-      firstRows = false;
-    }
-    metadata();
-  });
-  rows.observe(list, { childList: true });
   const state = new MutationObserver(sync); state.observe(main, { attributes: true, attributeFilter: ['class'] });
-  const detach = chatStream.subscribeAll(() => {
-    const key = chatStream.listInFlight().filter(entry => entry.status === 'processing').map(entry => entry.sessionId).sort().join('|');
-    if (key === liveKey) return;
-    liveKey = key; sync(); drawWorking();
-  });
+  const detach = chatStream.subscribeAll(sync);
   document.addEventListener('kairos:appearance', sync);
-  sync(); metadata();
+  sync();
   return () => {
-    disposed = true; revision++; rows.disconnect(); state.disconnect(); detach();
+    disposeConversations(); state.disconnect(); detach();
     document.removeEventListener('kairos:appearance', sync);
     if (dock) idleLayout.before(dock);
     idleLayout.remove();
-    for (const [row, nodes] of originals) if (row.isConnected) row.replaceChildren(...nodes);
-    for (const node of [idle, heading, search, recent, working]) node.remove();
-    list.classList.remove('rd-stagger');
+    idle.remove();
     menus.forEach(node => node.classList.remove('rd-menu-in'));
   };
 }

@@ -271,6 +271,12 @@
 .artifact-panel { flex: 0 0 clamp(330px, 38vw, 660px); min-width: 0; display: flex; flex-direction: column; background: var(--bg-panel); border-left: 1px solid var(--border); animation: artifact-enter 220ms var(--ease-out, ease-out); }
 .artifact-viewer, .chat-files-panel { animation: none; } /* The shared pane mount animates retained documents too. */
 .chat-pane-resizer { display: none; }
+.chat-pane-toolbar, .chat-new-window, .chat-window-menu-item { display: none; }
+.chat-pane-stack > .chat-stacked-pane { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.chat-pane-stack > .chat-stacked-pane[hidden] { display: none; }
+.single-chat-window #sidebar, .single-chat-window .mobile-tabbar,
+.single-chat-window #chat-sessions, .single-chat-window #chat-history-toggle { display: none !important; }
+.single-chat-window #content { margin-left: 0; }
 /* Clip content while its region grows from zero, including wide previews. */
 .chat-layout.pane-opening > .artifact-panel { overflow: hidden; }
 @media (min-width: 1101px) {

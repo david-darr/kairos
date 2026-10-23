@@ -1,5 +1,6 @@
 import { keepReadingPosition } from '../chatScrollAnchor.js';
 import { mountBackgroundTasks } from '../backgroundTasks.js';
+import { mountChatPaneToolbar } from '../chatPaneToolbar.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
@@ -1098,6 +1099,8 @@ export async function render(container, tabId, options = {}) {
     busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
   const bgHost = el('div', { class: 'bg-tasks', hidden: true });
   const backgroundTasks = activeBackgroundTasks = mountBackgroundTasks({ host: bgHost, messages, getSessionId: () => activeSessionId, onOpenComputer: () => { syncComputer().then(showComputer); } });
+  const disposePaneToolbar = mountChatPaneToolbar({ header: mobileHeader, host: container, getSessionId: () => activeSessionId,
+    backgroundTasks, getComputer: () => computerInfo, openComputer: showComputer, menu: phoneToolsMenu });
   const backgroundFollowup = event => { if (event.detail.sessionId === activeSessionId) { const msg = event.detail.message; messages.appendChild(messageCard('assistant', msg.content, msg.ts, 'complete', [], msg)); } };
   document.addEventListener('kairos:bg-followup', backgroundFollowup);
   const questionHost = el('div', { class: 'chat-question-host', hidden: true, 'aria-live': 'polite' });
@@ -1297,6 +1300,7 @@ export async function render(container, tabId, options = {}) {
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    disposePaneToolbar();
     backgroundTasks.dispose(); if (activeBackgroundTasks === backgroundTasks) activeBackgroundTasks = null; document.removeEventListener('kairos:bg-followup', backgroundFollowup);
     disposeVoiceRow(); disposeMic(); disposeMobileChat(); disposeMobileComposer(); mobileModelSheet.dispose();
     document.removeEventListener('kairos:models-changed', onModelsChanged);
@@ -2384,6 +2388,11 @@ async function refreshProjectPicker(sessionsList, messages) {
   menu.appendChild(el("div", { class: "overflow-menu-divider" }));
   menu.appendChild(menuItem(ICON_PLUS, "New Project", () => { closeMenu(menu); openProjectModal(null); }));
 
+  sessionsList.chatFilters = [
+    { id: null, label: 'All', select: () => menu.children[0].click() },
+    ...allProjects.map((project, index) => ({ id: project.id, label: project.name, select: () => menu.children[index + 1].click() })),
+  ];
+  sessionsList.dispatchEvent(new Event('kairos:conversations'));
   const active = allProjects.find((p) => p.id === activeProjectFilter);
   label.textContent = active ? active.name : "All Chats";
   if (gearBtn) gearBtn.style.display = active ? "" : "none";
@@ -2503,6 +2512,8 @@ async function refreshSessions(sessionsList, messages) {
   // project is currently selected in the picker above; null (the default,
   // "All Chats") shows everything, unchanged from before this feature.
   const sessions = activeProjectFilter === null ? allSessions : allSessions.filter((s) => s.project_id === activeProjectFilter);
+  sessionsList.chatSessions = allSessions;
+  sessionsList.chatProject = activeProjectFilter;
   sessionsList.innerHTML = "";
   // Deliberately no early return on an empty list: the "no active session"
   // block at the bottom is what populates the model picker, and returning here
@@ -2533,6 +2544,7 @@ async function refreshSessions(sessionsList, messages) {
     sessionsList.appendChild(item);
     if (session.id === activeSessionId) syncChatLayout(messages, session.title);
   }
+  sessionsList.dispatchEvent(new Event('kairos:conversations'));
   if (!activeSessionId) {
     renderWelcome(messages);
     await refreshModelPicker(null);

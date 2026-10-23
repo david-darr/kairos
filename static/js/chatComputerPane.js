@@ -26,8 +26,13 @@ export function openChatComputer(sessionId, info, { onDismiss } = {}) {
     'aria-label': 'Computer in this chat' }, [
     el('header', { class: 'artifact-header' }, [el('h2', { text: 'Computer' }), close]), body,
   ]);
-  const onKey = event => { if (event.key === 'Escape' && event.target !== body.querySelector('.computer-stage')) closeChatComputer(); };
-  const layout = mountChatPane(host, panel, closeChatComputer);
+  const onKey = event => {
+    if (event.defaultPrevented) return;
+    const focusedPane = event.target.closest?.('.chat-stacked-pane');
+    if (focusedPane && focusedPane !== panel) return;
+    if (event.key === 'Escape' && event.target !== body.querySelector('.computer-stage')) closeChatComputer();
+  };
+  const layout = mountChatPane(host, panel, closeChatComputer, { kind: 'computer' });
   pane = { panel, layout, sessionId, onKey, onDismiss, view: mountComputerPanel(body, `chat:${sessionId}`, info) };
   document.addEventListener('keydown', onKey);
 }

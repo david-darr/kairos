@@ -5,7 +5,7 @@
 // for its linked chat. The old Design tab and #/design/<id> links redirect to
 // Library > Designs (app.js).
 import { api, el, toast, confirmDialog, emptyState } from '../api.js';
-import { mountDesignCanvas } from '../designCanvas.js';
+import { mountSharedDesignCanvas as mountDesignCanvas } from '../sharedDesignCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
 import { mountDesignModelPicker } from '../designModelPicker.js';
 import { mobileOn } from '../mobileShared.js';

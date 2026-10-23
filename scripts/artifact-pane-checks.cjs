@@ -1,6 +1,10 @@
 const assert = require('node:assert/strict');
 
 module.exports = async function checkArtifactPanes({ js, win, waitFor, capture, base, delay, navigate }) {
+  // Same width contract, now stored separately for each signed-in user.
+  const widthKey = await js("import('/static/js/chatPaneStack.js').then(m => m.paneStorageKey('kairos:chat-pane-width'))");
+  const execute = js;
+  js = code => execute(code.replaceAll("'kairos:chat-pane-width'", JSON.stringify(widthKey)));
   const open = name => js(`import('/static/js/chatContent.js').then(m => m.openArtifact('s1', '/generated-files/012345abcdef_${name}', '${name}', document.querySelector('.artifact-card')))`);
   const close = () => js("import('/static/js/chatContent.js').then(m => m.closeArtifact())");
   const escape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
