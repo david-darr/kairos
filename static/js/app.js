@@ -14,6 +14,7 @@ import { registration as notificationRegistration } from './mobileNotifications.
 import { mountMobileChrome } from './mobileChrome.js';
 import { mountMobileDock } from './mobileDock.js';
 import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
+import { hasLeaveGuard, canLeaveView } from './leaveGuard.js';
 
 import { mountForgeRail } from './forgeRail.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
@@ -126,6 +127,12 @@ let navigationVersion = 0;
 // captured once the arriving view has drawn its halftone (and the chat has
 // opened any chat it was asked for), or after 800 ms at most.
 export function switchTab(tabId, options = {}) {
+  // Unsaved edits (leaveGuard.js): the view on screen may ask first.
+  if (hasLeaveGuard()) return canLeaveView().then(ok => ok ? switchTabNow(tabId, options) : undefined);
+  return switchTabNow(tabId, options);
+}
+
+function switchTabNow(tabId, options) {
   ({ tab: tabId, options } = phoneRoute(tabId, options));
   if (tabId === 'forgeSession') tabId = 'forgeShell';
   if (tabId === 'forgeShell' && activeTab === 'forgeShell' && modules.forgeShell) {
@@ -493,6 +500,7 @@ async function buildSidebarFooter() {
 
 // Shared by the sidebar gear button and the command palette (Ctrl+K).
 async function openSettings(options = {}) {
+  if (hasLeaveGuard() && !await canLeaveView()) return;
   const settings = await import("./views/settings.js");
   // Mobile gets a real full-screen page, not the floating popup window
   // (David's ask 2026-09-01) — same setup switchTab() does (stop any

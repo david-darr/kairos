@@ -163,7 +163,9 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     // A draft keeps the composer 10px above the bar.
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
-    assert.ok(await js("Math.abs(document.querySelector('.design-composer').getBoundingClientRect().bottom - (document.querySelector('.ms-tabbar').getBoundingClientRect().top - 10)) <= 1"), 'Draft composer clears the tab bar by 10px');
+    // The draft grows the composer (is-active); its geometry settles a frame or two later.
+    await waitFor("Math.abs(document.querySelector('.design-composer').getBoundingClientRect().bottom - (document.querySelector('.ms-tabbar').getBoundingClientRect().top - 10)) <= 1 && document.querySelector('.ms-tabbar').getAnimations().length === 0");
+    assert.ok(true, 'Draft composer clears the tab bar by 10px');
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
   }

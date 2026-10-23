@@ -263,6 +263,13 @@ async function run(ctx) {
   eq(await small('.library-editor button, .library-editor input'), [], 'Editor controls are 44px');
   await shot('library-editor');
   await js("document.querySelector('.library-editor textarea').focus(); document.querySelector('.library-editor textarea').value = 'changed'; document.querySelector('.library-editor textarea').dispatchEvent(new Event('input', { bubbles: true }))");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()");
+  await waitFor("!!document.querySelector('.confirm-panel')");
+  ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard unsaved changes?')"), 'Tab navigation asks before discarding document edits');
+  await js("[...document.querySelectorAll('.confirm-panel .btn')].find(b => b.textContent.trim() === 'Cancel').click()");
+  await waitFor("!document.querySelector('.confirm-panel')");
+  eq(await js("document.querySelector('.library-editor textarea').value"), 'changed', 'Cancel preserves the document edit');
+  eq(await js("document.documentElement.dataset.view"), 'library', 'Cancel keeps the document editor in Library');
   await js("[...document.querySelectorAll('.library-editor button')].find(b => b.textContent.includes('Back to Library')).click()");
   await waitFor("!!document.querySelector('.confirm-panel, .panel-dialog')");
   await press('Escape');
