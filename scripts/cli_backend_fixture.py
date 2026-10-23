@@ -21,6 +21,7 @@ Prompts it understands (the first word decides):
 """
 import asyncio
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -78,6 +79,7 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
     command = words[0].lower() if words else ""
     reply: list[str] = []
     times: list[float] = []
+    timeline = []
 
     async def say(piece: str, pause: float = 0.0):
         reply.append(piece)
@@ -111,10 +113,17 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
         yield await say(f"The command was {'allowed' if result.behavior == 'allow' else 'refused'}.\n")
     elif command == "tool":
         now = time.time()
-        yield {"tool_step": {"phase": "started", "id": "t1", "name": "read_file", "summary": "services/forge_sessions.py",
+        step_id = f"t{secrets.token_hex(3)}"
+        timeline = [
+            {"at": now, "kind": "tool_started", "name": "read_file", "ok": None,
+             "detail": '{"path": "services/forge_sessions.py"}'},
+            {"at": now + 0.3, "kind": "tool_finished", "name": "read_file", "ok": True,
+             "detail": "def create(...):\n    ...", "seconds": 0.3},
+        ]
+        yield {"tool_step": {"phase": "started", "id": step_id, "name": "read_file", "summary": "services/forge_sessions.py",
                              "ok": None, "output": "", "at": now, "seconds": 0}}
         await asyncio.sleep(0.3)
-        yield {"tool_step": {"phase": "finished", "id": "t1", "name": "read_file", "summary": "services/forge_sessions.py",
+        yield {"tool_step": {"phase": "finished", "id": step_id, "name": "read_file", "summary": "services/forge_sessions.py",
                              "ok": True, "output": "def create(...):\n    ...", "at": now, "seconds": 0.3}}
         yield await say("Read it.\n")
     elif command == "edit" and len(words) >= 3:
@@ -127,7 +136,6 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
                 (Path(folder) / words[1]).write_text(" ".join(words[2:]) + "\n", encoding="utf-8")
             yield await say(f"Wrote {words[1]}.\n")
     elif command == "file" and len(words) >= 3:
-        import secrets
         from core import image_gen
         os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
         stored = f"{secrets.token_hex(6)}_{os.path.basename(words[1])}"
@@ -149,10 +157,10 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
     else:
         yield await say("You said: " + text + "\n")
     session_manager.append_message(session_id, "assistant", "".join(reply))
-    _record_usage(session_id, text, "".join(reply), started, times)
+    _record_usage(session_id, text, "".join(reply), started, times, timeline)
 
 
-def _record_usage(session_id: str, prompt: str, reply: str, started: float, times: list) -> None:
+def _record_usage(session_id: str, prompt: str, reply: str, started: float, times: list, timeline: list) -> None:
     """The scripted model reports usage the way a provider does, so runs and
     the context meter have data: about four characters a token, and a
     growing prompt cache. Only for this test backend."""
@@ -164,14 +172,14 @@ def _record_usage(session_id: str, prompt: str, reply: str, started: float, time
     output_tokens = max(1, len(reply) // 4)
     cached = int(prompt_tokens * 0.7) if len(session.get("messages") or []) > 2 else 0
     session_manager_store.record_run({
-        "id": uuid.uuid4().hex, "parent_id": None, "surface": f"chat:{session_id}", "session_id": session_id,
+        "id": uuid.uuid4().hex, "parent_id": None, "surface": "chat", "session_id": session_id,
         "agent_id": None, "task_id": None, "endpoint_id": session.get("model_endpoint_id"), "model": "scripted-1",
         "started_at": started, "ended_at": time.time(), "outcome": "finished", "stop_confirmed": None,
         "tool_calls": 1 if prompt.startswith("tool") else 0, "total_tokens": prompt_tokens + output_tokens,
         "cache_read_tokens": cached, "usage_complete": 1, "detail": "",
         "input_tokens": prompt_tokens, "output_tokens": output_tokens, "cache_write_tokens": None,
         "first_output_at": times[0] if times else None, "last_output_at": times[-1] if times else None,
-    }, [])
+    }, timeline)
     usage = {"input_tokens": prompt_tokens - cached, "cache_read_input_tokens": cached, "output_tokens": output_tokens}
     if session.get("model_endpoint_id"):
         token_usage.record_usage(session["model_endpoint_id"], usage)

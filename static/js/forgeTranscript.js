@@ -1,3 +1,4 @@
+import { keepReadingPosition } from './chatScrollAnchor.js';
 import { mountMobileDictation } from './mobileDictation.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { mobileOn, phone, button, PLUS_ICON } from './mobileShared.js';
@@ -58,21 +59,33 @@ function createTranscript(options) {
     following = true; heldUntil = 0; follow();
   } });
   messages.append(documentBody);
+  let intentUntil = 0, shown = false;
+  const intent = () => { intentUntil = performance.now() + 700; };
   const release = () => { following = false; heldUntil = performance.now() + 150; jump.hidden = false; };
-  messages.addEventListener('wheel', event => { if (event.deltaY < 0) release(); }, { passive: true });
+  messages.addEventListener('wheel', event => { intent(); if (event.deltaY < 0) release(); }, { passive: true });
   let touchY;
-  messages.addEventListener('touchstart', event => { touchY = event.touches[0]?.clientY; }, { passive: true });
-  messages.addEventListener('touchmove', event => { if (event.touches[0]?.clientY > touchY) release(); touchY = event.touches[0]?.clientY; }, { passive: true });
-  messages.addEventListener('keydown', event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) release(); });
+  messages.addEventListener('touchstart', event => { intent(); touchY = event.touches[0]?.clientY; }, { passive: true });
+  messages.addEventListener('touchmove', event => { intent(); if (event.touches[0]?.clientY > touchY) release(); touchY = event.touches[0]?.clientY; }, { passive: true });
+  messages.addEventListener('pointerdown', event => { if (event.target === messages) intent(); });
+  messages.addEventListener('keydown', event => { if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) intent(); if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) release(); });
   messages.addEventListener('scroll', () => {
     const near = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 16;
-    following = near && performance.now() >= heldUntil; jump.hidden = following;
+    if (near && performance.now() >= heldUntil) following = true;
+    else if (!near && performance.now() < intentUntil) following = false;
+    jump.hidden = following;
   });
   function follow() {
     if (!disposed && following && performance.now() >= heldUntil) messages.scrollTop = messages.scrollHeight;
     jump.hidden = following;
   }
-  const observer = new ResizeObserver(follow); observer.observe(documentBody);
+  const observer = new ResizeObserver(() => {
+    const visible = messages.clientHeight > 0 && messages.isConnected;
+    // Opened or restored tabs land at the newest message; parking resets scrollTop.
+    if (visible && !shown) { following = true; heldUntil = 0; }
+    shown = visible; follow();
+  });
+  observer.observe(documentBody); observer.observe(messages);
+  const disposeAnchor = keepReadingPosition(messages, { pinned: () => following });
   const spinnerFrames = ['\u2801', '\u2803', '\u2807', '\u2847', '\u28c7', '\u28e7', '\u28f7', '\u28ff', '\u28fe', '\u28fc'];
   const ticker = setInterval(() => {
     for (const state of states.values()) if (state.busy) labelWork(state);
@@ -324,7 +337,7 @@ function createTranscript(options) {
   return {
     messages: documentBody, mount, card, paint, history, follow, setBusy,
     dispose() {
-      disposePhoneControls(); disposeMobileComposer(); backdrop?.dispose();
+      disposeAnchor(); disposePhoneControls(); disposeMobileComposer(); backdrop?.dispose();
       disposed = true; ++refreshVersion; clearInterval(ticker); observer.disconnect(); unsubscribe();
       documentBody.querySelectorAll('.forge-prompt').forEach(node => node._observer?.disconnect());
       document.removeEventListener('kairos:forge-review', reviewChanged); states.clear();
