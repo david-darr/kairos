@@ -76,7 +76,7 @@ app.whenReady().then(async () => {
     await click(survey);
     await wait("document.querySelector('.bg-task-steps')?.textContent.includes('Grep')", 12000);
     assert(await js("['Prompt', 'Steps'].every(label => [...document.querySelectorAll('.bg-task-section-heading')].some(n => n.textContent === label))"), 'Subagent detail has Prompt and Steps headings');
-    assert(await js("document.querySelector('.bg-task-usage')?.textContent === '100 tokens · 1 tool uses · 3s'"), 'Usage uses plain words and middle dots');
+    assert(await js("document.querySelector('.bg-task-usage')?.textContent === '100 tokens · 1 tool use · 3s'"), 'Usage uses plain words and middle dots');
     await capture('desktop-subagent-detail');
     await click('.bg-task-back'); await click(command);
     await wait("document.querySelector('.bg-task-output')?.textContent.includes('Slow test')");

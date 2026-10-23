@@ -1,16 +1,8 @@
-/* Phone tab bar and More sheet (2026-10-22, David): a floating liquid-glass bar
-   at the bottom of every phone page (static/js/mobileTabBar.js) replaces the
-   top-left avatar and its workspace sheet. Phone only, redesign only; desktop
-   has no rules here.
-
-   Geometry. The bar sits max(12px, bottom safe area) above the true bottom,
-   like every dock (redesign-mobile.css), and drops by --ms-below-fold so it
-   reaches the true bottom in an iOS home-screen app. While it shows, the root
-   carries .ms-tabbar-up and --ms-tabbar-space is the room it takes (its height
-   plus a 10px gap); docks, the launch composer and page padding add it, so
-   they sit above the bar. Inside a conversation, a Forge session or a pushed
-   page the bar slides away and the space is 0. The 12px --ms-ios-nudge only
-   moves things at the top, so the bar is unaffected by it. */
+/* The tab bar shows on every phone page. Composers on pushed pages sit 10px
+   above it. It slides away only for the keyboard and full-screen views.
+   The bar clears the bottom safe area and subtracts --ms-below-fold to reach
+   the true screen bottom on iOS. --ms-ios-nudge moves only top surfaces. */
+.agents-conversation-back { display: none; }
 @media (max-width: 768px) {
   .kairos-redesign { --ms-tabbar-height: 62px; --ms-tabbar-space: 0px; }
   .kairos-redesign.ms-tabbar-up { --ms-tabbar-space: calc(var(--ms-tabbar-height) + 10px); }
@@ -98,6 +90,43 @@
   .kairos-redesign .ms-launch-bottom { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
   .kairos-redesign .ms-history { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
   .kairos-redesign .mf-dashboard-body { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space)); }
+
+  /* Pushed pages keep the bar. */
+  .kairos-redesign .ms-conversation:not(.ms-launch-chat) .chat-composer-dock {
+    padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
+  }
+  .kairos-redesign #view-content.view:has(.mf-session):not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding-bottom: var(--ms-tabbar-space); }
+  .kairos-redesign:is(:has(.forge-transcript-composer), :has(.ms-git-dock)) .ms-activity-floating {
+    bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 74px + var(--ms-tabbar-space));
+  }
+  .kairos-redesign .ms-conversation .chat-input-right .model-picker-menu {
+    bottom: calc(100px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)) + var(--ms-tabbar-space) - var(--ms-below-fold, 0px));
+  }
+  /* The live launch dock otherwise uses interface.css's 16px + safe bottom. */
+  .kairos-redesign.ms-tabbar-up .ms-live-chat .chat-composer-dock {
+    padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
+  }
+  .kairos-redesign.ms-tabbar-up .settings-mobile-page :is(#settings-nav, .settings-content) {
+    padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
+    scroll-padding-bottom: var(--ms-tabbar-space);
+  }
+  /* The Design board list: its sticky composer sits 10px above the bar, as every dock does. */
+  .kairos-redesign.ms-tabbar-up #view-content.view:has(.design-composer):not(.chat-layout):not(.settings-mobile-page):not(.ms-home):not(.ms-has-dock) {
+    padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
+  }
+  .kairos-redesign.ms-tabbar-up .design-composer { padding-bottom: 10px; }
+  .kairos-redesign .design-focus { padding-top: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
+
+  /* A shared phone back control for agent, team and inbox conversations. */
+  .kairos-redesign .agents-workspace.has-conversation .agents-workspace-controls { flex: 1; }
+  .kairos-redesign .agents-workspace.has-conversation .agents-conversation-back:not([hidden]) {
+    display: inline-grid; place-items: center; width: 44px; height: 44px; min-width: 44px;
+    padding: 0; margin-right: auto; border: 1px solid var(--rd-line-strong);
+    border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); color: var(--rd-ink);
+    font: 400 28px/1 var(--rd-font-ui); box-shadow: var(--rd-shadow);
+  }
+  .kairos-redesign .agents-conversation-back:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .agents-messenger .swarm-header > button:first-child { display: none; }
 
   /* More: a glass sheet over the page. */
   .kairos-redesign .ms-more-sheet {

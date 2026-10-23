@@ -95,7 +95,7 @@ async function run(ctx) {
     ok(await js("document.querySelector('.library-vault-browser').classList.contains('vault-phone-detail') && document.querySelector('.library-vault-sidebar').hidden"), 'phone: the note pushes in as its own page');
     ok(await js("!!document.querySelector('.vault-phone-back')"), 'phone: the note page has a back button');
     await delay(400);
-    ok(await js("!document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'"), 'phone: the tab bar steps aside on the pushed note page, as on other pushed pages');
+    ok(await js("document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"), 'phone: the pushed note page keeps the tab bar');
     eq(await js("document.querySelectorAll('.ms-dock').length"), 0, 'phone: the dock leaves with the list page');
     eq(await small('.vault-phone-detail .library-vault-reader-head button, .vault-phone-back'), [], 'phone: note controls are 44px');
     await capture(label + '-vault-note');
@@ -149,6 +149,14 @@ async function run(ctx) {
   await cm("view.dispatch({ changes: { from: view.state.doc.length, insert: '\\nAdded in the Library.\\n' } });");
   await waitFor("document.querySelector('.vault-note-title').classList.contains('dirty')");
   ok(true, 'a dirty dot shows on the title');
+  await click(phone ? '.ms-tabbar [data-tabbar=home]' : '#nav .nav-item[data-tab=home]');
+  await waitFor("!!document.querySelector('.confirm-panel')");
+  ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard note edits?')"), 'tab navigation asks before discarding note edits');
+  await clickText('.confirm-panel .btn', 'Cancel');
+  await waitFor("!document.querySelector('.confirm-panel')");
+  eq(await js("document.documentElement.dataset.view"), 'library', 'Cancel keeps Library open');
+  ok(await js("document.querySelector('.vault-editor .cm-content').textContent.includes('Added in the Library.')"), 'Cancel preserves the note edit');
+  ok(await js("document.querySelector('.vault-note-title').classList.contains('dirty')"), 'Cancel preserves the dirty title dot');
   // [[ completion offers vault notes.
   await cm("view.focus(); view.dispatch({ selection: { anchor: view.state.doc.length } });");
   // Typed as the keyboard would, so completion opens as it does for a person.
