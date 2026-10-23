@@ -32,7 +32,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       }
       if (width <= 768 && tab === 'home') {
         assert.equal(await js("!document.getElementById('mobile-menu-btn') && !!document.querySelector('.ms-tabbar [data-tabbar=home][aria-current=page]') && !document.querySelector('.ms-shell')"), true, 'Home has the tab bar, Home current, and the dashboard');
-        assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0 && !document.querySelector('.ms-your-day')"), true, 'Dashboard is directly visible');
+        assert.equal(await js("document.querySelector('.hm-heading, .dashboard-header').getClientRects().length > 0 && !document.querySelector('.ms-your-day')"), true, 'Dashboard is directly visible');
       }
       if (tab === 'calendar') {
         assert.equal(await js("document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar choices take no page space');

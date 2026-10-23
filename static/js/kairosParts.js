@@ -1,6 +1,6 @@
-import { api, el } from './api.js';
+import { api, el, modelMark } from './api.js';
 import { createMascot } from './mascot.js';
-import { PROVIDERS, SIGN_IN, toSnap, toneOf, pctText, resetCopy, staleOf } from './quotaReadings.js';
+import { PROVIDERS, SIGN_IN, toSnap, toneOf, pctText, resetCopy, staleOf, ago, usedCopy } from './quotaReadings.js';
 
 export function segmented({ label, options, value, onChange }) {
   const track = el('div', { class: 'rd-segmented', role: 'radiogroup', 'aria-label': label });
@@ -63,13 +63,14 @@ export function emptyState({ mascotState = 'idle', title, text, action }) {
   return node;
 }
 
-export function usageCard({ providers = [] }) {
+export function usageCard({ providers = [], accounting = [] }) {
   const card = el('section', { class: 'rd-usage-card', 'aria-label': 'Model usage' }, [el('h2', { text: 'Model usage' })]);
   for (const provider of PROVIDERS) {
     const reading = providers.find(p => p.provider === provider.id);
     const snap = toSnap(reading || { status: 'unavailable' });
-    const section = el('div', { class: 'rd-usage-provider' }, [el('h3', { text: provider.name })]);
-    if (snap.status === 'needsAuth') section.append(el('p', { text: SIGN_IN[provider.id] }));
+    if (!snap.windows.length && snap.status !== 'needsAuth') continue;
+    const section = el('div', { class: 'rd-usage-provider', 'data-provider': provider.id }, [el('h3', {}, [modelMark(provider.mark, provider.name), provider.name])]);
+    if (snap.status === 'needsAuth') section.append(el('p', { class: 'rd-usage-note', text: [SIGN_IN[provider.id], snap.note].filter(Boolean).join(' ') }));
     else {
       for (const window of snap.windows) {
         const label = window.id === 'session' ? '5-hour' : window.id === 'weekly' ? 'Weekly' : window.label;
@@ -77,15 +78,23 @@ export function usageCard({ providers = [] }) {
           cells: Array.from({ length: 24 }, (_, i) => i < Math.round(Math.min(1, window.used) * 24) ? 'a' : 'empty'),
           label: `${label}: ${pctText(window.used)}% used` });
         bar.classList.add('rd-usage-bar', `rd-tone-${toneOf(window.used)}`);
-        section.append(el('div', { class: 'rd-usage-window' }, [el('span', { class: 'rd-part-label', text: label }), bar,
+        bar.setAttribute('role', 'meter');
+        bar.setAttribute('aria-label', `${label}: ${usedCopy(window)}`);
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-valuenow', String(Math.min(100, window.used * 100)));
+        section.append(el('div', { class: 'rd-usage-window', 'data-quota-tone': toneOf(window.used), title: usedCopy(window) }, [el('span', { class: 'rd-part-label', text: label }), bar,
           el('span', { class: 'rd-usage-percent', text: `${pctText(window.used)}%`, 'aria-hidden': 'true' })]));
       }
       const resets = snap.windows.map(w => `${w.id === 'session' ? '5-hour' : w.id === 'weekly' ? 'Weekly' : w.label}: ${resetCopy(w.resets_at)}`).filter(s => !s.endsWith(': '));
-      if (staleOf(snap)) resets.push('Usage may be out of date.');
-      section.append(el('p', { text: resets.join(' · ') || snap.note || 'Waiting for usage.' }));
+      if (staleOf(snap)) resets.push(snap.fetched_at ? 'Updated ' + ago(snap.fetched_at) : 'Usage may be out of date.');
+      section.append(el('p', { class: 'rd-usage-note', text: resets.join(' · ') || snap.note || 'Waiting for usage.' }));
     }
     card.append(section);
   }
+  for (const item of accounting) card.append(el('p', { class: 'rd-usage-accounting', title: item.title }, [
+    el('span', { text: item.name + ': ' }), el('span', { class: 'dashboard-model-usage', text: item.text }),
+  ]));
   return card;
 }
 
@@ -106,4 +115,4 @@ export async function loadUsageCard(container) {
 }
 
 // Home and the shared card use one request contract.
-export function loadQuotas() { return api('/api/models/quotas'); }
+export function loadQuotas() { return api('/api/models/quotas'); }

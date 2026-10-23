@@ -4,15 +4,41 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 (async () => {
+  const vm = require('node:vm');
+  const homeSource = fs.readFileSync(path.join(__dirname, '../static/js/redesignHome.js'), 'utf8');
+  const packSource = homeSource.slice(homeSource.indexOf('export function packRows'), homeSource.indexOf('// The week/hero')).replace('export ', '');
+  const context = {}; vm.createContext(context); vm.runInContext(packSource + ';this.pack = packRows', context);
+  const packed = items => JSON.parse(JSON.stringify(context.pack(items)));
+  for (let mask = 0; mask < 32; mask++) {
+    const items = [{ id: 'hero', span: 8, group: 'hero' }, { id: 'week', span: 4, group: 'hero' },
+      ...['needs', 'working', 'chats', 'schedule', 'models'].flatMap((id, i) => mask & (1 << i) ? [{ id, span: i === 0 ? 8 : 4, group: i < 2 ? 'live' : 'recent' }] : []),
+      { id: 'system', span: 12, group: 'system' }];
+    const rows = packed(items);
+    for (const row of rows) assert.equal(row.reduce((n, c) => n + c.span, 0), 12, 'Every missing-section combination fills its row');
+    assert.deepEqual(rows.flat().map(c => c.id), items.map(c => c.id));
+  }
+  assert.deepEqual(packed([{ span: 4 }, { span: 4 }])[0].map(c => c.span), [6, 6]);
+  assert.deepEqual(packed([{ span: 4 }])[0].map(c => c.span), [12]);
+  assert.deepEqual(packed([{ span: 8 }, { span: 4 }, { span: 8 }, { span: 8 }]).map(row => row.map(c => c.span)), [[8, 4], [12], [12]], 'Custom orders have no gaps');
+  const phoneRows = packed([{ id: 'week', span: 4, group: 'hero' }, { id: 'system', span: 12, group: 'system' }]);
+  assert.deepEqual(phoneRows.flat().map(c => c.id), ['week', 'system'], 'Phone fixed cards contain week and Systems, with no hero');
+  assert.equal(phoneRows[0][0].span, 12, 'A week without the desktop hero fills its row');
   const saved = new Map();
   global.localStorage = { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) };
   global.document = new EventTarget();
+  let redesign = false;
+  document.documentElement = { classList: { contains: () => redesign } };
   global.CustomEvent = class extends Event { constructor(name) { super(name); } };
   const source = fs.readFileSync(path.join(__dirname, '../static/js/layout.js'), 'utf8');
   const layout = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const listId = 'tab:crm:follow-ups', statId = 'tab:crm:open-count';
   const fixture = require('../demo/fixtures.js')({ state: { empty: false } });
   const read = () => fixture.fixture(new URL('http://fixture/api/home/tab-cards')).cards;
+  const week = fixture.fixture(new URL('http://fixture/api/home/week'));
+  assert.equal(week.slots.length, 14);
+  assert.deepEqual(week.unavailable, ['notes_done']);
+  for (const key of ['chats', 'agent_runs']) assert.equal(week.totals[key], week.slots.reduce((n, slot) => n + slot[key], 0));
+  assert.deepEqual(week.slots.slice(0, 2).map(slot => slot.half), ['am', 'pm']);
   assert.deepEqual(read(), [], 'Off tabs provide no cards');
   fixture.mutate('/api/system/tab-templates/crm', 'POST', { enabled: true });
   const cards = read();
@@ -49,5 +75,20 @@ const path = require('node:path');
   layout.initLayout('bob');
   assert.equal(layout.homeLayout().order[0], unknownId, 'Any saved tab ID is retained even without its manifest');
   assert.deepEqual(layout.homeLayout().hidden, [unknownId]);
+  redesign = true;
+  document.dispatchEvent(new CustomEvent('kairos:appearance'));
+  assert.ok(layout.homeLayout().order.includes('working'), 'Redesign can customize Working now');
+  const custom = layout.getLayout();
+  custom.home = ['working', 'needs', ...custom.home.filter(id => !['working', 'needs'].includes(id))];
+  custom.hiddenHome = custom.hiddenHome.filter(id => id !== 'working');
+  layout.saveLayout(custom);
+  layout.initLayout('bob');
+  assert.deepEqual(layout.getLayout(), custom, 'Redesign order and visibility survive reload');
+  redesign = false;
+  document.dispatchEvent(new CustomEvent('kairos:appearance'));
+  assert.ok(!layout.homeLayout().order.includes('working'), 'Classic excludes redesign-only cards');
+  redesign = true;
+  document.dispatchEvent(new CustomEvent('kairos:appearance'));
+  assert.equal(layout.homeLayout().order[0], 'working', 'Switching back restores the custom arrangement');
   console.log('PASS: fixtures, default visibility, mixed order, off/unloaded IDs, reload, re-enable, new cards, reset and per-user layout.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

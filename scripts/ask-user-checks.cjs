@@ -41,6 +41,7 @@ const server = http.createServer(async (req, res) => {
     const data = raw ? JSON.parse(raw) : {};
     const json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
     if (url.pathname.endsWith('/respond')) { posts.push({ path: url.pathname, data }); return json({ status: data.skip ? 'skipped' : 'answered' }); }
+    if (url.pathname === '/api/home/week') return json(require('../demo/fixtures.js')().fixture(url));
     if (url.pathname === '/api/chat/live/snapshot') return json(snapshot());
     if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, setup_required: false, username: 'Alex', is_admin: true });
     if (url.pathname === '/api/sessions') return json([chat]);

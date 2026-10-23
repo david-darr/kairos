@@ -108,11 +108,12 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await js("window.Notification = window.mascotNotification; document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
   }
 
-  // -- Phone: the mascot beside the bottom tab bar (393x852) ----------------------------
+  // -- Phone: week replaces the hero; the Agents badge carries its signal (393x852) ----------------------------
   win.setContentSize(393, 852); await delay(400);
   await navigate('home');
-  await waitFor("!!document.querySelector('.ms-tabbar') && !!document.querySelector('.dashboard-mascot kairos-mascot svg')");
-  assert.ok(await js("(() => { const m = document.querySelector('.dashboard-mascot').getBoundingClientRect(), b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return m.width >= 44 && m.bottom <= b.top && m.right <= innerWidth && m.left >= 0; })()"), 'Home mascot clears the tab bar');
+  await waitFor("!!document.querySelector('.ms-tabbar') && !!document.querySelector('.hm-week .dashboard-core')");
+  assert.ok(await js("!document.querySelector('.dashboard-hero, .dashboard-mascot, kairos-mascot[follow-pointer]')"), 'Phone Home has no hero mascot or pointer listener');
+  assert.ok(await js("(() => { const h = document.querySelector('.hm-heading').getBoundingClientRect(), b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return h.left >= 0 && h.right <= innerWidth && h.bottom <= b.top; })()"), 'Phone Home heading clears the tab bar');
   // The bar's Agents badge is the needs-you signal on phone: untouched, no mascot in the bar.
   assert.equal(await js("document.querySelectorAll('.ms-tabbar kairos-mascot, .ms-tabbar .agent-mascot').length"), 0);
   assert.ok(await js("!!document.querySelector('.ms-tabbar-item[data-tabbar=agents] .ms-tabbar-badge')"), 'the Agents badge still shows');

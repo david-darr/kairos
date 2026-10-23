@@ -116,13 +116,13 @@ function collect() {
   }
   for (const item of remote.inbox.items) {
     const name = agentName(item.agent_id), question = item.kind === "question";
-    need.push({ key: `inbox:${item.id}`, kind: "agent", finished: !question, tint: agentTint(item.agent_id), initial: initial(name),
+    need.push({ key: `inbox:${item.id}`, kind: "agent", agent: names.get(item.agent_id), finished: !question, tint: agentTint(item.agent_id), initial: initial(name),
       title: question ? `${name} asked a question` : `${name} sent a report`, detail: clip(item.title),
       action: question ? "Reply" : "Review", go: () => go({ tab: "agents", agentId: item.agent_id }) });
   }
   for (const card of remote.inbox.reviews) {
     const name = agentName(card.agent_id);
-    need.push({ key: `review:${card.id}`, kind: "agent", finished: true, tint: agentTint(card.agent_id), initial: initial(name),
+    need.push({ key: `review:${card.id}`, kind: "agent", agent: names.get(card.agent_id), finished: true, tint: agentTint(card.agent_id), initial: initial(name),
       title: `${name} has a result ready`, detail: clip(card.title || card.name || "Waiting for your review"),
       action: "Review", go: () => go({ tab: "agents", agentId: card.agent_id }) });
   }
@@ -141,7 +141,7 @@ function collect() {
   }
   for (const agent of remote.agents) {
     if (agent.status !== "working") continue;
-    work.push({ key: `working:${agent.id}`, kind: "agent", agentId: agent.id, modelEndpointId: agent.endpoint_id,
+    work.push({ key: `working:${agent.id}`, kind: "agent", agent, agentId: agent.id, modelEndpointId: agent.endpoint_id,
       model: agent.model_override, needsYou: !!agent.activity?.waiting, tint: agent.color || "", initial: initial(agent.name),
       title: `${agent.name} is working`, detail: clip(agent.status_detail || "Working"), action: "View",
       go: () => go({ tab: "agents", agentId: agent.id }) });

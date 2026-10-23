@@ -222,7 +222,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-group .ms-group-label')].map(n => n.textContent)"), ['Workspace', 'Intelligence'], 'Sheet has the saved sidebar groups (the top group is all on the bar)');
   await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
   await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()"); await delay(450);
-  assert.equal(await js("!!document.querySelector('.dashboard-hero') && !document.querySelector('.ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home on the bar opens dashboard and Customize');
+  assert.equal(await js("!!document.querySelector('.hm-week') && !document.querySelector('.dashboard-hero, .ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home on the bar opens dashboard and Customize');
   await home();
   // Tiles navigate
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
@@ -362,7 +362,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     await resize(w, h);
     await navigate('home'); await delay(500);
     assert.equal(await js("(() => { const s = document.querySelector('.ms-shell'); return !!s && !s.hidden && s.getClientRects().length > 0; })()"), false, `${w}px Home keeps the dashboard`);
-    assert.equal(await js("document.querySelector('.dashboard-header').getClientRects().length > 0"), true, `${w}px shows the dashboard overview`);
+    assert.equal(await js("document.querySelector('.hm-heading, .dashboard-header').getClientRects().length > 0"), true, `${w}px shows the dashboard overview`);
     if (!phone) assert.equal(await js("[...document.querySelectorAll('.ms-activity, .ms-tab-sheet[open], .ms-tabbar')].every(n => n.hidden || !n.getClientRects().length)"), true, 'No phone chrome (tab bar included) on desktop');
   }
   await resize(1440, 900);

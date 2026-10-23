@@ -169,9 +169,6 @@
 .kairos-redesign .hm-compose { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-left: 44px; }
 .kairos-redesign .hm-compose[hidden] { display: none; }
 .kairos-redesign .hm-compose-input { flex: 1 1 200px; min-width: 0; height: 36px; padding: 0 14px; }
-.kairos-redesign .hm-clear {
-  padding: 18px 0 16px; border-top: 1px solid var(--rd-line); font-family: var(--rd-font-title); font-style: italic; font-size: 22px; color: var(--rd-ink-dim);
-}
 
 /* Shared pill buttons for Needs you and the sheet */
 .kairos-redesign .hm-btn {
@@ -261,3 +258,117 @@
   .kairos-redesign button.dashboard-row { min-height: 44px; }
   .kairos-redesign .dashboard-section-header .btn.quiet { min-width: 44px; min-height: 44px; justify-content: flex-end; }
 }
+/* Home: shared hero, activity cards and congruent rows in both states. */
+.kairos-redesign .hm-home { max-width: 1240px; gap: 24px; }
+.kairos-redesign .hm-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.kairos-redesign .hm-heading p { margin: 0 0 6px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-heading h1 { margin: 0; font: italic 600 clamp(36px, 4vw, 52px)/1.05 var(--rd-font-title); color: var(--rd-ink); }
+.kairos-redesign .hm-heading-actions { display: flex; align-items: center; gap: 8px; }
+.kairos-redesign .hm-home .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; align-items: stretch; }
+.kairos-redesign .hm-home .dashboard-grid > * { grid-column: span var(--rd-span, 4); min-width: 0; }
+.kairos-redesign .hm-home .hm-custom-order { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.kairos-redesign .hm-home .hm-custom-order > * { grid-column: span var(--rd-span, 4); }
+.kairos-redesign .hm-home .dashboard-section { border-radius: 26px; padding: 20px 22px; }
+.kairos-redesign .hm-home .dashboard-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 0 10px; }
+.kairos-redesign .hm-home .dashboard-section-header h2 { margin: 0; color: var(--rd-ink); font: italic 600 24px/1.1 var(--rd-font-title); letter-spacing: 0; text-transform: none; }
+.kairos-redesign .hm-home .dashboard-row { min-height: 48px; padding: 11px 0; }
+.kairos-redesign .hm-home .dashboard-row-title { font-size: 15px; }
+.kairos-redesign .hm-home .dashboard-event-date { flex: 0 0 64px; width: 64px; white-space: normal; }
+.kairos-redesign .hm-home [data-home-section="schedule"] .dashboard-row { display: flex; align-items: center; gap: 10px; }
+.kairos-redesign .hm-live-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--rd-line); }
+.kairos-redesign .hm-live-row:first-child { border-top: 0; }
+.kairos-redesign .hm-live-row > :first-child { flex-shrink: 0; }
+.kairos-redesign .hm-live-copy { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--rd-ink); text-align: left; font: inherit; cursor: pointer; }
+.kairos-redesign .hm-live-title { display: block; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.kairos-redesign .hm-live-detail { display: block; font-size: 13px; line-height: 1.5; color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign .hm-live-row .rd-pill { flex-shrink: 0; padding-inline: 14px; font-size: 13px; }
+.kairos-redesign .hm-week { position: relative; isolation: isolate; overflow: hidden; gap: 14px; background: var(--rd-surface-solid); }
+.kairos-redesign .hm-home .hm-week .dashboard-section-header { padding: 0; align-items: center; }
+.kairos-redesign .hm-home .hm-week .dashboard-section-header h2 { font: 500 11px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-week-range { padding: 5px 10px; border-radius: var(--rd-radius-pill); background: var(--rd-ground); color: var(--rd-ink); font-size: 12px; white-space: nowrap; }
+.kairos-redesign .hm-week-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.kairos-redesign .hm-week-stats > div { min-width: 0; }
+.kairos-redesign .hm-week-stats strong { display: block; font: 600 34px/1 var(--rd-font-title); color: var(--rd-ink); }
+.kairos-redesign .hm-week-stats span { display: block; font-size: 12px; color: var(--rd-ink-dim); margin-top: 4px; }
+.kairos-redesign .hm-week .rd-dot-matrix { gap: 3px; }
+.kairos-redesign .hm-week .rd-dot { border-radius: 2px; }
+.kairos-redesign .hm-week .rd-dot-empty { background: var(--rd-surface-2); }
+.kairos-redesign .hm-week .rd-dot-dim { background: var(--rd-ground); }
+.kairos-redesign .hm-week-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; font-size: 11px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-week-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--rd-ink-dim); }
+.kairos-redesign .hm-week-legend > span:not(.hm-busiest)::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--rd-ink); }
+.kairos-redesign .hm-week-legend > .hm-legend-runs:not(.hm-busiest)::before { background: var(--accent); }
+.kairos-redesign .hm-busiest { margin-left: auto; }
+.kairos-redesign .hm-home .rd-usage-card { padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.kairos-redesign .hm-home .rd-usage-card > h2 { display: none; }
+.kairos-redesign .hm-home .rd-usage-provider:nth-of-type(2) .rd-dot-a { background: var(--accent); }
+.kairos-redesign .hm-home [hidden] { display: none; }
+@media (max-width: 768px) {
+  .kairos-redesign .hm-home { gap: 22px; }
+  .kairos-redesign .hm-heading { align-items: center; }
+  .kairos-redesign .hm-heading h1 { font-size: 36px; }
+  .kairos-redesign .hm-heading p { display: none; }
+  .kairos-redesign .hm-heading-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .kairos-redesign .hm-heading-actions > .rd-pill { display: none; }
+  .kairos-redesign .hm-home .dashboard-grid,
+  .kairos-redesign .hm-home .hm-custom-order { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .kairos-redesign .hm-home .dashboard-grid > * { grid-column: auto; }
+  .kairos-redesign .hm-home .dashboard-section { padding: 18px; }
+  .kairos-redesign .hm-week-stats { gap: 10px; }
+  .kairos-redesign .hm-week .rd-dot-matrix { gap: 3px; }
+}
+
+.kairos-redesign .hm-home .dashboard-hero { position: relative; min-height: 320px; padding: 30px 34px; border-radius: 26px; box-sizing: border-box; }
+.kairos-redesign .hm-home .dashboard-intro { position: static; padding: 0; min-height: 0; max-width: none; }
+.kairos-redesign .hm-home .dashboard-intro h1 { max-width: 440px; margin-top: 14px; font-size: clamp(36px, 3.5vw, 52px); }
+.kairos-redesign .hm-home .dashboard-intro > .eyebrow { padding-right: 72px; }
+.kairos-redesign .hm-home .dashboard-intro > p { margin-top: 14px; }
+.kairos-redesign .hm-home .dashboard-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.kairos-redesign .hm-home .dashboard-mascot { position: absolute; top: 22px; right: 24px; left: auto; bottom: auto; width: 72px; height: 72px; transform: none; margin: 0; }
+.kairos-redesign .hm-home .dashboard-mascot kairos-mascot { width: 100%; height: 100%; }
+.kairos-redesign .hm-phone-calendar, .kairos-redesign .hm-customize-icon { display: none; }
+.kairos-redesign .hm-working-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: var(--accent); }
+.kairos-redesign .hm-home [data-home-section="system"] { display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 14px 22px; padding: 16px 24px; }
+.kairos-redesign .hm-home [data-home-section="system"] .dashboard-section-header { display: contents; }
+.kairos-redesign .hm-home [data-home-section="system"] h2 { order: 0; flex: 0 0 auto; }
+.kairos-redesign .hm-home [data-home-section="system"] .dashboard-section-header > button { order: 2; margin-left: auto; }
+.kairos-redesign .hm-home [data-home-section="system"] .dashboard-section-body { order: 1; flex: 1; min-width: 0; }
+.kairos-redesign .hm-home .dashboard-system-chips { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.kairos-redesign .hm-home .dashboard-system-chip { flex: 0 0 auto; width: auto; gap: 6px; padding: 0; border: 0; background: transparent; white-space: nowrap; }
+.kairos-redesign .hm-home .dashboard-system-chip > span:nth-child(2) { flex: 0 0 auto; }
+@media (max-width: 768px) {
+  .kairos-redesign[data-view="home"]:has(.hm-home) .kairos-redesign-backdrop { display: none; }
+  .kairos-redesign[data-halftone="on"] .dashboard:has(> .hm-home) { background-image: radial-gradient(color-mix(in srgb, var(--rd-ink) 7%, transparent) 1px, transparent 1.3px); background-size: 7px 7px; }
+  .kairos-redesign .hm-home [data-home-section="system"] { flex-wrap: wrap; gap: 8px 16px; padding: 14px 18px; }
+  .kairos-redesign .hm-home [data-home-section="system"] .dashboard-section-body { order: 3; flex-basis: 100%; }
+  .kairos-redesign .hm-home .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign .hm-home .dashboard-grid > * { grid-column: 1; }
+  .kairos-redesign .dashboard:not(.ms-home):has(> .hm-home) { padding: 62px 20px max(140px, var(--mobile-safe-bottom, 0px)); }
+  .kairos-redesign .hm-heading { gap: 12px; }
+  .kairos-redesign .hm-heading > div:first-child { min-width: 0; }
+  .kairos-redesign .hm-heading-actions { flex-shrink: 0; flex-wrap: nowrap; }
+  .kairos-redesign .hm-customize > span:not(.hm-customize-icon) { display: none; }
+  .kairos-redesign .hm-customize-icon { display: flex; }
+  .kairos-redesign .hm-home :is(.hm-customize, .hm-phone-calendar) { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; min-height: 46px; padding: 0; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); color: var(--rd-ink); cursor: pointer; }
+  .kairos-redesign .hm-heading-actions svg { width: 20px; height: 20px; }
+  .kairos-redesign .hm-phone-calendar:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign .hm-home .hm-week { padding: 18px 18px 16px; }
+  .kairos-redesign .hm-week .dashboard-core { z-index: -1; }
+  .kairos-redesign .hm-week .dashboard-core::after { background: linear-gradient(90deg, rgba(var(--wash-rgb), .95), rgba(var(--wash-rgb), .86) 55%, rgba(var(--wash-rgb), .4)); }
+  .kairos-redesign:not([data-halftone="on"]) .hm-week .dashboard-core { display: none; }
+  .kairos-redesign .hm-home .dashboard-section[data-home-section]:not([data-home-section="system"]) { padding: 0; border: 0; background: transparent; box-shadow: none; overflow: visible; gap: 12px; }
+  .kairos-redesign .hm-home .dashboard-section[data-home-section]:not([data-home-section="system"]) .dashboard-section-header { padding: 0; }
+  .kairos-redesign .hm-home .dashboard-section[data-home-section] h2 { font-size: 26px; }
+  .kairos-redesign .hm-home .dashboard-section-header .btn.quiet { min-height: 0; }
+  .kairos-redesign .hm-home .dashboard-section[data-home-section]:not([data-home-section="system"]) > .dashboard-section-body { padding: 4px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+  .kairos-redesign .hm-home .dashboard-section-body > .dashboard-row:first-child { border-top: 0; }
+  .kairos-redesign .hm-home .dashboard-row { min-height: 0; padding: 12px 0; }
+  .kairos-redesign .hm-home .dashboard-row-title { font-weight: 500; }
+  .kairos-redesign .hm-home .dashboard-row-detail { font-size: 13px; }
+  .kairos-redesign .hm-home [data-home-section="working"] > .dashboard-section-body { padding: 4px 16px; }
+  .kairos-redesign .hm-home [data-home-section="models"] > .dashboard-section-body { padding: 18px; }
+}
+
+/* Provider identity and diagnostic/accounting copy stay within the usage card. */
+.kairos-redesign .hm-home .rd-usage-provider h3 { display: flex; align-items: center; gap: 8px; }
+.kairos-redesign .hm-home :is(.rd-usage-note, .rd-usage-accounting) { overflow-wrap: anywhere; }

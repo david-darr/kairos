@@ -971,6 +971,20 @@
     ];
     const route = url.pathname;
     const list = (data) => state.empty ? [] : data;
+    if (route === '/api/home/week') {
+      const start = new Date(now * 1000); start.setHours(12, 0, 0, 0);
+      start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+      const iso = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      const slots = Array.from({ length: 14 }, (_, i) => {
+        const day = new Date(start); day.setDate(day.getDate() + Math.floor(i / 2));
+        return { date: iso(day), half: i % 2 ? 'pm' : 'am', chats: state.empty ? 0 : [1, 2, 2, 1, 3, 2, 4, 3, 2, 1, 0, 1, 1, 0][i],
+          agent_runs: state.empty ? 0 : [1, 1, 0, 2, 1, 1, 2, 1, 1, 1, 1, 0, 0, 1][i] };
+      });
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      return { start: iso(start), end: iso(end), slots,
+        totals: { chats: slots.reduce((n, slot) => n + slot.chats, 0), agent_runs: slots.reduce((n, slot) => n + slot.agent_runs, 0), notes_done: 0 },
+        busiest: state.empty ? null : 'Thu', unavailable: ['notes_done'] };
+    }
     if (route === '/api/home/tab-cards') return { cards: tabs.some(t => t.slug === 'crm' && t.status === 'on') ? [
       { id: 'tab:crm:follow-ups', slug: 'crm', tab_name: 'CRM', tab_icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="7" r="4"/><path d="M2 21v-2a6 6 0 0 1 12 0v2M20 8v6m-3-3h6"/></svg>',
         title: 'Follow-ups', kind: 'list', empty_text: 'No open follow-ups.', rows: list([
@@ -1162,7 +1176,7 @@
     }
     if (route === "/api/settings/agent-tools") return { available: ["Bash", "Read", "Write", "WebFetch"], disabled: ["WebFetch"], extra_allowed: [] };
     if (route === "/api/system/custom-tabs") return tabs.filter((t) => t.status === "on").map(tabManifest);
-    if (route === "/api/system/tabs") return tabs;
+    if (route === "/api/system/tabs") return state.tabs ?? tabs;
     if (route === "/api/system/status") return { scheduler_running: true, vault_ok: true, enabled_task_count: state.empty ? 0 : 1, model_endpoint_count: state.empty ? 0 : 3, discord_connected_bots: [], next_task: state.empty ? null : { name: "Daily briefing", next_run_at: future(6) } };
     if (route === "/api/system/logs/files") return [
       { name: "backend", file: "backend.log", size: 204800, modified: now - 30 },
@@ -1267,7 +1281,7 @@
     }
     if (route === "/api/tasks") return list(tasks);
     // Webhook triggers (2026-10-05): one waiting for approval, one runs straight away.
-    if (route === "/api/triggers") return state.empty ? { triggers: [], pending: [] } : {
+    if (route === "/api/triggers") return state.empty || state.homeClear ? { triggers: [], pending: [] } : {
       triggers: [
         { id: "tr1", name: "GitHub pushes", preset: "github", action: "card", agent_id: "a1", enabled: true, auto_run: false,
           events: ["push"], conditions: [{ path: "ref", equals: "refs/heads/main" }], title_template: "Push: {head_commit.message}",
@@ -1281,10 +1295,10 @@
     if (route === "/api/agents/conversations") return { agents: state.empty ? [] : agentsFixture.map((agent, i) => ({ id: agent.id,
       preview: i === 0 ? 'A clearer direction for your project.' : 'The reference notes are ready.', at: now - (i + 1) * 300,
       message_count: 2, ...(state.chatPreferences || {})['agent:' + agent.id] })), preferences: state.chatPreferences || {} };
-    if (route === "/api/agents") return list(agentsFixture);
+    if (route === "/api/agents") return list(agentsFixture).map(agent => state.homeClear ? { ...agent, status: "idle", needs_you: 0 } : agent);
     // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
     if (route === "/api/notifications") return { devices: [] };
-    if (route === "/api/agents/inbox") return state.empty ? { items: [], reviews: [], count: 0 } :
+    if (route === "/api/agents/inbox") return state.empty || state.homeClear ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };
     if (/^\/api\/agents\/a\d$/.test(route)) return agentDetail(route.split("/")[3]);
     // Teams (agents phase 5) are listed in the Agents tab from Swarm.
@@ -1433,7 +1447,7 @@
     if (route === "/api/tab-school/assignments/a1/draft") return { content: "" };
     if (route === "/api/tab-school/courses/session") return { session_id: "school-course" };
     if (route === "/api/tab-school/assignments") return url.searchParams.has("overdue") ? [] : list([{ id: "a1", course: "Software Design", title: "Review the project brief", due: future(40), completed: false, attachment_links: [] }]);
-    if (route === "/api/integrations") return [
+    if (route === "/api/integrations") return list([
       // Roadmap phase 6: a working server with a tool held for review, one
       // signed out, and a local command that is not responding.
       { id: "i-notion", kind: "mcp_server", name: "Notion", mcp_type: "http", url: "https://mcp.notion.com/mcp", has_api_key: false, auth: "oauth", signed_in: true,
@@ -1442,7 +1456,7 @@
       { id: "i-sentry", kind: "mcp_server", name: "Sentry", mcp_type: "http", url: "https://mcp.sentry.dev/mcp", has_api_key: false, auth: "oauth", signed_in: false,
         status: { state: "signed_out", tools: null, checked_at: now - 300, error: null }, pinned: false, held_tools: [] },
       { id: "i-local", kind: "mcp_server", name: "Local files", mcp_type: "stdio", command: "npx", args: [], has_api_key: false, auth: "none", signed_in: false,
-        status: { state: "down", tools: null, checked_at: now - 60, error: "FileNotFoundError: npx" }, pinned: false, held_tools: [] }];
+        status: { state: "down", tools: null, checked_at: now - 60, error: "FileNotFoundError: npx" }, pinned: false, held_tools: [] }]);
     if (route === "/api/integrations/contacts") return [];
     if (route === "/api/sandbox/changes") return [
       { id: "c0ffee000001", session_id: null, created: 1790200000, applicable: true,

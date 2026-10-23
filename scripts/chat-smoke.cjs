@@ -114,6 +114,7 @@ const server = http.createServer(async (req, res) => {
     const data = body && req.headers['content-type']?.includes('application/json') ? JSON.parse(body) : {};
     requests.push({ path: url.pathname, method: req.method, data });
     const json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
+    if (url.pathname === '/api/home/week') return json(require('../demo/fixtures.js')({ now: Date.now() / 1000 }).fixture(url));
     if (url.pathname === '/api/chat/live/snapshot') return json(liveSnapshot());
     if (url.pathname === '/api/chat/live/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });

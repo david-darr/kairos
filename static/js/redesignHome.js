@@ -1,21 +1,10 @@
-// Redesign preview, Home (step 4). views/home.js calls mountRedesignHome() once
-// and forwards three things: arrange (the order/visibility pass), update (each
-// data key as it lands) and dispose. Everything here is a no-op while the
-// preview is off, and it undoes itself live when the switch is turned off
-// (the `kairos:appearance` event), so Home looks and behaves as it does today.
-//
-// What it adds with the switch on:
-//  - a 12-column packed card grid (natural spans 4/6/8/12; the last card of a
-//    row widens to fill it, so every row sums to 12),
-//  - the "Needs you" card (agent questions, results to approve, trigger
-//    approvals, failed deliveries),
-//  - "At a glance" (the number strip, as a card),
-//  - the Customize sheet, which edits the SAME saved arrangement Settings >
-//    Layout edits (layout.js: homeLayout/getLayout/saveLayout), so the two stay
-//    in sync,
-//  - usage rings on the model limits.
-import { api, el, toast } from "./api.js";
+import { el } from "./api.js";
 import { agentAvatar } from "./agentAvatar.js";
+import { createMascot } from "./mascot.js";
+import { ICONS } from "./icons.js";
+import { subscribeActivity } from "./redesignShell.js";
+import { dotMatrix, pill, usageCard } from "./kairosParts.js";
+import { toSnap } from "./quotaReadings.js";
 import { getLayout, saveLayout, homeLayout, resetHomeLayout, knownHomeCards, HOME_SECTIONS } from "./layout.js";
 
 const on = () => document.documentElement.classList.contains("kairos-redesign");
@@ -25,10 +14,11 @@ const isTab = (id) => id.startsWith("tab:");
 // Natural column span and Customize-sheet wording per built-in card.
 const META = {
   needs: { label: "Needs you", sub: "Replies, approvals and failures", span: 8 },
+  working: { label: "Working now", sub: "Live chats and agent runs", span: 4 },
   chats: { label: "Recent chats", sub: "Your latest conversations", span: 4 },
-  schedule: { label: "Upcoming", sub: "Events from the next seven days", span: 4 },
-  models: { label: "Models", sub: "Providers, usage limits and tokens", span: 4 },
-  system: { label: "Systems", sub: "Vault, scheduler, Discord, computer use", span: 4 },
+  schedule: { label: "Coming up", sub: "Events from the next seven days", span: 4 },
+  models: { label: "Model usage", sub: "Providers, usage limits and tokens", span: 4 },
+  system: { label: "Systems", sub: "Vault, scheduler, Discord, computer use", span: 12 },
   stats: { label: "At a glance", sub: "Counts for chats, notes, automations", span: 12 },
   projects: { label: "Projects", sub: "Project shelf with document counts", span: 4 },
   agents: { label: "Agents", sub: "Who is working and who needs you", span: 4 },
@@ -38,28 +28,26 @@ const META = {
 const TAB_SPAN = 4;
 const spanOf = (id) => (META[id] ? META[id].span : TAB_SPAN);
 
-// The redesign's default: these five, in this order, then the rest hidden.
-const DEFAULT_ORDER = ["needs", "chats", "schedule", "models", "system", "stats", "projects", "agents", "activity", "store"];
-const DEFAULT_SHOWN = 5;
-// What an untouched arrangement looks like in the saved layout (layout.js).
-const LEGACY_ORDER = HOME_SECTIONS.map((s) => s.id).filter((id) => id !== "needs");
-
+// Phone order; desktop places the three small cards in their preferred row.
+const DEFAULT_ORDER = ["needs", "working", "models", "chats", "schedule", "system", "stats", "projects", "agents", "activity", "store"];
+const DEFAULT_SHOWN = 6;
 const AUTO_KEY = "kairos:redesign-home-auto";
 const readAuto = () => { try { return localStorage.getItem(AUTO_KEY); } catch { return null; } };
 const writeAuto = (value) => { try { value ? localStorage.setItem(AUTO_KEY, value) : localStorage.removeItem(AUTO_KEY); } catch { /* optional */ } };
 
 // The built-in part of an arrangement, comparable as a string.
-const snapshot = (layout) => JSON.stringify({
-  order: layout.home.filter((id) => !isTab(id) && id !== "needs"),
-  hidden: layout.hiddenHome.filter((id) => !isTab(id) && id !== "needs").sort(),
+const snapshot = layout => JSON.stringify({ order: layout.home, hidden: [...layout.hiddenHome].sort() });
+const legacySnapshot = layout => JSON.stringify({
+  order: layout.home.filter(id => !isTab(id) && !["needs", "working"].includes(id)),
+  hidden: layout.hiddenHome.filter(id => !isTab(id) && !["needs", "working"].includes(id)).sort(),
 });
 
 // True when nobody has arranged Home: built-ins in today's default order,
 // none hidden (the redesign-only "needs" aside), and no tab card turned on.
 function untouched(layout) {
-  const order = layout.home.filter((id) => !isTab(id) && id !== "needs");
-  if (order.join() !== LEGACY_ORDER.join()) return false;
-  if (layout.hiddenHome.some((id) => !isTab(id) && id !== "needs")) return false;
+  const order = layout.home.filter((id) => !isTab(id));
+  if (order.join() !== HOME_SECTIONS.map(s => s.id).join()) return false;
+  if (layout.hiddenHome.some((id) => !isTab(id) && !["needs", "working"].includes(id))) return false;
   return layout.home.filter(isTab).every((id) => layout.hiddenHome.includes(id));
 }
 
@@ -74,7 +62,12 @@ function applyDefault({ remember = false } = {}) {
 // A person who never arranged Home gets the redesign's default. Someone with
 // their own saved arrangement keeps it.
 function ensureArrangement() {
-  if (untouched(getLayout())) applyDefault({ remember: true });
+  const layout = getLayout(), remembered = readAuto();
+  // Old auto markers omitted tab cards, so they cannot prove that a mixed
+  // arrangement is still automatic. Preserve those saved placements.
+  const automatic = remembered && (snapshot(layout) === remembered ||
+    (!layout.home.some(isTab) && legacySnapshot(layout) === remembered));
+  if (untouched(layout) || automatic) applyDefault({ remember: true });
 }
 
 // Switching the preview off puts back what we applied on its behalf, but only
@@ -90,255 +83,217 @@ document.addEventListener("kairos:appearance", () => {
   wasOn = now;
 });
 
-// Natural spans packed into 12-column rows: when the next card doesn't fit,
-// the last card of the row widens to fill it. Every row sums to 12.
+// Optional row groups keep the default rows intact when sections are missing.
+// Within a partial row distribute spare columns evenly, preserving proportions.
 export function packRows(items) {
   const rows = [];
   let row = [], sum = 0;
+  const flush = () => {
+    if (!row.length) return;
+    let spare = 12 - sum;
+    row.forEach((cell, i) => { const extra = Math.floor(spare / (row.length - i)); cell.span += extra; spare -= extra; });
+    rows.push(row); row = []; sum = 0;
+  };
   for (const item of items) {
-    if (sum + item.span > 12) { row[row.length - 1].span += 12 - sum; rows.push(row); row = []; sum = 0; }
+    if (sum + item.span > 12 || (row.length && item.group !== row[0].group)) flush();
     row.push({ ...item }); sum += item.span;
-    if (sum === 12) { rows.push(row); row = []; sum = 0; }
+    if (sum === 12) flush();
   }
-  if (row.length) { row[row.length - 1].span += 12 - sum; rows.push(row); }
+  flush();
   return rows;
 }
 
-function relative(seconds) {
-  const age = Math.max(0, Math.round(Date.now() / 1000 - seconds));
-  if (age < 60) return "just now";
-  if (age < 3600) return Math.floor(age / 60) + "m ago";
-  if (age < 86400) return Math.floor(age / 3600) + "h ago";
-  return Math.floor(age / 86400) + "d ago";
-}
-
-const FAILURE_TYPES = new Set(["delivery.failed", "task.delivery_failed", "connector.delivery_failed"]);
-const FAILURE_WINDOW = 3 * 86400;
-const LATER_KEY = "kairos:home:needs-later";
-const readLater = () => { try { return JSON.parse(localStorage.getItem(LATER_KEY) || "[]"); } catch { return []; } };
-const writeLater = (list) => { try { localStorage.setItem(LATER_KEY, JSON.stringify(list.slice(-60))); } catch { /* optional */ } };
-
-export function mountRedesignHome({ container, content, header, grid, parts, data, refresh, rearrange }) {
-  let disposed = false, active = false, sheet = null, customizeButton = null, glance = null;
-  let triggers = [], failures = [], failuresLoaded = false, triggersLoaded = false, lastSignature = "";
-
-  // -- "At a glance": the number strip, framed as a card ----------------------
-  const makeGlance = () => {
-    const body = el("div", { class: "dashboard-section-body" });
-    const panel = el("section", { class: "dashboard-section hm-glance", "aria-label": "At a glance" }, [
-      el("div", { class: "dashboard-section-header" }, [el("h2", { text: "At a glance" })]), body,
+// The week/hero are fixed; live sections use the saved Customize arrangement.
+export function mountRedesignHome({ container, content, hero, grid, parts, data, rearrange, launchSurface = false }) {
+  let disposed = false, active = false, sheet = null, customizeButton = null;
+  let activity = { need: [], work: [] };
+  let entranceTimer = 0, entered = false;
+  const phone = matchMedia('(max-width: 768px)');
+  const heroAnchor = document.createComment('Classic Home hero');
+  hero.before(heroAnchor);
+  const heroMascot = hero.querySelector('kairos-mascot');
+  const banner = hero.querySelector('.dashboard-core');
+  const bannerAnchor = document.createComment('Home banner');
+  banner?.before(bannerAnchor);
+  const classicChrome = ['.dashboard-header', '.dashboard-next'].map(selector => hero.querySelector(selector)).filter(Boolean)
+    .map(node => { const anchor = document.createComment('Classic Home detail'); node.before(anchor); return { node, anchor }; });
+  const heading = el('header', { class: 'hm-heading' });
+  // Keep the painter connected while the first week request is pending;
+  // backgroundEffects disposes owners removed from the document.
+  const bannerParking = el('div', { hidden: true });
+  const hour = new Date().getHours();
+  heading.append(el('div', {}, [el('p', { text: new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) }),
+    el('h1', { text: `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}` })]));
+  const controls = el('div', { class: 'hm-heading-actions' }, [pill({ text: 'New chat', onClick: () => navigate('chat') })]);
+  const calendarButton = el('button', { type: 'button', class: 'hm-phone-calendar', 'aria-label': 'Calendar', onclick: () => navigate('calendar') });
+  calendarButton.innerHTML = ICONS.calendar;
+  controls.append(calendarButton);
+  heading.append(controls, bannerParking);
+  const week = el('section', { class: 'dashboard-section hm-week', 'aria-label': 'This week' });
+  const makeSection = (title, id, link, go) => {
+    const body = el('div', { class: 'dashboard-section-body' });
+    const panel = el('section', { class: 'dashboard-section', 'data-home-section': id }, [
+      el('div', { class: 'dashboard-section-header' }, [el('h2', { text: title }),
+        el('button', { type: 'button', class: 'btn quiet', text: link, onclick: go })]), body,
     ]);
     return { panel, body };
   };
-
-  // -- "Needs you" ------------------------------------------------------------
-  const needsBody = el("div", { class: "dashboard-section-body hm-needs-body" });
-  const needsCount = el("span", { class: "hm-needs-count" });
-  const needs = el("section", { class: "dashboard-section hm-needs", "aria-label": "Needs you", "data-home-section": "needs" }, [
-    el("div", { class: "hm-needs-head" }, [el("h2", { text: "Needs you" }), needsCount]), needsBody,
-  ]);
-  needsBody.append(el("div", { class: "skeleton skeleton-line" }), el("div", { class: "skeleton skeleton-line" }));
-
-  const agentOf = (id) => (Array.isArray(data().agents) ? data().agents.find((a) => a.id === id) : null);
-
-  async function act(work, success) {
-    try { const result = await work(); if (success) toast(success(result), "success"); }
-    catch (problem) { toast(problem.message || "That didn't work", "error"); }
-    document.dispatchEvent(new CustomEvent("jarvis:agents-changed"));
-    loadTriggers(); loadFailures(); refresh();
-  }
-
-  const button = (label, tone, onclick) => el("button", { type: "button", class: "hm-btn hm-btn-" + tone, text: label, onclick });
-
-  function itemRow({ lead, title, sub, subTone, body, actions, compose }) {
-    const composeRow = compose ? el("div", { class: "hm-compose", hidden: true }) : null;
-    let field = null;
-    if (compose) {
-      field = el("input", { class: "hm-compose-input", type: "text", placeholder: compose.placeholder, "aria-label": compose.placeholder });
-      field.addEventListener("keydown", (e) => { if (e.key === "Enter") send.click(); });
-      var send = button("Send", "primary", () => {
-        if (!field.value.trim()) { toast(compose.empty, "error"); return; }
-        compose.submit(field.value.trim());
-      });
-      composeRow.append(field, send, button("Cancel", "ghost", () => { composeRow.hidden = true; field.value = ""; }));
+  const needs = makeSection('Needs you', 'needs', 'See all', () => navigate('agents'));
+  const working = makeSection('Working now', 'working', 'All tasks', () => navigate('tasks'));
+  const models = makeSection('Model usage', 'models', 'Models', () => navigate('settings', { section: 'models' }));
+  let glance = null;
+  const cardFor = id => {
+    if (id === 'needs') return needs.panel;
+    if (id === 'working') return working.panel;
+    if (id === 'models') return models.panel;
+    if (id === 'stats') {
+      if (!glance) glance = makeSection('At a glance', 'stats', '', () => {});
+      glance.body.append(parts.stats); return glance.panel;
     }
-    const open = () => { if (composeRow) { composeRow.hidden = false; field.focus(); } };
-    const buttons = actions(open).map(([label, tone, handler]) => button(label, tone, handler));
-    return el("div", { class: "hm-need" }, [
-      lead,
-      el("div", { class: "hm-need-text" }, [
-        el("div", { class: "hm-need-title", text: title, title }),
-        el("div", { class: "hm-need-sub" + (subTone ? " is-" + subTone : ""), text: sub }),
-        body ? el("div", { class: "hm-need-body", text: body }) : el("span"),
-      ]),
-      el("div", { class: "hm-need-actions" }, buttons),
-      ...(composeRow ? [composeRow] : []),
+    return parts[id];
+  };
+  function activityRow(item, needsYou) {
+    const agent = item.agent || data().agents?.find(a => a.id === item.agentId);
+    const face = !needsYou ? el('span', { class: 'hm-working-dot', 'aria-hidden': 'true' })
+      : agent ? agentAvatar(agent, 40, 'needs') : createMascot({ state: 'needs', size: 40, decorative: true });
+    return el('div', { class: 'hm-live-row' }, [face,
+      el('button', { type: 'button', class: 'hm-live-copy', onclick: item.go }, [
+        el('span', { class: 'hm-live-title', text: item.title }), el('span', { class: 'hm-live-detail', text: item.detail }),
+      ]), ...(needsYou ? [pill({ text: item.action === 'Reply' ? 'Answer' : item.action,
+        kind: item.action === 'Review' ? 'secondary' : 'primary', onClick: item.go })] : []),
     ]);
   }
-
-  const initial = (text, tone) => el("span", { class: "hm-need-lead" + (tone ? " is-" + tone : ""), "aria-hidden": "true", text });
-  const lead = (agent) => {
-    if (!agent) return initial("K");
-    const wrap = el("span", { class: "hm-need-lead is-avatar", "aria-hidden": "true" });
-    wrap.append(agentAvatar(agent, 32));
-    return wrap;
-  };
-
-  function collect() {
-    const inbox = data().inbox, rows = [];
-    const answer = (item, choice, text) => act(
-      () => api(`/api/agents/inbox/${item.id}/answer`, { method: "POST", body: JSON.stringify({ choice, text: text || null }) }),
-      (result) => (result?.next ? result.next[0].toUpperCase() + result.next.slice(1) : "Done"));
-    for (const item of inbox?.items || []) {
-      const agent = agentOf(item.agent_id);
-      const computer = /^(Ready for you: press|Needs you: sign in|Needs you: embedded frame)/.test(item.title || "");
-      const question = item.kind === "question";
-      rows.push({ key: "item:" + item.id, node: () => itemRow({
-        lead: lead(agent), title: item.title || "A question", sub: `${agent?.name || "Agent"} · ${relative(item.created_at)}`, body: item.body,
-        compose: { placeholder: question ? "Your answer" : "Reply or guidance", empty: "Write a reply first", submit: (text) => answer(item, "reply", text) },
-        actions: (open) => {
-          const list = [];
-          if (computer) {
-            list.push(["Dismiss", "ghost", () => answer(item, "dismiss")], ["Reply", "secondary", open], ["Open computer", "primary", async () => {
-              const running = await api("/api/computer").catch(() => []);
-              if (!running.some((c) => c.owner === `agent:${item.agent_id}`)) { toast("This computer is closed.", "error"); return; }
-              navigate("agents", { agentId: item.agent_id, agentTab: "work", computerTakeover: true });
-            }]);
-          } else if (question) list.push(["Dismiss", "ghost", () => answer(item, "dismiss")], ["Reply", "primary", open]);
-          else list.push(["Reply", "ghost", open], ["Dismiss", "primary", () => answer(item, "dismiss")]);
-          return list;
-        } }) });
-    }
-    for (const card of inbox?.reviews || []) {
-      const agent = agentOf(card.agent_id);
-      const result = [...(card.comments || [])].reverse().find((c) => c.kind === "result");
-      const move = (status, text) => act(() => api(`/api/tasks/${card.id}/status`, { method: "POST", body: JSON.stringify({ status, note: text || null }) }));
-      rows.push({ key: "review:" + card.id, node: () => itemRow({
-        lead: lead(agent), title: card.name || "A result", sub: `${agent?.name || "Agent"} · result to approve`, body: result ? result.text : "",
-        compose: { placeholder: "What should change? (it remembers this)", empty: "Say what should change", submit: (text) => move("ready", text) },
-        actions: (open) => [["Request changes", "ghost", open], ["Approve", "primary", () => move("done")]] }) });
-    }
-    for (const pending of triggers) {
-      const answerTrigger = (approve) => act(() => api(`/api/triggers/pending/${pending.id}`, { method: "POST", body: JSON.stringify({ approve }) }), (r) => r?.next || "Done");
-      rows.push({ key: "trigger:" + pending.id, node: () => itemRow({
-        lead: initial("T"), title: `${pending.trigger_name}: ${pending.summary}`, sub: `${pending.event_type} · waiting for your OK`,
-        actions: () => [["Skip", "ghost", () => answerTrigger(false)], ["Approve", "primary", () => answerTrigger(true)]] }) });
-    }
-    const later = readLater();
-    for (const event of failures) {
-      const key = "failure:" + event.ts;
-      if (later.includes(key)) continue;
-      rows.push({ key, node: () => itemRow({
-        lead: initial("!", "danger"), title: event.message, sub: "Delivery failed and was given up", subTone: "danger",
-        actions: () => [["Later", "ghost", () => { writeLater([...readLater(), key]); renderNeeds(true); }], ["Open Channels", "secondary", () => navigate("settings", { section: "channels" })]] }) });
-    }
-    return rows;
+  function drawGreeting() {
+    const name = data().auth?.username;
+    const greeting = `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}`;
+    heading.querySelector('h1').textContent = greeting + (name && name !== 'local' ? ', ' + name : '');
   }
-
-  function renderNeeds(force = false) {
-    if (disposed || !active) return;
-    const admin = !!data().auth?.is_admin;
-    const known = data().auth !== undefined && data().feed !== undefined && failuresLoaded
-      && (admin ? data().inbox !== undefined && data().agents !== undefined && triggersLoaded : true);
-    if (!known) return;
-    const rows = collect();
-    const signature = rows.map((r) => r.key).join("|") + "#" + (data().agents?.length || 0);
-    if (!force && signature === lastSignature) return;
-    // Don't rebuild under a half-typed reply.
-    const typing = needsBody.querySelector(".hm-compose:not([hidden]) .hm-compose-input");
-    if (!force && typing && typing.value) return;
-    lastSignature = signature;
-    needsCount.textContent = rows.length ? rows.length + " waiting" : "All clear";
-    needsBody.replaceChildren(...(rows.length ? rows.map((r) => r.node()) : [el("div", { class: "hm-clear", text: "Nothing waiting. The moment is yours." })]));
+  function drawActivity() {
+    needs.body.replaceChildren(...activity.need.map(item => activityRow(item, true)));
+    working.body.replaceChildren(...activity.work.map(item => activityRow(item, false)));
   }
-
-  async function loadTriggers() {
-    if (!data().auth?.is_admin) { triggers = []; triggersLoaded = true; return; }
-    const result = await api("/api/triggers").catch(() => null);
-    if (disposed) return;
-    triggers = Array.isArray(result?.pending) ? result.pending : [];
-    triggersLoaded = true;
-    renderNeeds();
+  function statsNodes(value) {
+    return [['chats', 'chats'], ['agent_runs', 'agent runs'], ['notes_done', 'notes done']]
+      .filter(([key]) => !value.unavailable?.includes(key) && Number.isFinite(value.totals?.[key]))
+      .map(([key, label]) => el('div', {}, [el('strong', { text: String(value.totals[key]) }), el('span', { text: label })]));
   }
-  async function loadFailures() {
-    const events = await api("/api/system/events?limit=60").catch(() => null);
-    if (disposed) return;
-    const cutoff = Date.now() / 1000 - FAILURE_WINDOW;
-    failures = Array.isArray(events) ? events.filter((e) => FAILURE_TYPES.has(e.type) && e.ts >= cutoff).slice(0, 5) : [];
-    failuresLoaded = true;
-    renderNeeds();
+  function drawWeek() {
+    const value = data().week;
+    week.replaceChildren();
+    if (!value?.slots || value.slots.length !== 14) { week.hidden = true; return; }
+    week.hidden = false;
+    const date = iso => new Date(iso + 'T12:00:00');
+    const start = date(value.start), end = date(value.end);
+    const range = start.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' \u2013 ' +
+      end.toLocaleDateString([], start.getMonth() === end.getMonth() ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+    const shortDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const fullDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const busiest = fullDays[shortDays.indexOf(value.busiest)] || value.busiest;
+    const cells = [];
+    for (let r = 0; r < 6; r++) for (const [c, slot] of value.slots.entries()) {
+      const level = 6 - r;
+      const chats = value.unavailable?.includes('chats') ? 0 : slot.chats;
+      const runs = value.unavailable?.includes('agent_runs') ? 0 : slot.agent_runs;
+      cells.push(level <= chats ? 'a' : level <= chats + runs ? 'b' : (r + c) % 2 ? 'dim' : 'empty');
+    }
+    week.append(el('div', { class: 'dashboard-section-header' }, [el('h2', { text: 'This week' }), el('span', { class: 'hm-week-range', text: range })]),
+      el('div', { class: 'hm-week-stats' }, statsNodes(value)),
+      dotMatrix({ rows: 6, cols: 14, cells, label: 'Activity per half day, Monday AM to Sunday PM. Chats below agent runs; up to six per column.' }),
+      el('div', { class: 'hm-week-days' }, shortDays.map(text => el('span', { text }))),
+      el('div', { class: 'hm-week-legend' }, [el('span', { class: 'hm-legend-chats', text: 'Chats' }), el('span', { class: 'hm-legend-runs', text: 'Agent work' }),
+        ...(busiest ? [el('span', { class: 'hm-busiest', text: 'Busiest: ' + busiest })] : [])]));
   }
-
-  // -- Usage rings on the model limits -----------------------------------------
-  function decorateRings() {
-    for (const window_ of parts.models?.querySelectorAll(".dashboard-quota-window") || []) {
-      if (window_.querySelector(".hm-ring")) continue;
-      const meter = window_.querySelector('[role="meter"]');
-      const fill = window_.querySelector(".dashboard-quota-fill");
-      const tone = (fill?.className.match(/tone-(\w+)/) || [])[1] || "ample";
-      window_.prepend(el("span", { class: "hm-ring tone-" + tone, "aria-hidden": "true", style: `--rd-pct:${meter?.getAttribute("aria-valuenow") || 0}` }));
+  function drawUsage() {
+    const providers = (data().quotas?.providers || []).filter(p => { const snap = toSnap(p); return snap.windows.length || snap.status === 'needsAuth'; });
+    const accounting = data().modelAccounting || [];
+    models.panel.hidden = !providers.length && !accounting.length;
+    models.body.replaceChildren(...(!models.panel.hidden ? [usageCard({ providers, accounting })] : []));
+  }
+  function hasItems(id) {
+    if (id === 'needs') return activity.need.length > 0;
+    if (id === 'working') return activity.work.length > 0;
+    if (id === 'models') return !models.panel.hidden;
+    if (id === 'chats') return !!data().sessions?.length;
+    // Home already applies its upcoming-event and date-only filter.
+    if (id === 'schedule') return !!parts.schedule.querySelector('.dashboard-row');
+    if (id === 'store') return !parts.store.hidden && parts.store.dataset.hasItems === 'true';
+    const node = cardFor(id);
+    return node && !node.hidden && !node.querySelector('.dashboard-empty, .skeleton');
+  }
+  function place(host, nodes) {
+    if (host.children.length !== nodes.length || nodes.some((node, i) => host.children[i] !== node)) host.replaceChildren(...nodes);
+    if (!entered) {
+      entered = true; grid.classList.add('rd-stagger');
+      entranceTimer = setTimeout(() => grid.classList.remove('rd-stagger'), 800);
     }
   }
-
-  // -- The grid ------------------------------------------------------------------
-  const cardFor = (id) => {
-    if (id === "needs") return needs;
-    if (id === "stats") {
-      if (!glance) glance = makeGlance();
-      if (parts.stats.parentElement !== glance.body) glance.body.append(parts.stats);
-      return glance.panel;
-    }
-    return parts[id] || null;
-  };
-  const everyCard = () => [needs, glance?.panel, ...Object.values(parts)].filter(Boolean);
-
   function arrange(order, hidden) {
-    if (!on()) { deactivate(); return false; }
+    if (!on() || launchSurface) { deactivate(); return false; }
     if (!active) {
-      activate();
-      // Applying the default saved a new arrangement; use it, not the stale one.
-      ({ order, hidden } = homeLayout());
+      active = true; ensureArrangement(); ({ order, hidden } = homeLayout());
+      content.classList.add('hm-home'); content.prepend(heading);
+      classicChrome.forEach(({ node }) => node.remove());
+      customizeButton = el('button', { type: 'button', class: 'hm-customize', 'aria-label': 'Customize Home', 'aria-haspopup': 'dialog', onclick: openSheet }, [el('span', { text: 'Customize' })]);
+      const customizeIcon = el('span', { class: 'hm-customize-icon', 'aria-hidden': 'true' });
+      customizeIcon.innerHTML = ICONS.settings; customizeButton.append(customizeIcon);
+      for (const [id, label] of [['chats', 'All chats'], ['schedule', 'Calendar'], ['system', 'Details']]) {
+        const link = parts[id].querySelector('.dashboard-section-header button');
+        link.dataset.classicLabel = link.textContent; link.textContent = label;
+      }
+      const calendarTitle = parts.schedule.querySelector('h2');
+      calendarTitle.dataset.classicTitle = calendarTitle.textContent; calendarTitle.textContent = 'Coming up';
+      controls.prepend(customizeButton); drawGreeting(); drawActivity(); drawWeek(); drawUsage();
     }
-    const cards = order.filter((id) => !hidden.includes(id)).map((id) => ({ id, node: cardFor(id) })).filter((c) => c.node && !c.node.hidden);
-    const rows = packRows(cards.map((c) => ({ id: c.id, span: spanOf(c.id) })));
-    const spans = new Map(rows.flat().map((c) => [c.id, c.span]));
-    for (const card of everyCard()) card.style.removeProperty("--rd-span");
-    for (const c of cards) { c.node.style.setProperty("--rd-span", String(spans.get(c.id))); c.node.dataset.rdSpan = String(spans.get(c.id)); }
-    const current = [...grid.children];
-    if (current.length !== cards.length || cards.some((c, i) => current[i] !== c.node)) grid.replaceChildren(...cards.map((c) => c.node));
+    const cards = order.filter(id => id === 'system' || (!hidden.includes(id) && hasItems(id)));
+    if (!cards.includes('system')) cards.push('system');
+    const defaultOrder = cards.every((id, i) => DEFAULT_ORDER.indexOf(id) >= 0 && (!i || DEFAULT_ORDER.indexOf(cards[i - 1]) < DEFAULT_ORDER.indexOf(id)));
+    grid.classList.toggle('hm-custom-order', !defaultOrder);
+    let ordered = cards;
+    if (defaultOrder && !phone.matches) {
+      // Only reorder the recent-card slots. Keep every enabled saved section.
+      const recent = ['chats', 'schedule', 'models'].filter(id => cards.includes(id));
+      ordered = cards.map(id => ['chats', 'schedule', 'models'].includes(id) ? recent.shift() : id);
+    }
+    // Reuse the one mounted Home painter across breakpoints and refreshes.
+    // The detached desktop hero has no phone slogan or pointer listener.
+    if (phone.matches) {
+      if (banner && !week.hidden && banner.parentElement !== week) week.prepend(banner);
+      else if (week.hidden) bannerParking.append(banner);
+      hero.remove(); heroMascot?.removeAttribute('follow-pointer');
+    } else {
+      bannerAnchor.after(banner); heroMascot?.setAttribute('follow-pointer', '');
+    }
+    const fixed = [...(!phone.matches ? [hero] : []), ...(!week.hidden ? [week] : [])];
+    const nodes = [...fixed, ...ordered.map(cardFor)].filter(Boolean);
+    const groupOf = id => ['needs', 'working'].includes(id) ? 'live' : ['chats', 'schedule', 'models'].includes(id) ? 'recent' : id;
+    const packed = packRows(nodes.map((node, i) => ({ id: i, span: node === hero ? 8 : node === week ? 4 : spanOf(node.dataset.homeSection),
+      group: i < fixed.length ? 'hero' : node === parts.system ? 'system' : defaultOrder ? groupOf(node.dataset.homeSection) : 'custom' })));
+    for (const row of packed) for (const cell of row) nodes[cell.id].style.setProperty('--rd-span', cell.span);
+    place(grid, nodes);
     return true;
   }
-
-  function activate() {
-    active = true;
-    ensureArrangement();
-    if (!customizeButton) {
-      customizeButton = el("button", { type: "button", class: "hm-customize", text: "Customize", "aria-haspopup": "dialog", onclick: openSheet });
-      header.append(customizeButton);
-    }
-    content.classList.add("hm-home");
-    loadTriggers(); loadFailures();
-    decorateRings();
-  }
-
   function deactivate() {
     if (!active) return;
-    active = false;
-    closeSheet(false);
-    customizeButton?.remove(); customizeButton = null;
-    content.classList.remove("hm-home");
-    for (const card of everyCard()) { card.style.removeProperty("--rd-span"); delete card.dataset.rdSpan; }
-    for (const ring of container.querySelectorAll(".hm-ring")) ring.remove();
-    needs.remove();
-    lastSignature = "";
+    clearTimeout(entranceTimer); grid.classList.remove('rd-stagger');
+    active = false; closeSheet(false); heading.remove(); customizeButton?.remove(); customizeButton = null;
+    classicChrome.forEach(({ node, anchor }) => anchor.after(node));
+    bannerAnchor.after(banner); heroAnchor.after(hero); heroMascot?.removeAttribute('follow-pointer'); content.classList.remove('hm-home');
+    for (const id of ['chats', 'schedule', 'system']) {
+      const link = parts[id].querySelector('.dashboard-section-header button');
+      link.textContent = link.dataset.classicLabel; delete link.dataset.classicLabel;
+    }
+    const calendarTitle = parts.schedule.querySelector('h2');
+    calendarTitle.textContent = calendarTitle.dataset.classicTitle; delete calendarTitle.dataset.classicTitle;
+    grid.classList.remove('hm-custom-order');
+    for (const panel of [hero, ...Object.values(parts)]) panel.style.removeProperty('--rd-span');
+    for (const node of [week, needs.panel, working.panel, models.panel]) node.remove();
   }
-
   // -- Customize sheet -----------------------------------------------------------
   const tabCard = (id) => knownHomeCards().find((c) => c.id === id);
   function sheetRows() {
     const layout = getLayout();
-    const main = layout.home.filter((id) => META[id]);
-    const tabs = layout.home.filter((id) => isTab(id) && tabCard(id));
+    const tabs = layout.home.filter((id) => isTab(id) && tabCard(id) && layout.hiddenHome.includes(id));
+    const main = layout.home.filter((id) => META[id] || (isTab(id) && tabCard(id) && !layout.hiddenHome.includes(id)));
     return { layout, main, tabs };
   }
   function change(mutate) {
@@ -348,10 +303,11 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
   }
   function swap(id, step) {
     change((layout) => {
-      const group = (x) => isTab(x);
+      const { main, tabs } = sheetRows();
+      const peers = main.includes(id) ? main : tabs;
       const i = layout.home.indexOf(id);
       let j = i + step;
-      while (j >= 0 && j < layout.home.length && (group(layout.home[j]) !== group(id) || (isTab(layout.home[j]) && !tabCard(layout.home[j])) || (!isTab(layout.home[j]) && !META[layout.home[j]]))) j += step;
+      while (j >= 0 && j < layout.home.length && !peers.includes(layout.home[j])) j += step;
       if (j < 0 || j >= layout.home.length) return;
       [layout.home[i], layout.home[j]] = [layout.home[j], layout.home[i]];
     });
@@ -364,6 +320,7 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
 
   function sheetRow(id, label, sub, shown, first, last) {
     const toggle = el("button", { type: "button", class: "hm-switch", role: "switch", "aria-checked": String(shown), "aria-label": (shown ? "Hide " : "Show ") + label, "data-focus": id + ":toggle", onclick: () => toggleCard(id) }, [el("span", { class: "hm-switch-knob" })]);
+    if (id === 'system') { toggle.disabled = true; toggle.setAttribute('aria-checked', 'true'); toggle.setAttribute('aria-label', 'Systems is always shown'); }
     const up = el("button", { type: "button", class: "hm-ib", "aria-label": "Move " + label + " up", "data-focus": id + ":up", text: "↑", onclick: () => swap(id, -1) });
     const down = el("button", { type: "button", class: "hm-ib", "aria-label": "Move " + label + " down", "data-focus": id + ":down", text: "↓", onclick: () => swap(id, 1) });
     up.disabled = first; down.disabled = last;
@@ -378,7 +335,7 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
     const list = (ids, labelOf, subOf) => ids.map((id, i) => sheetRow(id, labelOf(id), subOf(id), !layout.hiddenHome.includes(id), i === 0, i === ids.length - 1));
     sheet.list.replaceChildren(
       el("div", { class: "hm-sheet-group" }, [el("h3", { text: "Cards" }), el("span", { text: `${shownCount} of ${main.length + tabs.length} shown` })]),
-      ...list(main, (id) => META[id].label, (id) => META[id].sub),
+      ...list(main, (id) => META[id]?.label || tabCard(id).title, (id) => META[id]?.sub || "From " + tabCard(id).tab_name),
       ...(tabs.length ? [el("div", { class: "hm-sheet-group" }, [el("h3", { text: "From your tabs" })]), ...list(tabs, (id) => tabCard(id).title, (id) => "From " + tabCard(id).tab_name)] : []),
     );
     if (focused) sheet.list.querySelector(`[data-focus="${CSS.escape(focused)}"]`)?.focus();
@@ -391,7 +348,7 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
     const list = el("div", { class: "hm-sheet-list" });
     const panel = el("aside", { class: "hm-sheet", role: "dialog", "aria-modal": "true", "aria-label": "Customize Home" }, [
       el("div", { class: "hm-sheet-top" }, [el("h2", { text: "Customize Home" }), done]),
-      el("p", { class: "hm-sheet-intro", text: "Switch cards on or off and move them up or down. Home fills each row on its own." }),
+      el("p", { class: "hm-sheet-intro", text: "Switch cards on or off and move them up or down. Your choices are saved on this device." }),
       list,
       el("div", { class: "hm-sheet-foot" }, [
         el("button", { type: "button", class: "hm-btn hm-btn-secondary", text: "Reset to default", onclick: () => applyDefault() }),
@@ -422,31 +379,28 @@ export function mountRedesignHome({ container, content, header, grid, parts, dat
     if (restore && returnTo?.isConnected) returnTo.focus();
   }
 
-  // -- Events --------------------------------------------------------------------
+  const stopActivity = subscribeActivity(value => {
+    activity = value;
+    if (!active || disposed) return;
+    drawActivity(); rearrange();
+  });
   const onLayout = () => { if (active) drawSheet(); };
   const onAppearance = () => { if (on() !== active) rearrange(); };
-  const onAgents = () => { if (active) { loadTriggers(); } };
-  document.addEventListener("kairos:layout", onLayout);
-  document.addEventListener("kairos:appearance", onAppearance);
-  document.addEventListener("jarvis:agents-changed", onAgents);
-
-  return {
-    arrange,
-    update(key) {
-      if (!on() || disposed) return;
-      if (key === "inbox") { loadTriggers(); renderNeeds(); }
-      if (key === "feed") loadFailures();
-      if (key === "agents") renderNeeds();
-      if (["endpoints", "usage", "quotas"].includes(key)) decorateRings();
-      // Cards that appear or vanish as their admin data lands re-pack the grid.
-      if (["agents", "skills", "integrations", "tabs", "catalog"].includes(key)) rearrange();
-    },
-    dispose() {
-      disposed = true;
-      closeSheet(false);
-      document.removeEventListener("kairos:layout", onLayout);
-      document.removeEventListener("kairos:appearance", onAppearance);
-      document.removeEventListener("jarvis:agents-changed", onAgents);
-    },
-  };
+  const onPhone = () => { if (active) rearrange(); };
+  phone.addEventListener('change', onPhone);
+  document.addEventListener('kairos:layout', onLayout);
+  document.addEventListener('kairos:appearance', onAppearance);
+  return { arrange, update(key) {
+    if (!active || disposed) return;
+    if (key === 'auth') drawGreeting();
+    if (key === 'week') drawWeek();
+    if (['quotas', 'usage', 'endpoints'].includes(key)) drawUsage();
+    if (key === 'agents') drawActivity();
+    rearrange();
+  }, dispose() {
+    disposed = true; stopActivity(); deactivate(); heroAnchor.remove(); bannerAnchor.remove(); classicChrome.forEach(({ anchor }) => anchor.remove());
+    phone.removeEventListener('change', onPhone);
+    document.removeEventListener('kairos:layout', onLayout);
+    document.removeEventListener('kairos:appearance', onAppearance);
+  } };
 }
