@@ -185,7 +185,14 @@ module.exports = async function tabBarChecks(c) {
   ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-more-sheet')); return /blur/.test(s.backdropFilter) && /saturate/.test(s.backdropFilter) && /(rgba\\(.*, 0?\\.\\d+\\)|\\/ 0?\\.\\d+\\))$/.test(s.backgroundColor); })()"), 'More is a glass sheet');
   ok(await js("(() => { const r = document.querySelector('.ms-more-sheet').getBoundingClientRect(); return Math.round(r.bottom) === innerHeight && r.left === 0 && r.width === innerWidth; })()"), 'More rises from the bottom edge, full width');
   await js("document.querySelector('.ms-profile-row').click()");
-  eq(await js("[document.querySelector('.ms-profile-row').getAttribute('aria-expanded'), [...document.querySelector('.ms-profile-row').nextElementSibling.querySelectorAll('button')].map(b => b.textContent)]"), ['true', ['Switch User', 'Log Out']], 'Profile opens Switch User and Log Out');
+  await waitFor("!!document.querySelector('.workspace-profile-actions button')");
+  eq(await js("[!!document.querySelector('.workspace-profile-panel[role=dialog][aria-modal=true]'), [...document.querySelectorAll('.workspace-profile-actions button')].map(b => b.textContent)]"), [true, ['Switch User', 'Log Out']], 'Profile screen opens Switch User and Log Out');
+  eq(await js("[...document.querySelectorAll('.workspace-profile-actions button')].map(b => b.disabled)"), await js("[...document.querySelectorAll('#sidebar-footer .overflow-menu-item')].map(b => b.disabled)"), 'Profile preserves account action authorization');
+  eq(await js("document.querySelector('.workspace-profile-identity strong').textContent"), more.account, 'Profile screen shows the current account');
+  await shot('tabbar-profile');
+  await js("document.querySelector('.workspace-profile-panel .modal-close-btn').click()");
+  await waitFor("!document.querySelector('.workspace-profile-panel')");
+  await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(300);
   await shot('tabbar-more');
   await js("document.querySelector('.ms-more-sheet .ms-tab-tile[data-tab=cookbook]').click()");
   await waitFor("document.documentElement.dataset.view === 'cookbook' && !document.querySelector('.ms-more-sheet[open]')"); await barShown();
@@ -245,8 +252,8 @@ module.exports = async function tabBarChecks(c) {
   await navigate('library', { section: 'documents' }); await waitFor("!!document.querySelector('.library-document-card')");
   await js("document.querySelector('.library-document-card').click()"); await waitFor("!!document.querySelector('.library-editor')");
   await pushedPage('Library editor', { back: '.library-editor .view-header .card-row:first-child > button:first-child', current: 'more' });
-  await navigate('library'); await waitFor("!!document.querySelector('.segmented-tab')");
-  await js("[...document.querySelectorAll('.segmented-tab')].find(b => b.textContent.trim() === 'Vault').click()"); await waitFor("!!document.querySelector('.library-vault-note')");
+  await navigate('library'); await waitFor("!!document.querySelector('[data-library-section=vault]')");
+  await js("document.querySelector('[data-library-section=vault]').click()"); await waitFor("!!document.querySelector('.library-vault-note')");
   await js("document.querySelector('.library-vault-note').click()"); await waitFor("!!document.querySelector('.vault-phone-detail')");
   await pushedPage('Vault note', { back: '.vault-phone-back', current: 'more' });
   await openDesign();

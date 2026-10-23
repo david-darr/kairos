@@ -986,6 +986,7 @@ app.whenReady().then(async () => {
       await waitFor("!!document.querySelector('.library-document-card')");
       await js("document.querySelector('.library-document-card').click()");
       await waitFor("!!document.querySelector('#view-content .library-editor')");
+      await waitFor("document.querySelector('#view-content .library-editor').getAnimations().length === 0");
       assert.equal(await js("document.querySelector('#view-content .library-editor').getBoundingClientRect().width"), 1440, "Library document editor is 1440px wide");
       await navigate("library", { section: "documents" });
       for (const tab of ["tasks", "notes", "email", "cookbook", "tool-store"]) {
@@ -1151,6 +1152,37 @@ app.whenReady().then(async () => {
           assert.ok(await js("!!document.querySelector('.school-course-chat .session-chat-models .custom-select') && [...document.querySelectorAll('.school-course-chat button')].some(b=>b.textContent==='Open in Chats')"), label + " School course chat has model choice and Open in Chats");
           assert.deepEqual(await overflow(), [], label + " School assignment overflow");
           await capture(label + "-school-assignment");
+          // Keep the assignment editor and real embedded chat usable through
+          // the breakpoint, including the entrance (not just its final frame).
+          for (const schoolWidth of [1440, 1024, 769, 768, 430, 390, 320]) {
+            win.setContentSize(schoolWidth, height); await delay(100);
+            await js(`(() => {
+              const workspace = document.querySelector('.school-assignment-workspace');
+              window.__schoolEntrances = workspace.getAnimations();
+              // Restart the app's own entrance even after it has finished.
+              if (!window.__schoolEntrances.length) {
+                const entranceClass = [...workspace.classList].find(c => c.startsWith('rd-'));
+                workspace.classList.remove(entranceClass); void workspace.offsetWidth;
+                workspace.classList.add(entranceClass);
+                window.__schoolEntrances = workspace.getAnimations();
+              }
+              window.__schoolEntrances.forEach(a => a.pause());
+            })()`);
+            for (const frame of [0, 100, 200]) {
+              await js(`window.__schoolEntrances.forEach(a => { a.currentTime = ${frame}; })`);
+              assert.deepEqual(await overflow(), [], `School assignment ${schoolWidth}px entrance ${frame}ms`);
+            }
+            await js("window.__schoolEntrances.forEach(a => a.finish()); delete window.__schoolEntrances");
+            assert.ok(await js(`(() => {
+              const workspace = document.querySelector('.school-assignment-workspace');
+              const bounds = workspace.getBoundingClientRect();
+              return [...workspace.querySelectorAll(':scope > .card, textarea, .school-course-chat, .session-chat')].every(node => {
+                const r = node.getBoundingClientRect();
+                return r.width > 0 && r.left >= bounds.left - 1 && r.right <= bounds.right + 1;
+              });
+            })()`), `School assignment panes and inputs fit at ${schoolWidth}px`);
+          }
+          win.setContentSize(width, height); await delay(100);
           assert.ok(writes.slice(schoolWrites).every(w => w.path.startsWith('/api/tab-school/assignments/a1/')), label + ' School writes only its own sync');
           writes.splice(schoolWrites);
         }
@@ -1440,7 +1472,8 @@ app.whenReady().then(async () => {
           const completionStates = weekItems.map(item => item.completed);
           weekItems.forEach(item => { item.completed = true; });
           await showUpcoming();
-          assert.equal(await js("document.querySelector('.cal-day-panel .empty-state')?.textContent"), 'Nothing coming up.', label + ' a completed week uses the existing empty state');
+          assert.equal(await js("(document.querySelector('.cal-day-panel .empty-state-title') || document.querySelector('.cal-day-panel .empty-state'))?.textContent"), 'Nothing coming up.', label + ' a completed week shows the empty-state title');
+          assert.ok(await js("document.querySelector('.cal-day-panel .empty-state-hint')?.textContent === 'Make room for something new.' && [...document.querySelectorAll('.cal-day-panel .empty-state button')].some(b => b.textContent === 'Add an event')"), label + ' the redesigned empty state offers an event action');
           assert.equal(await js("document.querySelectorAll('.cal-day-panel .card, .cal-upcoming-day-label').length"), 0);
           await capture(label + '-calendar-completed-week');
           weekItems.forEach((item, index) => {

@@ -478,7 +478,12 @@ async function buildSidebarFooter() {
   const cardWrap = document.createElement("div");
   cardWrap.style.cssText = "position:relative;flex:1;min-width:0;";
   cardWrap.append(card, menu);
-  card.addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("hidden"); });
+  card.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (document.documentElement.classList.contains('kairos-redesign')) {
+      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(card));
+    } else menu.classList.toggle("hidden");
+  });
   document.addEventListener("click", () => menu.classList.add("hidden"));
 
   const settingsBtn = document.createElement("button");

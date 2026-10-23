@@ -92,6 +92,11 @@ export function openMoreSheet(from) {
   const name = document.querySelector('.sidebar-user-name')?.textContent || 'Account';
   // Profile: the account's initial and name; it opens Switch User and Log Out.
   const account = button('', () => {
+    if (document.documentElement.classList.contains('kairos-redesign')) {
+      closeMoreSheet();
+      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(from));
+      return;
+    }
     account.setAttribute('aria-expanded', String(accountActions.hidden === false ? false : true));
     accountActions.hidden = !accountActions.hidden;
   }, 'ms-account-row ms-profile-row');

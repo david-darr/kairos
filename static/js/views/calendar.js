@@ -1,6 +1,8 @@
 import { dateOnly, eventColor, itemsOnDay, googleCalendars, eventDialog, weekGrid, deleteCalendarEvent } from '../googleCalendar.js';
 import { api, el, iconButton, openPanelDialog } from "../api.js";
 import { ICONS } from "../icons.js";
+import { segmented } from '../kairosParts.js';
+import { redesignOn, workspaceEmpty } from '../workspaceParts.js';
 
 // Real visual monthly grid, resized to leave room for a day-detail panel
 // (David's ask, 2026-08-31) that lists every event/note for whichever day
@@ -43,6 +45,8 @@ viewMonth.setHours(0, 0, 0, 0);
 
 let selectedDayKey = null;
 let viewMode = 'month';
+let viewDay = new Date();
+viewDay.setHours(0, 0, 0, 0);
 let viewWeek = new Date();
 viewWeek.setHours(0, 0, 0, 0);
 viewWeek.setDate(viewWeek.getDate() - viewWeek.getDay());
@@ -51,6 +55,7 @@ export async function render(container) {
   container.innerHTML = "";
   container.classList.add("cal-layout");
   selectedDayKey = null;
+  if (!redesignOn() && viewMode === 'day') viewMode = 'month';
 
   const left = el("div", { class: "cal-left" });
   const header = el("div", { class: "view-header" }, [
@@ -63,12 +68,16 @@ export async function render(container) {
   const createBar = buildCreateBar();
   const calendarList = el('div', { class: 'cal-calendar-list' });
   const calendarStore = el('div', { hidden: true }, [calendarList]);
-  const calendarsBtn = el('button', { type: 'button', class: 'btn cal-calendars-trigger', text: 'Google calendars', 'aria-haspopup': 'dialog' });
+  const calendarsBtn = el('button', { type: 'button', class: 'btn cal-calendars-trigger', text: redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-label': redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-haspopup': 'dialog' });
   calendarsBtn.insertAdjacentHTML('afterbegin', ICONS.calendar);
   calendarsBtn.addEventListener('click', () => {
-    openPanelDialog({ title: 'Google calendars', body: calendarList, opener: calendarsBtn,
+    const dialog = openPanelDialog({ title: redesignOn() ? 'Your calendars' : 'Google calendars', body: calendarList, opener: calendarsBtn,
       owner: container, group: 'calendar-selection', className: 'cal-calendars-dialog',
       onClose: () => calendarStore.append(calendarList) });
+    dialog.panel.classList.add('rd-sheet-in');
+    dialog.panel.dataset.view = 'calendar';
+    dialog.panel.addEventListener('animationend', () => dialog.panel.classList.remove('rd-sheet-in'), { once: true });
+    dialog.panel.parentElement.classList.add('rd-scrim-in');
   });
   header.append(calendarsBtn);
 
@@ -83,14 +92,26 @@ export async function render(container) {
   // The wrapper only lets the redesign draw Month and Week as one segmented
   // control; with the switch off it is display: contents (redesign-calendar.css).
   todayBtn.dataset.mobileDock = 'today'; monthBtn.dataset.mobileDock = 'month'; weekBtn.dataset.mobileDock = 'week';
-  const viewSwitch = el('div', { class: 'cal-view-switch', role: 'group', 'aria-label': 'Calendar view' }, [monthBtn, weekBtn]);
+  const viewSwitch = redesignOn() ? segmented({ label: 'Calendar view', value: viewMode,
+    options: ['day', 'week', 'month'].map(value => ({ value, text: value[0].toUpperCase() + value.slice(1) })),
+    onChange: mode => setMode(mode) })
+    : el('div', { class: 'cal-view-switch', role: 'group', 'aria-label': 'Calendar view' }, [monthBtn, weekBtn]);
+  viewSwitch.classList.add('cal-range-switch');
+  if (redesignOn()) {
+    viewSwitch.classList.add('cal-view-switch');
+    for (const button of viewSwitch.querySelectorAll('button')) {
+      const mode = button.textContent.toLowerCase();
+      button.dataset.mobileDock = mode;
+      button.setAttribute('aria-pressed', String(viewMode === mode));
+    }
+  }
   nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
 
   const grid = el("div", { class: "cal-grid glass" });
 
   left.append(header, createBar, calendarStore, nav, grid);
 
-  const dayPanel = el("div", { class: "glass bracket cal-day-panel" });
+  const dayPanel = el("div", { class: "glass bracket cal-day-panel rd-stagger" });
 
   container.append(left, dayPanel);
 
@@ -98,25 +119,29 @@ export async function render(container) {
   createBar._refresh = refresh;
   createBar._owner = left;
   const setMode = mode => {
+    const today = new Date();
+    const anchorDay = selectedDayKey ? new Date(selectedDayKey) : viewMode === 'day' ? viewDay : viewMode === 'week' ? viewWeek
+      : viewMonth.getFullYear() === today.getFullYear() && viewMonth.getMonth() === today.getMonth() ? today : viewMonth;
     if (mode !== viewMode) {
       if (mode === 'week') {
-        const today = new Date();
-        const anchor = selectedDayKey ? new Date(selectedDayKey)
-          : (viewMonth.getFullYear() === today.getFullYear() && viewMonth.getMonth() === today.getMonth() ? today : viewMonth);
-        viewWeek = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - anchor.getDay());
-      } else {
-        const middle = new Date(viewWeek); middle.setDate(middle.getDate() + 3);
-        viewMonth = new Date(middle.getFullYear(), middle.getMonth(), 1);
+        viewWeek = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), anchorDay.getDate() - anchorDay.getDay());
+      } else if (mode === 'month') {
+        viewMonth = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), 1);
       }
+      if (mode === 'day') viewDay = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), anchorDay.getDate());
     }
     viewMode = mode;
     monthBtn.setAttribute('aria-pressed', String(mode === 'month'));
     weekBtn.setAttribute('aria-pressed', String(mode === 'week'));
+    for (const button of viewSwitch.querySelectorAll('button')) {
+      button.setAttribute('aria-pressed', String(button.textContent.toLowerCase() === mode));
+    }
     selectedDayKey = null; refresh();
   };
   monthBtn.onclick = () => setMode('month'); weekBtn.onclick = () => setMode('week');
   const shift = amount => {
-    if (viewMode === 'week') viewWeek.setDate(viewWeek.getDate() + amount * 7);
+    if (viewMode === 'day') viewDay.setDate(viewDay.getDate() + amount);
+    else if (viewMode === 'week') viewWeek.setDate(viewWeek.getDate() + amount * 7);
     else viewMonth.setMonth(viewMonth.getMonth() + amount);
     refresh();
   };
@@ -128,6 +153,7 @@ export async function render(container) {
   // month AND selects/shows today, same as clicking today's cell would.
   todayBtn.addEventListener("click", () => {
     const today = new Date();
+    viewDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     viewMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     viewWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
     createBar._dateInput.value = dateOnly(today);
@@ -142,7 +168,7 @@ export async function render(container) {
   dayPanel._createBar = createBar;
   await refresh();
   if (!grid.isConnected) return;
-  const timer = setInterval(() => { if (viewMode === 'week') refresh(); }, 60000);
+  const timer = setInterval(() => { if (viewMode !== 'month') refresh(); }, 60000);
   const observer = new MutationObserver(() => {
     if (!grid.isConnected) { clearInterval(timer); observer.disconnect(); }
   });
@@ -166,11 +192,12 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   const generation = grid._generation = (grid._generation || 0) + 1;
   const mode = viewMode;
   const firstOfMonth = new Date(viewMonth);
-  const gridStart = new Date(mode === 'week' ? viewWeek : firstOfMonth);
-  gridStart.setDate(gridStart.getDate() - gridStart.getDay()); // back up to the Sunday on/before the 1st
+  const gridStart = new Date(mode === 'day' ? viewDay : mode === 'week' ? viewWeek : firstOfMonth);
+  if (mode !== 'day') gridStart.setDate(gridStart.getDate() - gridStart.getDay()); // back up to Sunday
 
   const gridEnd = new Date(gridStart);
-  gridEnd.setDate(gridEnd.getDate() + (mode === 'week' ? 7 : 42)); // always render 6 full weeks for a stable grid height
+  gridEnd.setDate(gridEnd.getDate() + (mode === 'day' ? 1 : mode === 'week' ? 7 : 42));
+  if (mode === 'day') createBar._dateInput.value = dateOnly(gridStart);
 
   const items = await api(`/api/calendar/events?start=${encodeURIComponent(gridStart.toISOString())}&end=${encodeURIComponent(gridEnd.toISOString())}`);
 
@@ -181,10 +208,13 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   const enteringView = grid._viewMode !== mode;
   grid._viewMode = mode;
   grid.innerHTML = '';
-  grid.classList.toggle('cal-week-grid', mode === 'week');
+  grid.classList.toggle('cal-week-grid', mode !== 'month');
+  grid.classList.toggle('cal-single-day', mode === 'day');
   const refresh = () => renderGrid(monthLabel, grid, createBar, dayPanel);
-  if (mode === 'week') {
-    monthLabel.textContent = `${gridStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · Week`;
+  if (mode !== 'month') {
+    const last = new Date(gridEnd); last.setDate(last.getDate() - 1);
+    monthLabel.textContent = mode === 'day' ? gridStart.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+      : `${gridStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${last.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
     weekGrid(grid, gridStart, items, (date, dayItems) => {
       selectedDayKey = date.toDateString(); createBar._dateInput.value = dateOnly(date);
       renderDayPanel(dayPanel, date, dayItems, refresh);
@@ -192,9 +222,10 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
       if ((item.source === 'google' && item.editable) || item.source === 'calendar')
         eventDialog(createBar._calendars, refresh, item, date, createBar._owner);
       else renderDayPanel(dayPanel, date, dayItems, refresh);
-    });
+    }, mode === 'day' ? 1 : 7);
     grid.scrollTop = enteringView ? Math.max(0, (new Date().getHours() - 1) * 42) : previousScroll;
-    if (selectedDayKey) renderDayPanel(dayPanel, new Date(selectedDayKey), itemsOnDay(items, new Date(selectedDayKey)), refresh);
+    if (mode === 'day') renderDayPanel(dayPanel, gridStart, itemsOnDay(items, gridStart), refresh);
+    else if (selectedDayKey) renderDayPanel(dayPanel, new Date(selectedDayKey), itemsOnDay(items, new Date(selectedDayKey)), refresh);
     else await renderUpcomingPanel(dayPanel, refresh, isCurrent);
     return;
   }
@@ -261,7 +292,7 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
   dayPanel.appendChild(el("div", { class: "cal-day-panel-title", text: "Next 7 Days" }));
 
   if (items.length === 0) {
-    dayPanel.appendChild(el("div", { class: "empty-state", text: "Nothing coming up." }));
+    dayPanel.appendChild((redesignOn() ? workspaceEmpty({ title: 'Nothing coming up.', hint: 'Make room for something new.', actionLabel: 'Add an event', onAction: () => dayPanel._createBar?.querySelector('button')?.click() }) : el("div", { class: "empty-state", text: "Nothing coming up." })));
     return;
   }
 
@@ -284,7 +315,7 @@ function renderDayPanel(dayPanel, date, items, onChange) {
   dayPanel.appendChild(el("div", { class: "cal-day-panel-title", text: date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) }));
 
   if (items.length === 0) {
-    dayPanel.appendChild(el("div", { class: "empty-state", text: "Nothing on this day." }));
+    dayPanel.appendChild((redesignOn() ? workspaceEmpty({ title: 'Nothing on this day.', hint: 'Make room for something new.', actionLabel: 'Add an event', onAction: () => dayPanel._createBar?.querySelector('button')?.click() }) : el("div", { class: "empty-state", text: "Nothing on this day." })));
     return;
   }
 
@@ -366,12 +397,13 @@ function getArchiveModal() {
   if (archiveModal) return archiveModal;
   const closeBtn = el("button", { class: "modal-close-btn", text: "✕" });
   const body = el("div", { style: "overflow-y:auto;flex:1;margin-top:10px;" });
-  const panel = el("div", { class: "glass modal-panel cal-archive-panel" }, [
+  const panel = el("div", { class: "glass modal-panel cal-archive-panel rd-sheet-in" }, [
     el("h4", { text: "Archive" }, [closeBtn]),
     el("div", { class: "muted", text: "Checked-off events and notes. Reopen to bring one back to the active calendar." }),
     body,
   ]);
-  const backdrop = el("div", { class: "modal-backdrop hidden" }, [panel]);
+  const backdrop = el("div", { class: "modal-backdrop hidden rd-scrim-in" }, [panel]);
+  panel.dataset.view = 'calendar';
   backdrop.addEventListener("click", (e) => { if (e.target === backdrop) backdrop.classList.add("hidden"); });
   panel.addEventListener("click", (e) => e.stopPropagation());
   closeBtn.addEventListener("click", () => backdrop.classList.add("hidden"));

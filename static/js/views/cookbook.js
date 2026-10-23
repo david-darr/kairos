@@ -1,4 +1,6 @@
-import { api, el, toast, confirmDialog } from "../api.js";
+import { api, el, toast } from "../api.js";
+import { segmented } from '../kairosParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
 
 // Cookbook (David's ask 2026-09-01: "can we develop the cookbook tab now")
 // — browse/pull/manage local models. Two backends, toggled via a segmented
@@ -80,6 +82,11 @@ export async function render(container) {
 
   function renderTabs() {
     tabs.innerHTML = "";
+    if (redesignOn()) {
+      tabs.append(segmented({ label: 'Local model backend', value: activeSection,
+        options: [{ value: 'ollama', text: 'Ollama' }, { value: 'engine', text: 'Built-in Engine' }], onChange: switchSection }));
+      return;
+    }
     for (const [id, label] of [["ollama", "Ollama"], ["engine", "Built-in Engine"]]) {
       tabs.appendChild(el("button", {
         type: "button",
@@ -152,7 +159,9 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
   const runningNames = new Set(running.map((r) => r.name));
 
   if (installed.length === 0) {
-    installedSection.appendChild(el("div", { class: "empty-state", text: "No models installed yet — pull one from the catalog below." }));
+    installedSection.appendChild(redesignOn() ? emptyState({ title: 'No models installed yet', text: 'Choose a local model from the catalog.',
+      action: { text: 'Browse catalog', onClick: () => catalogSection.scrollIntoView({ block: 'start' }) } })
+      : el("div", { class: "empty-state", text: "No models installed yet — pull one from the catalog below." }));
     return;
   }
 
@@ -207,7 +216,7 @@ async function renderOllamaCatalog(catalogSection, installedSection) {
       await api(`/api/cookbook/pull/${encodeURIComponent(item.name)}`, { method: "POST" });
       watchOllamaPull(item.name, statusEl, pullBtn, installedSection, catalogSection);
     });
-    const card = el("div", { class: "glass bracket card", "data-mobile-row": "" }, [
+    const card = el("div", { class: "glass bracket card rd-enter-rise", "data-mobile-row": "" }, [
       el("div", { class: "title", style: "font-size:12.5px;", text: `${item.label} (${item.params})` }),
       el("div", { class: "meta", style: "margin:4px 0 8px;", text: item.description }),
       el("div", { class: "card-row" }, [statusEl, pullBtn]),
@@ -285,7 +294,9 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
   const downloaded = await api("/api/cookbook/engine/downloaded");
   const st = await api("/api/cookbook/engine/status");
   if (downloaded.length === 0) {
-    downloadedSection.appendChild(el("div", { class: "empty-state", text: "No models downloaded yet — pull one from the catalog below." }));
+    downloadedSection.appendChild(redesignOn() ? emptyState({ title: 'No models downloaded yet', text: 'Choose a model to run on this computer.',
+      action: { text: 'Browse catalog', onClick: () => catalogSection?.scrollIntoView({ block: 'start' }) } })
+      : el("div", { class: "empty-state", text: "No models downloaded yet — pull one from the catalog below." }));
     return;
   }
 
@@ -352,7 +363,7 @@ async function renderEngineCatalog(catalogSection, downloadedSection, statusRow)
       await api(`/api/cookbook/engine/download/${encodeURIComponent(item.name)}`, { method: "POST" });
       watchEngineDownload(item.name, statusEl, downloadBtn, downloadedSection, catalogSection, statusRow);
     });
-    const card = el("div", { class: "glass bracket card", "data-mobile-row": "" }, [
+    const card = el("div", { class: "glass bracket card rd-enter-rise", "data-mobile-row": "" }, [
       el("div", { class: "title", style: "font-size:12.5px;", text: `${item.label} (${item.params})` }),
       el("div", { class: "meta", style: "margin:4px 0 8px;", text: item.description }),
       el("div", { class: "card-row" }, [statusEl, downloadBtn]),

@@ -4,7 +4,8 @@
 // (openDesignPage) on the canvas, with its own composer and the model picker
 // for its linked chat. The old Design tab and #/design/<id> links redirect to
 // Library > Designs (app.js).
-import { api, el, toast, confirmDialog, emptyState } from '../api.js';
+import { api, el, toast } from '../api.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
 import { mountDesignCanvas } from '../designCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
 import { mountDesignModelPicker } from '../designModelPicker.js';
@@ -62,16 +63,17 @@ export async function renderDesignList(host) {
   const create = el('button', { type: 'button', class: 'btn primary', text: 'New design', onclick: event => newDesign(event.currentTarget) });
   const withAi = el('button', { type: 'button', class: 'btn', text: 'Design with a model', title: 'A chat in Design mode: describe what you want and the model builds the boards',
     onclick: () => startDesignChat().catch(() => {}) });
-  const grid = el('div', { class: 'design-grid', role: 'list', 'aria-label': 'Designs' });
+  const grid = el('div', { class: 'design-grid rd-stagger', role: 'list', 'aria-label': 'Designs' });
   host.replaceChildren(el('div', { class: 'design-home-actions' }, [create, withAi]), grid);
   let designs = [], status = { available: false };
   try { [designs, status] = await Promise.all([api('/api/designs'), api('/api/designs/render-status').catch(() => ({ available: false }))]); }
   catch { grid.replaceChildren(el('p', { class: 'meta', role: 'status', text: 'Designs could not load. Open the tab again to retry.' })); return; }
   if (!designs.length) {
-    grid.replaceChildren(emptyState({ title: 'No designs yet', hint: 'Start a blank design, or ask a model in a Design chat to build one.' }));
+    grid.replaceChildren(emptyState({ title: 'No designs yet', hint: 'Start a blank design, or ask a model in a Design chat to build one.',
+      actionLabel: 'New design', onAction: () => newDesign(create) }));
     return;
   }
-  grid.replaceChildren(...designs.map(design => {
+  const cards = designs.map(design => {
     const preview = el('div', { class: 'design-card-preview', 'aria-hidden': 'true' });
     if (status.available && design.first_board) {
       const img = el('img', { alt: '', loading: 'lazy', src: `/api/designs/${design.id}/boards/${design.first_board}/thumb?k=${design.version}` });
@@ -84,7 +86,18 @@ export async function renderDesignList(host) {
         el('span', { class: 'meta', text: `${design.boards} board${design.boards === 1 ? '' : 's'} · edited ${ago(design.updated)}` }),
         design.chat_title ? el('span', { class: 'meta', text: `From ${design.chat_title}` }) : el('span')]),
     ]);
-  }));
+  });
+  grid.replaceChildren(...cards);
+  if (redesignOn()) {
+    const search = el('input', { type: 'search', class: 'design-search', placeholder: 'Search designs', 'aria-label': 'Search designs' });
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      const matches = cards.filter((card, i) => `${designs[i].title} ${(designs[i].board_titles || []).join(' ')}`.toLocaleLowerCase().includes(query));
+      grid.replaceChildren(...(matches.length ? matches : [emptyState({ title: 'No designs match', hint: 'Try a different title or board name.',
+        actionLabel: 'Clear search', onAction: () => { search.value = ''; search.dispatchEvent(new Event('input')); search.focus(); } })]));
+    });
+    host.querySelector('.design-home-actions').prepend(search);
+  }
 }
 
 async function openDesign(container, designId, options) {
@@ -107,7 +120,9 @@ async function openDesign(container, designId, options) {
     el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), modelHost, forge, more, remove]);
   const canvasHost = el('div', { class: 'design-page-canvas' });
   const composerHost = el('div', { class: 'design-page-composer' });
-  const page = el('div', { class: 'design-page', 'data-design-id': designId }, [header, canvasHost, composerHost]);
+  const identity = el('div', { class: 'design-page-identity' });
+  if (redesignOn()) header.insertBefore(identity, header.children[1]);
+  const page = el('div', { class: 'design-page rd-push-in', 'data-design-id': designId }, [header, canvasHost, composerHost]);
   container.replaceChildren(page);
   container.classList.add('library-design-open');
   try { history.replaceState(null, '', `#/library/designs/${designId}`); } catch { /* Not essential. */ }
@@ -127,7 +142,7 @@ async function openDesign(container, designId, options) {
     designId,
     onSelection: (item, previous) => composer.setSelection(item, previous),
     onComments: items => { if (!linked()) { toast('Link a chat first, or start a design chat.'); return; } composer.addComments(items); },
-    onLoaded: data => { design = data; paintChats(data); },
+    onLoaded: data => { design = data; identity.replaceChildren(el('strong', { text: data.title }), el('small', { text: `Library · v${data.version}` })); paintChats(data); },
   });
   openParts = { canvas, composer };
   cleanup = () => {
@@ -149,7 +164,7 @@ async function openDesign(container, designId, options) {
   chatPick.addEventListener('change', async () => {
     if (chatPick.value !== '__link') { composer.update(); picker.update(); return; }
     sessions = sessions.length ? sessions : await api('/api/sessions').catch(() => []);
-    const menu = el('div', { class: 'design-menu', role: 'menu', 'aria-label': 'Link a chat' }, sessions.filter(s => !s.forge).slice(0, 30).map(s =>
+    const menu = el('div', { class: 'design-menu rd-menu-in', role: 'menu', 'aria-label': 'Link a chat' }, sessions.filter(s => !s.forge).slice(0, 30).map(s =>
       el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: s.title || 'Chat', onclick: async () => {
         menu.remove();
         const data = await api(`/api/designs/${designId}/link`, { method: 'POST', body: JSON.stringify({ session_id: s.id }) }).catch(() => null);
@@ -177,7 +192,7 @@ async function openDesign(container, designId, options) {
         menu.remove(); go('forgeSession', { sessionId: result.session_id, initialMessage: result.task });
       } catch { start.disabled = false; }
     } });
-    const menu = el('div', { class: 'design-menu design-forge-menu', role: 'dialog', 'aria-label': 'Build in Forge' }, [
+    const menu = el('div', { class: 'design-menu design-forge-menu rd-menu-in', role: 'dialog', 'aria-label': 'Build in Forge' }, [
       el('p', { class: 'meta', text: 'A Forge session builds this design in a project, reading its boards and tokens.' }),
       el('label', { class: 'design-field' }, [el('span', { text: 'Project' }), project]),
       el('label', { class: 'design-field' }, [el('span', { text: 'Agent' }), model]), start]);

@@ -189,9 +189,11 @@ async function run(ctx) {
 
   await navigate('calendar');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.cal-month-label').textContent");
-  eq((await dockInfo()).buttons.map(b => b.text), ['+', 'Today', 'Month', 'Week'], 'Calendar dock offers + Today Month Week');
-  eq(await pressed(), { '+': null, Today: null, Month: 'true', Week: 'false' }, 'Calendar dock shows Month selected');
-  ok(await js("[...document.querySelectorAll('.cal-nav button')].filter(b => b.getClientRects().length).every(b => !['Today', 'Month', 'Week'].includes(b.textContent.trim()))"), 'The page does not repeat what the dock offers');
+  eq((await dockInfo()).buttons.map(b => b.text), ['+', 'Today', 'Day', 'Week', 'Month'], 'Calendar dock offers + Today Day Week Month');
+  eq(await pressed(), { '+': null, Today: null, Day: 'false', Week: 'false', Month: 'true' }, 'Calendar dock shows Month selected');
+  ok(await js("!!document.querySelector('.cal-calendars-trigger').getClientRects().length && !!document.querySelector('.cal-create-bar button').getClientRects().length"), 'Calendar keeps Your calendars and Add in its phone header');
+  eq(await js("[...document.querySelectorAll('.cal-range-switch button')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())"), ['Day', 'Week', 'Month'], 'Calendar keeps the mockup range switch beside the period');
+  ok(await js("!document.querySelector('[data-mobile-dock=today]').getClientRects().length"), 'Today remains reachable in the dock');
   eq(await small('.cal-nav button'), [], 'Calendar page controls stay 44px');
   const monthNow = await monthLabel();
   await js("[...document.querySelectorAll('.cal-nav button')].find(b => b.textContent.includes('Next')).click()");
@@ -201,14 +203,18 @@ async function run(ctx) {
   await delay(300);
   eq(await monthLabel(), monthNow, 'Dock Today returns to the current month');
   ok(await js("!!document.querySelector('.cal-day-panel') && document.querySelector('.cal-day-panel').textContent.length > 0"), 'Dock Today selects the day and shows its panel');
+  await dockButton('Day');
+  await waitFor("!!document.querySelector('.cal-single-day') && document.querySelectorAll('.cal-week-day').length === 1");
+  eq((await pressed()).Day, 'true', 'Dock Day opens a one-day timeline');
+  await shot('calendar-day');
   await dockButton('Week');
-  await waitFor("document.querySelector('.cal-view-switch button:nth-child(2)').getAttribute('aria-pressed') === 'true'");
+  await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Week').getAttribute('aria-pressed') === 'true'");
   eq((await pressed()).Week, 'true', 'Dock Week follows the original control');
   eq((await pressed()).Month, 'false', 'Dock Month clears');
   eq(await docks(), 1, 'Switching to Week keeps one dock');
   await shot('calendar-week');
   await dockButton('Month');
-  await waitFor("document.querySelector('.cal-view-switch button:first-child').getAttribute('aria-pressed') === 'true'");
+  await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Month').getAttribute('aria-pressed') === 'true'");
   eq((await pressed()).Month, 'true', 'Dock Month returns');
   // The event sheet and its four ways out.
   const sheetUp = "!!document.querySelector('.cal-event-dialog.ms-sheet-surface')";
@@ -242,7 +248,11 @@ async function run(ctx) {
   ok(writes.slice(eventWrites).some(w => w.method === 'POST' && /\/api\/(google\/)?calendar\//.test(w.path) && String(w.body).includes('Dock event')), 'The sheet creates the event through the existing route');
 
   // ---- D. Library: documents, vault, drive, editor -----------------------------------------
-  const libTab = text => js(`[...document.querySelectorAll('.segmented-tab')].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`);
+  const libTab = text => {
+    const section = { Vault: 'vault', Files: 'documents', Designs: 'designs', 'Google Drive': 'google' }[text];
+    assert.ok(section, 'Known Library section: ' + text);
+    return js(`document.querySelector('[data-library-section="${section}"]').click()`);
+  };
   await navigate('library');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length === 3");
   const docSearch = await js("document.querySelector('.ms-dock input').placeholder");
@@ -302,7 +312,7 @@ async function run(ctx) {
   await js("document.querySelector('.ms-dock button').click()");
   ok(await js("!!document.querySelector('details[open] > summary[data-mobile-dock=create], details.drive-new[open]') || [...document.querySelectorAll('details')].some(d => d.open && /New/.test(d.querySelector('summary')?.textContent || ''))"), 'Drive + opens the New menu');
   await shot('library-drive');
-  for (const name of ['Documents & files', 'Vault', 'Google Drive', 'Documents & files', 'Vault']) {
+  for (const name of ['Files', 'Vault', 'Google Drive', 'Files', 'Vault']) {
     await libTab(name); await delay(500);
     ok(await docks() <= 1 && (await js("document.querySelectorAll('.ms-dock input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);
   }
@@ -432,7 +442,7 @@ async function run(ctx) {
   await press('Escape'); await waitFor("!document.querySelector('.cal-event-dialog')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // Resize cycle: the live search node moves to the dock and back, never cloned, never duplicated.
-  await navigate('library'); await libTab('Documents & files');
+  await navigate('library'); await libTab('Files');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.library-view .card-row input')");
   await js("window.__search = document.querySelector('.ms-dock input'); window.__search.value = 'keep me'");
   for (let i = 0; i < 3; i++) {
