@@ -214,7 +214,7 @@ To reach it, run this exact command through your shell tool, substituting one of
 
 {ASK_USER_GUIDANCE}
 Never use request_user_input or Codex's own approval UI; Kairos cannot display those.
-ask_user waits until the person answers (up to 30 minutes): if your shell yields while it runs, keep waiting for that same command instead of running it again.
+ask_user puts your question on screen and returns at once: then end your turn with one short line, and the answer arrives as your next message.
 
 Available subcommands (a true|false flag alone means true; ID,ID is a comma-separated list; add --args_json with a JSON object for anything structured; --help after a subcommand shows its arguments):
 {_codex_commands(is_admin, agent, session_id)}

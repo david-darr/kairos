@@ -175,6 +175,17 @@ async def _ask_user(args, ctx):
             questions = json.loads(questions)
         except ValueError:
             questions = None
+    if ctx.surface == CODEX and ctx.session_id:
+        from core import codex_questions
+        normalized, refusal = permissions._prepare_question(ctx.permission_surface, ctx.agent_id, questions, "ask_user")
+        if refusal:
+            return refusal.reason
+        if codex_questions.at_limit(ctx.session_id):
+            return "Further ask_user questions were skipped: the limit of 8 question rounds for this turn was reached. Continue with your best judgment."
+        task = permissions.ask_later(surface=ctx.permission_surface, agent_id=ctx.agent_id,
+                                     raw_questions=normalized, tool="ask_user")
+        codex_questions.register(ctx.session_id, task)
+        return "Your question is on screen. End your turn now with one short line saying you are waiting for the answer; it will arrive as your next message."
     outcome = await permissions.ask_person(surface=ctx.permission_surface, agent_id=ctx.agent_id,
                                            raw_questions=questions, tool="ask_user")
     if outcome.status != "answered":
