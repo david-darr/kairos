@@ -59,6 +59,8 @@ export function mountDesignComposer(host, { getSession, onStartChat, onOpenChat 
   paint(); update();
   return {
     root, update,
+    // An unsent message or chips (the leave guard asks before they are lost).
+    hasDraft: () => !!input.value.trim() || chips.length > 0,
     // Replace the previous selection chip (one live selection at a time).
     setSelection(item, previous) {
       if (previous) chips = chips.filter(c => keyOf(c) !== keyOf(previous));

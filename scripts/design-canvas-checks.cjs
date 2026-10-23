@@ -316,6 +316,15 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   for (let i = 0; i < 60 && !writes.slice(sentFrom).some(w => w.path === '/api/chat/live'); i++) await delay(50);
   assert.equal(JSON.parse(writes.slice(sentFrom).find(w => w.path === '/api/chat/live').body).session_id, 'dz1', 'the design composer sends to the chat whose model was picked');
 
+  // -- an unsent message: leaving the design asks first (leaveGuard.js) -------------
+  await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'Not sent yet'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await js("import('/static/js/app.js').then(m => { m.switchTab('library', { section: 'documents' }); return 1; })");
+  await waitFor("!!document.querySelector('.confirm-panel') && /Leave this design/.test(document.querySelector('.confirm-panel').textContent)");
+  await js("[...document.querySelectorAll('.confirm-panel .btn')].find(b => b.textContent === 'Cancel').click()");
+  await waitFor("!document.querySelector('.confirm-panel')");
+  assert.ok(await js(`!!document.querySelector('.design-page[data-design-id="${ID}"]') && document.querySelector('.design-composer-input').value === 'Not sent yet'`), 'Cancel keeps the design and its draft');
+  await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+
   // -- the older link form still opens the design, in Library ----------------------
   // (Live boards for the pictures; the render window's thumbnails are checked below.)
   designs[MID].render = false;
@@ -542,9 +551,12 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     await capture(`design-phone-pager-${width}`);
     await js("document.querySelector('.design-focus-bar [aria-label=\"Close focus\"]').click()");
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
-    // A draft in the docked composer hides the bar too.
+    // A draft keeps the composer 10px above the bar.
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await waitFor("!document.documentElement.classList.contains('ms-tabbar-up')");
+    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    // The draft grows the composer (is-active); its geometry settles a frame or two later.
+    await waitFor("Math.abs(document.querySelector('.design-composer').getBoundingClientRect().bottom - (document.querySelector('.ms-tabbar').getBoundingClientRect().top - 10)) <= 1 && document.querySelector('.ms-tabbar').getAnimations().length === 0");
+    assert.ok(true, 'Draft composer clears the tab bar by 10px');
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
   }

@@ -63,10 +63,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     })()`), true, 'Action glyphs centered within controls');
     if (width <= 768) {
       assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
-      const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
-      assert.ok(bottomGap>=11.9 && bottomGap<=52, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
+      const bottomGap = await js("document.querySelector('.ms-tabbar').getBoundingClientRect().top-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
+      assert.ok(bottomGap>=9 && bottomGap<=11, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
       await js("document.querySelector('.chat-phone-tools > button').click()");
-      assert.equal(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace') && document.querySelector('.ms-tabbar').dataset.state === 'hidden'"), true, 'A conversation has no workspace entry and no tab bar; Back leads out');
+      assert.equal(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace') && document.querySelector('.ms-tabbar').dataset.state === 'shown' && !!document.querySelector('.ms-chat-back')?.getClientRects().length"), true, 'A conversation keeps the tab bar and Back leads out');
       await capture(`interface-${label}-workspace`);
       await js("document.querySelector('.chat-phone-tools > button').click()");
 

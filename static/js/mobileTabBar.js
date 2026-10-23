@@ -6,22 +6,19 @@ import { chatPage } from './mobileShell.js';
 import { rememberedProject } from './mobileForge.js';
 import { badgeCounts } from './mobileActivity.js';
 
-// The phone tab bar (2026-10-22, David): a floating liquid-glass bar at the
-// bottom of every phone page, replacing the top-left avatar and its workspace
-// sheet. Kairos shows Home, Chats, Agents, Calendar and More; Forge shows
-// Forge Home, New, Sessions and More. More opens the sheet with every other
-// tab (mobileTabSheet.js). Inside a conversation, a Forge session or any
-// pushed page the composer owns the bottom, so the bar slides away; it also
-// steps aside while the keyboard is up. While it shows, the root carries
-// .ms-tabbar-up, which sets --ms-tabbar-space for docks and page padding
-// (redesign-mobile.css, "Tab bar").
-
-// Pages that own the bottom of the screen.
-const PUSHED = [
+// The phone tab bar stays on every phone page. It steps aside only for the
+// keyboard and the full-screen views listed in FULLSCREEN. Tapping the current
+// item on a pushed page returns to that tab's root. The root carries
+// .ms-tabbar-up while shown, reserving --ms-tabbar-space for docks and padding.
+// A side panel inside the page (documents, files, the browser, the computer)
+// covers the page on a phone; the page is a stacking context, so it cannot
+// rise above the bar and the bar steps aside instead.
+const FULLSCREEN = [
+  '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel',
+].join(', ');
+const SUBPAGE = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',
-  '.agents-messenger .side-chat-input', '.library-editor', '.vault-phone-detail',
-  // The Design canvas: its one-board pager, and its composer while in use.
-  '.design-focus', '.design-composer.is-active',
+  '.agents-workspace.has-conversation', '.library-editor', '.vault-phone-detail',
 ].join(', ');
 const nav = id => document.querySelector(`#nav .nav-item[data-tab="${id}"]`);
 const forge = () => document.documentElement.dataset.appMode === 'forge';
@@ -34,7 +31,8 @@ const KAIROS = [
   { id: 'chats', label: 'Chats', icon: 'chats', source: 'chat',
     open: () => {
       // Already on the chat workspace: Chats shows the list of chats.
-      if (document.getElementById('ms-tab-1')?.isConnected && document.documentElement.dataset.view === 'mobileLaunch') document.getElementById('ms-tab-1').click();
+      if (document.querySelector('.ms-live-chat')) go('chat', { mobilePage: 1 });
+      else if (document.getElementById('ms-tab-1')?.isConnected && document.documentElement.dataset.view === 'mobileLaunch') document.getElementById('ms-tab-1').click();
       else go('chat', { mobilePage: chatPage() });
     } },
   { id: 'agents', label: 'Agents', icon: 'agents', source: 'agents', badge: 'agents' },
@@ -54,6 +52,7 @@ let bar, glass, more, current = 'home', frame = 0, signature = '';
 function selection() {
   const view = document.documentElement.dataset.view;
   if (forge()) {
+    if (document.querySelector('#view-content .mf-session')) return 'sessions';
     if (document.querySelector('#view-content .mf-dashboard')) return 'forgeHome';
     if (document.querySelector('#view-content .mf-project')) return pagerTab(1)?.getAttribute('aria-selected') === 'true' ? 'sessions' : 'new';
     // A Forge view still loading keeps the item it was opened from.
@@ -64,7 +63,7 @@ function selection() {
 
 function hiddenNow() {
   if (!mobileOn()) return true;
-  if (document.querySelector(PUSHED)) return true;
+  if (document.querySelector(FULLSCREEN)) return true;
   return keyboardLift(innerHeight, window.visualViewport) > 0;
 }
 
@@ -78,6 +77,10 @@ function build() {
     if (item.badge) node.dataset.badge = item.badge;
     node.addEventListener('click', () => {
       haptic();
+      if (node.getAttribute('aria-current') === 'page' && document.querySelector(SUBPAGE)) {
+        if (item.open) item.open(); else nav(item.source)?.click();
+        return;
+      }
       if (node.getAttribute('aria-current') === 'page' && !item.open) {
         // The tab already on screen: back to its top, as iOS does.
         document.getElementById('view-content')?.scrollTo({ top: 0, behavior: reduced.matches ? 'auto' : 'smooth' });

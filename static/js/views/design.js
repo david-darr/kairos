@@ -20,6 +20,13 @@ let cleanup = () => {};
 
 // Library calls these (views/library.js): one design open at a time.
 export function closeDesign() { cleanup(); }
+let openParts = null;  // {canvas, composer} of the design on screen
+// Library's leave guard (leaveGuard.js): an unsent message, chips, a comment
+// being written or unsaved token changes are asked about before leaving.
+export async function canLeaveDesign() {
+  if (!openParts || !(openParts.composer.hasDraft() || openParts.canvas.hasUnsaved())) return true;
+  return confirmDialog({ title: 'Leave this design?', message: 'Your unsent message, selections, comment or token changes here will be lost.', confirmLabel: 'Leave', danger: false });
+}
 export function openDesignPage(container, designId, options = {}) { cleanup(); return openDesign(container, designId, options); }
 
 export async function render(container, tabId, options = {}) {
@@ -120,7 +127,9 @@ async function openDesign(container, designId, options) {
     onComments: items => { if (!linked()) { toast('Link a chat first, or start a design chat.'); return; } composer.addComments(items); },
     onLoaded: data => { design = data; paintChats(data); },
   });
+  openParts = { canvas, composer };
   cleanup = () => {
+    openParts = null;
     canvas.dispose(); composer.dispose(); picker.dispose(); container.classList.remove('library-design-open');
     try { if (/^#\/(design|library\/designs)\//.test(location.hash)) history.replaceState(null, '', location.pathname); } catch { /* Not essential. */ }
     cleanup = () => {};

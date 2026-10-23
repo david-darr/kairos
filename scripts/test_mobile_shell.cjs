@@ -308,7 +308,25 @@ class Surface {
   assert.doesNotMatch(source('app.js'), /registerMobileDrawer/);
   assert.match(source('mobileChrome.js'), /mountTabBar\(\)/);
   assert.doesNotMatch(source('mobileChrome.js') + source('mobileShell.js') + source('mobileForge.js') + source('app.js'), /openTabSheet|ms-avatar|mobile-menu-btn/, 'The avatar and its workspace sheet are gone');
-  assert.match(source('mobileTabBar.js'), /\.ms-conversation:not\(\.ms-launch-chat\)', '\.ms-live-chat', '\.mf-session'/, 'The bar steps aside in conversations and Forge sessions');
+  const tabbarSource = source('mobileTabBar.js');
+  assert.doesNotMatch(tabbarSource, /\bPUSHED\b/);
+  const fullscreen = tabbarSource.match(/const FULLSCREEN = \[([\s\S]*?)\]\.join/)[1];
+  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel']);
+  const hides = tabbarSource.match(/function hiddenNow\(\) \{([\s\S]*?)\n\}/)[1];
+  assert.match(hides, /!mobileOn\(\)/);
+  assert.match(hides, /document\.querySelector\(FULLSCREEN\)/);
+  assert.match(hides, /keyboardLift\(innerHeight, window\.visualViewport\) > 0/);
+  assert.equal((hides.match(/querySelector/g) || []).length, 1, 'Only full-screen views and the keyboard hide the phone bar');
+  assert.doesNotMatch(hides, /SUBPAGE/);
+  for (const enabled of [false, true]) for (const fullscreen of [false, true]) for (const lift of [0, 300]) {
+    const hidden = vm.runInNewContext(`(${tabbarSource.match(/function hiddenNow\(\) \{[\s\S]*?\n\}/)[0]})()`, {
+      mobileOn: () => enabled, FULLSCREEN: 'full-screen', innerHeight: 844, window: { visualViewport: {} },
+      document: { querySelector: selector => { assert.equal(selector, 'full-screen'); return fullscreen; } }, keyboardLift: () => lift,
+    });
+    assert.equal(hidden, !enabled || fullscreen || lift > 0, 'Only desktop, full-screen views and keyboard hide the bar');
+  }
+  assert.match(source('agentsMessenger.js'), /class: 'agents-conversation-back'/);
+  assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, viewTabs\]/);
   assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar'\]\)/, 'More lists the tabs the bar does not');
   assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);

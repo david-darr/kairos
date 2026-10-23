@@ -4,6 +4,7 @@ import { createVaultExplorer } from "../vaultExplorer.js";
 import { createVaultGraph } from "../vaultGraph.js";
 import { createVaultStore } from "../vaultStore.js";
 import { renderGoogleWorkspace } from "../googleWorkspace.js";
+import { registerLeaveGuard } from "../leaveGuard.js";
 
 // Library tab (Phase 7, David's ask 2026-09-01 "let's move on to the next
 // stage") — real document storage + bounded keyword search, deliberately
@@ -13,15 +14,23 @@ import { renderGoogleWorkspace } from "../googleWorkspace.js";
 
 let activeSection = "documents";
 let activeVaultView = null;
+let docGuard = null;
 
 export async function render(container, tabId, options = {}) {
+  const unguard = registerLeaveGuard(async () => {
+    if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return false;
+    if (docGuard && !await docGuard()) return false;
+    // An open design with an unsent message, chips or unsaved token changes (views/design.js).
+    if (designModule?.canLeaveDesign && !await designModule.canLeaveDesign()) return false;
+    return true;
+  });
   if (["vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
   if (activeSection === "designs" && options.designId) await renderDesign(container, options.designId, options);
   else if (activeSection === "designs") await renderDesigns(container);
   else if (activeSection === "vault") renderVault(container, options.vaultPath || null);
   else if (activeSection === "google") renderGoogle(container);
   else await renderList(container);
-  return () => { disposeVault(); closeDesignPage(); };
+  return () => { unguard(); docGuard = null; disposeVault(); closeDesignPage(); };
 }
 
 let designModule = null;
@@ -333,16 +342,15 @@ async function renderEditor(container, docId) {
   // silently discard everything typed since the last save.
   const isDirty = () => titleInput.value !== doc.title || contentArea.value !== doc.content;
   const markSaved = () => { doc.title = titleInput.value; doc.content = contentArea.value; };
+  const confirmLeave = async () => !isDirty() || await confirmDialog({
+    title: "Discard unsaved changes?",
+    message: `"${titleInput.value.trim() || "Untitled"}" has changes you haven't saved yet.`,
+    confirmLabel: "Discard changes",
+  });
+  docGuard = () => (contentArea.isConnected ? confirmLeave() : true);
 
   backBtn.addEventListener("click", async () => {
-    if (isDirty()) {
-      const ok = await confirmDialog({
-        title: "Discard unsaved changes?",
-        message: `"${titleInput.value.trim() || "Untitled"}" has changes you haven't saved yet.`,
-        confirmLabel: "Discard changes",
-      });
-      if (!ok) return;
-    }
+    if (!await confirmLeave()) return;
     renderList(container);
   });
 

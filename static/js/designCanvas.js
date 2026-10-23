@@ -1041,6 +1041,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     fitBoards: slugs => { fitRect(bounds(slugs), 48, false); autoFit = false; },
     state: () => ({ zoom, tx, ty, mode, view, selected, focus: focus?.slug || null, live: Number(root.dataset.live || 0), preview: preview?.n || null }),
     clearSelection: () => clearPicked(false),
+    // Unsaved here: token knobs not yet saved, or a comment being written.
+    hasUnsaved: () => tokenDraft.size > 0 || (!popover.hidden && !!popover.querySelector('textarea')?.value.trim()),
     dispose() { lifetime.abort(); resize.disconnect(); closeFocus(true); sheet?.close?.(); cancelAnimationFrame(liveFrame); cancelAnimationFrame(paintFrame); root.remove(); },
   };
   root.designCanvas = controller;  // For the UI checks (scripts/ui-smoke.cjs) and devtools.
