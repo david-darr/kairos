@@ -316,14 +316,26 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   for (let i = 0; i < 60 && !writes.slice(sentFrom).some(w => w.path === '/api/chat/live'); i++) await delay(50);
   assert.equal(JSON.parse(writes.slice(sentFrom).find(w => w.path === '/api/chat/live').body).session_id, 'dz1', 'the design composer sends to the chat whose model was picked');
 
-  // -- an unsent message: leaving the design asks first (leaveGuard.js) -------------
+  // -- leaving: an unsent message stays with the design; a comment being written asks first (leaveGuard.js)
   await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'Not sent yet'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await navigate('library', { section: 'documents' });
+  await waitFor("!document.querySelector('.design-page')");
+  await navigate('library', { section: 'designs', designId: ID });
+  await waitFor(`!!document.querySelector('.design-page[data-design-id="${ID}"] .design-composer-input')`);
+  assert.equal(await js("document.querySelector('.design-composer-input').value"), 'Not sent yet', 'the unsent message is kept with the design');
+  await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await waitFor("document.querySelectorAll('.design-board iframe').length === 3");
+  await js(`${C}.setMode('comment')`); await delay(400);
+  await frameJs('landing', "document.querySelector('h1').click(); 1");
+  await waitFor("!document.querySelector('.design-popover').hidden");
+  await js("document.querySelector('.design-popover textarea').value = 'Half a thought'");
   await js("import('/static/js/app.js').then(m => { m.switchTab('library', { section: 'documents' }); return 1; })");
   await waitFor("!!document.querySelector('.confirm-panel') && /Leave this design/.test(document.querySelector('.confirm-panel').textContent)");
   await js("[...document.querySelectorAll('.confirm-panel .btn')].find(b => b.textContent === 'Cancel').click()");
   await waitFor("!document.querySelector('.confirm-panel')");
-  assert.ok(await js(`!!document.querySelector('.design-page[data-design-id="${ID}"]') && document.querySelector('.design-composer-input').value === 'Not sent yet'`), 'Cancel keeps the design and its draft');
-  await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  assert.ok(await js(`!!document.querySelector('.design-page[data-design-id="${ID}"]') && document.querySelector('.design-popover textarea').value === 'Half a thought'`), 'Cancel keeps the design and the comment');
+  await js("document.querySelector('.design-popover').hidden = true");
+  await js(`${C}.setMode('pan')`);
 
   // -- the older link form still opens the design, in Library ----------------------
   // (Live boards for the pictures; the render window's thumbnails are checked below.)

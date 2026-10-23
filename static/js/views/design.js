@@ -21,11 +21,13 @@ let cleanup = () => {};
 // Library calls these (views/library.js): one design open at a time.
 export function closeDesign() { cleanup(); }
 let openParts = null;  // {canvas, composer} of the design on screen
-// Library's leave guard (leaveGuard.js): an unsent message, chips, a comment
-// being written or unsaved token changes are asked about before leaving.
+// Library's leave guard (leaveGuard.js): a comment being written or token
+// changes not yet saved are asked about before leaving. (An unsent message is
+// kept with the design, as a chat keeps its draft; every other change is
+// already saved as a version.)
 export async function canLeaveDesign() {
-  if (!openParts || !(openParts.composer.hasDraft() || openParts.canvas.hasUnsaved())) return true;
-  return confirmDialog({ title: 'Leave this design?', message: 'Your unsent message, selections, comment or token changes here will be lost.', confirmLabel: 'Leave', danger: false });
+  if (!openParts?.canvas.hasUnsaved()) return true;
+  return confirmDialog({ title: 'Leave this design?', message: 'The comment you are writing or your unsaved token changes will be lost.', confirmLabel: 'Leave', danger: false });
 }
 export function openDesignPage(container, designId, options = {}) { cleanup(); return openDesign(container, designId, options); }
 
@@ -117,7 +119,7 @@ async function openDesign(container, designId, options) {
   // The model of the linked chat (designModelPicker.js): the composer's sends use it.
   const picker = mountDesignModelPicker(modelHost, { getSession: linked });
   const composer = mountDesignComposer(composerHost, {
-    getSession: linked,
+    getSession: linked, draftKey: designId,
     onStartChat: async () => { await startDesignChat(designId, design?.title || 'Design').catch(() => {}); },
     onOpenChat: () => { const s = linked(); if (s) go('chat', { sessionId: s.id, openDesign: designId, mobileConversation: true }); },
   });

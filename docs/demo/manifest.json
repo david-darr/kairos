@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "fd180adaaa8e9a5a17e5a12adeacf2484529eaef1d1be96efbff0ee4b2d98961",
+  "app.js": "b4da8fb580dcb04d220be481ba6a15b5e645fe393f25e7221a8994d2604c9f2a",
   "fixtures.js": "18aa62234f9cadfc94998a60f502911a27e31486a0c30a7ba0bf27d33ebffd68",
   "index.html": "655ad70c8c28baa1748e3cf949ac130a82dc8f3015590d5953388dc06444cba8",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -427,7 +427,7 @@
   "static/js/creativeConnections.js": "98d66baf896dcf9053381fb88aa712c4ab2950f2249d26f08a391b51545442a5",
   "static/js/designAutoOpen.js": "91d6ea3721e4b11551b9714596e2fc239ea327a9ee9ea3aab7a4fc121edc4a9c",
   "static/js/designCanvas.js": "982a6cdfa8b52389f10b26d68864b1c93d2e0c0bd733b29672c761d0676a5451",
-  "static/js/designComposer.js": "d088bdce7437839e3c85a0728c0c3c8995fea30788714dc6087e1ed0515d5180",
+  "static/js/designComposer.js": "86a116dacdbfd224d538628b09f5f1b6f3d51db37256e776161bab282169570c",
   "static/js/designModelPicker.js": "e5a6f5e83788f01fc17fb3d429d89eedf30b34d8dad2de0cce6796c7efecd2c6",
   "static/js/designSystems.js": "eda5aeeac32ad2759be2ea2c18ecfdaaab9b6742039acb2d3cd23e1c2924477d",
   "static/js/dither.js": "4ca2e039470e85d801a337853e2812a9abb1365975da448fb940d6d79d3b64d0",
@@ -722,7 +722,7 @@
   "static/js/views/calendar.js": "188cb76b15ab0e81924dbc5fbac3e66231b978c87f9c3f472896c8b630184463",
   "static/js/views/chat.js": "7b4ba1636b3886b9de8a58328e3b06c6ddc764ff039f152c5527d035510cd6cf",
   "static/js/views/cookbook.js": "772ee1d3744c631d36d0ed4a25f05812b4ec1a2c3c5b6be12acabe8da66438db",
-  "static/js/views/design.js": "1906894c748d7783b8cf4e076d0daebb17b1dfc013a8427464b17e7cb1cb7001",
+  "static/js/views/design.js": "ee35dcef19b690b9e256ab2eadbd5cd9fed98e0ec1f09387146d2aa34e2d0695",
   "static/js/views/email.js": "43fb777752485b04416da19f051bc998e32d9e90398ede9e55f87219499cb3c2",
   "static/js/views/forgeHome.js": "9b6283de9694db6524f724acd29d135fb820dfceb5384ec405d212c1cca704f6",
   "static/js/views/forgeShell.js": "36fafdd964269100a4d948e64a9dbf7e79c29957481db2c849dc4af45776bf30",
