@@ -1,4 +1,5 @@
 import { el } from './api.js';
+import { holdReadingPositions } from './chatScrollAnchor.js';
 
 // The chat keeps most of the room and a document opens beside it at about
 // 40% (David, 2026-10-09: "the default width to be a lot smaller"). These
@@ -13,6 +14,7 @@ let current = null;
 // Every right-hand pane registers here so even rapid opens close the native
 // browser synchronously. The registration owns the divider and its listeners.
 export function mountChatPane(host, panel, close, { onDrag } = {}) {
+  holdReadingPositions(); // Capture before the pane's first layout can move the reader.
   const main = host.querySelector('#chat-main');
   // Capture the painted width before replacing a pane. An auto width cannot
   // transition to the fixed split width in CSS, so interpolate pixels once.
@@ -90,6 +92,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
     resize(clamp(preferred ?? defaultWidth()) + (event.key === 'ArrowRight' ? 24 : -24)); save();
   });
   const setMaximized = value => {
+    holdReadingPositions();
     if (value) stopEntrance();
     maximized = value && window.innerWidth > 1100;
     host.classList.toggle('pane-maximized', maximized);
@@ -153,6 +156,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
     isMaximized: () => maximized,
     setMaximized,
     dispose() {
+      holdReadingPositions();
       stopEntrance();
       stopDrag(); setMaximized(false);
       observer.disconnect(); window.removeEventListener('resize', onWindowResize);

@@ -1,3 +1,4 @@
+import { keepReadingPosition } from './chatScrollAnchor.js';
 // Side-by-side chats (David's ask 2026-09-25, after Hermes Desktop's split
 // panes): a second chat open next to the main one. Drag a chat from the list
 // onto the right half of the chat area, or pick "Open side by side" from its
@@ -27,6 +28,7 @@ let sessionId = null;
 let unsubscribe = () => {};
 let shownPermission = null;
 let disposeHandoffs = () => {};
+let disposeAnchor = () => {};
 let references = null;
 
 function remember(id) {
@@ -47,14 +49,14 @@ function card(role, text, message = null) {
 // Mount into a freshly rendered chat layout (chat.js's render runs on every
 // visit to the Chats tab). Reopens the side chat that was open last time.
 export function mountSideChat(chatLayout, options) {
-  disposeHandoffs(); references?.dispose(); references = null;
+  disposeAnchor(); disposeHandoffs(); references?.dispose(); references = null;
   layout = chatLayout; hooks = options; pane = null; sessionId = null;
   unsubscribe(); unsubscribe = () => {};
   wireDropZone(chatLayout.querySelector('#chat-main'));
   let saved = null;
   try { saved = localStorage.getItem(STORAGE_KEY); } catch { /* private mode */ }
   if (saved && wide.matches) openSideChat(saved, { quiet: true });
-  return () => { unsubscribe(); disposeHandoffs(); references?.dispose(); references = null; };
+  return () => { unsubscribe(); disposeAnchor(); disposeHandoffs(); references?.dispose(); references = null; };
 }
 
 export async function openSideChat(id, { quiet = false } = {}) {
@@ -72,7 +74,7 @@ export async function openSideChat(id, { quiet = false } = {}) {
 }
 
 export function closeSideChat() {
-  disposeHandoffs(); references?.dispose(); references = null;
+  disposeAnchor(); disposeHandoffs(); references?.dispose(); references = null;
   unsubscribe(); unsubscribe = () => {};
   sessionId = null;
   remember(null);
@@ -82,7 +84,7 @@ export function closeSideChat() {
 }
 
 function build(session) {
-  disposeHandoffs(); references?.dispose();
+  disposeAnchor(); disposeHandoffs(); references?.dispose();
   pane?.remove();
   const messages = el('div', { class: 'side-messages', role: 'log', 'aria-label': `Messages in ${session.title}` });
   const input = el('textarea', { class: 'side-chat-input', rows: '1', placeholder: 'Message this chat', 'aria-label': `Message ${session.title}` });
@@ -118,6 +120,7 @@ function build(session) {
   const handoffs = watchAgentHandoffs(messages, () => sessionId);
   disposeHandoffs = () => handoffs.dispose();
   layout.append(pane);
+  disposeAnchor = keepReadingPosition(messages);
   layout.classList.add('has-side-chat');
   applyWidth();
   messages.scrollTop = messages.scrollHeight;
@@ -155,7 +158,10 @@ function build(session) {
   const attach = (replyBody) => {
     unsubscribe();
     const id = sessionId;
+    const bound = chatStream.getInFlight(id);
     unsubscribe = chatStream.subscribe(id, (entry) => {
+      // A newer turn must never paint into this reply.
+      if (bound && entry !== bound) return;
       if (!pane?.isConnected || sessionId !== id) return;
       renderMessageBody(replyBody, entry.text || (entry.status === 'processing' ? '' : '(no reply)'), id, true);
       if (entry.permission && entry.permission.id !== shownPermission) {
@@ -197,6 +203,8 @@ function build(session) {
     messages.append(card('user', text, { references: selected }));
     const reply = card('assistant', '');
     messages.append(reply);
+    // startTurn notifies synchronously, so detach the previous reply first.
+    unsubscribe(); unsubscribe = () => {};
     try { chatStream.startTurn(sessionId, session.title, text, [], selected); }
     catch (error) { toast(error.message, 'error'); reply.remove(); return; }
     attach(reply.querySelector('.msg-body'));

@@ -1,3 +1,4 @@
+import { keepReadingPosition } from './chatScrollAnchor.js';
 import { mountMobileModelSheet, renderMobileCatalogMenu } from './mobileModelSheet.js';
 import { mobileOn, phone } from './mobileShared.js';
 // One embedded conversation (2026-10-08): the Agents tab's chat pane and a
@@ -99,6 +100,7 @@ export async function mountSessionChat(host, options = {}) {
   else host.replaceChildren(el('div', { class: 'session-chat' }, [tools, scrollHost, queueList,
     ...(options.agent ? [el('div', { class: 'agent-composer-row' }, [el('div', { class: 'agent-composer-orb', 'aria-label': options.agent.name }, [agentAvatar(options.agent, 38)]), composer])] : [composer]),
   ]));
+  const disposeAnchor = transcript ? () => {} : keepReadingPosition(scrollHost);
   tools.hidden = false;
   tools.append(creativeSelectionButton(() => ({ sessionId }), host));
 
@@ -157,6 +159,7 @@ export async function mountSessionChat(host, options = {}) {
     unsubscribe();
     clearInterval(workingTimer); workingTimer = null;
     const id = sessionId;
+    const bound = chatStream.getInFlight(id);
     liveTurnId = chatStream.getInFlight(id)?.turnId || null;
     let finished = false;
     const agentTurn = !!session?.agent_id;
@@ -214,6 +217,8 @@ export async function mountSessionChat(host, options = {}) {
       verb.textContent = entry.stopping ? 'Stopping' : active ? action(active) : 'Writing';
     };
     const paint = (entry) => {
+      // A newer turn must never paint into this reply.
+      if (bound && entry !== bound) return;
       if (!host.isConnected || sessionId !== id) return;
       // Decision 3, 2026-10-13: only a session with agent_id buffers its
       // visible reply. The stream entry still retains all text for Stop/error.
@@ -302,7 +307,7 @@ export async function mountSessionChat(host, options = {}) {
       attach(reply.querySelector('.msg-body, .forge-prose'));
     }
     if (!shown.length && !busy() && !current) showEmpty();
-    scrollHost.scrollTop = scrollHost.scrollHeight;
+    if (transcript) transcript.follow(); else scrollHost.scrollTop = scrollHost.scrollHeight;
   };
 
   // Connection and model for this chat, the same choices as the chat
@@ -427,9 +432,11 @@ export async function mountSessionChat(host, options = {}) {
     messages.append(card('user', text, { references: selected, attachments: attached }));
     const reply = card('assistant', ''); messages.append(reply);
     let entry;
+    // startTurn notifies synchronously, so detach the previous reply first.
+    unsubscribe(); unsubscribe = () => {};
     try { entry = chatStream.startTurn(sessionId, session?.title || label, text, attached.map(item => item.id), selected); }
     catch (error) { toast(error.message, 'error'); reply.remove(); pausedQueues.add(sessionId); return; }
-    attach(reply.querySelector('.msg-body, .forge-prose')); syncSend(); scrollHost.scrollTop = scrollHost.scrollHeight;
+    attach(reply.querySelector('.msg-body, .forge-prose')); syncSend(); if (transcript) transcript.follow(); else scrollHost.scrollTop = scrollHost.scrollHeight;
     return entry;
   };
   if (options.agent && !options.readOnly) {
@@ -524,5 +531,5 @@ export async function mountSessionChat(host, options = {}) {
   drawQueue();
   if (options.initialMessage && session && !session.messages.length && !disposed && host.isConnected) { input.value = options.initialMessage; await submit(); }
   else if (options.initialMessage && !session) input.value = options.initialMessage;
-  return () => { disposePhoneModels(); disposed = true; call?.dispose(); recorder?.cancel(); attachments?.dispose(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
+  return () => { disposeAnchor(); disposePhoneModels(); disposed = true; call?.dispose(); recorder?.cancel(); attachments?.dispose(); if (shownPermission) dismissPermissionPrompt(shownPermission); clearInterval(workingTimer); if (queues.get(sessionId)?.length) pausedQueues.add(sessionId); unsubscribe(); unsubscribeLive(); references.dispose(); handoffs.dispose(); transcript?.dispose(); };
 }
