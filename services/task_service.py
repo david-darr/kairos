@@ -247,7 +247,7 @@ class TaskService:
         if schedule_kind == "card":
             task.update({"status": status or "backlog", "depends_on": list(depends_on or []), "attempts": 0,
                          "claimed_until": None, "comments": []})
-        if origin_session_id is not None and schedule_kind != "card":
+        if origin_session_id is not None:
             task["origin_session_id"] = origin_session_id
         if owner_user is not None:
             task["owner_user"] = owner_user

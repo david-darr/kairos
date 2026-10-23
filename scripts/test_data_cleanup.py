@@ -26,7 +26,8 @@ def repo_fixtures():
 class TestDataCleanupTests(unittest.TestCase):
     def test_suites_leave_no_repo_or_temp_data(self):
         for module, fixture in (('test_ask_user', 'environment'),
-                                ('test_background_tasks', 'fixture')):
+                                ('test_background_tasks', 'fixture'),
+                                ('test_background_any_model', 'fixture')):
             with self.subTest(module=module):
                 before = repo_fixtures()
                 code = f'''

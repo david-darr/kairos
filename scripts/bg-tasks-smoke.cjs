@@ -6,13 +6,21 @@ const path = require('node:path');
 const argument = name => process.argv.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const base = process.env.KAIROS_BG_URL || argument('bg-url');
 const sid = process.env.KAIROS_BG_SESSION || argument('bg-session');
+const surfaceIndex = process.argv.indexOf('--surface');
+const surface = argument('surface') || (surfaceIndex >= 0 ? process.argv[surfaceIndex + 1] : 'claude');
+assert(['claude', 'api', 'local'].includes(surface), 'Choose --surface claude|api|local');
 if (!base || !sid) throw Error('Set KAIROS_BG_URL and KAIROS_BG_SESSION from the scripted harness startup line');
 const target = new URL(base);
 assert(['127.0.0.1', 'localhost'].includes(target.hostname), 'Use the isolated local harness');
 assert(!['8420', '8430'].includes(target.port), 'Never use the app or dev port');
 const output = path.resolve(__dirname, '../data/review/bg-tasks');
 fs.mkdirSync(output, { recursive: true });
-const profile = path.resolve(__dirname, '../data/bg-tasks-smoke-profile');
+// The harness owns this system-temp tree through TestDataDirectory.
+const dataDir = process.env.KAIROS_BG_DATA_DIR || argument('bg-data-dir');
+if (!dataDir) throw Error('Pass --bg-data-dir=<dataDir from harness startup> for the isolated Electron profile');
+const tempRoot = path.resolve(require('node:os').tmpdir());
+assert(path.resolve(dataDir).startsWith(tempRoot + path.sep), 'Harness data must be in system temp');
+const profile = path.join(dataDir, 'electron-profile');
 fs.mkdirSync(profile, { recursive: true });
 app.setPath('userData', profile);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -20,6 +28,11 @@ app.whenReady().then(async () => {
   fs.writeSync(1, 'Background smoke: Electron ready\n');
   const win = new BrowserWindow({ width: 1280, height: 800, show: false, useContentSize: true,
     webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false } });
+  win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+    const url = new URL(details.url);
+    callback({ cancel: ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)
+      && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) });
+  });
   win.webContents.on('console-message', details => { if (details.level === 'error') fs.writeSync(2, `Renderer: ${details.message}\n`); });
   fs.writeSync(1, 'Background smoke: window created\n');
   const js = async (code, step = code) => {
@@ -87,6 +100,25 @@ app.whenReady().then(async () => {
     const sentAt = Date.now();
     await click('#chat-send');
     await wait("document.querySelector('.bg-tasks-caption')?.textContent.includes('running in background') && !document.querySelector('.bg-tasks').hidden", 10000);
+    if (surface !== 'claude') {
+      // Assert backend ownership and live UI while the two held HTTP helper
+      // replies are still in flight, then capture the pill and actual list.
+      const state = `fetch('/api/chat/background/' + ${JSON.stringify(sid)}).then(r => r.json())`;
+      await wait(`(${state}).then(data => data.items.filter(i => i.kind === 'helper' && i.status === 'running').length === 2
+        && data.items.some(i => i.kind === 'scheduled')
+        && (${JSON.stringify(surface)} !== 'api' || data.items.some(i => i.kind === 'agent')))`, 12000);
+      await wait("document.querySelector('#chat-messages').textContent.includes('Started the helpers.')", 12000);
+      await capture(surface + '-pill');
+      await click(pill);
+      await wait("document.querySelectorAll('.bg-task-row[data-item-id^=\"helper:\"]').length === 2 && document.querySelector('.bg-task-row[data-item-id^=\"task:\"]')");
+      assert.equal(await js("document.querySelectorAll('.bg-task-row[data-item-id^=\"helper:\"] .bg-task-status-running').length"), 2);
+      if (surface === 'api') await wait("document.querySelector('.bg-task-row[data-item-id^=\"card:\"]')");
+      await capture(surface + '-list');
+      await wait(`(${state}).then(data => data.items.filter(i => i.kind === 'helper').every(i => i.status === 'done'))`, 45000);
+      await wait("document.querySelectorAll('.bg-task-note').length >= 2", 6000);
+      console.log(`PASS: ${surface} running helpers, scheduled work${surface === 'api' ? ', agent handoff' : ''}, completion notes and screenshots`);
+      win.destroy(); app.exit(0); return;
+    }
     // The model connection itself may take time to initialize; the three
     // stream tasks must be visible within 3 seconds of its first response.
     await wait("document.querySelector('#chat-messages')?.textContent.includes('Starting two background jobs.')");

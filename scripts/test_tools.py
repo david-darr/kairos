@@ -23,8 +23,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-environment = Path(__file__).resolve().parents[1] / (".tools-test-" + uuid.uuid4().hex[:12])
-environment.mkdir()
+from scripts.test_data_support import TestDataDirectory
+fixture = TestDataDirectory(prefix='tools-test-')
+environment = Path(fixture.name)
 os.environ["JARVIS_DATA_DIR"] = str(environment)
 
 import httpx  # noqa: E402
@@ -592,8 +593,7 @@ def tearDownModule():
     # Windows will not delete a database that is still open.
     from core import session_manager_store
     session_manager_store.close()
-    assert Path(__file__).resolve().parents[1] in environment.resolve().parents
-    shutil.rmtree(environment)
+    fixture.cleanup()
 
 
 if __name__ == "__main__":
