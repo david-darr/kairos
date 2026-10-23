@@ -1,9 +1,13 @@
-// The Design tab (vault: Design Canvas (Build Spec), decision 4): every
-// design as a card, and one design full page on the canvas with its own
-// composer. Library > Designs shows the same list (renderDesignList).
+// Designs in Library (vault: Design Canvas (Build Spec); David 2026-10-22
+// moved them out of their own tab): Library > Designs lists every design as a
+// card (renderDesignList), and a design opens full page inside Library
+// (openDesignPage) on the canvas, with its own composer and the model picker
+// for its linked chat. The old Design tab and #/design/<id> links redirect to
+// Library > Designs (app.js).
 import { api, el, toast, confirmDialog, emptyState } from '../api.js';
 import { mountDesignCanvas } from '../designCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
+import { mountDesignModelPicker } from '../designModelPicker.js';
 import { mobileOn } from '../mobileShared.js';
 
 const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
@@ -13,6 +17,10 @@ const ago = t => {
   return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(t * 1000).toLocaleDateString();
 };
 let cleanup = () => {};
+
+// Library calls these (views/library.js): one design open at a time.
+export function closeDesign() { cleanup(); }
+export function openDesignPage(container, designId, options = {}) { cleanup(); return openDesign(container, designId, options); }
 
 export async function render(container, tabId, options = {}) {
   cleanup();
@@ -36,7 +44,7 @@ async function newDesign(button) {
   button.disabled = true;
   try {
     const design = await api('/api/designs', { method: 'POST', body: JSON.stringify({ title: 'Untitled design', frame: 'phone' }) });
-    go('design', { designId: design.id });
+    go('library', { section: 'designs', designId: design.id });
   } catch { button.disabled = false; }
 }
 
@@ -61,7 +69,7 @@ export async function renderDesignList(host) {
       img.addEventListener('error', () => img.replaceWith(el('span', { class: 'design-card-boards', text: (design.board_titles || []).join(' · ') })));
       preview.append(img);
     } else preview.append(el('span', { class: 'design-card-boards', text: (design.board_titles || []).join(' · ') }));
-    return el('button', { type: 'button', class: 'design-card', role: 'listitem', 'aria-label': `Open ${design.title}`, onclick: () => go('design', { designId: design.id }) }, [
+    return el('button', { type: 'button', class: 'design-card', role: 'listitem', 'aria-label': `Open ${design.title}`, onclick: () => go('library', { section: 'designs', designId: design.id }) }, [
       preview,
       el('span', { class: 'design-card-copy' }, [el('strong', { text: design.title }),
         el('span', { class: 'meta', text: `${design.boards} board${design.boards === 1 ? '' : 's'} · edited ${ago(design.updated)}` }),
@@ -72,30 +80,35 @@ export async function renderDesignList(host) {
 
 async function openDesign(container, designId, options) {
   let design = null, sessions = [], admin = false;
-  const back = el('button', { type: 'button', class: 'btn quiet', text: 'All designs', onclick: () => go('design') });
+  const back = el('button', { type: 'button', class: 'btn quiet design-back', text: 'All designs', 'aria-label': 'All designs, in Library',
+    onclick: () => go('library', { section: 'designs' }) });
   const chatPick = el('select', { 'aria-label': 'Chat that changes this design' });
   const forge = el('button', { type: 'button', class: 'btn quiet', text: 'Build in Forge', hidden: true, onclick: event => buildInForge(event.currentTarget) });
   const more = el('button', { type: 'button', class: 'btn quiet', text: 'Duplicate', onclick: async () => {
     const copy = await api(`/api/designs/${designId}/duplicate`, { method: 'POST', body: '{}' }).catch(() => null);
-    if (copy) go('design', { designId: copy.id });
+    if (copy) go('library', { section: 'designs', designId: copy.id });
   } });
   const remove = el('button', { type: 'button', class: 'btn quiet danger', text: 'Delete', onclick: async () => {
     const ok = await confirmDialog({ title: 'Delete this design?', message: 'Its boards, versions and comments are removed. This cannot be undone.', confirmLabel: 'Delete' });
     if (!ok) return;
-    await api(`/api/designs/${designId}`, { method: 'DELETE' }); go('design');
+    await api(`/api/designs/${designId}`, { method: 'DELETE' }); go('library', { section: 'designs' });
   } });
+  const modelHost = el('div', { class: 'design-model-host' });
   const header = el('div', { class: 'design-page-header' }, [back, el('span', { class: 'design-spacer' }),
-    el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), forge, more, remove]);
+    el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), modelHost, forge, more, remove]);
   const canvasHost = el('div', { class: 'design-page-canvas' });
   const composerHost = el('div', { class: 'design-page-composer' });
-  const page = el('div', { class: 'design-page' }, [header, canvasHost, composerHost]);
+  const page = el('div', { class: 'design-page', 'data-design-id': designId }, [header, canvasHost, composerHost]);
   container.replaceChildren(page);
-  try { history.replaceState(null, '', `#/design/${designId}`); } catch { /* Not essential. */ }
+  container.classList.add('library-design-open');
+  try { history.replaceState(null, '', `#/library/designs/${designId}`); } catch { /* Not essential. */ }
 
   const linked = () => {
     const id = chatPick.value;
     return id ? { id, title: chatPick.selectedOptions[0]?.textContent || 'Design chat' } : null;
   };
+  // The model of the linked chat (designModelPicker.js): the composer's sends use it.
+  const picker = mountDesignModelPicker(modelHost, { getSession: linked });
   const composer = mountDesignComposer(composerHost, {
     getSession: linked,
     onStartChat: async () => { await startDesignChat(designId, design?.title || 'Design').catch(() => {}); },
@@ -107,7 +120,11 @@ async function openDesign(container, designId, options) {
     onComments: items => { if (!linked()) { toast('Link a chat first, or start a design chat.'); return; } composer.addComments(items); },
     onLoaded: data => { design = data; paintChats(data); },
   });
-  cleanup = () => { canvas.dispose(); composer.dispose(); try { if (location.hash.startsWith('#/design/')) history.replaceState(null, '', location.pathname); } catch { /* Not essential. */ } cleanup = () => {}; };
+  cleanup = () => {
+    canvas.dispose(); composer.dispose(); picker.dispose(); container.classList.remove('library-design-open');
+    try { if (/^#\/(design|library\/designs)\//.test(location.hash)) history.replaceState(null, '', location.pathname); } catch { /* Not essential. */ }
+    cleanup = () => {};
+  };
 
   function paintChats(data) {
     const linkedChats = data.chats || [];
@@ -116,16 +133,16 @@ async function openDesign(container, designId, options) {
       el('option', { value: '__link', text: 'Link another chat...' })];
     chatPick.replaceChildren(...options);
     chatPick.value = linkedChats.at(-1)?.id || '';
-    composer.update();
+    composer.update(); picker.update();
   }
   chatPick.addEventListener('change', async () => {
-    if (chatPick.value !== '__link') { composer.update(); return; }
+    if (chatPick.value !== '__link') { composer.update(); picker.update(); return; }
     sessions = sessions.length ? sessions : await api('/api/sessions').catch(() => []);
     const menu = el('div', { class: 'design-menu', role: 'menu', 'aria-label': 'Link a chat' }, sessions.filter(s => !s.forge).slice(0, 30).map(s =>
       el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: s.title || 'Chat', onclick: async () => {
         menu.remove();
         const data = await api(`/api/designs/${designId}/link`, { method: 'POST', body: JSON.stringify({ session_id: s.id }) }).catch(() => null);
-        if (data) { design = { ...design, ...data }; paintChats(data); chatPick.value = s.id; composer.update(); toast(`Linked to ${s.title}`, 'success'); }
+        if (data) { design = { ...design, ...data }; paintChats(data); chatPick.value = s.id; composer.update(); picker.update(); toast(`Linked to ${s.title}`, 'success'); }
       } })));
     chatPick.value = design?.chats?.at(-1)?.id || '';
     header.append(menu);

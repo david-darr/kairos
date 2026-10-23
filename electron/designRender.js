@@ -14,6 +14,8 @@ const { BrowserWindow, session } = require('electron');
 const PARTITION = 'persist:design-render';
 const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
 let running = false, stopped = false, controller = null, configured = false;
+// The content's height: the bottom of the body's last child (the viewer script measures the same way).
+const MEASURE = `(() => { let bottom = 0; for (const c of document.body.children) { if (c.tagName === 'SCRIPT') continue; const r = c.getBoundingClientRect(); if (r.height) bottom = Math.max(bottom, r.bottom + (parseFloat(getComputedStyle(c).marginBottom) || 0)); } return Math.ceil(bottom + scrollY); })()`;
 // The board the current job renders: the request filter allows only its routes.
 const current = { designId: '' };
 
@@ -40,7 +42,8 @@ function configure(origin) {
 
 async function renderJob(origin, job) {
   const match = JOB_PATH.exec(String(job.path || ''));
-  const w = Math.max(64, Math.min(4000, Number(job.w) || 0)), h = Math.max(64, Math.min(8000, Number(job.h) || 0));
+  const w = Math.max(64, Math.min(4000, Number(job.w) || 0));
+  let h = Math.max(64, Math.min(8000, Number(job.h) || 0));
   if (!match || !['png', 'pdf'].includes(job.kind)) throw new Error('refused an invalid render job');
   current.designId = match[1];
   const isolated = configure(origin);
@@ -61,6 +64,18 @@ async function renderJob(origin, job) {
     // Fonts first, then one frame, so the capture shows the real type.
     await win.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))).then(() => 1)', true)
       .catch(() => 1);
+    // A website or email board is as tall as its content (core/design_formats.py):
+    // measure the page and render all of it, never cut at a stale height.
+    if (job.grow) {
+      const measured = Number(await win.webContents.executeJavaScript(MEASURE, true).catch(() => 0));
+      if (measured >= 64 && Math.abs(measured - h) > 1) {
+        h = Math.max(64, Math.min(8000, Math.max(Math.round(measured), Number(job.min_h) || 0)));
+        win.setContentSize(w, h);
+        // The page's own print size follows (its @page rule names the stored height).
+        await win.webContents.executeJavaScript(`(() => { const s = document.createElement('style'); s.textContent = '@page { size: ${w}px ${h}px; margin: 0 } @media print { html, body { height: ${h}px } }'; document.head.append(s); return 1; })()`, true).catch(() => 1);
+        await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))).then(() => 1)', true).catch(() => 1);
+      }
+    }
     if (job.kind === 'png') {
       // A rectangle capture fails (UnknownVizError) on an offscreen window: take
       // the whole page, which is the board, and size it to 1x or 2x exactly.

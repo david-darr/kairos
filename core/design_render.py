@@ -28,7 +28,7 @@ import secrets
 import time
 from typing import Optional
 
-from core import design_html, design_store, design_systems
+from core import design_formats, design_html, design_store, design_systems
 
 _SECRET = secrets.token_bytes(32)
 TOKEN_SECONDS = 600
@@ -49,9 +49,31 @@ VIEWER_SCRIPT = r"""(function () {
       });
     });
   }
+  // A point as fractions of the board the canvas draws: on the canvas the
+  // frame is exactly the board, so the viewport is the board's own size.
   function point(event) {
-    var w = document.documentElement.scrollWidth || 1, h = document.documentElement.scrollHeight || 1;
+    var w = window.innerWidth || 1;
+    var h = ownScroll ? (document.documentElement.scrollHeight || 1) : (window.innerHeight || 1);
     return { x: Math.max(0, Math.min(1, (event.pageX) / w)), y: Math.max(0, Math.min(1, (event.pageY) / h)) };
+  }
+  // How tall the content is (not the frame): a website or email board grows to it.
+  var lastHeight = 0;
+  function contentHeight() {
+    var body = document.body, bottom = 0;
+    if (!body) return 0;
+    for (var i = 0; i < body.children.length; i++) {
+      var child = body.children[i];
+      if (child.tagName === 'SCRIPT') continue;
+      var r = child.getBoundingClientRect(), mb = parseFloat(getComputedStyle(child).marginBottom) || 0;
+      if (r.height && r.bottom + mb > bottom) bottom = r.bottom + mb;
+    }
+    return Math.ceil(bottom + (window.scrollY || 0));
+  }
+  function reportSize() {
+    var height = contentHeight();
+    if (Math.abs(height - lastHeight) < 2) return;
+    lastHeight = height;
+    send({ type: 'kd-size', height: height, width: document.documentElement.scrollWidth });
   }
   function describe(node) {
     var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -153,12 +175,16 @@ VIEWER_SCRIPT = r"""(function () {
     }
   });
   send({ type: 'kd-ready', height: document.documentElement.scrollHeight });
+  reportSize();
+  if (window.ResizeObserver) { var sizes = new ResizeObserver(reportSize); sizes.observe(document.documentElement); if (document.body) sizes.observe(document.body); }
+  window.addEventListener('load', reportSize);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportSize);
 })();"""
 VIEWER_HASH = "sha256-" + base64.b64encode(hashlib.sha256(VIEWER_SCRIPT.encode("utf-8")).digest()).decode()
 
 RESET = """*, *::before, *::after { box-sizing: border-box; }
-html { width: %(w)spx; min-height: %(h)spx; overflow-x: hidden; -webkit-text-size-adjust: 100%%; }
-body { margin: 0; min-height: %(h)spx; background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans);
+html { width: %(w)spx; min-height: %(min)spx; overflow-x: hidden; background: var(--ds-bg); -webkit-text-size-adjust: 100%%; }
+body { margin: 0; min-height: %(min)spx; background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans);
        font-size: var(--ds-size-3); line-height: 1.45; -webkit-font-smoothing: antialiased; }
 img, svg, video { max-width: 100%%; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -214,7 +240,7 @@ def render_document(design_id: str, slug: str, *, version: Optional[int] = None,
     system = design_systems.get(system_id) or design_systems.builtin()
     head = "\n".join([design_systems.font_faces(system["id"], font_base),
                       design_systems.tokens_css(system["tokens"], overrides),
-                      RESET % {"w": int(meta["w"]), "h": int(meta["h"])}])
+                      RESET % {"w": int(meta["w"]), "h": int(meta["h"]), "min": _min_height(meta)}])
     script = f"<script>{VIEWER_SCRIPT}</script>" if viewer else ""
     title = html.escape(meta.get("title") or slug)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{title}</title>'
@@ -222,6 +248,14 @@ def render_document(design_id: str, slug: str, *, version: Optional[int] = None,
             f"<style>{head}</style><style id=\"kd-live-tokens\"></style></head>"
             f'<body data-kd-board="{html.escape(slug)}" data-kd-frame="{html.escape(meta.get("frame") or "none")}">'
             f"{source}{script}</body></html>")
+
+
+def _min_height(meta: dict) -> int:
+    """A growing board (website, email) is as tall as its content, at least its
+    minimum: the page must not stretch to the frame, or it could never shrink."""
+    if design_formats.grows(meta):
+        return int(meta.get("min_h") or meta["h"])
+    return int(meta["h"])
 
 
 def sign(design_id: str, slug: str, seconds: int = TOKEN_SECONDS) -> str:

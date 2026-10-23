@@ -258,12 +258,15 @@ class StoreTests(unittest.TestCase):
         self.assertIn("Renamed", text(call("design_boards", {"action": "rename", "board": "welcome", "title": "Hello"}, c)))
         self.assertIn("Duplicated", text(call("design_boards", {"action": "duplicate", "board": "welcome"}, c)))
         self.assertIn("position 1", text(call("design_boards", {"action": "reorder", "board": "reminders", "order": 1}, c)))
-        self.assertIn("Moved", text(call("design_boards", {"action": "move", "board": "welcome", "x": 2000, "y": 40}, c)))
+        # On the row layout a move is a place in the board's row (2026-10-22), and
+        # a resize keeps an app screen's ratio.
+        self.assertIn("Moved", text(call("design_boards", {"action": "move", "board": "welcome", "x": 9000, "y": 40}, c)))
         self.assertIn("Resized", text(call("design_boards", {"action": "resize", "board": "welcome", "w": 500, "h": 900}, c)))
         self.assertIn("canvas note", text(call("design_boards", {"action": "note", "text": "Flow A", "x": 0, "y": -200}, c)))
         data = design_store.manifest(design_id)
-        self.assertEqual((data["boards"]["welcome"]["x"], data["boards"]["welcome"]["w"], data["boards"]["welcome"]["frame"]), (2000, 500, "phone"))
+        self.assertEqual((data["boards"]["welcome"]["w"], data["boards"]["welcome"]["h"], data["boards"]["welcome"]["frame"]), (500, 1082, "phone"))
         self.assertEqual(design_store.ordered_boards(data)[0][0], "reminders")
+        self.assertEqual(design_store.ordered_boards(data)[-1][0], "welcome", "dropped past the row's end, it goes last")
         self.assertIn("Deleted", text(call("design_boards", {"action": "delete", "board": "hello-copy"}, c)))
 
 
@@ -650,6 +653,45 @@ class ExportTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG"))
         self.assertEqual({j["kind"] for j in seen}, {"png", "pdf"})
 
+    def test_a_website_board_takes_the_height_the_render_window_measured(self):
+        """SIMULATED worker: the window renders a website board as tall as its
+        page; the board keeps that height (no version), so a page that only
+        ever shows as a thumbnail is still the right size."""
+        sid = new_chat()
+        design_id, _ = create(sid, boards=[{"title": "Home", "format": "website", "orientation": "landscape"}])
+        version = design_store.manifest(design_id)["version"]
+
+        async def scenario():
+            stream = design_render_bridge.worker_stream()
+            await stream.__anext__()
+            jobs = []
+
+            async def worker():
+                while True:
+                    block = await stream.__anext__()
+                    if block.startswith("data: "):
+                        job = json.loads(block[6:])
+                        jobs.append(job)
+                        design_render_bridge.complete(job["id"], _png(job["w"], 2600))
+            task = asyncio.ensure_future(worker())
+            try:
+                await design_render_bridge.render(design_id, "home", "png")
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                await stream.aclose()
+            return jobs
+        # Its own job queue and loop: the module keeps one per event loop it ran in.
+        with patch.object(design_render_bridge, "_queue", None), patch.object(design_render_bridge, "_loop", None):
+            jobs = run(scenario())
+        self.assertEqual((jobs[0]["grow"], jobs[0]["min_h"]), (True, 900), "the window is told to measure the page")
+        data = design_store.manifest(design_id)
+        self.assertEqual((data["boards"]["home"]["h"], data["version"]), (2600, version))
+        self.assertGreater(data["boards"]["home-mobile"]["y"], 2600, "the mobile row moved down")
+
     def test_the_render_worker_routes_need_the_token(self):
         app = FastAPI(); app.include_router(design_routes.render_router)
         client = TestClient(app)
@@ -681,10 +723,10 @@ class RouteTests(unittest.TestCase):
         edited = self.client.post(f"/api/designs/{design_id}/boards/screen-1/text", json={"id": h1, "text": "Hello"}).json()
         self.assertEqual(edited["changed"], {"screen-1": [h1]})
         self.assertEqual(design_store.versions(design_id)[0]["by"], "You")
-        self.client.post(f"/api/designs/{design_id}/board-action", json={"action": "move", "board": "screen-1", "x": 300, "y": 10})
-        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["x"], 300)
+        self.client.post(f"/api/designs/{design_id}/board-action", json={"action": "resize", "board": "screen-1", "w": 780})
+        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["h"], 1688, "an app screen keeps its ratio")
         self.assertEqual(self.client.post(f"/api/designs/{design_id}/undo").status_code, 200)
-        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["x"], 0)
+        self.assertEqual(design_store.manifest(design_id)["boards"]["screen-1"]["w"], 390)
         tokens = self.client.post(f"/api/designs/{design_id}/tokens", json={"set": {"--ds-accent": "#123456"}}).json()
         self.assertEqual(tokens["system"]["variables"]["--ds-accent"], "#123456")
         sid = new_chat()
@@ -765,6 +807,247 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("unless the person asks for a different look or palette", spec.description)
         skill = (REPO / "skill_templates" / "design-canvas" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Keep the design system's look", skill)
+
+
+def _rects(data):
+    """Each board's box on the canvas with its device chrome and title, for overlap checks."""
+    from core import design_formats
+    out = {}
+    for slug, b in data["boards"].items():
+        top, side, below = design_formats.CHROME.get(b.get("frame"), (0, 0, 0))
+        out[slug] = (b["x"] - side, b["y"] - top - design_formats.TITLE, b["x"] + b["w"] + side, b["y"] + b["h"] + below)
+    return out
+
+
+def _overlaps(data):
+    rects = list(_rects(data).items())
+    return [(a, b) for i, (a, ra) in enumerate(rects) for b, rb in rects[i + 1:]
+            if ra[0] < rb[2] and rb[0] < ra[2] and ra[1] < rb[3] and rb[1] < ra[3]]
+
+
+class FormatTests(unittest.TestCase):
+    """Natural formats (David, 2026-10-22): models used to pick odd sizes such
+    as 1468x3990 for a website; now every board is made in a named format, at
+    that format's size, and stays true to it when resized or laid out."""
+
+    def test_every_format_resolves_to_its_natural_size(self):
+        from core import design_formats as f
+        pair = f.resolve("website")
+        self.assertEqual([(b["size"], b["w"], b["frame"], b["grow"]) for b in pair],
+                         [("desktop", 1440, "browser", True), ("mobile", 390, "phone", True)], "a website is a pair")
+        self.assertEqual(f.resolve("website", size="mobile")[0]["w"], 390)
+        self.assertEqual((f.resolve("app")[0]["w"], f.resolve("app")[0]["h"]), (390, 844))
+        self.assertEqual((f.resolve("app", size="tablet")[0]["w"], f.resolve("app", size="tablet")[0]["h"]), (820, 1180))
+        self.assertEqual((f.resolve("app", orientation="landscape")[0]["w"], f.resolve("app", orientation="landscape")[0]["h"]), (844, 390))
+        self.assertEqual((f.resolve("slides")[0]["w"], f.resolve("slides")[0]["h"]), (1920, 1080))
+        ratios = {"2:3": 2 / 3, "3:4": 3 / 4, "a-series": 1 / 2 ** 0.5, "18x24": 18 / 24, "11x17": 11 / 17}
+        for size, ratio in ratios.items():
+            portrait = f.resolve("poster", size=size, orientation="portrait")[0]
+            landscape = f.resolve("poster", size=size, orientation="landscape")[0]
+            self.assertAlmostEqual(portrait["w"] / portrait["h"], ratio, 2, size)
+            self.assertAlmostEqual(landscape["h"] / landscape["w"], ratio, 2, size)
+            self.assertLess(portrait["w"], portrait["h"]); self.assertGreater(landscape["w"], landscape["h"])
+        social = {o: f.resolve("social", orientation=o)[0] for o in ("square", "portrait", "landscape")}
+        self.assertAlmostEqual(social["square"]["w"] / social["square"]["h"], 1, 2)
+        self.assertAlmostEqual(social["portrait"]["w"] / social["portrait"]["h"], 4 / 5, 2)
+        self.assertAlmostEqual(social["landscape"]["w"] / social["landscape"]["h"], 1.91, 1)
+        story = f.resolve("social", size="story", orientation="landscape")[0]
+        self.assertEqual((story["w"], story["h"], story["orientation"]), (1080, 1920, "portrait"), "a story is always 9:16")
+        self.assertEqual((f.resolve("print", orientation="portrait")[0]["w"], f.resolve("print", orientation="portrait")[0]["h"]), (816, 1056))
+        self.assertEqual((f.resolve("print", size="a4", orientation="landscape")[0]["w"], f.resolve("print", size="a4", orientation="landscape")[0]["h"]), (1123, 794))
+        self.assertEqual(f.resolve("email")[0]["w"], 600)
+        self.assertTrue(f.resolve("email")[0]["grow"])
+        self.assertEqual((f.resolve("banner")[0]["w"], f.resolve("banner")[0]["h"]), (1500, 500))
+        # Old frames map onto their natural format.
+        self.assertEqual(f.resolve(None, frame="phone")[0]["format"], "app")
+        self.assertEqual(f.resolve(None, frame="slide")[0]["format"], "slides")
+        self.assertEqual(f.resolve(None, frame="browser")[0]["size"], "desktop")
+
+    def test_bad_formats_change_nothing_and_teach(self):
+        from core import design_formats as f
+        for args, says in (({}, "format is required"), ({"frame": "none", "w": 1468, "h": 3990}, "Pick a format instead"),
+                           ({"fmt": "poster"}, "poster needs orientation: portrait or landscape"),
+                           ({"fmt": "social"}, "social needs orientation"),
+                           ({"fmt": "custom"}, "format custom needs w and h"),
+                           ({"fmt": "poster", "size": "5:9", "orientation": "portrait"}, "poster size is one of"),
+                           ({"fmt": "billboard"}, "No format `billboard`")):
+            with self.assertRaises(ValueError) as caught:
+                f.resolve(args.get("fmt"), size=args.get("size"), orientation=args.get("orientation"),
+                          w=args.get("w"), h=args.get("h"), frame=args.get("frame"))
+            self.assertIn(says, str(caught.exception))
+        self.assertEqual(f.resolve("custom", w=1000, h=500)[0]["w"], 1000, "custom is allowed for exact sizes")
+        sid = new_chat()
+        refused = text(call("design_create", {"title": "Site", "boards": [{"title": "Home", "frame": "none", "w": 1468, "h": 3990,
+                                                                           "html": "<main>Hi</main>"}]}, ctx(sid)))
+        self.assertTrue(refused.startswith("Not run: Board \"Home\": Pick a format"), refused)
+        self.assertEqual(design_store.designs_for_chat(sid), [], "a refused create leaves no design behind")
+        spec = next(s for s in tool_registry.specs(tool_registry.OPENAI, True) if s.name == "design_create")
+        item = spec.schema["properties"]["boards"]["items"]
+        self.assertEqual(item["required"], ["title", "format", "orientation"])
+        self.assertNotIn("frame", item["properties"], "the tools ask for a format, not a free frame")
+        add = next(s for s in tool_registry.specs(tool_registry.OPENAI, True) if s.name == "design_add_board")
+        self.assertEqual(list(add.schema["required"]), ["title", "format", "orientation"])
+        for word in ("poster", "website", "slides", "exact pixel dimensions"):
+            self.assertIn(word, spec.description)
+        skill = (REPO / "skill_templates" / "design-canvas" / "SKILL.md").read_text(encoding="utf-8")
+        for word in ("## Formats: pick one from the request", "| poster, flyer, print ad | `poster`", "mobile_html"):
+            self.assertIn(word, skill)
+
+    def test_a_website_is_a_desktop_and_mobile_pair_that_grows(self):
+        sid = new_chat()
+        made = text(call("design_create", {"title": "Kairos site", "boards": [
+            {"title": "Home", "format": "website", "orientation": "landscape", "html": "<main><h1>Kairos</h1></main>",
+             "mobile_html": "<main><h1>Kairos</h1><p>Phone</p></main>"}]}, ctx(sid)))
+        design_id = re.search(r"Created design ([a-f0-9]{12})", made).group(1)
+        self.assertIn("Website · Desktop 1440 wide, height grows", made)
+        added = text(call("design_add_board", {"title": "Pricing", "format": "website", "orientation": "portrait",
+                                               "html": "<main><h1>Pricing</h1></main>"}, ctx(sid)))
+        self.assertIn("pricing", added); self.assertIn("pricing-mobile", added)
+        self.assertIn("rework it for 390 wide", added)
+        data = design_store.manifest(design_id)
+        self.assertEqual({s: (b["w"], b["format"], b["size"]) for s, b in data["boards"].items()},
+                         {"home": (1440, "website", "desktop"), "home-mobile": (390, "website", "mobile"),
+                          "pricing": (1440, "website", "desktop"), "pricing-mobile": (390, "website", "mobile")})
+        self.assertIn("Phone", design_store.board_html(design_id, "home-mobile"))
+        page = design_render.render_document(design_id, "home")
+        self.assertIn("min-height: 900px", page, "the page is not stretched to the frame, so it can be measured")
+        self.assertIn("kd-size", design_render.VIEWER_SCRIPT)
+        # The canvas measures the page: the board grows (or shrinks to its minimum) with no version.
+        version = data["version"]
+        design_store.fit_height(design_id, "home", 2400)
+        data = design_store.manifest(design_id)
+        self.assertEqual((data["boards"]["home"]["h"], data["version"]), (2400, version))
+        self.assertEqual(_overlaps(data), [], "the mobile row moved down to make room")
+        design_store.fit_height(design_id, "home", 300)
+        self.assertEqual(design_store.manifest(design_id)["boards"]["home"]["h"], 900)
+        phone_design, _ = create(new_chat(), boards=[{"title": "Phone", "format": "app", "orientation": "portrait"}])
+        with self.assertRaises(ValueError):
+            design_store.fit_height(phone_design, "phone", 2000)
+
+    def test_resize_keeps_the_format(self):
+        sid = new_chat()
+        design_id, _ = create(sid, boards=[{"title": "Poster", "format": "poster", "orientation": "portrait"},
+                                           {"title": "Home", "format": "website", "size": "desktop", "orientation": "landscape"}])
+        c = ctx(sid)
+        call("design_boards", {"action": "resize", "board": "poster", "w": 1500}, c)
+        call("design_boards", {"action": "resize", "board": "home", "w": 3000, "h": 2600}, c)
+        boards = design_store.manifest(design_id)["boards"]
+        self.assertEqual((boards["poster"]["w"], boards["poster"]["h"]), (1500, 2250), "a poster keeps 2:3")
+        self.assertEqual((boards["home"]["w"], boards["home"]["h"]), (1440, 2600), "a website changes height only")
+        call("design_boards", {"action": "resize", "board": "home", "h": 700}, c)
+        self.assertEqual(design_store.manifest(design_id)["boards"]["home"]["h"], 700)
+
+    def test_rows_by_format_reflow_and_never_overlap(self):
+        sid = new_chat()
+        design_id, _ = create(sid, boards=[
+            {"title": "Home", "format": "website", "orientation": "landscape"},
+            {"title": "Poster", "format": "poster", "orientation": "portrait"},
+            {"title": "About", "format": "website", "orientation": "landscape"},
+            {"title": "Wide poster", "format": "poster", "orientation": "landscape"},
+            {"title": "Deck", "format": "slides", "orientation": "landscape"}])
+        data = design_store.manifest(design_id)
+        b = data["boards"]
+        self.assertEqual(data["layout"], "auto")
+        self.assertEqual(_overlaps(data), [])
+        self.assertEqual(b["home"]["y"], b["about"]["y"], "one row of desktop pages")
+        self.assertEqual(b["home-mobile"]["y"], b["about-mobile"]["y"], "one row of mobile pages")
+        self.assertEqual(b["poster"]["y"], b["wide-poster"]["y"], "posters share a row")
+        self.assertLess(b["home"]["x"], b["about"]["x"])
+        rows = sorted({b[s]["y"] for s in b})
+        self.assertEqual(len(rows), 4, "desktop, mobile, poster and slides rows")
+        # Resizing a board pushes its row along and the rows below down.
+        about_x, poster_y = b["about"]["x"], b["poster"]["y"]
+        call("design_boards", {"action": "resize", "board": "home", "h": 3000}, ctx(sid))
+        after = design_store.manifest(design_id)["boards"]
+        self.assertGreater(after["poster"]["y"], poster_y)
+        self.assertEqual(after["about"]["x"], about_x, "a website grows down, not across")
+        call("design_boards", {"action": "resize", "board": "poster", "w": 2400}, ctx(sid))
+        after = design_store.manifest(design_id)["boards"]
+        self.assertGreater(after["wide-poster"]["x"], b["wide-poster"]["x"] + 1000)
+        self.assertEqual(_overlaps(design_store.manifest(design_id)), [])
+
+    def test_a_drag_moves_a_board_along_its_row_as_a_version(self):
+        app = FastAPI(); app.include_router(design_routes.router)
+        client = TestClient(app)
+        sid = new_chat()
+        design_id, _ = create(sid, boards=[{"title": f"Screen {n}", "format": "app", "orientation": "portrait"} for n in (1, 2, 3)])
+        before = design_store.manifest(design_id)
+        x3 = before["boards"]["screen-3"]["x"]
+        result = client.post(f"/api/designs/{design_id}/board-action",
+                             json={"action": "move", "board": "screen-1", "x": x3 + 100, "y": 0}).json()
+        self.assertEqual(result["design"]["order"], ["screen-2", "screen-3", "screen-1"])
+        after = design_store.manifest(design_id)
+        self.assertEqual(after["version"], before["version"] + 1)
+        self.assertEqual(design_store.versions(design_id)[0]["by"], "You")
+        self.assertEqual(after["boards"]["screen-2"]["x"], before["boards"]["screen-1"]["x"], "neighbours shift into the gap")
+        self.assertEqual({b["y"] for b in after["boards"].values()}, {before["boards"]["screen-1"]["y"]}, "it stays in its row")
+
+    def test_old_designs_keep_their_sizes_and_fit_to_format_on_request(self):
+        app = FastAPI(); app.include_router(design_routes.router)
+        client = TestClient(app)
+        design_id = client.post("/api/designs", json={"title": "Old site"}).json()["id"]
+        # The shape of the dev "Kairos website redesign": frame none, odd sizes, free layout.
+        path = Path(design_store.DESIGNS_DIR) / design_id / "design.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        html = design_store.board_html(design_id, "screen-1")
+        sizes = {"home": (1468, 3990, "Home"), "features": (1440, 2500, "Features"), "home-phone": (1072, 3076, "Home (phone)")}
+        data["boards"] = {slug: {"title": t, "x": n * 1560, "y": 0, "w": w, "h": h, "frame": "none", "order": n + 1}
+                          for n, (slug, (w, h, t)) in enumerate(sizes.items())}
+        data.pop("layout", None)
+        path.write_text(json.dumps(data), encoding="utf-8")
+        (Path(design_store.DESIGNS_DIR) / design_id / "boards" / "screen-1.html").unlink()
+        for slug in sizes:
+            (Path(design_store.DESIGNS_DIR) / design_id / "boards" / f"{slug}.html").write_text(html, encoding="utf-8")
+        client.patch(f"/api/designs/{design_id}", json={"title": "Old site, renamed"})  # A version holding the old boards.
+        shown = client.get(f"/api/designs/{design_id}").json()
+        self.assertEqual(shown["layout"], "free")
+        self.assertEqual(shown["boards"]["home"]["format_guess"]["label"], "Website · Desktop")
+        self.assertEqual(shown["boards"]["home-phone"]["format_guess"]["label"], "Website · Mobile")
+        self.assertEqual({s: (b["w"], b["h"]) for s, b in design_store.manifest(design_id)["boards"].items()},
+                         {s: (w, h) for s, (w, h, _) in sizes.items()}, "showing a design changes nothing")
+        fitted = client.post(f"/api/designs/{design_id}/board-action", json={"action": "fit_format"}).json()["design"]
+        self.assertEqual({s: (b["w"], b["format"], b["size"]) for s, b in fitted["boards"].items()},
+                         {"home": (1440, "website", "desktop"), "features": (1440, "website", "desktop"),
+                          "home-phone": (390, "website", "mobile")})
+        self.assertEqual(fitted["layout"], "auto")
+        self.assertEqual(_overlaps(design_store.manifest(design_id)), [])
+        # Fit to format is a version: restoring the one before brings the old sizes back.
+        before = design_store.versions(design_id)[1]["n"]
+        design_store.restore(design_id, before, by="You")
+        self.assertEqual(design_store.manifest(design_id)["boards"]["home"]["w"], 1468)
+        self.assertIsNone(design_store.manifest(design_id).get("layout"), "restored to the free layout it had")
+        # Dragging a board of an older design (the canvas sends reflow) puts it on the row layout: no overlaps.
+        moved = client.post(f"/api/designs/{design_id}/board-action", json={"action": "move", "board": "home", "x": 4000, "y": 0,
+                                                                           "reflow": True}).json()["design"]
+        self.assertEqual(moved["layout"], "auto")
+        self.assertEqual({s: b["w"] for s, b in moved["boards"].items()}, {"home": 1468, "features": 1440, "home-phone": 1072},
+                         "a drag never changes sizes")
+        self.assertEqual(_overlaps(design_store.manifest(design_id)), [])
+        one = client.post(f"/api/designs/{design_id}/board-action", json={"action": "fit_format", "board": "home-phone",
+                                                                         "format": "app", "size": "phone", "orientation": "portrait"}).json()["design"]
+        self.assertEqual((one["boards"]["home-phone"]["w"], one["boards"]["home-phone"]["h"]), (390, 844))
+
+    def test_design_create_names_its_chat_so_the_pane_opens_at_once(self):
+        heard = []
+        design_store.on_change(heard.append)
+        try:
+            sid = new_chat()
+            create(sid, boards=[{"title": "One", "format": "app", "orientation": "portrait"}])
+        finally:
+            design_store._listeners.remove(heard.append)
+        packet = next(p for p in heard if p["tool"] == "design_create")
+        self.assertEqual(packet["sessionId"], sid, "the chat opens the design beside it on the first event")
+
+    def test_add_board_route_takes_a_format(self):
+        app = FastAPI(); app.include_router(design_routes.router)
+        client = TestClient(app)
+        design_id = client.post("/api/designs", json={"title": "Deck", "format": "slides", "orientation": "landscape"}).json()["id"]
+        added = client.post(f"/api/designs/{design_id}/boards", json={"title": "Poster", "format": "poster", "orientation": "landscape"}).json()
+        self.assertEqual((added["design"]["boards"][added["slug"]]["w"], added["design"]["boards"][added["slug"]]["h"]), (1800, 1200))
+        self.assertEqual(client.post(f"/api/designs/{design_id}/boards", json={"title": "Odd", "frame": "none"}).status_code, 422)
+        shown = client.get(f"/api/designs/{design_id}").json()
+        self.assertIn("poster", [f["id"] for f in shown["formats"]])
+        self.assertEqual([s["label"] for s in shown["sections"]], ["Slides", "Poster"])
 
 
 class ElectronWorkerTests(unittest.TestCase):

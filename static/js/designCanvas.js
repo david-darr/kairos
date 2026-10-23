@@ -6,6 +6,13 @@
 // the viewer talk only by postMessage; messages are accepted only from a
 // frame this canvas created, and are treated as data.
 //
+// Boards are made in named formats (core/design_formats.py) and sit in rows,
+// one row per format. Dragging a board by its title moves it along its row and
+// its neighbours make room; resizing it from its corner keeps its format (a
+// fixed ratio, or height only for a website) and pushes the row along and the
+// rows below down. A website or email board grows with its content: the
+// viewer reports the page's height and the board follows it.
+//
 // Modes: Pan (drag the canvas, drag a board by its title, resize it from its
 // corner), Select (picked elements become chips in the chat composer),
 // Comment (pin a comment to an element or a point), Text (double-click text
@@ -20,6 +27,7 @@ const FRAME_LABEL = { phone: 'Phone', tablet: 'Tablet', desktop: 'Desktop', brow
 // Chrome drawn around each board, outside its w x h (canvas pixels).
 const CHROME = { phone: [36, 12, 22], tablet: [22, 18, 22], desktop: [0, 0, 0], browser: [40, 0, 0], slide: [0, 0, 0], none: [0, 0, 0] };
 const TITLE_GAP = 34;
+const GAP = 120, ROW_GAP = 320;  // core/design_formats.py: between boards in a row, and between rows.
 const LIVE_ZOOM = 0.35;
 const MAX_LIVE = 16;
 const MIN_ZOOM = 0.04, MAX_ZOOM = 4;
@@ -28,6 +36,62 @@ const MODES = [['pan', 'Pan', 'Move around the canvas and arrange boards (H)'], 
   ['comment', 'Comment', 'Pin a comment to an element (C)'], ['text', 'Text', 'Double-click text to edit it (T)']];
 
 export function designUrl(id) { return `/designs/${id}`; }
+
+// "Website · Desktop · 1440 wide", "Poster · 2:3 portrait · 1200x1800", or an
+// older board's size with its nearest format.
+export function sizeText(info) {
+  if (!info) return '';
+  if (info.format) return `${info.format_label || info.format} · ${info.grows ? `${info.w} wide` : `${info.w}x${info.h}`}`;
+  return `${FRAME_LABEL[info.frame] || 'Custom'} · ${info.w}x${info.h}${info.format_guess ? ` · nearest ${info.format_guess.label}` : ''}`;
+}
+
+// Rows by format, in board order: the same layout as design_formats.layout,
+// so a drag or resize shows where everything lands before it is saved.
+export function layoutRows(boards, order) {
+  const rows = new Map();
+  for (const slug of order) {
+    const key = boards[slug].section || 'custom';
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push(slug);
+  }
+  const out = {};
+  let y = 0;
+  for (const slugs of rows.values()) {
+    y += Math.max(...slugs.map(slug => (CHROME[boards[slug].frame] || CHROME.none)[0])) + TITLE_GAP;
+    let x = 0, bottom = 0;
+    for (const slug of slugs) {
+      const b = boards[slug], [, side, below] = CHROME[b.frame] || CHROME.none;
+      x += side; out[slug] = { x, y }; x += b.w + side + GAP;
+      bottom = Math.max(bottom, b.h + below);
+    }
+    y += bottom + ROW_GAP;
+  }
+  return out;
+}
+
+// Where a board dropped at x lands in its row (design_tools.board_action "move").
+export function orderAfterDrop(boards, order, slug, x) {
+  const key = boards[slug].section;
+  const row = order.filter(s => s !== slug && boards[s].section === key);
+  const centre = x + boards[slug].w / 2;
+  const before = row.find(s => centre < boards[s].x + boards[s].w / 2);
+  const rest = order.filter(s => s !== slug);
+  const at = before ? rest.indexOf(before) : row.length ? rest.indexOf(row.at(-1)) + 1 : rest.length;
+  rest.splice(at, 0, slug);
+  return rest;
+}
+
+// The size a corner drag lands on, true to the board's format (design_formats.resize).
+export function sizeFor(info, w, h) {
+  if (info.grows) return { w: info.w, h: Math.max(600, Math.min(8000, Math.round(h)), info.content_h || 0) };
+  if (info.ratio) {
+    let nw = w, nh = h;
+    if (Math.abs(w - info.w) / info.w >= Math.abs(h - info.h) / info.h) nh = w / info.ratio; else nw = h * info.ratio;
+    let scale = Math.min(1, 4000 / nw, 8000 / nh); scale = Math.max(scale, 60 / Math.min(nw, nh));
+    return { w: Math.round(nw * scale), h: Math.round(nh * scale) };
+  }
+  return { w: Math.max(120, Math.min(4000, Math.round(w))), h: Math.max(120, Math.min(8000, Math.round(h))) };
+}
 const boardUrl = (id, slug, extra = '') => `/api/designs/${encodeURIComponent(id)}/boards/${encodeURIComponent(slug)}/render${extra}`;
 
 export function mountDesignCanvas(host, { designId, compact = false, onSelection = null, onComments = null, onOpenChat = null, onLoaded = null } = {}) {
@@ -58,13 +122,16 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     panelBtns[id] = el('button', { type: 'button', class: 'btn quiet', text: label, 'aria-pressed': 'false', 'aria-controls': `design-panel-${designId}`, onclick: () => togglePanel(id) });
   }
   const exportBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Export', 'aria-haspopup': 'menu', onclick: () => openExport(exportBtn) });
-  const addBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Add board', onclick: () => addBoard(addBtn) });
+  const addBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Add board', 'aria-haspopup': 'menu', onclick: () => addBoard(addBtn) });
+  // Designs made before formats keep their sizes until the person fits them (core/design_formats.py infer).
+  const fitFormatBtn = el('button', { type: 'button', class: 'btn quiet design-fit-format', text: 'Fit to format', hidden: true, 'aria-haspopup': 'menu',
+    title: 'Put boards made before formats into their nearest natural size', onclick: () => fitFormatMenu(fitFormatBtn) });
   const systemNode = el('span', { class: 'design-system-name meta', text: '' });
   const viewBtn = el('button', { type: 'button', class: 'btn quiet design-view-toggle', text: 'Canvas', onclick: () => { chosenView = true; setView(view === 'list' ? 'canvas' : 'list'); } });
   const toolbar = el('div', { class: 'design-toolbar', role: 'toolbar', 'aria-label': 'Design tools' }, [
     el('div', { class: 'design-toolbar-start' }, [titleNode, systemNode]),
     modeGroup,
-    el('div', { class: 'design-toolbar-end' }, [addBtn, fitBtn, zoomLabel, focusBtn, panelBtns.tokens, panelBtns.versions, panelBtns.comments, exportBtn, viewBtn]),
+    el('div', { class: 'design-toolbar-end' }, [addBtn, fitFormatBtn, fitBtn, zoomLabel, focusBtn, panelBtns.tokens, panelBtns.versions, panelBtns.comments, exportBtn, viewBtn]),
   ]);
   const banner = el('div', { class: 'design-banner', role: 'status', hidden: true });
   const world = el('div', { class: 'design-world' });
@@ -109,18 +176,40 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
       node.chrome.style.inset = `-${top}px -${side}px -${bottom}px -${side}px`;
       node.title.style.bottom = `calc(100% + ${top}px + 6px / var(--design-zoom, 1))`;
       node.name.textContent = info.title;
-      node.meta.textContent = `${FRAME_LABEL[info.frame] || 'Board'} · ${info.w}x${info.h}`;
+      node.meta.textContent = sizeText(info);
       node.address.textContent = info.title;
-      node.wrap.setAttribute('aria-label', `${info.title}, ${FRAME_LABEL[info.frame] || 'board'}`);
+      node.wrap.dataset.format = info.format || 'none';
+      node.wrap.setAttribute('aria-label', `${info.title}, ${sizeText(info)}`);
       node.wrap.classList.toggle('selected', slug === selected);
+      node.wrap.classList.remove('design-lifted');
     }
+    delete root.dataset.dropOrder;
     world.querySelectorAll('.design-note').forEach(n => n.remove());
     for (const note of data.notes || []) {
       world.append(el('div', { class: `design-note design-note-${note.kind || 'label'}`, text: note.text, style: `left:${note.x}px;top:${note.y}px` }));
     }
+    paintSections();
     paintPins();
+    fitFormatBtn.hidden = preview || !Object.values(data.boards).some(b => !b.format);
     schedule();
     if (view === 'list') paintList();
+  }
+
+  // Each format's row gets a label at its left ("Website · Desktop").
+  function paintSections(boards = manifest().boards, positions = null) {
+    world.querySelectorAll('.design-section-label').forEach(n => n.remove());
+    const data = manifest();
+    if (data.layout !== 'auto' && !positions) return;
+    const labels = Object.fromEntries((data.sections || []).map(section => [section.key, section.label]));
+    const rows = new Map();
+    for (const slug of order()) {
+      const b = boards[slug]; if (!b) continue;
+      const at = positions?.[slug] || b, [top, side] = CHROME[b.frame] || CHROME.none;
+      const row = rows.get(b.section) || { x: Infinity, y: Infinity, label: labels[b.section] || b.format_label || 'Custom' };
+      row.x = Math.min(row.x, at.x - side); row.y = Math.min(row.y, at.y - top); rows.set(b.section, row);
+    }
+    // Left of the row, on its board titles' line: no height to find between rows at any zoom.
+    for (const row of rows.values()) world.append(el('div', { class: 'design-section-label', text: row.label, style: `left:${row.x}px;top:${row.y}px` }));
   }
 
   function makeBoard(slug) {
@@ -135,6 +224,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     ]);
     const body = el('div', { class: 'design-board-body' });
     const shield = el('div', { class: 'design-shield' });
+    // A board showing its thumbnail in Select, Comment or Text: bring it close, live.
+    body.addEventListener('click', () => { if (mode !== 'pan' && !boardNodes.get(slug)?.iframe) zoomToBoard(slug); });
     const handle = el('div', { class: 'design-resize', title: 'Drag to resize this board', 'aria-hidden': 'true' });
     const wrap = el('div', { class: 'design-board', 'data-slug': slug, role: 'group' }, [chrome, title, body, shield, handle]);
     const node = { wrap, body, title, name, meta, chrome, address, iframe: null, img: null, live: false };
@@ -165,7 +256,10 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     const cx = (view0.x1 + view0.x2) / 2, cy = (view0.y1 + view0.y2) / 2;
     const data = manifest();
     // With no thumbnails (no desktop render window), a small design stays live at any zoom.
-    const thumbsOnly = zoom < LIVE_ZOOM && (renderAvailable || Object.keys(data.boards).length > MAX_LIVE);
+    // Select, Comment and Text work on live boards only, so in those modes every
+    // board in view (nearest first, up to 16) is live whatever the zoom: a tall
+    // website board never fits at 35%, and used to stay a picture.
+    const thumbsOnly = mode === 'pan' && zoom < LIVE_ZOOM && (renderAvailable || Object.keys(data.boards).length > MAX_LIVE);
     const candidates = thumbsOnly ? [] : Object.entries(data.boards)
       .filter(([, b]) => b.x < view0.x2 && b.x + b.w > view0.x1 && b.y < view0.y2 && b.y + b.h > view0.y1)
       .sort((a, b) => Math.hypot(a[1].x + a[1].w / 2 - cx, a[1].y + a[1].h / 2 - cy) - Math.hypot(b[1].x + b[1].w / 2 - cx, b[1].y + b[1].h / 2 - cy))
@@ -229,8 +323,10 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   function fitRect(b, pad = 48, animate = true) {
     const r = stage.getBoundingClientRect();
     if (!r.width || !r.height) return;
-    const next = Math.max(MIN_ZOOM, Math.min(1, (r.width - pad * 2) / (b.x2 - b.x1), (r.height - pad * 2) / (b.y2 - b.y1)));
-    zoom = next; tx = (r.width - (b.x2 - b.x1) * zoom) / 2 - b.x1 * zoom; ty = (r.height - (b.y2 - b.y1) * zoom) / 2 - b.y1 * zoom;
+    // The row labels sit left of each row (paintSections): keep room for them.
+    const left = manifest()?.layout === 'auto' && !compact ? Math.min(180, r.width * 0.2) : pad;
+    const next = Math.max(MIN_ZOOM, Math.min(1, (r.width - pad - left) / (b.x2 - b.x1), (r.height - pad * 2) / (b.y2 - b.y1)));
+    zoom = next; tx = left + (r.width - pad - left - (b.x2 - b.x1) * zoom) / 2 - b.x1 * zoom; ty = (r.height - (b.y2 - b.y1) * zoom) / 2 - b.y1 * zoom;
     world.classList.toggle('design-animate', animate && !reduced.matches);
     applyTransform();
     setTimeout(() => world.classList.remove('design-animate'), 260);
@@ -294,30 +390,60 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, zoom };
   }
 
-  // Whole boards move (title bar) and resize (corner); each drop is a version.
+  // Whole boards move (title bar) and resize (corner), on the row layout: the
+  // board follows the pointer while its neighbours make room; a resize stays
+  // true to the format and pushes the row along and the rows below down.
+  // Each drop is a version; a design from before formats joins the row layout.
   function startBoardDrag(event, slug, kind) {
     if (event.button !== 0 || preview) return;
     event.preventDefault(); event.stopPropagation();
-    const info = manifest().boards[slug]; const node = boardNodes.get(slug);
+    const info = manifest().boards[slug], node = boardNodes.get(slug);
     const start = { x: event.clientX, y: event.clientY, bx: info.x, by: info.y, bw: info.w, bh: info.h };
     const target = event.currentTarget; try { target.setPointerCapture(event.pointerId); } catch { /* A synthetic or ended pointer. */ }
     root.classList.add('design-dragging'); selectBoard(slug);
+    world.classList.toggle('design-reflowing', !reduced.matches);
+    let current = { x: info.x, y: info.y, w: info.w, h: info.h }, moved = false;
     const move = e => {
       const dx = (e.clientX - start.x) / zoom, dy = (e.clientY - start.y) / zoom;
-      if (kind === 'move') { node.wrap.style.left = `${Math.round(start.bx + dx)}px`; node.wrap.style.top = `${Math.round(start.by + dy)}px`; }
-      else { node.wrap.style.width = `${Math.max(120, Math.round(start.bw + dx))}px`; node.wrap.style.height = `${Math.max(120, Math.round(start.bh + dy))}px`; }
+      if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) moved = true;
+      if (!moved) return;
+      if (kind === 'move') current = { ...current, x: Math.round(start.bx + dx), y: Math.round(start.by + dy) };
+      else current = { ...current, ...sizeFor(info, start.bw + dx, start.bh + dy) };
+      previewLayout(slug, kind, current, node);
     };
-    const up = async e => {
+    const up = async () => {
       target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', up); target.removeEventListener('pointercancel', up);
       root.classList.remove('design-dragging');
-      const dx = Math.round((e.clientX - start.x) / zoom), dy = Math.round((e.clientY - start.y) / zoom);
-      if (Math.abs(dx) + Math.abs(dy) < 2) return;
-      const body = kind === 'move' ? { action: 'move', board: slug, x: start.bx + dx, y: start.by + dy }
-        : { action: 'resize', board: slug, w: Math.max(120, start.bw + dx), h: Math.max(120, start.bh + dy) };
-      try { const result = await api(`/api/designs/${designId}/board-action`, { method: 'POST', body: JSON.stringify(body) }); design = { ...design, ...result.design }; if (kind === 'resize') stamp.set(slug, (stamp.get(slug) || 0) + 1); build(); }
-      catch { build(); }
+      if (!moved) { world.classList.remove('design-reflowing'); return; }
+      const body = kind === 'move' ? { action: 'move', board: slug, x: current.x, y: current.y, reflow: true }
+        : { action: 'resize', board: slug, w: current.w, h: current.h, reflow: true };
+      try {
+        const result = await api(`/api/designs/${designId}/board-action`, { method: 'POST', body: JSON.stringify(body) });
+        design = { ...design, ...result.design };
+        if (kind === 'resize') stamp.set(slug, (stamp.get(slug) || 0) + 1);
+        status.textContent = result.message || '';
+      } catch { /* api shows the error; the layout goes back. */ }
+      build();
+      setTimeout(() => world.classList.remove('design-reflowing'), 260);
     };
     target.addEventListener('pointermove', move); target.addEventListener('pointerup', up); target.addEventListener('pointercancel', up);
+  }
+  // Where every board would sit with this drag or resize, drawn live.
+  function previewLayout(slug, kind, current, node) {
+    const boards = Object.fromEntries(Object.entries(manifest().boards).map(([name, b]) => [name, { ...b }]));
+    boards[slug].w = current.w; boards[slug].h = current.h;
+    const ord = kind === 'move' ? orderAfterDrop(boards, order(), slug, current.x) : order();
+    const positions = layoutRows(boards, ord);
+    for (const [name, at] of Object.entries(positions)) {
+      const wrap = boardNodes.get(name)?.wrap; if (!wrap || name === slug) continue;
+      wrap.style.left = `${at.x}px`; wrap.style.top = `${at.y}px`;
+    }
+    if (kind === 'move') { node.wrap.style.left = `${current.x}px`; node.wrap.style.top = `${current.y}px`; }
+    else Object.assign(node.wrap.style, { left: `${positions[slug].x}px`, top: `${positions[slug].y}px`, width: `${current.w}px`, height: `${current.h}px` });
+    node.wrap.classList.add('design-lifted');
+    paintSections(boards, positions);
+    world.querySelectorAll('.design-pin').forEach(n => n.remove());
+    root.dataset.dropOrder = ord.join(',');
   }
 
   function selectBoard(slug) {
@@ -363,6 +489,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     if (mode !== 'select') clearPicked(false);
     popover.hidden = true;
     broadcast();
+    schedule();
   }
   const viewerMode = () => ({ pan: 'browse', select: 'select', comment: 'comment', text: 'text' })[mode];
   function post(win, message) { try { win.postMessage(message, '*'); } catch { /* A frame that is gone. */ } }
@@ -397,11 +524,28 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
       const r = source.frame.getBoundingClientRect(), s = r.width / source.frame.offsetWidth || zoom;
       wheel(Number(data.dx) || 0, Number(data.dy) || 0, Number(data.unit) || 0, !!data.ctrl, r.left + (Number(data.x) || 0) * s, r.top + (Number(data.y) || 0) * s);
     }
+    else if (data.type === 'kd-size' && !source.focus) measured(source.slug, Number(data.height));
     else if (data.type === 'kd-pick') pick(source.slug, data, source);
     else if (data.type === 'kd-text') saveText(source.slug, String(data.id || ''), String(data.text ?? ''));
     else if (data.type === 'kd-goto') gotoBoard(String(data.board || ''), !!data.overlay, source);
     else if (data.type === 'kd-key') keyCommand(String(data.key || ''), !!data.ctrl, !!data.shift);
   }, { signal });
+
+  // A website or email board as tall as its page: no version, the rows below move.
+  const sizing = new Map();
+  function measured(slug, height) {
+    const info = design?.boards?.[slug];
+    if (!info?.grows || preview || !Number.isFinite(height) || height < 60) return;
+    const want = Math.max(info.min_h || 0, Math.min(8000, Math.round(height)));
+    if (Math.abs(want - info.h) <= 2) return;
+    clearTimeout(sizing.get(slug));
+    sizing.set(slug, setTimeout(async () => {
+      try {
+        const result = await api(`/api/designs/${designId}/boards/${encodeURIComponent(slug)}/fit-height`, { method: 'POST', body: JSON.stringify({ h: Math.round(height) }), toast: false });
+        design = { ...design, ...result.design }; build();
+      } catch { /* The next measure tries again. */ }
+    }, 250));
+  }
 
   function pick(slug, data, source) {
     const element = data.element && /^[a-z][a-z0-9-]{0,31}$/.test(data.element.id || '') ? data.element : null;
@@ -588,7 +732,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
         preview_.append(img);
       } else preview_.append(liveThumb(slug, info, preview_));
       return el('button', { type: 'button', class: 'design-list-card', role: 'listitem', 'aria-label': `Open ${info.title}`, onclick: () => openFocus(slug) }, [
-        preview_, el('span', { class: 'design-list-label' }, [el('strong', { text: `${n + 1}. ${info.title}` }), el('span', { class: 'meta', text: `${FRAME_LABEL[info.frame]} · ${info.w}x${info.h}` })])]);
+        preview_, el('span', { class: 'design-list-label' }, [el('strong', { text: `${n + 1}. ${info.title}` }), el('span', { class: 'meta', text: sizeText(info) })])]);
     }));
   }
   function liveThumb(slug, info, holder) {
@@ -789,14 +933,53 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
       toast(`Exported ${result.filename}`, 'success');
     } catch { /* api shows the error. */ }
   }
+  // Add a board in a named format (core/design_formats.py); a website adds its pair.
+  function formatItems(onPick, { pair = true } = {}) {
+    const items = [];
+    for (const group of design?.formats || []) {
+      items.push(el('div', { class: 'design-menu-heading', role: 'presentation', text: group.label }));
+      if (pair && group.id === 'website') items.push(el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: 'Desktop and mobile pair',
+        onclick: () => onPick({ format: 'website', size: 'pair', orientation: null }, 'Website') }));
+      for (const option of group.options) {
+        const label = option.label.replace(`${group.label} · `, '').replace(group.label, '') || group.label;
+        items.push(el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', 'data-format': `${option.format}:${option.size}:${option.orientation || ''}`,
+          text: `${label} · ${option.grows ? `${option.w} wide` : `${option.w}x${option.h}`}`, onclick: () => onPick(option, group.label) }));
+      }
+    }
+    return items;
+  }
   function addBoard(anchor) {
-    const menu = el('div', { class: 'design-menu', role: 'menu', 'aria-label': 'Add board' }, Object.entries(FRAME_LABEL).filter(([f]) => f !== 'none').map(([frame, label]) =>
-      el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: label, onclick: async () => {
-        menu.remove();
-        const result = await api(`/api/designs/${designId}/boards`, { method: 'POST', body: JSON.stringify({ title: `${label} ${order().length + 1}`, frame }) }).catch(() => null);
-        if (result) { design = { ...design, ...result.design }; build(); zoomToBoard(result.slug); }
-      } })));
+    const menu = el('div', { class: 'design-menu design-format-menu', role: 'menu', 'aria-label': 'Add board' }, formatItems(async (option, name) => {
+      menu.remove();
+      const body = { title: `${name} ${order().length + 1}`, format: option.format, size: option.size, orientation: option.orientation };
+      const result = await api(`/api/designs/${designId}/boards`, { method: 'POST', body: JSON.stringify(body) }).catch(() => null);
+      if (result) { design = { ...design, ...result.design }; build(); zoomToBoard(result.slug); }
+    }));
     showMenu(menu, anchor);
+  }
+  // Older boards: fit every one to its nearest format, or the selected one to a format.
+  function fitFormatMenu(anchor) {
+    const data = manifest();
+    const loose = order().filter(slug => !data.boards[slug].format);
+    const one = selected && !data.boards[selected]?.format ? selected : null;
+    const items = [el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: `Fit ${loose.length === 1 ? 'the board' : `all ${loose.length} boards`} to the nearest format`,
+      onclick: () => { menu.remove(); fitFormat({}); } })];
+    if (one) {
+      const guess = data.boards[one].format_guess;
+      items.push(el('div', { class: 'design-menu-heading', role: 'presentation', text: `${data.boards[one].title}${guess ? `: nearest ${guess.label}` : ''}` }),
+        ...formatItems(option => { menu.remove(); fitFormat({ board: one, format: option.format, size: option.size, orientation: option.orientation }); }, { pair: false }));
+    } else items.push(el('p', { class: 'meta', text: 'Select a board first to choose its format.' }));
+    const menu = el('div', { class: 'design-menu design-format-menu', role: 'menu', 'aria-label': 'Fit to format' }, items);
+    showMenu(menu, anchor);
+  }
+  async function fitFormat(body) {
+    try {
+      const result = await api(`/api/designs/${designId}/board-action`, { method: 'POST', body: JSON.stringify({ action: 'fit_format', ...body }) });
+      design = { ...design, ...result.design };
+      for (const slug of order()) stamp.set(slug, (stamp.get(slug) || 0) + 1);
+      build(); reloadBoards(order()); requestAnimationFrame(() => fitAll());
+      toast(result.message?.replace(/^Version \d+: /, '') || 'Fitted to format', 'success');
+    } catch { /* api shows the error. */ }
   }
   function showMenu(menu, anchor) {
     root.querySelectorAll('.design-menu').forEach(m => m.remove());
@@ -824,6 +1007,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   document.addEventListener('kairos:design-changed', async event => {
     const packet = event.detail || {};
     if (packet.designId !== designId || signal.aborted) return;
+    // A measured height (fit-height): positions only, nothing to announce or reload.
+    if (packet.quiet) { await load(); return; }
     await load();
     const boards = packet.boards || [];
     for (const [slug, ids] of Object.entries(packet.changed || {})) if (ids.length) flash.set(slug, ids);
@@ -850,7 +1035,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     root, ready,
     get design() { return design; },
     reload: reloadAll,
-    fit: fitAll, zoomTo, zoomToBoard, openFocus, closeFocus, setMode, setView, togglePanel,
+    fit: fitAll, zoomTo, zoomToBoard, openFocus, closeFocus, setMode, setView, togglePanel, addBoard: () => addBoard(addBtn), fitFormat,
+    fitBoards: slugs => { fitRect(bounds(slugs), 48, false); autoFit = false; },
     state: () => ({ zoom, tx, ty, mode, view, selected, focus: focus?.slug || null, live: Number(root.dataset.live || 0), preview: preview?.n || null }),
     clearSelection: () => clearPicked(false),
     dispose() { lifetime.abort(); resize.disconnect(); closeFocus(true); sheet?.close?.(); cancelAnimationFrame(liveFrame); cancelAnimationFrame(paintFrame); root.remove(); },
