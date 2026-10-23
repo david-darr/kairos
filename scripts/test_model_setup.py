@@ -10,13 +10,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
-import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import zipfile
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+from scripts.test_data_support import TestDataDirectory
 
 import httpx
 from cryptography.fernet import Fernet
@@ -36,7 +36,7 @@ def run(awaitable):
 
 class ModelSetupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='model-setup-', dir=REPO)
+        self.temp = TestDataDirectory(prefix='model-setup-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.stack = ExitStack()

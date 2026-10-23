@@ -3,15 +3,13 @@ import json
 import os
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-native_mkdir = os.mkdir
-with patch('tempfile._os.mkdir', side_effect=lambda path, mode=0o777: native_mkdir(path, 0o777)):
-    environment = tempfile.TemporaryDirectory(prefix='ask-user-', dir=Path(__file__).resolve().parents[1], ignore_cleanup_errors=True)
+from scripts.test_data_support import TestDataDirectory
+environment = TestDataDirectory(prefix='ask-user-')
 os.environ['JARVIS_DATA_DIR'] = environment.name
 from core import permissions, mobile_activity
 from core.brain import Brain
@@ -180,8 +178,6 @@ class AskTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Which color?', json.dumps(payload))
 
 def tearDownModule():
-    from core import session_manager_store
-    session_manager_store.close()
     environment.cleanup()
 
 
