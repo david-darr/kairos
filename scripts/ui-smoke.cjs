@@ -1829,6 +1829,8 @@ app.whenReady().then(async () => {
         // Dialogs rise in and fade out: the scrim's display waits for its fade.
         assert.ok(await js("(() => { const b = getComputedStyle(document.querySelector('.settings-window').parentElement); return b.transitionProperty.includes('display') && b.transitionBehavior.includes('allow-discrete') && getComputedStyle(document.querySelector('.settings-window')).transitionProperty.includes('transform'); })()"), label + " dialogs animate in and out");
         assert.equal(await js("getComputedStyle(document.querySelector('.set-page')).animationName"), "set-page-in", label + " Settings pages fade in");
+        // Settings ignores Escape while a confirmation, dialog or menu is open (settings.js); wait for none first.
+        await waitFor("!document.querySelector('.confirm-panel, dialog[open]') && ![...document.querySelectorAll('.custom-select-menu, .overflow-menu')].some(m => !m.classList.contains('hidden'))");
         await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
         await waitFor("!!document.querySelector('.modal-backdrop.hidden .settings-window')");
         await js("document.querySelector('.sidebar-settings-btn').click()");

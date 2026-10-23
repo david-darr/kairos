@@ -174,7 +174,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.activeElement.blur()");
   // Back keeps the retained search
   await js("document.querySelector('.ms-chat-back').click()");
-  await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-conversation')");
+  // The launch composer's chat host is also an .ms-conversation; only a pushed conversation must be gone.
+  await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-conversation:not(.ms-launch-chat)')");
   await delay(500);
   assert.equal(await page(), 1, 'Back returns to Chats');
   assert.equal(await js("document.querySelector('.ms-history-dock input').value"), 'clearer', 'The search survives the round trip');

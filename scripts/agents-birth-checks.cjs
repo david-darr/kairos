@@ -117,7 +117,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.ok(await js("document.querySelector('.agent-profile-sheet:not([hidden]) .agent-create-notice')"));
   assert.ok(writes.slice(routineStart).some(w => /\/api\/agents\/a\d+\/goals/.test(w.path)));
   assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'Routine Survivor');
-  const expectedRoutineErrors = ['Routine service unavailable', 'Routine Survivor was created, but the first routine was not: Routine service unavailable'];
+  const expectedRoutineErrors = ['Routine service unavailable', 'Routine Survivor was created, but the first routine was not: 500: Routine service unavailable'];
   const routineErrors = "[...document.querySelectorAll('#toast-host .toast.error')]";
   await waitFor(`${routineErrors}.length === 2`);
   assert.deepEqual(await js(`${routineErrors}.map(n => n.textContent).sort()`), [...expectedRoutineErrors].sort(), 'routine failure shows both expected errors');
