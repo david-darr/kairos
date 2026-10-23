@@ -10,22 +10,23 @@
   --rd-stagger: 30ms;
 }
 .kairos-redesign .rd-enter-rise,
-.kairos-redesign .rd-stagger > * { animation: rd-rise var(--rd-dur-fade) var(--rd-ease) both; }
+.kairos-redesign .rd-stagger > * { animation: rd-rise var(--rd-dur-fade) var(--rd-ease) backwards; }
 .kairos-redesign .rd-stagger > :nth-child(1) { animation-delay: 0ms; }
 .kairos-redesign .rd-stagger > :nth-child(2) { animation-delay: var(--rd-stagger); }
 .kairos-redesign .rd-stagger > :nth-child(3) { animation-delay: calc(var(--rd-stagger) * 2); }
 .kairos-redesign .rd-stagger > :nth-child(4) { animation-delay: calc(var(--rd-stagger) * 3); }
 .kairos-redesign .rd-stagger > :nth-child(5) { animation-delay: calc(var(--rd-stagger) * 4); }
 .kairos-redesign .rd-stagger > :nth-child(6) { animation-delay: calc(var(--rd-stagger) * 5); }
-.kairos-redesign .rd-sheet-in { animation: rd-sheet var(--rd-dur-sheet) var(--rd-spring) both; }
+.kairos-redesign .rd-sheet-in { animation: rd-sheet var(--rd-dur-sheet) var(--rd-spring) backwards; }
 .kairos-redesign .rd-scrim-in { animation: rd-opacity var(--rd-dur-fade) var(--rd-ease) both; }
-.kairos-redesign .rd-push-in { animation: rd-push var(--rd-dur-push) var(--rd-ease) both; }
-.kairos-redesign .rd-menu-in { animation: rd-menu var(--rd-dur-menu) var(--rd-ease) both; }
-@keyframes rd-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes rd-sheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.kairos-redesign .rd-push-in { animation: rd-push var(--rd-dur-push) var(--rd-ease) backwards; }
+.kairos-redesign .rd-menu-in { animation: rd-menu var(--rd-dur-menu) var(--rd-ease) backwards; }
+/* Entrances yield back to normal layout after finishing, including fixed children. */
+@keyframes rd-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes rd-sheet { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes rd-opacity { from { opacity: 0; } to { opacity: 1; } }
-@keyframes rd-push { from { transform: translateX(100%); } to { transform: translateX(0); } }
-@keyframes rd-menu { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes rd-push { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes rd-menu { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
 /* Follows the OS preference only. Appearance's `motion` setting is the Flow
    background's own "Animate background" switch, not a UI-wide one. */
 @media (prefers-reduced-motion: reduce) {

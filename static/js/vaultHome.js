@@ -119,7 +119,7 @@ export function renderVaultHome(host, { store, admin, onOpen, onCreated }) {
 
   function pinnedCard() {
     const pins = store.pins.map(id => store.note(id)).filter(Boolean);
-    const body = el('div', { class: 'vault-home-list' });
+    const body = el('div', { class: 'vault-home-list rd-stagger' });
     if (!pins.length) body.append(el('p', { class: 'vault-rail-empty', text: 'Pin a note from its header to keep it here, on every device.' }));
     for (const node of pins) body.append(noteButton(node));
     return card('Pinned', body, { count: pins.length || null });
@@ -176,7 +176,7 @@ export function renderVaultHome(host, { store, admin, onOpen, onCreated }) {
         el('h2', { class: 'vault-home-title', text: 'Vault' }),
         el('p', { class: 'meta', text: `${notes} notes · ${folders} folders · ${store.graph.edges.filter(e => e.kind === 'link').length} links` }),
       ]),
-      el('div', { class: 'vault-home-grid' }, [todayCard(), pinnedCard(), monthStrip(), recentCard(), attentionCard(), filterCard()]),
+      el('div', { class: 'vault-home-grid rd-stagger' }, [todayCard(), pinnedCard(), monthStrip(), recentCard(), attentionCard(), filterCard()]),
     ]);
   }
 
@@ -186,7 +186,7 @@ export function renderVaultHome(host, { store, admin, onOpen, onCreated }) {
     return el('div', { class: 'vault-home vault-home-filtered' }, [
       el('div', { class: 'vault-home-head' }, [back, el('h2', { class: 'vault-home-title', text: view.title }),
         el('p', { class: 'meta', text: `${notes.length} note${notes.length === 1 ? '' : 's'}${view.hint ? ' · ' + view.hint : ''}` })]),
-      el('div', { class: 'vault-home-list vault-home-list-wide' }, notes.map(node => {
+      el('div', { class: 'vault-home-list vault-home-list-wide rd-stagger' }, notes.map(node => {
         const row = noteButton(node);
         if (view.showMissing) row.querySelector('.vault-home-row-copy').append(propertyPills(node));
         return row;

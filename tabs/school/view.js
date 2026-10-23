@@ -1,5 +1,6 @@
 import { api, el } from "/static/js/api.js";
 import { mountSessionChat } from "/static/js/sessionChat.js";
+import { workspaceEmpty as emptyState, redesignOn, workspaceStats } from '/static/js/workspaceParts.js';
 
 // School: Canvas assignments grouped by course. Three states in one view
 // (no routing) — overview (upcoming-across-everything + course cards, a mix
@@ -104,17 +105,29 @@ async function renderOverview(body) {
     api("/api/tab-school/courses"),
   ]);
 
+  if (redesignOn()) {
+    const all = await api('/api/tab-school/assignments?include_completed=true');
+    const now = new Date(), end = new Date(now); end.setDate(end.getDate() + 7);
+    body.prepend(workspaceStats([{ label: 'Completed', value: all.filter(a => a.completed).length },
+      { label: 'Due this week', value: upcoming.filter(a => new Date(a.due) >= now && new Date(a.due) < end).length }]));
+    const next = upcoming.find(a => !a.completed && new Date(a.due) >= now);
+    if (next) body.append(el('section', { class: 'school-next-due card' }, [el('small', { text: 'Next due' }),
+      el('h3', { text: next.title }), el('p', { class: 'meta', text: `${next.course} · ${formatDue(next.due)}` }),
+      el('button', { type: 'button', class: 'btn primary', text: 'Start with Kairos', onclick: () => openAssignment(body, next.id) })]));
+  }
   body.appendChild(el("div", { class: "title", style: "margin:18px 0 10px;font-size:15px;", text: "Courses" }));
-  const grid = el("div", { class: "document-grid" });
+  const grid = el("div", { class: "document-grid rd-stagger" });
   body.appendChild(grid);
   if (courses.length === 0) {
-    grid.appendChild(el("div", { class: "empty-state", text: "No courses yet — connect Canvas above and hit Sync Now." }));
+    grid.appendChild(redesignOn() ? emptyState({ title: 'Your classes belong here', text: 'Connect Canvas and sync your assignments.',
+      action: { text: 'Connect Canvas', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } })
+      : el("div", { class: "empty-state", text: "No courses yet — connect Canvas above and hit Sync Now." }));
   }
   for (const c of courses) {
     const bits = [`${c.upcoming_count} upcoming`];
     if (c.overdue_count > 0) bits.push(`${c.overdue_count} overdue`);
     bits.push(`${c.assignment_count} total`);
-    grid.appendChild(el("div", { class: "glass bracket card", style: "cursor:pointer;padding:20px 18px;", onclick: () => openCourse(body, c.name) }, [
+    grid.appendChild(el(redesignOn() ? 'button' : 'div', { ...(redesignOn() ? { type: 'button' } : {}), class: "glass bracket card school-course-card", style: "cursor:pointer;padding:20px 18px;", onclick: () => openCourse(body, c.name) }, [
       el("div", { class: "title", style: "font-size:16px;", text: c.name }),
       el("div", { class: "meta", style: "margin-top:8px;font-size:12.5px;" + (c.overdue_count > 0 ? "color:var(--danger);" : ""), text: bits.join(" · ") }),
     ]));
@@ -122,16 +135,18 @@ async function renderOverview(body) {
 
   if (overdue.length > 0) {
     body.appendChild(el("div", { class: "title", style: "margin:18px 0 8px;color:var(--danger);", text: `Overdue (${overdue.length})` }));
-    const overdueList = el("div", {});
+    const overdueList = el("div", { class: 'rd-stagger' });
     body.appendChild(overdueList);
     for (const a of overdue) overdueList.appendChild(assignmentCard(a, () => openAssignment(body, a.id), true));
   }
 
   body.appendChild(el("div", { class: "title", style: "margin:18px 0 8px;", text: "Upcoming (next 14 days)" }));
-  const upcomingList = el("div", {});
+  const upcomingList = el("div", { class: 'rd-stagger' });
   body.appendChild(upcomingList);
   if (upcoming.length === 0) {
-    upcomingList.appendChild(el("div", { class: "empty-state", text: "Nothing due in the next two weeks — or nothing synced yet." }));
+    upcomingList.appendChild(redesignOn() ? emptyState({ title: 'Room to catch your breath', text: 'Nothing due in the next two weeks, or nothing synced yet.',
+      action: { text: 'Canvas connection', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } })
+      : el("div", { class: "empty-state", text: "Nothing due in the next two weeks — or nothing synced yet." }));
   } else {
     for (const a of upcoming) upcomingList.appendChild(assignmentCard(a, () => openAssignment(body, a.id)));
   }
@@ -174,7 +189,9 @@ async function renderCourseView(body) {
     list.innerHTML = "";
     const assignments = await api(`/api/tab-school/assignments?course=${encodeURIComponent(state.course)}&include_completed=${showCompletedCheckbox.checked}`);
     if (assignments.length === 0) {
-      list.appendChild(el("div", { class: "empty-state", text: "No assignments found for this course yet." }));
+      list.appendChild(redesignOn() ? emptyState({ title: 'No assignments here yet', text: 'Sync Canvas to bring in your coursework.',
+        action: { text: 'All courses', onClick: () => { state = { view: 'overview', course: null, assignmentId: null }; renderBody(body); } } })
+        : el("div", { class: "empty-state", text: "No assignments found for this course yet." }));
       return;
     }
     for (const a of assignments) list.appendChild(assignmentCard(a, () => openAssignment(body, a.id)));
@@ -214,7 +231,9 @@ async function renderAssignmentWorkspace(body) {
   ]);
   body.appendChild(infoCard);
 
-  const workspace = el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;align-items:stretch;" });
+  // This is an inline section: a full-width horizontal push escapes the page
+  // while entering. Rise in place and let both panes shrink with their tracks.
+  const workspace = el("div", { class: 'school-assignment-workspace rd-enter-rise', style: "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px;align-items:stretch;" });
   body.appendChild(workspace);
 
   // -- editor pane --

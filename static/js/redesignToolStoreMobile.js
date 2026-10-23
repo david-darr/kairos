@@ -55,6 +55,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
       menu.style.top = `${Math.round(box.bottom + 6)}px`;
     }
     view.toggleAttribute("data-ts-menu", open);
+    menu.classList.toggle('rd-menu-in', open);
     plus.setAttribute("aria-expanded", String(open));
     if (open) menu.querySelector("button:not([hidden]):not(:disabled)")?.focus();
   };
@@ -174,8 +175,9 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     const close = el("button", { type: "button", class: "ts-sheet-close", "aria-label": "Close details" }, [markup(ICONS.close || PLUS)]);
     const bar = el("div", { class: "ts-sheet-bar" }, [el("span", { class: "ts-sheet-kind", text: KIND_LABEL[card.dataset.tsKind] || "Details" }), close]);
     const body = el("div", { class: "ts-sheet-body" });
-    const sheet = el("div", { class: "ts-sheet", role: "dialog", "aria-modal": "true", tabindex: "-1" }, [el("div", { class: "ts-sheet-grip", "aria-hidden": "true" }), bar, body]);
-    const backdrop = el("div", { class: "ts-sheet-backdrop" }, [sheet]);
+    const sheet = el("div", { class: "ts-sheet rd-sheet-in", 'data-view': 'tool-store', role: "dialog", "aria-modal": "true", tabindex: "-1" }, [el("div", { class: "ts-sheet-grip", "aria-hidden": "true" }), bar, body]);
+    const backdrop = el("div", { class: "ts-sheet-backdrop rd-scrim-in" }, [sheet]);
+    sheet.addEventListener('animationend', () => sheet.classList.remove('rd-sheet-in'), { once: true });
     open = { key: card.dataset.tsKey, card, opener, sheet, body, close, backdrop, placeholder: document.createComment("ts-row") };
     card.replaceWith(open.placeholder);
     mountCard(card);
@@ -238,6 +240,8 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     card.classList.remove("ts-in-sheet");
     if (placeholder.parentNode) placeholder.replaceWith(card);
     sheet.style.transform = "";
+    sheet.classList.remove('rd-sheet-in');
+    backdrop.classList.remove('rd-scrim-in');
     backdrop.classList.remove("open");
     setTimeout(() => backdrop.remove(), 200);
     if (restoreFocus && view.isConnected) {
