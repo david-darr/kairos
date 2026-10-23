@@ -595,6 +595,7 @@
       state.communityInstalls ||= {}; state.communityInstalls[route.split('/').at(-1)] = { installed: false, update_available: false };
       return { ok: true };
     }
+    if (route === '/api/google/accounts/default' && method === 'POST') { state.googleActiveAccount = body.account; return { ok: true }; }
     if (route === '/api/google/calendar/settings' && method === 'PATCH') { state.googleCalendarIds = body.calendar_ids; return body; }
     if (route === '/api/google/oauth/start') { state.googleCalendarMissing = false; return { url: 'https://accounts.google.com/o/oauth2/v2/auth' }; }
     if (route === '/api/google/calendar/action') {
@@ -1229,8 +1230,16 @@
     if (route === "/api/projects") return list(projects);
     if (route.startsWith("/api/projects/")) return projects[0];
     if (route === "/api/notes") return list(url.searchParams.get("include_completed") === "false" ? notes.filter(n => !n.completed) : notes);
-    if (route === '/api/google/status') return { configured: true, connected: true, email: 'demo@example.com', client_id: 'demo.apps.googleusercontent.com',
-      calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null };
+    if (route === '/api/google/status') {
+      const active = state.googleActiveAccount || 'demo';
+      const accounts = [
+        { id: 'demo', email: 'demo@example.com', calendar_connected: !state.googleCalendarMissing, can_send_email: true, active: active === 'demo', calendar: true },
+        { id: 'coach', email: 'coach.demo@example.com', calendar_connected: true, can_send_email: false, active: active === 'coach', calendar: false },
+      ];
+      return { configured: true, connected: true, email: accounts.find(a => a.id === active).email, client_id: 'demo.apps.googleusercontent.com',
+        calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null,
+        active_account: active, calendar_account: 'demo', accounts };
+    }
     if (route === '/api/google/calendar/calendars') return googleCalendars;
     if (route === '/api/google/calendar/events') return list(calendarInstances(googleEvents));
     const googleEventRead = route.match(/^\/api\/google\/calendar\/events\/([^/]+)$/);

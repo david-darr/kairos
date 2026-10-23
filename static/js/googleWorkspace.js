@@ -15,6 +15,26 @@ const button = (label, onClick, cls = 'btn') => el('button', { type: 'button', c
   onclick: async event => { try { await onClick(event); } catch (error) { toast(error.message || 'Google action failed', 'error'); } },
 });
 
+// Opens Google sign-in, then polls status until done(status) says it finished.
+async function signIn(control, idleLabel, done) {
+  const result = await action('/oauth/start', {});
+  if (window.jarvis?.openGoogleSignIn) {
+    if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
+  } else window.open(result.url, '_blank', 'noopener');
+  control.disabled = true;
+  control.textContent = 'Waiting for Google…';
+  const started = Date.now();
+  const poll = async () => {
+    if (!control.isConnected || Date.now() - started > 10 * 60 * 1000) { control.disabled = false; control.textContent = idleLabel; return; }
+    try { if (await done(await api(`${BASE}/status`))) return; } catch { /* retry */ }
+    setTimeout(poll, 1800);
+  };
+  poll();
+}
+
+const onSignInHost = () => Boolean(window.jarvis?.openGoogleSignIn)
+  || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
+
 export async function renderGoogleWorkspace(container, header, tabs) {
   container.replaceChildren();
   const body = el('div', { class: 'google-workspace' });
@@ -33,33 +53,21 @@ export async function renderGoogleWorkspace(container, header, tabs) {
 
 function renderConnection(host, status, refresh) {
   host.replaceChildren();
-  const onHost = Boolean(window.jarvis?.openGoogleSignIn)
-    || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
+  const onHost = onSignInHost();
   const client = el('input', { type: 'text', value: status.client_id || '',
     placeholder: 'Google OAuth Desktop client ID', 'aria-label': 'Google OAuth Desktop client ID' });
   const secret = el('input', { type: 'password', placeholder: 'Client secret, if provided',
     'aria-label': 'Google OAuth client secret' });
-  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, and Calendar APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
+  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, Calendar, and Gmail APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
   const save = button('Save client ID', async () => {
     await action('/client', { client_id: client.value.trim(), client_secret: secret.value });
     toast('Google client saved', 'success');
     refresh();
   }, 'btn primary');
-  const connect = button('Connect Google account', async () => {
-    const result = await action('/oauth/start', {});
-    if (window.jarvis?.openGoogleSignIn) {
-      if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
-    } else window.open(result.url, '_blank', 'noopener');
-    connect.disabled = true;
-    connect.textContent = 'Waiting for Google…';
-    const started = Date.now();
-    const poll = async () => {
-      if (!host.isConnected || Date.now() - started > 10 * 60 * 1000) { connect.disabled = false; connect.textContent = 'Connect Google account'; return; }
-      try { if ((await api(`${BASE}/status`)).connected) { refresh(); return; } } catch { /* retry */ }
-      setTimeout(poll, 1800);
-    };
-    poll();
-  }, 'btn primary');
+  const connect = button('Connect Google account', () => signIn(connect, 'Connect Google account', next => {
+    if (!next.connected) return false;
+    refresh(); return true;
+  }), 'btn primary');
   connect.disabled = !onHost;
   host.append(el('div', { class: 'glass card google-connect' }, [
     el('div', { class: 'title', text: status.configured ? 'Connect Google Workspace' : 'Set up Google Workspace' }),
@@ -132,15 +140,40 @@ function renderDrive(host, status, refreshAll) {
     listButton.setAttribute('aria-pressed', String(layout === 'list'));
   }
   setLayout('grid');
+  const accounts = status.accounts || [];
+  const current = accounts.find(a => a.id === status.active_account) || accounts[0] || {};
+  const accountPicker = el('select', { 'aria-label': 'Google account' },
+    accounts.map(a => el('option', { value: a.id, text: a.email })));
+  accountPicker.value = current.id || '';
+  accountPicker.addEventListener('change', async () => {
+    try { await action('/accounts/default', { account: accountPicker.value, purpose: 'library' }); refreshAll(); }
+    catch (error) { accountPicker.value = current.id || ''; toast(error.message || 'Could not switch account', 'error'); }
+  });
+  const addAccount = button('Add account', () => signIn(addAccount, 'Add account', next => {
+    if ((next.accounts || []).length <= accounts.length) return false;
+    toast('Google account added', 'success'); refreshAll(); return true;
+  }), 'btn quiet');
+  addAccount.disabled = !onSignInHost();
+  addAccount.title = onSignInHost() ? 'Sign in to another Google account' : 'Open Library on the Kairos host computer to add an account';
+  const enableSending = button('Reconnect to send email', () => signIn(enableSending, 'Reconnect to send email', next => {
+    if (!(next.accounts || []).find(a => a.id === current.id)?.can_send_email) return false;
+    toast(`${current.email} can now send email`, 'success'); refreshAll(); return true;
+  }), 'btn quiet');
+  enableSending.hidden = !current.id || current.can_send_email;
+  enableSending.disabled = !onSignInHost();
+  enableSending.title = `Sign in again as ${current.email} and approve sending email`;
   const disconnect = button('Disconnect', async () => {
-    if (await confirmDialog({ title: 'Disconnect Google?', message: 'Kairos will forget the account tokens. Files stay in Google Drive.', confirmLabel: 'Disconnect' })) {
-      await api(`${BASE}/connection`, { method: 'DELETE' }); refreshAll();
+    if (await confirmDialog({ title: `Disconnect ${current.email || 'Google'}?`, message: 'Kairos will forget this account\'s tokens. Files stay in Google Drive, and other connected accounts are unaffected.', confirmLabel: 'Disconnect' })) {
+      await api(`${BASE}/connection?account=${encodeURIComponent(current.id || '')}`, { method: 'DELETE' }); refreshAll();
     }
   }, 'btn quiet');
   main.append(el('div', { class: 'google-toolbar' }, [search, kind, gridButton, listButton, button('Refresh', () => load())]),
     breadcrumbs, selectionBar, statusLine,
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
-  host.append(el('div', { class: 'google-account-line' }, [el('strong', { text: status.email || 'Google account' }), disconnect]),
+  host.append(el('div', { class: 'google-account-line' }, [
+    accounts.length > 1 ? accountPicker : el('strong', { text: status.email || 'Google account' }),
+    el('span', { class: 'meta', text: current.can_send_email ? 'Can send email' : 'Cannot send email yet' }),
+    enableSending, addAccount, disconnect]),
     el('div', { class: 'google-browser' }, [rail, main]));
   api(`${BASE}/drive/storage`).then(result => {
     const quota = result.storageQuota || {};

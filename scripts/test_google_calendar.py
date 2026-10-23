@@ -111,10 +111,10 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
         from urllib.parse import parse_qs, urlsplit
         url = google.start_sign_in("http://127.0.0.1:8420/api/google/oauth/callback")
         args = parse_qs(urlsplit(url).query)
-        self.assertEqual(args["prompt"], ["consent"])
+        self.assertEqual(args["prompt"], ["consent select_account"])
         self.assertIn(google.CALENDAR_SCOPE, args["scope"][0].split())
         await google.finish_sign_in(args["state"][0], "code", "http://127.0.0.1:8420/api/google/oauth/callback")
-        self.assertIn(google.CALENDAR_SCOPE, self.data["granted_scopes"])
+        self.assertIn(google.CALENDAR_SCOPE, google.status()["granted_scopes"])
         result = await self.web("/api/google/status")
         self.assertTrue(result.json()["calendar_connected"])
         self.assertNotIn("refresh_token", result.json())

@@ -1704,6 +1704,9 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 .google-field-row input, .google-toolbar input[type='search'] { min-width: min(100%, 220px); flex: 1; }
 .google-account-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); }
 .google-account-line strong { color: var(--text); font-size: 13px; }
+.google-account-line { flex-wrap: wrap; justify-content: flex-start; }
+.google-account-line > :first-child { margin-right: auto; }
+.google-account-line select { max-width: 280px; }
 .google-toolbar { padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); }
 .google-toolbar select { min-width: 100px; }
 .google-trash-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; }

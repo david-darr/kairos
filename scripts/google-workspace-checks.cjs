@@ -16,6 +16,24 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await waitFor("document.querySelectorAll('.google-file-row').length === 8");
   await waitFor("document.querySelector('.google-thumbnail img')?.naturalWidth > 0");
   assert.equal(await js("document.querySelectorAll('.google-rail .google-section').length"), 5);
+  // Several Google accounts: pick one for Library, add more, see which can send.
+  assert.deepEqual(await js("[...document.querySelectorAll('.google-account-line select option')].map(o => o.textContent)"),
+    ['demo@example.com', 'coach.demo@example.com']);
+  const accountButtons = await js("[...document.querySelectorAll('.google-account-line button')].filter(b => !b.hidden).map(b => b.textContent)");
+  assert.ok(accountButtons.includes('Add account') && accountButtons.includes('Disconnect'), label + ' account actions: ' + accountButtons);
+  assert.ok(!accountButtons.includes('Reconnect to send email'), label + ' sending account needs no reconnect');
+  assert.ok(await js("document.querySelector('.google-account-line').textContent.includes('Can send email')"));
+  let before = writes.length;
+  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'coach'; s.dispatchEvent(new Event('change')); })()");
+  await requestAfter(writes, before, w => w.path === '/api/google/accounts/default' && JSON.parse(w.body || '{}').account === 'coach');
+  await waitFor("document.querySelector('.google-account-line select')?.value === 'coach' && document.querySelectorAll('.google-file-row').length === 8");
+  assert.ok(await js("[...document.querySelectorAll('.google-account-line button')].some(b => !b.hidden && b.textContent === 'Reconnect to send email')"));
+  assert.deepEqual(await overflow(), [], label + ' account bar fits');
+  await capture(label + '-drive-accounts');
+  before = writes.length;
+  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'demo'; s.dispatchEvent(new Event('change')); })()");
+  await requestAfter(writes, before, w => w.path === '/api/google/accounts/default' && JSON.parse(w.body || '{}').account === 'demo');
+  await waitFor("document.querySelector('.google-account-line select')?.value === 'demo' && document.querySelectorAll('.google-file-row').length === 8");
   assert.ok(await js("document.querySelector('.google-storage').textContent.includes('2.0 GB')"));
   assert.deepEqual(await overflow(), [], label + ' Drive grid fits');
   await capture(label + '-drive-grid');

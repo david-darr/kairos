@@ -51,6 +51,8 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     "read_spec list_documents read_document list_contacts list_task_runs create_note update_note delete_note "
     "create_task update_task delete_task create_event update_event delete_event save_generated_image run_code "
     "browse save_generated_file google_drive google_sheets google_forms google_calendar agent_remember agent_ask "
+    # Reviewed 2026-10-23: send_email asks through the broker itself, like google_*.
+    "list_email_accounts send_email "
     # Helpers (roadmap phase 5, 2026-10-06): delegate and collect.
     "delegate helper_results computer "
     # Agent mentions (2026-10-08): hand work to a named agent from a chat.

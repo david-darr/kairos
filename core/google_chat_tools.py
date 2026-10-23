@@ -35,6 +35,19 @@ async def execute(area: str, args: dict, ctx: ToolContext) -> str:
         )
         if decision.behavior != "allow":
             return f"Not run: {decision.reason or 'not approved'}"
+    account = args.get("account")
+    if account is not None and (not isinstance(account, str) or len(account) > 320):
+        return "Enter a connected Google account address, or omit account."
+    try:
+        with google.use_account(account):
+            return await _run(area, action, args, ctx)
+    except google.GoogleError as problem:
+        if account:
+            return f"Not run: {problem}"
+        raise
+
+
+async def _run(area: str, action: str, args: dict, ctx: ToolContext) -> str:
     if area == "drive":
         if action == "list":
             result = await google.list_files(query=args.get("query", ""), parent=args.get("parent"),

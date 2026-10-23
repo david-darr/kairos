@@ -51,6 +51,11 @@ class FormActionRequest(BaseModel):
     published: bool | None = None
 
 
+class DefaultAccountRequest(BaseModel):
+    account: str
+    purpose: Literal["library", "calendar"] = "library"
+
+
 class CalendarSettingsRequest(BaseModel):
     calendar_ids: list[str]
 
@@ -84,8 +89,19 @@ async def configure(body: ClientRequest, user: str = Depends(require_admin)) -> 
 
 
 @router.delete("/connection")
-async def disconnect(user: str = Depends(require_admin)) -> dict:
-    return google.disconnect()
+async def disconnect(account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    try:
+        return google.disconnect(account)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
+
+
+@router.post("/accounts/default")
+async def default_account(body: DefaultAccountRequest, user: str = Depends(require_admin)) -> dict:
+    try:
+        return google.set_default(body.account, body.purpose)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.post("/oauth/start")
