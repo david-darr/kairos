@@ -1,4 +1,5 @@
 import { mobileOn, phone, edgeBlur } from './mobileShared.js';
+import { mountPhoneMotion } from './mobilePhoneMotion.js';
 import { refreshActivity } from './mobileActivity.js';
 import { mountTabBar, currentTabItem } from './mobileTabBar.js';
 
@@ -15,6 +16,7 @@ export function mountMobileChrome() {
   const frost = edgeBlur('top'); frost.classList.add('ms-global-frost');
   document.body.append(frost);
   mountTabBar();
+  mountPhoneMotion();
   const sync = () => { frost.hidden = !mobileOn(); refreshActivity(); };
   // Identity and mode can rebuild the sidebar independently of navigation;
   // focus that was inside it lands on the tab bar's current item.

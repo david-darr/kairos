@@ -417,7 +417,18 @@ async function run(ctx) {
   await navigate('calendar'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
   await js("document.querySelector('.ms-dock button').focus(); document.querySelector('.ms-dock button').click()");
   await waitFor("!!document.querySelector('.cal-event-dialog.ms-sheet-surface')");
-  ok(await js("getComputedStyle(document.querySelector('.cal-event-dialog')).animationName === 'none'"), 'Reduced motion removes the sheet rise');
+  // Phase 3 uses phase 1's reduced-motion contract: a 120ms opacity fade,
+  // with no translated frames or transition, rather than removing the fade.
+  const sheetMotion = await js(`(() => {
+    const node = document.querySelector('.cal-event-dialog'), style = getComputedStyle(node);
+    return { name: style.animationName, duration: style.animationDuration, transform: style.transform,
+      transition: style.transitionDuration,
+      frames: node.getAnimations().filter(a => a.effect?.target === node).flatMap(a => a.effect.getKeyframes()).map(f => ({ transform: f.transform || 'none', opacity: f.opacity })) };
+  })()`);
+  eq(sheetMotion.name, 'rd-opacity', 'Reduced motion uses the shared opacity fade');
+  eq(sheetMotion.duration, '0.12s', 'Reduced motion fades sheets for 120ms');
+  eq(sheetMotion.frames.map(f => f.opacity), ['0', '1'], 'The sheet animation changes opacity only');
+  ok(sheetMotion.transform === 'none' && /^0s(, 0s)*$/.test(sheetMotion.transition) && sheetMotion.frames.length >= 2 && sheetMotion.frames.every(f => f.transform === 'none'), 'Reduced motion removes all sheet movement: ' + JSON.stringify(sheetMotion));
   await press('Escape'); await waitFor("!document.querySelector('.cal-event-dialog')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // Resize cycle: the live search node moves to the dock and back, never cloned, never duplicated.
@@ -596,7 +607,7 @@ async function run(ctx) {
     ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0, 12],
     ['browser or Android (no fold)', 393, 852, 852, 47, 34, 0],
   ];
-  // 2026-10-21 (David): popups sit cleanly above the page, titles sit on the top row on the right,
+  // 2026-10-23 (David, Motion board): popups sit cleanly above the page, titles lead the top row,
   // and no tab's first content starts above the bottom of that row.
   const popupClear = async (selector, label, top) => {
     const r = await js(`(() => {
@@ -614,21 +625,31 @@ async function run(ctx) {
     })()`);
     ok(r.open && !r.bad.length && r.ownHit && r.ownTop >= top, `${label}: sits above the page, its own header clear of the status bar and of the page header: ${JSON.stringify(r)}`);
   };
-  // The top row: 44px tall, 6px under the status bar (plus the nudge). With the avatar gone it holds the title alone.
+  // The top row clears the status bar by 6px (plus the nudge). Root titles
+  // lead; up to two round actions follow. Pushed Settings has Back on the left.
   const titleRow = async (label, rowTop) => {
     const r = await js(`(() => {
       const box = n => { const b = n.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
-      const row = { l: 0, r: 16, t: ${rowTop}, b: ${rowTop} + 44 };
+      const row = { l: 20, r: innerWidth - 20, t: ${rowTop}, b: ${rowTop} + 46 };
       const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
+      const header = title?.closest('.view-header, .agents-workspace-bar, .settings-titlebar, .ms-header-row');
+      const headerButtons = [...(header?.querySelectorAll('button') || [])].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().top < row.b);
+      const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
+      const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
       const v = document.getElementById('view-content');
-      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
+      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth };
+      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
     })()`);
+    // Home's independently redesigned hero has no shell title; keep checking
+    // its first-content clearance without treating a section heading as one.
+    if (!label.endsWith(': home')) ok(r.title && r.text, `${label}: the page title is present`);
     if (r.title) {
-      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.r - (r.width - 16)) <= 1 && r.title.l >= r.row.r - 0.5,
-        `${label}: the title sits on the top row, on the right: ${JSON.stringify(r)}`);
+      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.l - r.row.l) <= 1 && r.title.r <= r.row.r + 1 && r.align === 'left' && r.italic === 'italic' && /serif/i.test(r.family),
+        `${label}: the serif italic title leads the top row on the left: ${JSON.stringify(r)}`);
+      ok(r.buttons.filter(b => !b.back).length <= 2, `${label}: at most two header actions`);
+      for (const b of r.buttons) ok(b.r - b.l >= 44 && b.b - b.t >= 44 && b.radius >= (b.b - b.t) / 2 && b.l >= r.row.l - 1 && b.r <= r.row.r + 1 && b.t >= r.row.t - 1 && b.b <= r.row.b + 1 && (b.back ? Math.abs(b.l - r.row.l) <= 1 : b.l >= r.title.r - 1), `${label}: round header buttons clear the title and stay in the top row: ${JSON.stringify(b)}`);
     }
     ok(!r.first || r.first.t >= r.row.b - 0.5, `${label}: the first content starts below the top row: ${JSON.stringify(r.first)} row ${JSON.stringify(r.row)}`);
   };

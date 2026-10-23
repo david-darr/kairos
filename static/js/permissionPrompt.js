@@ -14,6 +14,9 @@
 import { showQuestionPrompt, dismissQuestionPrompt } from './questionPrompt.js';
 import { api, el } from "./api.js";
 
+import { mobileOn } from './mobileShared.js';
+import { mountSheetSurface } from './mobileSheet.js';
+
 let open = null;
 document.addEventListener('kairos:permission-closed', event => {
   if (open?.dataset.requestId !== event.detail.id) return;
@@ -67,6 +70,16 @@ export function showPermissionPrompt(request, onAnswered, options = {}) {
   }
   dialog.dataset.requestId = request.id;
 
+  const disposeSurface = !inline && mobileOn() ? mountSheetSurface(dialog, () => dialog.close()) : () => {};
+  if (!inline && mobileOn()) {
+    const close = el('button', { type: 'button', class: 'ms-sheet-close', text: 'Close', onclick: () => dialog.close() });
+    dialog.querySelector('.permission-head').append(close);
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const r = dialog.getBoundingClientRect();
+      if (event.clientY < r.top || event.clientX < r.left || event.clientX > r.right || event.clientY > r.bottom) dialog.close();
+    });
+  }
   let answered = false;
   const expiry = request.expires_at ? setTimeout(() => {
     answered = true;
@@ -105,6 +118,7 @@ export function showPermissionPrompt(request, onAnswered, options = {}) {
 
   dialog.addEventListener("close", () => {
     clearTimeout(expiry);
+    disposeSurface();
     if (open === dialog) open = null;
     dialog.remove();
     if (!answered && dialog.dataset.resolved !== 'true') {
