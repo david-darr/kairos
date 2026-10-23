@@ -43,9 +43,11 @@ export async function render(container) {
   form.querySelector('summary').dataset.mobileCreateLabel = 'Connect an email account';
   const list = el("div", { id: "email-accounts-list", style: "margin-top:14px;" });
   const triage = el("div", { id: "email-triage", style: "margin-top:14px;" });
-  wrap.append(header, triage, form, list);
+  const sending = el("div", { id: "email-sending", style: "margin-top:14px;" });
+  wrap.append(header, triage, sending, form, list);
   container.append(wrap);
   refreshTriage(triage);
+  refreshSending(sending, form);
 
   addBtn.addEventListener("click", async () => {
     // Was a silent `return` on incomplete input — the button just did
@@ -67,6 +69,7 @@ export async function render(container) {
     });
     emailInput.value = ""; passInput.value = ""; imapHost.value = ""; smtpHost.value = "";
     await refresh(list, emailInput);
+    refreshSending(sending, form);
     toast("Account added", "success");
   });
 
@@ -135,6 +138,72 @@ async function refreshTriage(host) {
       runBtn,
     ]),
     ...body,
+  ]));
+}
+
+// Every address agents can send from (send_email). Google accounts are signed
+// in through the same flow as Library, so people find them where they look
+// for email. Admin only, like Google itself; hidden for everyone else.
+async function refreshSending(host, form) {
+  let data;
+  try { data = await api("/api/email/sending-accounts"); }
+  catch (_) { host.replaceChildren(); return; }
+  if (!host.isConnected) return;
+  const { signIn, onSignInHost } = await import("../googleWorkspace.js");
+  const again = () => refreshSending(host, form);
+  const openLibrary = () => import("../app.js").then(m => m.switchTab("library", { section: "google" }));
+
+  const rows = data.accounts.map(account => {
+    const google = account.via === "Google";
+    const allow = el("button", { type: "button", class: "btn", text: "Allow sending" });
+    allow.addEventListener("click", async () => {
+      try {
+        await signIn(allow, "Allow sending", next => {
+          if (!(next.accounts || []).find(a => a.id === account.id)?.can_send_email) return false;
+          toast(`${account.email} can now send email`, "success"); again(); return true;
+        });
+      } catch (e) { toast(e.message || "Google sign-in failed", "error"); }
+    });
+    allow.disabled = !onSignInHost();
+    allow.title = `Sign in again as ${account.email} and approve sending email`;
+    return el("div", { class: "email-sending-row", "data-mobile-row": "" }, [
+      el("div", { class: "email-sending-address" }, [
+        el("div", { class: "title", text: account.email }),
+        el("div", { class: "meta", text: google
+          ? (account.can_send ? "Google · can send" : "Google · needs permission to send")
+          : "Email tab account · can send" }),
+      ]),
+      google && !account.can_send ? allow : null,
+    ]);
+  });
+
+  const addGoogle = el("button", { type: "button", class: "btn primary", text: data.google_configured ? "Add Google account" : "Set up Google" });
+  addGoogle.addEventListener("click", async () => {
+    if (!data.google_configured) { openLibrary(); return; }
+    const before = data.accounts.filter(a => a.via === "Google").length;
+    try {
+      await signIn(addGoogle, "Add Google account", next => {
+        if ((next.accounts || []).length <= before) return false;
+        toast("Google account added", "success"); again(); return true;
+      });
+    } catch (e) { toast(e.message || "Google sign-in failed", "error"); }
+  });
+  addGoogle.disabled = data.google_configured && !onSignInHost();
+  if (addGoogle.disabled) addGoogle.title = "Open Kairos on the computer it runs on to sign in to Google";
+  const addOther = el("button", { type: "button", class: "btn", text: "Add another provider", onclick: () => {
+    form.open = true; form.querySelector("input")?.focus();
+  }});
+
+  host.replaceChildren(el("div", { class: "glass bracket card email-sending-card" }, [
+    el("div", { class: "card-row", style: "justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;" }, [
+      el("div", {}, [
+        el("div", { class: "title", text: "Sending accounts" }),
+        el("div", { class: "meta", style: "margin-top:3px;", text: "Addresses your agents can send email from. Gmail and Google Workspace sign in with Google; other providers use the form below." }),
+      ]),
+      el("div", { class: "card-row", style: "gap:6px;flex-wrap:wrap;" }, [addGoogle, addOther]),
+    ]),
+    ...(rows.length ? rows : [el("div", { class: "meta", style: "margin-top:8px;", text: "No sending accounts yet." })]),
+    data.google_configured ? null : el("div", { class: "meta", style: "margin-top:8px;", text: "Google needs a one-time OAuth client setup in Library first." }),
   ]));
 }
 

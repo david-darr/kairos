@@ -16,7 +16,7 @@ const button = (label, onClick, cls = 'btn') => el('button', { type: 'button', c
 });
 
 // Opens Google sign-in, then polls status until done(status) says it finished.
-async function signIn(control, idleLabel, done) {
+export async function signIn(control, idleLabel, done) {
   const result = await action('/oauth/start', {});
   if (window.jarvis?.openGoogleSignIn) {
     if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
@@ -32,7 +32,7 @@ async function signIn(control, idleLabel, done) {
   poll();
 }
 
-const onSignInHost = () => Boolean(window.jarvis?.openGoogleSignIn)
+export const onSignInHost = () => Boolean(window.jarvis?.openGoogleSignIn)
   || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
 
 export async function renderGoogleWorkspace(container, header, tabs) {

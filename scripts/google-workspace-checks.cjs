@@ -12,6 +12,22 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   };
   const assert = require('node:assert/strict');
   const writeStart = writes.length;
+  // Email tab: every sending address, and where to add more (2026-10-23).
+  await navigate('email');
+  await waitFor("document.querySelectorAll('.email-sending-row').length === 3");
+  assert.deepEqual(await js("[...document.querySelectorAll('.email-sending-row .title')].map(n => n.textContent)"),
+    ['demo@example.com', 'coach.demo@example.com', 'office@example.org']);
+  assert.deepEqual(await js("[...document.querySelectorAll('.email-sending-row')].map(r => !!r.querySelector('button'))"), [false, true, false],
+    label + ' only the Google account without send permission offers Allow sending');
+  assert.ok(await js("[...document.querySelectorAll('.email-sending-card button')].some(b => b.textContent === 'Add Google account')"));
+  await js("[...document.querySelectorAll('.email-sending-card button')].find(b => b.textContent === 'Add another provider').click()");
+  await waitFor("document.querySelector('.email-view details.disclosure-panel')?.open === true");
+  assert.deepEqual(await overflow(), [], label + ' Email sending accounts fit');
+  // Every Email section spans the view: a stale grid placement squeezes the page without overflowing.
+  const narrow = await js("(() => { const view = document.querySelector('.email-view').clientWidth; return ['#email-triage', '#email-sending', '.email-view > details.disclosure-panel'].filter(s => document.querySelector(s).getBoundingClientRect().width < view * (innerWidth > 900 ? 0.25 : 0.9)); })()");
+  assert.deepEqual(narrow, [], label + ' Email sections are full width');
+  await capture(label + '-email-sending-accounts');
+  await js("document.querySelector('.email-view details.disclosure-panel').open = false");
   await navigate('library', { section: 'google' });
   await waitFor("document.querySelectorAll('.google-file-row').length === 8");
   await waitFor("document.querySelector('.google-thumbnail img')?.naturalWidth > 0");

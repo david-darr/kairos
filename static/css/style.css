@@ -1707,6 +1707,10 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 .google-account-line { flex-wrap: wrap; justify-content: flex-start; }
 .google-account-line > :first-child { margin-right: auto; }
 .google-account-line select { max-width: 280px; }
+.email-sending-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+.email-sending-row:first-of-type { margin-top: 10px; }
+.email-sending-address { min-width: 0; }
+.email-sending-address .title { overflow-wrap: anywhere; font-size: 13px; }
 .google-toolbar { padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); }
 .google-toolbar select { min-width: 100px; }
 .google-trash-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; }

@@ -1396,6 +1396,11 @@
     if (route.startsWith("/api/vault/") || route.startsWith("/api/file-checkpoints/vault-")) { const answer = vaultRoute(route, url); if (answer !== undefined) return answer; }
     if (route === "/api/email/triage") return { generated_at: now, scanned: 12, items: state.empty ? [] : [{ subject: "Project check-in this afternoon", from: "team@example.test", reason: "An upcoming meeting needs your review." }] };
     if (route === "/api/email/accounts") return [];
+    if (route === "/api/email/sending-accounts") return { google_configured: true, accounts: [
+      { email: "demo@example.com", via: "Google", id: "demo", can_send: true, note: "" },
+      { email: "coach.demo@example.com", via: "Google", id: "coach", can_send: false, note: "reconnect it in Library to allow sending" },
+      { email: "office@example.org", via: "Email tab", id: "smtp1", can_send: true, note: "" },
+    ] };
     if (route === "/api/channels") return [];
     // Settings > Hooks (2026-10-05): a command that blocked a tool, and a
     // signed post that is switched off.

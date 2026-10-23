@@ -24,10 +24,21 @@
 .kairos-redesign .email-view > * { margin: 0 !important; min-width: 0; }
 .kairos-redesign .email-view > .view-header { grid-column: 1 / -1; padding-bottom: 6px; margin-bottom: 0; }
 .kairos-redesign .email-view > #email-triage { grid-column: 1; grid-row: 2 / 5; }
-.kairos-redesign .email-view.email-view > details.disclosure-panel { grid-column: 2; grid-row: 2; }
-.kairos-redesign .email-view > #email-accounts-list { grid-column: 2; grid-row: 3; }
+.kairos-redesign .email-view > #email-sending { grid-column: 2; grid-row: 2; }
+.kairos-redesign .email-view.email-view > details.disclosure-panel { grid-column: 2; grid-row: 3; }
+.kairos-redesign .email-view > #email-accounts-list { grid-column: 2; grid-row: 4; }
 .kairos-redesign .email-view > .view-header h2 { font-size: clamp(36px, 4.2vw, 52px); }
 .kairos-redesign .email-view > .view-header .sub { margin-top: 8px; font-size: 15px; }
+
+/* -- Sending accounts: every address agents can send from ------------------------------------ */
+.kairos-redesign .email-sending-card {
+  padding: 16px 18px 8px; background-color: var(--rd-surface); border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign .email-sending-card > .card-row > div > .title {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 22px; line-height: 1.1; color: var(--rd-ink);
+}
+.kairos-redesign .email-sending-card .meta { color: var(--rd-ink-dim); font-size: 12.5px; }
+.kairos-redesign .email-sending-row { border-top-color: var(--rde-line); }
 
 /* -- Important today ----------------------------------------------------------------------------- */
 .kairos-redesign .email-triage-card {
@@ -119,11 +130,13 @@
 @media (max-width: 900px) {
   .kairos-redesign .email-view { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .kairos-redesign .email-view > #email-triage,
+  .kairos-redesign .email-view > #email-sending,
   .kairos-redesign .email-view.email-view > details.disclosure-panel,
   .kairos-redesign .email-view > #email-accounts-list { grid-column: 1; grid-row: auto; }
 }
 @media (max-width: 768px) {
   .kairos-redesign .email-triage-card { padding: 16px 16px 8px; }
+  .kairos-redesign .email-sending-card { padding: 16px 16px 8px; }
   .kairos-redesign .email-triage-card > .card-row > div > .title { font-size: 26px; }
   .kairos-redesign .email-triage-card button.btn.btn.btn.btn { min-height: 44px; }
   .kairos-redesign .email-view.email-view > details.disclosure-panel { padding: 12px 16px; }

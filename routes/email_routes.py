@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core import builtin_tasks, email_triage
-from core.middleware import require_user
+from core.middleware import require_admin, require_user
 from services.email_service import email_service
 
 router = APIRouter(prefix="/api/email", tags=["email"])
@@ -28,6 +28,14 @@ class SendRequest(BaseModel):
 @router.get("/accounts")
 async def list_accounts(user: str = Depends(require_user)) -> list[dict]:
     return email_service.list_accounts()
+
+
+# Every address agents can send from (send_email), Google sign-ins included,
+# so the Email tab is where people look for and add sending accounts.
+@router.get("/sending-accounts")
+async def sending_accounts(user: str = Depends(require_admin)) -> dict:
+    from core import email_send, google_workspace
+    return {"accounts": email_send.accounts(), "google_configured": google_workspace.status()["configured"]}
 
 
 # Daily importance triage (David's ask 2026-09-06). Registered before the
