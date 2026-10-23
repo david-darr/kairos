@@ -463,7 +463,7 @@ function attachToInFlight(sessionId, messages, replyCard, replyBody, sendBtn) {
     if (entry.permission && entry.permission.id !== shownPermission) {
       const request = entry.permission;
       shownPermission = request.id;
-      showPermissionPrompt(request, () => chatStream.clearPermission(sessionId, request.id));
+      showPermissionPrompt(request, () => chatStream.clearPermission(sessionId, request.id), request.kind === 'question' ? { dock: composerRefs?.questionHost } : {});
     } else if (!entry.permission && shownPermission) {
       dismissPermissionPrompt(shownPermission);
       shownPermission = null;
@@ -598,7 +598,9 @@ export async function render(container, tabId, options = {}) {
   // anyway means a future bug in that call order fails safe (no leaked
   // listeners) instead of silently accumulating one per tab visit.
   activeUnsubscribers = [];
-  const mountSubscriptions = activeUnsubscribers;
+  const turnSubscriptions = activeUnsubscribers;
+  // Keep the remote-start listener alive when switching chats clears turn subscriptions.
+  const mountSubscriptions = [];
   // Every fresh landing on the Chat tab starts at the welcome state, even
   // if a session was open the last time this tab was visited — matches a
   // typical chat app's "new chat by default" convention rather than
@@ -828,7 +830,7 @@ export async function render(container, tabId, options = {}) {
     const replyCard = messageCard('assistant', '');
     replyCard.dataset.liveTurn = 'true';
     messages.appendChild(replyCard);
-    mountSubscriptions.push(attachToInFlight(sessionId, messages, replyCard, replyCard.querySelector('.msg-body'),
+    activeUnsubscribers.push(attachToInFlight(sessionId, messages, replyCard, replyCard.querySelector('.msg-body'),
       document.getElementById('chat-send')));
   }));
   const handoffs = watchAgentHandoffs(messages, () => activeSessionId, () => syncChatLayout(messages));
@@ -1089,6 +1091,7 @@ export async function render(container, tabId, options = {}) {
   const disposeMobileComposer = mountMobileComposer({ composer, input, attachmentHost: attachStrip,
     context: () => document.getElementById('project-picker-label')?.textContent || 'Current vault',
     busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
+  const questionHost = el('div', { class: 'chat-question-host', hidden: true, 'aria-live': 'polite' });
   const queueHost = el('div', { class: 'chat-queue', hidden: true, 'aria-live': 'polite' });
   const composerHint = el('div', { class: 'composer-hint' });
   const syncComposerHint = () => {
@@ -1102,7 +1105,7 @@ export async function render(container, tabId, options = {}) {
     text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
   composerOptions.append(permissionNotice);
   const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
-  const dock = el('div', { class: 'chat-composer-dock' }, [queueHost, attachStrip, composer]);
+  const dock = el('div', { class: 'chat-composer-dock' }, [questionHost, queueHost, attachStrip, composer]);
   const phoneComposer = matchMedia('(max-width: 768px)');
   const syncComposerMenu = () => {
     // Re-parent the same controls so state and handlers survive live resizing.
@@ -1119,7 +1122,7 @@ export async function render(container, tabId, options = {}) {
   };
   syncComposerMenu();
   phoneComposer.addEventListener('change', syncComposerMenu);
-  composerRefs = { messages, input, sendBtn, attachStrip, queueHost };
+  composerRefs = { messages, input, sendBtn, attachStrip, queueHost, questionHost };
   main.append(messages, dock);
   const timeline = mountChatTimeline(main, messages, () => activeSessionId);
   activeTimeline = timeline;
@@ -1324,7 +1327,8 @@ export async function render(container, tabId, options = {}) {
     // A live microphone must never outlive the view that owns it.
     if (openMic) { openMic.stop(); openMic = null; }
     mountSubscriptions.forEach((unsub) => unsub());
-    if (activeUnsubscribers === mountSubscriptions) activeUnsubscribers = [];
+    turnSubscriptions.forEach((unsub) => unsub());
+    if (activeUnsubscribers === turnSubscriptions) activeUnsubscribers = [];
   };
   options.registerCleanup?.(cleanup);
 
