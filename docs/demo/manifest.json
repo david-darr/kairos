@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "22cc256451e41a45484638eae5b41f3ee643dba95b86146e9a655761debff584",
+  "app.js": "d24cd33459a832205c41bb5b6ffacb701d7b0d6b28992d27f1ede07dcb305968",
   "fixtures.js": "18aa62234f9cadfc94998a60f502911a27e31486a0c30a7ba0bf27d33ebffd68",
   "index.html": "655ad70c8c28baa1748e3cf949ac130a82dc8f3015590d5953388dc06444cba8",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -760,9 +760,9 @@
   "static/vendor/ascii-magic/pieces/snowfall.js": "a56bfe11458b9eadd47620fd6888a23d1a464efa26fdb4e45662f8e88cda398b",
   "static/vendor/ascii-magic/runtime/canvas.js": "7eaabbf67ad07c72d86aaf1688465ba2118a773393b0b02591a10254c942fa8c",
   "static/vendor/ascii-magic/runtime/glyphs.js": "802aba97dc2194785fb0086b91b98b0b4ae4210181000de525d18cc9f191ff8c",
-  "tabs/crm/tab.json": "de16615ffca89a4afec2ac4ef6c1a1a1a55a69404c99d735f640217dda829387",
+  "tabs/crm/tab.json": "a7613f0ad82f70ca6bc5506745c2f32b957033422746b13a3e2dfeb78e03277a",
   "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5",
-  "tabs/crm/view.js": "bedb7532228a5c0c0924802b6cfe4b81771d3fc17ae08bb3f1f1f9949cd928df",
+  "tabs/crm/view.js": "440d3e53e1ca6fd9ef85bc4b23ab442902a77e399f156de15de21b2ca14f9be2",
   "tabs/school/tab.json": "97ca66d011d3f675e7e725bcc758cb9c8c77e0a132b175728979fb8145453ed0",
   "tabs/school/view.js": "e04fb7d29d810825692c472a8d3c923d5a2bac75936b465be0572890dc5bceb3"
  }
