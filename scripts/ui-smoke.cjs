@@ -1844,7 +1844,8 @@ app.whenReady().then(async () => {
         await waitFor("document.querySelector('.settings-window').getAnimations().length === 0");
         await js(`document.querySelector(".settings-titlebar-btn[title='Close']").click()`);
       }
-      await waitFor("document.querySelector('#view-content')?.dataset.view === 'tasks' && !document.querySelector('.modal-backdrop:not(.hidden) .settings-window') && !document.querySelector('.settings-mobile-page')");
+      await waitFor("document.querySelector('#view-content')?.dataset.view === 'tasks' && !document.querySelector('.modal-backdrop:not(.hidden) .settings-window') && !document.querySelector('.settings-mobile-page')")
+        .catch(async error => { throw new Error(label + ' ' + error.message + ' State: ' + JSON.stringify(await js("({ view: document.querySelector('#view-content')?.dataset.view, cls: document.querySelector('#view-content')?.className, mobileView: document.querySelector('#view-content')?.dataset.mobileView, modalOpen: !!document.querySelector('.modal-backdrop:not(.hidden) .settings-window'), blocker: !!document.querySelector('.confirm-panel, dialog[open]'), root: document.documentElement.dataset.view })"))); });
       assert.equal(await js("document.querySelector('#view-content').dataset.view"), "tasks", label + " leaving Settings stays on the tab you were on");
       assert.ok(await js("document.querySelector('.nav-item[data-tab=tasks]').classList.contains('active')"), label + " and that tab is still highlighted");
     }
