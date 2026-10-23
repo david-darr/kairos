@@ -269,6 +269,8 @@ def enqueue(run_id, kind, permission=None):
         text = {"completed": "Your reply is ready. Tap to open the chat.", "failed": "A chat could not finish. Tap to review.",
                 "permission": "A chat needs your permission. Tap to review before the request expires.",
                 "test": "Notifications are enabled on this device."}[kind]
+        if kind == "permission" and (permission or {}).get("kind") == "question":
+            text = "A chat is waiting for your answer. Tap to respond."
         payload = {"title": "Kairos", "body": text, "url": "/?chat=" + run["session_id"],
                    "tag": "kairos-" + run_id, "kind": kind, "expires_at": expiry}
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (run["owner"],)).fetchall():

@@ -31,6 +31,7 @@ from core.atomic_io import write_json_atomic
 
 PERMISSIONS_FILE = os.path.join(DATA_DIR, "permissions.json")
 DEFAULT_TIMEOUT_SECONDS = 120
+QUESTION_TIMEOUT_SECONDS = 1800
 AUDIT_LIMIT = 500
 
 _lock = asyncio.Lock()
@@ -49,12 +50,18 @@ class Request:
     title: str
     description: str
     choices: list[dict]
+    kind: str = "permission"
+    questions: list | None = None
     expires_at: float = field(default_factory=lambda: time.time() + DEFAULT_TIMEOUT_SECONDS)
     answer: asyncio.Future = field(default_factory=asyncio.Future)
 
     def payload(self) -> dict:
         """What the surface shows. Text only - never markup, never executed."""
-        return {"id": self.id, "tool": self.tool, "target": self.target,
+        if self.kind == "question":
+            return {"id": self.id, "kind": self.kind, "tool": self.tool,
+                    "title": "Waiting for your response", "questions": self.questions,
+                    "choices": [], "arguments": {}, "expires_at": self.expires_at}
+        return {"kind": self.kind, "id": self.id, "tool": self.tool, "target": self.target,
                 "title": self.title, "description": self.description,
                 "arguments": _clip(self.arguments, 100000 if self.tool == "creative_tools" else 4000), "choices": self.choices,
                 "expires_at": self.expires_at}
@@ -291,7 +298,9 @@ def close_channel(surface: str) -> None:
     _channels.pop(surface, None)
     for request in [item for item in _pending.values() if item.surface == surface]:
         if not request.answer.done():
-            request.answer.set_result(Decision("deny", "The window asking for this closed."))
+            request.answer.set_result(QuestionOutcome("skipped", reason="The window asking for this closed.")
+                                      if request.kind == "question" else
+                                      Decision("deny", "The window asking for this closed."))
 
 
 def drop_session(surface: str) -> None:
@@ -396,7 +405,7 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
     """Resolve a pending request. Request ids are server-made, so a model
     cannot answer its own question by guessing one."""
     request = pending_request(request_id)
-    if request is None:
+    if request is None or request.kind == "question":
         return False
     choice = next((item for item in request.choices if item["id"] == choice_id), None)
     if choice is None:
@@ -415,3 +424,95 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
               else f"{request.tool} was refused by the owner.")
     request.answer.set_result(Decision(choice["behavior"], reason, rule))
     return True
+
+
+@dataclass(frozen=True)
+class QuestionOutcome:
+    status: str
+    answers: dict | None = None
+    reason: str = ""
+
+
+def normalize_questions(raw) -> list[dict] | None:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 4:
+        return None
+    result, seen = [], set()
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        text = item.get("question")
+        if not isinstance(text, str) or not text.strip() or len(text.strip()) > 2000:
+            return None
+        text = text.strip()
+        if text in seen:
+            return None
+        seen.add(text)
+        options = item.get("options", [])
+        if not isinstance(options, list) or len(options) > 8:
+            return None
+        normalized, labels = [], set()
+        for option in options:
+            if not isinstance(option, dict) or not isinstance(option.get("label"), str):
+                return None
+            label = option["label"].strip()[:200]
+            if not label or label in labels:
+                return None
+            labels.add(label)
+            description = option.get("description", "")
+            normalized.append({"label": label, "description": description.strip()[:500] if isinstance(description, str) else ""})
+        header = item.get("header", "")
+        result.append({"question": text, "header": header.strip()[:40] if isinstance(header, str) else "",
+                       "multiSelect": item.get("multiSelect") is True, "options": normalized})
+    return result
+
+
+async def ask(*, surface, tool, questions, timeout=QUESTION_TIMEOUT_SECONDS) -> QuestionOutcome:
+    queue = _channels.get(surface)
+    if queue is None:
+        return QuestionOutcome("unavailable", reason="Nobody is here to answer questions in this run.")
+    request = Request(id=uuid.uuid4().hex, surface=surface, tool=tool, target=None,
+                      arguments={}, title="Waiting for your response", description="", choices=[],
+                      kind="question", questions=questions, expires_at=time.time() + timeout)
+    _pending[request.id] = request
+    try:
+        await queue.put(request.payload())
+        return await asyncio.wait_for(asyncio.shield(request.answer), timeout=timeout)
+    except asyncio.TimeoutError:
+        return QuestionOutcome("timeout", reason="Nobody answered within 30 minutes.")
+    finally:
+        _pending.pop(request.id, None)
+        if _channels.get(surface) is queue:
+            queue.put_nowait({"permission_closed": request.id})
+
+
+def waiting(surface: str) -> bool:
+    return any(r.surface == surface and pending_request(r.id) for r in _pending.values())
+
+
+def respond(request_id, *, answers: dict | None, skip: bool, user: str) -> str | None:
+    request = pending_request(request_id)
+    if request is None or request.kind != "question":
+        return "That question is no longer waiting for an answer."
+    cleaned = {}
+    if not skip:
+        questions = request.questions or []
+        if not isinstance(answers, dict) or set(answers) != {q["question"] for q in questions}:
+            return "Answer every question, with no extra answers."
+        def valid(value):
+            return isinstance(value, str) and bool(value.strip()) and len(value.strip()) <= 4000
+        for question in questions:
+            value = answers[question["question"]]
+            if isinstance(value, str) and valid(value):
+                cleaned[question["question"]] = value.strip()
+            elif (question["multiSelect"] and isinstance(value, list) and
+                  1 <= len(value) <= len(question["options"]) + 1 and all(valid(v) for v in value) and
+                  len({v.strip() for v in value}) == len(value)):
+                cleaned[question["question"]] = [v.strip() for v in value]
+            else:
+                return "Each question needs a valid, non-empty answer."
+    status = "skipped" if skip else "answered"
+    data = _load()
+    _record(data, {"decision": status, "tool": request.tool, "kind": "question", "by": user, "request_id": request_id})
+    _save(data)
+    request.answer.set_result(QuestionOutcome(status, answers=None if skip else cleaned))
+    return None

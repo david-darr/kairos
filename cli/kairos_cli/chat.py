@@ -111,3 +111,13 @@ def age(timestamp: float | None) -> str:
         if seconds >= size:
             return f"{int(seconds // size)}{unit} ago"
     return "just now"
+
+
+async def answer_question(conn: Connection, request_id: str, answers=None, skip=False) -> str:
+    try:
+        await conn.post(f"/api/permissions/{request_id}/respond", {"skip": True} if skip else {"answers": answers})
+        return "skipped" if skip else "answered"
+    except KairosError as error:
+        if "no longer waiting" in str(error) or "not found" in str(error):
+            return "gone"
+        raise

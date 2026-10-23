@@ -58,3 +58,31 @@ async def revoke(rule_id: str, user: str = Depends(require_admin)) -> dict:
     if not permissions.revoke(rule_id):
         raise HTTPException(404, "No such rule")
     return {"status": "revoked"}
+
+
+class Response(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answers: dict[str, str | list[str]] | None = None
+    skip: bool = False
+
+
+@router.post("/{request_id}/respond")
+async def respond(request_id: str, body: Response, user: str = Depends(require_user)) -> dict:
+    from core.auth import SINGLE_USER, auth_manager
+    missing = "That question is no longer waiting for an answer."
+    pending = permissions.pending_request(request_id)
+    if not pending or pending.kind != "question" or not pending.surface.startswith("chat:"):
+        raise HTTPException(404, missing)
+    session = chat_live.chat_service.session_manager.get_session(pending.surface.removeprefix("chat:"))
+    if not session:
+        raise HTTPException(404, missing)
+    owner = session.get("owner_user")
+    if owner != user and not (owner is None and (user == SINGLE_USER or auth_manager.is_admin(user))):
+        raise HTTPException(404, missing)
+    if session.get("forge") and not auth_manager.is_admin(user):
+        raise HTTPException(404, missing)
+    error = permissions.respond(request_id, answers=body.answers, skip=body.skip, user=user)
+    if error:
+        raise HTTPException(409, error)
+    chat_live.permission_answered(request_id)
+    return {"status": "skipped" if body.skip else "answered"}

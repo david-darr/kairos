@@ -1194,14 +1194,75 @@ class KairosApp:
                  (s.fg("dim"), now.strftime("%I:%M %p").lstrip("0")), ("", " ")]
         return self.spread(left, right, self.width)
 
+    def question_state(self, view, request):
+        states = view.__dict__.setdefault("question_states", {})
+        return states.setdefault(request["id"], {"index": 0, "answers": {}, "toggles": set()})
+
+    def modal_box(self, view, request):
+        note = view.__dict__.get("modal_note", "")
+        if request.get("kind") == "question":
+            return render.question_box(request, self.palette, self.width - SIDEBAR - 2,
+                                       self.question_state(view, request), note)
+        return render.permission_box(request, self.palette, self.width - SIDEBAR - 2, note)
+
+    async def respond_question(self, index=None, text=None, skip=False):
+        view = self.view
+        request = view.__dict__.get("modal") if view else None
+        if not request or request.get("kind") != "question" or request["id"] in self.answered:
+            return
+        state = self.question_state(view, request)
+        if not skip:
+            question = request["questions"][state["index"]]
+            options = question.get("options", [])
+            if index is not None:
+                if not 0 <= index < len(options):
+                    return
+                if question.get("multiSelect"):
+                    toggles = state["toggles"]
+                    toggles.symmetric_difference_update({index})
+                    self.invalidate()
+                    return
+                value = options[index]["label"]
+            elif question.get("multiSelect"):
+                value = [o["label"] for i, o in enumerate(options) if i in state["toggles"]]
+                if text:
+                    value.append(text)
+                value = list(dict.fromkeys(value))
+            else:
+                value = text
+            if not value:
+                return
+            state["answers"][question["question"]] = value
+            if state["index"] + 1 < len(request["questions"]):
+                state["index"] += 1
+                state["toggles"] = set()
+                self.invalidate()
+                return
+        self.answered.add(request["id"])
+        try:
+            result = await chat.answer_question(self.conn, request["id"], state["answers"], skip=skip)
+        except KairosError as error:
+            self.answered.discard(request["id"])
+            self.set_modal(view, request, str(error))
+            self.invalidate()
+            return
+        note = "Answered in the app." if result == "gone" else "Skipped the question." if skip else "Answered."
+        if view.reply is not None:
+            view.reply.__dict__.setdefault("notes", []).append(note)
+            view.touch()
+        else:
+            view.add(NoteItem(note))
+        if view.__dict__.get("modal") is request:
+            self.set_modal(view, None)
+        self.invalidate()
+
     def permission_window(self):
         view = self.view
         request = view.__dict__.get("modal") if view else None
         if not request:
             return []
         out = []
-        for line in rich_lines(render.permission_box(request, self.palette, self.width - SIDEBAR - 2,
-                                                     view.__dict__.get("modal_note", "")),
+        for line in rich_lines(self.modal_box(view, request),
                                self.palette, self.width - SIDEBAR - 2):
             out += line + [("", "\n")]
         return out[:-1]
@@ -1211,7 +1272,7 @@ class KairosApp:
         request = view.__dict__.get("modal") if view else None
         if not request:
             return 0
-        return len(rich_lines(render.permission_box(request, self.palette, self.width - SIDEBAR - 2), self.palette,
+        return len(rich_lines(self.modal_box(view, request), self.palette,
                               self.width - SIDEBAR - 2))
 
     # -- actions -----------------------------------------------------------------------------
@@ -1254,6 +1315,9 @@ class KairosApp:
         view = self.view
         request = view.__dict__.get("modal") if view else None
         if not request:
+            return
+        if request.get("kind") == "question":
+            await self.respond_question(index=index, skip=index is None)
             return
         choices = request.get("choices") or []
         choice = chat.reject_choice(request) if index is None else (choices[index] if 0 <= index < len(choices) else None)
@@ -1335,6 +1399,11 @@ class KairosApp:
 
     async def submit(self) -> None:
         text = self.buffer.text.strip()
+        request = self.view.__dict__.get("modal") if self.view else None
+        if request and request.get("kind") == "question":
+            self.buffer.reset()
+            await self.respond_question(text=text)
+            return
         if self.screen == "picker":
             rows = self.screen_data.get("filtered") or []
             index = self.screen_data.get("index", 0)
@@ -1588,6 +1657,8 @@ class KairosApp:
     def bindings(self) -> KeyBindings:
         keys = KeyBindings()
         modal = Condition(lambda: bool(self.view and self.view.__dict__.get("modal")) and not self.screen)
+        # Other answers need digits to reach the buffer once typing has started.
+        option_shortcuts = modal & Condition(lambda: self.modal.get("kind") != "question" or not self.buffer.text)
         working = Condition(lambda: bool(self.view and self.view.working))
         picker = Condition(lambda: self.screen == "picker")
         sidebar = Condition(lambda: self.sidebar_mode)
@@ -1597,7 +1668,7 @@ class KairosApp:
         run = self.spawn
 
         for digit in "123456789":
-            @keys.add(digit, filter=modal, eager=True)
+            @keys.add(digit, filter=option_shortcuts, eager=True)
             def _(event, digit=digit):
                 run(self.answer(int(digit) - 1))
 

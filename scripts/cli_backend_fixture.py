@@ -12,6 +12,7 @@ temp data folder, never on 8420:
 Prompts it understands (the first word decides):
     lines N          stream N numbered lines, with a code fence and a table
     ask              raise a permission request, then say what was decided
+    question [multi|markup] ask the person through Brain
     tool             a Forge-style tool step, started then finished
     file NAME TEXT   write a generated file and link it, as a document tool does
     edit NAME TEXT   write NAME in a Forge session's folder (checkpointed)
@@ -98,6 +99,35 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
                 yield await say(piece)
             if number % 50 == 0:
                 await asyncio.sleep(0)
+    elif command == "question":
+        import json
+        from types import SimpleNamespace
+        from core.brain import Brain
+        from claude_agent_sdk import PermissionResultAllow
+        questions = [{"question": "Which layout should the dashboard use?", "header": "Layout", "multiSelect": False,
+                      "options": [{"label": "Two columns", "description": "Charts on the left, notes on the right"},
+                                  {"label": "Single column", "description": "Everything stacked"},
+                                  {"label": "Tabs", "description": "One section at a time"}]}]
+        if "multi" in words:
+            questions.append({"question": "Which widgets should be on it?", "header": "Widgets", "multiSelect": True,
+                              "options": [{"label": name} for name in ("Calendar", "Tasks", "Weather")]})
+        if "markup" in words:
+            questions = [{"question": '<img src=x onerror="window.__pwned=1"><b>Bold?</b> Pick one',
+                          "options": [{"label": '<script>window.__pwned=2</script>Yes'}, {"label": "No"}]}]
+        brain = Brain(session_id=session_id, is_admin=is_admin)
+        surface = f"chat:{session_id}"
+        queue = permissions.open_channel(surface)
+        task = asyncio.create_task(brain._permission("AskUserQuestion", {"questions": questions}, SimpleNamespace(suggestions=[])))
+        try:
+            yield {"permission": await queue.get()}
+            result = await task
+            yield await queue.get()
+            yield await say("You answered: " + json.dumps(result.updated_input["answers"]) if isinstance(result, PermissionResultAllow)
+                            else "No answer: " + result.message)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            permissions.close_channel(surface)
     elif command == "ask":
         surface = f"chat:{session_id}"
         queue = permissions.open_channel(surface)
