@@ -151,6 +151,10 @@ export function agentCall(agent, controller) {
     if (active) return;
     error.textContent = ''; await loadSetup();
   } });
+  // Phone (Kairos Mobile v2): the call button is a round phone icon; the word stays for a desktop.
+  const callIcon = el('span', { class: 'agent-call-open-icon', 'aria-hidden': 'true' });
+  callIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
+  button.replaceChildren(callIcon, el('span', { class: 'agent-call-open-label', text: 'Call' }));
   const speakerOptions = {
     onLevel:level=>{if(active&&state==='speaking')orb.style.setProperty('--word',String(level));},
     getVoice: () => voices.find(item => item.name === voice.value) || resolveVoice(voices),
