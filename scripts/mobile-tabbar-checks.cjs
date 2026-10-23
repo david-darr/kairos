@@ -327,7 +327,7 @@ module.exports = async function tabBarChecks(c) {
       if (tab === 'chat') {
         const launch = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
         ok(launch && Math.abs(launch.b - (bar.t - 10)) <= 1, `${name}: the launch composer sits 10px above the bar: ${JSON.stringify(launch)}`);
-        eq(Math.round((await rect('.ms-shell .ms-header .ms-switch')).t), top + nudge + 6, `${name}: the New / Chats switch keeps the top row (nudge ${nudge}px)`);
+        await require('./chat-header-checks.cjs')(c, name, top + nudge + 6);
       }
       if (tab === 'calendar') {
         const dock = await rect('.ms-dock');

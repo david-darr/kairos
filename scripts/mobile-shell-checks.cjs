@@ -35,20 +35,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'default', redesign: true }))");
   await home();
   assert.deepEqual(await overflow(), [], 'Launch surface has no overflow');
-  assert.equal(await js("document.querySelector('.ms-shell h1').textContent"), 'What should we work on?');
-  const launchHeader = await js(`(() => {
-    const header = document.querySelector('.ms-shell .ms-header'), row = header.querySelector('.ms-header-row');
-    const sw = row.querySelector('.ms-switch'), h = header.getBoundingClientRect(), s = sw?.getBoundingClientRect();
-    const buttons = [...row.querySelectorAll('button')].filter(n => !sw?.contains(n) && n.getClientRects().length);
-    return { switchInHeader: !!s && s.top >= h.top && s.bottom <= h.bottom && s.left >= 0 && s.right <= innerWidth,
-      extras: [...row.children].filter(n => n !== sw && !n.matches('h1, h2, .ms-root-title') && !n.matches('button')).length,
-      buttons: buttons.map(n => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, radius: getComputedStyle(n).borderRadius }; }) };
-  })()`);
-  assert.ok(launchHeader.switchInHeader, 'The New/Chats switch exists inside the header area and stays on screen');
-  assert.equal(launchHeader.extras, 0, 'The launch header contains only its switch, title and header buttons');
-  assert.ok(launchHeader.buttons.length <= 2, 'The launch header allows at most two action buttons');
-  for (const b of launchHeader.buttons) assert.ok(b.width >= 44 && b.height >= 44 && b.left >= 0 && b.right <= 390 && b.top >= 0 && b.bottom <= 844 && parseFloat(b.radius) >= b.height / 2, 'Header actions are round, touch sized and on screen: ' + JSON.stringify(b));
-  assert.equal(Math.round((await rect('.ms-mark')).w), 84, 'Centered mark is 84px');
+  assert.equal(await js("document.querySelector('.ms-shell h1').textContent"), 'Chats');
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row > *')].map(n => n.tagName === 'H1' ? 'h1' : n.className.split(' ')[0])"), ['h1', 'rd-chat-header-actions'], 'The header row holds the Chats title and chat actions');
+  assert.ok(await js("!!document.querySelector('.ms-header-row button[aria-label=\"Search and filter chats\"]')"), 'The header includes the history button');
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row ~ .ms-switch .ms-segment')].map(n => n.textContent)"), ['New', 'Chats'], 'The original New/Chats switch follows the title row');
+  assert.equal(await js("document.querySelector('.ms-intro h2').textContent"), 'What should we work on?', 'The idle prompt remains an h2 below the header');
+  assert.equal(Math.round((await rect('.ms-intro kairos-mascot')).w), 84, 'Centered Kip is 84px');
+  const launchButtons = await js(`[...document.querySelectorAll('.ms-shell .ms-header-row button')].filter(n => n.getClientRects().length).map(n => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, radius: getComputedStyle(n).borderRadius }; })`);
+  assert.ok(launchButtons.length <= 2, 'The launch header allows at most two action buttons');
+  for (const b of launchButtons) assert.ok(b.width >= 44 && b.height >= 44 && b.left >= 0 && b.right <= 390 && b.top >= 0 && b.bottom <= 844 && parseFloat(b.radius) >= b.height / 2, 'Header actions are round, touch sized and on screen: ' + JSON.stringify(b));
   assert.ok(await js("document.querySelector('.ms-background')?.getClientRects().length > 0"), 'The backdrop runs full bleed behind the launch surface');
   assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar')"), true, 'No avatar and no hamburger: the tab bar navigates');
   await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
@@ -111,7 +106,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await waitFor("document.querySelectorAll('.ms-history-row').length === 1");
   assert.equal(await js("document.querySelector('.ms-history-main strong').textContent"), 'Planning the week ahead');
   await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = 'zzzz'; s.dispatchEvent(new Event('input')); })()");
-  await waitFor("document.querySelector('.ms-history-list [role=status]')?.textContent === 'No matching chats.'");
+  const noMatchingChats = "document.querySelector('.ms-history-list [role=status] h2')?.textContent === 'No matching chats' && document.querySelector('.ms-history-list [role=status] p')?.textContent === 'Try another search or filter.' && document.querySelectorAll('.ms-history-row').length === 0";
+  await waitFor(noMatchingChats);
   await capture('shell-chats-no-match');
   await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === " + ids.length);
@@ -119,7 +115,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.querySelector('.ms-history-dock > button').click()"); await delay(250);
   assert.equal(await js("!document.querySelector('.ms-history-filters').hidden && document.querySelector('.ms-history-dock > button').getAttribute('aria-expanded')"), 'true');
   await js("(() => { const f = document.querySelector('.ms-history-filters select'); f.value = 'working'; f.dispatchEvent(new Event('change')); })()");
-  await waitFor("document.querySelector('.ms-history-list [role=status]')?.textContent === 'No matching chats.'");
+  await waitFor(noMatchingChats);
   await js("(() => { const f = document.querySelector('.ms-history-filters select'); f.value = 'all'; f.dispatchEvent(new Event('change')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === " + ids.length);
   await press('Escape', 'Escape', 27); await delay(150);

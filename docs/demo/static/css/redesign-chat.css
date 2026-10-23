@@ -87,3 +87,135 @@
 .kairos-redesign .btn.artifact-thumbnail { border-radius: 8px; }
 .kairos-redesign .btn.artifact-thumbnail.active { outline-offset: -2px; }
 .kairos-redesign .btn.artifact-thumbnail:focus-visible { outline-offset: -2px; }
+
+/* Round two. These surfaces sit above the existing figure/sky backdrop. */
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.rd-chat-panel-title, .rd-chat-recent, .rd-chat-working h2) {
+  font-family: var(--rd-font-title); font-style: italic; font-weight: 500; color: var(--rd-ink); line-height: 1.1;
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-panel-title { font-size: 30px; margin: 4px 0 16px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.rd-chat-recent, .rd-chat-working h2) { font-size: 26px; margin: 16px 0 12px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-search {
+  width: 100%; min-height: 48px; padding-inline: 18px; border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong);
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #sessions-list { padding: 2px 12px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #sessions-list .session-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 70px; margin: 0; padding: 12px 0;
+  border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; color: var(--rd-ink); text-align: left;
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #sessions-list .session-item[hidden] { display: none; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #sessions-list .session-item:last-child { border-bottom: 0; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #sessions-list .session-item:is(:hover, .active) { background: var(--rd-surface-2); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-initial {
+  flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--rd-radius-field);
+  background: var(--rd-surface-2); color: var(--rd-ink); font: italic 600 22px var(--rd-font-title);
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px var(--rd-font-ui); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-row-age { flex: none; color: var(--rd-ink-dim); font-size: 12px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-working-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-working-row button {
+  display: flex; flex: 0 0 64px; flex-direction: column; align-items: center; gap: 6px; min-height: 44px; width: 64px; padding: 4px;
+  border: 0; background: transparent; color: var(--rd-ink-dim); font: 12px var(--rd-font-ui); cursor: pointer;
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-working-row button span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-working-row button:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; border-radius: var(--rd-radius-field); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-working-row kairos-mascot { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); padding: 6px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-idle[hidden] { display: none; }
+.rd-chat-idle-layout { display: contents; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-idle { flex: 0 0 auto; margin: auto auto 0; padding: 24px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .rd-chat-idle h2 { font-size: 32px; margin-top: 14px; margin-bottom: 8px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) #chat-main.is-empty .chat-composer-dock { margin-block: 18px auto; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .chat-input-bar {
+  border-color: var(--rd-line-strong); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-input { background: transparent; border: 0; border-radius: 0; box-shadow: none; color: var(--rd-ink); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #overflow-plus-btn { background: var(--rd-surface-2); color: var(--rd-ink); border-color: var(--rd-line); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .chat-header-model { background: var(--rd-surface-2); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-messages .msg.user .msg-body {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: var(--rd-primary-bg); border-radius: 22px 22px 6px 22px; padding: 13px 16px;
+}
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-messages .msg.user .msg-body :is(a, code) { color: inherit; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-messages .chat-prose { font: 15px/1.65 var(--rd-font-ui); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .chat-activity { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface); color: var(--rd-ink-dim); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-tasks-pill, .bg-tasks-panel, .bg-task-row, .question-card) { background: var(--rd-surface-solid); border-color: var(--rd-line-strong); box-shadow: var(--rd-shadow); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .bg-tasks-pill { margin: 0 auto 8px; border-radius: var(--rd-radius-pill); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-tasks-panel, .question-card) { border-radius: var(--rd-radius-card); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-task-row, .question-option) { border-radius: 18px; border-color: var(--rd-line); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-tasks-heading, .question-head h2) { font: italic 500 26px/1.15 var(--rd-font-title); }
+/* The existing document pane owns its geometry, focus and scroll restoration. */
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-panel { background: var(--rd-surface-solid); border-color: var(--rd-line); box-shadow: var(--rd-shadow); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.artifact-header, .artifact-toolbar, .artifact-pane-top) { border-color: var(--rd-line); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-header h2 { font: italic 500 24px/1.15 var(--rd-font-title); color: var(--rd-ink); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-tabs { gap: 6px; padding: 10px 12px; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-tab { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); overflow: hidden; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-tab.active { background: var(--rd-primary-bg); box-shadow: none; }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-tab.active :is(.artifact-tab-label, .artifact-tab-close) { color: var(--rd-primary-fg); }
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-preview { background: var(--rd-surface-2); color: var(--rd-ink); }
+@media (min-width: 769px) {
+  /* Only the composer contributes height to the centered desktop layout. */
+  .kairos-redesign[data-view=chat] #chat-main.is-empty .rd-chat-idle-layout {
+    display: block; position: relative; z-index: 4; width: 100%; margin-block: auto;
+  }
+  .kairos-redesign[data-view=chat] #chat-main.is-empty .rd-chat-idle {
+    position: absolute; bottom: calc(100% + 18px); left: 0; width: 100%; margin: 0; box-sizing: border-box;
+  }
+  .kairos-redesign[data-view=chat] #chat-main.is-empty .chat-composer-dock { margin-block: 0; }
+  .kairos-redesign[data-view=chat] #chat-sessions { position: relative; }
+  .kairos-redesign[data-view=chat] .rd-chat-panel-title { padding-right: 54px; }
+  .kairos-redesign[data-view=chat] #chat-sessions > .chat-new-btn {
+    position: absolute; top: 12px; right: 12px; min-width: 46px; width: 46px; height: 46px; padding: 0; gap: 0;
+    border-radius: var(--rd-radius-pill); font-size: 0; background: var(--rd-surface-solid); border-color: var(--rd-line-strong);
+  }
+  .kairos-redesign[data-view=chat] #chat-sessions > .chat-new-btn svg { width: 20px; height: 20px; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header { padding-inline: 20px; padding-bottom: 16px; }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-header-row { display: flex; justify-content: space-between; height: auto; margin-bottom: 18px; }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header h1 { margin: 0; font: italic 600 40px/1 var(--rd-font-title); }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chat-header-actions { display: flex; gap: 8px; }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chat-round { width: 46px; height: 46px; padding: 0; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 22px; }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header > .ms-switch {
+    display: flex; width: 100%; height: 52px; box-sizing: border-box; padding: 4px;
+    border: 0; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2);
+    box-shadow: inset 0 1px 3px color-mix(in srgb, var(--rd-ink) 10%, transparent);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-switch-thumb {
+    inset: 4px auto 4px 4px; width: calc(50% - 4px); background: var(--rd-surface-solid);
+    box-shadow: var(--rd-shadow); transition: transform var(--rd-dur-tab) var(--rd-ease);
+  }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-segment {
+    min-height: 44px; margin: 0; border-radius: var(--rd-radius-pill);
+    color: var(--rd-ink-dim); font: 500 15px var(--rd-font-ui);
+  }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-segment[aria-selected=true] { color: var(--rd-ink); }
+  .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-segment:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-dragging .ms-switch-thumb { transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .kairos-redesign[data-view=mobileLaunch] .rd-chats-header .ms-switch-thumb { transition: none; }
+  }
+  .kairos-redesign[data-view=mobileLaunch] .ms-intro { min-height: 0; overflow-y: auto; gap: 14px; padding: 20px 20px 24px; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-launch-bottom { flex-shrink: 0; }
+  .kairos-redesign.ms-tabbar-up[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom {
+    padding-bottom: var(--ms-launch-clearance, calc(12px + var(--ms-tabbar-space)));
+  }
+  @media (max-height: 480px) {
+    .kairos-redesign[data-view=mobileLaunch] .ms-intro { flex-basis: 0; padding-block: 0; overflow: hidden; }
+  }
+  .kairos-redesign[data-view=mobileLaunch] .ms-intro h2 { font-size: 32px; margin: 0; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-intro p { font-size: 14px; margin: 0; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-context { display: none; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-context:has(select:not([hidden])) { display: block; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-dragging) .ms-page-track { transition: transform var(--rd-dur-tab) var(--rd-ease); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-dock { order: -1; flex-shrink: 0; margin: 4px 0 0; border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-filters { bottom: auto; top: calc(100% + 8px); z-index: 5; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-list { flex: 1; min-height: 0; border-radius: var(--rd-radius-card); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-main { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 4px 12px; min-height: 80px; padding: 13px 48px 13px 16px; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-main .rd-chat-initial { grid-column: 1; grid-row: 1 / 3; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-main strong { grid-column: 2; font-size: 15px; font-weight: 500; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-main small { grid-column: 2; grid-row: 2; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-age { grid-column: 3; grid-row: 1; font-size: 12px; }
+  /* Phone composers retain the shared resting pill and expand on focus. */
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-chat-heading strong { font: italic 500 24px/1.1 var(--rd-font-title); }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .artifact-panel { border-radius: 32px 32px 0 0; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .chat-question-host .question-card { border-radius: 32px 32px 0 0; padding: 16px; }
+}

@@ -670,8 +670,7 @@ async function run(ctx) {
     await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
     const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
     eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
-    const switchTop = (await rect('.ms-shell .ms-header .ms-switch')).t;
-    eq(Math.round(switchTop), top + nudge + 6, `${name}: the launch switch clears the status bar by 6px plus the ${nudge}px nudge`);
+    await require('./chat-header-checks.cjs')({ js, ok, eq, press }, name, top + nudge + 6);
     ok(await noAvatar(), `${name}: no avatar on the launch page`);
     await barShown();
     const bar = await rect('.ms-tabbar');

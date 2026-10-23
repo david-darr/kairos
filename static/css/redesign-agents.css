@@ -143,6 +143,13 @@
 .kairos-redesign :is(.swarm-member-form, .swarm-schedule, .swarm-memory) { border-color: var(--rd-line); border-radius: var(--rd-radius-field); }
 .kairos-redesign .swarm-panel-tabs { background: transparent; }
 
+/* Round two light pass: keep messenger, ecosystem and calls in place. */
+.kairos-redesign[data-view=agents] :is(.agents-rail-item, .agent-conversation-topbar, .side-chat-composer, .agent-thread-search) { font-family: var(--rd-font-ui); color: var(--rd-ink); }
+.kairos-redesign[data-view=agents] :is(.agent-profile-face h2, .agent-chat-empty .title) { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; }
+.kairos-redesign[data-view=agents] :is(.agent-info-toggle, .agent-call-open, .agents-rail-action) { background: var(--rd-surface-solid); border-color: var(--rd-line-strong); color: var(--rd-ink); }
+.kairos-redesign[data-view=agents] :is(.agent-info-toggle, .agent-call-open, .agents-rail-action):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg.user > .msg-body { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: var(--rd-primary-bg); }
+
 /* -- Phones: titles a little smaller; every control keeps its 44px target ----- */
 @media (max-width: 768px) {
   .kairos-redesign .agents-workspace-bar h2 { font-size: 26px; }
