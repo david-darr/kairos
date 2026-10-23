@@ -1,11 +1,12 @@
 import { api, el } from './api.js';
-import { ICON as MARK } from './brand.js';
 import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
 import { watchKeyboard } from './mobileDock.js';
 import { initMoreSheet } from './mobileTabSheet.js';
 import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
+import { emptyState } from './kairosParts.js';
+import * as chatStream from './chatStream.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
@@ -26,15 +27,30 @@ export function mountMobileHome({ container, content, banner, options }) {
   const newTab = button('New', () => {}, 'ms-segment'), chatsTab = button('Chats', () => {}, 'ms-segment');
   [newTab, chatsTab].forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `ms-tab-${i}`; tab.setAttribute('aria-controls', `ms-page-${i}`); });
   switcher.append(el('span', { class: 'ms-switch-thumb', 'aria-hidden': 'true' }), newTab, chatsTab);
+  let pager;
+  const newChat = button('+', () => { pager.select(0); (launchHost?.querySelector('#chat-input') || input).focus(); }, 'rd-chat-round');
+  newChat.setAttribute('aria-label', 'New chat');
+  const historyButton = button('…', () => { pager.select(1); history.querySelector('input[type=search]')?.focus(); }, 'rd-chat-round');
+  historyButton.setAttribute('aria-label', 'Search and filter chats');
   const modelChoice = el('select', { 'aria-label': 'Model for new chat', 'data-mobile-hook': 'model-picker' }, [el('option', { value: '', text: 'Choose a model' })]);
   modelChoice.addEventListener('change', () => { selectedModelId = modelChoice.value; });
   const context = el('div', { class: 'ms-context' }, [modelChoice]);
-  // The New / Chats switch is the page's title; navigation and Settings live in the tab bar (mobileTabBar.js).
-  const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [switcher]), context]);
+  // Chats owns the title and switch; global navigation stays in the tab bar.
+  const header = el('header', { class: 'ms-header rd-chats-header' }, [edgeBlur('top'),
+    el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, historyButton])]), switcher, context]);
   const launch = el('section', { class: 'ms-page ms-launch', id: 'ms-page-0', role: 'tabpanel', 'aria-labelledby': newTab.id });
   const history = el('section', { class: 'ms-page ms-history', id: 'ms-page-1', role: 'tabpanel', 'aria-labelledby': chatsTab.id });
-  const mark = el('div', { class: 'ms-mark', 'aria-hidden': 'true' }); mark.innerHTML = MARK;
-  const intro = el('div', { class: 'ms-intro' }, [mark, el('h1', { text: 'What should we work on?' })]);
+  const intro = emptyState({ mascotState: 'sleeping', title: 'What should we work on?', text: 'Kip is resting until you need it.' });
+  intro.classList.add('ms-intro');
+  let introBusy;
+  const syncIntro = () => {
+    const busy = chatStream.listInFlight().some(entry => entry.status === 'processing');
+    if (busy === introBusy) return;
+    introBusy = busy;
+    intro.querySelector('p').textContent = busy ? 'Start something new while your other work continues.' : 'Kip is resting until you need it.';
+    intro.querySelector('kairos-mascot')?.setAttribute('state', busy ? 'idle' : 'sleeping');
+  };
+  const detachIntro = chatStream.subscribeAll(syncIntro); syncIntro();
   const activitySlot = el('div', { class: 'ms-activity-slot' });
   const input = el('textarea', { rows: '1', placeholder: 'Plan, ask, build...', 'aria-label': 'Message Kairos', value: launchDraft });
   input.value = launchDraft;
@@ -52,7 +68,7 @@ export function mountMobileHome({ container, content, banner, options }) {
   const track = el('div', { class: 'ms-page-track' }, [launch, history]);
   shell.append(header, el('div', { class: 'ms-page-window' }, [track])); content.prepend(shell);
   const historyUI = mountHistory(history);
-  const pager = mountPager(shell, [launch, history], [newTab, chatsTab], options.mobilePage ?? selectedPage, value => {
+  pager = mountPager(shell, [launch, history], [newTab, chatsTab], options.mobilePage ?? selectedPage, value => {
     selectedPage = value; historyUI.closeRows();
     if (value === 1 && shell.contains(document.activeElement) && document.activeElement.matches('textarea')) document.activeElement.blur();
   });
@@ -113,6 +129,24 @@ export function mountMobileHome({ container, content, banner, options }) {
   shell.hidden = true; sync();
   // The shell fills the page (CSS); the keyboard lift pads its bottom so the composer rides the keyboard.
   const keyboard = watchKeyboard(shell);
+  // Measure the bar in the same coordinates as the launch page. In a short
+  // landscape viewport the intro must yield before it can push the dock down.
+  const placeDock = () => {
+    const bar = document.querySelector('.ms-tabbar');
+    if (!mobileOn() || !bar || bar.dataset.state !== 'shown') {
+      shell.style.removeProperty('--ms-launch-clearance'); return;
+    }
+    shell.style.setProperty('--ms-launch-clearance', `${Math.max(0, shell.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10)}px`);
+  };
+  const dockSize = new ResizeObserver(placeDock);
+  dockSize.observe(shell);
+  const tabbar = document.querySelector('.ms-tabbar');
+  if (tabbar) dockSize.observe(tabbar);
+  const dockState = new MutationObserver(placeDock);
+  if (tabbar) dockState.observe(tabbar, { attributes: true, attributeFilter: ['data-state'] });
+  window.addEventListener('resize', placeDock);
+  document.addEventListener('kairos:appearance', placeDock);
+  placeDock();
   phone.addEventListener('change', sync); document.addEventListener('kairos:appearance', sync);
   return { update(key, value) {
     historyUI.update(key, value);
@@ -123,8 +157,11 @@ export function mountMobileHome({ container, content, banner, options }) {
     }
     if (key === 'sessions') activityMetadata(value, null);
   }, dispose() {
-    disposed = true; if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
+    disposed = true; detachIntro(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
+    dockSize.disconnect(); dockState.disconnect();
+    window.removeEventListener('resize', placeDock);
+    document.removeEventListener('kairos:appearance', placeDock);
     phone.removeEventListener('change', sync); document.removeEventListener('kairos:appearance', sync);
     shell.remove(); bannerAnchor.remove();
   } };
@@ -187,12 +224,19 @@ export function mountMobileChat(container, actions) {
       if (modelPill) container.querySelector('.chat-input-right')?.prepend(modelPill);
     } else if (phoneApplied) restore();
   }; sync();
+  // Clear the animation's transform after entry so fixed document/menu
+  // surfaces retain their viewport containing block.
+  const finishPush = event => { if (event.target === container) container.classList.remove('rd-push-in'); };
+  container.addEventListener('animationend', finishPush);
+  if (mobileOn() && !container.classList.contains('ms-launch-chat')) container.classList.add('rd-push-in');
   header.addEventListener('kairos:desktop-chat-layout', restore);
   let syncFrame;
   const scheduleSync = () => { cancelAnimationFrame(syncFrame); syncFrame = requestAnimationFrame(sync); };
   phone.addEventListener('change', scheduleSync); document.addEventListener('kairos:appearance', scheduleSync);
   return () => {
     observer.disconnect(); menuObserver.disconnect();
+    container.removeEventListener('animationend', finishPush);
+    container.classList.remove('rd-push-in');
     restore();
     blur.remove(); back.remove(); heading.remove(); capsule.remove(); extras.forEach(n => n.remove());
     cancelAnimationFrame(syncFrame); header.removeEventListener('kairos:desktop-chat-layout', restore);

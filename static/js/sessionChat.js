@@ -46,6 +46,7 @@ export async function mountSessionChat(host, options = {}) {
   let session = null;
   let unsubscribe = () => {};
   let liveTurnId = null;
+  let replyRevision = 0;
   let shownPermission = null;
   let disposed = false, submitting = false;
   let modelSaving = false, modelControls = [], disposePhoneModels = () => {};
@@ -272,6 +273,7 @@ export async function mountSessionChat(host, options = {}) {
   };
 
   const load = async () => {
+    const revision = replyRevision;
     if (!sessionId) { showEmpty(); return; }
     try { session = await api(`/api/sessions/${sessionId}`); }
     catch (problem) {
@@ -281,13 +283,15 @@ export async function mountSessionChat(host, options = {}) {
       ]));
       return;
     }
-    if (!host.isConnected) return;
+    if (!host.isConnected || revision !== replyRevision) return;
     const shown = session.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
     lastDay = '';
     const historyCards = shown.map((m) => card(m.role, m.content, m));
     messages.replaceChildren(...shown.flatMap((m, index) => [...dateMarker(m.ts), historyCards[index]]));
     if (transcript) await transcript.history(session);
-    if (disposed) return;
+    // Sending is available while tool history loads. Its reply already owns
+    // the subscription; attaching again would leave that reply unfinished.
+    if (disposed || revision !== replyRevision) return;
     const current = chatStream.getInFlight(sessionId);
     // History may finish loading after the stream completes. Reattach the
     // retained entry, using a saved reply when present, so switches neither
@@ -427,6 +431,7 @@ export async function mountSessionChat(host, options = {}) {
   if (options.agent && host.closest('.is-messages')) composer.append(tools);
 
   const runTurn = (text, selected = [], attached = []) => {
+    replyRevision++;
     messages.querySelector('.agent-chat-empty')?.remove();
     messages.append(...dateMarker());
     messages.append(card('user', text, { references: selected, attachments: attached }));

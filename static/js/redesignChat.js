@@ -9,10 +9,12 @@
 //    and the chat title it used to carry sits beside it as its own heading.
 // Switching the preview off, or narrowing to a phone, puts everything back.
 import { fitMenu } from "./menuFit.js";
+import { mountChatParts } from './redesignChatParts.js';
 const on = () => document.documentElement.classList.contains("kairos-redesign");
 const ICON_LIST = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.3A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>';
 
 export function mountRedesignChat(container) {
+  const disposeParts = mountChatParts(container);
   const desktop = matchMedia("(min-width: 769px)");
   const header = container.querySelector(".chat-mobile-header");
   const toggle = container.querySelector("#chat-history-toggle");
@@ -21,7 +23,7 @@ export function mountRedesignChat(container) {
   const menu = container.querySelector("#model-picker-menu");
   const list = container.querySelector("#sessions-list");
   const title = toggle?.querySelector(".chat-title");
-  if (!header || !toggle || !pill || !right || !menu) return { dispose() {} };
+  if (!header || !toggle || !pill || !right || !menu) return { dispose: disposeParts };
 
   let applied = false;
   let pillNext = null;
@@ -94,6 +96,7 @@ export function mountRedesignChat(container) {
 
   return {
     dispose() {
+      disposeParts();
       desktop.removeEventListener("change", sync);
       document.removeEventListener("kairos:appearance", sync);
       revert();

@@ -1,18 +1,22 @@
 import { api, el, toast } from './api.js';
 import * as chatStream from './chatStream.js';
 import { button, go, haptic, longPress, edgeBlur } from './mobileShared.js';
+import { emptyState } from './kairosParts.js';
+import { workingChats, chatAge } from './redesignChatParts.js';
 
 const saved = { query: '', working: false, model: '', scroll: 0 };
 export function mountHistory(page) {
   let sessions, models = [], query = saved.query.toLowerCase(), working = saved.working, model = saved.model, disposed = false, timer, opened = null, restored = false;
   let pressCleanups = [];
   const list = el('div', { class: 'ms-history-list', role: 'region', 'aria-label': 'Chat history' });
+  const recent = el('h2', { class: 'rd-chat-recent', text: 'Recent' });
+  let activity = workingChats([], () => {}), firstRender = true;
   const search = el('input', { type: 'search', placeholder: 'Search chats', 'aria-label': 'Search chats' });
   search.value = saved.query;
   const filter = el('select', { 'aria-label': 'Filter chats' }, [el('option', { value: 'all', text: 'All' }), el('option', { value: 'working', text: 'Working' })]);
   const modelFilter = el('select', { 'aria-label': 'Filter by model' }, [el('option', { value: '', text: 'Any model' })]);
   filter.value = working ? 'working' : 'all';
-  const filters = el('div', { class: 'ms-history-filters ms-glass', hidden: true }, [filter, modelFilter]);
+  const filters = el('div', { class: 'ms-history-filters ms-glass rd-menu-in', hidden: true }, [filter, modelFilter]);
   const toggle = button('Filter', () => { filters.hidden = !filters.hidden; toggle.setAttribute('aria-expanded', String(!filters.hidden)); });
   toggle.setAttribute('aria-label', 'Filter chats'); toggle.setAttribute('aria-expanded', 'false');
   if (working) toggle.textContent = 'Working';
@@ -21,7 +25,7 @@ export function mountHistory(page) {
   const outside = e => { if (!dock.contains(e.target)) closeFilters(); };
   document.addEventListener('click', outside);
   dock.addEventListener('keydown', e => { if (e.key === 'Escape' && !filters.hidden) { e.preventDefault(); closeFilters(); toggle.focus(); } });
-  page.append(list, dock);
+  page.append(dock, activity, recent, list);
   const refresh = async () => {
     try { const value = await api('/api/sessions'); if (!disposed) { sessions = value; draw(true); } }
     catch { if (!disposed) toast('Could not refresh chats', 'error'); }
@@ -42,8 +46,20 @@ export function mountHistory(page) {
         `${s.title || ''} ${s.model || ''} ${models.find(m => m.id === s.model_endpoint_id)?.name || ''}`.toLowerCase().includes(query);
     });
     const scroll = restored ? list.scrollTop : saved.scroll;
+    const nextActivity = workingChats(sessions, id => {
+      const session = sessions.find(item => item.id === id);
+      go(session?.forge || session?.is_forge ? 'forgeShell' : 'chat', { sessionId: id });
+    });
+    activity.replaceWith(nextActivity); activity = nextActivity;
     list.replaceChildren();
-    if (!filtered.length) list.append(el('p', { role: 'status', text: sessions.length ? 'No matching chats.' : 'No chats yet.' }));
+    if (firstRender && filtered.length) { list.classList.add('rd-stagger'); firstRender = false; }
+    else list.classList.remove('rd-stagger');
+    if (!filtered.length) {
+      const empty = emptyState({ mascotState: 'sleeping', title: sessions.length ? 'No matching chats' : 'No chats yet',
+      text: sessions.length ? 'Try another search or filter.' : 'Start a conversation in New.',
+      ...(!sessions.length ? { action: { text: 'New chat', onClick: () => go('chat', { mobilePage: 0 }) } } : {}) });
+      empty.setAttribute('role', 'status'); list.append(empty);
+    }
     for (const session of filtered) {
       const row = el('div', { class: 'ms-history-row', 'data-session-id': session.id });
       const showActions = () => { closeRows(); row.classList.add('ms-actions-open'); opened = row; haptic(); };
@@ -62,9 +78,9 @@ export function mountHistory(page) {
         if (opened === row) { closeRows(); return; }
         go(session.forge || session.is_forge ? 'forgeShell' : 'chat', { sessionId: session.id });
       }, 'ms-history-main');
-      const minutes = Math.max(0, Math.floor((Date.now() / 1000 - session.updated_at) / 60));
-      const age = minutes < 1 ? 'Now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`;
-      main.append(el('strong', { text: session.title || 'Untitled conversation' }),
+      const age = chatAge(session.updated_at);
+      main.append(el('span', { class: 'rd-chat-initial', text: Array.from((session.title || 'K').trim())[0] || 'K', 'aria-hidden': 'true' }),
+        el('strong', { text: session.title || 'Untitled conversation' }),
         el('span', { class: 'ms-history-age', text: chatStream.getInFlight(session.id)?.status === 'processing' ? 'Working' : age }),
         el('small', { text: [session.starred ? 'Starred' : '', session.forge || session.is_forge ? 'Forge' : '', session.model || models.find(m => m.id === session.model_endpoint_id)?.name || 'Default model'].filter(Boolean).join(' · ') }));
       pressCleanups.push(longPress(main, showActions));
