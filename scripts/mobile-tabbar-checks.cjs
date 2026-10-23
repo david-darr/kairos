@@ -6,8 +6,8 @@
 //
 // Covers: the bar on every tab and its selected state, the sliding glass pill,
 // the glass itself, icons, labels and badges, what each item opens, More's
-// contents and the mode switch, Forge mode's items, the bar stepping aside in
-// conversations, sessions and pushed pages and sliding back, docks above it,
+// contents and the mode switch, Forge mode's items, pushed pages keeping the bar, current-item pops, full-screen close controls,
+// composer gaps, scroll clearance, and docks above the bar,
 // the 393x852 (59/34) and 375x667 (20/0) iPhone classes and a non-iPhone,
 // reduced motion, desktop, and that the avatar is gone. Screenshots: tabbar-*.
 module.exports = async function tabBarChecks(c) {
@@ -23,18 +23,63 @@ module.exports = async function tabBarChecks(c) {
     return js(`(() => { const p = document.querySelector('.ms-tabbar-pill').getBoundingClientRect(), c = document.querySelector('.ms-tabbar [aria-current=page]')?.getBoundingClientRect(); return !!c && Math.abs(p.left - c.left) <= 1.5 && Math.abs(p.right - c.right) <= 1.5 && p.top >= c.top - 1 && p.bottom <= c.bottom + 1; })()`);
   };
   // After scrolling every scroller to its end, no visible content runs under the bar.
+  // Composer dock padding reserves the bar space; measure its children, not that empty padding.
   const clearsBar = () => js(`(() => {
     const v = document.getElementById('view-content'), barTop = document.querySelector('.ms-tabbar').getBoundingClientRect().top;
     for (const n of [v, ...v.querySelectorAll('*')]) if (n.scrollHeight > n.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(n).overflowY)) n.scrollTop = 1e6;
     const clip = n => { const r = n.getBoundingClientRect(); let t = r.top, b = r.bottom;
       for (let a = n.parentElement; a && a !== document.documentElement; a = a.parentElement) { const s = getComputedStyle(a); if (s.overflowX !== 'visible' || s.overflowY !== 'visible') { const q = a.getBoundingClientRect(); t = Math.max(t, q.top); b = Math.min(b, q.bottom); } }
       return b - t > 0.5 ? b : null; };
-    const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, [inert], .ms-activity');
-    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-dock, .ms-launch-composer, .chat-composer-dock')));
+    const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, .dither-canvas, [inert], .ms-activity');
+    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-dock, .ms-launch-composer')));
     const bottoms = nodes.map(n => ({ b: clip(n), n: String(n.className || n.tagName).slice(0, 40) })).filter(x => x.b !== null).sort((a, b) => b.b - a.b);
     v.scrollTo?.(0, 0); for (const n of v.querySelectorAll('*')) if (n.scrollTop) n.scrollTop = 0;
     return { last: bottoms[0], barTop };
   })()`);
+  const safeTop = () => js(`(() => { const p = document.createElement('i'); p.style.cssText = 'position:fixed;height:var(--mobile-safe-top, env(safe-area-inset-top, 0px))'; document.body.append(p); const h = p.getBoundingClientRect().height; p.remove(); return h; })()`);
+  const backControl = async (label, selector) => {
+    eq(await small(selector), [], `${label}: back is a 44px target`);
+    const b = await js(`(() => { const n = [...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden'); if (!n) return null; const r = n.getBoundingClientRect(); return { top: r.top, w: r.width, h: r.height, hit: n.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) }; })()`);
+    ok(b && b.w >= 43.99 && b.h >= 43.99 && b.top >= (await safeTop()) - 0.5 && b.hit, `${label}: visible back clears the status area and hit-tests: ${JSON.stringify(b)}`);
+  };
+  const pushedPage = async (label, { back, composer, current, composerGap } = {}) => {
+    await barShown(); await delay(400);
+    eq(await barState(), 'shown', `${label}: bar shown`);
+    ok(await js("!document.querySelector('.ms-tabbar').inert && document.documentElement.classList.contains('ms-tabbar-up')"), `${label}: bar accessible and space reserved`);
+    eq(await js("(() => { const p = document.createElement('i'); p.style.cssText = 'position:fixed;height:var(--ms-tabbar-space)'; document.body.append(p); const h = getComputedStyle(p).height; p.remove(); return h; })()"), '72px', `${label}: reserves 72px`);
+    eq(await barCurrent(), current, `${label}: current tab`);
+    if (back) await backControl(label, back);
+    const bar = await rect('.ms-tabbar');
+    if (composer) {
+      const r = await rect(composer);
+      ok(r && (composerGap === 'atMost' ? r.b <= bar.t - 8 : Math.abs(r.b - (bar.t - 10)) <= 1), `${label}: composer clears bar: ${JSON.stringify([r, bar])}`);
+    }
+    ok(await js("[...document.querySelectorAll('.ms-tabbar-item')].every(n => { const r = n.getBoundingClientRect(); return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.ms-tabbar'); })"), `${label}: every tab item hit-tests`);
+    const clear = await clearsBar();
+    ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${label}: content scrolls clear: ${JSON.stringify(clear)}`);
+    ok(await noSideways(), `${label}: no sideways overflow`);
+  };
+  const openSettings = async () => {
+    await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(350);
+    await js("document.querySelector('.ms-more-sheet .ms-settings-row').click()");
+    await waitFor("document.querySelector('.settings-mobile-page')?.dataset.mobileView === 'list'");
+  };
+  const openForgeSession = async () => {
+    await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-dashboard')"); await barShown();
+    await tap('sessions'); await waitFor("!!document.querySelector('#mf-sessions .ms-history-main')"); await delay(350);
+    await js("document.querySelector('#mf-sessions .ms-history-main').click()"); await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')");
+  };
+  const openDesign = async () => {
+    await navigate('design', { designId: 'd5e5e5e5e5e5' }); await waitFor("!!document.querySelector('.design-list-card')"); await barShown();
+  };
+  const openLive = async () => {
+    await navigate('chat', { mobilePage: 0 }); await waitFor("!!document.querySelector('.ms-launch-chat #chat-input')");
+    await js("(() => { const i = document.querySelector('.ms-launch-chat #chat-input'); i.value = 'Tab bar live chat check'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('.ms-launch-chat #chat-send').click(); })()");
+    await waitFor("!!document.querySelector('.ms-live-chat')");
+  };
+  const conversationPage = { back: '.ms-chat-back', composer: '.ms-conversation .ms-composer', current: 'chats' };
+  const agentPage = { back: '.agents-conversation-back', composer: '.side-chat-composer', current: 'agents', composerGap: 'atMost' };
+  const forgePage = { back: '.mf-session .mf-back', composer: '.mf-session .forge-transcript-composer', current: 'sessions' };
   const geometry = async (label, screen, gap, width) => {
     const bar = await rect('.ms-tabbar');
     ok(bar && Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 16) <= 1 && Math.abs(bar.r - (width - 16)) <= 1,
@@ -146,33 +191,74 @@ module.exports = async function tabBarChecks(c) {
   await waitFor("document.documentElement.dataset.view === 'cookbook' && !document.querySelector('.ms-more-sheet[open]')"); await barShown();
   eq(await barCurrent(), 'more', 'A tab opened from More marks More');
   eq(await js("document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-expanded')"), 'false', 'More announces the sheet closed');
-  // Settings from More is a pushed page: the bar steps aside, and Back brings it back on the tab underneath.
+  // Settings keeps the bar and Back returns to the tab underneath.
   await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(300);
   await js("document.querySelector('.ms-more-sheet .ms-settings-row').click()");
-  await waitFor("document.querySelector('.settings-mobile-page')?.dataset.mobileView === 'list'"); await barGone();
-  ok(await barState() === 'hidden', 'Settings, opened from More, owns the screen');
+  await waitFor("document.querySelector('.settings-mobile-page')?.dataset.mobileView === 'list'"); await barShown();
+  eq(await barCurrent(), 'more', 'Settings opened from More keeps More current');
   await js("document.querySelector('.settings-mobile-back').click()");
   await waitFor("!document.querySelector('.settings-mobile-page') && document.documentElement.dataset.view === 'cookbook'"); await barShown();
   eq(await barCurrent(), 'more', 'Back from Settings slides the bar back');
 
-  // ---- 6. The bar steps aside where the composer owns the bottom, and slides back ----------------
+  // ---- 6. Pushed pages keep the bar; full-screen views have their own close ----------------
   const away = async label => {
     await barGone();
-    const s = await js(`(() => { const b = document.querySelector('.ms-tabbar'), r = b.getBoundingClientRect(); return { inert: b.inert, hidden: b.getAttribute('aria-hidden'), up: document.documentElement.classList.contains('ms-tabbar-up'), below: r.top >= innerHeight, space: getComputedStyle(document.documentElement).getPropertyValue('--ms-tabbar-space').trim() }; })()`);
-    ok(s.inert && s.hidden === 'true' && !s.up && s.below && s.space === '0px', `${label}: the bar slides below the screen and leaves the tab order: ${JSON.stringify(s)}`);
+    ok(await js("document.querySelector('.ms-tabbar').inert && !document.documentElement.classList.contains('ms-tabbar-up') && getComputedStyle(document.documentElement).getPropertyValue('--ms-tabbar-space').trim() === '0px'"), `${label}: full-screen view hides and inerts the bar without reserved space`);
   };
   await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')");
-  await away('A conversation');
-  const composer = await rect('.ms-conversation .ms-composer');
-  ok(composer.b >= H - 13, 'The conversation composer owns the bottom: ' + JSON.stringify(composer));
-  await shot('tabbar-conversation-hidden');
-  await js("document.querySelector('.ms-chat-back').click()"); await waitFor("document.documentElement.dataset.view === 'mobileLaunch'"); await barShown();
-  ok(await js("document.documentElement.classList.contains('ms-tabbar-up')"), 'Back from a conversation slides the bar back');
-  eq(await barCurrent(), 'chats', 'and Chats is current again');
-  await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')");
-  await away('An agent conversation');
-  await navigate('agents'); await barShown();
-  eq(await barCurrent(), 'agents', 'Leaving the agent conversation brings the bar back on Agents');
+  await pushedPage('Conversation', conversationPage);
+  await js("document.getElementById('chat-history-toggle').click()"); await waitFor("!!document.querySelector('#chat-sessions.open')");
+  await away('Chat history'); await backControl('Chat history', '.chat-history-close');
+  await js("document.querySelector('.chat-history-close').click()"); await barShown();
+  await tap('chats'); await waitFor("document.documentElement.dataset.view === 'mobileLaunch'");
+  ok(true, 'Current Chats pops a conversation to the chat workspace');
+  await openLive();
+  await pushedPage('Live launch chat', { back: '.ms-chat-back', composer: '.ms-live-chat .ms-composer', current: 'chats' });
+  await tap('chats'); await waitFor("!document.querySelector('.ms-live-chat') && document.querySelector('#ms-tab-1[aria-selected=true]')");
+  ok(true, 'Current Chats pops live launch chat to the Chats list');
+  for (const action of ['tab', 'back']) {
+    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')");
+    await pushedPage('Agent DM', agentPage);
+    if (action === 'tab') await tap('agents'); else await js("document.querySelector('.agents-conversation-back').click()");
+    await waitFor("!!document.querySelector('.agents-messenger-welcome') && !document.querySelector('.agents-workspace.has-conversation')");
+    ok(true, `${action}: returns the agent DM to Agents welcome`);
+  }
+  // Team and inbox use the same back control as direct messages.
+  const teamId = await js("(async () => { const r = await fetch('/api/swarm/systems'); return (await r.json()).items?.[0]?.id || null; })()");
+  if (teamId) {
+    await navigate('agents', { team: teamId }); await waitFor("!!document.querySelector('.swarm-composer')");
+  } else {
+    await js("[...document.querySelectorAll('.agents-welcome-actions button')].find(b => b.textContent === 'New team').click()");
+    await waitFor("!!document.querySelector('dialog[open] .swarm-setup')");
+    await js("document.querySelector('dialog[open] .swarm-dialog-header button').click()");
+  }
+  await pushedPage('Team', { back: '.agents-conversation-back', current: 'agents' });
+  eq(await js("[...document.querySelectorAll('.agents-messenger button')].filter(b => /All agents/.test(b.textContent) && b.getClientRects().length).length"), 0, 'Team has no duplicate All agents back');
+  await js("document.querySelector('.agents-conversation-back').click()"); await waitFor("!!document.querySelector('.agents-messenger-welcome')");
+  await js("document.querySelector('.agents-chats-open').click()");
+  await js("document.querySelector('.agents-rail-inbox').click()"); await waitFor("!!document.querySelector('.agents-inbox-view')");
+  await pushedPage('Inbox', { back: '.agents-conversation-back', current: 'agents' });
+  await js("document.querySelector('.agents-conversation-back').click()"); await waitFor("!!document.querySelector('.agents-messenger-welcome')");
+  await openSettings(); await pushedPage('Settings list', { back: '.settings-mobile-back', current: 'more' });
+  await js("document.querySelector('.settings-nav-item').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'");
+  await pushedPage('Settings page', { back: '.settings-mobile-back', current: 'more' });
+  await navigate('library', { section: 'documents' }); await waitFor("!!document.querySelector('.library-document-card')");
+  await js("document.querySelector('.library-document-card').click()"); await waitFor("!!document.querySelector('.library-editor')");
+  await pushedPage('Library editor', { back: '.library-editor .view-header .card-row:first-child > button:first-child', current: 'more' });
+  await navigate('library'); await waitFor("!!document.querySelector('.segmented-tab')");
+  await js("[...document.querySelectorAll('.segmented-tab')].find(b => b.textContent.trim() === 'Vault').click()"); await waitFor("!!document.querySelector('.library-vault-note')");
+  await js("document.querySelector('.library-vault-note').click()"); await waitFor("!!document.querySelector('.vault-phone-detail')");
+  await pushedPage('Vault note', { back: '.vault-phone-back', current: 'more' });
+  await openDesign();
+  await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await pushedPage('Design draft', { composer: '.design-composer', current: 'more' });
+  await js("document.querySelector('.design-list-card').click()"); await waitFor("!!document.querySelector('.design-focus')");
+  await away('Design focus'); await backControl('Design focus', '[aria-label="Close focus"]');
+  await js("document.querySelector('[aria-label=\"Close focus\"]').click()"); await barShown();
+  await openForgeSession(); await pushedPage('Forge session', forgePage);
+  await tap('sessions'); await waitFor("!!document.querySelector('#mf-tab-1[aria-selected=true]') && !document.querySelector('.mf-session')");
+  ok(true, 'Current Sessions pops the session to the Sessions list');
+  await navigate('home'); await barShown();
 
   // ---- 7. Forge mode: Forge Home, New, Sessions, More --------------------------------------
   await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open] .ms-mode-switch')"); await delay(300);
@@ -197,10 +283,10 @@ module.exports = async function tabBarChecks(c) {
   eq(await barCurrent(), 'new', 'Swiping the pager back to New moves the bar with it');
   await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(300);
   await js("document.querySelector('#mf-sessions .ms-history-main').click()"); await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')");
-  await away('A Forge session');
+  await pushedPage('A Forge session', forgePage);
   await js("document.querySelector('.mf-session .mf-changes').click()"); await waitFor("!!document.querySelector('dialog.ms-sheet[open]')"); await delay(300);
   const changesDock = await rect('.mf-git-dock');
-  ok(await barState() === 'hidden' && (!changesDock || changesDock.b <= H), 'The Changes dock has the bottom to itself: ' + JSON.stringify(changesDock));
+  ok(await js("(() => { const r = document.querySelector('.ms-tabbar').getBoundingClientRect(); return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('dialog.ms-sheet[open]'); })()") && (!changesDock || changesDock.b <= H), 'The modal Changes sheet covers the bar: ' + JSON.stringify(changesDock));
   await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   await js("document.querySelector('.mf-session .mf-back').click()"); await waitFor("!!document.querySelector('.mf-project')"); await barShown();
   eq(await barCurrent(), 'sessions', 'Back from the session slides the bar back on Sessions');
@@ -250,8 +336,13 @@ module.exports = async function tabBarChecks(c) {
     ok((await rect('.ms-more-sheet')).t >= top + nudge - 0.5, `${name}: More stays below the status bar`);
     await js("document.querySelector('.ms-more-sheet').close()");
     await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
-    await barGone();
-    ok(Math.abs((await rect('.ms-conversation .ms-composer')).b - (screen - gap)) <= 1, `${name}: in a conversation the bar is away and the composer sits ${gap}px above the true bottom`);
+    await pushedPage(`${name} conversation`, conversationPage);
+    await geometry(`${name} conversation`, screen, gap, w);
+    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')");
+    await pushedPage(`${name} agent DM`, agentPage); await geometry(`${name} agent DM`, screen, gap, w);
+    await openSettings(); await pushedPage(`${name} Settings list`, { back: '.settings-mobile-back', current: 'more' });
+    await geometry(`${name} Settings list`, screen, gap, w);
+    await openForgeSession(); await pushedPage(`${name} Forge session`, forgePage); await geometry(`${name} Forge session`, screen, gap, w);
     await navigate('forgeHome'); await waitFor("!!document.querySelector('.mf-dashboard')"); await barShown(); await delay(300);
     eq(await items(), ['forgeHome', 'new', 'sessions', 'more'], `${name}: Forge mode items`);
     await geometry(`${name} Forge Home`, screen, gap, w);
@@ -277,8 +368,12 @@ module.exports = async function tabBarChecks(c) {
     await shot(`tabbar-${name}-forge-home`);
     await tap('sessions'); await waitFor("!!document.querySelector('.mf-project') && document.getElementById('mf-tab-1').getAttribute('aria-selected') === 'true'"); await barShown(); await delay(500); await pillOn();
     await shot(`tabbar-${name}-forge-sessions`);
-    await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await barGone(); await delay(300);
-    await shot(`tabbar-${name}-conversation-bar-hidden`);
+    await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await barShown(); await delay(300);
+    await shot(`tabbar-${name}-conversation`);
+    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')"); await barShown(); await delay(400);
+    await shot(`tabbar-${name}-agent-dm`);
+    await openSettings(); await barShown(); await delay(400); await shot(`tabbar-${name}-settings`);
+    await openForgeSession(); await barShown(); await delay(400); await shot(`tabbar-${name}-forge-session`);
     await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
   }
   await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.removeProperty('--ms-ios-nudge'); s.setProperty('--native-safe-bottom', '0px'); })()");
@@ -291,7 +386,7 @@ module.exports = async function tabBarChecks(c) {
   await tap('calendar'); await waitFor("document.documentElement.dataset.view === 'calendar'");
   await waitFor("document.querySelector('.ms-tabbar [aria-current=page]')?.dataset.tabbar === 'calendar'");
   ok(await js("document.querySelector('.ms-tabbar-pill').getAnimations().length === 0") && await pillOn(), 'Reduced motion: the pill jumps straight to the new item');
-  await navigate('chat', { sessionId: 's1' }); await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
+  await openDesign(); await js("document.querySelector('.design-list-card').click()"); await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
   ok(await js("getComputedStyle(document.querySelector('.ms-tabbar')).visibility === 'hidden'"), 'Reduced motion: the bar leaves at once');
   await navigate('home');
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });

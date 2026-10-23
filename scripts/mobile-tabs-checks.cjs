@@ -257,11 +257,19 @@ async function run(ctx) {
   await waitFor("!!document.querySelector('.library-editor textarea')");
   await delay(250);
   eq(await docks(), 0, 'The dock leaves while the editor is open');
-  await barGone(); ok(await barCurrent() === 'hidden', 'The tab bar steps aside for the pushed editor');
+  await barShown(); eq(await barCurrent(), 'more', 'The editor keeps the tab bar');
+  ok(await js("[...document.querySelectorAll('.library-editor button')].some(b => b.textContent.includes('Back to Library') && b.getClientRects().length)"), 'The editor keeps Back to Library');
   ok(writes.slice(viewWritesBefore).some(w => w.method === 'POST' && w.path === '/api/documents'), 'Dock + creates through the existing route');
   eq(await small('.library-editor button, .library-editor input'), [], 'Editor controls are 44px');
   await shot('library-editor');
   await js("document.querySelector('.library-editor textarea').focus(); document.querySelector('.library-editor textarea').value = 'changed'; document.querySelector('.library-editor textarea').dispatchEvent(new Event('input', { bubbles: true }))");
+  await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()");
+  await waitFor("!!document.querySelector('.confirm-panel')");
+  ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard unsaved changes?')"), 'Tab navigation asks before discarding document edits');
+  await js("[...document.querySelectorAll('.confirm-panel .btn')].find(b => b.textContent.trim() === 'Cancel').click()");
+  await waitFor("!document.querySelector('.confirm-panel')");
+  eq(await js("document.querySelector('.library-editor textarea').value"), 'changed', 'Cancel preserves the document edit');
+  eq(await js("document.documentElement.dataset.view"), 'library', 'Cancel keeps the document editor in Library');
   await js("[...document.querySelectorAll('.library-editor button')].find(b => b.textContent.includes('Back to Library')).click()");
   await waitFor("!!document.querySelector('.confirm-panel, .panel-dialog')");
   await press('Escape');
@@ -482,7 +490,7 @@ async function run(ctx) {
   const backBtn = () => js("document.querySelector('.settings-mobile-back').click()");
   const visibleItems = () => js("[...document.querySelectorAll('.settings-nav-item')].filter(n => n.getClientRects().length).map(n => n.dataset.section)");
   await openSettings('notes');
-  await checkChrome('settings', 'hidden');
+  await checkChrome('settings', 'more');
   eq(await mview(), 'list', 'Settings opens on its list');
   const nav = await rect('#settings-nav');
   ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
@@ -648,9 +656,10 @@ async function run(ctx) {
     await js("document.querySelector('.ms-tab-sheet').close()");
     // A conversation's composer.
     await navigate('chat', { mobileConversation: true }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
-    await barGone();
+    await barShown();
+    const chatBar = await rect('.ms-tabbar');
     const chat = await rect('.ms-conversation .ms-composer');
-    ok(Math.abs(chat.b - (screen - gap)) <= 1, `${name}: the bar steps aside and the conversation composer sits ${gap}px above the screen bottom: ${JSON.stringify(chat)}`);
+    ok(Math.abs(chatBar.b - (screen - gap)) <= 1 && Math.abs(chat.b - (chatBar.t - 10)) <= 1, `${name}: the bar clears the screen bottom and the conversation composer sits 10px above it: ${JSON.stringify(chat)}`);
     ok(Math.round((await rect('#view-content')).b) === screen, `${name}: conversation fills the screen`);
     // A docked tab: the fixed dock and a bottom sheet.
     await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
@@ -676,15 +685,16 @@ async function run(ctx) {
     await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(400);
     await js("document.querySelector('#mf-sessions .ms-history-main').click()");
     await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')"); await delay(500);
-    await barGone();
+    await barShown();
+    const sessionBar = await rect('.ms-tabbar');
     const forgeChat = await rect('.mf-session .forge-transcript-composer');
-    ok(forgeChat && Math.abs(forgeChat.b - (screen - gap)) <= 1, `${name}: the bar steps aside and the Forge session composer sits ${gap}px above the screen bottom: ${JSON.stringify(forgeChat)}`);
+    ok(forgeChat && Math.abs(sessionBar.b - (screen - gap)) <= 1 && Math.abs(forgeChat.b - (sessionBar.t - 10)) <= 1, `${name}: the bar clears the screen bottom and the Forge session composer sits 10px above it: ${JSON.stringify(forgeChat)}`);
     await js("document.querySelector('.mf-changes').click()"); await waitFor("!!document.querySelector('dialog.ms-sheet[open] .mf-git-dock')"); await delay(400);
     const changes = { sheet: await rect('dialog.ms-sheet[open]'), dock: await rect('.mf-git-dock'), actions: await js("document.querySelectorAll('.mf-git-dock button').length") }, dockGap = Math.max(8, bottom);
     ok(Math.round(changes.sheet.b) === screen, `${name}: Changes sheet reaches the screen bottom: ${JSON.stringify(changes)}`);
     // A dock with actions sits above the home indicator; with nothing to do there is no dock at all, never an empty pill.
     ok(changes.actions ? Math.abs(changes.dock.b - (screen - dockGap)) <= 1 : changes.dock === null, `${name}: Changes dock ${changes.actions ? 'sits ' + dockGap + 'px above the screen bottom' : 'is hidden with no actions'}: ${JSON.stringify(changes)}`);
-    ok(await barState() === 'hidden' && !(await js("document.documentElement.classList.contains('ms-tabbar-up')")), `${name}: no tab bar under the Changes dock`);
+    ok(await js("(() => { const b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('dialog.ms-sheet[open]'); })()"), `${name}: the modal Changes sheet covers the bar`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-changes');
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
     if (!nudge) continue;

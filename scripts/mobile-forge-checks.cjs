@@ -117,6 +117,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   const forgeSessionId = await js("document.querySelector('.forge-surface-tabs [aria-selected=true]').closest('[data-surface-id]').dataset.surfaceId.slice(8)");
   await waitFor("document.querySelector('.forge-send')?.textContent === 'Send'");
   await delay(300);
+  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
+  ok(await barCurrent() === 'sessions', 'The session keeps Sessions current on the tab bar');
   ok(await js("document.querySelector('.forge-project-sidebar').hidden && !document.querySelector('.forge-workspace').inert"), 'Conversation opens directly without the old sidebar modal');
   ok(await js("!!document.querySelector('.mf-session-header strong') && !!document.querySelector('.mf-count')"), 'Session title, subtitle and changes badge are present');
   ok(await js("getComputedStyle(document.querySelector('.forge-surface-bar')).display === 'none' && document.querySelector('.forge-shell').dataset.split === 'false'"), 'Phone has neither desktop tabs nor side-by-side panes');
