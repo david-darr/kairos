@@ -10,9 +10,10 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 _ROOT = Path(__file__).resolve().parents[1]
-(_ROOT / "data").mkdir(exist_ok=True)
-_DATA = _ROOT / "data" / ("kairos-handoff-" + uuid.uuid4().hex)
-_DATA.mkdir()
+sys.path.insert(0, str(_ROOT))
+from scripts.test_data_support import TestDataDirectory
+fixture = TestDataDirectory(prefix='kairos-handoff-')
+_DATA = Path(fixture.name)
 os.environ["JARVIS_DATA_DIR"] = str(_DATA)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -478,10 +479,14 @@ class CoordinationTests(unittest.TestCase):
         self.assertTrue(seen["ran_inside"], "the model's turn ran inside the checkpoint")
 
 
+def tearDownModule():
+    fixture.cleanup()
+
+
 if __name__ == "__main__":
     try:
         unittest.main(verbosity=2)
     finally:
         from core import session_manager_store
         session_manager_store.close()
-        shutil.rmtree(_DATA)
+        fixture.cleanup()

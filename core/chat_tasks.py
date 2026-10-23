@@ -104,7 +104,7 @@ def _changed(sid, immediate=True):
 def _note(data, item):
     at = item.get('endedAt') or time.time()
     if item['status'] not in TERMINAL or any(n['id'] == item['id'] and
-            (item['kind'] != 'agent' or round(n['at']) == round(at)) for n in data['notes']):
+            (not item['id'].startswith('card:') or round(n['at']) == round(at)) for n in data['notes']):
         return False
     data['notes'].append({**{k: item[k] for k in ('id', 'kind', 'source', 'label', 'status')},
                           'at': at})

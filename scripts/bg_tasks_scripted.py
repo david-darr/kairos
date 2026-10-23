@@ -1,7 +1,7 @@
 """Real Kairos HTTP/UI with deterministic SDK traffic and no model process.
 
 Run from this worktree: .venv/Scripts/python.exe scripts/bg_tasks_scripted.py
-  --port 8457 --data-dir data/review/bg-tasks/demo --scale 1
+  --port 8457 --surface api --scale 1
 The last startup line is a JSON object suitable for the Electron smoke test.
 """
 import argparse
@@ -80,15 +80,17 @@ def main():
     parser.add_argument('--port', type=int, default=8457)
     parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--scale', type=float, default=1)
+    parser.add_argument('--surface', choices=('claude', 'api', 'local'), default='claude')
     args = parser.parse_args()
     if args.port in (8420, 8430) or not 1024 <= args.port <= 65535:
         parser.error('Use a dedicated test port, never 8420 or 8430')
     if args.scale <= 0:
         parser.error('--scale must be positive')
-    data_dir = (args.data_dir or ROOT / 'data/review/bg-tasks' / ('demo-' + uuid.uuid4().hex[:8])).resolve()
-    if not data_dir.is_relative_to(ROOT):
-        parser.error('--data-dir must be inside this worktree')
-    data_dir.mkdir(parents=True, exist_ok=True)
+    if args.data_dir:
+        parser.error('Omit --data-dir: scripted data is owned by TestDataDirectory in system temp')
+    from scripts.test_data_support import TestDataDirectory
+    fixture = TestDataDirectory(prefix='bg-' + args.surface + '-')
+    data_dir = Path(fixture.name)
     temp_dir = data_dir / 'temp'; temp_dir.mkdir(exist_ok=True)
     os.environ.update(JARVIS_DATA_DIR=str(data_dir), APP_PORT=str(args.port), AUTH_ENABLED='0', TEMP=str(temp_dir), TMP=str(temp_dir))
     tempfile.tempdir = str(temp_dir)
@@ -217,6 +219,22 @@ def main():
     session_manager.set_model_endpoint(sid, endpoint['id'])
     agent = agent_service.create('Repo reviewer', endpoint_id=endpoint['id'])
 
+    model_server = None
+    if args.surface != 'claude':
+        from scripts.bg_model_server import ScriptedModelServer, demo_calls
+        from core import helpers
+        model_server = ScriptedModelServer(helper_delay=20 * args.scale).start()
+        endpoint = model_endpoints.create_endpoint('Scripted ' + args.surface, kind=args.surface,
+                                                  base_url=model_server.base_url, model='scripted')
+        helper_endpoint = model_endpoints.create_endpoint('Scripted helpers', kind='local',
+                                                         base_url=model_server.base_url, model='scripted-helper')
+        settings.update_settings(helper_endpoint_id=helper_endpoint['id'])
+        session_manager.set_model_endpoint(sid, endpoint['id'])
+        model_server.calls = demo_calls(agent['id'] if args.surface == 'api' else None)
+        # Return the batch while helpers are still genuinely working, so the
+        # same turn can also schedule work and hand off to the seeded agent.
+        helpers.WAIT_SECONDS = .3
+
     card_ready = asyncio.Event()
 
     async def card_lifecycle():
@@ -241,15 +259,18 @@ def main():
         # Keep production routes/middleware, with only the deterministic
         # executors enabled. No scheduler, connector or external model starts.
         background_tasks.start()
-        lifecycle = asyncio.create_task(card_lifecycle())
-        print(json.dumps({'port': args.port, 'sessionId': sid, 'dataDir': str(data_dir)}), flush=True)
+        lifecycle = asyncio.create_task(card_lifecycle()) if args.surface == 'claude' else None
+        print(json.dumps({'port': args.port, 'sessionId': sid, 'dataDir': str(data_dir), 'surface': args.surface}), flush=True)
         try:
             yield
         finally:
-            lifecycle.cancel()
-            await asyncio.gather(lifecycle, return_exceptions=True)
+            if lifecycle:
+                lifecycle.cancel()
+                await asyncio.gather(lifecycle, return_exceptions=True)
             await background_tasks.stop()
             await chat_service.shutdown()
+            if model_server:
+                await asyncio.to_thread(model_server.close)
     app.router.lifespan_context = harness_lifespan
     import uvicorn
     uvicorn.run(app, host='127.0.0.1', port=args.port, log_level='warning')
