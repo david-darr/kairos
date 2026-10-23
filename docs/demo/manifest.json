@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "535c75efc790fb872145b48e67677e396c9393acc0c7c6854d10698fabb7cbbc",
+  "app.js": "722e798dc6d398c90c68562208aff6aff2fc49ef65ec987499f48f37a082bbf8",
   "fixtures.js": "18aa62234f9cadfc94998a60f502911a27e31486a0c30a7ba0bf27d33ebffd68",
   "index.html": "655ad70c8c28baa1748e3cf949ac130a82dc8f3015590d5953388dc06444cba8",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -422,7 +422,7 @@
   "static/js/cliPair.js": "2baede5f091f64a1f73f10a18046ac67c4df777db5d21da3965a0e3f861cb832",
   "static/js/commandPalette.js": "8de2dcf5488478453020fc379e5cc34cda6b14eae949eed64e0eac5b27750c87",
   "static/js/composerKeyboard.js": "c7162d371eb386bbe3e657b61bca8883ed9a1ce9d384f8d65578bf73aa9665f1",
-  "static/js/computerPanel.js": "00107d445280cc147dab498f06f4016015a5d9980db389a4e72317c3ae786d78",
+  "static/js/computerPanel.js": "eef56e91f00cfb81a89dd864c18b3d1f12c4daf5931fd4fe3365399399a83a1b",
   "static/js/computerSteps.js": "ad4b4d92515c28ae5d66844af110282ac30f1784d467cbb01faf191ec3558810",
   "static/js/creativeConnections.js": "98d66baf896dcf9053381fb88aa712c4ab2950f2249d26f08a391b51545442a5",
   "static/js/designCanvas.js": "0bd5e6b997aebe26b0687ad223ab85e7e015b6ff4a18a3c7bbebf7a27eac291f",
