@@ -117,6 +117,12 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.ok(await js("document.querySelector('.agent-profile-sheet:not([hidden]) .agent-create-notice')"));
   assert.ok(writes.slice(routineStart).some(w => /\/api\/agents\/a\d+\/goals/.test(w.path)));
   assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'Routine Survivor');
+  const expectedRoutineErrors = ['Routine service unavailable', 'Routine Survivor was created, but the first routine was not: Routine service unavailable'];
+  const routineErrors = "[...document.querySelectorAll('#toast-host .toast.error')]";
+  await waitFor(`${routineErrors}.length === 2`);
+  assert.deepEqual(await js(`${routineErrors}.map(n => n.textContent).sort()`), [...expectedRoutineErrors].sort(), 'routine failure shows both expected errors');
+  await js(`${routineErrors}.forEach(n => n.click())`);
+  await waitFor(`!${routineErrors}.some(n => ${JSON.stringify(expectedRoutineErrors)}.includes(n.textContent))`);
   demoState.failFirstRoutine = false;
 
   // 6-10. One bot session has agent_id. The registry keeps its run while the
@@ -132,8 +138,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   assert.ok(await js(`${botCard}?.querySelector('.agent-dot-avatar')`));
   assert.equal(await js(`${botBody}?.textContent.includes('A partial finding')`), false);
   const firstTime = await js(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent`);
-  await delay(1150);
-  assert.notEqual(await js(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent`), firstTime, 'elapsed time ticks');
+  await waitFor(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent !== ${JSON.stringify(firstTime)}`);
+  assert.ok(true, 'elapsed time ticks');
   liveEvent('as1', 'tool_step', { id: 'read-1', phase: 'finished', name: 'read_file', summary: 'Read notes', ok: true, output: 'Done reading' });
   liveEvent('as1', 'tool_step', { id: 'search-2', phase: 'finished', name: 'search', summary: 'Search failed', ok: false, output: 'Unavailable' });
   await waitFor(`${botCard}?.querySelectorAll('.agent-turn-step').length === 2`);

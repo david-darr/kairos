@@ -155,12 +155,9 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(writes.slice(appStart).some(w => w.path.endsWith('/app/stop')), 'Logs retains Stop app');
   await click('.mf-back');
   await tool('Explorer');
-  // The tree's rows can paint before its folders load, so wait for a folder itself.
-  await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row') && !!document.querySelector('dialog.ms-sheet .forge-tree-directory')");
+  await waitFor("(() => { document.querySelectorAll('dialog.ms-sheet .forge-tree-directory:not([open])').forEach(d => d.open = true); return [...document.querySelectorAll('dialog.ms-sheet [data-file-path]')].some(n => n.getClientRects().length); })()");
   ok(await js("document.querySelector('dialog.ms-sheet').classList.contains('ms-sheet-full')"), 'Explorer is full-height');
-  await js("document.querySelector('dialog.ms-sheet .forge-tree-directory').open = true");
-  await waitFor("!!document.querySelector('dialog.ms-sheet [data-file-path]')");
-  await click('dialog.ms-sheet [data-file-path]');
+  await js("[...document.querySelectorAll('dialog.ms-sheet [data-file-path]')].find(n => n.getClientRects().length).click()");
   await waitFor("!!document.querySelector('.forge-pane .cm-editor') && !document.querySelector('dialog.ms-sheet')");
   ok(await js("!!document.querySelector('.mf-back') && !!document.querySelector('.forge-pane .forge-editor-toolbar')"), 'Editor pushes with Back and Save');
   await click('.mf-back');
@@ -199,11 +196,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   if (demoState) {
     // A diff replaced the preview tab; open a file again so the editor flow has its surface.
     await tool('Explorer');
-    await waitFor("!!document.querySelector('dialog.ms-sheet .forge-tree-row')");
-    // After the commit above the tree may list the file at its root, with no folder to open.
-    await js("{ const folder = document.querySelector('dialog.ms-sheet .forge-tree-directory'); if (folder) folder.open = true; }");
-    await waitFor("!!document.querySelector('dialog.ms-sheet [data-file-path]')");
-    await click('dialog.ms-sheet [data-file-path]');
+    await waitFor("(() => { document.querySelectorAll('dialog.ms-sheet .forge-tree-directory:not([open])').forEach(d => d.open = true); return [...document.querySelectorAll('dialog.ms-sheet [data-file-path]')].some(n => n.getClientRects().length); })()");
+    await js("[...document.querySelectorAll('dialog.ms-sheet [data-file-path]')].find(n => n.getClientRects().length).click()");
     await waitFor("!!document.querySelector('.forge-pane .cm-editor') && !document.querySelector('dialog.ms-sheet')");
   }
   if (demoState) await require('./forge3-checks.cjs')({ js, waitFor, capture, writes, demoState, label: 'mobile-project', forgeSessionId, width: 390 });

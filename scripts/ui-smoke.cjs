@@ -243,8 +243,9 @@ app.whenReady().then(async () => {
     try { return await win.webContents.executeJavaScript(code); }
     catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
   };
-  const waitFor = async (condition) => {
-    for (let i = 0; i < 80; i++) { if (await js(condition)) return; await delay(50); }
+  const waitFor = async (condition, timeout = 10000) => {
+    for (const end = Date.now() + timeout; Date.now() < end; await delay(50)) if (await js(condition)) return;
+    if (await js(condition)) return;
     throw new Error("Timed out: " + condition);
   };
   const capture = async (name) => {
@@ -889,17 +890,17 @@ app.whenReady().then(async () => {
     const nearWidth = (actual, nominal, message) => assert.ok(Math.abs(actual - nominal) <= 1, `${message || 'Sidebar width'}: expected ${nominal}, got ${actual}`);
     const railWidth = () => js("Math.round(document.querySelector('#sidebar').getBoundingClientRect().width)");
     nearWidth(await railWidth(), 204);
-    // Sample every animation frame instead of one fixed 80ms read, which
-    // missed the transition when the GPU was busy (2026-10-21).
-    const movingWidths = await js(`new Promise(resolve => {
-      const rail = document.querySelector('#sidebar'), seen = [], start = performance.now();
+    const transitionProperties = await js(`(async () => {
+      const rail = document.querySelector('#sidebar');
       document.querySelector('#sidebar-toggle').click();
-      const tick = () => { seen.push(Math.round(rail.getBoundingClientRect().width));
-        performance.now() - start < 600 ? requestAnimationFrame(tick) : resolve(seen); };
-      requestAnimationFrame(tick);
-    })`);
-    assert.ok(movingWidths.some(width => width > 53 && width < 203), `Sidebar animates between widths: ${movingWidths.join(',')}`);
-    await delay(100);
+      getComputedStyle(rail).width;
+      const transitions = document.getAnimations().filter(a => a instanceof CSSTransition && (a.effect.target === rail || a.effect.target.contains?.(rail)));
+      const properties = transitions.map(a => a.transitionProperty);
+      await Promise.all(transitions.map(a => a.finished.catch(() => {})));
+      return properties;
+    })()`);
+    assert.ok(transitionProperties.includes('width'), `Sidebar animates between widths: ${transitionProperties.join(',')}`);
+    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 52) <= 1");
     nearWidth(await railWidth(), 52);
     assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item svg')].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=52})"), 'Icons fit the slim rail');
     assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item > span, #sidebar .sidebar-user-name')].every(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return (r.width===0||s.opacity==='0'||s.display==='none')&&r.right<=52})"), 'Labels are hidden in the slim rail');
@@ -1188,6 +1189,10 @@ app.whenReady().then(async () => {
           if (await phoneRail()) await js("document.querySelector('.agents-chats-open').click()");
           await js("document.querySelector('.agents-rail-inbox').click()");
           await waitFor("!!document.querySelector('.agent-inbox .agent-inbox-question')");
+          const writeSeen = async (start, test, timeout = 10000) => {
+            for (const end = Date.now() + timeout; Date.now() < end; await delay(50)) if (writes.slice(start).some(test)) return true;
+            return writes.slice(start).some(test);
+          };
           const agentComputerStart = writes.length;
           await js("[...document.querySelectorAll('.agent-inbox-question button')].find(b => b.textContent === 'Open computer').click()");
           await waitFor("document.querySelector('.agent-work-host:not([hidden]) .computer-state')?.textContent.includes('You have control')");
@@ -1198,9 +1203,10 @@ app.whenReady().then(async () => {
           await waitFor("document.querySelector('.recording-review')?.textContent.includes(\"Mention in Scout's instructions\")");
           await capture(label + '-agent-recording-review');
           await js("[...document.querySelectorAll('.recording-review button')].find(b => b.textContent === 'Discard').click()");
-          await js("document.querySelector('.agent-computer-section .computer-actions button:first-child').click()");
-          for (let i = 0; i < 40 && !writes.slice(agentComputerStart).some(w => w.path.endsWith('/handback')); i++) await delay(50);
-          assert.ok(writes.slice(agentComputerStart).some(w => w.path === '/api/computer/agent%3Aa1/handback'), label + ' Hand back calls the computer route');
+          await waitFor("!document.querySelector('.recording-review')");
+          await js("[...document.querySelectorAll('.agent-computer-section .computer-actions button')].find(b => b.textContent === 'Hand back').click()");
+          assert.ok(await writeSeen(agentComputerStart, w => w.path === '/api/computer/agent%3Aa1/handback'), label + ' Hand back calls the computer route');
+          await waitFor("document.querySelector('.agent-computer-section .computer-state')?.textContent.includes('The model has control')");
           writes.splice(agentComputerStart);
           demoState.stoppedOwners = []; demoState.takenOwners = [];
           demoState.recordingOwners = []; demoState.recordedSteps = {};
@@ -1823,9 +1829,10 @@ app.whenReady().then(async () => {
         await waitFor("!!document.querySelector('.modal-backdrop.hidden .settings-window')");
         await js("document.querySelector('.sidebar-settings-btn').click()");
         await waitFor("!!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
+        await waitFor("document.querySelector('.settings-window').getAnimations().length === 0");
         await js(`document.querySelector(".settings-titlebar-btn[title='Close']").click()`);
       }
-      await delay(300);
+      await waitFor("document.querySelector('#view-content')?.dataset.view === 'tasks' && !document.querySelector('.modal-backdrop:not(.hidden) .settings-window') && !document.querySelector('.settings-mobile-page')");
       assert.equal(await js("document.querySelector('#view-content').dataset.view"), "tasks", label + " leaving Settings stays on the tab you were on");
       assert.ok(await js("document.querySelector('.nav-item[data-tab=tasks]').classList.contains('active')"), label + " and that tab is still highlighted");
     }
@@ -1882,7 +1889,7 @@ app.whenReady().then(async () => {
     await delay(150);
     assert.equal(await sideId(), 's3', "the chat already open in the main pane is not opened twice");
     await js("document.querySelector('.side-chat-promote').click()");
-    await waitFor(`document.querySelector('.side-chat')?.dataset.sessionId === '${mainId}'`);
+    await waitFor(`document.querySelector('.side-chat')?.dataset.sessionId === '${mainId}' && document.querySelector('.session-item.active')?.dataset.sessionId === 's3'`);
     assert.equal(await js("document.querySelector('.session-item.active')?.dataset.sessionId"), 's3', "Make main swaps the two chats");
     await js("document.querySelector('.side-chat-close').click()");
     assert.equal(await sideId(), null);

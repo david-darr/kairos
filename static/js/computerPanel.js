@@ -124,11 +124,13 @@ export function mountComputerPanel(host, owner, initial = {}, { onClose, takeOve
     catch (error) { toast(error.message, 'error'); }
   }, { passive: false });
   toggle.onclick = async () => {
+    // Frames can land during the request, so fix the intent first.
+    const next = !control;
     toggle.disabled = true;
     try {
-      await api(`${endpoint}/${control ? 'handback' : 'takeover'}`, { method: 'POST' });
-      render({ taken_over: !control });
-      if (control) stage.focus();
+      await api(`${endpoint}/${next ? 'takeover' : 'handback'}`, { method: 'POST' });
+      render({ taken_over: next });
+      if (next) stage.focus();
     } finally { toggle.disabled = false; }
   };
   stop.onclick = async () => {
