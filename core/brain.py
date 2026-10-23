@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Optional
 
 from claude_agent_sdk import (
@@ -32,7 +33,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent
 
-from core import claude_cli, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
+from core import chat_tasks, claude_cli, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
 from core.constants import DATA_DIR, REPO_CODE_DIRS
 from core.vault import resolve_vault_dir
 from core.turn_taint import TurnTaint
@@ -46,6 +47,7 @@ from core.turn_taint import TurnTaint
 logger = logging.getLogger(__name__)
 
 TURN_MESSAGE_TIMEOUT_SECONDS = 180
+FOLLOWUP_GRACE_SECONDS = 15
 
 # The SDK transport's per-JSON-line cap, read by services/chat_service.py as
 # well so the failure message can tell a user which attachment was over it.
@@ -193,6 +195,16 @@ class Brain:
         self._client: ClaudeSDKClient | None = None
         self.turn_taint = TurnTaint()
         self.pending_reference_taint = False
+        self._background = set()
+        self._known_background = set()
+        self._pending_followups = {}
+        self._pending_notifications = set()
+        self._idle = None
+        self._self_turn = False
+        self._self_turn_done = asyncio.Event()
+        self._self_turn_done.set()
+        self._followup_changed = asyncio.Event()
+        self.followup_handler = None
 
     def _tool_config(self) -> tuple[list[str], list[str], dict]:
         """The parts of a connection that come from global settings rather
@@ -422,6 +434,8 @@ class Brain:
         guess made in this app. Falling back to a derived scope keeps the
         prompt useful when no suggestion arrives.
         """
+        if self._self_turn:
+            return PermissionResultDeny(message='No approval channel is open for a background turn.', interrupt=False)
         if tool_name == "AskUserQuestion":
             return await self._ask_person(arguments)
         if self.read_only and not self._plan_tool(tool_name):
@@ -546,6 +560,7 @@ class Brain:
         each tool call started and finished, the turn's usage, an account
         quota reading when the CLI sends one, then RESULT. One transport
         either way, so `stream` changes nothing here."""
+        await self.settle_background()
         if self._client is None:
             raise RuntimeError("Brain.connect() must be called before run_turn_stream().")
 
@@ -556,7 +571,118 @@ class Brain:
             self.pending_reference_taint = False
         await self._client.query(user_text)
 
-        response_iter = self._client.receive_response().__aiter__()
+        async for item in self._message_events(self._client.receive_response().__aiter__()):
+            yield item
+        if self._background or self._pending_followups or self._pending_notifications:
+            self._idle = asyncio.create_task(self._between_turns())
+
+    def _observe(self, message):
+        data = getattr(message, 'data', {}) or {}
+        ident = getattr(message, 'task_id', data.get('task_id'))
+        ident = 'claude:' + str(ident) if self.session_id and ident else ident
+        if type(message).__name__ == 'TaskUpdatedMessage' and ident in self._known_background:
+            if (getattr(message, 'patch', data.get('patch', {})) or {}).get('status') in ('completed', 'failed', 'stopped', 'killed'):
+                self._pending_notifications.add(ident)
+                self._self_turn_done.clear()
+        if type(message).__name__ == 'TaskNotificationMessage':
+            self._pending_notifications.discard(ident)
+        if (type(message).__name__ == 'TaskNotificationMessage' and
+                getattr(message, 'status', data.get('status')) in ('completed', 'failed', 'stopped', 'killed') and ident in self._known_background):
+            # Completion queues a CLI-owned turn even when its init has not
+            # reached the transport yet. Drain its Result before a new query.
+            self._pending_followups[ident] = time.monotonic()
+            self._followup_changed.set()
+            self._self_turn_done.clear()
+        if self.session_id:
+            chat_tasks.claude_message(self.session_id, message)
+            self._background = chat_tasks.background_ids(self.session_id)
+        else:
+            data = getattr(message, 'data', {}) or {}
+            ident = getattr(message, 'task_id', data.get('task_id'))
+            if type(message).__name__ == 'TaskStartedMessage' and data.get('is_backgrounded'):
+                self._background.add(ident)
+            if type(message).__name__ == 'TaskNotificationMessage':
+                self._background.discard(ident)
+        self._known_background.update(self._background)
+        if not (self._self_turn or self._pending_notifications or self._pending_followups):
+            self._self_turn_done.set()
+
+    async def _between_turns(self):
+        iterator = self._client.receive_messages().__aiter__()
+        try:
+            while True:
+                message = await iterator.__anext__()
+                if getattr(message, 'parent_tool_use_id', None):
+                    self._observe(message)
+                    continue
+                if (getattr(message, 'subtype', None) == 'init' or
+                        type(message).__name__ in ('AssistantMessage', 'UserMessage', 'StreamEvent')):
+                    self._self_turn = True
+                    self._self_turn_done.clear()
+                    # One CLI turn can answer several completed tasks. New
+                    # notifications observed during it belong to a later turn.
+                    self._known_background.difference_update(self._pending_followups)
+                    self._pending_followups.clear()
+                    self._pending_notifications.clear()
+                    self._followup_changed.set()
+                    began = time.time()
+                    tally = runs.Tally()
+                    async def turn():
+                        yield message
+                        async for following in iterator:
+                            yield following
+                            if isinstance(following, ResultMessage):
+                                return
+                    try:
+                        async for event in self._message_events(turn().__aiter__()):
+                            tally.add(event)
+                        if self.followup_handler:
+                            await self.followup_handler(''.join(tally.parts).strip(), tally,
+                                                        {**(tally.finished.data if tally.finished else {}), 'started_at': began})
+                    finally:
+                        self._self_turn = False
+                        self._self_turn_done.set()
+                        self._followup_changed.set()
+                else:
+                    self._observe(message)
+        except (StopAsyncIteration, asyncio.CancelledError):
+            pass
+        except Exception:
+            logger.exception('Claude background reader failed')
+
+    async def settle_background(self):
+        task = self._idle
+        if task is None or task is asyncio.current_task():
+            return
+        if not task.done():
+            while not task.done() and not task.cancelling():
+                self._followup_changed.clear()
+                if self._self_turn:
+                    try:
+                        await asyncio.wait_for(self._self_turn_done.wait(), TURN_MESSAGE_TIMEOUT_SECONDS)
+                    except asyncio.TimeoutError:
+                        pass
+                    break
+                elif self._pending_followups:
+                    remaining = max(self._pending_followups.values()) + FOLLOWUP_GRACE_SECONDS - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        await asyncio.wait_for(self._followup_changed.wait(), remaining)
+                    except asyncio.TimeoutError:
+                        break
+                else:
+                    break
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self._idle = None
+        self._pending_followups.clear()
+        self._pending_notifications.clear()
+
+    async def _message_events(self, response_iter):
         streamed_blocks = {}
         has_text = False
         untrusted_tool_ids: dict[str, str] = {}
@@ -579,6 +705,7 @@ class Brain:
                 except asyncio.TimeoutError:
                     raise RuntimeError("Claude Code timed out waiting for a response")
 
+                self._observe(message)
                 if isinstance(message, StreamEvent):
                     if message.parent_tool_use_id:
                         continue
@@ -625,7 +752,7 @@ class Brain:
                             open_tools.discard(tool_use_id)
                             yield runs.tool_finished(tool_use_id, not getattr(block, "is_error", False),
                                                      getattr(block, "content", ""))
-                if isinstance(message, AssistantMessage):
+                if isinstance(message, AssistantMessage) and not getattr(message, 'parent_tool_use_id', None):
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             if block.text in streamed_blocks.values():
@@ -654,6 +781,14 @@ class Brain:
                 await asyncio.gather(pending_next, return_exceptions=True)
 
     async def disconnect(self) -> None:
+        if self._idle and self._idle is not asyncio.current_task():
+            self._idle.cancel()
+        await self.settle_background()
+        self._pending_followups.clear()
+        self._pending_notifications.clear()
+        self._known_background.clear()
+        self._background.clear()
+        chat_tasks.end_source(self.session_id, 'claude', 'The Claude Code session closed')
         if self._client is not None:
             await self._client.disconnect()
             self._client = None

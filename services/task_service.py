@@ -157,6 +157,7 @@ class TaskService:
         enabled: bool = True,
         time_zone: Optional[str] = None,
         weekdays: Optional[list[int]] = None,
+        origin_session_id: Optional[str] = None,
     ) -> dict:
         if schedule_kind not in ("once", "interval", "daily", "card"):
             raise ValueError("schedule_kind must be 'once', 'interval', 'daily' or 'card'")
@@ -245,6 +246,8 @@ class TaskService:
         if schedule_kind == "card":
             task.update({"status": status or "backlog", "depends_on": list(depends_on or []), "attempts": 0,
                          "claimed_until": None, "comments": []})
+        if origin_session_id is not None and schedule_kind != "card":
+            task["origin_session_id"] = origin_session_id
         self._tasks[task_id] = task
         self._save_tasks()
         return task
