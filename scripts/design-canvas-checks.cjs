@@ -500,12 +500,21 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.chat-layout')");
   await js("import('/static/js/chatContent.js').then(m => { m.closeArtifact(); return 1; })");
+  // The reader keeps their place when the design takes half the window (chatScrollAnchor.js):
+  // a long conversation, read from the middle, then the design opens beside it.
+  await js(`(() => { const m = document.querySelector('#chat-messages'); for (let i = 0; i < 40; i++) { const d = document.createElement('div'); d.className = 'msg assistant design-reading-filler'; d.dataset.n = i; d.innerHTML = '<p>Reading line ' + i + ': a paragraph long enough to wrap when the chat column narrows beside the design pane.</p>'; m.append(d); } m.scrollTop = m.querySelector('[data-n="20"]').offsetTop - 120; return 1; })()`);
+  await delay(300);
+  // The line at the middle of the chat is the reader's place (what chatScrollAnchor.js keeps).
+  await js("(() => { const m = document.querySelector('#chat-messages'), r = m.getBoundingClientRect(); const c = document.caretRangeFromPoint(r.left + m.clientWidth / 2, r.top + m.clientHeight / 2); window.__readingAt = { node: c.startContainer, offset: c.startOffset }; return 1; })()");
+  const readingTop = () => js("(() => { const m = document.querySelector('#chat-messages'), a = window.__readingAt; const range = document.createRange(); range.setStart(a.node, a.offset); range.setEnd(a.node, Math.min(a.offset + 1, a.node.length)); return range.getClientRects()[0].top - m.getBoundingClientRect().top; })()");
+  const readingBefore = await readingTop();
   state.designMode = ['s1'];
   liveRuns.s1 = { turnId: 'design-turn', sessionTitle: 'Workspace planning', prompt: 'Design our launch site', text: '', startedAt: Date.now() / 1000,
     status: 'processing', stopping: false, permission: null, toolEvents: [], toolSteps: [], handoffs: null, runId: null, error: null, revision: 1 };
   liveBroadcast({ type: 'started', sessionId: 's1', run: structuredClone(liveRuns.s1) });
   await waitFor("document.querySelector('.artifact-empty')?.dataset.designPending === 's1' && document.querySelector('.artifact-empty').offsetParent !== null");
   assert.match(await js("document.querySelector('.artifact-empty').textContent"), /Starting the design/);
+  await delay(600); const readingPlaceholder = await readingTop();
   await capture('design-pane-placeholder');
   // design_create's first event: the pane shows the design while the reply is still running.
   designs[PID].hidden = false;
@@ -513,6 +522,9 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await waitFor("[...document.querySelectorAll('.artifact-tab-label')].some(t => t.textContent.includes('Launch site')) && document.querySelectorAll('.artifact-panel .design-board').length === 1");
   assert.equal(await js("import('/static/js/chatStream.js').then(m => m.getInFlight('s1')?.status)"), 'processing', 'the pane opened mid-turn');
   assert.equal(await js("document.querySelector('.artifact-panel').contains(document.activeElement)"), false, 'opening it took no focus from the chat');
+  await delay(600);
+  const readingAfter = await readingTop();
+  assert.ok(Math.abs(readingAfter - readingBefore) <= 4, `the chat keeps its reading place when the design pane opens: ${readingBefore} -> ${readingPlaceholder} -> ${readingAfter}`);
   // The next board arrives with design_add_board: the pane redraws without waiting for the reply.
   const home = designs[PID].boards.home;
   designs[PID].boards['home-mobile'] = board('Home (mobile)', 2, 'website', 'mobile', null, 'phone', 390, 2600);
@@ -523,6 +535,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await capture('design-pane-mid-turn');
   liveFinish('s1');
   state.designMode = [];
+  await js("document.querySelectorAll('.design-reading-filler').forEach(n => n.remove()); 1");
   await js("import('/static/js/chatContent.js').then(m => { m.closeArtifact(); return 1; })");
   await noErrorToasts('design-pane');
   // The site it made, full page in Library: a desktop and mobile pair in their own rows.
