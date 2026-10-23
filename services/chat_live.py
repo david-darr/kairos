@@ -14,7 +14,7 @@ from copy import deepcopy
 
 from fastapi import HTTPException
 
-from core import runs, mobile_activity
+from core import runs, mobile_activity, permissions
 from core.auth import SINGLE_USER, auth_manager
 from services import chat_service
 
@@ -219,8 +219,12 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                                              reference_context, references, claimed=True)
         async with contextlib.aclosing(stream):
             async for item in stream:
+                # Output after a request used to mean it was settled. A Codex
+                # question stays open after its process writes and ends
+                # (core/codex_questions.py), so ask the broker first.
                 if run["permission"] and (isinstance(item, str) or
-                                           isinstance(item, dict) and ("tool_step" in item or "handoffs" in item)):
+                                           isinstance(item, dict) and ("tool_step" in item or "handoffs" in item)) \
+                        and permissions.pending_request(run["permission"].get("id", "")) is None:
                     _update(session_id, run, permission=None)
                 context = runs.current_for(session_id)
                 if context and run["runId"] != context.run_id:
