@@ -442,6 +442,31 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   for (let i = 0; i < 40 && !state.posts.some(p => p.body.action === 'resize'); i++) await delay(50);
   await delay(500);
   assert.deepEqual(overlaps(await boxes()), [], 'nothing overlaps after a resize');
+  // Titles and row labels at very low zoom: they shrink with the canvas, then
+  // step aside (row labels first), so no text ever overlaps a board or other text.
+  const textClash = () => js(`(() => {
+    const visible = n => getComputedStyle(n).visibility !== 'hidden' && n.getClientRects().length;
+    const box = n => { const r = n.getBoundingClientRect(); return { n, x1: r.left, y1: r.top, x2: r.right, y2: r.bottom }; };
+    const texts = [...document.querySelectorAll('.design-board-title, .design-section-label')].filter(visible).map(box);
+    const chrome = [...document.querySelectorAll('.design-board')].map(b => ({ ...box(b.querySelector('.design-chrome')), board: b }));
+    const hit = (a, b) => a.x1 < b.x2 - 0.5 && b.x1 < a.x2 - 0.5 && a.y1 < b.y2 - 0.5 && b.y1 < a.y2 - 0.5;
+    const name = t => t.n.classList.contains('design-section-label') ? 'label ' + t.n.textContent : 'title ' + t.n.closest('.design-board').dataset.slug;
+    const out = [];
+    texts.forEach((t, i) => {
+      for (const c of chrome) if (c.board !== t.n.closest('.design-board') && hit(t, c)) out.push(name(t) + ' on board ' + c.board.dataset.slug);
+      for (const u of texts.slice(i + 1)) if (hit(t, u)) out.push(name(t) + ' on ' + name(u));
+    });
+    return { out, titles: texts.filter(t => !t.n.classList.contains('design-section-label')).length, labels: texts.filter(t => t.n.classList.contains('design-section-label')).length };
+  })()`);
+  for (const level of [0.05, 0.1, 0.2]) {
+    await js(`${C}.fit(false); ${C}.zoomTo(${level})`); await delay(300);
+    const clash = await textClash();
+    assert.deepEqual(clash.out, [], `no text overlaps at ${level * 100}% zoom`);
+    if (level === 0.05) assert.equal(clash.titles + clash.labels, 0, 'at 5% titles and labels step aside');
+    if (level === 0.1) assert.ok(clash.titles > 0 && clash.labels > 0, 'at 10% titles and labels show, scaled to fit');
+    await clean(); await capture(`design-zoom-${Math.round(level * 100)}`);
+  }
+  await js(`${C}.fit(false)`);
   // Add board offers formats, not free frames.
   await js("[...document.querySelectorAll('.design-toolbar .btn')].find(b => b.textContent === 'Add board').click()");
   await waitFor("!!document.querySelector('.design-format-menu')");

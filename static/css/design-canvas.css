@@ -66,7 +66,7 @@
 
 .design-board { position: absolute; }
 .design-board-title { position: absolute; left: 0; right: 0; display: flex; align-items: baseline; gap: .7em; padding: 0 2px;
-  font-size: calc(14px / var(--design-zoom, 1)); line-height: 1.5; white-space: nowrap; overflow: hidden; cursor: move; user-select: none; color: var(--text); }
+  font-size: min(calc(14px / var(--design-zoom, 1)), 120px); line-height: 1.5; white-space: nowrap; overflow: hidden; cursor: move; user-select: none; color: var(--text); }
 .design-board-name { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .design-board-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .design-board-name { font-weight: 500; }
@@ -106,10 +106,17 @@
 
 /* Rows by format (core/design_formats.py): a label above each row; neighbours
    glide while a board is dragged or resized, the board itself follows the pointer. */
-.design-section-label { position: absolute; transform: translate(calc(-100% - 28px / var(--design-zoom, 1)), calc(-100% - 8px / var(--design-zoom, 1)));
-  color: var(--text-dim); font: 500 calc(11px / var(--design-zoom, 1)) / 1.5 var(--font-sans); letter-spacing: .08em; text-transform: uppercase;
+.design-section-label { position: absolute; transform: translate(calc(-100% - min(28px / var(--design-zoom, 1), 60px)), calc(-100% - min(8px / var(--design-zoom, 1), 20px)));
+  color: var(--text-dim); font: 500 min(calc(11px / var(--design-zoom, 1)), 100px) / 1.5 var(--font-sans); letter-spacing: .08em; text-transform: uppercase;
   text-align: right; white-space: nowrap; pointer-events: none; }
 .design-canvas-compact .design-section-label { display: none; }
+/* Titles and row labels keep their screen size until they would no longer fit
+   between rows (ROW_GAP + TITLE_GAP, 354 canvas px): past that they shrink with
+   the canvas (the caps above), and when too small to read they step aside,
+   row labels first, then board titles. Nothing overlaps at any zoom. */
+.design-canvas[data-zoom-tier="small"] .design-section-label,
+.design-canvas[data-zoom-tier="tiny"] .design-section-label,
+.design-canvas[data-zoom-tier="tiny"] .design-board-title { visibility: hidden; }
 .design-reflowing .design-board { transition: left .2s var(--ease-out), top .2s var(--ease-out); }
 .design-reflowing .design-board.design-lifted { transition: none; z-index: 2; }
 .design-board.design-lifted .design-board-body { box-shadow: var(--shadow-lifted); }

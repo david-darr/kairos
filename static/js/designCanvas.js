@@ -174,7 +174,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
       Object.assign(node.wrap.style, { left: `${info.x}px`, top: `${info.y}px`, width: `${info.w}px`, height: `${info.h}px` });
       node.wrap.dataset.frame = info.frame;
       node.chrome.style.inset = `-${top}px -${side}px -${bottom}px -${side}px`;
-      node.title.style.bottom = `calc(100% + ${top}px + 6px / var(--design-zoom, 1))`;
+      node.title.style.bottom = `calc(100% + ${top}px + min(6px / var(--design-zoom, 1), 20px))`;
       node.name.textContent = info.title;
       node.meta.textContent = sizeText(info);
       node.address.textContent = info.title;
@@ -242,6 +242,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     world.style.transform = `translate(${tx}px, ${ty}px) scale(${zoom})`;
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     root.style.setProperty('--design-zoom', zoom);
+    // Below these zooms a label would be under 8px (row labels) or 7px (titles) on screen.
+    root.dataset.zoomTier = zoom < 0.06 ? 'tiny' : zoom < 0.08 ? 'small' : 'normal';
     schedule();
   }
   function schedule() { cancelAnimationFrame(liveFrame); liveFrame = requestAnimationFrame(updateLive); }
