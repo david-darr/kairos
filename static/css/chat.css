@@ -875,7 +875,7 @@
   .chat-title { flex: 1; font-size: 14px; letter-spacing: 0; color: var(--text); font-weight: 500; }
   .chat-mobile-header .input-icon-btn { flex-shrink: 0; border-radius: 12px; }
   .chat-mobile-header .chat-documents-toggle { font-size: 11px; padding-inline: 8px; }
-  #chat-messages { padding: 22px 18px 16px; gap: 26px; scrollbar-gutter: auto; }
+  #chat-messages { padding: 22px 18px 16px; --chat-message-gap: 26px; gap: var(--chat-message-gap); scrollbar-gutter: auto; }
   #chat-messages .msg { font-size: 16px; line-height: 1.7; }
   #chat-messages .chat-prose { font-size: 16px; }
   .msg.user .msg-body { padding: 12px 16px; border-radius: 20px 20px 6px 20px; }

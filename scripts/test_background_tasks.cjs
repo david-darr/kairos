@@ -18,6 +18,7 @@ class Element {
   click() { this.listeners.click?.(); }
   focus() {}
   contains(n) { return n === this || this.children.some(c => c.contains(n)); }
+  get parentElement() { return this.parent; }
   matches(s) {
     if (s.startsWith('.')) return (this.className || '').split(' ').includes(s.slice(1));
     if (s.startsWith('[data-bg-note=')) return this.dataset.bgNote === s.slice(15, -2);
@@ -38,17 +39,33 @@ class Element {
   const details = { item, prompt: 'A prose prompt', steps: [{ name: 'Read', text: 'core/brain.py', kind: 'tool' }],
     summary: 'A prose result', command: 'echo test', output: 'test output', outputTruncated: false,
     timeline: [{ name: 'Grep', detail: 'TODO' }], lines: ['log entry'], usage: { total_tokens: 1234, tool_uses: 3, duration_ms: 12000 } };
-  const notes = [10, 20].map(at => ({ ...item, at }));
+  const notes = [20, 10].map(at => ({ ...item, at }));
   global.api = async url => url.endsWith('/card%3Aone') ? details : { items: [item], notes };
   let code = fs.readFileSync(path.join(__dirname, '../static/js/backgroundTasks.js'), 'utf8').replace(/^import .*;\r?\n/gm, '');
   const { mountBackgroundTasks } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
   const host = new Element('div'), messages = new Element('div');
+  const card = at => { const n = new Element('article'); n.dataset.ts = String(at); return n; };
+  messages.append(card(5), card(25));
   const ui = mountBackgroundTasks({ host, messages, getSessionId: () => 'sid' });
   const flush = () => new Promise(resolve => setImmediate(resolve));
   ui.setSession('sid'); await flush();
-  assert.equal(messages.children.length, 2, 'Both completions have notes');
+  assert.equal(messages.children.length, 3, 'Historical run sits between two cards');
+  assert.deepEqual(messages.children[1].children.map(n => n.dataset.ts), ['10', '20'], 'Out-of-order historical notes stay chronological');
+  assert.equal(messages.children[1].attrs.role, 'note');
+  assert(messages.children[1].children.every(n => n.tagName === 'button' && n.dataset.bgNote), 'Available notes remain keyboard reachable buttons with identifiers');
   await document.listeners['kairos:live-snapshot'](); await flush();
-  assert.equal(messages.children.length, 2, 'Refetch does not duplicate notes');
+  assert.equal(messages.querySelectorAll('.bg-task-note').length, 2, 'Refetch does not duplicate notes');
+  const packet = notes => document.listeners['kairos:bg-tasks']({ detail: { sessionId: 'sid', items: [item], notes } });
+  packet([{ ...item, at: 30 }]);
+  assert.equal(messages.children.length, 4, 'Live note after a card starts a new run');
+  packet([{ ...item, at: 40 }]);
+  assert.deepEqual(messages.children[3].children.map(n => n.dataset.ts), ['30', '40'], 'Live append joins the last run');
+  messages.append(card(50), card(70));
+  notes.push({ ...item, id: 'missing', at: 60 });
+  await document.listeners['kairos:live-snapshot'](); await flush();
+  assert.equal(messages.children[5].className, 'bg-task-notes', 'A historical note between cards forms its own run');
+  assert.equal(messages.children[5].children[0].attrs.role, 'note', 'Unavailable note retains note semantics');
+  assert.equal(messages.children[5].children[0].dataset.ts, '60');
   host.querySelector('.bg-tasks-pill').click();
   assert.equal(host.querySelectorAll('.bg-tasks-heading').length, 1);
   host.querySelector('.bg-task-row').click(); await flush();

@@ -157,7 +157,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
 .chat-phone-tools .overflow-menu { top: calc(100% + 12px); bottom: auto; right: 0; left: auto; min-width: 230px; }
 
 /* Open assistant prose, soft prompt bubbles and real progress disclosures. */
-#chat-messages { padding: 26px 32px 24px; gap: 32px; }
+#chat-messages { padding: 26px 32px 24px; --chat-message-gap: 32px; gap: var(--chat-message-gap); }
 #chat-messages .msg { font-size: 16px; line-height: 1.8; }
 #chat-messages .chat-prose { font-size: 16px; }
 .chat-layout > .chat-backdrop { opacity: .42; }
@@ -283,7 +283,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   .chat-header-model .model-picker-menu { right: -50px; max-height: min(400px, 55dvh); }
   .chat-phone-tools { align-self: center; }
   .chat-mobile-header .chat-phone-tools > button { border-radius: 50%; }
-  #chat-messages { padding: 24px 20px 18px; gap: 32px; scrollbar-gutter: auto; }
+  #chat-messages { padding: 24px 20px 18px; --chat-message-gap: 32px; gap: var(--chat-message-gap); scrollbar-gutter: auto; }
   .msg.user .msg-body { max-width: 92%; padding: 14px 18px; }
   .msg-actions { opacity: 1; flex-wrap: wrap; gap: 6px; }
   .msg-actions .msg-action-btn { min-height: 36px; padding-inline: 10px; }
