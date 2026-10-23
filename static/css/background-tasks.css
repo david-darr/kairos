@@ -26,12 +26,15 @@
 .bg-task-prompt, .bg-task-prose { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.5; }
 .bg-task-command, .bg-task-output, .bg-task-logs { max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .bg-task-usage, .bg-task-output-note { margin-top: 8px; font-size: 12px; }
-.bg-task-note { display: block; padding: 2px 8px; margin: 2px 0; border: 0; background: transparent; color: var(--text-faint); font: inherit; font-size: 12px; line-height: 1.4; text-align: center; overflow-wrap: anywhere; }
+.bg-task-note { display: block; box-sizing: border-box; min-height: 24px; padding: 2px 8px; margin: 0; border: 0; background: transparent; color: var(--text-faint); font: inherit; font-size: 12px; line-height: 1.4; text-align: center; overflow-wrap: anywhere; }
 .bg-task-note::before { content: ''; display: inline-block; width: 16px; margin: 0 8px 3px 0; border-top: 1px solid var(--border); }
-button.bg-task-note { min-height: 44px; width: 100%; cursor: pointer; }
-#chat-messages > .bg-task-note { margin-block: -12px; flex-shrink: 0; }
-#chat-messages > .bg-task-note:first-child { margin-top: 0; }
-#chat-messages > .bg-task-note:last-child { margin-bottom: 0; }
+button.bg-task-note { width: 100%; cursor: pointer; }
+#chat-messages > .bg-task-notes { display: flex; flex-direction: column; gap: 0; margin-block: calc(12px - var(--chat-message-gap)); flex-shrink: 0; }
+#chat-messages > .bg-task-notes:first-child { margin-top: 0; }
+#chat-messages > .bg-task-notes:last-child { margin-bottom: 0; }
+@media (pointer: coarse) {
+  .bg-task-note { min-height: 44px; }
+}
 .bg-followup-caption { margin-bottom: 4px; color: var(--text-faint); font-size: 11px; }
 .bg-tasks button:focus-visible, .bg-task-note:focus-visible { outline: 2px solid var(--k-gold); outline-offset: 2px; }
 @media (prefers-reduced-motion: no-preference) {
@@ -39,6 +42,7 @@ button.bg-task-note { min-height: 44px; width: 100%; cursor: pointer; }
   @keyframes bg-task-pulse { 50% { opacity: .4; } }
 }
 @media (max-width: 768px) {
+  .kairos-redesign .bg-task-note { min-height: 44px; }
   .kairos-redesign .bg-tasks { padding: 2px 4px; }
   .kairos-redesign .bg-tasks-pill { min-height: 44px; max-width: 100%; }
   .kairos-redesign .ms-sheet .bg-tasks-panel { position: static; max-height: none; width: 100%; box-sizing: border-box; border: 0; box-shadow: none; }
