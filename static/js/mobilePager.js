@@ -11,6 +11,8 @@ export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) 
     if (previous !== index && mobileOn()) pages[index].classList.add('rd-enter-rise');
     if (pages[1 - index].contains(document.activeElement)) document.activeElement.blur?.();
     host.classList.remove('ms-dragging'); paint(index);
+    // Focusing a control on the off-screen page can scroll the clipped window; the transform alone positions pages.
+    const clip = pages[0].parentElement?.parentElement; if (clip?.scrollLeft) clip.scrollLeft = 0;
     pages.forEach((page, i) => { page.inert = i !== index; page.setAttribute('aria-hidden', String(i !== index)); });
     tabs.forEach((tab, i) => { tab.setAttribute('aria-selected', String(i === index)); tab.tabIndex = i === index ? 0 : -1; });
     onChange(index);

@@ -36,12 +36,18 @@ export async function render(container) {
   ]);
 
   const body = el("div", { id: "school-body" });
+  if (redesignOn()) {
+    const sync = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Sync Canvas', onclick: () => body.querySelector('.school-sync')?.click() });
+    sync.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5M4 12a8 8 0 0 1 14-5M18 3v4h-4M6 21v-4h4"/></svg>';
+    header.append(sync);
+  }
   container.append(el("div", { class: "view-constrained" }, [header, body]));
   await renderBody(body);
 }
 
 async function renderBody(body) {
   body.innerHTML = "";
+  body.classList.toggle('school-overview', state.view === 'overview');
   if (state.view === "overview") await renderOverview(body);
   else if (state.view === "course") await renderCourseView(body);
   else await renderAssignmentWorkspace(body);
@@ -57,6 +63,7 @@ async function renderSettings(container, onSynced) {
   const icsInput = el("input", { placeholder: "or: Canvas iCal feed URL (Calendar > Calendar Feed)", value: settings.ics_url, style: inputStyle });
   const saveBtn = el("button", { class: "btn", text: "Save", style: "font-size:11.5px;padding:5px 9px;" });
   const syncBtn = el("button", { class: "btn", text: "Sync Now", style: "font-size:11.5px;padding:5px 9px;" });
+  syncBtn.classList.add('school-sync');
   const statusEl = el("div", { class: "meta", style: "margin-top:6px;font-size:10px;" });
 
   saveBtn.addEventListener("click", async () => {
@@ -115,7 +122,7 @@ async function renderOverview(body) {
       el('h3', { text: next.title }), el('p', { class: 'meta', text: `${next.course} · ${formatDue(next.due)}` }),
       el('button', { type: 'button', class: 'btn primary', text: 'Start with Kairos', onclick: () => openAssignment(body, next.id) })]));
   }
-  body.appendChild(el("div", { class: "title", style: "margin:18px 0 10px;font-size:15px;", text: "Courses" }));
+  body.appendChild(el("div", { class: "title school-classes-heading", style: "margin:18px 0 10px;font-size:15px;", text: redesignOn() && window.matchMedia('(max-width: 768px)').matches ? 'Classes' : "Courses" }));
   const grid = el("div", { class: "document-grid rd-stagger" });
   body.appendChild(grid);
   if (courses.length === 0) {

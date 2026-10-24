@@ -9,7 +9,7 @@ import { renderLayoutPanel } from './layoutPanel.js';
 import { renderChannelsPanel } from "./settingsChannels.js";
 import { runSummary, surfaceLabel, toggleRunTimeline } from "../runTimeline.js";
 import { renderHooksPanel } from "./settingsHooks.js";
-import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor } from "../settingsKit.js";
+import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor, staggerEntrance } from "../settingsKit.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { renderNotificationsPanel } from './settingsNotifications.js';
 
@@ -307,7 +307,9 @@ export async function renderMobilePage(container, section, onExit) {
 
   const backBtn = el("button", { class: "settings-titlebar-btn settings-mobile-back", title: "Back", "aria-label": "Back", text: "‹" });
   const barTitle = el("span", { class: "settings-mobile-title", text: "Settings" });
-  const titlebar = el("div", { class: "settings-titlebar" }, [el("div", { class: "title" }, [backBtn, barTitle])]);
+  const appearanceReset = el('button', { type: 'button', class: 'rd-mobile-appearance-reset', text: 'Reset',
+    onclick: () => content.querySelector('.set-header-actions .btn')?.click() });
+  const titlebar = el("div", { class: "settings-titlebar" }, [el("div", { class: "title" }, [backBtn, barTitle]), appearanceReset]);
   const nav = el("div", { class: "settings-nav", id: "settings-nav" });
   const content = el("div", { class: "settings-content", id: "settings-content" });
   const body = el("div", { class: "settings-body" }, [nav, content]);
@@ -540,7 +542,7 @@ function buildNav() {
   nav.innerHTML = "";
   const search = el("input", { class: "settings-search", type: "search", placeholder: "Search settings", "aria-label": "Find settings" });
   const navList = el("div", { class: "settings-nav-list" });
-  nav.append(search, navList);
+  nav.append(el('h1', { class: 'rd-settings-title', text: 'Settings' }), search, navList);
 
   const entries = [], folds = [];
   const setFold = (fold, block, collapsed) => {
@@ -579,6 +581,8 @@ function buildNav() {
     }
     entries.push({ heading, block, items });
   }
+
+  staggerEntrance(navList);
 
   const matches = (sec, q) => !q
     || sec.label.toLowerCase().includes(q)
@@ -628,6 +632,7 @@ async function selectSection(id) {
   };
   page.actions();
   await section.render(body, cachedStatus, page);
+  if (page.current) staggerEntrance(body);
 }
 
 // -- Add Models (moved from Cookbook, David's ask 2026-08-31). Kairos ships

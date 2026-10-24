@@ -72,7 +72,17 @@ export function showPermissionPrompt(request, onAnswered, options = {}) {
 
   const disposeSurface = !inline && mobileOn() ? mountSheetSurface(dialog, () => dialog.close()) : () => {};
   if (!inline && mobileOn()) {
-    const close = el('button', { type: 'button', class: 'ms-sheet-close', text: 'Close', onclick: () => dialog.close() });
+    const shield = el('span', { class: 'permission-phone-icon', 'aria-hidden': 'true' });
+    shield.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/></svg>';
+    // Icon, then the label over one quiet line (who asks, and how long the answer can wait), then close.
+    const head = dialog.querySelector('.permission-head'), tool = head.querySelector('.permission-tool');
+    const minutes = request.expires_at ? Math.max(1, Math.round((request.expires_at * 1000 - Date.now()) / 60000)) : 0;
+    if (minutes) tool.textContent = `${request.tool} \u00b7 answer within ${minutes} min`;
+    const copy = el('div', { class: 'permission-head-copy' }); head.querySelector('h2').before(copy);
+    copy.append(head.querySelector('h2'), tool);
+    head.prepend(shield);
+    dialog.querySelector('.permission-args').open = true;
+    const close = el('button', { type: 'button', class: 'ms-sheet-close', text: '×', 'aria-label': 'Close', onclick: () => dialog.close() });
     dialog.querySelector('.permission-head').append(close);
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;

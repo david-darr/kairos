@@ -14,6 +14,9 @@ export async function openWorkspaceProfile(opener) {
     dialog.close();
     document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
   };
+  const notifications = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Notifications', onclick: () => navigate('settings', { section: 'notifications' }) });
+  notifications.innerHTML = ICONS.bell;
+  dialog.panel.querySelector('.modal-header').insertBefore(notifications, dialog.panel.querySelector('.modal-close-btn'));
   const identity = await api('/api/auth/status', { signal: dialog.signal }).catch(() => null);
   if (dialog.signal.aborted) return;
   if (!identity) { body.append(el('p', { role: 'status', text: 'Your account could not load. Close and open Profile to try again.' })); return; }

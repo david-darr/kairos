@@ -51,11 +51,11 @@ export function dotMatrix({ rows, cols, cells = [], label }) {
   return matrix;
 }
 
-export function emptyState({ mascotState = 'idle', title, text, action }) {
+export function emptyState({ mascotState = 'idle', mascotSize = 84, title, text, action }) {
   const node = el('section', { class: 'rd-empty-state' });
   if (document.documentElement.dataset.mascot !== 'off') {
     node.append(el('div', { class: 'rd-empty-mascot', 'aria-hidden': 'true' }, [
-      createMascot({ state: mascotState, size: 84, decorative: true }),
+      createMascot({ state: mascotState, size: mascotSize, decorative: true }),
     ]));
   }
   node.append(el('h2', { text: title }), el('p', { text }));

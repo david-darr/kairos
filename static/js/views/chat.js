@@ -1,5 +1,6 @@
 import { keepReadingPosition } from '../chatScrollAnchor.js';
 import { mountBackgroundTasks } from '../backgroundTasks.js';
+import { mountChatPaneToolbar } from '../chatPaneToolbar.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
@@ -31,6 +32,7 @@ import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileModelSheet } from '../mobileModelSheet.js';
 import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
+import { createMascot } from '../mascot.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -104,7 +106,8 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   if (role === 'assistant') {
     const mark = el('span', { class: 'chat-author-mark', 'aria-hidden': 'true' });
     mark.innerHTML = KAIROS_MARK;
-    card.prepend(el('div', { class: 'chat-author' }, [mark, el('span', { text: 'Kairos' })]));
+    const phoneKip = el('span', { class: 'rd-chat-author-kip', 'aria-hidden': 'true' }, [createMascot({ state: 'idle', size: 34, decorative: true })]);
+    card.prepend(el('div', { class: 'chat-author' }, [mark, phoneKip, el('span', { text: 'Kairos' }), el('span', { class: 'rd-chat-author-time', text: ` · ${time}` })]));
   }
   if (role === 'user' && failure?.references?.length) card.insertBefore(renderReferenceChips(failure.references), actions);
   if (role === "user" && imageSources.length) {
@@ -1077,6 +1080,9 @@ export async function render(container, tabId, options = {}) {
   // The same controls keep their listeners, draft and permissions. Secondary
   // composer actions live in More so the phone input stays one usable row.
   const composerOptions = el('div', { class: 'composer-menu-options' }, [permissionControl, openMicBtn]);
+  const phoneDictation = menuItem(ICON_MIC, 'Dictate a message', () => { closeMenu(overflowMenu); micBtn.click(); });
+  phoneDictation.classList.add('rd-chat-dictation-action'); phoneDictation.hidden = micBtn.hidden;
+  composerOptions.append(phoneDictation);
   openMicBtn.append(el('span', { text: 'Open Mic' }));
   const composerDivider = el('div', { class: 'overflow-menu-divider' });
   inputLeft.replaceChildren(overflowWrap, workspacePill);
@@ -1098,6 +1104,8 @@ export async function render(container, tabId, options = {}) {
     busy: () => sendBtn.dataset.mode === 'stop', recording: () => micBtn.classList.contains('recording') || isOpenMicActive() });
   const bgHost = el('div', { class: 'bg-tasks', hidden: true });
   const backgroundTasks = activeBackgroundTasks = mountBackgroundTasks({ host: bgHost, messages, getSessionId: () => activeSessionId, onOpenComputer: () => { syncComputer().then(showComputer); } });
+  const disposePaneToolbar = mountChatPaneToolbar({ header: mobileHeader, host: container, getSessionId: () => activeSessionId,
+    backgroundTasks, getComputer: () => computerInfo, openComputer: showComputer, menu: phoneToolsMenu });
   const backgroundFollowup = event => { if (event.detail.sessionId === activeSessionId) { const msg = event.detail.message; messages.appendChild(messageCard('assistant', msg.content, msg.ts, 'complete', [], msg)); } };
   document.addEventListener('kairos:bg-followup', backgroundFollowup);
   const questionHost = el('div', { class: 'chat-question-host', hidden: true, 'aria-live': 'polite' });
@@ -1297,6 +1305,7 @@ export async function render(container, tabId, options = {}) {
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    disposePaneToolbar();
     backgroundTasks.dispose(); if (activeBackgroundTasks === backgroundTasks) activeBackgroundTasks = null; document.removeEventListener('kairos:bg-followup', backgroundFollowup);
     disposeVoiceRow(); disposeMic(); disposeMobileChat(); disposeMobileComposer(); mobileModelSheet.dispose();
     document.removeEventListener('kairos:models-changed', onModelsChanged);
@@ -2384,6 +2393,11 @@ async function refreshProjectPicker(sessionsList, messages) {
   menu.appendChild(el("div", { class: "overflow-menu-divider" }));
   menu.appendChild(menuItem(ICON_PLUS, "New Project", () => { closeMenu(menu); openProjectModal(null); }));
 
+  sessionsList.chatFilters = [
+    { id: null, label: 'All', select: () => menu.children[0].click() },
+    ...allProjects.map((project, index) => ({ id: project.id, label: project.name, select: () => menu.children[index + 1].click() })),
+  ];
+  sessionsList.dispatchEvent(new Event('kairos:conversations'));
   const active = allProjects.find((p) => p.id === activeProjectFilter);
   label.textContent = active ? active.name : "All Chats";
   if (gearBtn) gearBtn.style.display = active ? "" : "none";
@@ -2503,6 +2517,8 @@ async function refreshSessions(sessionsList, messages) {
   // project is currently selected in the picker above; null (the default,
   // "All Chats") shows everything, unchanged from before this feature.
   const sessions = activeProjectFilter === null ? allSessions : allSessions.filter((s) => s.project_id === activeProjectFilter);
+  sessionsList.chatSessions = allSessions;
+  sessionsList.chatProject = activeProjectFilter;
   sessionsList.innerHTML = "";
   // Deliberately no early return on an empty list: the "no active session"
   // block at the bottom is what populates the model picker, and returning here
@@ -2533,6 +2549,7 @@ async function refreshSessions(sessionsList, messages) {
     sessionsList.appendChild(item);
     if (session.id === activeSessionId) syncChatLayout(messages, session.title);
   }
+  sessionsList.dispatchEvent(new Event('kairos:conversations'));
   if (!activeSessionId) {
     renderWelcome(messages);
     await refreshModelPicker(null);

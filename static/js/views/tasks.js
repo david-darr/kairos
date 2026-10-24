@@ -88,6 +88,12 @@ export async function render(container) {
 
   form.querySelector('summary').dataset.mobileDock = 'create';
   form.querySelector('summary').dataset.mobileCreateLabel = 'Schedule a task';
+  if (redesignOn()) {
+    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New task', onclick: () => { form.open = true; nameInput.focus(); } });
+    create.innerHTML = ICONS.plus;
+    header.append(create);
+    buildButton.classList.add('tasks-build-button');
+  }
   const list = el("div", { id: "tasks-list", class: 'rd-stagger', style: "margin-top:14px;" });
   const activity = el('section', { class: 'task-activity', hidden: !redesignOn() });
   list.activity = activity;
@@ -95,7 +101,8 @@ export async function render(container) {
   const boardCard = el("div", { class: "glass card task-board-card" });
   // Webhook triggers (2026-10-05): outside events that start work.
   const triggersCard = el("div", { class: "glass card triggers-card" });
-  const wrap = el("div", { class: "view-constrained" }, [header, activity, boardCard, form, list, triggersCard, builtinCard]);
+  const routinesHeading = el('h3', { class: 'workspace-phone-only tasks-routines-heading', text: 'Routines' });
+  const wrap = el("div", { class: "view-constrained tasks-workspace" }, [header, activity, boardCard, form, routinesHeading, list, triggersCard, builtinCard]);
   wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search tasks and cards";  // phone dock search (mobileDock.js)
   container.append(wrap);
   await renderBoard(boardCard);

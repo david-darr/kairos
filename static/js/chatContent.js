@@ -2,6 +2,9 @@ import { api, el, toast, openOptionMenu, closeOptionMenu } from './api.js';
 import { marked, DOMPurify, hljs } from './vendor/chat-vendor.js';
 import { installDesignAutoOpen } from './designAutoOpen.js';
 import { mountChatPane } from './chatPaneLayout.js';
+import { desktopPanes } from './chatPaneStack.js';
+import { openChatDesign, designPaneOpen } from './chatDesignPane.js';
+import { mobileOn } from './mobileShared.js';
 import { renderArtifact, loadingSkeleton } from './artifactViewer.js';
 import { mountArtifactReview } from './artifactReview.js';
 import { mountForeignReview } from './artifactForeignReview.js';
@@ -141,6 +144,7 @@ function savePane() {
 
 export function setArtifactContext(sessionId, sessions = context.sessions) {
   context = { sessionId, sessions };
+  document.dispatchEvent(new CustomEvent('kairos:chat-session', { detail: { sessionId } }));
   if (viewer) {
     for (const tab of viewer.tabs) {
       tab.origin.hidden = sessionId === tab.sessionId;
@@ -169,16 +173,19 @@ export function hideArtifact({ navigation = false } = {}) {
   closeOptionMenu();
   const current = viewer;
   current.maximized = current.layout?.isMaximized() ?? current.maximized;
-  const layout = current.layout; current.layout = null; layout?.dispose();
+  const layout = current.layout; current.layout = null;
+  // Park first: disposing the last stacked pane removes the shared root, which would detach the panel
+  // (and reload an HTML iframe) before a state-preserving move.
+  movePanel(parking(), current.panel);
+  layout?.dispose();
   current.messageObserver?.disconnect();
   current.visible = !navigation ? false : current.visible && window.innerWidth > 1100;
   current.panel.classList.remove('artifact-panel', 'artifact-viewer');
-  movePanel(parking(), current.panel);
   if (current.opener?.isConnected && !navigation) current.opener.focus({ preventScroll: true });
   savePane();
 }
 function attachViewer(current, host) {
-  if (current.layout && current.panel.parentElement === host) return;
+  if (current.layout && current.panel.closest('.chat-layout') === host) return;
   // mountChatPane closes the prior pane; move the live document only after
   // that registration has released the region.
   current.panel.classList.add('artifact-panel', 'artifact-viewer');
@@ -204,7 +211,12 @@ export async function mountArtifactPane(host) {
     try {
       let saved;
       try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { /* Invalid or disabled storage. */ }
-      const tabs = Array.isArray(saved?.tabs) ? saved.tabs.slice(0, 20).filter(tab => typeof tab?.sessionId === 'string' && typeof tab.name === 'string' && typeof tab.url === 'string' && tab.url.length <= 500 && ARTIFACT_URL.test(tab.url)) : [];
+      let tabs = Array.isArray(saved?.tabs) ? saved.tabs.slice(0, 20).filter(tab => typeof tab?.sessionId === 'string' && typeof tab.name === 'string' && typeof tab.url === 'string' && tab.url.length <= 500 && ARTIFACT_URL.test(tab.url)) : [];
+      if (desktopPanes(host) || mobileOn()) {
+        const design = tabs.find(tab => DESIGN_URL.test(tab.url));
+        tabs = tabs.filter(tab => !DESIGN_URL.test(tab.url));
+        if (design && design.sessionId === context.sessionId) await openChatDesign(design.sessionId, design.url.match(DESIGN_URL)[1]);
+      }
       if (tabs.length && !viewer) {
         const current = createViewer(host);
         current.maximized = !!saved.maximized;
@@ -280,6 +292,7 @@ export function closeArtifact() {
   viewer = null;
   for (const tab of current.tabs) { tab.foreignReview.dispose(); tab.review?.dispose(); tab.controller.abort(); }
   current.layout?.dispose(); current.panel.remove();
+  current.disposePhoneChrome?.();
   current.messageObserver?.disconnect();
   cancelAnimationFrame(current.versionFrame);
   document.removeEventListener('keydown', current.onKey);
@@ -299,6 +312,7 @@ function activateTab(current, active, focus = false) {
   }
   current.panel.setAttribute('aria-label', `File preview: ${active.name}`);
   active.header.append(current.controls);
+  current.syncPhoneChrome?.();
   restoreScroll(active);
   if (current.layout) ensureRendered(active);
   if (focus) active.button.focus({ preventScroll: true });
@@ -359,6 +373,15 @@ async function renderDesignTab(tab) {
 }
 
 export async function openDesignTab(sessionId, designId, opener, options = {}) {
+  const host = document.querySelector('.chat-layout');
+  if (host && (desktopPanes(host) || mobileOn())) {
+    // Mount the design beside the placeholder first and drop the placeholder after, so the shared root never
+    // empties: tearing it down would reflow the chat at full width and the browser's scroll anchoring would
+    // move the reader before the width observer could restore their place.
+    const opening = openChatDesign(sessionId, designId);
+    if (viewer?.empty.dataset.designPending) hideArtifact();
+    return opening;
+  }
   let title = 'Design';
   try { title = (await api(`/api/designs/${designId}`)).title || title; } catch { toast('That design is no longer available.', 'error'); return; }
   await openArtifact(sessionId, `/designs/${designId}`, title, opener, options);
@@ -368,7 +391,7 @@ export async function openDesignTab(sessionId, designId, opener, options = {}) {
 const PENDING_TEXT = 'Starting the design. Its boards appear here as the model makes them.';
 installDesignAutoOpen({
   currentSession: () => document.querySelector('.chat-layout') ? context.sessionId : null,
-  isOpen: (sessionId, designId) => !!viewer?.tabs.some(tab => tab.url === `/designs/${designId}`),
+  isOpen: (sessionId, designId) => designPaneOpen(sessionId, designId) || !!viewer?.tabs.some(tab => tab.url === `/designs/${designId}`),
   openDesign: (sessionId, designId) => openDesignTab(sessionId, designId, null, { quiet: true }).catch(() => {}),
   showPlaceholder(sessionId) {
     const host = document.querySelector('.chat-layout');
@@ -420,6 +443,23 @@ function createViewer(host, sessionId, opener) {
   ]);
   panel.append(empty);
   const current = { panel, strip, tabs, opener, controls, plus, empty, visible: true, maximized: false, transcripts: new Map(), completedEntries: new Map() };
+  // On phones the document title precedes its tabs, as on ChatDocument.
+  // Move the live strip so selection, keyboard navigation and downloads keep
+  // their existing controllers. Restore its desktop home on resize/Classic.
+  const stripHome = panel.firstElementChild;
+  const phone = matchMedia('(max-width: 768px)');
+  current.syncPhoneChrome = () => {
+    const on = phone.matches && document.documentElement.classList.contains('kairos-redesign');
+    const active = current.active;
+    if (on && active) active.header.after(stripHome);
+    else if (stripHome.parentElement !== panel) panel.prepend(stripHome);
+  };
+  phone.addEventListener('change', current.syncPhoneChrome);
+  document.addEventListener('kairos:appearance', current.syncPhoneChrome);
+  current.disposePhoneChrome = () => {
+    phone.removeEventListener('change', current.syncPhoneChrome);
+    document.removeEventListener('kairos:appearance', current.syncPhoneChrome);
+  };
   attachViewer(current, host);
   maximize.onclick = () => current.layout.setMaximized(!current.layout.isMaximized());
   panel.addEventListener('pane-maximize', event => {
@@ -430,6 +470,8 @@ function createViewer(host, sessionId, opener) {
   });
   current.onKey = event => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
+    const focusedPane = event.target.closest?.('.chat-stacked-pane');
+    if (focusedPane && focusedPane !== current.panel) return;
     if (!current.layout || !current.panel.isConnected) return;
     event.preventDefault();
     if (current.active?.review?.leave()) return;

@@ -217,3 +217,32 @@
   .kairos-redesign .sidebar-user-card { min-height: 44px; }
   .kairos-redesign .rd-item-done { min-height: 44px; }
 }
+/* Phase 6: desktop board. Phone shell and Classic retain their own layout. */
+.rd-sidebar-brand, .rd-nav-heading { display: none; }
+@media (min-width: 769px) {
+  .kairos-redesign:not(.sidebar-collapsed) { --sidebar-width: 248px; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar { padding: 22px 16px 16px; gap: 14px; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar .sidebar-header { height: 30px; padding: 0 6px; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar #brand { display: flex; padding: 0; flex: 1; min-width: 0; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar #brand .brand-wordmark { display: none; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar .rd-sidebar-brand { display: flex; align-items: center; gap: 10px; color: var(--text); }
+  .kairos-redesign #sidebar .rd-sidebar-brand > span { font-size: 15px; letter-spacing: .32em; font-weight: 500; }
+  .kairos-redesign #sidebar .rd-kip-cut { fill: var(--sidebar-bg); }
+  .kairos-redesign #sidebar .rd-kip-point { fill: var(--point); }
+  .kairos-redesign[data-mascot='off'] #sidebar .rd-sidebar-brand svg { display: none; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar-toggle { width: 26px; height: 30px; flex: none; }
+  .kairos-redesign #sidebar .forge-mode-switch { border-radius: 999px; background: var(--surface-2); }
+  .kairos-redesign #sidebar .forge-mode-switch .segmented-tab { height: 36px; border-radius: 999px; }
+  .kairos-redesign #sidebar .forge-mode-switch small { display: none; }
+  .kairos-redesign #sidebar .rd-jump { border-radius: 999px; background: var(--bg-panel-solid); }
+  .kairos-redesign #sidebar .nav-group-label { font-size: 10px; letter-spacing: .18em; padding: 8px 10px 4px; margin-top: 8px; }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar .rd-nav-heading { display: block; }
+  .kairos-redesign #sidebar .nav-item { height: 40px; min-height: 40px; padding: 0 12px; border-radius: 14px; margin: 2px 0; color: var(--text); }
+  .kairos-redesign #sidebar .nav-item.active { background: var(--bg-panel-solid); box-shadow: 0 1px 3px rgba(var(--shade-rgb), .1); }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar .nav-item > svg { display: none; }
+  .kairos-redesign #sidebar-footer { padding: 10px 6px 0; }
+  .kairos-redesign #sidebar .sidebar-user-card { padding: 0; }
+  .kairos-redesign #sidebar .sidebar-avatar { width: 34px; height: 34px; background: var(--text); color: var(--sidebar-bg); border: 0; font: italic 600 18px var(--rd-font-title); }
+  .kairos-redesign #sidebar .sidebar-settings-btn { border-radius: 999px; color: var(--text); }
+  .kairos-redesign #sidebar-footer .overflow-menu { transform-origin: bottom left; }
+}

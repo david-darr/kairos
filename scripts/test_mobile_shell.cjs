@@ -39,7 +39,7 @@ class Surface {
     button(label, action, className = 'ms-glass') { const node = context.document.createElement('button'); node.textContent = label; node.className = className; node.addEventListener('click', action); return node; }, edgeBlur() {} };
   const stubs = {
     './mobileShared.js': shared,
-    './api.js': { api: async () => ({ providers: [] }), el(tag, attrs = {}, children = []) {
+    './api.js': { api: async () => ({ providers: [] }), modelMark: () => null, el(tag, attrs = {}, children = []) {
       const node = context.document.createElement(tag);
       for (const [key, value] of Object.entries(attrs)) {
         if (key === 'class') node.className = value;
@@ -50,6 +50,10 @@ class Surface {
       }
       node.append(...children); return node;
     } }, './brand.js': { ICON: '' }, './icons.js': { ICONS: {} },
+    './mascot.js': { createMascot() { return context.document.createElement('kairos-mascot'); } },
+    // chatStream.js attaches window and document listeners when it loads; this pure test needs only its two reads.
+    './chatStream.js': { listInFlight: () => [], subscribeAll: () => () => {} },
+    './mobileActions.js': { openNotifications() {} },
     './mobileHistory.js': { mountHistory() {} },
     './mobileTabSheet.js': { openMoreSheet() {}, initMoreSheet() {} },
     './mobileActivity.js': { initActivity() {}, attachActivity() {}, activityMetadata() {}, refreshActivity() {} },
@@ -247,7 +251,7 @@ class Surface {
   modelMenu.querySelector('.model-connection-item').click(); assert.equal(pickedConnection, 'codex');
   modelMenu.querySelectorAll('.model-catalog-item')[1].click(); assert.equal(pickedModel, 'custom', 'Model selection delegates to the existing controller callback');
   const modelDialog = doc.body.querySelector('.ms-sheet');
-  const optionsButton = modelDialog.querySelector('.ms-model-root').querySelector('button'); optionsButton.click();
+  const optionsButton = modelDialog.querySelector('.ms-model-extras').querySelector('button'); optionsButton.click();
   const optionsPage = modelDialog.querySelector('.ms-model-options');
   assert.equal(permission.parentNode, optionsPage, 'The same permission control moves into Options');
   const slider = optionsPage.querySelector('input'); assert.equal(slider.attrs.max, '2', 'Slider derives its discrete bounds from the real effort buttons plus Default');
@@ -326,7 +330,7 @@ class Surface {
     assert.equal(hidden, !enabled || fullscreen || lift > 0, 'Only desktop, full-screen views and keyboard hide the bar');
   }
   assert.match(source('agentsMessenger.js'), /class: 'agents-conversation-back'/);
-  assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, viewTabs\]/);
+  assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, phoneActions, viewTabs\]/, 'The Agents bar keeps Back and Open chats, then the v2 phone actions, before the view tabs');
   assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar'\]\)/, 'More lists the tabs the bar does not');
   assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);

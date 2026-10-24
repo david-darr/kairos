@@ -4,9 +4,9 @@
 // (openDesignPage) on the canvas, with its own composer and the model picker
 // for its linked chat. The old Design tab and #/design/<id> links redirect to
 // Library > Designs (app.js).
-import { api, el, toast } from '../api.js';
+import { api, el, toast, openPanelDialog } from '../api.js';
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
-import { mountDesignCanvas } from '../designCanvas.js';
+import { mountSharedDesignCanvas as mountDesignCanvas } from '../sharedDesignCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
 import { mountDesignModelPicker } from '../designModelPicker.js';
 import { mobileOn } from '../mobileShared.js';
@@ -118,6 +118,17 @@ async function openDesign(container, designId, options) {
   const modelHost = el('div', { class: 'design-model-host' });
   const header = el('div', { class: 'design-page-header' }, [back, el('span', { class: 'design-spacer' }),
     el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), modelHost, forge, more, remove]);
+  if (redesignOn()) {
+    const controls = el('div', { class: 'design-page-options' });
+    // Keep the model picker on the page when phone-only options move into a sheet.
+    controls.append(header.querySelector('.design-chat-pick'), forge, more, remove);
+    const optionsButton = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '…', 'aria-label': 'Design options', onclick: () => {
+      const dialog = openPanelDialog({ title: 'Design options', body: controls, owner: container, opener: optionsButton,
+        onClose: () => header.append(controls) });
+      dialog.panel.dataset.view = 'library';
+    } });
+    header.append(optionsButton, controls);
+  }
   const canvasHost = el('div', { class: 'design-page-canvas' });
   const composerHost = el('div', { class: 'design-page-composer' });
   const identity = el('div', { class: 'design-page-identity' });
@@ -142,7 +153,7 @@ async function openDesign(container, designId, options) {
     designId,
     onSelection: (item, previous) => composer.setSelection(item, previous),
     onComments: items => { if (!linked()) { toast('Link a chat first, or start a design chat.'); return; } composer.addComments(items); },
-    onLoaded: data => { design = data; identity.replaceChildren(el('strong', { text: data.title }), el('small', { text: `Library · v${data.version}` })); paintChats(data); },
+    onLoaded: data => { design = data; identity.replaceChildren(el('h2', { class: 'workspace-phone-only', text: 'Library' }), el('strong', { text: data.title }), el('small', { text: `Library · v${data.version}` })); paintChats(data); },
   });
   openParts = { canvas, composer };
   cleanup = () => {

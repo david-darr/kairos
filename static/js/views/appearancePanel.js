@@ -1,7 +1,7 @@
 import { el } from '../api.js';
 import { EFFECTS, ART_PIECES } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
-import { group, row, toggle } from '../settingsKit.js';
+import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
   resetAppearance, setAppearancePreview, halftoneSource, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
 
@@ -17,7 +17,9 @@ export function renderAppearancePanel(content, _status, page) {
   const root = el('section', { class: 'appearance-panel' });
   const status = el('p', { class: 'appearance-status meta', role: 'status', 'aria-live': 'polite' });
   const preview = el('canvas', { width: '640', height: '280', 'aria-hidden': 'true' });
-  const previewFrame = el('div', { class: 'appearance-preview' }, [preview,
+  const previewScene = el('div', { class: 'appearance-preview-scene', 'aria-hidden': 'true' });
+  let previewSceneKey = '', stopPreviewScene = null;
+  const previewFrame = el('div', { class: 'appearance-preview' }, [preview, previewScene,
     el('div', { class: 'appearance-preview-copy' }, [el('span', { text: 'KAIROS' }), el('strong', { text: 'Not more time. The right time.' })]),
     el('span', { class: 'appearance-preview-badge', text: 'Live preview' }),
   ]);
@@ -76,7 +78,16 @@ export function renderAppearancePanel(content, _status, page) {
     const focusBtn = el('button', { type: 'button', class: 'appearance-halftone-thumb-btn', 'aria-label': `Set the focus point for ${title}` }, [thumb]);
     focusBtn.addEventListener('click', (event) => {
       const box = focusBtn.getBoundingClientRect();
-      setHalftoneFocus(slot, (event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
+      const keyboard = !event.detail && !event.clientX && !event.clientY;
+      setHalftoneFocus(slot, keyboard ? .5 : (event.clientX - box.left) / box.width, keyboard ? .5 : (event.clientY - box.top) / box.height);
+      sync();
+    });
+    focusBtn.addEventListener('keydown', event => {
+      const delta = { ArrowLeft: [-.05, 0], ArrowRight: [.05, 0], ArrowUp: [0, -.05], ArrowDown: [0, .05] }[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      const info = getAppearance().halftoneSlots[slot];
+      setHalftoneFocus(slot, Math.max(0, Math.min(1, info.focusX + delta[0])), Math.max(0, Math.min(1, info.focusY + delta[1])));
       sync();
     });
     const upload = el('input', { type: 'file', id: `appearance-halftone-${slot}`, accept: 'image/png,image/jpeg,image/webp' });
@@ -167,6 +178,7 @@ export function renderAppearancePanel(content, _status, page) {
     input.addEventListener('input', () => { updateAppearance({ [key]: Number(input.value) / 100 }); sync(); });
     let drag = null;
     input.addEventListener('pointerdown', event => {
+      if (key === 'tint' && document.documentElement.classList.contains('kairos-redesign')) return;
       if (event.button !== 0) return;
       event.preventDefault(); input.focus(); input.setPointerCapture(event.pointerId);
       drag = { x: event.clientX, y: event.clientY, value: Number(input.value) };
@@ -216,10 +228,10 @@ export function renderAppearancePanel(content, _status, page) {
   const overlay = window.jarvis?.usageOverlay;
   const overlayToggle = toggle({ label: 'Show above other windows' });
   overlayToggle.id = 'usage-overlay-toggle';
-  const overlayNote = el('span', { text: 'A notch at the screen edge showing your Claude Code and Codex account limits. Hidden by default.' });
+  const overlayNote = el('span', { text: 'Kip, activity and Claude Code and Codex account limits at the screen edge. Hidden by default.' });
   // The notch's edge and fold (design from CodeNotch; see static/css/usage-overlay.css)
   const overlayEdge = el('select', { id: 'usage-overlay-edge' }, [
-    el('option', { value: 'right', text: 'Right edge' }), el('option', { value: 'left', text: 'Left edge' }),
+    el('option', { value: 'top-centre', text: 'Top centre (notch)' }), el('option', { value: 'right', text: 'Right edge' }), el('option', { value: 'left', text: 'Left edge' }),
     el('option', { value: 'top', text: 'Top edge' }), el('option', { value: 'bottom', text: 'Bottom edge' })]);
   const overlayDisplay = el('select', { id: 'usage-overlay-display' });
   // Where along the edge: 0 is the top (or left) end, 100 the bottom (or right).
@@ -228,7 +240,7 @@ export function renderAppearancePanel(content, _status, page) {
   const overlayFold = toggle({ label: 'Fold to a sliver' });
   overlayFold.id = 'usage-overlay-fold';
   const overlaySection = el('div', { class: 'appearance-overlay-setting' }, [
-    group({ title: 'Desktop usage overlay' }, [
+    group({ title: 'The notch' }, [
       row({ title: 'Show above other windows', description: overlayNote, control: overlayToggle }),
       row({ title: 'Monitor', control: overlayDisplay }),
       row({ title: 'Screen edge', control: overlayEdge }),
@@ -241,7 +253,7 @@ export function renderAppearancePanel(content, _status, page) {
       overlayToggle.disabled = !state.supported;
       overlayToggle.checked = !!state.visible;
       overlayEdge.disabled = overlayFold.disabled = overlayDisplay.disabled = overlayOffset.disabled = !state.supported;
-      overlayEdge.value = ['left', 'top', 'bottom'].includes(state.edge) ? state.edge : 'right';
+      overlayEdge.value = ['left', 'top', 'bottom', 'top-centre'].includes(state.edge) ? state.edge : 'right';
       overlayFold.checked = state.foldOnHover !== false;
       // The monitors present right now; a saved one that was unplugged reads as the main display
       const displays = Array.isArray(state.displays) ? state.displays : [];
@@ -249,7 +261,7 @@ export function renderAppearancePanel(content, _status, page) {
         ...displays.map(d => el('option', { value: String(d.id), text: d.label })));
       overlayDisplay.value = displays.some(d => d.id === state.displayId) ? String(state.displayId) : '';
       if (document.activeElement !== overlayOffset) overlayOffset.value = String(Math.round((Number(state.offset) || 0) * 100));
-      offsetLabel.textContent = (state.edge === 'top' || state.edge === 'bottom') ? 'Position along the edge (left to right)' : 'Position along the edge (top to bottom)';
+      offsetLabel.textContent = (state.edge === 'top' || state.edge === 'bottom' || state.edge === 'top-centre') ? 'Position along the edge (left to right)' : 'Position along the edge (top to bottom)';
       if (!state.supported) overlayNote.textContent = 'The desktop overlay is currently available on Windows.';
     };
     overlay.state().then(syncOverlay).catch(() => { overlayNote.textContent = 'Overlay setting unavailable.'; });
@@ -281,7 +293,25 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  root.append(previewFrame, modes, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, mascotSection, redesignSection, overlaySection, status);
+  // Keep the original controls and show/hide owners. These headings and
+  // containers only give the redesign its board layout; Classic keeps its frame.
+  const modeSection = el('section', { class: 'appearance-background-setting' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Background style' }), modes,
+  ]);
+  halftoneSection.prepend(el('h3', { class: 'rd-appearance-label', text: 'Halftone backgrounds' }));
+  imageOptions.prepend(el('h3', { class: 'rd-appearance-label', text: 'Your image' }));
+  shaderOptions.prepend(el('h3', { class: 'rd-appearance-label', text: 'Flow' }));
+  for (const [heading, text] of [[palette.querySelector('.title'), 'Color'], [imageOptions.querySelector('h3'), 'Image'], [shaderOptions.querySelector('h3'), 'Flow']]) {
+    heading.append(el('span', { class: 'rd-appearance-tag', text }));
+  }
+  const effectControls = el('div', { class: 'appearance-effect-controls' });
+  effectSection.insertBefore(effectControls, pieceRow);
+  effectControls.append(pieceRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
+  const characterSection = el('div', { class: 'appearance-character-setting' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Kip and classic look' }), mascotSection, redesignSection,
+  ]);
+  root.append(previewFrame, modeSection, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, characterSection, overlaySection, status);
+  for (const list of [modes, effectGrid, chatStyles, halftoneSection.querySelector('.appearance-halftone-grid')]) staggerEntrance(list);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
@@ -298,6 +328,13 @@ export function renderAppearancePanel(content, _status, page) {
     tint.value = effectPrefs.tint; effectMotion.checked = effectPrefs.motion;
     piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated';
     const nextPreviewSource = halftoneSource('home');
+    previewScene.hidden = !['default', 'color'].includes(value.mode) || !value.halftone;
+    const homeFocus = value.halftoneSlots.home;
+    const sceneKey = `${nextPreviewSource}:${homeFocus.focusX}:${homeFocus.focusY}`;
+    if (sceneKey !== previewSceneKey) {
+      stopPreviewScene?.(); previewSceneKey = sceneKey;
+      stopPreviewScene = mountBackgroundEffect(previewScene, nextPreviewSource, { preview: true, focusX: homeFocus.focusX, focusY: homeFocus.focusY });
+    }
     if (nextPreviewSource !== effectPreviewSource) {
       effectPreviewStops.forEach(stop => stop()); effectPreviewSource = nextPreviewSource;
       effectPreviewStops = [...effectChoices].map(([effect, { thumb }]) =>

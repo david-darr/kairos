@@ -1,5 +1,6 @@
 import { mobileOn, phone, button } from './mobileShared.js';
 import { watchKeyboard, keyboardLift, belowFold } from './mobileDock.js';
+import { ICONS } from './icons.js';
 let sheetId = 0;
 
 // Also used by existing panel dialogs: their nesting, confirmation and owner
@@ -36,6 +37,7 @@ export function openMobileSheet({ title, content, opener = document.activeElemen
   const heading = document.createElement('header'); heading.className = 'ms-sheet-header';
   const name = document.createElement('h2'); name.textContent = title;
   const dismiss = button('Close', () => close(), 'ms-glass'); heading.append(name, dismiss);
+  dismiss.textContent = ''; dismiss.innerHTML = ICONS.close; dismiss.setAttribute('aria-label', 'Close');
   const body = document.createElement('div'); body.className = 'ms-sheet-body'; body.append(content);
   dialog.append(heading, body); document.body.append(dialog);
   const keyboard = watchKeyboard(dialog);
@@ -76,5 +78,5 @@ export function openMobileSheet({ title, content, opener = document.activeElemen
   });
   phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
   dialog.showModal(); dismiss.focus();
-  return { dialog, body, close };
+  return { dialog, body, close, dismiss };
 }

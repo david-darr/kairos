@@ -51,7 +51,7 @@ const createMascot = () => el('kairos-mascot');
 const emptyState = ({ title, text }) => el('section', {}, [createMascot(), el('h2', { text: title }), el('p', { text })]);
 const observers = [];
 class MutationObserver { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} disconnect() { this.disconnected = true; } }
-const context = vm.createContext({ document, el, createMascot, emptyState, segmented: () => el('div'), chatStream, MutationObserver, CSS: { escape: value => value }, api: async () => { requests++; return sessions; }, Date });
+const context = vm.createContext({ document, el, createMascot, emptyState, segmented: () => el('div'), chatStream, MutationObserver, mountConversations: () => () => {}, CSS: { escape: value => value }, api: async () => { requests++; return sessions; }, Date });
 const source = fs.readFileSync(path.join(__dirname, '../static/js/redesignChatParts.js'), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
 vm.runInContext(source + '\nthis.parts = { chatAge, workingChats, mountChatParts };', context);
 const { chatAge, workingChats, mountChatParts } = context.parts;
@@ -78,17 +78,14 @@ async function run() {
   assert.equal(messages.childNodes.length, 0, 'empty-state must never enter the message list');
   assert.equal(container.querySelector('.rd-chat-idle').hidden, false);
   assert.equal(dock.parent, container.querySelector('.rd-chat-idle-layout'));
-  assert.equal(row.querySelector('.rd-chat-initial').textContent, 'R');
-  assert.equal(row.querySelector('.rd-chat-row-title').childNodes[0], original, 'preserve the original title nodes');
   assert.equal(menu.classList.contains('rd-menu-in'), true);
-  const search = container.querySelector('.rd-chat-search'); search.value = 'missing'; search.listeners.input(); assert.equal(row.hidden, true);
   root.classList.remove('kairos-redesign'); document.listeners['kairos:appearance']();
   assert.equal(row.childNodes[0], original); assert.equal(row.childNodes.length, 1); assert.equal(row.hidden, false);
   assert.equal(container.querySelector('.rd-chat-idle').hidden, true);
   root.classList.add('kairos-redesign'); document.listeners['kairos:appearance']();
   processing = false; streamListener(); const requestCount = requests;
   streamListener(); assert.equal(requests, requestCount, 'stream updates must not fetch session metadata');
-  main.classList.remove('is-empty'); observers[1].fn(); assert.equal(container.querySelector('.rd-chat-idle').hidden, true);
+  main.classList.remove('is-empty'); observers[0].fn(); assert.equal(container.querySelector('.rd-chat-idle').hidden, true);
   dispose(); assert.equal(row.childNodes[0], original); assert.equal(streamListener, null);
   assert.equal(dock.parent, main, 'restore the original composer dock on cleanup');
   assert.equal(container.querySelector('.rd-chat-idle-layout'), null);

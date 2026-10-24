@@ -3,6 +3,7 @@
 .kairos-redesign [data-view]:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"]) .view-header h2 {
   font-family: var(--rd-font-title); font-style: italic; font-size: clamp(40px, 4vw, 44px); line-height: 1.05;
 }
+
 .kairos-redesign [data-view]:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"]) .workspace-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; margin: 0 0 18px; }
 .kairos-redesign [data-view]:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"]) .workspace-stat { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); }
 .kairos-redesign [data-view]:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"]) .workspace-stat > span { font-size: 13px; color: var(--rd-ink-dim); }
@@ -138,7 +139,6 @@
   .kairos-redesign [data-view="calendar"] .cal-left > .view-header > div { grid-column: 1; padding-bottom: 16px; }
   .kairos-redesign [data-view="calendar"] .cal-left > .view-header .cal-calendars-trigger { grid-column: 2; grid-row: 1; width: 46px; height: 46px; padding: 0; font-size: 0; margin-bottom: 16px; }
   .kairos-redesign [data-view="calendar"] .cal-left > .cal-create-bar { grid-column: 3; grid-row: 1; margin-bottom: 16px; }
-  .kairos-redesign [data-view="calendar"] .cal-left > .cal-create-bar { display: block !important; }
   .kairos-redesign [data-view="calendar"] .cal-create-bar .btn { display: inline-flex !important; justify-content: center; width: 46px; height: 46px; padding: 0; font-size: 0; border-radius: 50%; }
   .kairos-redesign [data-view="calendar"] .cal-create-bar .btn::after { content: '+'; font-size: 24px; }
   .kairos-redesign [data-view="calendar"] .view-header .sub { display: none; }
@@ -175,4 +175,576 @@
   .kairos-redesign [data-view="school"] .school-assignment-workspace { grid-template-columns: minmax(0, 1fr) !important; }
   .kairos-redesign [data-view="school"] :is(input:not([type="checkbox"]), select) { min-height: 44px; }
   .kairos-redesign [data-view="profile"].workspace-profile-panel { width: 100%; max-height: 94dvh; margin: 0; padding: 20px; border-radius: 32px 32px 0 0; }
+}
+
+/* Phone fidelity, October 23. Extra phone markup is inert in Classic/desktop. */
+.workspace-phone-only { display: none; }
+.kairos-redesign [data-view="email"] :is(.email-summary, .email-needs-list) { display: contents; }
+.kairos-redesign [data-view="notes"] .notes-finished-bar svg { display: none; }
+
+/* Installed tab IDs are arbitrary; the renderer marks their common host. */
+.kairos-redesign [data-view][data-custom-tab="true"] {
+  color: var(--rd-ink); font-family: var(--rd-font-ui); gap: 18px;
+  --card-radius: 26px;
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(h1, .view-header h2, [class$="-header"] > h2) {
+  font: italic 600 40px/1.05 var(--rd-font-title); color: var(--rd-ink); margin: 0;
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(h3, .section-title) { font: italic 600 26px/1.15 var(--rd-font-title); color: var(--rd-ink); }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.card, [class$="-card"], .panel, [class$="-panel"], .empty-state) {
+  background: var(--rd-surface-solid); background-image: none; color: var(--rd-ink);
+  border: 1px solid var(--rd-line); border-radius: 26px; padding: 18px; box-shadow: var(--rd-shadow);
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(button, .btn, [role="button"]) {
+  border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid);
+  color: var(--rd-ink); font-family: var(--rd-font-ui); min-height: 44px; padding: 8px 16px;
+  transition: background var(--rd-dur-fade) var(--rd-ease), border-color var(--rd-dur-fade) var(--rd-ease);
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.primary, .btn-primary, [aria-selected="true"], [aria-pressed="true"]) {
+  background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent;
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  background: var(--rd-ground); color: var(--rd-ink); border: 1px solid var(--rd-line); border-radius: 16px;
+  padding: 12px 14px; font: inherit; min-height: 44px; min-width: 0; max-width: 100%; box-sizing: border-box;
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--rd-primary-bg); }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.meta, small, .muted, [class$="-subtitle"]) { color: var(--rd-ink-dim); }
+.kairos-redesign [data-view][data-custom-tab="true"] table { width: 100%; border-collapse: collapse; background: var(--rd-surface-solid); color: var(--rd-ink); }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(th, td) { border-bottom: 1px solid var(--rd-line); padding: 12px 14px; text-align: left; overflow-wrap: anywhere; }
+.kairos-redesign [data-view][data-custom-tab="true"] th { font-size: 12px; font-weight: 500; color: var(--rd-ink-dim); }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(li, [class$="-list-row"]) { padding-block: 12px; border-bottom: 1px solid var(--rd-line); }
+.kairos-redesign [data-view][data-custom-tab="true"] .empty-state { text-align: center; padding: 32px 20px; line-height: 1.5; }
+.kairos-redesign [data-view][data-custom-tab="true"] :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+.kairos-redesign [data-view][data-custom-tab="true"] [hidden] { display: none !important; }
+
+@media (max-width: 768px) {
+  /* Override the previous absolute/right-aligned phone title inside our views. */
+  /* School renders #school-body inside this wrapper, directly in the page
+     scroller. Reserve the bar clearance inside the content's flow rather
+     than relying on trailing padding on the scrolling flex container. */
+  .kairos-redesign #view-content[data-view="school"] { padding-bottom: 0 !important; }
+  .kairos-redesign #view-content[data-view="school"] > .view-constrained {
+    flex: none; display: flow-root;
+    padding-bottom: calc(68px + var(--ms-tabbar-space, 0px));
+  }
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-custom-tab="true"]) {
+    padding: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 140px;
+    /* The shell reserves 62px for an absolute title. These views carry
+       their header in normal flow and need only the safe-area clearance. */
+    padding-top: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) !important;
+    gap: 18px; scroll-padding-bottom: 140px;
+  }
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-custom-tab="true"]) .view-header {
+    display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; margin: 0 0 18px; padding: 0; min-height: 46px;
+  }
+  /* Match the shell's :first-child specificity so titles stay in the row,
+     rather than inheriting its absolute safe-area placement. */
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-custom-tab="true"]) .view-header.view-header h2 {
+    position: static; inset: auto; width: auto; height: 46px; min-height: 0; padding: 0; margin: 0;
+    text-align: left; font: italic 600 40px/46px var(--rd-font-title); text-shadow: none; overflow: visible;
+  }
+  .kairos-redesign #view-content:is([data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="school"]) .view-header .sub { display: none; }
+  .kairos-redesign #view-content:is([data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"]) .view-header > div:first-child { flex: 1; min-width: 0; }
+  /* Size actual target boxes, including detached workspace dialogs. Labels
+     supply the target for nested checkboxes; standalone checkboxes own it. */
+  .kairos-redesign :is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"], [data-custom-tab="true"]) :is(button, .btn, [role="button"], select, summary, input:not([type="checkbox"]):not([type="radio"]), label:has(input[type="checkbox"], input[type="radio"]), input[type="checkbox"]:not(label input), input[type="radio"]:not(label input)) {
+    min-width: 44px !important; min-height: 44px !important;
+  }
+  /* Seven 44px days fit at 390px without losing space to six gaps. On
+     narrower phones only the calendar scrolls, never the page. */
+  .kairos-redesign #view-content[data-view="library"] .vault-month-grid {
+    grid-template-columns: repeat(7, minmax(44px, 1fr)); column-gap: 0; overflow-x: auto; max-width: 100%;
+  }
+  .kairos-redesign :is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-view="profile"]) .workspace-phone-only { display: flex; }
+  .kairos-redesign :is([data-view="notes"], [data-view="library"], [data-view="email"], [data-view="cookbook"], [data-view="school"]) .workspace-round {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; width: 46px; height: 46px; min-width: 46px;
+    padding: 0; border-radius: 50%; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 24px;
+  }
+  .kairos-redesign :is([data-view="notes"], [data-view="library"], [data-view="email"], [data-view="cookbook"], [data-view="school"]) .workspace-round svg { width: 20px; height: 20px; }
+  .kairos-redesign :is([data-view="notes"], [data-view="school"]) .workspace-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 18px; }
+  .kairos-redesign :is([data-view="notes"], [data-view="school"]) .workspace-stat { padding: 16px 18px; gap: 5px; border-radius: 26px; }
+  .kairos-redesign :is([data-view="notes"], [data-view="school"]) .workspace-stat::before { content: '✓'; display: grid; place-items: center; width: 26px; height: 26px; margin-bottom: 9px; border-radius: 50%; background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-size: 17px; }
+  .kairos-redesign :is([data-view="notes"], [data-view="school"]) .workspace-stat:nth-child(2)::before { content: '◷'; background: transparent; color: var(--rd-ink); border: 1px solid var(--rd-ink); box-sizing: border-box; }
+  .kairos-redesign :is([data-view="notes"], [data-view="school"]) .workspace-stat > strong { font-size: 22px; font-weight: 600; }
+  .kairos-redesign [data-view="notes"] .notes-sort-home:empty { display: none; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar { order: 1; margin: 0; align-self: center; }
+  .kairos-redesign #view-content[data-view="notes"] .view-header > .workspace-round { order: 2; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar .btn { display: grid; place-items: center; width: 46px; height: 46px; padding: 0; font-size: 0; border-color: var(--rd-line); }
+  .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar svg { display: block; width: 20px; height: 20px; }
+  .kairos-redesign #view-content[data-view="notes"] .view-constrained > .glass.card { padding: 16px; margin: 0 0 18px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 8px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow { grid-column: 1 / -1; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow input { height: 46px; background: var(--rd-ground); border-radius: 16px; padding: 0 14px; font-size: 15px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .notes-due-field { display: none; grid-column: 1 / -1; grid-row: 3; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-due-open .notes-due-field { display: flex; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .btn { width: auto; padding-inline: 14px; font-size: 13px; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-list-heading { align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-list-heading h3 { margin: 0; font: italic 600 26px var(--rd-font-title); }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-title { font-size: 15px; }
+
+  /* Calendar: one header, compact range row, day strip and agenda. */
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header { display: contents; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > div { padding-bottom: 18px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-nav { gap: 8px; margin-bottom: 14px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-month-label { flex: 1 1 120px; font-size: 18px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-range-switch { padding: 4px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-range-switch button { min-height: 44px; height: 44px; padding: 0 12px; }
+  .kairos-redesign [data-view="calendar"] .cal-phone-days { grid-column: 1 / -1; display: none; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding-bottom: 14px; border-bottom: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="calendar"] [data-calendar-range="day"] .cal-phone-days { display: grid; }
+  .kairos-redesign [data-view="calendar"] .cal-phone-days button { height: 68px; border: 0; border-radius: 20px; background: transparent; color: var(--rd-ink); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: 500 17px var(--rd-font-ui); }
+  .kairos-redesign [data-view="calendar"] .cal-phone-days small { font-size: 12px; font-weight: 400; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="calendar"] .cal-phone-days [aria-pressed="true"] { background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); outline: 1px solid var(--rd-line); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-single-day { display: none; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-grid:not(.cal-week-grid) { padding: 12px 10px; gap: 4px 0; grid-template-rows: auto repeat(6, 46px); border-radius: 24px; background: var(--rd-surface-solid); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day { align-items: center; justify-content: center; flex-wrap: wrap; flex-direction: row; align-content: center; gap: 3px; border: 0; border-radius: 14px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-num { width: 100%; font-size: 14px; text-align: center; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day.selected { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day .cal-event-pill { font-size: 0; width: 5px; height: 5px; padding: 0; border: 0; border-radius: 50%; background: var(--rd-ink); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day .cal-event-pill.cal-src-note { background: var(--accent); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day.other-month { opacity: .35; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-weekday { border: 0; font-size: 11px; letter-spacing: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-week-grid { border-radius: 24px; min-height: 420px; max-height: 470px; background: var(--rd-surface-solid); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel { padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel-title { font-size: 24px; margin: 0 0 10px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel > .card { margin-bottom: 10px; padding: 14px 16px; border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-surface-solid); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .title { font-size: 15px; font-weight: 500; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px 8px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-sheet-grabber { grid-column: 1 / -1; margin-bottom: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > h3 { grid-column: 2; grid-row: 2; margin: 0; align-self: center; text-align: center; font-size: 28px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .row-actions { display: contents; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .row-actions .quiet { grid-column: 1; grid-row: 2; padding: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .row-actions .primary { grid-column: 3; grid-row: 2; padding-inline: 14px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > :is(.form-grid, .meta) { grid-column: 1 / -1; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .form-grid { display: flex; flex-direction: column; gap: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field { width: 100%; display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rd-line); min-width: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field > label { min-width: 72px; margin: 0; font-size: 14px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field > :is(input, select, textarea) { flex: 1; min-width: 0; width: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field:has([aria-label="Event title"]) { order: -2; border: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field:has([aria-label="Event title"]) label { display: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog [aria-label="Event title"] { height: 56px; font-size: 17px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-checkbox-label { order: -1; min-height: 52px; font-size: 15px; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog { width: 100%; max-height: 100dvh; border-radius: 0; padding: calc(16px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 140px; background: var(--rd-ground); }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-list { border-radius: 26px; padding: 4px 18px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-choice input { order: 2; margin-left: auto; }
+
+  /* Library's phone section chips coexist with the desktop segmented control. */
+  .kairos-redesign #view-content[data-view="library"] .library-section-nav > :not(.library-phone-sections) { display: none; }
+  .kairos-redesign #view-content[data-view="library"] .library-phone-sections { display: flex; gap: 8px; width: 100%; overflow-x: auto; scrollbar-width: none; padding: 1px 0 4px; }
+  .kairos-redesign #view-content[data-view="library"] .library-phone-sections .btn { flex: none; padding: 0 16px; height: 44px; min-height: 44px; font-size: 14px; border-color: var(--rd-line); white-space: nowrap; }
+  .kairos-redesign #view-content[data-view="library"] .library-phone-sections [aria-pressed="true"] { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign [data-view="library"] .library-overview-search { width: 100%; height: 54px; border-radius: var(--rd-radius-pill); padding: 0 18px; margin-bottom: 18px; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); font-size: 15px; }
+  .kairos-redesign [data-view="library"] :is(.vault-overview-card, .library-recent-list) { width: 100%; padding: 18px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); color: var(--rd-ink); text-align: left; }
+  .kairos-redesign [data-view="library"] .vault-overview-card { display: flex; flex-direction: column; gap: 8px; font-family: var(--rd-font-ui); }
+  .kairos-redesign [data-view="library"] .vault-overview-card small { font-size: 11px; text-transform: uppercase; letter-spacing: .16em; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .vault-overview-card strong { font: 600 22px var(--rd-font-title); }
+  .kairos-redesign [data-view="library"] .vault-overview-card > span { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .library-overview h3 { font: italic 600 26px var(--rd-font-title); margin: 18px 0 12px; }
+  .kairos-redesign [data-view="library"] .library-recent-list { padding: 4px 16px; }
+  .kairos-redesign [data-view="library"] .library-recent-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rd-line); background: transparent; color: var(--rd-ink); text-align: left; font: inherit; }
+  .kairos-redesign [data-view="library"] .library-recent-row:last-child { border-bottom: 0; }
+  .kairos-redesign [data-view="library"] .library-recent-row > span:last-child { min-width: 0; }
+  .kairos-redesign [data-view="library"] .library-recent-row strong { display: block; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="library"] .library-recent-row small { display: block; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .library-import { border-style: dashed; width: 100%; min-height: 50px; }
+  .kairos-redesign [data-view="library"] .document-grid { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 2px 16px; }
+  .kairos-redesign [data-view="library"] :is(.library-document-card, .library-file-row) { border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; padding: 12px 0; box-shadow: none; background: transparent; }
+  .kairos-redesign [data-view="library"] .google-browser { display: flex; flex-direction: column; background: transparent; border: 0; box-shadow: none; }
+  .kairos-redesign [data-view="library"] .google-rail { flex-direction: row; overflow-x: auto; flex-wrap: wrap; border: 0; padding: 0 0 12px; }
+  .kairos-redesign [data-view="library"] .google-file-list { display: flex; flex-direction: column; gap: 0; padding: 2px 16px; border-radius: 26px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="library"] .google-file-list .google-file-row { border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; padding: 12px 0; }
+  .kairos-redesign [data-view="library"] .google-grid .google-file-open { display: flex; align-items: center; gap: 12px; }
+  .kairos-redesign [data-view="library"] .google-grid .google-thumbnail { flex: none; width: 40px; height: 44px; }
+  .kairos-redesign [data-view="library"] .google-file-copy strong { font-size: 15px; }
+  .kairos-redesign [data-view="library"] .google-file-copy small { font-size: 12px; }
+  .kairos-redesign #view-content[data-view="library"]:has(.vault-phone-detail) .library-section-nav { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-note-title { font: italic 600 36px/1.05 var(--rd-font-title); }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-head { border: 0; padding: 14px 24px 0; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reading { padding: 14px 24px 140px; font-size: 16px; line-height: 1.7; }
+  .kairos-redesign [data-view="library"] .vault-ask { order: -1; background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign [data-view="library"] .design-page-header { gap: 8px; padding: 12px 0; }
+  .kairos-redesign [data-view="library"] .design-page-identity strong { font-size: 22px; }
+  .kairos-redesign [data-view="library"] .design-page-composer { border-radius: 30px; }
+
+  /* Email uses its real unread/important counts, with grouped sender rows. */
+  .kairos-redesign [data-view="email"] .email-accounts-trigger { display: grid; place-items: center; width: 46px; height: 46px; padding: 0; font-size: 0; }
+  .kairos-redesign [data-view="email"] .email-accounts-trigger svg { width: 20px; height: 20px; }
+  .kairos-redesign [data-view="email"] .email-triage-card { padding: 0; background: transparent; border: 0; box-shadow: none; }
+  .kairos-redesign [data-view="email"] .email-summary { display: block; padding: 18px; border-radius: 26px; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="email"] .email-summary > .card-row { gap: 12px; flex-wrap: wrap; }
+  .kairos-redesign [data-view="email"] .email-summary .workspace-stats { text-align: center; margin: 14px 0 0; }
+  .kairos-redesign [data-view="email"] .email-summary .workspace-stat { flex-direction: column-reverse; gap: 4px; }
+  .kairos-redesign [data-view="email"] .email-summary .workspace-stat strong { font-size: 18px; font-weight: 600; }
+  .kairos-redesign [data-view="email"] .email-triage-card > h3 { font: italic 600 26px var(--rd-font-title); margin: 18px 0 12px; }
+  .kairos-redesign [data-view="email"] .email-needs-list { display: block; padding: 4px 16px; border-radius: 26px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="email"] .email-item { padding: 13px 0 !important; align-items: flex-start; }
+  .kairos-redesign [data-view="email"] .email-item:first-child { border-top: 0 !important; }
+  .kairos-redesign [data-view="email"] .email-item-body { display: flex; flex-direction: column; }
+  .kairos-redesign [data-view="email"] .email-item-from { order: -1; font-size: 15px; font-weight: 500; color: var(--rd-ink); }
+  .kairos-redesign [data-view="email"] .email-item .title { font-size: 14px !important; font-weight: 400; }
+  .kairos-redesign [data-view="email"] .email-item-reason { font-size: 13px; }
+
+  .kairos-redesign [data-view="tasks"] .task-activity-body { padding: 18px; gap: 14px; }
+  .kairos-redesign [data-view="tasks"] .task-activity-count > strong { line-height: 1.1; font-weight: 600; }
+  .kairos-redesign [data-view="tasks"] .task-activity-body .rd-dot-matrix { gap: 3px; }
+  .kairos-redesign [data-view="tasks"] .task-activity-body .rd-dot { border-radius: 2px; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-view .tool-store-top { display: flex; flex-direction: column; align-items: stretch; }
+  .kairos-redesign #view-content[data-view="tool-store"] .tool-store-view .tool-store-top .view-header { display: flex; }
+  .kairos-redesign #view-content[data-view="tool-store"] .tool-store-view .tool-store-top .view-header > div:first-child { display: block; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-top .tool-store-toolbar { display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 16px; }
+  /* A column's centered flex items otherwise use their max-content width:
+     keep the wide chip strip inside its own viewport-sized scroller. */
+  .kairos-redesign [data-view="tool-store"] .tool-store-top .ts-chips { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; }
+  /* The toolbar is a column here: discard the search's old 100% flex basis. */
+  .kairos-redesign [data-view="tool-store"] .tool-store-top .tool-store-search { flex: none; width: 100%; min-width: 44px; min-height: 44px; height: 54px; border-radius: var(--rd-radius-pill); font-size: 15px; padding-inline: 18px; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-top .ts-plus { min-width: 44px; min-height: 44px; width: 46px; height: 46px; border-radius: 50%; }
+  .kairos-redesign [data-view="tool-store"] :is(button, .btn, .tool-store-installed, .tool-store-card-foot > a, .tool-store-search) { min-width: 44px; min-height: 44px; }
+  /* Chips use their real box as the target, rather than an overflowing pseudo-element. */
+  .kairos-redesign [data-view="tool-store"] .tool-store-filters .segmented-tab { min-width: 44px; min-height: 44px; }
+  .kairos-redesign [data-view="tool-store"] :is(.tool-store-filters .segmented-tab, .tool-store-installed)::before { content: none; }
+  .kairos-redesign [data-view="tool-store"] input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none; width: 44px; height: 44px; flex: none; margin-inline-end: -14px; cursor: pointer;
+    background: currentColor; opacity: .65;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Cpath d='m17 17 10 10m0-10L17 27' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / 44px 44px no-repeat;
+  }
+  .kairos-redesign [data-view="tool-store"] .tool-store-feature { padding: 18px 100px 18px 18px; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-feature h3 { font-size: 24px; }
+
+  /* Cookbook is model management. Retain every start/register/delete action. */
+  .kairos-redesign #view-content[data-view="cookbook"] .view-header .sub { margin-top: 4px; font-size: 13px; }
+  .kairos-redesign [data-view="cookbook"] .segmented-tabs, .kairos-redesign [data-view="cookbook"] .rd-segmented { width: 100%; box-sizing: border-box; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-status { display: flex; flex-direction: column; gap: 12px; padding: 18px; margin-bottom: 18px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-status-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-status-line strong { flex: 1; font-size: 14px; font-weight: 500; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--success); }
+  .kairos-redesign [data-view="cookbook"] code { font: 11px var(--font-mono, monospace); color: var(--rd-ink-dim); overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-running { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 18px; background: var(--rd-ground); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-running > div { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+  .kairos-redesign [data-view="cookbook"] :is(.cookbook-running small, .cookbook-running-label) { font-size: 10px; text-transform: uppercase; letter-spacing: .16em; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-running strong { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .kairos-redesign #view-content[data-view="cookbook"] :is(.cookbook-installed, .cookbook-catalog) > .title { font: italic 600 26px var(--rd-font-title); text-transform: none; letter-spacing: 0; color: var(--rd-ink); }
+  .kairos-redesign [data-view="cookbook"] :is(.cookbook-installed, .cookbook-catalog-list) { border-radius: 26px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list { display: flex !important; flex-direction: column; gap: 0 !important; padding: 2px 16px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card { margin: 0; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; box-shadow: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card:last-child { border-bottom: 0; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-progress { display: grid; width: 100%; margin-top: 8px; gap: 3px; }
+  .kairos-redesign [data-view="cookbook"] .card .title { overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="cookbook"] .card-row > div:last-child:not(:first-child) { width: auto; }
+  .kairos-redesign [data-view="cookbook"] .card-row { gap: 8px; }
+
+  .kairos-redesign [data-view="school"] .school-overview { display: flex; flex-direction: column; }
+  .kairos-redesign [data-view="school"] .school-overview > .workspace-stats { order: -4; }
+  .kairos-redesign [data-view="school"] .school-classes-heading { order: -3; font: italic 600 26px var(--rd-font-title) !important; margin: 0 0 12px !important; }
+  .kairos-redesign [data-view="school"] .school-overview > .document-grid { order: -2; display: flex; flex-direction: column; gap: 0; padding: 4px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="school"] .school-overview .school-course-card { padding: 13px 0 !important; margin: 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; box-shadow: none; }
+  .kairos-redesign [data-view="school"] .school-next-due { order: -1; padding: 16px 18px; margin-bottom: 18px; }
+  .kairos-redesign [data-view="school"] .school-next-due h3 { font: 500 16px var(--rd-font-ui); margin: 8px 0; }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel { max-height: 100dvh; height: 100dvh; border-radius: 0; padding: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 140px; }
+  .kairos-redesign [data-view="profile"] .workspace-stat { gap: 4px; padding: 14px 0 0 14px; }
+  .kairos-redesign [data-view="profile"] .workspace-stat:first-child { padding-left: 0; }
+  .kairos-redesign [data-view="profile"] .workspace-stat + .workspace-stat { border-left: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="profile"] .workspace-stat strong { font-size: 20px; font-weight: 600; }
+  .kairos-redesign [data-view][data-custom-tab="true"] :is(.view-constrained, [class$="-layout"], [class$="-grid"]) { min-width: 0; max-width: 100%; }
+  .kairos-redesign [data-view][data-custom-tab="true"] :is([class$="-grid"], [class$="-columns"]) { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign [data-view][data-custom-tab="true"] :is(.table-wrap, [class$="-table-wrap"]) { overflow-x: auto; max-width: 100%; }
+}
+/* These wrappers leave the established desktop/Classic layout intact. */
+.cookbook-installed-list, .design-page-options { display: contents; }
+@media (min-width: 769px) {
+  .kairos-redesign [data-view="library"] :is(.design-page-header, .design-page-options) > .design-model-host { order: 1; }
+  .kairos-redesign [data-view="library"] .design-page-options > .btn { order: 2; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"]) { --rd-radius-card: 26px; }
+  .kairos-redesign [data-view="calendar"] .cal-left { column-gap: 8px; }
+  .kairos-redesign [data-view="calendar"] .cal-nav { grid-column: 1 / -1; }
+  .kairos-redesign [data-view="calendar"] .cal-nav > .btn { min-height: 44px; font-size: 12px; padding: 0 12px; }
+  .kairos-redesign [data-view="calendar"] .cal-calendars-trigger { border-radius: 50%; }
+  .kairos-redesign [data-view="calendar"] .cal-calendars-trigger svg { width: 20px; height: 20px; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-day-panel-title { display: none; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-agenda-card { position: relative; margin-left: 68px; }
+  .kairos-redesign [data-view="calendar"] .cal-agenda-hour { display: none; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-agenda-hour { display: block; position: absolute; left: -68px; top: 16px; width: 56px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="calendar"] .cal-day.selected .cal-event-pill { background: var(--rd-primary-fg); }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-header { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 12px; font: italic 600 34px/1 var(--rd-font-title); }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-close-btn { position: static; flex: none; width: 46px; height: 46px; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); font-size: 0; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-close-btn::after { content: '‹'; font-size: 28px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .row-actions { position: static; padding: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-checkbox-label { justify-content: space-between; flex-direction: row-reverse; padding-inline: 12px; }
+  .kairos-redesign [data-view="library"] .library-document-toolbar { padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .kairos-redesign [data-view="library"] .library-document-toolbar > .card-row { flex-wrap: wrap; }
+  .kairos-redesign [data-view="library"] .library-document-toolbar input[type="text"],
+  .kairos-redesign [data-view="library"] .library-document-toolbar input:not([type]) { flex: 1 1 100% !important; height: 46px; border-radius: var(--rd-radius-pill); padding-inline: 18px; }
+  .kairos-redesign [data-view="library"] .design-home-actions { gap: 8px; }
+  .kairos-redesign [data-view="library"] .design-home-actions > .primary { display: none; }
+  .kairos-redesign [data-view="library"] .design-page-header { display: grid; grid-template-columns: minmax(0, 1fr) 46px 46px; align-items: center; padding: 0; min-height: 46px; }
+  .kairos-redesign [data-view="library"] .design-page-identity { display: contents; text-align: left; }
+  .kairos-redesign [data-view="library"] .design-page-identity h2 { grid-column: 1; grid-row: 1; }
+  .kairos-redesign [data-view="library"] .design-page-header > .design-back { grid-column: 2; grid-row: 1; }
+  .kairos-redesign [data-view="library"] .design-page-header > .workspace-round { grid-column: 3; grid-row: 1; }
+  .kairos-redesign #view-content[data-view="library"] .design-page-identity h2 { position: static; inset: auto; height: 46px; margin: 0; padding: 0; text-align: left; font: italic 600 40px/46px var(--rd-font-title); }
+  .kairos-redesign [data-view="library"] .design-page-identity strong { grid-column: 1 / -1; grid-row: 2; white-space: normal; font: 12px/1.5 var(--rd-font-ui); color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .design-page-identity small { display: none; }
+  .kairos-redesign [data-view="library"] .design-page-header > .design-back { width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); font-size: 0; }
+  .kairos-redesign [data-view="library"] .design-page-header > .design-back::after { content: '‹'; font-size: 28px; }
+  .kairos-redesign [data-view="library"] .design-page-header > .design-page-options { display: none; }
+  .kairos-redesign [data-view="library"].panel-dialog .design-page-options { display: flex; flex-wrap: wrap; gap: 12px; }
+  .kairos-redesign [data-view="library"] .design-model-host { flex: none; min-width: 0; }
+  .kairos-redesign [data-view="library"] .design-page-header > .design-model-host { grid-column: 1 / -1; grid-row: 3; }
+  .kairos-redesign [data-view="library"] .design-toolbar { gap: 8px; padding: 6px 0 10px; background: var(--rd-ground); }
+  .kairos-redesign [data-view="library"] .design-modes { padding: 4px; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); }
+  .kairos-redesign [data-view="library"] .design-mode { height: 44px; min-height: 44px; padding: 0 14px; border-radius: var(--rd-radius-pill); }
+  .kairos-redesign [data-view="library"] .design-mode[aria-pressed="true"] { background: var(--rd-surface-solid); color: var(--rd-ink); }
+  .kairos-redesign #view-content[data-view="library"]:has(.vault-phone-detail) .library-vault-page > .view-header { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail > .library-vault-reader { margin-inline: -20px; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-phone-header { padding: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 6px; background: var(--rd-ground); }
+  .kairos-redesign [data-view="library"] .vault-phone-heading { flex: 1; text-align: center; opacity: 1; }
+  .kairos-redesign [data-view="library"] .vault-phone-heading strong { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-heading small { font-size: 13px; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-more { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-head { display: flex; flex-direction: column; gap: 14px; padding: 14px 24px 0; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-note-title { margin: 0; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-breadcrumb { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions { order: 1; display: flex; flex-wrap: wrap; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions .btn { font-size: 14px; min-height: 46px; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .vault-links-pill { order: 2; }
+  .kairos-redesign [data-view="email"] .email-summary .workspace-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kairos-redesign [data-view="email"] .email-summary .workspace-stat { border: 0; border-radius: 16px; padding: 10px 0; background: var(--rd-ground); }
+  .kairos-redesign [data-view="email"] .email-item-avatar { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%; }
+  .kairos-redesign [data-view="email"] .email-item-reason { color: var(--rd-ink-dim) !important; }
+  .kairos-redesign [data-view="tasks"] .tasks-workspace { display: flex; flex-direction: column; gap: 16px; }
+  /* Beat the desktop board's :has() ordering: the title leads the phone,
+     followed by activity and the routines list. */
+  .kairos-redesign #view-content[data-view="tasks"] .tasks-workspace > .view-header { order: -5; margin-bottom: 0; }
+  .kairos-redesign [data-view="tasks"] .task-activity { order: -4; }
+  .kairos-redesign [data-view="tasks"] .tasks-routines-heading { order: -3; margin: 0; font: italic 600 26px/1.15 var(--rd-font-title); }
+  .kairos-redesign #view-content[data-view="tasks"] #tasks-list { order: -2; margin-top: 0 !important; }
+  .kairos-redesign [data-view="tasks"] .view-header > .workspace-round::after { content: none; }
+  .kairos-redesign [data-view="tasks"] .view-header > .workspace-round { display: inline-flex; align-items: center; justify-content: center; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: 50%; }
+  .kairos-redesign [data-view="tasks"] .workspace-round svg { width: 20px; height: 20px; }
+  .kairos-redesign [data-view="tasks"] .view-header > .tasks-build-button::after { content: '✧'; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list { display: flex; flex-direction: column; padding: 2px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card { margin: 0 !important; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; box-shadow: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card:last-child { border-bottom: 0; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .card-row { flex-wrap: wrap; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .title,
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list .title { font: 500 15px var(--rd-font-ui) !important; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .meta,
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list .meta { font-size: 11px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .btn { min-height: 44px; padding: 0 12px; font-size: 13px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .btn:first-child:not(.danger) { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-progress .rd-dot { border-radius: 50%; }
+  .kairos-redesign [data-view="school"] .school-overview > .document-grid { margin-bottom: 18px; }
+  .kairos-redesign [data-view="profile"] .modal-header { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+  .kairos-redesign [data-view="profile"] .modal-header > span { flex: 1; }
+  .kairos-redesign [data-view="profile"] .modal-close-btn { position: static; width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="profile"] .workspace-profile-identity .btn { align-self: flex-start; background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign [data-view][data-custom-tab="true"] table { display: block; overflow-x: auto; max-width: 100%; }
+  .kairos-redesign [data-view][data-custom-tab="true"] :is(.card, [class$="-card"], .panel, [class$="-panel"]) { min-width: 0; overflow-wrap: anywhere; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign #view-content:is([data-view="notes"], [data-view="school"]) .workspace-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .kairos-redesign #view-content:is([data-view="notes"], [data-view="school"]) .workspace-stat { padding: 16px 18px; gap: 5px; border-radius: 26px; }
+  .kairos-redesign #view-content:is([data-view="notes"], [data-view="school"]) .workspace-stat > strong { font-size: 22px; font-weight: 600; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-range-switch button { display: block !important; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-nav > .cal-view-switch { display: inline-grid !important; }
+  .kairos-redesign [data-view="profile"] .modal-header > .workspace-round { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 46px; height: 46px; padding: 0; border-radius: 50%; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="profile"] .workspace-round svg { width: 20px; height: 20px; }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel .workspace-stat { padding: 14px 0 0 14px; gap: 4px; border: 0; border-top: 1px solid var(--rd-line); border-radius: 0; flex-direction: column-reverse; }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel .workspace-stat > strong { font-size: 20px; font-weight: 600; }
+}
+/* Installed tabs often ship inline styles. These shared primitives must win. */
+.kairos-redesign [data-view][data-custom-tab="true"] :is(h1, .view-header h2, [class$="-header"] > h2) { font-family: var(--rd-font-title) !important; font-style: italic !important; color: var(--rd-ink) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.card, [class$="-card"], .panel, [class$="-panel"], .empty-state) { border-radius: 26px !important; background-color: var(--rd-surface-solid) !important; color: var(--rd-ink) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(button, .btn, [role="button"]) { border-radius: var(--rd-radius-pill) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { background: var(--rd-ground) !important; color: var(--rd-ink) !important; border-color: var(--rd-line) !important; }
+@media (max-width: 768px) {
+  .kairos-redesign [data-view][data-custom-tab="true"] :is([class$="-grid"], [class$="-columns"]) { grid-template-columns: minmax(0, 1fr) !important; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(var(--calendar-weeks, 6), 46px); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > div { box-sizing: border-box; min-height: 64px; display: flex; align-items: center; padding-bottom: 18px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-calendars-trigger,
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .cal-create-bar { margin-bottom: 18px; align-self: start; }
+  .kairos-redesign [data-view="library"] .vault-overview-card { flex-direction: row; align-items: center; gap: 14px; }
+  .kairos-redesign [data-view="library"] .vault-overview-copy { display: grid; gap: 8px; flex: 1; min-width: 0; }
+  .kairos-redesign [data-view="library"] .vault-overview-copy > span { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .vault-overview-map { flex: 0 1 160px; min-width: 0; }
+  .kairos-redesign [data-view="library"] .vault-overview-map svg { width: 100%; height: auto; }
+  .kairos-redesign [data-view="library"] .vault-overview-map path { stroke: var(--rd-line-strong); fill: none; }
+  .kairos-redesign [data-view="library"] .vault-overview-map circle { fill: var(--rd-ink); }
+  .kairos-redesign [data-view="library"] .vault-overview-map circle:nth-of-type(2n) { fill: var(--accent); }
+  .kairos-redesign [data-view="tool-store"] .tool-store-top .ts-plus { border: 1px solid var(--rd-line); background: var(--rd-surface-solid); color: var(--rd-ink); }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel .workspace-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px 0 0; gap: 0; }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel .workspace-stat:first-child { padding-left: 0; }
+  .kairos-redesign [data-view="profile"].workspace-profile-panel .workspace-stat + .workspace-stat { border-left: 1px solid var(--rd-line); }
+}
+@media (max-width: 768px) {
+  .kairos-redesign [data-view="cookbook"] .cookbook-engine-status > .card { display: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .title { grid-column: 1; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .meta { grid-column: 1; margin: 0 !important; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .card-row { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; align-items: end; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list .btn { min-height: 44px; padding: 0 14px; font-size: 13px; }
+}
+.kairos-redesign [data-view="email"] .email-accounts-trigger svg { display: none; }
+@media (max-width: 768px) {
+  .kairos-redesign [data-view="email"] .email-accounts-trigger svg { display: block; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-head > .vault-crumbs { display: none; }
+  .kairos-redesign [data-view="library"] .vault-phone-heading .vault-crumbs { display: flex; justify-content: center; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; margin: 0; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .vault-phone-heading .vault-crumb { flex: none; min-width: 0; padding-inline: 2px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions { width: 100%; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions > .btn:not(.vault-pin):not(.vault-more):not(.vault-rail-toggle) { flex: 1; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions .vault-links-pill { order: 1; font-size: 14px; height: 46px; }
+  .kairos-redesign [data-view="library"] .vault-phone-detail .library-vault-reader-actions .vault-pin { order: 2; }
+  .kairos-redesign [data-view="tasks"] .task-activity[data-range="week"] .task-activity-count > span { font-size: 0; }
+  .kairos-redesign [data-view="tasks"] .task-activity[data-range="week"] .task-activity-count > span::after { content: 'Runs this week'; font-size: 13px; }
+}
+.kairos-redesign [data-view][data-custom-tab="true"] :is(button, .btn, [role="button"]) { background-color: var(--rd-surface-solid) !important; color: var(--rd-ink) !important; border-color: var(--rd-line-strong) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.primary, .btn-primary, [aria-selected="true"], [aria-pressed="true"]) { background-color: var(--rd-primary-bg) !important; color: var(--rd-primary-fg) !important; border-color: transparent !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] :is(.danger, .btn-danger) { color: var(--danger) !important; }
+
+@media (max-width: 768px) {
+  /* Calendar's only top-row contents are the title and two round actions.
+     Reset the desktop display:contents grid and its inherited row padding. */
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header {
+    display: flex; flex-direction: row; align-items: center; grid-column: 1 / -1; gap: 8px;
+    height: 46px; min-height: 46px; margin: 0 0 18px; padding: 0; border: 0;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > div:first-child {
+    flex: 1; min-width: 0; min-height: 0; padding: 0; align-self: center;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .view-header .sub { display: none; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header :is(.cal-calendars-trigger, .cal-create-bar) {
+    flex: none; align-self: center; margin: 0;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header button {
+    /* Own the target geometry here, above desktop pill and flex sizing. */
+    box-sizing: border-box; flex: 0 0 46px; width: 46px; height: 46px;
+    min-width: 46px !important; min-height: 46px !important;
+    max-width: 46px; max-height: 46px; margin: 0; padding: 0; border-radius: 50%;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > .cal-create-bar {
+    /* Keep the header action visible when the dock hides its source controls. */
+    display: flex !important; width: 46px; height: 46px; min-height: 0; padding: 0;
+  }
+  .kairos-redesign #view-content[data-view="cookbook"] .view-header .sub { display: none; }
+  .kairos-redesign #view-content[data-view="library"] .library-editor-toolbar {
+    flex-wrap: wrap; align-items: stretch;
+  }
+  .kairos-redesign #view-content[data-view="library"] .library-editor-toolbar > div {
+    flex: 1 1 100%; min-width: 0; flex-wrap: wrap;
+  }
+  .kairos-redesign #view-content[data-view="library"] .library-editor-toolbar input { min-width: 0; width: 100%; }
+  .kairos-redesign #view-content[data-view="library"] .library-editor-back { display: none; }
+  .kairos-redesign #view-content[data-view="tool-store"] .view-header {
+    height: 46px; min-height: 46px;
+  }
+  .kairos-redesign [data-view="tool-store"] .view-header > .ts-plus {
+    width: 46px; height: 46px; min-width: 46px; min-height: 46px;
+    border-radius: 50%; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); color: var(--rd-ink);
+  }
+
+  /* Installed tabs may supply any number of labelled controls. Give their
+     title its own row; controls retain their labels on the following row. */
+  .kairos-redesign #view-content[data-custom-tab="true"] .view-header {
+    flex-wrap: wrap; align-items: center;
+  }
+  .kairos-redesign #view-content[data-custom-tab="true"] .view-header > :first-child {
+    flex: 1 0 100%; min-width: 0; max-width: 100%;
+  }
+  .kairos-redesign #view-content[data-custom-tab="true"] .view-header .sub { display: none; }
+  .kairos-redesign #view-content[data-custom-tab="true"] .view-header h2 {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* Profile is a full-screen pushed dialog, with its own safe-area row and
+     an independently scrolling body above the home indicator. */
+  .kairos-redesign [data-view="profile"].workspace-profile-panel {
+    height: var(--ms-page-height, 100dvh); max-height: var(--ms-page-height, 100dvh);
+    padding: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 140px;
+    border: 0; border-radius: 0; box-sizing: border-box;
+  }
+  .kairos-redesign [data-view="profile"] .modal-header {
+    height: 46px; min-height: 46px; margin: 0 0 18px; gap: 8px; text-align: left; line-height: 46px;
+  }
+  .kairos-redesign [data-view="profile"] .modal-header > span { min-width: 0; }
+  .kairos-redesign [data-view="profile"] .modal-close-btn { flex: none; padding: 0; }
+}
+
+/* Pill inputs own a single surface. General form styles must not paint a second
+   rectangle inside search wrappers, including when their input has focus. */
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock:has(> input)) {
+  border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock) input,
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock) input:focus {
+  appearance: none; border: 0 !important; outline: 0 !important; box-shadow: none !important;
+  background: transparent !important; border-radius: inherit;
+}
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search) {
+  appearance: none; border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock:has(> input)):focus-within,
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search):focus-visible {
+  outline: 2px solid var(--rd-focus); outline-offset: 2px;
+}
+
+/* Today marks the number area, never the full cell or the selected date tray. */
+.kairos-redesign .cal-day.today .cal-day-num,
+.kairos-redesign .cal-week-heading.is-today .cal-week-date,
+.kairos-redesign [data-view="calendar"] .cal-phone-days [aria-current="date"] > span {
+  display: grid; place-items: center; box-sizing: border-box; width: 32px; height: 32px;
+  min-width: 32px; padding: 0; margin-inline: auto; border: 0; border-radius: 10px;
+  background: var(--rd-ink); color: var(--rd-surface-solid); box-shadow: none; outline: 0;
+}
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day.today .cal-day-num { width: 32px; height: 32px; border-radius: 10px; }
+  /* Italic N has a left overhang. Give the glyph real space inside the scroll clip. */
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel-title {
+    padding: 2px 4px; line-height: 1.25; overflow: visible;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel > .card {
+    box-sizing: border-box; min-height: 44px; padding: 6px 12px; margin-bottom: 6px; border-radius: 16px;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .title { font-size: 13px; line-height: 1.25; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .meta { font-size: 10px; line-height: 1.2; margin-top: 2px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-upcoming-day-label { font-size: 10px; margin-top: 12px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card :is(.btn, .row-action-btn) { min-height: 44px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card input[type="checkbox"] { margin: 0; }
+}
+
+.kairos-redesign .cal-week-heading .cal-week-date { display: inline-grid; place-items: center; width: 32px; height: 32px; }
+.kairos-redesign .cal-week-heading .cal-week-weekday { display: block; font-size: 10px; font-weight: 400; }
+.kairos-redesign .cal-week-heading .btn.quiet { line-height: 1; }
+.kairos-redesign .cal-week-heading.is-today .btn.quiet { background: transparent; color: var(--rd-ink); border-radius: 10px; }
+
+/* Shared phone icon geometry, including SVG and generated +/back icons. :where() keeps it weaker than
+   every button's own rules, so a button its own CSS hides or lays out stays that way. */
+@media (max-width: 768px) {
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]) {
+    display: grid; place-items: center; justify-content: center; align-items: center; grid-template: 1fr / 1fr;
+    padding: 0 !important; gap: 0 !important; line-height: 1; text-indent: 0;
+  }
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]) svg {
+    display: block; grid-area: 1 / 1; margin: 0 !important; vertical-align: middle;
+  }
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden])::after,
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden])::before { grid-area: 1 / 1; margin: 0; line-height: 1; }
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]):has(> svg) { font-size: 0; }
+}
+
+.kairos-redesign .cal-completion-hit { display: contents; }
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-completion-hit {
+    display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; cursor: pointer;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-completion-hit input { align-self: center; }
+}
+
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search):focus { box-shadow: none; }
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card-row > div { min-width: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .title { overflow-wrap: anywhere; }
 }

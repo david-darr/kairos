@@ -88,6 +88,25 @@
     scroll-padding-bottom: var(--ms-tabbar-space);
   }
   .kairos-redesign .ms-launch-bottom { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
+  /* Forge New reserves the bottom group's actual flex size. Only the intro
+     scrolls, so activity updates and composer growth cannot cover its copy.
+     Safe centering keeps the start reachable when the intro overflows. */
+  .kairos-redesign .mf-project .ms-launch { overflow: hidden; }
+  .kairos-redesign .mf-project .ms-intro { flex: 1 1 0; min-height: 0; padding-block: 0; overflow-y: auto; justify-content: safe center; }
+  .kairos-redesign .mf-project .ms-intro > * { flex-shrink: 0; }
+  .kairos-redesign .mf-project .ms-intro > :first-child { margin-top: 12px; }
+  .kairos-redesign .mf-project .ms-intro > :last-child { margin-bottom: 12px; }
+  .kairos-redesign .mf-project .ms-launch-bottom { position: relative; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: 100%; box-sizing: border-box; }
+  .kairos-redesign .mf-project .ms-activity-slot { min-height: 0; overflow-y: auto; }
+  .kairos-redesign .mf-project .ms-launch-bottom > :not(.ms-activity-slot) { flex-shrink: 0; }
+  @media (max-height: 700px) {
+    .kairos-redesign .mf-project .ms-finished-deck > button,
+    .kairos-redesign .mf-project .forge-composer-hint { display: none; }
+  }
+  @media (max-height: 480px) {
+    /* New / Sessions remain available in the tab bar on landscape phones. */
+    .kairos-redesign[data-view="forgeHome"] .mf-project .ms-switch { display: none; }
+  }
   .kairos-redesign .ms-history { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
   .kairos-redesign .mf-dashboard-body { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space)); }
 
@@ -115,7 +134,6 @@
     padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
   }
   .kairos-redesign.ms-tabbar-up .design-composer { padding-bottom: 10px; }
-  .kairos-redesign .design-focus { padding-top: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
 
   /* A shared phone back control for agent, team and inbox conversations. */
   .kairos-redesign .agents-workspace.has-conversation .agents-workspace-controls { flex: 1; }
@@ -310,4 +328,183 @@
   .kairos-redesign .settings-mobile-page .settings-titlebar .title { margin-left: 0; text-align: left; min-height: 46px; }
   .kairos-redesign .settings-mobile-title { font: italic 600 32px/46px var(--rd-font-title); }
   .kairos-redesign .settings-mobile-back { width: 46px; height: 46px; min-width: 46px; margin-left: 0; border-radius: 999px; }
+}
+
+/* Mobile v2 board fidelity. Shell-owned surfaces only; page views own their content. */
+@media (max-width: 768px) {
+  /* The board lifts the bar to 28px (the old 12px plus 16); the extra shrinks as the home-indicator inset grows past it. */
+  .kairos-redesign.ms-tabbar-up { --ms-tabbar-space: calc(var(--ms-tabbar-height) + 10px + max(0px, 28px - max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))))); }
+  .kairos-redesign .ms-tabbar {
+    left: max(18px, env(safe-area-inset-left, 0px)); right: max(18px, env(safe-area-inset-right, 0px));
+    bottom: calc(max(28px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) - var(--ms-below-fold, 0px));
+    justify-content: space-between; max-width: none;
+  }
+  .kairos-redesign .ms-tabbar-glass {
+    flex: 0 1 calc(var(--ms-tab-count, 5) * 54px + 12px); height: 64px; padding: 6px; gap: 2px;
+    border: 1px solid var(--rd-line); background: color-mix(in srgb, var(--rd-surface-solid) 94%, transparent);
+    box-shadow: 0 12px 32px rgba(var(--shade-rgb), .14), inset 0 1px 0 rgba(var(--parchment-rgb), .8);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .kairos-redesign .ms-tabbar-glass::before, .kairos-redesign .ms-tabbar-glass::after { display: none; }
+  .kairos-redesign .ms-tabbar-pill {
+    top: 6px; bottom: 6px; left: 6px;
+    width: calc((100% - 12px - (var(--ms-tab-count, 5) - 1) * 2px) / var(--ms-tab-count, 5));
+    transform: translateX(calc(var(--ms-tab-index, 0) * (100% + 2px)));
+    background: var(--rd-surface-solid); border: 0;
+    box-shadow: 0 2px 8px rgba(var(--shade-rgb), .12), inset 0 0 0 1px var(--rd-line);
+  }
+  .kairos-redesign .ms-tabbar-item { height: 50px; }
+  /* TabBar board uses icon-only pills. Preserve every label for assistive technology. */
+  .kairos-redesign .ms-tabbar-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .kairos-redesign .ms-tabbar-create svg { width: 24px; height: 24px; }
+  .kairos-redesign .ms-tabbar-create svg { stroke-width: 1.9; }
+  .kairos-redesign .ms-tab-sheet.ms-more-sheet {
+    height: min(720px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px);
+    background: var(--rd-surface-solid); backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .kairos-redesign .ms-more-sheet .ms-sheet-panel { display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box; padding: 0 20px 36px; }
+  /* The shell's own sheets: 12px of ground, the 42 x 5 grabber, then 16px to the header (the boards). The grabber button keeps a 44px
+     touch area by hanging over the 33px the sheet reserves, in the empty middle of the header row. */
+  .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet), .kairos-redesign :is(.permission-dialog, .question-dialog):not(.agent-inline-permission) { padding-top: 33px; }
+  .kairos-redesign .ms-more-sheet .ms-sheet-panel { padding-top: 33px; }
+  .kairos-redesign :is(.ms-more-sheet, .ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet, .permission-dialog, .question-dialog) :is(.ms-sheet-grabber, .ms-sheet-grab):not(#_) { position: absolute; top: 0; left: 50%; margin: 0 0 0 -32px; width: 64px; height: 44px; min-height: 44px; }
+  .kairos-redesign :is(.ms-more-sheet, .ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet, .permission-dialog, .question-dialog) :is(.ms-sheet-grabber, .ms-sheet-grab)::after { position: absolute; top: 12px; left: 11px; margin: 0; }
+  .kairos-redesign :is(.ms-sheet-close, .ms-sheet-header > button) {
+    display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+    border: 0; background: var(--rd-ground); font-size: 24px; line-height: 1;
+  }
+  .kairos-redesign :is(.ms-sheet-close, .ms-sheet-header > button) svg { width: 18px; height: 18px; }
+  .kairos-redesign .ms-more-sheet .ms-sheet-heading { font-size: 34px; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 2px 0 0; }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch { padding: 5px; border: 0; background: var(--rd-surface-2); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-thumb { inset: 5px auto 5px 5px; width: calc(50% - 5px); border: 0; background: var(--rd-surface-solid); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-option { height: 50px; min-height: 50px; font-weight: 500; }
+  .kairos-redesign .ms-mode-option svg, .kairos-redesign .ms-mode-name small, .kairos-redesign .ms-mode-caption { display: none; }
+  .kairos-redesign .ms-tab-tile { border-color: var(--rd-line); gap: 8px; }
+  .kairos-redesign .ms-tab-tile svg { width: 20px; height: 20px; }
+  .kairos-redesign .ms-more-sheet .ms-sheet-footer { margin-top: auto; padding: 0; border-top: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-profile-row { border-bottom: 1px solid var(--rd-line); padding-block: 12px; }
+  .kairos-redesign .ms-profile-copy { display: block; flex: 1; min-width: 0; text-align: left; }
+  .kairos-redesign .ms-profile-name { display: block; font-weight: 500; }
+  .kairos-redesign .ms-profile-detail { display: block; font-weight: 400; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-more-extras { margin-block: 14px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-more-extras > summary { cursor: pointer; }
+  .kairos-redesign .ms-sheet.ms-model-sheet { height: 640px; max-height: calc(100dvh - 32px); }
+  .kairos-redesign .ms-sheet.ms-notifications-sheet { height: 770px; max-height: calc(100dvh - 32px); }
+  .kairos-redesign .ms-sheet.ms-background-sheet { height: 620px; max-height: calc(100dvh - 32px); }
+  .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) { display: flex; flex-direction: column; padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); }
+  .kairos-redesign .ms-model-menu { display: flex; flex-direction: column; border: 0; overflow: visible; }
+  .kairos-redesign .ms-model-menu > .model-picker-heading,
+  .kairos-redesign .ms-model-menu .model-version-section > .model-picker-heading { display: none; }
+  .kairos-redesign .ms-model-menu .model-connection-list { display: flex; gap: 0; padding: 5px; border-radius: 999px; background: var(--rd-surface-2); margin: 0 0 16px; overflow-x: auto; }
+  .kairos-redesign .ms-model-menu .model-connection-item { flex: 1 0 84px; min-width: 0; justify-content: center; min-height: 42px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 14px; }
+  .kairos-redesign .ms-model-menu .model-connection-text { display: block; min-width: 0; }
+  .kairos-redesign .ms-model-menu .model-connection-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-model-menu .model-connection-item.active { background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 3px rgba(var(--shade-rgb), .1); }
+  .kairos-redesign .ms-model-menu .model-connection-item :is(.model-connection-sub, .model-mark),
+  .kairos-redesign .ms-model-menu .model-connection-item::after { display: none; }
+  .kairos-redesign .ms-model-menu .model-catalog-list { border: 1px solid var(--rd-line); border-radius: 24px; overflow: hidden; max-height: none; }
+  .kairos-redesign .ms-model-menu .model-catalog-item { display: grid; grid-template-columns: minmax(0, 1fr) 20px; gap: 2px 12px; text-align: left; min-height: 69px; }
+  .kairos-redesign .ms-model-menu .model-catalog-name { grid-column: 1; font-size: 15px; font-weight: 500; }
+  .kairos-redesign .ms-model-menu .model-catalog-desc { grid-column: 1; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-model-menu .model-catalog-item::after { content: ''; grid-column: 2; grid-row: 1 / 3; width: 20px; height: 20px; border: 1.5px solid var(--rd-line-strong); border-radius: 50%; box-sizing: border-box; }
+  .kairos-redesign .ms-model-menu .model-catalog-item.active::after { border: 6px solid var(--rd-ink); }
+  .kairos-redesign .ms-model-menu .model-catalog-item:last-child { border-bottom: 0; }
+  .kairos-redesign .ms-model-menu .model-version-section { border: 0; padding: 0; margin: 0; }
+  .kairos-redesign .ms-sheet .ms-model-menu .model-effort-row { gap: 6px; margin: 16px 0 0; border: 0; padding: 0; }
+  .kairos-redesign .ms-model-menu .model-effort-label { flex-basis: 100%; font: 500 11px var(--rd-font-ui); text-transform: uppercase; letter-spacing: .16em; margin-bottom: 4px; }
+  .kairos-redesign .ms-model-menu .model-effort-btn { flex: 1; padding: 0 8px; font-size: 13px; }
+  .kairos-redesign .ms-model-extras { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-model-extras > :not(summary) { margin-top: 12px; }
+  .kairos-redesign .ms-model-extras input { width: 100%; box-sizing: border-box; min-height: 44px; border-radius: 999px; background: var(--rd-ground); color: var(--rd-ink); border: 1px solid var(--rd-line); padding-inline: 16px; }
+  .kairos-redesign .ms-sheet.ms-quick-popup {
+    inset: 0; width: 100%; height: 100%; max-height: none; padding: 0; border: 0; border-radius: 0; overflow: auto;
+    background: transparent; box-shadow: none; color: var(--rd-ink);
+  }
+  .kairos-redesign .ms-quick-popup::backdrop { background: rgba(var(--shade-rgb), .42); }
+  .kairos-redesign .ms-quick-popup > :is(.ms-sheet-grabber, .ms-sheet-header) { display: none; }
+  .kairos-redesign .ms-quick-popup .ms-sheet-body { position: absolute; right: 18px; bottom: max(112px, calc(env(safe-area-inset-bottom, 0px) + 84px)); width: min(280px, calc(100vw - 36px)); padding: 0; overflow: visible; }
+  .kairos-redesign .ms-quick-action { min-height: 68px; gap: 0 14px; border: 0; background: var(--rd-surface-solid); box-shadow: 0 8px 24px rgba(var(--shade-rgb), .14); font-size: 15px; font-weight: 500; }
+  .kairos-redesign .ms-quick-icon { background: var(--rd-ground); border: 0; border-radius: 14px; }
+  .kairos-redesign .ms-quick-close { position: absolute; right: 18px; bottom: max(28px, env(safe-area-inset-bottom, 0px)); display: grid; place-items: center; width: 62px; height: 62px; border: 0; border-radius: 999px; background: var(--rd-surface-solid); color: var(--rd-ink); box-shadow: 0 12px 28px rgba(var(--shade-rgb), .28); cursor: pointer; }
+  .kairos-redesign .ms-quick-close svg { width: 24px; height: 24px; }
+  .kairos-redesign .ms-notifications { display: flex; flex-direction: column; gap: 16px; }
+  .kairos-redesign .ms-notifications h3 { margin: 0 0 10px; }
+  .kairos-redesign .ms-notification-row { display: flex; align-items: center; gap: 12px; margin: 0; border: 0; background: transparent; }
+  .kairos-redesign .ms-notification-copy { flex: 1; min-width: 0; }
+  .kairos-redesign .ms-notification-copy :is(strong, small) { display: block; }
+  .kairos-redesign .ms-notification-copy strong { font-size: 15px; font-weight: 500; }
+  .kairos-redesign .ms-notification-copy small { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-notification-live { padding: 16px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 30px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .kairos-redesign .ms-notification-live h3 { display: none; }
+  .kairos-redesign .ms-notification-live .ms-notification-row { padding: 0; }
+  .kairos-redesign .ms-notification-live small { color: inherit; opacity: .65; }
+  .kairos-redesign .ms-notification-needs .ms-notification-row { border: 1px solid var(--rd-line-strong); background: var(--rd-ground); }
+  .kairos-redesign .ms-notification-earlier .ms-notification-list { padding: 2px 16px; border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-ground); }
+  .kairos-redesign .ms-notification-earlier .ms-notification-row { min-height: 44px; border-radius: 0; padding: 12px 0; border-bottom: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-notification-earlier .ms-notification-row:last-child { border-bottom: 0; }
+  .kairos-redesign .ms-notification-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: var(--success); }
+  .kairos-redesign .ms-notification-dot[data-status=Failed] { background: var(--danger); }
+  .kairos-redesign .ms-background-sheet .bg-tasks-summary { margin: 0 0 16px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-background-sheet .bg-task-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; border: 1px solid var(--rd-line); text-align: left; }
+  .kairos-redesign .ms-background-sheet .bg-task-label { grid-column: 1; grid-row: 1; font-size: 15px; font-weight: 500; }
+  .kairos-redesign .ms-background-sheet .bg-task-label::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 10px; border-radius: 50%; background: var(--accent); }
+  .kairos-redesign .ms-background-sheet .bg-task-row[data-status=waiting] .bg-task-label::before { background: var(--danger); }
+  .kairos-redesign .ms-background-sheet .bg-task-row[data-status=done] .bg-task-label::before { background: var(--success); }
+  .kairos-redesign .ms-background-sheet .bg-task-elapsed { position: static; grid-column: 2; grid-row: 1; font: 12px var(--font-mono); }
+  .kairos-redesign .ms-background-sheet .bg-task-top { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; gap: 8px; }
+  .kairos-redesign .ms-background-sheet .bg-task-kind { padding: 3px 9px; border-radius: 999px; background: var(--rd-surface-solid); font-size: 12px; }
+  .kairos-redesign .ms-background-sheet .bg-task-activity { grid-column: 1 / -1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* Mobile v2 fidelity, second pass: model rows, effort, quick create, notifications, question, permission, background tasks. */
+@media (max-width: 768px) {
+  /* More: the last row has no rule under it */
+  .kairos-redesign .ms-more-sheet .ms-settings-row { border-bottom: 0; }
+  /* Quick create: the bar steps aside; the + becomes the close button in the same place */
+  .kairos-redesign:has(.ms-quick-popup[open]) .ms-tabbar-glass { opacity: 0; transition: opacity var(--rd-dur-fade) var(--rd-ease); }
+  /* Model sheet */
+  .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) .ms-sheet-header { padding: 0; margin: 0 0 16px; border: 0; min-height: 44px; }
+  .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) .ms-sheet-header h2 { font: italic 600 32px/1 var(--rd-font-title); }
+  .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) .ms-sheet-body { padding: 0; }
+  .kairos-redesign .ms-model-menu .model-connection-list { margin: 0 0 16px; }
+  .kairos-redesign .ms-model-menu .model-catalog-list { display: flex; flex-direction: column; gap: 0; padding: 0; }
+  .kairos-redesign .ms-model-menu .model-catalog-item { padding: 14px 16px; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: var(--rd-surface-solid); color: var(--rd-ink); align-items: center; }
+  .kairos-redesign .ms-model-menu .model-catalog-item.active { background: var(--rd-ground); }
+  .kairos-redesign .ms-model-menu .model-catalog-item > span { min-width: 0; }
+  .kairos-redesign .ms-model-menu .model-catalog-desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-model-menu .model-version-section { display: flex; flex-direction: column; }
+  .kairos-redesign .ms-model-menu .model-effort-row { order: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+  .kairos-redesign .ms-model-menu .model-effort-label { grid-column: 1 / -1; }
+  .kairos-redesign .ms-model-menu .model-effort-btn { min-height: 42px; height: 42px; border: 1px solid var(--rd-line); border-radius: 999px; background: var(--rd-ground); color: var(--rd-ink); text-transform: capitalize; }
+  .kairos-redesign .ms-model-menu .model-effort-btn.active { border-color: transparent; background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign .ms-model-menu .rd-effort-seg { display: contents; }
+  .kairos-redesign .ms-model-menu .model-use-endpoint, .kairos-redesign .ms-model-menu .model-custom-details { order: 2; }
+  .kairos-redesign .ms-model-menu .model-use-endpoint { min-height: 44px; justify-content: flex-start; padding: 0; background: transparent; color: var(--accent); font-size: 13px; }
+  .kairos-redesign .ms-model-menu .model-add-item { justify-content: flex-start; padding: 0; background: transparent; color: var(--accent); font-size: 13px; }
+  /* Notifications */
+  .kairos-redesign .ms-notification-list { display: flex; flex-direction: column; gap: 8px; }
+  .kairos-redesign .ms-notification-needs .ms-notification-row { padding: 14px 16px; border-radius: 22px; }
+  .kairos-redesign .ms-notification-earlier .ms-notification-list { gap: 0; }
+  .kairos-redesign .ms-notification-earlier .ms-notification-copy { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .kairos-redesign .ms-notification-earlier .ms-notification-copy strong { font-size: 14px; font-weight: 400; }
+  .kairos-redesign .ms-notification-earlier .ms-notification-copy small { flex: none; font-size: 12px; }
+  /* Question and permission, the head: icon, label over one quiet line, close */
+  .kairos-redesign .question-dialog .question-head-copy, .kairos-redesign .permission-dialog .permission-head-copy { flex: 1; min-width: 0; }
+  .kairos-redesign .question-dialog .question-head h2, .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-head h2 { margin: 0; font: 500 11px/1.5 var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+  .kairos-redesign .question-dialog .question-head-sub, .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-tool { display: block; margin: 0; padding: 0; border: 0; border-radius: 0; font: 13px/1.5 var(--rd-font-ui); color: var(--rd-ink-dim); width: auto; order: 0; }
+  .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-tool::before { content: none; }
+  .kairos-redesign .question-dialog .question-footer > p.muted:not(:last-of-type) { display: none; }
+  .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-choices .btn:not(#_) { background: var(--rd-ground); border-color: var(--rd-line); }
+  .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-choices .btn.primary:not(#_) { background: var(--rd-primary-bg); border-color: var(--rd-primary-bg); }
+  /* The chosen model reads as a filled radio ring (ModelSheet board); this resets the check mark the shared rows draw. */
+  .kairos-redesign .ms-model-menu .model-catalog-item:not(#_)::after { content: ''; position: static; display: block; grid-column: 2; grid-row: 1 / 3; width: 20px; height: 20px; margin: 0; background: none; -webkit-mask: none; mask: none; border: 1.5px solid var(--rd-line-strong); border-radius: 50%; box-sizing: border-box; }
+  .kairos-redesign .ms-model-menu .model-catalog-item.active:not(#_)::after { border: 6px solid var(--rd-ink); }
+  .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-target { font: 12px/1.6 var(--font-mono); }
+  .kairos-redesign :is(.question-dialog, .permission-dialog) .ms-sheet-close:not(#_) { font-size: 26px; font-weight: 400; line-height: 1; }
+  /* Background tasks: the counts under the title, rows as three lines */
+  .kairos-redesign .ms-background-sheet .ms-sheet-titles { min-width: 0; }
+  .kairos-redesign .ms-background-sheet .bg-tasks-summary { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-background-sheet .bg-tasks-list { display: flex; flex-direction: column; gap: 10px; }
+  .kairos-redesign .ms-background-sheet .bg-task-row { padding: 14px 16px; border-radius: 22px; background: var(--rd-ground); border-color: var(--rd-line); }
 }

@@ -48,6 +48,12 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
   menu.setAttribute("aria-label", "Add or manage");
 
   const phone = window.matchMedia(PHONE);
+  const placeHeader = () => {
+    if (phone.matches && redesignOn()) {
+      if (header.parentElement === top) view.insertBefore(header, top);
+    } else if (header.parentElement !== top) top.prepend(header);
+  };
+  placeHeader();
   let focusWatch = null;
   const setMenu = open => {
     if (open) {
@@ -124,6 +130,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
 
   function sync() {
     if (!view.isConnected) { closeSheet(false); return; }
+    placeHeader();
     if (!redesignOn()) return;
     measurePad();
     syncChips();
@@ -249,7 +256,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
       (row?.querySelector(".ts-row-hit") || plus).focus();
     }
   }
-  phone.addEventListener("change", () => { measurePad(); if (!phone.matches) { closeSheet(false); setMenu(false); } });
+  phone.addEventListener("change", () => { placeHeader(); measurePad(); if (!phone.matches) { closeSheet(false); setMenu(false); } });
   window.addEventListener("resize", measurePad);
 
   return { sync };

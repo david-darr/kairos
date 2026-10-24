@@ -7,6 +7,8 @@ import * as commandPalette from "./commandPalette.js";
 import * as floatingProgress from "./floatingProgress.js";
 import * as chatStream from "./chatStream.js";
 import { setupSidebar, restoreSidebar } from "./sidebar.js";
+import { parseChatWindow } from './chatWindowRoute.js';
+import { setPaneUser } from './chatPaneStack.js';
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
@@ -197,6 +199,8 @@ async function performSwitch(tabId, options = {}) {
   nextView.id = "view-content";
   nextView.className = "view active";
   nextView.dataset.view = tabId;
+  // Installed views share a host-level design contract regardless of their ID.
+  if (customViewUrls[tabId] && tabId !== 'school') nextView.dataset.customTab = 'true';
   view.replaceWith(nextView);
   view = nextView;
   nextView.innerHTML = `<div class="empty-state" role="status">Loading...</div>`;
@@ -332,10 +336,15 @@ async function buildSidebar() {
     document.querySelector('.sidebar-header').after(control);
   }
   const brand = document.getElementById("brand");
+  brand.setAttribute('role', 'img'); brand.setAttribute('aria-label', 'Kairos');
   brand.innerHTML = WORDMARK;
   brand.firstElementChild.classList.add("brand-wordmark");
   brand.firstElementChild.setAttribute("role", "img");
   brand.firstElementChild.setAttribute("aria-label", "Kairos");
+  const redesignBrand = document.createElement('span');
+  redesignBrand.className = 'rd-sidebar-brand'; redesignBrand.setAttribute('aria-hidden', 'true');
+  redesignBrand.innerHTML = `<svg width="26" height="26" viewBox="0 0 40 40"><circle cx="20" cy="21" r="15" fill="currentColor"/><circle cx="30" cy="10" r="7" class="rd-kip-cut"/><circle cx="30" cy="10" r="3.4" class="rd-kip-point"/><rect x="13" y="16" width="4" height="9" rx="2" class="rd-kip-cut"/><rect x="21" y="16" width="4" height="9" rx="2" class="rd-kip-cut"/></svg><span>KAIROS</span>`;
+  brand.append(redesignBrand);
   // In the desktop app the wordmark lives in the title bar instead.
   const titlebarBrand = document.getElementById("titlebar-brand");
   if (titlebarBrand) titlebarBrand.innerHTML = brand.innerHTML;
@@ -352,6 +361,7 @@ async function buildSidebar() {
 
   forgeRailCleanup();
   const nav = document.getElementById("nav");
+  nav.classList.toggle('rd-stagger', !matchMedia('(max-width: 768px)').matches);
   // Cleared before rebuilding — buildSidebar() now also runs whenever
   // Approved and enabled tabs supply their own sidebar manifests.
   const customTabs = await api("/api/system/custom-tabs").catch(() => []);
@@ -370,10 +380,11 @@ async function buildSidebar() {
   if (appMode === 'forge') for (const item of FORGE_NAV) items.set(item.id, { ...item, svg: ICONS[item.icon] });
   for (const group of groups) {
     if (!group.ids.length) continue;
-    if (group.label) {
+    if (group.label || group.id === 'main') {
       const label = document.createElement("div");
       label.className = "nav-group-label";
       label.textContent = group.label;
+      if (!group.label) { label.textContent = 'Kairos'; label.classList.add('rd-nav-heading'); }
       nav.appendChild(label);
     }
     for (const id of group.ids) {
@@ -428,7 +439,7 @@ async function buildSidebarFooter() {
   card.append(avatar, userName);
 
   const menu = document.createElement("div");
-  menu.className = "overflow-menu hidden";
+  menu.className = "overflow-menu rd-menu-in hidden";
   menu.style.cssText = "position:absolute;bottom:calc(100% + 6px);left:0;min-width:170px;";
 
   // No stored multi-account sessions exist to actually swap accounts without
@@ -547,6 +558,7 @@ async function boot() {
   await auth.run(overlay);
   const identity = await api('/api/auth/status');
   await initAppearance(identity.username);
+  setPaneUser(identity.username);
   initLayout(identity.username);
   overlay.classList.add("hidden");
 
@@ -573,12 +585,17 @@ async function boot() {
 }
 
 async function startApp() {
+  const chatWindow = parseChatWindow(location.search);
+  if (chatWindow) document.documentElement.classList.add('single-chat-window');
   const customTabs = await buildSidebar();
   setupSidebar();
   setupMobileMenu();
   document.addEventListener("jarvis:navigate", (event) => {
     const { tab, ...options } = event.detail;
     tab === "settings" ? openSettings(options) : switchTab(tab, options);
+  });
+  window.jarvis?.usageOverlay?.onNavigate?.(tab => {
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...(tab === 'settings' ? { section: 'appearance' } : {}) } }));
   });
   // Adding/removing a tab in the Tool Store rebuilds the nav so it
   // appears immediately instead of after a reload.
@@ -652,7 +669,8 @@ async function startApp() {
       switchTab('library', { section: 'designs', designId: match[1] });
     }
   });
-  if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
+  if (chatWindow) await switchTab('chat', chatWindow);
+  else if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
   else if (!await openNotificationChat(location.href)) {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');

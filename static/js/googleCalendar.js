@@ -290,8 +290,13 @@ export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
     const next = new Date(date); next.setDate(next.getDate() + 1);
     const dayItems = itemsOnDay(items, date);
     const isToday = date.toDateString() === today.toDateString();
-    const cell = el('div', { class: 'cal-week-heading' + (isToday ? ' is-today' : '') }, [el('button', { type: 'button', class: 'btn quiet',
-      text: date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }), onclick: () => selectDay(date, dayItems) })]);
+    const dateButton = el('button', { type: 'button', class: 'btn quiet', 'aria-label': date.toDateString(),
+      onclick: () => selectDay(date, dayItems) });
+    if (redesignOn()) {
+      dateButton.append(el('span', { class: 'cal-week-weekday', text: date.toLocaleDateString(undefined, { weekday: 'short' }) }),
+        el('span', { class: 'cal-week-date', text: String(date.getDate()) }));
+    } else dateButton.textContent = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+    const cell = el('div', { class: 'cal-week-heading' + (isToday ? ' is-today' : '') }, [dateButton]);
     for (const item of dayItems.filter(item => item.all_day)) cell.append(eventColor(el('button', { type: 'button', class: 'cal-event-pill' + source(item), text: item.title,
       onclick: () => edit(item, date, dayItems) }), item));
     header.append(cell);
