@@ -12,14 +12,15 @@ const path = require('node:path');
 
 class Node {
   constructor(tag, attrs = {}, children = []) {
-    this.tag = tag; this.children = []; this.dataset = {}; this.attrs = attrs; this.isConnected = true; this.scrollTop = 0;
+    this.tag = tag; this.children = []; this.dataset = {}; this.attrs = attrs; this.isConnected = true; this.scrollTop = 0; this.value = ''; this.checked = false;
     this.classes = new Set((attrs.class || '').split(/\s+/));
     this.classList = { add: (...xs) => xs.forEach(x => this.classes.add(x)), remove: (...xs) => xs.forEach(x => this.classes.delete(x)),
       contains: x => this.classes.has(x), toggle: (x, on) => { on ? this.classes.add(x) : this.classes.delete(x); } };
     this.style = { setProperty(name, value) { this[name] = value; }, removeProperty(name) { delete this[name]; } };
     Object.assign(this, attrs); if (attrs.text !== undefined) this.textContent = attrs.text; this.append(...children);
   }
-  append(...nodes) { for (const n of nodes.filter(Boolean)) { if (typeof n === 'object') n.parentElement = this; this.children.push(n); } }
+  remove() { if (this.parentElement) { const siblings = this.parentElement.children; if (siblings.includes(this)) siblings.splice(siblings.indexOf(this), 1); this.parentElement = null; } }
+  append(...nodes) { for (const n of nodes.filter(Boolean)) { if (typeof n === 'object') { n.remove(); n.parentElement = this; } this.children.push(n); } }
   appendChild(n) { this.append(n); return n; }
   prepend(...nodes) { for (const n of nodes.filter(Boolean)) n.parentElement = this; this.children.unshift(...nodes.filter(Boolean)); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
@@ -28,6 +29,7 @@ class Node {
   getAttribute(k) { return this.attrs[k] ?? null; }
   replaceWith(node) { const p = this.parentElement; p.children[p.children.indexOf(this)] = node; node.parentElement = p; }
   addEventListener(k, fn) { this['on' + k] = fn; }
+  focus() {}
   click() { return this.onclick?.({ currentTarget: this }); }
   insertAdjacentHTML() {}
   querySelectorAll(selector) { return descendants(this).filter(n => selector.startsWith('.') ? n.classes.has(selector.slice(1)) : n.tag === selector); }
@@ -35,18 +37,18 @@ class Node {
 }
 const descendants = n => n.children.flatMap(c => typeof c === 'object' ? [c, ...descendants(c)] : []);
 const el = (...args) => new Node(...args);
-let segments, requests = [], redesign = true, phone = true, responses = {};
+let segments, requests = [], sent = [], redesign = true, phone = true, responses = {};
 const context = vm.createContext({ console, Date, Intl, URL, Set, Map, Promise, Math, String, Number,
-  document: { createElement: tag => el(tag), documentElement: { dataset: { mascot: 'on' }, classList: { contains: () => redesign } }, body: new Node('body') },
+  document: { createElement: tag => el(tag), documentElement: { dataset: { mascot: 'on' }, classList: { contains: () => redesign } }, body: new Node('body'), addEventListener() {}, removeEventListener() {} },
   window: { matchMedia: () => ({ matches: phone }) },
   MutationObserver: class { observe() {} disconnect() {} }, setInterval: () => 0, clearInterval() {},
 });
 const cache = new Map();
 const mocks = {
-  'api.js': { el, modelMark: () => el('span'), api: async url => { requests.push(url); return responses[url] ?? []; }, iconButton: () => el('button'), openPanelDialog() {}, toast() {} },
-  'mobileSheet.js': { mountSheetSurface() {} }, 'calendarRepeat.js': { repeatControls() {} },
+  'api.js': { el, modelMark: () => el('span'), api: async (url, options) => { requests.push(url); sent.push({ url, options }); return typeof responses === 'function' ? responses(url, options) : responses[url] ?? []; }, iconButton: () => el('button'), openPanelDialog() {}, toast() {} },
+  'mobileSheet.js': { mountSheetSurface(panel) { panel.prepend(el('button', { class: 'ms-sheet-grabber' })); return () => {}; } }, 'calendarRepeat.js': { repeatControls() {} },
   'mascot.js': { createMascot: ({ state, size }) => el('kairos-mascot', { state, size }) },
-  'workspaceParts.js': { redesignOn: () => redesign, workspaceEmpty: () => el('section'), workspaceConfirm: async () => false },
+  'workspaceParts.js': { redesignOn: () => redesign, workspaceEmpty: ({ title, hint, actionLabel, onAction }) => el('section', { class: 'empty-state' }, [el('h2', { class: 'empty-state-title', text: title }), el('p', { class: 'empty-state-hint', text: hint }), el('button', { text: actionLabel, onclick: onAction })]), workspaceConfirm: async () => false },
   'kairosParts.js': { segmented: options => { segments = options; return el('div'); }, dotMatrix: options => options },
   'icons.js': { ICONS: { calendar: '' } },
   'modelSetup.js': { openModelSetup() {} },
@@ -66,10 +68,23 @@ async function moduleAt(file) {
   });
   await module.evaluate(); return module;
 }
+function assertMonth(host) {
+  const cells = host.querySelectorAll('.cal-day');
+  const dates = cells.map(c => new Date(c.getAttribute('aria-label'))).filter(d => !isNaN(d));
+  const month = dates.find(d => d.getDate() === 1);
+  const offset = (month.getDay() + 6) % 7;
+  const expected = Math.ceil((offset + new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()) / 7) * 7;
+  assert.equal(cells.length, expected, 'Month uses precisely the weeks it needs');
+  if (phone) for (const cell of cells.filter(c => c.classList.contains('other-month'))) {
+    assert.equal(cell.children.length, 0, 'Outside-month cells stay blank');
+    assert.equal(cell.disabled, true);
+  }
+}
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
 (async () => {
   const shared = (await moduleAt('static/js/kairosParts.js')).namespace;
   mocks['kairosParts.js'].segmented = options => { segments = options; return shared.segmented(options); };
+  mocks['calendarRepeat.js'].repeatControls = (await moduleAt('static/js/calendarRepeat.js')).namespace.repeatControls;
   const google = (await moduleAt('static/js/googleCalendar.js')).namespace;
   const start = new Date(2026, 9, 23), grid = el('div');
   const events = [{ source: 'calendar', title: 'Review', start: new Date(2026, 9, 23, 9).toISOString(), end: new Date(2026, 9, 23, 10).toISOString() }];
@@ -85,6 +100,30 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(google.itemsOnDay([trip], new Date(2026, 9, 24)).length, 1);
   assert.equal(google.itemsOnDay([trip], new Date(2026, 9, 25)).length, 0);
 
+  let saved = false;
+  google.eventDialog([], async () => { saved = true; }, null, start);
+  const form = context.document.body.querySelector('.cal-event-dialog');
+  assert.equal(form.getAttribute('aria-label'), 'New event');
+  assert.equal(form.querySelector('h3').textContent, 'New event');
+  assert.equal(form.querySelectorAll('.ms-sheet-grabber').length, 1);
+  assert.equal(form.querySelectorAll('.cal-sheet-grabber').length, 0);
+  const fields = form.querySelector('.form-grid');
+  assert.ok(fields.children[0].classList.contains('cal-title-field'));
+  assert.equal(form.querySelectorAll('.cal-field-group').length, 2);
+  const inputByLabel = label => descendants(form).find(n => n.getAttribute('aria-label') === label);
+  for (const label of ['Event title', 'Calendar', 'Start', 'End', 'Time zone', 'Location', 'Description', 'Repeat', 'Edit recurring event'])
+    assert.ok(inputByLabel(label), `Grouped editor preserves ${label}`);
+  inputByLabel('Event title').value = 'Grouped event';
+  inputByLabel('Location').value = 'Library';
+  inputByLabel('Description').value = 'Bring notes';
+  await form.onsubmit({ preventDefault() {} });
+  const creation = sent.find(r => r.url === '/api/calendar/events' && r.options?.method === 'POST');
+  assert.ok(saved);
+  const payload = JSON.parse(creation.options.body);
+  assert.equal(payload.title, 'Grouped event'); assert.equal(payload.location, 'Library');
+  assert.equal(payload.description, 'Bring notes'); assert.ok(payload.time_zone);
+  assert.equal(payload.recurrence, null);
+
   const calendar = (await moduleAt('static/js/views/calendar.js')).namespace;
   const host = el('div'); await calendar.render(host);
   const phoneHeader = host.querySelector('.view-header');
@@ -93,7 +132,7 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(phoneHeader.querySelectorAll('button').length, 2, 'Only calendars and Add lead the phone page');
   assert.equal(createBar.querySelector('button').getAttribute('aria-label'), 'Add');
   assert.equal(host.querySelector('.cal-nav').parentElement, phoneHeader.parentElement, 'Period and view controls follow the header');
-  assert.equal(host.querySelectorAll('.cal-weekday')[0].textContent, 'Mon');
+  assert.equal(host.querySelectorAll('.cal-weekday')[0].textContent, 'M');
   assert.equal(host.querySelector('.cal-phone-days').children.length, 7);
   const currentDates = host.querySelector('.cal-phone-days').children.filter(b => b.getAttribute('aria-current') === 'date');
   assert.equal(currentDates.length, 1, 'Only today is marked current, independently of the selected day');
@@ -103,12 +142,17 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(rangeButtons.map(b => b.textContent), ['Day', 'Week', 'Month']);
   assert.ok(descendants(host).every(b => !b.dataset.mobileDock && !b.getAttribute('data-mobile-dock')), 'Calendar controls stay in the header, without dock proxies');
   assert.deepEqual(rangeButtons.map(b => b.getAttribute('aria-pressed')), ['false', 'false', 'true']);
-  assert.equal(host.querySelectorAll('.cal-day').length, 42);
+  assertMonth(host);
+  assert.equal(host.querySelector('.cal-month-label').getAttribute('aria-label'), 'Today');
+  assert.equal(host.querySelector('.cal-nav').querySelectorAll('button').some(b => b.textContent === 'Archive' || b.textContent === 'Today'), false);
+  assert.ok(host.querySelector('.cal-upcoming'), 'Next 7 Days remains below the selected agenda');
   rangeButtons[0].onclick(); await flush();
   assert.deepEqual(rangeButtons.map(b => b.getAttribute('aria-pressed')), ['true', 'false', 'false']);
   assert.deepEqual(rangeButtons.map(b => b.getAttribute('aria-checked')), ['true', 'false', 'false']);
   let timeline = host.querySelector('.cal-grid');
   assert.equal(timeline.querySelectorAll('.cal-week-day').length, 1);
+  host.querySelector('.cal-month-label').click(); await flush();
+  assert.equal(host.querySelector('.cal-phone-days').children.find(b => b.getAttribute('aria-pressed') === 'true').getAttribute('aria-label'), new Date().toDateString());
   const strip = host.querySelector('.cal-phone-days');
   const pick = strip.children[0];
   const pickedDate = new Date(pick.getAttribute('aria-label'));
@@ -119,7 +163,7 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(host.querySelector('.cal-phone-days').children.filter(button => button.getAttribute('aria-pressed') === 'true').length, 1);
   const nav = host.querySelector('.cal-nav');
   const period = new URL(requests.filter(u => u.startsWith('/api/calendar/events?')).at(-1), 'http://test');
-  nav.children[3].onclick(); await flush();
+  nav.querySelector('.cal-period-next').onclick(); await flush();
   const nextPeriod = new URL(requests.filter(u => u.startsWith('/api/calendar/events?')).at(-1), 'http://test');
   assert.equal((new Date(nextPeriod.searchParams.get('start')) - new Date(period.searchParams.get('start'))) / 3600000, 24);
   assert.equal(host.querySelector('.cal-month-label').textContent, new Date(nextPeriod.searchParams.get('start')).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }));
@@ -135,25 +179,114 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(new Date(selectedRange.searchParams.get('start')).toDateString(), selectedDate.toDateString());
 
   // Use the real switch buttons, as the shared Google workspace smoke does.
-  // Month must return to 42 cells from either timeline, on phone and desktop.
+  // Month fits its actual weeks from either timeline, on phone and desktop.
   for (const isPhone of [true, false]) {
     phone = isPhone;
     const monthHost = el('div'); await calendar.render(monthHost);
     assert.equal(monthHost.querySelector('.cal-create-bar').parentElement,
-      monthHost.querySelector(isPhone ? '.view-header' : '.cal-left'));
+      monthHost.querySelector('.view-header'));
     const buttons = monthHost.querySelector('.cal-nav').querySelectorAll('button');
     for (const mode of ['Day', 'Week']) {
       buttons.find(button => button.textContent === mode).click(); await flush();
       assert.equal(monthHost.querySelectorAll('.cal-day').length, 0);
+      if (mode === 'Week') {
+        const first = new Date(monthHost.querySelectorAll('.cal-week-day')[0].getAttribute('aria-label'));
+        assert.equal(first.getDay(), 1, 'Both desktop and phone weeks begin Monday');
+        assert.ok(monthHost.querySelector('.cal-legend'));
+        if (isPhone) assert.ok(!/\d{4}/.test(monthHost.querySelector('.cal-month-label').textContent), 'Phone range omits the year');
+      }
       const before = requests.length;
       const month = buttons.find(button => button.textContent === 'Month');
       month.click(); await flush();
       assert.ok(requests.slice(before).some(url => url.startsWith('/api/calendar/events?')));
-      assert.equal(monthHost.querySelectorAll('.cal-day').length, 42);
+      assertMonth(monthHost);
+      assert.equal(monthHost.querySelectorAll('.cal-weekday')[0].textContent, isPhone ? 'M' : 'Mon');
+      assert.ok(monthHost.querySelector('.cal-selected-agenda'));
+      assert.ok(monthHost.querySelector('.cal-upcoming'));
+      if (!isPhone) assert.equal(monthHost.querySelector('.cal-calendars-card').parentElement, monthHost.querySelector('.cal-day-panel'));
       assert.equal(month.getAttribute('aria-pressed'), 'true');
       assert.equal(month.getAttribute('aria-checked'), 'true');
     }
   }
+  host.querySelector('.cal-month-label').click(); await flush();
+  // Reproduce the smoke completion flow: Month contains two copies of today's
+  // task, and ticking either must clear both after the PATCH and range refresh.
+  const matchMedia = context.window.matchMedia;
+  for (const isPhone of [true, false]) for (const reduced of [true, false]) {
+    phone = isPhone;
+    context.window.matchMedia = query => ({ matches: query.includes('prefers-reduced-motion') ? reduced : phone });
+    for (const source of ['tab', 'calendar', 'note']) for (const section of ['.cal-selected-agenda', '.cal-upcoming']) {
+      const item = { id: 'completion', source, title: 'Review the course project', completed: false,
+        source_label: 'School', toggle_url: '/api/tab-school/assignments/a1', start: new Date().toISOString() };
+      const toggleUrl = source === 'tab' ? item.toggle_url : source === 'calendar' ? '/api/calendar/events/completion' : '/api/notes/completion';
+      responses = (url, options) => {
+        if (options?.method === 'PATCH') {
+          assert.equal(url, toggleUrl);
+          assert.deepEqual(JSON.parse(options.body), { completed: true });
+          item.completed = true;
+          return {};
+        }
+        return url.startsWith('/api/calendar/events?') ? [{ ...item }] : [];
+      };
+      const host = el('div'); await calendar.render(host);
+      const panel = host.querySelector('.cal-day-panel');
+      assert.equal(panel.querySelectorAll('.card').length, 2, 'Selected day and upcoming both show the active item');
+      const card = host.querySelector(section).querySelector('.card');
+      let animations = 0;
+      card.animate = () => { animations++; return { finished: Promise.resolve() }; };
+      const checkbox = card.querySelector('input');
+      checkbox.checked = true;
+      await checkbox.onchange();
+      assert.equal(item.completed, true);
+      assert.equal(panel.querySelectorAll('.card').length, 0, `${source} completion clears both ${section} copies`);
+      assert.equal(host.querySelector('.cal-day-count').textContent, 'No events');
+      assert.equal(panel.getAttribute('aria-busy'), 'false');
+      assert.equal(animations, section === '.cal-upcoming' && !reduced ? 1 : 0, 'Completion respects reduced motion');
+    }
+  }
+  context.window.matchMedia = matchMedia;
+  // Next 7 Days is a second request after the month grid. Neither it nor
+  // the selected-day agenda should retain completed cards.
+  for (const isPhone of [true, false]) {
+    phone = isPhone;
+    const completed = { id: 'done', source: 'calendar', title: 'Finished', completed: true,
+      start: new Date().toISOString() };
+    const pending = [];
+    const host = el('div');
+    responses = url => {
+      if (!url.startsWith('/api/calendar/events?')) return [];
+      const range = new URL(url, 'http://test');
+      const days = (new Date(range.searchParams.get('end')) - new Date(range.searchParams.get('start'))) / 86400000;
+      return days < 8 ? new Promise(resolve => pending.push(resolve)) : [completed];
+    };
+    const rendering = calendar.render(host); await flush();
+    const panel = host.querySelector('.cal-day-panel');
+    assert.equal(panel.getAttribute('aria-busy'), 'true', 'Month waits for its separate upcoming request');
+    assert.equal(host.querySelector('.cal-selected-agenda').querySelectorAll('.card').length, 0);
+    assert.equal(host.querySelector('.cal-day-count').textContent, 'No events');
+    assert.equal(pending.length, 1);
+    pending.shift()([completed]); await rendering;
+    assert.equal(panel.getAttribute('aria-busy'), 'false');
+    const upcoming = host.querySelector('.cal-upcoming');
+    assert.equal(upcoming.querySelector('.empty-state-title').textContent, 'Nothing coming up.');
+    assert.equal(upcoming.querySelector('.empty-state-hint').textContent, 'Make room for something new.');
+    assert.equal(upcoming.querySelectorAll('.card').length, 0);
+    assert.equal(upcoming.querySelectorAll('.cal-upcoming-day-label').length, 0);
+    let adds = 0; host.querySelector('.cal-create-bar').querySelector('button').onclick = () => adds++;
+    upcoming.querySelector('button').click(); assert.equal(adds, 1, 'Upcoming empty state opens event creation');
+    // A day selection can still have an upcoming response in flight when
+    // Month is refreshed. Its response must not release the new busy state.
+    host.querySelectorAll('.cal-day').find(cell => cell.getAttribute('aria-label') === new Date(completed.start).toDateString()).click();
+    host.querySelector('.cal-range-switch').querySelectorAll('button').find(b => b.textContent === 'Month').click();
+    await flush(); assert.equal(pending.length, 2);
+    pending.shift()([completed]); await flush();
+    assert.equal(panel.getAttribute('aria-busy'), 'true');
+    assert.equal(host.querySelector('.cal-upcoming').querySelector('.empty-state-title'), undefined, 'Detached response cannot populate the new upcoming section');
+    pending.shift()([completed]); await flush();
+    assert.equal(panel.getAttribute('aria-busy'), 'false');
+    assert.equal(host.querySelector('.cal-upcoming').querySelector('.empty-state-title').textContent, 'Nothing coming up.');
+  }
+  responses = {};
   phone = true;
 
   const activity = (await moduleAt('static/js/taskActivity.js')).namespace;

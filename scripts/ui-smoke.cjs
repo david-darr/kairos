@@ -1415,13 +1415,13 @@ app.whenReady().then(async () => {
         }
         if (tab === "calendar" && !demoState.empty) {
           const calendarWrites = writes.length;
-          const card = title => `[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.querySelector('.title')?.textContent===${JSON.stringify(title)})`;
+          const card = title => `[...document.querySelectorAll((window._calendarCardScope || '.cal-day-panel') + ' .card')].find(c=>c.querySelector('.title')?.textContent===${JSON.stringify(title)})`;
           const completed = fixture(new URL('/api/calendar/events/e-completed', base));
           const completedCard = card(completed.title);
-          const showDay = start => js(`document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
+          const showDay = start => js(`window._calendarCardScope = '.cal-selected-agenda'; if (!document.documentElement.classList.contains('kairos-redesign')) window._calendarCardScope = '.cal-day-panel'; document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
           const showUpcoming = async () => {
-            await js("window._previousCalendarTitle=document.querySelector('.cal-day-panel-title'); [...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
-            await waitFor("document.querySelector('.cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days'");
+            await js("window._previousCalendarTitle=document.querySelector('.cal-upcoming .cal-day-panel-title') || document.querySelector('.cal-day-panel-title'); window._calendarCardScope=document.documentElement.classList.contains('kairos-redesign') ? '.cal-upcoming' : '.cal-day-panel'; [...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+            await waitFor("document.querySelector('.cal-day-panel')?.getAttribute('aria-busy') === 'false' && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')?.textContent==='Next 7 Days'");
           };
           await showUpcoming();
           assert.equal(await js(`!!(${completedCard})`), false, label + ' completed fixture is absent from Next 7 Days');
@@ -1438,12 +1438,16 @@ app.whenReady().then(async () => {
           await waitFor(`!(${completedCard})`);
           assert.equal(await js("window._calendarFadeDuration"), await js("matchMedia('(prefers-reduced-motion: reduce)').matches") ? null : 200, label + ' upcoming completion respects the motion preference');
           assert.ok(writes.slice(calendarWrites).some(w => w.path === '/api/calendar/events/e-completed' && JSON.parse(w.body).completed === true), label + ' ticking an active local event removes it from Next 7 Days');
-          await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Archive').click()");
+          if (await js("document.documentElement.classList.contains('kairos-redesign')")) {
+            await js("document.querySelector('.cal-calendars-trigger').click()");
+            await waitFor("!!document.querySelector('.cal-calendars-dialog')");
+          }
+          await js("[...document.querySelectorAll('.cal-nav button, .cal-calendars-card button')].find(b=>b.textContent==='Archive').click()");
           await waitFor(`document.querySelector('.modal-backdrop:not(.hidden) .modal-panel')?.textContent.includes(${JSON.stringify(completed.title)})`);
           await js("document.querySelector('.modal-backdrop:not(.hidden) .modal-close-btn').click()");
-          await waitFor("[...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
-          assert.ok(await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).textContent.includes('School')"), label + " Calendar names the tab source");
-          await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')).querySelector('input[type=checkbox]').click()");
+          await waitFor(`!!(${card('Review the course project')})`);
+          assert.ok(await js(`(${card('Review the course project')}).textContent.includes('School')`), label + " Calendar names the tab source");
+          await js(`(${card('Review the course project')}).querySelector('input[type=checkbox]').click()`);
           await waitFor(`!(${card('Review the course project')})`);
           // The PATCH goes out just after the box ticks; poll for it.
           for (let i = 0; i < 80 && !writes.slice(calendarWrites).some(w => w.path === "/api/tab-school/assignments/a1" && w.method === "PATCH"); i++) await delay(50);
@@ -1472,9 +1476,9 @@ app.whenReady().then(async () => {
           const completionStates = weekItems.map(item => item.completed);
           weekItems.forEach(item => { item.completed = true; });
           await showUpcoming();
-          assert.equal(await js("(document.querySelector('.cal-day-panel .empty-state-title') || document.querySelector('.cal-day-panel .empty-state'))?.textContent"), 'Nothing coming up.', label + ' a completed week shows the empty-state title');
-          assert.ok(await js("document.querySelector('.cal-day-panel .empty-state-hint')?.textContent === 'Make room for something new.' && [...document.querySelectorAll('.cal-day-panel .empty-state button')].some(b => b.textContent === 'Add an event')"), label + ' the redesigned empty state offers an event action');
-          assert.equal(await js("document.querySelectorAll('.cal-day-panel .card, .cal-upcoming-day-label').length"), 0);
+          assert.equal(await js("(document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .empty-state-title') || document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .empty-state'))?.textContent"), 'Nothing coming up.', label + ' a completed week shows the empty-state title');
+          assert.ok(await js("document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .empty-state-hint')?.textContent === 'Make room for something new.' && [...document.querySelectorAll((window._calendarCardScope || '.cal-day-panel') + ' .empty-state button')].some(b => b.textContent === 'Add an event')"), label + ' the redesigned empty state offers an event action');
+          assert.equal(await js("document.querySelectorAll((window._calendarCardScope || '.cal-day-panel') + ' .card, ' + (window._calendarCardScope || '.cal-day-panel') + ' .cal-upcoming-day-label').length"), 0);
           await capture(label + '-calendar-completed-week');
           weekItems.forEach((item, index) => {
             if (completionStates[index] === undefined) delete item.completed;
@@ -2145,7 +2149,7 @@ app.whenReady().then(async () => {
     const reducedCalendarWrites = writes.length;
     await navigate('calendar');
     await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
-    await waitFor("document.querySelector('.cal-day-panel-title')?.textContent==='Next 7 Days' && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    await waitFor("[...document.querySelectorAll('.cal-day-panel-title')].some(n=>n.textContent==='Next 7 Days') && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
     await js("{ const c=[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
     await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
     assert.equal(await js("window._reducedCalendarFade"), false, 'Reduced motion removes completed upcoming items without animation');
