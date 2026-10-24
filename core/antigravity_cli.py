@@ -109,7 +109,8 @@ def probe() -> dict:
     except (OSError, subprocess.SubprocessError):
         pass
     try:
-        code, out, err = run_readonly(path, 'models')
+        # A cold 'agy models' took about 9 s on Windows (agy 1.4.7); 10 s read as signed out.
+        code, out, err = run_readonly(path, 'models', timeout=30)
         if auth_error(out + '\n' + err):
             result.update(status='needs_sign_in', message=SIGN_IN)
         elif code == 0:
