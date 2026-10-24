@@ -94,7 +94,6 @@ export async function render(container) {
   const weekBtn = el('button', { class: 'btn', text: 'Week', 'aria-pressed': String(viewMode === 'week') });
   // The wrapper only lets the redesign draw Month and Week as one segmented
   // control; with the switch off it is display: contents (redesign-calendar.css).
-  todayBtn.dataset.mobileDock = 'today'; monthBtn.dataset.mobileDock = 'month'; weekBtn.dataset.mobileDock = 'week';
   const viewSwitch = redesignOn() ? segmented({ label: 'Calendar view', value: viewMode,
     options: ['day', 'week', 'month'].map(value => ({ value, text: value[0].toUpperCase() + value.slice(1) })),
     onChange: mode => setMode(mode) })
@@ -104,7 +103,6 @@ export async function render(container) {
     viewSwitch.classList.add('cal-view-switch');
     for (const button of viewSwitch.querySelectorAll('button')) {
       const mode = button.textContent.toLowerCase();
-      button.dataset.mobileDock = mode;
       button.setAttribute('aria-pressed', String(viewMode === mode));
     }
   }
@@ -191,7 +189,7 @@ function buildCreateBar() {
   const bar = el('div', { class: 'cal-create-bar' });
   bar._dateInput = el('input', { type: 'date', value: dateOnly(new Date()) });
   bar._calendars = [];
-  bar.append(el('button', { type: 'button', class: 'btn primary', 'data-mobile-dock': 'create', 'data-mobile-create-label': 'New event', text: '+ Add an event', onclick: () => {
+  bar.append(el('button', { type: 'button', class: 'btn primary', text: '+ Add an event', onclick: () => {
     const day = new Date(`${bar._dateInput.value}T00:00:00`);
     eventDialog(bar._calendars, bar._refresh, null, day, bar._owner);
   } }));
@@ -228,7 +226,7 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
     monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
     createBar._phoneDays.replaceChildren(...Array.from({ length: 7 }, (_, i) => {
       const date = new Date(monday); date.setDate(date.getDate() + i);
-      return el('button', { type: 'button', 'aria-label': date.toDateString(), 'aria-pressed': String(dateOnly(date) === dateOnly(viewDay)), onclick: () => {
+      return el('button', { type: 'button', 'aria-label': date.toDateString(), 'aria-current': dateOnly(date) === dateOnly(new Date()) ? 'date' : 'false', 'aria-pressed': String(dateOnly(date) === dateOnly(viewDay)), onclick: () => {
         viewDay = date; selectedDayKey = date.toDateString(); refresh();
       } }, [el('small', { text: date.toLocaleDateString(undefined, { weekday: 'short' }) }), el('span', { text: String(date.getDate()) })]);
     }));
@@ -401,7 +399,7 @@ function appendItemCard(dayPanel, item, refreshGrid, upcoming = false) {
 
   const card = el("div", { class: "glass card has-row-actions" + (item.completed ? " cal-item-completed" : "") }, [
     el("div", { class: "card-row" }, [
-      checkbox,
+      redesignOn() ? el("label", { class: "cal-completion-hit", "aria-label": "Mark complete" }, [checkbox]) : checkbox,
       el("div", { style: "flex:1;" }, [
         el("div", { class: "title", text: item.title }),
         el("div", { class: "meta", text: item.all_day ? "All day" : new Date(item.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) }),
