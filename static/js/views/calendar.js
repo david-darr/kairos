@@ -44,8 +44,9 @@ viewMonth.setDate(1);
 viewMonth.setHours(0, 0, 0, 0);
 
 const phoneCalendar = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
-const weekOffset = date => phoneCalendar() ? (date.getDay() + 6) % 7 : date.getDay();
+const weekOffset = date => redesignOn() ? (date.getDay() + 6) % 7 : date.getDay();
 
+const hiddenSources = new Set();
 let selectedDayKey = null;
 let viewMode = 'month';
 let viewDay = new Date();
@@ -57,7 +58,7 @@ viewWeek.setDate(viewWeek.getDate() - weekOffset(viewWeek));
 export async function render(container) {
   container.innerHTML = "";
   container.classList.add("cal-layout");
-  selectedDayKey = null;
+  selectedDayKey = redesignOn() ? viewDay.toDateString() : null;
   if (!redesignOn() && viewMode === 'day') viewMode = 'month';
 
   const left = el("div", { class: "cal-left" });
@@ -70,13 +71,16 @@ export async function render(container) {
 
   const createBar = buildCreateBar();
   const calendarList = el('div', { class: 'cal-calendar-list' });
-  const calendarStore = el('div', { hidden: true }, [calendarList]);
+  const calendarStore = el('section', { class: 'cal-calendars-card', hidden: true }, [...(redesignOn() ? [el('h3', { text: 'Calendars' })] : []), calendarList]);
+  createBar._calendarStore = calendarStore;
   const calendarsBtn = el('button', { type: 'button', class: 'btn cal-calendars-trigger', text: redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-label': redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-haspopup': 'dialog' });
-  calendarsBtn.insertAdjacentHTML('afterbegin', phoneCalendar() ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>' : ICONS.calendar);
+  calendarsBtn.insertAdjacentHTML('afterbegin', redesignOn() ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>' : ICONS.calendar);
   calendarsBtn.addEventListener('click', () => {
-    const dialog = openPanelDialog({ title: redesignOn() ? 'Your calendars' : 'Google calendars', body: calendarList, opener: calendarsBtn,
+    calendarStore.hidden = false; calendarStore._inDialog = true;
+    const dialog = openPanelDialog({ title: redesignOn() ? 'Your calendars' : 'Google calendars', body: calendarStore, opener: calendarsBtn,
       owner: container, group: 'calendar-selection', className: 'cal-calendars-dialog',
-      onClose: () => calendarStore.append(calendarList) });
+      onClose: () => { calendarStore._dialog = null; calendarStore._inDialog = false; calendarStore.hidden = !(redesignOn() && !phoneCalendar() && viewMode === 'month'); (calendarStore.hidden ? left : dayPanel).append(calendarStore); } });
+    calendarStore._dialog = dialog;
     dialog.panel.classList.add('rd-sheet-in');
     dialog.panel.dataset.view = 'calendar';
     dialog.panel.addEventListener('animationend', () => dialog.panel.classList.remove('rd-sheet-in'), { once: true });
@@ -85,7 +89,7 @@ export async function render(container) {
   header.append(calendarsBtn);
 
   const nav = el("div", { class: "cal-nav" });
-  const monthLabel = el("div", { class: "cal-month-label" });
+  const monthLabel = el(redesignOn() ? "button" : "div", { type: "button", class: "cal-month-label", ...(redesignOn() ? { "aria-label": "Today", title: "Go to today" } : {}) });
   const prevBtn = el("button", { class: "btn", text: "‹ Prev" });
   const todayBtn = el("button", { class: "btn", text: "Today" });
   const nextBtn = el("button", { class: "btn", text: "Next ›" });
@@ -106,17 +110,26 @@ export async function render(container) {
       button.setAttribute('aria-pressed', String(viewMode === mode));
     }
   }
-  nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
+  if (redesignOn()) {
+    prevBtn.textContent = '\u2039'; nextBtn.textContent = '\u203a';
+    prevBtn.classList.add('cal-period-prev'); nextBtn.classList.add('cal-period-next');
+    prevBtn.setAttribute('aria-label', 'Previous period'); nextBtn.setAttribute('aria-label', 'Next period');
+    nav.append(monthLabel, prevBtn, nextBtn, viewSwitch);
+    calendarStore.append(archiveBtn);
+    if (phoneCalendar()) calendarStore.append(
+      el('button', { type: 'button', class: 'btn', text: 'Previous period', onclick: () => shift(-1) }),
+      el('button', { type: 'button', class: 'btn', text: 'Next period', onclick: () => shift(1) }));
+  } else nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
 
   const grid = el("div", { class: "cal-grid glass" });
   const phoneDays = el('div', { class: 'cal-phone-days workspace-phone-only', role: 'group', 'aria-label': 'Choose a day' });
   createBar._phoneDays = phoneDays;
-  // The phone title row owns both round actions. Keeping the create control
-  // outside it makes it page content even when the grid puts it beside h2.
-  if (phoneCalendar()) {
+  // Phone has a title row and a range row; desktop owns all controls in one header.
+  if (redesignOn()) {
     header.append(createBar);
-    createBar.querySelector('button').setAttribute('aria-label', 'Add');
-    left.append(header, calendarStore, nav, phoneDays, grid);
+    createBar.querySelector('button').setAttribute('aria-label', phoneCalendar() ? 'Add' : 'New event');
+    if (phoneCalendar()) left.append(header, calendarStore, nav, phoneDays, grid);
+    else { header.append(nav, calendarsBtn, createBar); left.append(header, calendarStore, phoneDays, grid); }
   } else {
     left.append(header, createBar, calendarStore, nav, phoneDays, grid);
   }
@@ -146,13 +159,18 @@ export async function render(container) {
     for (const button of viewSwitch.querySelectorAll('button')) {
       button.setAttribute('aria-pressed', String(button.textContent.toLowerCase() === mode));
     }
-    selectedDayKey = null; refresh();
+    selectedDayKey = redesignOn() ? anchorDay.toDateString() : null; refresh();
   };
   monthBtn.onclick = () => setMode('month'); weekBtn.onclick = () => setMode('week');
   const shift = amount => {
     if (viewMode === 'day') viewDay.setDate(viewDay.getDate() + amount);
     else if (viewMode === 'week') viewWeek.setDate(viewWeek.getDate() + amount * 7);
     else viewMonth.setMonth(viewMonth.getMonth() + amount);
+    if (redesignOn()) {
+      const anchor = viewMode === 'day' ? viewDay : viewMode === 'week' ? viewWeek : viewMonth;
+      selectedDayKey = anchor.toDateString();
+      viewDay = new Date(anchor);
+    }
     refresh();
   };
   prevBtn.onclick = () => shift(-1); nextBtn.onclick = () => shift(1);
@@ -161,7 +179,7 @@ export async function render(container) {
   // showed today in the panel, so the grid re-rendered on the current
   // month but nothing was actually selected. Now it jumps to the current
   // month AND selects/shows today, same as clicking today's cell would.
-  todayBtn.addEventListener("click", () => {
+  const goToday = () => {
     const today = new Date();
     viewDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     viewMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -169,12 +187,22 @@ export async function render(container) {
     createBar._dateInput.value = dateOnly(today);
     selectedDayKey = today.toDateString();
     renderGrid(monthLabel, grid, createBar, dayPanel);
-  });
-  archiveBtn.addEventListener("click", () => openArchiveModal(() => renderGrid(monthLabel, grid, createBar, dayPanel)));
+  };
+  todayBtn.addEventListener("click", goToday);
+  if (redesignOn()) monthLabel.addEventListener("click", goToday);
+  archiveBtn.addEventListener("click", () => { calendarStore._dialog?.close(); openArchiveModal(() => renderGrid(monthLabel, grid, createBar, dayPanel)); });
 
   try {
     createBar._calendars = await googleCalendars(calendarList, reconnect => reconnect ? render(container) : refresh());
   } catch (error) { calendarList.append(el('div', { class: 'meta', text: `Google calendars unavailable: ${error.message}` })); }
+  if (redesignOn()) {
+    for (const [source, label] of [['calendar', 'Kairos'], ['note', 'Notes with due times'], ['tab', 'Workspace deadlines']]) {
+      const check = el('input', { type: 'checkbox', checked: !hiddenSources.has(source) });
+      check.onchange = () => { check.checked ? hiddenSources.delete(source) : hiddenSources.add(source); refresh(); };
+      calendarList.append(el('label', { class: 'cal-calendar-choice' }, [check, label]));
+    }
+    calendarList.append(el('button', { type: 'button', class: 'btn quiet cal-connect', text: 'Connect another calendar', onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) }));
+  }
   dayPanel._createBar = createBar;
   await refresh();
   if (!grid.isConnected) return;
@@ -189,7 +217,7 @@ function buildCreateBar() {
   const bar = el('div', { class: 'cal-create-bar' });
   bar._dateInput = el('input', { type: 'date', value: dateOnly(new Date()) });
   bar._calendars = [];
-  bar.append(el('button', { type: 'button', class: 'btn primary', text: '+ Add an event', onclick: () => {
+  bar.append(el('button', { type: 'button', class: 'btn primary', text: redesignOn() ? (phoneCalendar() ? '+' : 'New event') : '+ Add an event', onclick: () => {
     const day = new Date(`${bar._dateInput.value}T00:00:00`);
     eventDialog(bar._calendars, bar._refresh, null, day, bar._owner);
   } }));
@@ -197,6 +225,18 @@ function buildCreateBar() {
 }
 
 async function renderGrid(monthLabel, grid, createBar, dayPanel) {
+  // Month also loads Next 7 Days. Keep the panel busy until both requests
+  // settle, so a previous selected day's late response is not treated as ready.
+  dayPanel.setAttribute('aria-busy', 'true');
+  const pending = renderGridContent(monthLabel, grid, createBar, dayPanel);
+  const generation = grid._generation;
+  try { await pending; }
+  finally {
+    if (generation === grid._generation) dayPanel.setAttribute('aria-busy', 'false');
+  }
+}
+
+async function renderGridContent(monthLabel, grid, createBar, dayPanel) {
   monthLabel.textContent = viewMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   const generation = grid._generation = (grid._generation || 0) + 1;
@@ -209,7 +249,7 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   gridEnd.setDate(gridEnd.getDate() + (mode === 'day' ? 1 : mode === 'week' ? 7 : 42));
   if (mode === 'day') createBar._dateInput.value = dateOnly(gridStart);
 
-  const items = await api(`/api/calendar/events?start=${encodeURIComponent(gridStart.toISOString())}&end=${encodeURIComponent(gridEnd.toISOString())}`);
+  const items = (await api(`/api/calendar/events?start=${encodeURIComponent(gridStart.toISOString())}&end=${encodeURIComponent(gridEnd.toISOString())}`)).filter(item => !redesignOn() || !hiddenSources.has(item.source));
 
   if (generation !== grid._generation || !grid.isConnected) return;
   const isCurrent = () => generation === grid._generation && grid.isConnected;
@@ -221,6 +261,7 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   grid.classList.toggle('cal-week-grid', mode !== 'month');
   grid.classList.toggle('cal-single-day', mode === 'day');
   grid.parentElement.dataset.calendarRange = mode;
+  if (createBar._calendarStore && !createBar._calendarStore._inDialog) createBar._calendarStore.hidden = !(redesignOn() && !phoneCalendar() && mode === 'month');
   if (createBar._phoneDays) {
     const monday = new Date(viewDay);
     monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
@@ -235,46 +276,58 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   if (mode !== 'month') {
     const last = new Date(gridEnd); last.setDate(last.getDate() - 1);
     monthLabel.textContent = mode === 'day' ? gridStart.toLocaleDateString(undefined, phoneCalendar() ? { month: 'long', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-      : `${gridStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${last.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      : `${gridStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} \u2013 ${last.toLocaleDateString(undefined, { ...(last.getMonth() !== gridStart.getMonth() ? { month: 'short' } : {}), day: 'numeric', ...(!phoneCalendar() ? { year: 'numeric' } : {}) })}`;
     weekGrid(grid, gridStart, items, (date, dayItems) => {
       selectedDayKey = date.toDateString(); createBar._dateInput.value = dateOnly(date);
+      if (redesignOn()) viewDay = new Date(date);
       renderDayPanel(dayPanel, date, dayItems, refresh);
     }, (item, date, dayItems) => {
       if ((item.source === 'google' && item.editable) || item.source === 'calendar')
         eventDialog(createBar._calendars, refresh, item, date, createBar._owner);
       else renderDayPanel(dayPanel, date, dayItems, refresh);
     }, mode === 'day' ? 1 : 7);
-    grid.scrollTop = enteringView ? Math.max(0, (new Date().getHours() - 1) * 42) : previousScroll;
-    if (mode === 'day') renderDayPanel(dayPanel, gridStart, itemsOnDay(items, gridStart), refresh);
-    else if (selectedDayKey) renderDayPanel(dayPanel, new Date(selectedDayKey), itemsOnDay(items, new Date(selectedDayKey)), refresh);
+    grid.scrollTop = enteringView ? (redesignOn() ? 8 * (phoneCalendar() ? 28 : 42) : Math.max(0, (new Date().getHours() - 1) * 42)) : previousScroll;
+    let legend = grid.parentElement.querySelector('.cal-legend');
+    if (redesignOn() && mode === 'week') {
+      if (!legend) { legend = el('div', { class: 'cal-legend', 'aria-label': 'Calendar legend' }); grid.parentElement.append(legend); }
+      const sources = new Map();
+      for (const item of items) sources.set(item.calendar_id || item.source, item);
+      legend.replaceChildren(...[...sources.values()].map(item => eventColor(el('span', { class: `cal-legend-item cal-src-${item.source || 'event'}`, text: item.calendar_name || item.source_label || (item.source === 'google' ? 'Google' : item.source === 'note' ? 'Notes' : 'Kairos') }), item)));
+    }
+    if (mode === 'day') grid.parentElement.querySelector('.cal-legend')?.remove();
+    if (mode === 'day') await renderDayPanel(dayPanel, gridStart, itemsOnDay(items, gridStart), refresh);
+    else if (selectedDayKey) await renderDayPanel(dayPanel, new Date(selectedDayKey), itemsOnDay(items, new Date(selectedDayKey)), refresh);
     else await renderUpcomingPanel(dayPanel, refresh, isCurrent);
     return;
   }
-  for (const wd of (phoneCalendar() ? [...WEEKDAYS.slice(1), WEEKDAYS[0]] : WEEKDAYS)) grid.appendChild(el('div', { class: 'cal-weekday', text: wd }));
+  grid.parentElement.querySelector('.cal-legend')?.remove();
+  for (const wd of (redesignOn() ? [...WEEKDAYS.slice(1), WEEKDAYS[0]] : WEEKDAYS)) grid.appendChild(el('div', { class: 'cal-weekday', text: phoneCalendar() ? wd[0] : wd }));
   const cursor = new Date(gridStart);
   const currentMonth = firstOfMonth.getMonth();
   const todayKey = new Date().toDateString();
-  // Keep the standard six-week month grid on every screen size.
-  const weeks = 6;
+  // Fit the redesign to the actual month; classic retains its six-week grid.
+  const weeks = redesignOn() ? Math.ceil((weekOffset(firstOfMonth) + new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() + 1, 0).getDate()) / 7) : 6;
   grid.style.setProperty('--calendar-weeks', weeks);
   for (let i = 0; i < weeks * 7; i++) {
     const dayKey = cursor.toDateString();
     const isOtherMonth = cursor.getMonth() !== currentMonth;
     const cell = el("button", { type: "button", "aria-label": dayKey, class: "cal-day" + (isOtherMonth ? " other-month" : "") + (dayKey === todayKey ? " today" : "") + (dayKey === selectedDayKey ? " selected" : "") });
-    cell.appendChild(el("div", { class: "cal-day-num", text: String(cursor.getDate()) }));
+    if (!(redesignOn() && phoneCalendar() && isOtherMonth)) cell.appendChild(el("div", { class: "cal-day-num", text: String(cursor.getDate()) }));
+    if (redesignOn() && phoneCalendar() && isOtherMonth) { cell.disabled = true; cell.setAttribute('aria-label', 'Outside this month'); }
 
     const dayItems = byDay[dayKey] = itemsOnDay(items, cursor);
-    for (const item of dayItems.slice(0, 2)) {
+    for (const item of (redesignOn() && phoneCalendar() && isOtherMonth ? [] : dayItems.slice(0, 2))) {
       cell.appendChild(eventColor(el("div", { class: "cal-event-pill " + (item.source === "note" ? "note" : "event") + ` cal-src-${item.source || "event"}` + (item.completed ? " completed" : ""), text: item.title, title: item.title }), item));
     }
     const overflow = dayItems.length - 2;
-    if (overflow > 0) cell.appendChild(el("div", { class: "cal-event-pill overflow", text: `+${overflow} more` }));
+    if (overflow > 0 && !(redesignOn() && phoneCalendar() && isOtherMonth)) cell.appendChild(el("div", { class: "cal-event-pill overflow", text: `+${overflow} more` }));
 
     const dateForForm = dateOnly(cursor);
     const dayDate = new Date(cursor);
     cell.addEventListener("click", () => {
       createBar._dateInput.value = dateForForm;
       selectedDayKey = dayKey;
+      if (redesignOn()) viewDay = new Date(dayDate);
       renderDayPanel(dayPanel, dayDate, dayItems, refresh);
       [...grid.querySelectorAll(".cal-day")].forEach((c) => c.classList.remove("selected"));
       cell.classList.add("selected");
@@ -284,19 +337,19 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  // Default/Today state: show whichever day is selected, or the next-7-days
-  // list if nothing is (David's ask 2026-08-31 — the old default was just
+  // Show the selected agenda (with upcoming items below it in the redesign),
+  // or the next-7-days list if nothing is selected (David's ask 2026-08-31 — the old default was just
   // a dead "click a day" prompt with nothing actually useful in it).
   if (selectedDayKey) {
     for (const [key, dayItems] of Object.entries(byDay)) {
       if (key === selectedDayKey) {
-        renderDayPanel(dayPanel, new Date(key), dayItems, refresh);
+        await renderDayPanel(dayPanel, new Date(key), dayItems, refresh);
         return;
       }
     }
     // Selected day has no items but is still a real day (e.g. today with
     // nothing scheduled) — reconstruct its Date from the key itself.
-    renderDayPanel(dayPanel, new Date(selectedDayKey), [], refresh);
+    await renderDayPanel(dayPanel, new Date(selectedDayKey), [], refresh);
   } else {
     await renderUpcomingPanel(dayPanel, refresh, isCurrent);
   }
@@ -309,7 +362,7 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
   weekEnd.setDate(weekEnd.getDate() + 7);
 
   const items = (await api(`/api/calendar/events?start=${encodeURIComponent(today.toISOString())}&end=${encodeURIComponent(weekEnd.toISOString())}`))
-    .filter(item => !item.completed);
+    .filter(item => !item.completed && (!redesignOn() || !hiddenSources.has(item.source)));
   if (!isCurrent()) return;
 
   dayPanel.innerHTML = "";
@@ -334,18 +387,43 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
   }
 }
 
-function renderDayPanel(dayPanel, date, items, onChange) {
+async function renderDayPanel(dayPanel, date, items, onChange) {
+  // The selected agenda shares the active-only list with Next 7 Days.
+  // Range responses can still include completed calendar and tab items.
+  items = items.filter(item => !item.completed);
+  let upcomingReady;
+  const store = dayPanel._createBar?._calendarStore;
+  // Keep the live filter controls attached while rebuilding the selected day.
+  if (store && !store._inDialog) dayPanel._createBar._owner.append(store);
   dayPanel.innerHTML = "";
-  dayPanel.appendChild(el("div", { class: "cal-day-panel-title", text: date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) }));
+  const selected = el('section', { class: 'cal-selected-agenda' });
+  selected._createBar = dayPanel._createBar;
+  const target = redesignOn() ? selected : dayPanel;
+  target.appendChild(el("div", { class: "cal-day-panel-title", text: date.toLocaleDateString(undefined, { weekday: "long", month: redesignOn() ? "short" : "long", day: "numeric" }) }));
+  if (redesignOn()) {
+    const counts = ['No events', 'One event', 'Two events', 'Three events'];
+    target.append(el('h3', { class: 'cal-day-count', text: counts[items.length] || `${items.length} events` }));
+    dayPanel.append(selected);
+    if (viewMode === 'month') {
+      const store = dayPanel._createBar?._calendarStore;
+      if (store && !phoneCalendar() && !store._inDialog) { store.hidden = false; dayPanel.append(store); }
+      const upcoming = el('section', { class: 'cal-upcoming' }); upcoming._createBar = dayPanel._createBar;
+      dayPanel.append(upcoming);
+      upcomingReady = renderUpcomingPanel(upcoming, onChange, () => upcoming.isConnected && dayPanel.querySelector('.cal-upcoming') === upcoming);
+    }
+  }
 
   if (items.length === 0) {
-    dayPanel.appendChild((redesignOn() ? workspaceEmpty({ title: 'Nothing on this day.', hint: 'Make room for something new.', actionLabel: 'Add an event', onAction: () => dayPanel._createBar?.querySelector('button')?.click() }) : el("div", { class: "empty-state", text: "Nothing on this day." })));
+    target.appendChild((redesignOn() ? workspaceEmpty({ title: 'Nothing on this day.', hint: 'Make room for something new.', actionLabel: 'Add an event', onAction: () => dayPanel._createBar?.querySelector('button')?.click() }) : el("div", { class: "empty-state", text: "Nothing on this day." })));
+    await upcomingReady;
     return;
   }
 
-  for (const item of items) {
-    appendItemCard(dayPanel, item, onChange);
-  }
+  const rows = redesignOn() && viewMode === 'month' ? el('div', { class: 'cal-selected-events' }) : target;
+  rows._createBar = dayPanel._createBar;
+  if (rows !== target) target.append(rows);
+  for (const item of items) appendItemCard(rows, item, onChange);
+  await upcomingReady;
 }
 
 // Shared by both the day panel and the upcoming list — a checkbox to mark
@@ -413,6 +491,10 @@ function appendItemCard(dayPanel, item, refreshGrid, upcoming = false) {
 function appendAgendaCard(panel, card, item) {
   if (redesignOn()) {
     card.classList.add('cal-agenda-card');
+    const source = item.calendar_name || (item.source === 'google' ? 'Google' : item.source === 'note' ? 'Notes' : item.source === 'tab' ? item.source_label : 'Kairos');
+    card.append(el('span', { class: 'cal-agenda-source', text: source }));
+    const clock = el('div', { class: 'cal-agenda-clock', text: item.all_day ? 'All day' : (viewMode === 'month' ? [item.start] : [item.start, item.end]).filter(Boolean).map(value => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })).join(' \u2013 ') });
+    card.append(clock);
     card.prepend(el('span', { class: 'workspace-phone-only cal-agenda-hour', text: item.all_day ? 'All day' : new Date(item.start).toLocaleTimeString([], { hour: 'numeric' }) }));
   }
   panel.appendChild(card);

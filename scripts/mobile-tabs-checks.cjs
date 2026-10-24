@@ -206,11 +206,11 @@ async function run(ctx) {
   }))`);
   ok(calendarActions.every(b => b.valid), 'Calendar header actions are round 46px buttons inside the title row: ' + JSON.stringify(calendarActions));
   eq(await js("[...document.querySelectorAll('.cal-range-switch button')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())"), ['Day', 'Week', 'Month'], 'Calendar keeps the mockup range switch beside the period');
-  ok(await js("[...document.querySelectorAll('.cal-nav > button')].find(b => b.textContent === 'Today').getClientRects().length > 0"), 'Today remains visible in the header navigation');
+  ok(await js("document.querySelector('.cal-month-label').getAttribute('aria-label') === 'Today' && ![...document.querySelectorAll('.cal-nav > button')].some(b => b.textContent === 'Today' || b.textContent === 'Archive')"), 'Today is the period label; legacy action rows are absent');
   ok(await js("[...document.querySelectorAll('.cal-range-switch button')].every(b => b.getBoundingClientRect().height >= 36)"), 'Calendar range pills match the board layout: 36px controls');
-  eq(await small('.cal-nav > .btn'), [], 'Calendar navigation keeps 44px touch targets');
+  ok(await js("[...document.querySelectorAll('.cal-nav > .btn')].every(b => !b.getClientRects().length)"), 'Day and Month omit period arrows on phone');
   const monthNow = await monthLabel();
-  await js("[...document.querySelectorAll('.cal-nav button')].find(b => b.textContent.includes('Next')).click()");
+  await js("[...document.querySelectorAll('.cal-calendars-card button')].find(b => b.textContent === 'Next period').click()");
   await delay(250);
   ok((await monthLabel()) !== monthNow, 'Next moves the month');
   await calendarButton('Today');
@@ -228,6 +228,7 @@ async function run(ctx) {
   eq((await pressed()).Week, 'true', 'Header Week follows the original control');
   eq((await pressed()).Month, 'false', 'Header Month clears');
   eq(await docks(), 0, 'Switching to Week keeps the bottom dock absent');
+  ok(await js("document.querySelectorAll('.cal-week-day').length === 7 && document.querySelector('.cal-week-header').scrollWidth <= document.querySelector('.cal-grid').clientWidth && !!document.querySelector('.cal-legend')"), 'Week shows all seven days without horizontal scrolling and keeps its legend');
   await shot('calendar-week');
   await calendarButton('Month');
   await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Month').getAttribute('aria-pressed') === 'true'");
@@ -253,13 +254,16 @@ async function run(ctx) {
   };
   for (const how of ['escape', 'cancel', 'grabber click', 'swipe down']) await eventDismiss(how);
   await calendarButton('Add'); await waitFor(sheetUp); await settleMotion('.cal-event-dialog');
+  eq(await js("document.querySelectorAll('.cal-event-dialog .ms-sheet-grabber').length"), 1, 'New event has one working drag handle');
+  eq(await js("document.querySelectorAll('.cal-event-dialog .cal-sheet-grabber').length"), 0, 'No duplicate decorative handle');
+  ok(await js("document.querySelector('.cal-event-dialog .form-grid').firstElementChild.classList.contains('cal-title-field') && document.querySelectorAll('.cal-event-dialog .cal-field-group').length === 2"), 'Title leads the two grouped field sections');
   await shot('calendar-event-sheet');
   eq(await small('.cal-event-dialog button, .cal-event-dialog input, .cal-event-dialog select'), [], 'Event sheet controls are 44px');
-  const reach = await js(`(() => { const form = document.querySelector('.cal-event-dialog'); const scroller = [form, ...form.querySelectorAll('*')].find(n => n.scrollHeight > n.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(n).overflowY)) || form; scroller.scrollTop = 1e6; const b = [...form.querySelectorAll('button')].find(n => /^Create event$/.test(n.textContent.trim())).getBoundingClientRect(); return { b: b.bottom, h: b.height, vh: innerHeight }; })()`);
+  const reach = await js(`(() => { const form = document.querySelector('.cal-event-dialog'); const scroller = [form, ...form.querySelectorAll('*')].find(n => n.scrollHeight > n.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(n).overflowY)) || form; scroller.scrollTop = 1e6; const b = [...form.querySelectorAll('button')].find(n => /^Add$/.test(n.textContent.trim())).getBoundingClientRect(); return { b: b.bottom, h: b.height, vh: innerHeight }; })()`);
   ok(reach.b <= reach.vh - 8 && reach.h >= 43.5, 'The sheet scrolls so its last action clears the screen edge: ' + JSON.stringify(reach));
   // Create a real event through the sheet; the write goes to the existing route.
   const eventWrites = writes.length;
-  await js("(() => { const i = document.querySelector('.cal-event-dialog input'); i.focus(); i.value = 'Dock event'; i.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('.cal-event-dialog button')].find(b => /^Create event$/.test(b.textContent.trim())).click(); })()");
+  await js("(() => { const i = document.querySelector('.cal-event-dialog input'); i.focus(); i.value = 'Dock event'; i.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('.cal-event-dialog button')].find(b => /^Add$/.test(b.textContent.trim())).click(); })()");
   await waitFor("!document.querySelector('.cal-event-dialog')");
   ok(writes.slice(eventWrites).some(w => w.method === 'POST' && /\/api\/(google\/)?calendar\//.test(w.path) && String(w.body).includes('Dock event')), 'The sheet creates the event through the existing route');
 

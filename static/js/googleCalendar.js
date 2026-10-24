@@ -171,7 +171,18 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   if (redesignOn()) {
     form.dataset.view = 'calendar';
     backdrop.dataset.view = 'calendar';
-    form.prepend(el('span', { class: 'cal-sheet-grabber', 'aria-hidden': 'true' }));
+    form.querySelector('h3').textContent = item ? 'Edit event' : 'New event';
+    form.setAttribute('aria-label', item ? 'Edit event' : 'New event');
+    save.textContent = item ? 'Save' : 'Add';
+    title.placeholder = 'Event title'; location.placeholder = 'Add';
+    const fields = form.querySelector('.form-grid');
+    const field = input => input.parentElement;
+    field(title).classList.add('cal-title-field');
+    const timing = el('section', { class: 'cal-field-group' }, [
+      field(allDay), field(start), field(end), repeat.host, zoneField, scopeField,
+    ]);
+    const details = el('section', { class: 'cal-field-group' }, [field(target), field(location), field(description)]);
+    fields.replaceChildren(field(title), timing, details);
   }
   const opener = document.activeElement;
   const dispose = () => { disposeSheet(); backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
@@ -272,12 +283,16 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
 
 export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
   grid.classList.add('cal-week-grid');
+  const compact = redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+  const hourHeight = compact ? 28 : 42;
+  const scale = hourHeight / 60;
   const header = el('div', { class: 'cal-week-header' }, [el('span', { text: 'All day' })]);
   const timeline = el('div', { class: 'cal-week-timeline' });
   const hours = el('div', { class: 'cal-week-hours' });
   // The locale's own hour format, as the rest of the calendar shows times ("9 PM", not "21:00").
   const hourLabel = (hour) => new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: 'numeric' });
-  for (let hour = 0; hour < 24; hour++) hours.append(el('span', { text: hourLabel(hour), style: `top:${hour * 42}px` }));
+  for (let hour = 0; hour < 24; hour++) hours.append(el('span', { text: hourLabel(hour), style: `top:${hour * hourHeight}px` }));
+  timeline.style.height = `${24 * hourHeight}px`;
   timeline.append(hours);
   const today = new Date();
   // Class hooks only (restyle): the source of each item and today's column.
@@ -293,7 +308,7 @@ export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
     const dateButton = el('button', { type: 'button', class: 'btn quiet', 'aria-label': date.toDateString(),
       onclick: () => selectDay(date, dayItems) });
     if (redesignOn()) {
-      dateButton.append(el('span', { class: 'cal-week-weekday', text: date.toLocaleDateString(undefined, { weekday: 'short' }) }),
+      dateButton.append(el('span', { class: 'cal-week-weekday', text: date.toLocaleDateString(undefined, { weekday: compact ? 'narrow' : 'short' }) }),
         el('span', { class: 'cal-week-date', text: String(date.getDate()) }));
     } else dateButton.textContent = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
     const cell = el('div', { class: 'cal-week-heading' + (isToday ? ' is-today' : '') }, [dateButton]);
@@ -314,11 +329,11 @@ export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
       const node = eventColor(el('button', { type: 'button', class: 'cal-week-event' + source(event.item), text: event.item.title, title: event.item.title,
         onclick: () => edit(event.item, date, dayItems) }), event.item);
       if (redesignOn()) node.append(el('span', { class: 'cal-event-time', text: new Date(event.item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }));
-      node.style.top = `${event.from * .7}px`; node.style.height = `${Math.max(18, (event.to - event.from) * .7)}px`;
+      node.style.top = `${event.from * scale}px`; node.style.height = `${Math.max(18, (event.to - event.from) * scale)}px`;
       node.style.left = `${event.lane * 100 / lanes.length}%`; node.style.width = `${100 / lanes.length}%`;
       column.append(node);
     }
-    if (isToday) column.append(el('div', { class: 'cal-today-line', 'aria-label': 'Current time', style: `top:${(today.getHours() * 60 + today.getMinutes()) * .7}px` }));
+    if (isToday) column.append(el('div', { class: 'cal-today-line', 'aria-label': 'Current time', style: `top:${(today.getHours() * 60 + today.getMinutes()) * scale}px` }));
     timeline.append(column);
   }
   grid.replaceChildren(header, timeline);

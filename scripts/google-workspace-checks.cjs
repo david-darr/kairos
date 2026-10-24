@@ -68,11 +68,11 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await js("[...document.querySelectorAll('.google-context-menu button')].find(b=>b.textContent==='Close menu').click()");
   await navigate('library', { section: 'documents' });
   await navigate('calendar');
-  await waitFor("document.querySelectorAll('.cal-calendar-choice').length === 2");
+  await waitFor("document.querySelectorAll('.cal-calendar-choice.cal-google-event').length === 2");
   const initialMonthRead = reads.length;
   await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
   await requestAfter(reads, initialMonthRead, r => r.path === '/api/calendar/events');
-  await waitFor("document.querySelectorAll('.cal-day').length === 42");
+  await waitFor("(() => { const g=document.querySelector('.cal-grid'); return document.querySelectorAll('.cal-day').length === (document.documentElement.classList.contains('kairos-redesign') ? Number(g.style.getPropertyValue('--calendar-weeks')) * 7 : 42); })()");
   await waitFor("!!document.querySelector('.cal-event-pill.cal-google-event')");
   await capture(label + '-calendar-month-google');
   const weekRead = reads.length;
@@ -80,7 +80,8 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await requestAfter(reads, weekRead, r => r.path === '/api/calendar/events');
   await waitFor("document.querySelectorAll('.cal-week-day').length === 7 && !!document.querySelector('.cal-today-line')");
   await capture(label + '-calendar-week-google');
-  assert.deepEqual(await overflow(), [], label + ' Week scrolls within Calendar');
+  assert.deepEqual(await overflow(), [], label + ' Week fits within Calendar');
+  assert.ok(await js("!document.documentElement.classList.contains('kairos-redesign') || (document.querySelector('.cal-week-header').scrollWidth <= document.querySelector('.cal-grid').clientWidth && !!document.querySelector('.cal-legend'))"), label + ' v2 Week fits all seven columns and has its calendar legend');
   const settingsWrite = writes.length;
   await js("document.querySelector('.cal-calendar-choice input').click()");
   await requestAfter(writes, settingsWrite, w => w.path === '/api/google/calendar/settings' && w.method === 'PATCH');
@@ -91,7 +92,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await waitFor("!document.querySelector('.cal-calendar-choice input').disabled");
   await js("document.querySelector('.cal-create-bar button').click()");
   await waitFor("!!document.querySelector('.cal-event-dialog')");
-  assert.equal(await js("document.querySelector('.cal-event-dialog select').value"), 'demo@example.com');
+  assert.equal(await js("document.querySelector('.cal-event-dialog select[aria-label=Calendar]').value"), 'demo@example.com');
   assert.equal(await js("document.querySelectorAll('.cal-event-dialog select[aria-label=Calendar] option').length"), 3);
   await capture(label + '-calendar-create-picker');
   const createWrite = writes.length;
@@ -103,7 +104,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await waitFor("[...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Smoke Google event'))");
   await js("[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Smoke Google event')).querySelector('button').click()");
   await waitFor("!!document.querySelector('.cal-event-dialog')");
-  assert.ok(await js("document.querySelector('.cal-event-dialog select').disabled"));
+  assert.ok(await js("document.querySelector('.cal-event-dialog select[aria-label=Calendar]').disabled"));
   const editWrite = writes.length;
   await js(`document.querySelector('.cal-event-dialog input[aria-label="Event title"]').value='Smoke edited event'; document.querySelector('.cal-event-dialog').requestSubmit()`);
   await requestAfter(writes, editWrite, w => w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'update');
@@ -118,6 +119,6 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   const monthRead = reads.length;
   await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
   await requestAfter(reads, monthRead, r => r.path === '/api/calendar/events');
-  await waitFor("document.querySelectorAll('.cal-day').length === 42");
+  await waitFor("(() => { const g=document.querySelector('.cal-grid'); return document.querySelectorAll('.cal-day').length === (document.documentElement.classList.contains('kairos-redesign') ? Number(g.style.getPropertyValue('--calendar-weeks')) * 7 : 42); })()");
   writes.splice(writeStart);
 };
