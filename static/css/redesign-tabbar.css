@@ -211,6 +211,8 @@
   .kairos-redesign .ms-sheet-panel { padding-inline: 20px; }
   .kairos-redesign :is(.ms-sheet-grabber, .ms-sheet-grab) { display: block; position: relative; flex: none; width: 64px; min-height: 44px; height: 44px; margin: 0 auto; padding: 0; border: 0; background: transparent; touch-action: none; box-shadow: none; }
   .kairos-redesign :is(.ms-sheet-grabber, .ms-sheet-grab)::after { content: ''; display: block; position: static; width: 42px; height: 5px; margin: auto; border-radius: var(--rd-radius-pill); background: var(--rd-line-strong); }
+  /* The grab handle is a 64x44 hit area; its focus ring hugs the bar as a pill instead of the box. */
+  .kairos-redesign :is(.ms-sheet-grabber, .ms-sheet-grab):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -10px; border-radius: var(--rd-radius-pill); }
   .kairos-redesign :is(.ms-sheet-header, .ms-more-header) { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 16px; }
   .kairos-redesign :is(.ms-sheet-header h2, .ms-sheet-heading) { margin: 0; font: italic 600 32px/1.1 var(--rd-font-title); }
   .kairos-redesign .ms-more-sheet .ms-sheet-heading { margin: 0; }

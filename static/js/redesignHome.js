@@ -127,7 +127,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     el('h1', { text: `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}` })]));
   const controls = el('div', { class: 'hm-heading-actions' }, [pill({ text: 'New chat', onClick: () => navigate('chat') })]);
   const notificationsButton = el('button', { type: 'button', class: 'hm-phone-notifications', 'aria-label': 'Notifications', onclick: () => openNotifications(notificationsButton) });
-  notificationsButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+  notificationsButton.innerHTML = ICONS.bell;
   const settingsButton = el('button', { type: 'button', class: 'hm-phone-settings', 'aria-label': 'Settings', onclick: () => navigate('settings') });
   settingsButton.innerHTML = ICONS.settings;
   controls.append(settingsButton, notificationsButton);

@@ -5,9 +5,11 @@
   .kairos-redesign .ms-activity,
   .kairos-redesign .ms-tab-sheet { color: var(--rd-ink); font-family: var(--rd-font-ui); }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) [hidden] { display: none !important; }
-  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :is(button, input, select, textarea) {
+  /* Shared pills (kairosParts.js pill()) set their own colours; inheriting here painted the primary pill's label in ink on ink. */
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :is(button:not(.rd-pill), input, select, textarea) {
     font: inherit; color: inherit; box-sizing: border-box; min-height: 44px; min-width: 44px;
   }
+  .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) .rd-pill { min-height: 44px; min-width: 44px; }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) button { cursor: pointer; }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :focus-visible,
   .kairos-redesign .ms-conversation .ms-chat-back:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
