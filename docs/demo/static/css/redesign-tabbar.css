@@ -115,7 +115,6 @@
     padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
   }
   .kairos-redesign.ms-tabbar-up .design-composer { padding-bottom: 10px; }
-  .kairos-redesign .design-focus { padding-top: var(--mobile-safe-top, env(safe-area-inset-top, 0px)); }
 
   /* A shared phone back control for agent, team and inbox conversations. */
   .kairos-redesign .agents-workspace.has-conversation .agents-workspace-controls { flex: 1; }

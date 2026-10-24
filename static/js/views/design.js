@@ -120,7 +120,8 @@ async function openDesign(container, designId, options) {
     el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), modelHost, forge, more, remove]);
   if (redesignOn()) {
     const controls = el('div', { class: 'design-page-options' });
-    controls.append(header.querySelector('.design-chat-pick'), modelHost, forge, more, remove);
+    // Keep the model picker on the page when phone-only options move into a sheet.
+    controls.append(header.querySelector('.design-chat-pick'), forge, more, remove);
     const optionsButton = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '…', 'aria-label': 'Design options', onclick: () => {
       const dialog = openPanelDialog({ title: 'Design options', body: controls, owner: container, opener: optionsButton,
         onClose: () => header.append(controls) });

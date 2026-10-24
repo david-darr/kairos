@@ -248,7 +248,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-group .ms-group-label')].map(n => n.textContent)"), ['Workspace', 'Intelligence'], 'Sheet has the saved sidebar groups (the top group is all on the bar)');
   await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
   await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()"); await delay(450);
-  assert.equal(await js("!!document.querySelector('.hm-week') && !document.querySelector('.dashboard-hero, .ms-shell') && document.querySelector('.hm-customize').getClientRects().length > 0"), true, 'Home on the bar opens dashboard and Customize');
+  // Mobile v2 HomeFull/HomeClear puts Customize below the page content.
+  assert.equal(await js("!!document.querySelector('.hm-week') && !document.querySelector('.dashboard-hero, .ms-shell') && document.querySelector('.hm-phone-customize').getClientRects().length > 0"), true, 'Home on the bar opens dashboard and Customize');
+  await js("document.querySelector('.hm-phone-customize').click()");
+  await waitFor("!!document.querySelector('.hm-sheet[aria-label=\"Customize Home\"] .hm-sheet-row')");
+  await js("document.querySelector('.hm-sheet-top button').click()");
+  await waitFor("!document.querySelector('.hm-sheet-root')");
+  assert.ok(await js("document.activeElement === document.querySelector('.hm-phone-customize')"), 'Customize returns focus to the phone opener');
   await home();
   // Tiles navigate
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);

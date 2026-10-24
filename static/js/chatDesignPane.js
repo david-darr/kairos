@@ -22,7 +22,8 @@ export async function openChatDesign(sessionId, id) {
   const model = el('div', { class: 'design-model-host' });
   const action = (label, text, onclick) => el('button', { type: 'button', class: 'chat-pane-icon', title: label, 'aria-label': label, text, onclick });
   const expand = action('Expand design', '⛶', () => pane.layout.setMaximized(!pane.layout.isMaximized()));
-  const panel = el('section', { class: 'chat-design-pane', 'aria-label': 'Design' }, [
+  expand.classList.add('chat-design-expand');
+  const panel = el('section', { class: 'artifact-panel chat-design-pane', 'aria-label': 'Design' }, [
     el('header', { class: 'chat-side-pane-header' }, [el('span', { text: '▧', 'aria-hidden': 'true' }), el('span', { class: 'chat-pane-heading' }, [name, detail]),
       action('Open in Library', '↗', () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'designs', designId: id } }))), expand,
       action('Close design', '×', closeChatDesign)]), model, body,

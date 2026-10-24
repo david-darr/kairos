@@ -537,6 +537,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await js("(() => { const host = document.querySelector('.chat-layout'), handle = host.querySelector('.chat-pane-resizer'); const target = host.clientWidth - 588; const delta = target - Number(handle.getAttribute('aria-valuenow')); for (let i = 0; i < Math.round(Math.abs(delta) / 24); i++) handle.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? 'ArrowRight' : 'ArrowLeft', bubbles: true })); })()");
   await delay(300);
   assert.ok(await js("Math.abs(document.querySelector('.chat-design-pane').getBoundingClientRect().width - 560) < 28"), 'canvas pane is about 560px wide');
+  assert.ok(await js("!!document.querySelector('.chat-design-pane .design-model-btn')?.offsetParent"), 'the chat design pane keeps its model picker');
   await js(`window.__paneCanvas = ${C}; ${C}.zoomToBoard('home'); document.querySelector('.chat-design-pane [aria-label="Zoom in"]').click()`);
   const paneZoom = await js(`${C}.state().zoom`);
   await js("document.querySelector('.chat-design-pane [aria-label=\"Zoom out\"]').click()");
@@ -577,6 +578,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   // The site it made, full page in Library: a desktop and mobile pair in their own rows.
   await navigate('library', { section: 'designs', designId: PID });
   assert.ok(await js(`${C} === window.__paneCanvas && ${C}.state().mode === 'select'`), 'Library reuses the live canvas and tool state');
+  assert.ok(await js("!!document.querySelector('.design-page .design-model-btn')?.offsetParent"), 'Library keeps its desktop model picker after moving the shared canvas');
   await waitFor(`document.querySelectorAll('.design-page[data-design-id="${PID}"] .design-board iframe').length === 2`);
   assert.deepEqual(await js("[...document.querySelectorAll('.design-section-label')].map(n => n.textContent)"), ['Website · Desktop', 'Website · Mobile']);
   await delay(1500); await clean();
@@ -594,6 +596,15 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     const small = await js(`[...document.querySelectorAll('.design-toolbar .btn, .design-modes .btn, .design-composer .btn, .design-page-header .btn')].filter(b => b.offsetParent && Math.round(b.getBoundingClientRect().height) < 44).map(b => b.textContent)`);
     assert.deepEqual(small, [], `44px targets at ${width}`);
     assert.ok(await js("!!document.querySelector('.design-model-btn') && document.querySelector('.design-model-btn').offsetParent !== null"), 'the model picker is on the phone too');
+    assert.ok(await js(`(() => {
+      const title = document.querySelector('.design-page-identity h2').getBoundingClientRect();
+      const buttons = [...document.querySelectorAll('.design-page-header > button')].filter(n => n.getClientRects().length);
+      const model = document.querySelector('.design-page .design-model-btn').getBoundingClientRect();
+      const name = document.querySelector('.design-page-identity strong').getBoundingClientRect();
+      return buttons.length === 2 && buttons.every(n => { const r = n.getBoundingClientRect(), s = getComputedStyle(n);
+        return Math.abs(r.top - title.top) <= 1 && r.left >= title.right && Math.round(r.width) === 46 && Math.round(r.height) === 46 && parseFloat(s.borderRadius) >= 23;
+      }) && name.top >= title.bottom && model.top >= title.bottom;
+    })()`), `Library has a title and two round actions above its content at ${width}`);
     // The phone tab bar (mobileTabBar.js): the board list keeps it; the pager hides it.
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
     await noErrorToasts(`phone ${width}`);
@@ -608,6 +619,25 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     await js("document.querySelectorAll('.design-list-card')[0].click()");
     await waitFor("!!document.querySelector('.design-focus iframe')");
     await waitFor("!document.documentElement.classList.contains('ms-tabbar-up')");
+    const pagerBelowHeader = () => js(`(() => {
+      const header = document.querySelector('.design-page-header').getBoundingClientRect();
+      const model = document.querySelector('.design-page .design-model-btn');
+      const r = model.getBoundingClientRect();
+      return model.offsetParent !== null && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.design-model-btn') === model
+        && [...document.querySelectorAll('.design-focus-bar button')].filter(n => n.getClientRects().length).every(n => n.getBoundingClientRect().top >= header.bottom - 0.5);
+    })()`);
+    assert.ok(await pagerBelowHeader(), `the model stays exposed and pager controls start below the phone header at ${width}`);
+    assert.ok(await js(`(() => {
+      const title = document.querySelector('.design-focus-bar strong').getBoundingClientRect();
+      const close = document.querySelector('.design-focus-bar [aria-label="Close focus"]').getBoundingClientRect();
+      return Math.abs(close.top - title.top) <= 1 && Math.round(close.width) === 46 && Math.round(close.height) === 46
+        && [...document.querySelectorAll('.design-focus-controls button')].filter(n => n.getClientRects().length).every(n => n.getBoundingClientRect().top >= title.bottom);
+    })()`), `Previous/Next and width controls sit below the pager title at ${width}`);
+    // Parking keeps the open board; returning must also keep it below the header.
+    await navigate('library', { section: 'documents' });
+    await navigate('library', { section: 'designs', designId: ID });
+    await waitFor("!!document.querySelector('.design-focus iframe')");
+    assert.ok(await pagerBelowHeader(), `the retained shared pager stays below the header at ${width}`);
     await js("(() => { const s = document.querySelector('.design-focus-stage'); const r = s.getBoundingClientRect(); const at = (t, x) => s.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: r.top + 200, isPrimary: true, bubbles: true })); at('pointerdown', r.right - 30); at('pointerup', r.left + 30); })()");
     await waitFor("/2 \\/ 3/.test(document.querySelector('.design-focus-bar strong').textContent)");
     await capture(`design-phone-pager-${width}`);
@@ -621,6 +651,23 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     assert.ok(true, 'Draft composer clears the tab bar by 10px');
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    await navigate('chat', { sessionId: 's1', mobileConversation: true });
+    await js(`import('/static/js/chatContent.js').then(m => m.openDesignTab('s1', '${PID}'))`);
+    await waitFor("!!document.querySelector('.chat-design-pane .design-model-btn')?.offsetParent && !document.querySelector('.chat-design-pane .design-model-btn').disabled");
+    assert.ok(await js(`${C} === window.__paneCanvas`), `phone chat reuses Library's live canvas at ${width}`);
+    assert.ok(await js(`(() => {
+      const pane = document.querySelector('.chat-design-pane'), r = pane.getBoundingClientRect();
+      const title = pane.querySelector('.chat-pane-heading strong').getBoundingClientRect();
+      const buttons = [...pane.querySelectorAll('.chat-side-pane-header button')].filter(n => n.getClientRects().length);
+      const model = pane.querySelector('.design-model-btn'), m = model.getBoundingClientRect();
+      return r.width <= innerWidth && buttons.length === 2 && buttons.every(n => { const b = n.getBoundingClientRect();
+        return Math.abs(b.top - title.top) <= 1 && b.left >= title.right && Math.round(b.width) === 46 && Math.round(b.height) === 46 && parseFloat(getComputedStyle(n).borderRadius) >= 23;
+      }) && m.top >= title.bottom && document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2)?.closest('.design-model-btn') === model;
+    })()`), `chat Design keeps its phone header and accessible model picker at ${width}`);
+    await js("document.querySelector('.chat-design-pane .design-model-btn').click()");
+    await waitFor("document.querySelector('.chat-design-pane .design-model-btn').getAttribute('aria-expanded') === 'true' && document.querySelectorAll('.chat-design-pane .model-connection-item').length >= 2");
+    await capture(`design-chat-phone-${width}`);
+    await js("document.querySelector('.chat-design-pane [aria-label=\"Close design\"]').click()");
   }
   win.setContentSize(1440, 900); await delay(300);
   await navigate('library', { section: 'documents' });
