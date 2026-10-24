@@ -251,7 +251,13 @@ module.exports = async function tabBarChecks(c) {
   await pushedPage('Settings page', { back: '.settings-mobile-back', current: 'more' });
   await navigate('library', { section: 'documents' }); await waitFor("!!document.querySelector('.library-document-card')");
   await js("document.querySelector('.library-document-card').click()"); await waitFor("!!document.querySelector('.library-editor')");
-  await pushedPage('Library editor', { back: '.library-editor .view-header .card-row:first-child > button:first-child', current: 'more' });
+  // Mobile v2 puts Back in the title row; the desktop toolbar Back is hidden.
+  // Keep the same size, safe-area and hit-test coverage on the visible control.
+  const libraryBack = '.library-editor button[aria-label="Back to Library"]';
+  await pushedPage('Library editor', { back: libraryBack, current: 'more' });
+  await js(`document.querySelector(${JSON.stringify(libraryBack)}).click()`);
+  await waitFor("!document.querySelector('.library-editor') && !!document.querySelector('.library-document-card') && document.querySelectorAll('.ms-dock').length === 1");
+  ok(true, 'Library editor: visible Back returns to documents and restores the dock');
   await navigate('library'); await waitFor("!!document.querySelector('[data-library-section=vault]')");
   await js("document.querySelector('[data-library-section=vault]').click()"); await waitFor("!!document.querySelector('.library-vault-note')");
   await js("document.querySelector('.library-vault-note').click()"); await waitFor("!!document.querySelector('.vault-phone-detail')");

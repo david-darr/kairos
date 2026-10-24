@@ -1,6 +1,18 @@
 import { api, el, toast } from "../api.js";
-import { segmented } from '../kairosParts.js';
+import { segmented, dotMatrix } from '../kairosParts.js';
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
+import { openModelSetup } from '../modelSetup.js';
+import { createMascot } from '../mascot.js';
+const phoneCookbook = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+
+function downloadProgress(host, pct, label) {
+  host.replaceChildren(document.createTextNode(label));
+  if (redesignOn() && pct != null) {
+    const dots = dotMatrix({ rows: 1, cols: 24, cells: Array.from({ length: 24 }, (_, i) => i < Math.round(pct * 24 / 100) ? 'b' : 'empty'), label: `Downloading, ${pct} percent` });
+    dots.classList.add('workspace-phone-only', 'cookbook-progress');
+    host.append(dots);
+  }
+}
 
 // Cookbook (David's ask 2026-09-01: "can we develop the cookbook tab now")
 // — browse/pull/manage local models. Two backends, toggled via a segmented
@@ -73,12 +85,17 @@ export async function render(container) {
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
       el("h2", { text: "Cookbook" }),
-      el("div", { class: "sub", text: "Browse, download, and manage local models." }),
+      el("div", { class: "sub", text: phoneCookbook() ? 'Local models on this computer' : "Browse, download, and manage local models." }),
     ]),
   ]);
+  if (redesignOn()) {
+    const guide = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Setup guide', onclick: () => openModelSetup() });
+    guide.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 16.5v.5"/></svg>';
+    header.append(guide);
+  }
 
   const tabs = el("div", { class: "segmented-tabs" });
-  const body = el("div", {});
+  const body = el("div", { class: 'cookbook-body' });
 
   function renderTabs() {
     tabs.innerHTML = "";
@@ -136,6 +153,8 @@ async function renderOllamaSection(container) {
 
   const installedSection = el("div", { style: "margin-top:18px;" });
   const catalogSection = el("div", { style: "margin-top:18px;" });
+  installedSection.classList.add('cookbook-installed');
+  catalogSection.classList.add('cookbook-catalog');
   container.append(installedSection, catalogSection);
   await refreshOllamaInstalled(installedSection, catalogSection);
   await renderOllamaCatalog(catalogSection, installedSection);
@@ -157,6 +176,18 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
   }
 
   const runningNames = new Set(running.map((r) => r.name));
+  if (redesignOn()) {
+    const statusCard = el('section', { class: 'cookbook-status workspace-phone-only' }, [
+      el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
+        el('strong', { text: 'Ollama is running' }), el('code', { text: 'localhost:11434' })]),
+    ]);
+    for (const model of running) statusCard.append(el('div', { class: 'cookbook-running' }, [
+      document.documentElement.dataset.mascot !== 'off' ? createMascot({ state: 'working', size: 36, decorative: true }) : null,
+      el('div', {}, [el('small', { text: 'Running now' }), el('strong', { text: model.name }),
+        el('code', { text: model.size ? `${(model.size / 1e9).toFixed(1)} GB` : '' })]),
+    ]));
+    installedSection.prepend(statusCard);
+  }
 
   if (installed.length === 0) {
     installedSection.appendChild(redesignOn() ? emptyState({ title: 'No models installed yet', text: 'Choose a local model from the catalog.',
@@ -165,6 +196,8 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
     return;
   }
 
+  const installedList = el('div', { class: 'cookbook-installed-list' });
+  installedSection.append(installedList);
   for (const m of installed) {
     const sizeGb = (m.size / 1e9).toFixed(1);
     const delBtn = el("button", { class: "btn danger", text: "Delete", onclick: async () => {
@@ -192,7 +225,7 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
         el("div", { class: "card-row", style: "gap:6px;" }, [registerBtn, delBtn]),
       ]),
     ]);
-    installedSection.appendChild(card);
+    installedList.appendChild(card);
   }
 }
 
@@ -205,6 +238,7 @@ async function renderOllamaCatalog(catalogSection, installedSection) {
 
   const catalog = await api("/api/cookbook/catalog");
   const grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;" });
+  grid.classList.add('cookbook-catalog-list');
   catalogSection.dataset.mobileCatalog = 'true';
   catalogSection.appendChild(grid);
 
@@ -243,7 +277,7 @@ function watchOllamaPull(name, statusEl, pullBtn, installedSection, catalogSecti
       return;
     }
     const pct = progress.total ? Math.round((progress.completed / progress.total) * 100) : null;
-    statusEl.textContent = pct != null ? `${progress.status} ${pct}%` : (progress.status || "pulling...");
+    downloadProgress(statusEl, pct, pct != null ? `${progress.status} ${pct}%` : (progress.status || "pulling..."));
   }, 1000);
 }
 
@@ -253,8 +287,11 @@ async function renderEngineSection(container) {
   container.appendChild(el("div", { class: "meta", style: "margin:0 0 14px;", text: "No separate app to install — models download directly and run through a bundled local server (llama.cpp)." }));
 
   const statusRow = el("div", {});
+  statusRow.classList.add('cookbook-engine-status');
   const downloadedSection = el("div", { style: "margin-top:18px;" });
   const catalogSection = el("div", { style: "margin-top:18px;" });
+  downloadedSection.classList.add('cookbook-installed');
+  catalogSection.classList.add('cookbook-catalog');
   container.append(statusRow, downloadedSection, catalogSection);
 
   await refreshEngineStatus(statusRow, downloadedSection);
@@ -275,6 +312,7 @@ async function refreshEngineStatus(statusRow, downloadedSection) {
       el("div", { class: "glass bracket card" }, [
         el("div", { class: "card-row" }, [
           el("div", {}, [
+            el("div", { class: "cookbook-running-label workspace-phone-only", text: 'Running now' }),
             el("div", { class: "title", style: "font-size:12.5px;", text: `Running: ${st.model}` }),
             el("div", { class: "meta", text: st.base_url }),
           ]),
@@ -282,6 +320,15 @@ async function refreshEngineStatus(statusRow, downloadedSection) {
         ]),
       ]),
     );
+    if (redesignOn()) statusRow.append(el('section', { class: 'cookbook-status workspace-phone-only' }, [
+      el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
+        el('strong', { text: 'Built-in engine is running' }), el('code', { text: st.base_url })]),
+      el('div', { class: 'cookbook-running' }, [
+        document.documentElement.dataset.mascot !== 'off' ? createMascot({ state: 'working', size: 36, decorative: true }) : null,
+        el('div', {}, [el('small', { text: 'Running now' }), el('strong', { text: st.model })]),
+        el('button', { type: 'button', class: 'btn', text: 'Stop', onclick: () => stopBtn.click() }),
+      ]),
+    ]));
   } else {
     statusRow.appendChild(el("div", { class: "meta", text: "No model currently running." }));
   }
@@ -289,7 +336,7 @@ async function refreshEngineStatus(statusRow, downloadedSection) {
 
 async function refreshEngineDownloaded(downloadedSection, catalogSection, statusRow) {
   downloadedSection.innerHTML = "";
-  downloadedSection.appendChild(el("div", { class: "title", style: "margin-bottom:8px;", text: "Downloaded" }));
+  downloadedSection.appendChild(el("div", { class: "title", style: "margin-bottom:8px;", text: phoneCookbook() ? 'Installed' : "Downloaded" }));
 
   const downloaded = await api("/api/cookbook/engine/downloaded");
   const st = await api("/api/cookbook/engine/status");
@@ -300,6 +347,8 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
     return;
   }
 
+  const installedList = el('div', { class: 'cookbook-installed-list' });
+  downloadedSection.append(installedList);
   for (const m of downloaded) {
     const sizeGb = (m.size / 1e9).toFixed(1);
     const isRunning = st.running && st.model === m.name;
@@ -340,7 +389,7 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
         el("div", { class: "card-row", style: "gap:6px;" }, [startBtn, registerBtn, delBtn]),
       ]),
     ]);
-    downloadedSection.appendChild(card);
+    installedList.appendChild(card);
   }
 }
 
@@ -353,6 +402,7 @@ async function renderEngineCatalog(catalogSection, downloadedSection, statusRow)
 
   const catalog = await api("/api/cookbook/engine/catalog");
   const grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;" });
+  grid.classList.add('cookbook-catalog-list');
   catalogSection.appendChild(grid);
 
   for (const item of catalog) {
@@ -390,6 +440,6 @@ function watchEngineDownload(name, statusEl, downloadBtn, downloadedSection, cat
       return;
     }
     const pct = progress.total ? Math.round((progress.completed / progress.total) * 100) : null;
-    statusEl.textContent = pct != null ? `Downloading ${pct}%` : "Downloading...";
+    downloadProgress(statusEl, pct, pct != null ? `Downloading ${pct}%` : "Downloading...");
   }, 1000);
 }

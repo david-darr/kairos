@@ -15,7 +15,7 @@ export async function render(container) {
     ]),
   ]);
 
-  const textInput = el("input", { placeholder: "e.g. Finish the CS 571 lab writeup" });
+  const textInput = el("input", { placeholder: "e.g. Finish the CS 571 lab writeup", 'aria-label': 'New note' });
   textInput.dataset.mobileDock = 'create'; textInput.dataset.mobileCreateLabel = 'Add note';
   const dueInput = el("input", { type: "datetime-local" });
   const addBtn = el("button", { class: "btn primary", text: "Add note" });
@@ -27,11 +27,27 @@ export async function render(container) {
       addBtn,
     ]),
   ]);
+  if (redesignOn()) {
+    dueInput.setAttribute('aria-label', 'Due time');
+    const dueField = dueInput.parentElement;
+    dueField.classList.add('notes-due-field');
+    const dueToggle = el('button', { type: 'button', class: 'btn quiet workspace-phone-only notes-due-toggle', text: 'Add a due time',
+      'aria-expanded': 'false', onclick: () => {
+        const open = !form.classList.contains('notes-due-open');
+        form.classList.toggle('notes-due-open', open); dueToggle.setAttribute('aria-expanded', String(open));
+        if (open) dueInput.focus();
+      } });
+    form.querySelector('.form-grid').insertBefore(dueToggle, dueField);
+  }
 
   const list = el("div", { id: "notes-list", class: 'rd-stagger', style: "margin-top:14px;" });
   const stats = el('div', { class: 'notes-overview', hidden: !redesignOn() });
   list.overview = stats;
   if (redesignOn()) {
+    if (window.matchMedia('(max-width: 768px)').matches) textInput.placeholder = 'Capture a thought…';
+    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New note', onclick: () => textInput.focus() });
+    create.innerHTML = ICONS.plus;
+    header.append(create);
     const sort = el('select', { class: 'notes-sort', 'aria-label': 'Sort notes' }, [
       el('option', { value: 'saved', text: 'Saved order' }), el('option', { value: 'due', text: 'Due time' }),
       el('option', { value: 'title', text: 'A–Z' }),
@@ -45,7 +61,23 @@ export async function render(container) {
   list.finishedBar = finishedBar;
 
   header.append(finishedBar);  // right side of the page header, so it adds no row of its own
+  if (redesignOn()) {
+    const heading = el('div', { class: 'notes-list-heading workspace-phone-only' }, [el('h3', { text: 'Open' })]);
+    heading.append(header.querySelector('.notes-sort'));
+    // On desktop the original sort remains in the header.
+    const sortHome = el('span', { class: 'notes-sort-home' });
+    header.append(sortHome);
+    const sort = heading.querySelector('select');
+    const phone = window.matchMedia('(max-width: 768px)');
+    const placeSort = () => { if (phone.matches) heading.append(sort); else sortHome.append(sort); };
+    placeSort(); phone.addEventListener('change', placeSort);
+    const observer = new MutationObserver(() => { if (!wrap.isConnected) { phone.removeEventListener('change', placeSort); observer.disconnect(); } });
+    // Start observing after the wrapper is attached below.
+    queueMicrotask(() => observer.observe(document.body, { childList: true, subtree: true }));
+    list.beforeHeading = heading;
+  }
   wrap.append(header, stats, form, list);
+  if (list.beforeHeading) list.before(list.beforeHeading);
   container.append(wrap);
   const onAppearance = () => {
     if (!wrap.isConnected) { document.removeEventListener("kairos:appearance", onAppearance); return; }
@@ -94,7 +126,8 @@ function drawFinishedBar(list, focusTarget, notes) {
   const count = `${notes.length} note${notes.length === 1 ? "" : "s"}` + (done.length ? ` · ${done.length} finished` : "");
   bar.append(el("span", { class: "notes-finished-count", text: count }));
   if (!done.length) return;
-  const clear = el("button", { type: "button", class: "btn", text: "Clear finished" });
+  const clear = el("button", { type: "button", class: "btn", text: "Clear finished", 'aria-label': 'Clear finished' });
+  if (redesignOn()) clear.insertAdjacentHTML('afterbegin', ICONS.trash);
   clear.addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "Clear finished notes?",

@@ -1,6 +1,7 @@
 import { api, el, toast, iconButton } from "../api.js";
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats, redesignOn } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
+import { createMascot } from '../mascot.js';
 
 export async function render(container) {
   container.innerHTML = "";
@@ -46,9 +47,12 @@ export async function render(container) {
   const triage = el("div", { id: "email-triage", class: 'rd-stagger', style: "margin-top:14px;" });
   wrap.append(header, triage, form, list);
   container.append(wrap);
-  if (redesignOn()) header.append(el('button', { type: 'button', class: 'btn email-accounts-trigger', text: 'Accounts', onclick: () => {
+  if (redesignOn()) {
+    const accounts = el('button', { type: 'button', class: 'btn email-accounts-trigger', 'aria-label': 'Accounts', text: 'Accounts', onclick: () => {
     form.open = !form.open; if (form.open) emailInput.focus();
-  } }));
+    } });
+    accounts.insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="9" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/></svg>'); header.append(accounts);
+  }
   refreshTriage(triage);
 
   addBtn.addEventListener("click", async () => {
@@ -137,7 +141,7 @@ async function refreshTriage(host) {
     }
   }
 
-  host.appendChild(el("div", { class: "glass bracket card email-triage-card" }, [
+  const card = el("div", { class: "glass bracket card email-triage-card" }, [
     el("div", { class: "card-row", style: "justify-content:space-between;align-items:flex-start;" }, [
       el("div", {}, [
         el("div", { class: "title", text: "Important today" }),
@@ -146,7 +150,29 @@ async function refreshTriage(host) {
       runBtn,
     ]),
     ...body,
-  ]));
+  ]);
+  if (redesignOn()) {
+    const summary = el('div', { class: 'email-summary' });
+    const heading = card.firstElementChild;
+    const stats = body.find(node => node.classList.contains('workspace-stats'));
+    if (document.documentElement.dataset.mascot !== 'off') heading.prepend(el('span', { class: 'workspace-phone-only', 'aria-hidden': 'true' }, [createMascot({ state: 'done', size: 40, decorative: true })]));
+    const needs = el('section', { class: 'email-needs-list' });
+    const title = el('h3', { class: 'workspace-phone-only', text: 'Needs you' });
+    const phone = window.matchMedia('(max-width: 768px)');
+    const place = () => {
+      if (phone.matches) {
+        summary.replaceChildren(heading, ...(stats ? [stats] : []));
+        needs.replaceChildren(...body.filter(node => node !== stats));
+        card.replaceChildren(summary, title, needs);
+      } else card.replaceChildren(heading, ...body);
+    };
+    place(); phone.addEventListener('change', place);
+    const observer = new MutationObserver(() => {
+      if (!card.isConnected) { phone.removeEventListener('change', place); observer.disconnect(); }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+  host.appendChild(card);
 }
 
 async function refresh(list, focusTarget) {

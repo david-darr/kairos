@@ -43,13 +43,16 @@ let viewMonth = new Date();
 viewMonth.setDate(1);
 viewMonth.setHours(0, 0, 0, 0);
 
+const phoneCalendar = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+const weekOffset = date => phoneCalendar() ? (date.getDay() + 6) % 7 : date.getDay();
+
 let selectedDayKey = null;
 let viewMode = 'month';
 let viewDay = new Date();
 viewDay.setHours(0, 0, 0, 0);
 let viewWeek = new Date();
 viewWeek.setHours(0, 0, 0, 0);
-viewWeek.setDate(viewWeek.getDate() - viewWeek.getDay());
+viewWeek.setDate(viewWeek.getDate() - weekOffset(viewWeek));
 
 export async function render(container) {
   container.innerHTML = "";
@@ -69,7 +72,7 @@ export async function render(container) {
   const calendarList = el('div', { class: 'cal-calendar-list' });
   const calendarStore = el('div', { hidden: true }, [calendarList]);
   const calendarsBtn = el('button', { type: 'button', class: 'btn cal-calendars-trigger', text: redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-label': redesignOn() ? 'Your calendars' : 'Google calendars', 'aria-haspopup': 'dialog' });
-  calendarsBtn.insertAdjacentHTML('afterbegin', ICONS.calendar);
+  calendarsBtn.insertAdjacentHTML('afterbegin', phoneCalendar() ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>' : ICONS.calendar);
   calendarsBtn.addEventListener('click', () => {
     const dialog = openPanelDialog({ title: redesignOn() ? 'Your calendars' : 'Google calendars', body: calendarList, opener: calendarsBtn,
       owner: container, group: 'calendar-selection', className: 'cal-calendars-dialog',
@@ -108,8 +111,17 @@ export async function render(container) {
   nav.append(prevBtn, todayBtn, monthLabel, nextBtn, viewSwitch, archiveBtn);
 
   const grid = el("div", { class: "cal-grid glass" });
-
-  left.append(header, createBar, calendarStore, nav, grid);
+  const phoneDays = el('div', { class: 'cal-phone-days workspace-phone-only', role: 'group', 'aria-label': 'Choose a day' });
+  createBar._phoneDays = phoneDays;
+  // The phone title row owns both round actions. Keeping the create control
+  // outside it makes it page content even when the grid puts it beside h2.
+  if (phoneCalendar()) {
+    header.append(createBar);
+    createBar.querySelector('button').setAttribute('aria-label', 'Add');
+    left.append(header, calendarStore, nav, phoneDays, grid);
+  } else {
+    left.append(header, createBar, calendarStore, nav, phoneDays, grid);
+  }
 
   const dayPanel = el("div", { class: "glass bracket cal-day-panel rd-stagger" });
 
@@ -124,7 +136,7 @@ export async function render(container) {
       : viewMonth.getFullYear() === today.getFullYear() && viewMonth.getMonth() === today.getMonth() ? today : viewMonth;
     if (mode !== viewMode) {
       if (mode === 'week') {
-        viewWeek = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), anchorDay.getDate() - anchorDay.getDay());
+        viewWeek = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), anchorDay.getDate() - weekOffset(anchorDay));
       } else if (mode === 'month') {
         viewMonth = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), 1);
       }
@@ -155,7 +167,7 @@ export async function render(container) {
     const today = new Date();
     viewDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     viewMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    viewWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+    viewWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - weekOffset(today));
     createBar._dateInput.value = dateOnly(today);
     selectedDayKey = today.toDateString();
     renderGrid(monthLabel, grid, createBar, dayPanel);
@@ -193,7 +205,7 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   const mode = viewMode;
   const firstOfMonth = new Date(viewMonth);
   const gridStart = new Date(mode === 'day' ? viewDay : mode === 'week' ? viewWeek : firstOfMonth);
-  if (mode !== 'day') gridStart.setDate(gridStart.getDate() - gridStart.getDay()); // back up to Sunday
+  if (mode !== 'day') gridStart.setDate(gridStart.getDate() - weekOffset(gridStart));
 
   const gridEnd = new Date(gridStart);
   gridEnd.setDate(gridEnd.getDate() + (mode === 'day' ? 1 : mode === 'week' ? 7 : 42));
@@ -210,10 +222,21 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
   grid.innerHTML = '';
   grid.classList.toggle('cal-week-grid', mode !== 'month');
   grid.classList.toggle('cal-single-day', mode === 'day');
+  grid.parentElement.dataset.calendarRange = mode;
+  if (createBar._phoneDays) {
+    const monday = new Date(viewDay);
+    monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+    createBar._phoneDays.replaceChildren(...Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(monday); date.setDate(date.getDate() + i);
+      return el('button', { type: 'button', 'aria-label': date.toDateString(), 'aria-pressed': String(dateOnly(date) === dateOnly(viewDay)), onclick: () => {
+        viewDay = date; selectedDayKey = date.toDateString(); refresh();
+      } }, [el('small', { text: date.toLocaleDateString(undefined, { weekday: 'short' }) }), el('span', { text: String(date.getDate()) })]);
+    }));
+  }
   const refresh = () => renderGrid(monthLabel, grid, createBar, dayPanel);
   if (mode !== 'month') {
     const last = new Date(gridEnd); last.setDate(last.getDate() - 1);
-    monthLabel.textContent = mode === 'day' ? gridStart.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    monthLabel.textContent = mode === 'day' ? gridStart.toLocaleDateString(undefined, phoneCalendar() ? { month: 'long', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
       : `${gridStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${last.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
     weekGrid(grid, gridStart, items, (date, dayItems) => {
       selectedDayKey = date.toDateString(); createBar._dateInput.value = dateOnly(date);
@@ -229,11 +252,14 @@ async function renderGrid(monthLabel, grid, createBar, dayPanel) {
     else await renderUpcomingPanel(dayPanel, refresh, isCurrent);
     return;
   }
-  for (const wd of WEEKDAYS) grid.appendChild(el('div', { class: 'cal-weekday', text: wd }));
+  for (const wd of (phoneCalendar() ? [...WEEKDAYS.slice(1), WEEKDAYS[0]] : WEEKDAYS)) grid.appendChild(el('div', { class: 'cal-weekday', text: wd }));
   const cursor = new Date(gridStart);
   const currentMonth = firstOfMonth.getMonth();
   const todayKey = new Date().toDateString();
-  for (let i = 0; i < 42; i++) {
+  // Keep the standard six-week month grid on every screen size.
+  const weeks = 6;
+  grid.style.setProperty('--calendar-weeks', weeks);
+  for (let i = 0; i < weeks * 7; i++) {
     const dayKey = cursor.toDateString();
     const isOtherMonth = cursor.getMonth() !== currentMonth;
     const cell = el("button", { type: "button", "aria-label": dayKey, class: "cal-day" + (isOtherMonth ? " other-month" : "") + (dayKey === todayKey ? " today" : "") + (dayKey === selectedDayKey ? " selected" : "") });
@@ -338,10 +364,10 @@ function appendItemCard(dayPanel, item, refreshGrid, upcoming = false) {
       el('button', { type: 'button', class: 'btn quiet', text: 'Edit', onclick: edit }),
       iconButton(ICONS.trash, 'Delete event', () => deleteCalendarEvent(item, refreshGrid, dayPanel._createBar?._owner), { danger: true }),
     );
-    dayPanel.append(eventColor(el('div', { class: 'glass card has-row-actions' + (item.completed ? ' cal-item-completed' : '') }, [
+    appendAgendaCard(dayPanel, eventColor(el('div', { class: 'glass card has-row-actions' + (item.completed ? ' cal-item-completed' : '') }, [
       el('div', { class: 'title', text: item.title }),
       el('div', { class: 'meta', text: `${item.calendar_name} · ${item.all_day ? 'All day' : new Date(item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` }), actions,
-    ]), item));
+    ]), item), item);
     return;
   }
   const checkbox = el("input", { type: "checkbox" });
@@ -383,7 +409,15 @@ function appendItemCard(dayPanel, item, refreshGrid, upcoming = false) {
       trailing,
     ]),
   ]);
-  dayPanel.appendChild(card);
+  appendAgendaCard(dayPanel, card, item);
+}
+
+function appendAgendaCard(panel, card, item) {
+  if (redesignOn()) {
+    card.classList.add('cal-agenda-card');
+    card.prepend(el('span', { class: 'workspace-phone-only cal-agenda-hour', text: item.all_day ? 'All day' : new Date(item.start).toLocaleTimeString([], { hour: 'numeric' }) }));
+  }
+  panel.appendChild(card);
 }
 
 // -- Archive (David's ask, 2026-08-31): a real modal listing every checked-

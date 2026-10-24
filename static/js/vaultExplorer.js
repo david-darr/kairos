@@ -267,6 +267,7 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
       breadcrumb(node, store, { onOpen: id => openNote(id), onFolder: id => revealFolder(id) }),
       title,
       el('div', { class: 'vault-note-meta meta', text: noteMeta(node, note) }),
+      el('div', { class: 'workspace-phone-only vault-phone-properties' }, [propertyPills(node, { compact: true })]),
       linksPill,
       actions,
     ]);
@@ -290,12 +291,13 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
     railToggle.addEventListener('click', () => { setRailOpen(!railOpen()); railToggle.setAttribute('aria-pressed', String(railOpen())); browser.classList.toggle('vault-rail-closed', !railOpen()); });
     actions.append(railToggle);
     const more = el('button', { type: 'button', class: 'btn quiet vault-more', 'aria-label': 'More actions', title: 'More' }, [icon('more')]);
-    more.addEventListener('click', () => moreMenu(more, node, { admin, onHistory: admin ? () => { if (mobileOn()) openRailSheet(node, more, true); else { setRailOpen(true); browser.classList.remove('vault-rail-closed'); rail?.openHistory?.(); } } : null, onMap: id => onMap?.(id, 1) }));
+    const openMore = anchor => moreMenu(anchor, node, { admin, onHistory: admin ? () => { if (mobileOn()) openRailSheet(node, anchor, true); else { setRailOpen(true); browser.classList.remove('vault-rail-closed'); rail?.openHistory?.(); } } : null, onMap: id => onMap?.(id, 1) });
+    more.addEventListener('click', () => openMore(more));
     actions.append(more);
 
     const body = el('div', { class: 'library-vault-reading artifact-document vault-note-body' });
     renderVaultBody(body, note.content, { name: node.name, links: note.links, store, onOpen: id => openNote(id) });
-    const phoneHead = phoneHeader(node);
+    const phoneHead = phoneHeader(node, openMore);
     const article = el('article', { class: 'vault-note' }, [phoneHead, header(node, actions)]);
     titleObserver?.disconnect();
     titleObserver = new IntersectionObserver(([entry]) => phoneHead.classList.toggle('show-title', !entry.isIntersecting));
@@ -305,15 +307,33 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
     }
     article.append(body);
     reader.replaceChildren(article);
+    placeNoteChrome();
     titleObserver.observe(article.querySelector('.vault-note-title'));
     reader.scrollTop = 0;
     browser.classList.toggle('vault-rail-closed', !railOpen());
     drawRail(node);
   }
 
-  function phoneHeader(node) {
+  function phoneHeader(node, openMore) {
     const back = el('button', { type: 'button', class: 'vault-phone-back ms-glass', 'aria-label': 'Back to Vault', text: '‹', onclick: () => back_() });
-    return el('div', { class: 'vault-phone-header' }, [edgeBlur('top'), back, el('div', { class: 'vault-phone-heading' }, [el('strong', { text: node.name }), el('small', { text: node.folder || 'Vault' })])]);
+    const more = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round vault-phone-options', 'aria-label': 'Note options', text: '…', onclick: event => openMore(event.currentTarget) });
+    return el('div', { class: 'vault-phone-header' }, [edgeBlur('top'), back, el('div', { class: 'vault-phone-heading' }, [el('strong', { text: node.name })]), more]);
+  }
+
+  function placeNoteChrome() {
+    const head = reader.querySelector('.library-vault-reader-head');
+    const crumbs = reader.querySelector('.vault-crumbs');
+    const heading = reader.querySelector('.vault-phone-heading');
+    // Reuse one breadcrumb, including its folder navigation, at either size.
+    if (crumbs && head && heading) {
+      if (mobileOn()) heading.append(crumbs);
+      else head.prepend(crumbs);
+    }
+    const links = head?.querySelector('.vault-links-pill');
+    const actions = head?.querySelector('.library-vault-reader-actions');
+    if (!links || !actions) return;
+    if (mobileOn()) actions.append(links);
+    else head.insertBefore(links, actions);
   }
 
   async function back_() {
@@ -402,6 +422,7 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
     if (!mobileOn()) { browser.classList.remove('vault-phone-detail'); sidebar.hidden = false; search.hidden = false; sheet?.close(); }
     else setDetail(!!selected);
     placeHome();
+    placeNoteChrome();
     if (note && !editor) { const node = store.note(note.path); if (node) drawRail(node); }
   };
   phone.addEventListener('change', syncPhone); document.addEventListener('kairos:appearance', syncPhone);
