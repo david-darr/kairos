@@ -1,4 +1,5 @@
 // Shared phone Chats header contract, exercised at every safe-area/device size.
+// rowTop is safe-top + 6 from the callers; the Chats board starts its title row 14px below the safe area (+8).
 module.exports = async ({ js, ok, eq, press }, label, rowTop) => {
   const r = await js(`(() => {
     const header = document.querySelector('.ms-shell .ms-header');
@@ -21,7 +22,7 @@ module.exports = async ({ js, ok, eq, press }, label, rowTop) => {
   ok(r, `${label}: Chats header, title row and switch exist`);
   eq([r.text, r.italic, r.size], ['Chats', 'italic', '40px'], `${label}: serif-italic Chats title typography`);
   ok(/serif/i.test(r.font), `${label}: Chats title uses the serif family: ${r.font}`);
-  ok(Math.abs(r.row.t - rowTop) <= 1 && Math.abs(r.row.l - 20) <= 1 && Math.abs(r.row.r - (r.width - 20)) <= 1,
+  ok(Math.abs(r.row.t - (rowTop + 8)) <= 1 && Math.abs(r.row.l - 20) <= 1 && Math.abs(r.row.r - (r.width - 20)) <= 1,
     `${label}: title row clears the status bar and keeps 20px gutters: ${JSON.stringify(r)}`);
   ok(Math.abs(r.title.l - r.row.l) <= 1 && r.buttons.length > 0 && r.buttons.length <= 2 && r.round &&
     r.buttons.every((b, i) => Math.abs(b.w - 46) <= 1 && Math.abs(b.h - 46) <= 1 && b.t >= r.row.t - 1 && b.b <= r.row.b + 1 && b.l >= (i ? r.buttons[i - 1].r : r.title.r) && b.r <= r.row.r + 1),

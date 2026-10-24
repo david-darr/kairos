@@ -54,7 +54,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await delay(450);
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row ~ .ms-switch .ms-segment')].map(n => n.textContent)"), ['New', 'Chats'], 'The original New/Chats switch follows the title row');
   assert.equal(await js("document.querySelector('.ms-intro h2').textContent"), 'What should we work on?', 'The idle prompt remains an h2 below the header');
-  assert.equal(Math.round((await rect('.ms-intro kairos-mascot')).w), 84, 'Centered Kip is 84px');
+  assert.equal(Math.round((await rect('.ms-intro kairos-mascot')).w), 120, 'Centered Kip is 120px, as on ChatsIdle');
   const launchButtons = await js(`[...document.querySelectorAll('.ms-shell .ms-header-row button')].filter(n => n.getClientRects().length).map(n => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, radius: getComputedStyle(n).borderRadius }; })`);
   assert.equal(launchButtons.length, 2, 'The launch header has New chat and Chat actions');
   assert.ok(launchButtons.every(b => Math.round(b.width) === 46 && Math.round(b.height) === 46), 'Both launch header actions are 46px');
@@ -62,11 +62,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.ok(await js("document.querySelector('.ms-background')?.getClientRects().length > 0"), 'The backdrop runs full bleed behind the launch surface');
   assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar')"), true, 'No avatar and no hamburger: the tab bar navigates');
   await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-  assert.equal(await js("document.getElementById('chat-input').placeholder"), 'Plan, ask, build…');
+  assert.equal(await js("document.getElementById('chat-input').placeholder"), 'Ask anything…');
   const rest = await rect('.ms-composer');
-  assert.ok(rest.h >= 48 && rest.h <= 56, `Composer rests as a pill (${rest.h}px)`);
-  assert.ok(rest.b <= 844 - 12 + 1, 'Composer clears the bottom edge');
-  assert.ok(rest.b <= (await rect('.ms-tabbar')).y - 8 + 1, 'Composer sits above the tab bar');
+  assert.ok(rest.h >= 100 && rest.h <= 140, `Idle composer rests as ChatsIdle's two-row card (${rest.h}px)`);
+  assert.ok(rest.b <= 844 - 12 + 1, 'Composer clears the bottom edge ' + JSON.stringify(rest));
+  assert.ok(rest.b <= (await rect('.ms-tabbar')).y - 8 + 1, 'Composer sits above the tab bar ' + JSON.stringify([rest, await rect('.ms-tabbar')]));
   assert.deepEqual(await small(), [], 'Launch controls are at least 44px');
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-header .ms-blur-top i')).backdropFilter.includes('blur')"), true, 'The header has a gradual edge blur');
   assert.equal(await js("document.querySelectorAll('.ms-header .ms-blur-top i').length"), 6, 'Edge blur is built from six layers');
@@ -79,9 +79,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     const bar = document.querySelector('.ms-composer'), input = bar.querySelector('textarea');
     const r = n => n.getBoundingClientRect(), cy = n => { const b = r(n); return (b.top + b.bottom) / 2; };
     const controls = ['#overflow-plus-btn', '#chat-mic'].map(s => bar.querySelector(s));
-    return { gaps: controls.map(n => cy(n) - cy(input)), bar: cy(bar) - cy(input), lineHeight: getComputedStyle(input).lineHeight };
+    const row = cy(controls[0]);
+    return { gaps: controls.map(n => cy(n) - row), inputAbove: r(input).bottom <= r(controls[0]).top + 1, lineHeight: getComputedStyle(input).lineHeight };
   })()`);
-    assert.ok(m.gaps.every(g => Math.abs(g) <= 1) && Math.abs(m.bar) <= 1 && m.lineHeight === '24px', 'Resting composer controls and text line are centered within 1px: ' + JSON.stringify(m));
+    // ChatsIdle: the text line sits on top, and the controls share one centred row beneath it.
+    assert.ok(m.gaps.every(g => Math.abs(g) <= 1) && m.inputAbove && m.lineHeight === '24px', 'Resting composer: text line above, controls centered on one row within 1px: ' + JSON.stringify(m));
   };
   await centered();
 
@@ -174,7 +176,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await delay(450);
   assert.deepEqual(await overflow(), [], 'Conversation has no overflow');
   assert.equal(await js("document.querySelector('.ms-chat-heading strong').textContent"), 'A clearer direction for the workspace');
-  assert.equal(await js("document.querySelector('.ms-chat-heading small').textContent"), 'Workspace design', 'The heading names the real project');
+  // Conversation board: the subtitle reads "<model> · <workspace>".
+  assert.match(await js("document.querySelector('.ms-chat-heading small').textContent"), /^.+ · Workspace design$/, 'The heading names the model and the real project');
   const head = await rect('.chat-mobile-header');
   assert.ok(head.h <= 76 && head.y === 0, `Header is one compact row (${head.h}px)`);
   assert.ok(await js("document.querySelector('.ms-chat-capsule').contains(document.querySelector('.chat-phone-tools > button')) && document.querySelector('.ms-chat-capsule').contains(document.querySelector('.chat-files-toggle'))"), 'Files and the menu share the actions capsule');
@@ -186,12 +189,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.getElementById('chat-messages').click()");
   // Composer inside a conversation morphs on focus
   const convoRest = await rect('.chat-input-bar');
-  assert.ok(convoRest.h <= 58, `Conversation composer rests as a pill (${convoRest.h}px)`);
+  assert.ok(convoRest.h <= 64, `Conversation composer rests as a pill (${convoRest.h}px)`);
   await js("document.getElementById('chat-input').focus()"); await delay(500);
   assert.equal(await js("document.querySelector('.chat-input-bar').classList.contains('ms-composer-expanded')"), true, 'Focus expands the composer');
-  assert.ok((await rect('.chat-input-bar')).h > 110, 'The expanded card keeps room for the field, model and Send');
+  // Conversation board: the one-row pill stays one row while drafting; field, model and Send all stay inside it.
+  assert.equal(await js(`(() => { const bar = document.querySelector('.chat-input-bar').getBoundingClientRect(); return ['#chat-input', '.chat-header-model', '#chat-send'].every(s => { const n = document.querySelector('.chat-input-bar ' + s); const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.left >= bar.left - 1 && r.right <= bar.right + 1 && r.top >= bar.top - 1 && r.bottom <= bar.bottom + 1; }); })()`), true, 'The expanded pill keeps the field, model and Send inside it');
   assert.equal(await js("getComputedStyle(document.getElementById('chat-send')).display !== 'none' && document.getElementById('chat-send').getBoundingClientRect().height >= 44"), true, 'Send appears when drafting');
-  assert.equal(await js(`(() => { const controls = ['#overflow-plus-btn', '#chat-mic', '#chat-send'].map(s => document.querySelector(s)); const centers = controls.map(n => { const r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }); return Math.max(...centers) - Math.min(...centers) <= 1; })()`), true, 'Expanded chat bottom row centered within 1px');
+  assert.equal(await js(`(() => { const controls = ['#overflow-plus-btn', '.chat-input-bar .model-picker-btn', '#chat-send'].map(s => document.querySelector(s)); const centers = controls.map(n => { const r = n.getBoundingClientRect(); return (r.top + r.bottom) / 2; }); return Math.max(...centers) - Math.min(...centers) <= 1; })()`), true, 'Expanded chat controls (plus, model, send; dictation lives in the plus menu) centered within 1px');
   await capture('shell-conversation-drafting');
   await js("document.activeElement.blur()");
   // Back keeps the retained search
@@ -330,9 +334,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("window.__composerNode = document.getElementById('chat-input')");
   await js("document.getElementById('chat-input').focus()"); await delay(500);
   assert.equal(await js("document.querySelector('.ms-composer').classList.contains('ms-composer-expanded') && document.getElementById('chat-input') === window.__composerNode"), true, 'The identical textarea survives the morph');
-  assert.ok(await js("document.querySelector('.ms-composer-context').getBoundingClientRect().height > 20"), 'The context row appears while drafting');
+  // ChatsIdle has no context row: the workspace pill in the controls row carries the workspace.
+  assert.ok(await js("document.querySelector('.ms-composer-context').getBoundingClientRect().height === 0 && document.getElementById('workspace-pill-slot') !== null"), 'The separate context row stays out of the board card');
   const field = await rect('#chat-input');
-  assert.ok(field.h >= 63.5 && field.h <= 160.5, `Draft field is 64-160px (${field.h})`);
+  assert.ok(field.h >= 43.5 && field.h <= 160.5, `Draft field is 44-160px (${field.h})`);
   await js("(() => { const t = document.getElementById('chat-input'); t.value = 'Draft stays'; t.dispatchEvent(new Event('input', { bubbles: true })); t.blur(); })()"); await delay(450);
   assert.equal(await js("document.querySelector('.ms-composer').classList.contains('ms-composer-expanded')"), true, 'A draft keeps the card open after blur');
   await js("document.getElementById('chat-mic').classList.add('recording')"); await delay(500);

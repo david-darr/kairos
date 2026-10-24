@@ -863,7 +863,7 @@ app.whenReady().then(async () => {
       assert.ok(reads.some(r => r.path === '/api/forge/projects/fp2/files'), label + ' project-folder fallback');
       // Chats opens the shell and selects the correct project.
       await navigate('chat');
-      await waitFor(`!!document.querySelector('.session-item[data-session-id="${forgeSessionId}"] .forge-chat-tag')`);
+      await waitFor(`!!document.querySelector('.session-item[data-session-id="${forgeSessionId}"] :is(.forge-chat-tag, .rd-conversation-tag)')`);
       await js(`document.querySelector('.session-item[data-session-id="${forgeSessionId}"]').click()`);
       await waitFor("document.getElementById('view-content').dataset.view === 'forgeShell' && !!document.querySelector('.forge-transcript-layout')");
       assert.equal(await js("document.querySelector('.forge-project-heading strong').textContent"), 'Kairos garden', label + ' Chats selects the project');
@@ -2063,7 +2063,7 @@ app.whenReady().then(async () => {
     assert.ok(await js(popupLook.split(popupRadius).join(sharedRadius) + "(document.querySelector('#overflow-menu'))"), "+ menu: shared popup look, above the composer");
     assert.ok(await js("[...document.querySelectorAll('.chat-input-bar button')].filter(b => !b.closest('#overflow-menu')).every(b => !b.classList.contains('chat-computer-toggle') && b.id !== 'chat-compact' && !['Capture screen', 'Computer', 'Compact'].includes(b.title) && !['Capture screen', 'Computer', 'Compact'].includes(b.textContent.trim()) && b.getAttribute('aria-label') !== 'Capture from this device')"), "Capture screen, Computer and Compact are absent from the composer bar outside the + menu");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].some(b => b.textContent.trim() === 'Capture screen' && !b.hidden)"), "+ menu always contains Capture screen");
-    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order");
+    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item:not(.rd-chat-dictation-action)')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order (the phone-only Dictate action is excluded)");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item[hidden]')].every(b => getComputedStyle(b).display === 'none')"), "Hidden + menu items leave no gaps");
     await capture("desktop-plus-menu");
     await js("document.body.click()");

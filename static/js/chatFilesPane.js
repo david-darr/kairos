@@ -73,7 +73,12 @@ export function openChatFiles(sessionId) {
     el('header', { class: 'artifact-header' }, [el('h2', { text: 'Chat files' }), el('div', { class: 'card-row' }, [refresh, close])]),
     body,
   ]);
-  const onKey = event => { if (event.key === 'Escape') { event.preventDefault(); closeChatFiles(); } };
+  const onKey = event => {
+    if (event.defaultPrevented) return;
+    const focusedPane = event.target.closest?.('.chat-stacked-pane');
+    if (focusedPane && focusedPane !== panel) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeChatFiles(); }
+  };
   const nextPane = { panel, body, sessionId, onKey };
   // Let the shared mount release the old registration before publishing this
   // pane, so a replacement never clears the split between two paints.

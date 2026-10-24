@@ -1,5 +1,7 @@
+import { mountStackedPane, desktopPanes, paneStorageKey } from './chatPaneStack.js';
 import { el } from './api.js';
 import { holdReadingPositions } from './chatScrollAnchor.js';
+import { maximumChatWidth } from './chatPaneState.js';
 
 // The chat keeps most of the room and a document opens beside it at about
 // 40% (David, 2026-10-09: "the default width to be a lot smaller"). These
@@ -13,7 +15,8 @@ let current = null;
 
 // Every right-hand pane registers here so even rapid opens close the native
 // browser synchronously. The registration owns the divider and its listeners.
-export function mountChatPane(host, panel, close, { onDrag } = {}) {
+export function mountChatPane(host, panel, close, { onDrag, sharedRoot = false, animate = false, kind } = {}) {
+  if (!sharedRoot && desktopPanes(host)) return mountStackedPane(host, panel, close, { onDrag, kind }, mountChatPane);
   holdReadingPositions(); // Capture before the pane's first layout can move the reader.
   const main = host.querySelector('#chat-main');
   // Capture the painted width before replacing a pane. An auto width cannot
@@ -23,7 +26,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
   current?.close();
   let preferred = null; // null: the default share of whatever room there is
   try {
-    const saved = Number(localStorage.getItem(STORAGE_KEY));
+    const saved = Number(localStorage.getItem(paneStorageKey(STORAGE_KEY)));
     if (Number.isFinite(saved) && saved >= MIN_WIDTH) preferred = saved;
   } catch { /* Storage can be disabled on this device. */ }
   const defaultWidth = () => Math.round(host.clientWidth * DEFAULT_SHARE);
@@ -43,7 +46,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
     }
   };
   const inertBefore = new Map();
-  const maximum = () => Math.max(MIN_WIDTH, Math.floor(host.clientWidth * MAX_SHARE));
+  const maximum = () => desktopPanes(host) ? maximumChatWidth(host.clientWidth) : Math.max(MIN_WIDTH, Math.floor(host.clientWidth * MAX_SHARE));
   const clamp = width => Math.max(MIN_WIDTH, Math.min(maximum(), width));
   const sync = () => {
     const width = clamp(preferred ?? defaultWidth());
@@ -55,8 +58,8 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
   };
   const save = () => {
     try {
-      if (preferred === null) localStorage.removeItem(STORAGE_KEY);
-      else localStorage.setItem(STORAGE_KEY, String(preferred));
+      if (preferred === null) localStorage.removeItem(paneStorageKey(STORAGE_KEY));
+      else localStorage.setItem(paneStorageKey(STORAGE_KEY), String(preferred));
     } catch { /* Best effort. */ }
   };
   const resize = width => { stopEntrance(); preferred = clamp(width); sync(); };
@@ -114,7 +117,7 @@ export function mountChatPane(host, panel, close, { onDrag } = {}) {
     if (window.innerWidth <= 1100) { stopDrag(); setMaximized(false); }
     sync();
   };
-  const animateDocuments = !replacingPane && (panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel'))
+  const animateDocuments = !replacingPane && (panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel') || (sharedRoot && animate))
     && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const split = window.innerWidth > 1100 && main && !host.classList.contains('forge-conversation');
   // Disable the CSS resize transition before installing the split, including

@@ -7,6 +7,8 @@ import * as commandPalette from "./commandPalette.js";
 import * as floatingProgress from "./floatingProgress.js";
 import * as chatStream from "./chatStream.js";
 import { setupSidebar, restoreSidebar } from "./sidebar.js";
+import { parseChatWindow } from './chatWindowRoute.js';
+import { setPaneUser } from './chatPaneStack.js';
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
@@ -556,6 +558,7 @@ async function boot() {
   await auth.run(overlay);
   const identity = await api('/api/auth/status');
   await initAppearance(identity.username);
+  setPaneUser(identity.username);
   initLayout(identity.username);
   overlay.classList.add("hidden");
 
@@ -582,6 +585,8 @@ async function boot() {
 }
 
 async function startApp() {
+  const chatWindow = parseChatWindow(location.search);
+  if (chatWindow) document.documentElement.classList.add('single-chat-window');
   const customTabs = await buildSidebar();
   setupSidebar();
   setupMobileMenu();
@@ -661,7 +666,8 @@ async function startApp() {
       switchTab('library', { section: 'designs', designId: match[1] });
     }
   });
-  if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
+  if (chatWindow) await switchTab('chat', chatWindow);
+  else if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
   else if (!await openNotificationChat(location.href)) {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');

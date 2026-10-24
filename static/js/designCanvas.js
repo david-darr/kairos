@@ -115,6 +115,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     modeButtons.set(id, b); modeGroup.append(b);
   }
   const zoomLabel = el('button', { type: 'button', class: 'btn quiet design-zoom', text: '100%', title: 'Reset zoom to 100% (0)', onclick: () => zoomTo(1) });
+  const zoomOut = el('button', { type: 'button', class: 'btn quiet', text: '−', title: 'Zoom out (−)', 'aria-label': 'Zoom out', onclick: () => zoomTo(zoom / 1.25) });
+  const zoomIn = el('button', { type: 'button', class: 'btn quiet', text: '+', title: 'Zoom in (+)', 'aria-label': 'Zoom in', onclick: () => zoomTo(zoom * 1.25) });
   const fitBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Fit', title: 'Fit all boards (Shift+1)', onclick: () => fitAll() });
   const focusBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Focus', title: 'Open the selected board at real size (F)', onclick: () => openFocus(selected || order()[0]) });
   const panelBtns = {};
@@ -131,7 +133,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   const toolbar = el('div', { class: 'design-toolbar', role: 'toolbar', 'aria-label': 'Design tools' }, [
     el('div', { class: 'design-toolbar-start' }, [titleNode, systemNode]),
     modeGroup,
-    el('div', { class: 'design-toolbar-end' }, [addBtn, fitFormatBtn, fitBtn, zoomLabel, focusBtn, panelBtns.tokens, panelBtns.versions, panelBtns.comments, exportBtn, viewBtn]),
+    el('div', { class: 'design-toolbar-end' }, [addBtn, fitFormatBtn, fitBtn, zoomOut, zoomLabel, zoomIn, focusBtn, panelBtns.tokens, panelBtns.versions, panelBtns.comments, exportBtn, viewBtn]),
   ]);
   const banner = el('div', { class: 'design-banner', role: 'status', hidden: true });
   const world = el('div', { class: 'design-world' });
@@ -352,6 +354,7 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   let space = false, panning = null;
   const pointers = new Map();
   stage.addEventListener('pointerdown', event => {
+    root.focus({ preventScroll: true });
     const onBoard = event.target.closest('.design-board');
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.size === 2) { panning = { pinch: pinchState() }; return; }

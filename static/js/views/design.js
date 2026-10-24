@@ -6,7 +6,7 @@
 // Library > Designs (app.js).
 import { api, el, toast, openPanelDialog } from '../api.js';
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
-import { mountDesignCanvas } from '../designCanvas.js';
+import { mountSharedDesignCanvas as mountDesignCanvas } from '../sharedDesignCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
 import { mountDesignModelPicker } from '../designModelPicker.js';
 import { mobileOn } from '../mobileShared.js';

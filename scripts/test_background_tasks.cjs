@@ -96,7 +96,9 @@ class Element {
     n.append(...children); return n;
   };
   const context = { el, activeSessionId: 'sid', id: 'sid', states: new Map(), backdrop: null, options: {}, renderAgentHandoff: () => null,
-    renderMessageBody: (n, text) => { n.textContent = text; }, ICON_COPY: '', KAIROS_MARK: '' };
+    renderMessageBody: (n, text) => { n.textContent = text; }, ICON_COPY: '', KAIROS_MARK: '',
+    // Reply cards now carry Kip in the author row (phone Chats fidelity).
+    createMascot: () => new Element('kairos-mascot') };
   const chat = fs.readFileSync(path.join(__dirname, '../static/js/views/chat.js'), 'utf8');
   const chatCard = vm.runInNewContext(chat.match(/function messageCard\([\s\S]*?\n\}/)[0] + '; messageCard', context);
   const forge = fs.readFileSync(path.join(__dirname, '../static/js/forgeTranscript.js'), 'utf8');

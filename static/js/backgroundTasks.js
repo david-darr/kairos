@@ -1,5 +1,7 @@
 import { api } from './api.js';
 import { openMobileSheet } from './mobileSheet.js';
+import { mountChatPane } from './chatPaneLayout.js';
+import { desktopPanes } from './chatPaneStack.js';
 
 const kinds = { subagent: 'Subagent', command: 'Command', agent: 'Agent', helper: 'Helper', computer: 'Computer', app_server: 'App server', scheduled: 'Scheduled', task: 'Task' };
 const statuses = { running: 'Running', queued: 'Queued', waiting: 'Waiting on you', scheduled: 'Scheduled', done: 'Done', failed: 'Failed', stopped: 'Stopped' };
@@ -25,7 +27,9 @@ function elapsed(item) {
 
 export function mountBackgroundTasks({ host, messages, getSessionId, onOpenComputer }) {
   let sessionId = null, items = [], opened = false, selected = null, disposed = false;
-  let sheet = null, revision = 0, detailTimer = null, detailAt = 0, request = 0;
+  let sheet = null, revision = 0, detailTimer = null, detailAt = 0, request = 0, dock = null;
+  const canDock = () => typeof window !== 'undefined' && desktopPanes(host.closest('.chat-layout'));
+  const notify = () => { if (typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent('kairos:background-ui')); };
   const seen = new Set();
   const pill = button('', () => opened ? close() : open(), 'bg-tasks-pill');
   const dot = node('span', 'bg-tasks-dot'); dot.setAttribute('aria-hidden', 'true');
@@ -40,13 +44,27 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     opened = false; selected = null; request++;
     clearTimeout(detailTimer); detailTimer = null;
     const current = sheet; sheet = null; current?.close();
+    if (dock) { const old = dock; dock = null; old.layout.dispose(); old.root.remove(); }
     if (!host.contains(panel)) host.append(panel);
     panel.hidden = true; pill.setAttribute('aria-expanded', 'false');
+    notify();
     if (pill.isConnected && !host.hidden) pill.focus({ preventScroll: true });
   }
   function open(id = null) {
     if (disposed || !sessionId) return;
     opened = true; panel.hidden = false; pill.setAttribute('aria-expanded', 'true');
+    if (!dock && canDock()) {
+      const root = node('section', 'chat-background-pane'); root.setAttribute('aria-label', 'Background tasks');
+      const header = node('header', 'chat-side-pane-header');
+      const title = node('span', 'chat-pane-heading', 'Background tasks');
+      const count = node('small', 'chat-background-count'); title.append(count);
+      const expand = button('⛶', () => dock.layout.setMaximized(!dock.layout.isMaximized()), 'chat-pane-icon');
+      expand.setAttribute('aria-label', 'Expand background tasks'); expand.title = 'Expand background tasks';
+      const dismiss = button('×', close, 'chat-pane-icon'); dismiss.setAttribute('aria-label', 'Close background tasks'); dismiss.title = 'Close background tasks';
+      header.append(title, expand, dismiss); root.append(header, panel);
+      dock = { root, count, layout: mountChatPane(host.closest('.chat-layout'), root, close, { kind: 'background' }) };
+      root.addEventListener('pane-maximize', e => { expand.title = e.detail ? 'Restore background tasks' : 'Expand background tasks'; expand.setAttribute('aria-label', expand.title); });
+    }
     if (!sheet && matchMedia('(max-width: 768px)').matches && document.querySelector('.kairos-redesign')) {
       sheet = openMobileSheet({ title: 'In the background', content: panel, opener: pill, onClose: () => {
         sheet = null; opened = false; panel.hidden = true; host.append(panel); pill.setAttribute('aria-expanded', 'false');
@@ -58,6 +76,8 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     }
     selected = id;
     if (id) loadDetail(); else renderList();
+    if (dock) dock.count.textContent = `${items.filter(active).length} running`;
+    notify();
     panel.querySelector('button')?.focus();
   }
   function renderPill() {
@@ -67,19 +87,24 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     caption.textContent = count ? `${count} running in background${waiting ? ` · ${waiting} waiting on you` : ''}`
       : finished ? `${finished} finished in background` : `${items.length} scheduled in background`;
     host.dataset.state = count ? 'running' : items.some(i => i.status === 'failed') ? 'failed' : items.every(i => i.status === 'done') ? 'done' : 'idle';
+    if (dock) dock.count.textContent = `${count} running`;
+    notify();
     if (opened && !selected) renderList();
   }
   function renderList() {
     const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.itemId : null;
     panel.replaceChildren();
-    if (!panel.closest('.ms-sheet')) panel.append(node('h3', 'bg-tasks-heading', 'Background tasks'));
-    else summary.textContent = [
+    if (!dock && !panel.closest('.ms-sheet')) panel.append(node('h3', 'bg-tasks-heading', 'Background tasks'));
+    if (panel.closest('.ms-sheet')) summary.textContent = [
       [items.filter(item => ['running', 'queued'].includes(item.status)).length, 'running'],
       [items.filter(item => item.status === 'waiting').length, 'waiting on you'],
       [items.filter(item => item.status === 'done').length, 'done'],
     ].filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(' · ');
     const list = node('div', 'bg-tasks-list');
-    for (const item of items) {
+    const ordered = dock ? [...items.filter(active), ...items.filter(i => !active(i))] : items;
+    let group = null;
+    for (const item of ordered) {
+      if (dock) { const next = active(item) ? 'Running' : 'Finished'; if (group !== next) { group = next; list.append(node('h4', 'bg-task-group', group)); } }
       const row = button('', () => { selected = item.id; loadDetail(); }, 'bg-task-row');
       row.dataset.itemId = item.id;
       row.dataset.status = item.status;
@@ -202,8 +227,8 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
       detailTimer = setTimeout(loadDetail, Math.max(0, 1000 - (Date.now() - detailAt)));
     }
   };
-  const outside = event => { if (opened && !sheet && !event.composedPath().includes(host) && !host.contains(event.target) && !event.target.closest?.('.bg-task-note')) close(); };
-  const escape = event => { if (event.key === 'Escape' && opened) { event.preventDefault(); close(); } };
+  const outside = event => { if (opened && !sheet && !dock && !event.composedPath().includes(host) && !host.contains(event.target) && !event.target.closest?.('.bg-task-note')) close(); };
+  const escape = event => { if (event.key === 'Escape' && opened && !event.defaultPrevented && (!dock || dock.root.contains(event.target))) { event.preventDefault(); close(); } };
   const tick = setInterval(() => {
     if (!opened || selected) return;
     for (const age of panel.querySelectorAll('[data-elapsed]')) {
@@ -213,6 +238,8 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
   document.addEventListener('kairos:bg-tasks', packet); document.addEventListener('kairos:live-snapshot', refetch);
   document.addEventListener('click', outside); document.addEventListener('keydown', escape);
   return {
+    toggle() { opened ? close() : open(); },
+    getState: () => ({ opened, count: items.filter(active).length, available: items.length > 0 }),
     setSession(sid) { close(); sessionId = sid; items = []; seen.clear(); renderPill(); refetch(); },
     dispose() {
       disposed = true; close(); clearInterval(tick); revision++;
