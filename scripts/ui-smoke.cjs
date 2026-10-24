@@ -1568,7 +1568,7 @@ app.whenReady().then(async () => {
       // header with its title, then groups of rows.
       await waitFor("!!document.querySelector('#settings-content .set-header .set-title') && !!document.querySelector('#settings-content .set-row, #settings-content .set-empty')");
       assert.equal(await js("document.querySelector('#settings-content .set-title').textContent"),
-        await js("document.querySelector('.settings-nav-item.active').textContent"), label + " page header names the page");
+        await js("document.querySelector('.settings-nav-item.active .settings-nav-label').textContent"), label + " page header names the page");
       assert.equal(await js("document.querySelectorAll('.settings-nav-item svg').length === document.querySelectorAll('.settings-nav-item').length"), true, label + " every nav item has an icon");
       // A phone page pushes in over 280ms; measure it once it has settled.
       await waitFor("document.getAnimations().filter(a => a.effect?.target?.closest?.('.settings-mobile-page')).length === 0");
@@ -1580,10 +1580,12 @@ app.whenReady().then(async () => {
       // -- grouped nav + keyword search (David's ask 2026-09-15).
       assert.deepEqual(
         await js("[...document.querySelectorAll('.settings-nav-group')].filter(g=>!g.hidden).map(g=>g.textContent)"),
-        ["Models", "Connections", "Workspace", "Personal", "Administration"],
+        await js("document.documentElement.classList.contains('kairos-redesign')") ? ["General", "Intelligence", "Your data", "Access", "Advanced"] : ["Models", "Connections", "Workspace", "Personal", "Administration"],
         label + " settings groups",
       );
       assert.ok(!(await js("document.querySelector('[data-section=custom-tabs]')")), "Tabs are managed in the Tool Store");
+      assert.equal(await js("document.querySelector('[data-section=appearance] .settings-nav-value')?.textContent"),
+        await js("import('/static/js/appearance.js').then(m => m.appearanceName())"), label + " Appearance row shows the saved theme separately from its label");
       // -- Speech panel (David's ask 2026-09-15). Without it there is no way
       // to obtain a model, so dictation could only ever refuse.
       await js("document.querySelector('[data-section=speech]').click()");
@@ -1762,7 +1764,7 @@ app.whenReady().then(async () => {
       assert.equal(await js("document.querySelector('.settings-nav-item:not([hidden])').dataset.section"), "account");
       // An emptied group takes its heading with it rather than leaving a
       // stray label over nothing.
-      assert.deepEqual(await js("[...document.querySelectorAll('.settings-nav-group')].filter(g=>!g.hidden).map(g=>g.textContent)"), ["Personal"]);
+      assert.deepEqual(await js("[...document.querySelectorAll('.settings-nav-group')].filter(g=>!g.hidden).map(g=>g.textContent)"), await js("document.documentElement.classList.contains('kairos-redesign')") ? ["Access"] : ["Personal"]);
       await js("{ const s=document.querySelector('.settings-search'); s.value='tailscale'; s.dispatchEvent(new Event('input')); }");
       await waitFor("document.querySelector('.settings-nav-item:not([hidden])').dataset.section==='remote'");
       await js("{ const s=document.querySelector('.settings-search'); s.value=''; s.dispatchEvent(new Event('input')); }");
@@ -1805,9 +1807,11 @@ app.whenReady().then(async () => {
       // Every page opens in the same frame (redesign 2026-10-05): its own
       // title in the header, real content under it, nothing wider than the
       // pane. A page that throws leaves the header without content.
+      // V2 rows also show saved values (Appearance + Parchment, for example);
+      // only the row's label names the page, not its combined textContent.
       for (const id of await js("[...document.querySelectorAll('.settings-nav-item')].map(i => i.dataset.section)")) {
         await js(`document.querySelector('[data-section="${id}"]').click()`);
-        await waitFor(`document.querySelector('.set-page')?.dataset.page === '${id}' && document.querySelector('#settings-content .set-title')?.textContent === document.querySelector('[data-section="${id}"]').textContent
+        await waitFor(`document.querySelector('.set-page')?.dataset.page === '${id}' && document.querySelector('#settings-content .set-title')?.textContent === document.querySelector('[data-section="${id}"] .settings-nav-label').textContent
           && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .set-note, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item')`);
         assert.deepEqual(await overflow(), [], `${label} ${id} overflow`);
         await capture(`${label}-settings-${id}`);
@@ -2044,6 +2048,11 @@ app.whenReady().then(async () => {
     assert.equal(writes.length, navigationWriteBaseline, "Navigation must not write data");
     await js("document.querySelector('#model-picker-btn').click()");
     await capture("desktop-model-menu");
+    if (await js("document.documentElement.classList.contains('kairos-redesign')")) {
+      assert.ok(await js("!!document.querySelector('#model-picker-menu .rd-model-search-row input') && !!document.querySelector('#model-picker-menu .rd-model-group')"), 'Desktop model picker has search and endpoint groups');
+      assert.equal(await js("document.querySelector('#model-picker-menu .model-manage-item').textContent"), 'Manage models in Settings');
+      assert.ok(await js("[...document.querySelectorAll('#model-picker-menu .model-effort-row')].every(row => getComputedStyle(row).display !== 'none' && row.querySelector('.rd-effort-seg'))"), 'Published effort options stay visible in a segmented row');
+    }
     const menuFits = await js("(() => {const r=document.querySelector('#model-picker-menu').getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()");
     assert.ok(menuFits, "Model menu fits viewport");
     // Every popup shares one flat surface (no sheen), and the composer's

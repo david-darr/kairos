@@ -5,7 +5,7 @@
 // the same route (POST /api/sessions/<id>/model), so the design composer's
 // sends and the chat itself both use it.
 import { api, el, toast } from './api.js';
-import { renderMobileCatalogMenu } from './mobileModelSheet.js';
+import { renderMobileCatalogMenu, mountMobileModelSheet, appendEndpointCatalogs } from './mobileModelSheet.js';
 import { getInFlight, subscribe } from './chatStream.js';
 
 const EDITABLE = ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'];
@@ -19,6 +19,8 @@ export function mountDesignModelPicker(host, { getSession }) {
   const menu = el('div', { class: 'model-picker-menu design-model-menu', role: 'dialog', 'aria-label': 'Model for this design', hidden: true });
   const root = el('div', { class: 'design-model-picker' }, [button, menu]);
   host.append(root);
+  const mobilePicker = mountMobileModelSheet({ trigger: button, menu });
+  let otherCatalogs = [];
 
   const busy = () => getInFlight(sessionId)?.status === 'processing';
   function paintLabel() {
@@ -38,6 +40,8 @@ export function mountDesignModelPicker(host, { getSession }) {
       // A level for the model in use: an effort the model does not offer is refused on the server.
       onEffort: effort => save({ model_endpoint_id: choice.endpointId, model_override: choice.model, effort }),
     });
+    appendEndpointCatalogs(menu, otherCatalogs, (id, model) => save({ model_endpoint_id: id, model_override: model, effort: null }));
+    menu.dispatchEvent(new Event('kairos:model-menu-updated'));
   }
   async function load() {
     const ticket = ++generation;
@@ -54,9 +58,11 @@ export function mountDesignModelPicker(host, { getSession }) {
     endpoints = choices;
     const endpoint = endpoints.find(item => item.id === choice.endpointId);
     catalog = endpoint && EDITABLE.includes(endpoint.kind) ? await api(`/api/models/${endpoint.id}/catalog`).catch(() => []) : [];
+    otherCatalogs = document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches
+      ? await Promise.all(endpoints.filter(item => item.id !== choice.endpointId).map(async item => [item.id, await api(`/api/models/${item.id}/catalog`).catch(() => [])])) : [];
     if (ticket !== generation) return;
     paintLabel();
-    if (!menu.hidden) paintMenu();
+    paintMenu();
   }
   async function save(body) {
     if (!sessionId || busy()) { toast('Wait for the reply to finish before switching models.'); return; }
@@ -65,6 +71,10 @@ export function mountDesignModelPicker(host, { getSession }) {
       choice = { endpointId: result.model_endpoint_id || null, model: result.model_override ?? null, effort: result.effort ?? null };
       const endpoint = endpoints.find(item => item.id === choice.endpointId);
       catalog = endpoint && EDITABLE.includes(endpoint.kind) ? await api(`/api/models/${endpoint.id}/catalog`).catch(() => []) : [];
+      otherCatalogs = [];
+      if (document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches) {
+        otherCatalogs = await Promise.all(endpoints.filter(item => item.id !== choice.endpointId).map(async item => [item.id, await api(`/api/models/${item.id}/catalog`).catch(() => [])]));
+      }
       paintLabel(); paintMenu();
       if (body.model_override !== undefined || body.effort !== undefined) { close(); toast('Model updated for this design', 'success'); }
     } catch { /* api shows the reason; the menu stays open. */ }
@@ -74,17 +84,19 @@ export function mountDesignModelPicker(host, { getSession }) {
   function toggle() { if (menu.hidden) openMenu(); else close(); }
   function openMenu() {
     if (!sessionId) return;
-    paintMenu(); menu.hidden = false; button.setAttribute('aria-expanded', 'true');
+    paintMenu(); menu.hidden = false; menu.classList.remove('hidden'); button.setAttribute('aria-expanded', 'true');
     document.addEventListener('pointerdown', outside, true); menu.addEventListener('keydown', onKey);
-    (menu.querySelector('.model-picker-item.active') || menu.querySelector('button'))?.focus({ preventScroll: true });
+    const items = [...menu.querySelectorAll('.model-picker-item')].filter(item => item.getClientRects().length);
+    (items.find(item => item.classList.contains('active')) || items[0])?.focus({ preventScroll: true });
   }
   function close() {
+    mobilePicker.close();
     menu.hidden = true; button.setAttribute('aria-expanded', 'false');
     document.removeEventListener('pointerdown', outside, true); menu.removeEventListener('keydown', onKey);
   }
   load();
   return {
     root, update: load, state: () => ({ sessionId, ...choice, label: label.textContent }),
-    dispose() { generation++; unsubscribe(); close(); root.remove(); },
+    dispose() { generation++; unsubscribe(); close(); mobilePicker.dispose(); root.remove(); },
   };
 }

@@ -1,5 +1,5 @@
 import { api, el } from './api.js';
-import { mobileOn, button } from './mobileShared.js';
+import { mobileOn, button, go } from './mobileShared.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { toSnap, staleOf, pctText, resetCopy, SIGN_IN } from './quotaReadings.js';
 
@@ -7,25 +7,44 @@ export const quotaTone = percent => percent >= 90 ? 'danger' : percent >= 80 ? '
 // Never let the shared overlay's numeric conversion turn an unknown into 0%.
 export const knownQuota = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 
+// Desktop lists every connected endpoint's real catalog. Controllers own saves.
+export function appendEndpointCatalogs(menu, catalogs, onPick) {
+  for (const [endpointId, catalog] of catalogs) {
+    if (!catalog.length) continue;
+    const list = el('div', { class: 'model-other-catalog-list', 'data-endpoint-id': endpointId });
+    for (const model of catalog) list.append(el('button', {
+      type: 'button', class: 'model-picker-item model-other-catalog-item',
+      'data-model-search': `${model.id} ${model.display_name || ''} ${model.description || ''}`,
+      onclick: () => onPick(endpointId, model.id),
+    }, [el('span', { class: 'model-catalog-name', text: model.display_name || model.id }),
+      el('span', { class: 'model-catalog-desc', text: model.description || model.id })]));
+    menu.append(list);
+  }
+}
+
 // For embedded Forge sessions, render presentation from the controller's
 // already-fetched choices. All saves are callbacks into that controller.
 export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, effort, catalog, onConnection, onModel, onEffort }) {
+  const redesign = document.documentElement?.classList.contains('kairos-redesign');
   // The same structure the composer menu builds (views/chat.js), so one set of rules styles both.
   const fragment = document.createDocumentFragment();
   const connections = el('div', { class: 'model-connection-list' });
   for (const endpoint of endpoints) {
     const row = button(endpoint.name, () => onConnection(endpoint.id), `model-picker-item model-connection-item${endpoint.id === endpointId ? ' active' : ''}`);
+    row.dataset.endpointId = endpoint.id;
+    row.dataset.endpointName = endpoint.name;
     row.dataset.provider = endpoint.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', antigravity_cli: 'Antigravity', api: 'API connections' }[endpoint.kind] || endpoint.kind);
     connections.append(row);
   }
   fragment.append(connections);
   const endpoint = endpoints.find(item => item.id === endpointId);
   const effective = (model ?? endpoint?.model) || '';
+  if (redesign && !catalog.length && endpoint?.kind === 'local') catalog = [{ id: effective, display_name: effective || endpoint.name, description: endpoint.name, supported_efforts: [] }];
   const selected = catalog.find(item => item.id === effective || item.alias === effective);
   const section = el('div', { class: 'model-version-section' });
   const list = el('div', { class: 'model-catalog-list' });
   for (const entry of catalog) {
-    const row = el('button', { type: 'button', class: `model-picker-item model-catalog-item${entry === selected ? ' active' : ''}`, onclick: () => onModel(entry.id) },
+    const row = el('button', { type: 'button', class: `model-picker-item model-catalog-item${entry === selected ? ' active' : ''}`, onclick: () => endpoint?.kind === 'local' ? onConnection(endpoint.id) : onModel(entry.id) },
       [el('span', { class: 'model-catalog-name', text: entry.display_name || entry.id }), el('span', { class: 'model-catalog-desc', text: entry.description || entry.id })]);
     row.dataset.modelSearch = `${entry.id} ${entry.display_name || ''} ${entry.description || ''}`;
     row.dataset.modelDefault = String(!!endpoint?.model && (entry.id === endpoint.model || entry.alias === endpoint.model));
@@ -33,13 +52,18 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
   }
   section.append(list);
   fragment.append(section);
-  if (endpoint) section.append(button('Use endpoint setting', () => onModel(null), 'model-picker-item model-use-endpoint'));
+  if (endpoint) {
+    const reset = button('Use endpoint setting', () => onModel(null), 'model-picker-item model-use-endpoint');
+    section.append(redesign ? el('details', { class: 'model-custom-details' }, [el('summary', { text: 'More options' }), reset]) : reset);
+  }
   else if (!endpoints.length) fragment.append(el('p', { text: 'Add a model in Settings.' }));
   if (selected?.supported_efforts?.length) {
     const row = el('div', { class: 'model-effort-row', role: 'group', 'aria-label': 'Reasoning' }, [el('span', { class: 'model-effort-label', text: 'Reasoning' })]);
+    row.dataset.defaultEffort = selected.default_effort || '';
     for (const level of [{ effort: null }, ...selected.supported_efforts]) row.append(button(level.effort || 'Default', () => onEffort(level.effort), `model-effort-btn${(effort ?? null) === level.effort ? ' active' : ''}`));
     section.append(row);
   }
+  if (redesign) fragment.append(button('Set up a model', () => go('settings', { section: 'add-models' }), 'model-picker-item model-add-item'));
   menu.replaceChildren(fragment); menu.dispatchEvent(new Event('kairos:model-menu-updated'));
 }
 
@@ -88,6 +112,7 @@ async function loadAccount(card) {
 // buttons, and the permission select itself moves into the pushed page.
 export function mountMobileModelSheet({ trigger, menu, permission }) {
   const menuRole = menu.getAttribute('role'), originalControls = trigger.getAttribute('aria-controls');
+  const originallyHidden = menu.hidden;
   trigger.setAttribute('aria-haspopup', 'dialog');
   let sheet = null, home = null, optionsPage = null, permissionHome = null, permissionNode = null;
   let search, account, root, optionsButton, empty;
@@ -132,11 +157,17 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
   };
   const decorate = () => {
     if (!sheet) { decorateDesktop(); return; }
+    menu.querySelectorAll('.ms-provider-tabs, .ms-extra-connections').forEach(node => node.remove());
     menu.querySelectorAll('.ms-provider-heading, .ms-default-badge').forEach(node => node.remove());
     let provider = null;
     for (const item of menu.querySelectorAll('.model-connection-item')) {
-      const name = item.dataset.provider || 'Models';
+      const rawName = item.dataset.provider || 'Models';
+      const name = ({ claude: 'Claude', codex: 'Codex', local: 'Local', antigravity: 'Antigravity' })[rawName.toLowerCase()] || rawName;
+      item.dataset.provider = name;
       provider = name;
+      if (!item.dataset.desktopLabel) item.dataset.desktopLabel = item.querySelector('.model-connection-name')?.textContent || item.textContent;
+      const title = item.querySelector('.model-connection-name');
+      if (title) title.textContent = name; else item.textContent = name;
       item.setAttribute('aria-pressed', String(item.classList.contains('active')));
       item.setAttribute('role', 'tab');
       item.setAttribute('aria-selected', String(item.classList.contains('active')));
@@ -145,12 +176,46 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
       item.setAttribute('role', 'radio'); item.setAttribute('aria-checked', String(item.classList.contains('active')));
     }
     menu.querySelector('.model-connection-list')?.setAttribute('role', 'tablist');
+    const connections = [...menu.querySelectorAll('.model-connection-item')];
+    const providers = new Map();
+    for (const item of connections) {
+      const name = item.dataset.provider || 'Models';
+      if (!providers.has(name)) providers.set(name, []);
+      providers.get(name).push(item);
+    }
+    const tabs = el('div', { class: 'ms-provider-tabs', role: 'tablist', 'aria-label': 'Connection' });
+    for (const [name, items] of providers) {
+      const selected = items.some(item => item.classList.contains('active'));
+      tabs.append(el('button', { type: 'button', role: 'tab', 'aria-selected': String(selected), text: name,
+        onclick: () => (items.find(item => item.classList.contains('active')) || items[0]).click() }));
+    }
+    menu.prepend(tabs);
+    if (connections.length > providers.size) {
+      menu.append(el('details', { class: 'ms-extra-connections' }, [el('summary', { text: 'Connections' }),
+        ...connections.map(item => button(item.dataset.desktopLabel || item.textContent, () => item.click(), 'model-picker-item'))]));
+    }
     menu.querySelector('.model-catalog-list')?.setAttribute('role', 'radiogroup');
     nameEffort();
+    for (const levels of menu.querySelectorAll('.model-effort-row')) levels.setAttribute('aria-label', 'Effort');
     filter();
   };
   // The board calls the effort row "Effort"; the controller's own label and buttons stay as they are.
-  const nameEffort = () => { const label = menu.querySelector('.model-effort-label'); if (label) label.textContent = 'Effort'; };
+  const nameEffort = () => {
+    const label = menu.querySelector('.model-effort-label');
+    if (label) label.textContent = 'Effort';
+    for (const row of menu.querySelectorAll('.model-effort-row')) {
+      row.setAttribute('aria-label', 'Effort');
+      const levels = [...row.querySelectorAll('.model-effort-btn')];
+      const fallback = levels.find(level => level.textContent === 'Default');
+      fallback?.classList.add('rd-effort-default');
+      if (fallback?.classList.contains('active') && row.dataset.defaultEffort) {
+        const effective = levels.find(level => level.textContent === row.dataset.defaultEffort);
+        effective?.classList.add('active'); effective?.setAttribute('aria-pressed', 'true');
+      }
+      const details = menu.querySelector('.model-custom-details');
+      if (fallback && details && !details.querySelector('.rd-effort-reset')) details.append(button('Use provider effort default', () => fallback.click(), 'model-picker-item rd-effort-reset'));
+    }
+  };
   // Enhance the existing composer menu without changing its controller or data.
   // Catalogs remain loaded by the selected connection, never guessed here. The board lists
   // models under their provider, so each provider gets a label, and the active connection's
@@ -169,25 +234,30 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
         const input = el('input', { type: 'search', class: 'rd-model-search', placeholder: 'Search models', 'aria-label': 'Search models' });
         input.addEventListener('input', () => {
           const query = input.value.trim().toLowerCase();
-          for (const item of menu.querySelectorAll('.model-connection-item, .model-catalog-item')) item.hidden = !`${item.dataset.provider || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
-          for (const group of menu.querySelectorAll('.rd-model-group')) group.hidden = !group.dataset.rows.split(',').some(id => !menu.querySelector(`[data-endpoint-id="${CSS.escape(id)}"]`)?.hidden);
+          for (const item of menu.querySelectorAll('.model-connection-item, .model-catalog-item, .model-other-catalog-item')) item.hidden = !`${item.dataset.provider || ''} ${item.dataset.endpointName || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
+          for (const group of menu.querySelectorAll('.rd-model-group')) group.hidden = ![...group._rows].some(item => !item.hidden);
         });
         row = el('label', { class: 'rd-model-search-row' }, [icon(), input]); menu.prepend(row);
       }
     }
     row.style.order = '-1';
-    let step = 0, provider = null, group = null;
+    let step = 0;
     const catalog = menu.querySelector('.model-catalog-list');
     for (const item of menu.querySelectorAll('.model-connection-item')) {
-      const name = item.dataset.provider || 'Models';
-      if (name !== provider) {
-        step += 10; provider = name;
-        group = el('div', { class: 'rd-model-group', text: name }); group.dataset.rows = '';
-        group.style.order = String(step); item.before(group);
-      }
-      group.dataset.rows += (group.dataset.rows ? ',' : '') + (item.dataset.endpointId || '');
+      const title = item.querySelector('.model-connection-name');
+      if (item.dataset.desktopLabel) { if (title) title.textContent = item.dataset.desktopLabel; else item.textContent = item.dataset.desktopLabel; }
+      const name = item.dataset.endpointName || title?.textContent || item.textContent;
+      step += 10;
+      const group = el('div', { class: 'rd-model-group', text: name });
+      group.style.order = String(step); item.before(group);
       item.style.order = String(step + 1);
-      if (item.classList.contains('active') && catalog) catalog.style.order = String(step + 2);
+      const models = item.classList.contains('active') ? catalog : [...menu.querySelectorAll('.model-other-catalog-list')].find(list => list.dataset.endpointId === item.dataset.endpointId);
+      item.classList.toggle('rd-connection-has-catalog', !!models?.querySelector('button'));
+      if (models) {
+        models.style.order = String(step + 2);
+        models.querySelectorAll('button').forEach(row => { row.dataset.endpointName = name; });
+      }
+      group._rows = models?.querySelector('button') ? models.querySelectorAll('button') : [item];
     }
     // The effort buttons share one track, with the label beside it.
     for (const levels of menu.querySelectorAll('.model-effort-row')) {
@@ -196,6 +266,10 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     }
     for (const node of menu.querySelectorAll('.model-effort-row, .model-custom-details, .model-use-endpoint')) node.style.order = '900';
     for (const node of menu.querySelectorAll('.model-add-item')) node.style.order = '1000';
+    if (!menu.querySelector('.model-manage-item')) menu.append(button('Manage models in Settings', async () => {
+      menu.classList.add('hidden');
+      go('settings', { section: 'added-models' });
+    }, 'model-picker-item model-manage-item'));
   };
   const open = () => {
     if (!mobileOn() || trigger.disabled) return false;
@@ -205,10 +279,10 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     optionsButton = button('Options', options); account = el('details', { class: 'ms-account-card' });
     empty = el('p', { text: 'No models match that search.', hidden: true, role: 'status' });
     home = document.createComment('Model menu home'); menu.before(home);
-    menu.querySelectorAll('.rd-model-search-row:not(.model-version-search), .rd-model-group').forEach(node => node.remove());
+    menu.querySelectorAll('.rd-model-search-row:not(.model-version-search), .rd-model-group, .model-manage-item').forEach(node => node.remove());
     menu.classList.remove('rd-model-picker'); menu.querySelectorAll('[style*="order"]').forEach(node => node.style.removeProperty('order'));
     const extras = el('details', { class: 'ms-model-extras' }, [el('summary', { text: 'Search and account' }), search, optionsButton, account]);
-    root.append(menu, empty, extras); menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
+    root.append(menu, empty, extras); menu.hidden = false; menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
     menu.removeAttribute('role');
     trigger.setAttribute('aria-expanded', 'true');
     arming = true; setTimeout(() => { arming = false; }, 0);
@@ -216,13 +290,16 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
       restoreOptions();
       menu.querySelectorAll('[hidden]').forEach(node => { if (node.matches('.model-connection-item, .model-catalog-item')) node.hidden = false; });
       menu.querySelectorAll('.ms-provider-heading, .ms-default-badge').forEach(node => node.remove());
+      menu.querySelectorAll('.ms-provider-tabs, .ms-extra-connections').forEach(node => node.remove());
       for (const row of menu.querySelectorAll('.model-connection-item, .model-catalog-item')) {
         row.removeAttribute('role'); row.removeAttribute('aria-selected'); row.removeAttribute('aria-checked');
       }
       if (home?.isConnected) home.after(menu); home?.remove(); home = null;
       menu.classList.add('hidden'); menu.classList.remove('ms-model-menu'); trigger.setAttribute('aria-expanded', 'false'); sheet = null;
+      menu.hidden = originallyHidden;
       if (menuRole) menu.setAttribute('role', menuRole);
       if (originalControls) trigger.setAttribute('aria-controls', originalControls); else trigger.removeAttribute('aria-controls');
+      if (!mobileOn()) decorateDesktop();
     } });
     sheet.dialog.classList.add('ms-model-sheet');
     trigger.setAttribute('aria-controls', sheet.dialog.id);
@@ -240,5 +317,5 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
   });
   observer.observe(menu, { attributes: true, attributeFilter: ['class'] });
   menu.addEventListener('kairos:model-menu-updated', decorate);
-  return { open, dispose() { sheet?.close(); observer.disconnect(); menu.removeEventListener('kairos:model-menu-updated', decorate); trigger.removeEventListener('click', click, true); trigger.removeEventListener('keydown', key, true); } };
+  return { open, close() { sheet?.close(); }, dispose() { sheet?.close(); observer.disconnect(); menu.removeEventListener('kairos:model-menu-updated', decorate); trigger.removeEventListener('click', click, true); trigger.removeEventListener('keydown', key, true); } };
 }
