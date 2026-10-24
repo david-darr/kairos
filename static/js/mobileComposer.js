@@ -29,9 +29,11 @@ export function mountMobileComposer({ composer, input, context, attachmentHost, 
     if (contextLabel.textContent !== text) contextLabel.textContent = text || 'Current workspace';
     const expanded = composerExpanded({ focused: composer.contains(document.activeElement), draft: input.value, attachments: attachmentHost?.childElementCount || composer.querySelector('.chat-reference-chip'), recording: recording(), busy: busy() });
     if (composer.classList.contains('ms-composer-expanded') !== expanded) composer.classList.toggle('ms-composer-expanded', expanded);
-    if (input.placeholder === originalPlaceholder && input.placeholder !== 'Plan, ask, build…') input.placeholder = 'Plan, ask, build…';
+    const chatPhone = !!composer.closest('.ms-conversation');
+    const placeholder = chatPhone ? 'Ask anything…' : 'Plan, ask, build…';
+    if (input.placeholder !== placeholder) input.placeholder = placeholder;
     input.style.height = 'auto';
-    const height = expanded ? `${Math.min(160, Math.max(64, input.scrollHeight))}px` : '44px';
+    const height = expanded ? `${Math.min(160, Math.max(chatPhone ? 44 : 64, input.scrollHeight))}px` : '44px';
     if (input.style.height !== height) input.style.height = height;
   };
   const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(sync); };

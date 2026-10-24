@@ -422,14 +422,25 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['chat references'], errors }, null, 2));
       return;
     }
+    await require('./home-redesign-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
+    if (process.argv.includes('--home-only')) {
+      assert.deepEqual(errors, [], 'No Home renderer errors');
+      console.log('PASS: Home; screenshots: ' + output);
+      win.destroy(); server.close(); exitAfterFlush(0); return;
+    }
+    // Check the Classic hero before exercising the redesigned Home layout.
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:true}))");
     await navigate('home');
     assert.ok(await js("document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-header')) && !document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-stats'))"), "Home keeps the header and introduction in one card above the summary strip");
     // Home's banner is the Kairos figure as halftone (static/js/dither.js): still, no status dot, no motion control.
-    await waitFor("document.querySelector('.dashboard-core').classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
+    await waitFor("document.querySelector('.dashboard-core')?.classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
     assert.ok(await js("!document.querySelector('.kairos-sky-image, .kairos-sky-point, .core-motion-toggle, .core-caption, .kairos-mark')"), "Home has no sky scene, dot or motion control");
     assert.ok(await js("Number(document.querySelector('.dashboard-core').dataset.drawMs) < 400"), "Home banner draws quickly");
     // Tab summaries use the same Home and Layout paths in both demo and app.
     // Run early so the feature's screenshots don't depend on unrelated checks.
+    // Keep the original Needs-you expectation in the redesign. Its new hero
+    // and week row are fixed chrome, outside the customizable section order.
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:false}))");
     const tabCardWrites = writes.length;
     await js(`import('/static/js/layout.js').then(m => { const l=m.getLayout(); l.home=m.HOME_SECTIONS.map(s => s.id); l.hiddenHome=[]; m.saveLayout(l); })`);
     await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:true})}))`);
@@ -449,13 +460,21 @@ app.whenReady().then(async () => {
     await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
     await navigate('home');
     await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section^=\"tab:\"]').length === 2 && !!document.querySelector('[data-home-section=\"tab:crm:follow-ups\"] .tone-danger')");
-    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Tab card follows the order set with arrows');
-    assert.deepEqual(await js("[...document.querySelector('.dashboard-grid').children].slice(0,3).map(n => n.dataset.homeSection)"), ['tab:crm:follow-ups', 'tab:crm:open-count', 'needs'], 'Both tab cards can be ordered among built-ins');
+    assert.equal(await js("document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection"), 'tab:crm:follow-ups', 'Tab card follows the order set with arrows');
+    assert.deepEqual(await js("[...document.querySelectorAll('.dashboard-grid > [data-home-section]')].slice(0,3).map(n => n.dataset.homeSection)"), ['tab:crm:follow-ups', 'tab:crm:open-count', 'needs'], 'Both tab cards can be ordered among built-ins');
     assert.ok(await js("[...document.querySelectorAll('[data-home-section^=\"tab:\"]')].every(n => n.matches('section.dashboard-section') && !!n.querySelector('.dashboard-section-header h2 .dashboard-icon') && n.querySelector('.dashboard-section-header button').textContent === '↗' && n.querySelector('.dashboard-section-header button').getAttribute('aria-label').startsWith('Open ') && !!n.querySelector('.dashboard-section-body'))"), 'Tab cards use native dashboard sections');
     assert.ok(await js("document.querySelector('[data-home-section=\"tab:crm:follow-ups\"] .dashboard-row .tone-danger').textContent === 'Overdue'"), 'Follow-ups show native rows and badges');
     await win.loadURL(base);
     await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section^=\"tab:\"]').length === 2");
-    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Tab placement and visibility survive reload');
+    assert.equal(await js("document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection"), 'tab:crm:follow-ups', 'Tab placement and visibility survive reload');
+    // Customize and Settings > Layout must edit the same mixed order.
+    await js("document.querySelector('.hm-customize').click()");
+    await waitFor("!!document.querySelector('[data-focus=\"tab:crm:open-count:down\"]')");
+    await js("document.querySelector('[data-focus=\"tab:crm:open-count:down\"]').click()");
+    assert.deepEqual(await js("import('/static/js/layout.js').then(m => m.homeLayout().order.slice(0,3))"),
+      ['tab:crm:follow-ups', 'needs', 'tab:crm:open-count'], 'Customize moves a tab card past a built-in');
+    await js("document.querySelector('[data-focus=\"tab:crm:open-count:up\"]').click()");
+    await js("document.querySelector('.hm-sheet-top button').click()");
     await capture('desktop-home-tab-cards');
     win.setContentSize(390, 844); await delay(200);
     await js("document.querySelector('[data-home-section=\"tab:crm:follow-ups\"]').scrollIntoView({block:'start'})");
@@ -466,7 +485,7 @@ app.whenReady().then(async () => {
     // A failed optional read leaves built-in sections available.
     demoState.homeCardsUnavailable = true;
     await navigate('home');
-    await waitFor("document.querySelector('[data-home-section=chats] .dashboard-row') && document.querySelector('.dashboard-quota')");
+    await waitFor("document.querySelector('[data-home-section=chats] .dashboard-row') && document.querySelector('[data-home-section=models] .rd-usage-provider')");
     delete demoState.homeCardsUnavailable;
     await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:false})}))`);
     await win.loadURL(base);
@@ -480,7 +499,7 @@ app.whenReady().then(async () => {
     await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:true})}))`);
     await win.loadURL(base);
     await waitFor("document.querySelectorAll('[data-home-section^=\"tab:\"]').length === 2");
-    assert.equal(await js("document.querySelector('.dashboard-grid').firstElementChild.dataset.homeSection"), 'tab:crm:follow-ups', 'Placement survives edits while the tab is off');
+    assert.equal(await js("document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection"), 'tab:crm:follow-ups', 'Placement survives edits while the tab is off');
     // Return the shared fixture and device layout to their initial state.
     await js(`import('/static/js/layout.js').then(m => m.resetHomeLayout())`);
     await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:false})}))`);
@@ -496,6 +515,7 @@ app.whenReady().then(async () => {
       console.log('Screenshots: ' + output);
       win.destroy(); server.close(); exitAfterFlush(0); return;
     }
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:false}))");
     await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
     await require('./classic-look-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
@@ -843,7 +863,7 @@ app.whenReady().then(async () => {
       assert.ok(reads.some(r => r.path === '/api/forge/projects/fp2/files'), label + ' project-folder fallback');
       // Chats opens the shell and selects the correct project.
       await navigate('chat');
-      await waitFor(`!!document.querySelector('.session-item[data-session-id="${forgeSessionId}"] .forge-chat-tag')`);
+      await waitFor(`!!document.querySelector('.session-item[data-session-id="${forgeSessionId}"] :is(.forge-chat-tag, .rd-conversation-tag)')`);
       await js(`document.querySelector('.session-item[data-session-id="${forgeSessionId}"]').click()`);
       await waitFor("document.getElementById('view-content').dataset.view === 'forgeShell' && !!document.querySelector('.forge-transcript-layout')");
       assert.equal(await js("document.querySelector('.forge-project-heading strong').textContent"), 'Kairos garden', label + ' Chats selects the project');
@@ -875,7 +895,7 @@ app.whenReady().then(async () => {
         assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Kairos');
         assert.ok(await js("!!document.querySelector('.forge-mode-rail svg .brand-point')"), 'Collapsed mode toggle is the Kairos circle mark');
         await capture('desktop-forge-switch-collapsed');
-        await js("document.querySelector('.forge-mode-rail').click()"); await waitFor("!!document.querySelector('.dashboard-hero')");
+        await js("document.querySelector('.forge-mode-rail').click()"); await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
         await js("document.querySelector('#sidebar-toggle').click()"); await delay(350);
       } else {
         // Saved desktop collapse does not affect phone mode controls.
@@ -884,7 +904,7 @@ app.whenReady().then(async () => {
         await capture('mobile-forge-switch-collapsed');
         await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('.ms-tab-sheet[open]')");
         await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
-        await waitFor("!!document.querySelector('.dashboard-hero')");
+        await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
         await js("document.documentElement.classList.remove('sidebar-collapsed')");
       }
       demoState.isAdmin = false;
@@ -966,6 +986,7 @@ app.whenReady().then(async () => {
       await waitFor("!!document.querySelector('.library-document-card')");
       await js("document.querySelector('.library-document-card').click()");
       await waitFor("!!document.querySelector('#view-content .library-editor')");
+      await waitFor("document.querySelector('#view-content .library-editor').getAnimations().length === 0");
       assert.equal(await js("document.querySelector('#view-content .library-editor').getBoundingClientRect().width"), 1440, "Library document editor is 1440px wide");
       await navigate("library", { section: "documents" });
       for (const tab of ["tasks", "notes", "email", "cookbook", "tool-store"]) {
@@ -1116,7 +1137,7 @@ app.whenReady().then(async () => {
           const labels = await js("[...document.querySelectorAll('.dashboard-model-usage')].map(n => n.textContent)");
           assert.deepEqual(labels, ["842K tokens via Kairos"], label + " home model usage labels");
           // Provider logos where known (core/model_marks.py); the generic icon where not.
-          const marks = await js("[...document.querySelectorAll('.dashboard-row > .model-mark')].map(n => n.getAttribute('aria-label'))");
+          const marks = await js("[...document.querySelectorAll('.rd-usage-provider h3 > .model-mark')].map(n => n.getAttribute('aria-label'))");
           assert.deepEqual(marks, ["Claude", "Codex"], label + " home model logos");
         }
         if (tab === "school" && !demoState.empty && label === "desktop") {
@@ -1131,6 +1152,37 @@ app.whenReady().then(async () => {
           assert.ok(await js("!!document.querySelector('.school-course-chat .session-chat-models .custom-select') && [...document.querySelectorAll('.school-course-chat button')].some(b=>b.textContent==='Open in Chats')"), label + " School course chat has model choice and Open in Chats");
           assert.deepEqual(await overflow(), [], label + " School assignment overflow");
           await capture(label + "-school-assignment");
+          // Keep the assignment editor and real embedded chat usable through
+          // the breakpoint, including the entrance (not just its final frame).
+          for (const schoolWidth of [1440, 1024, 769, 768, 430, 390, 320]) {
+            win.setContentSize(schoolWidth, height); await delay(100);
+            await js(`(() => {
+              const workspace = document.querySelector('.school-assignment-workspace');
+              window.__schoolEntrances = workspace.getAnimations();
+              // Restart the app's own entrance even after it has finished.
+              if (!window.__schoolEntrances.length) {
+                const entranceClass = [...workspace.classList].find(c => c.startsWith('rd-'));
+                workspace.classList.remove(entranceClass); void workspace.offsetWidth;
+                workspace.classList.add(entranceClass);
+                window.__schoolEntrances = workspace.getAnimations();
+              }
+              window.__schoolEntrances.forEach(a => a.pause());
+            })()`);
+            for (const frame of [0, 100, 200]) {
+              await js(`window.__schoolEntrances.forEach(a => { a.currentTime = ${frame}; })`);
+              assert.deepEqual(await overflow(), [], `School assignment ${schoolWidth}px entrance ${frame}ms`);
+            }
+            await js("window.__schoolEntrances.forEach(a => a.finish()); delete window.__schoolEntrances");
+            assert.ok(await js(`(() => {
+              const workspace = document.querySelector('.school-assignment-workspace');
+              const bounds = workspace.getBoundingClientRect();
+              return [...workspace.querySelectorAll(':scope > .card, textarea, .school-course-chat, .session-chat')].every(node => {
+                const r = node.getBoundingClientRect();
+                return r.width > 0 && r.left >= bounds.left - 1 && r.right <= bounds.right + 1;
+              });
+            })()`), `School assignment panes and inputs fit at ${schoolWidth}px`);
+          }
+          win.setContentSize(width, height); await delay(100);
           assert.ok(writes.slice(schoolWrites).every(w => w.path.startsWith('/api/tab-school/assignments/a1/')), label + ' School writes only its own sync');
           writes.splice(schoolWrites);
         }
@@ -1420,7 +1472,8 @@ app.whenReady().then(async () => {
           const completionStates = weekItems.map(item => item.completed);
           weekItems.forEach(item => { item.completed = true; });
           await showUpcoming();
-          assert.equal(await js("document.querySelector('.cal-day-panel .empty-state')?.textContent"), 'Nothing coming up.', label + ' a completed week uses the existing empty state');
+          assert.equal(await js("(document.querySelector('.cal-day-panel .empty-state-title') || document.querySelector('.cal-day-panel .empty-state'))?.textContent"), 'Nothing coming up.', label + ' a completed week shows the empty-state title');
+          assert.ok(await js("document.querySelector('.cal-day-panel .empty-state-hint')?.textContent === 'Make room for something new.' && [...document.querySelectorAll('.cal-day-panel .empty-state button')].some(b => b.textContent === 'Add an event')"), label + ' the redesigned empty state offers an event action');
           assert.equal(await js("document.querySelectorAll('.cal-day-panel .card, .cal-upcoming-day-label').length"), 0);
           await capture(label + '-calendar-completed-week');
           weekItems.forEach((item, index) => {
@@ -2007,7 +2060,7 @@ app.whenReady().then(async () => {
     assert.ok(await js(popupLook + "(document.querySelector('#overflow-menu'))"), "+ menu: shared popup look, above the composer");
     assert.ok(await js("[...document.querySelectorAll('.chat-input-bar button')].filter(b => !b.closest('#overflow-menu')).every(b => !b.classList.contains('chat-computer-toggle') && b.id !== 'chat-compact' && !['Capture screen', 'Computer', 'Compact'].includes(b.title) && !['Capture screen', 'Computer', 'Compact'].includes(b.textContent.trim()) && b.getAttribute('aria-label') !== 'Capture from this device')"), "Capture screen, Computer and Compact are absent from the composer bar outside the + menu");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].some(b => b.textContent.trim() === 'Capture screen' && !b.hidden)"), "+ menu always contains Capture screen");
-    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order");
+    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item:not(.rd-chat-dictation-action)')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order (the phone-only Dictate action is excluded)");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item[hidden]')].every(b => getComputedStyle(b).display === 'none')"), "Hidden + menu items leave no gaps");
     await capture("desktop-plus-menu");
     await js("document.body.click()");
@@ -2098,9 +2151,10 @@ app.whenReady().then(async () => {
     // Home's "Your models" shows each subscription's limits as the overlay does
     // (quotaReadings.js), once per account, with signed-out and stale states.
     await navigate("home");
-    await waitFor("document.querySelectorAll('.dashboard-quota').length === 2");
-    assert.ok(await js("(() => { const c = document.querySelector('.dashboard-quota[data-provider=claude]'); return c.querySelectorAll('.dashboard-quota-window').length === 2 && c.querySelector('[role=meter]').getAttribute('aria-valuenow') === '34' && c.textContent.includes('resets') && [...c.querySelectorAll('.dashboard-quota-head')].some(h => h.title.includes('34% Used · 66% left')) && !!c.querySelector('.tone-ample'); })()"), "Claude's limits show on Home (ring, compact label, full reading on hover)");
-    assert.ok(await js("!!document.querySelector('.dashboard-quota[data-provider=codex] .tone-crit')"), "A limit past 80% shows as critical");
+    await waitFor("document.querySelectorAll('[data-home-section=models] .rd-usage-provider').length === 2");
+    assert.ok(await js("(() => { const c = document.querySelector('.rd-usage-provider[data-provider=claude]'); return c.querySelectorAll('.rd-usage-window').length === 2 && c.querySelector('[role=meter]').getAttribute('aria-valuenow') === '34' && c.textContent.includes('Resets') && [...c.querySelectorAll('.rd-usage-window')].some(h => h.title.includes('34% Used · 66% left')) && !!c.querySelector('[data-quota-tone=ample]'); })()"), "Claude's limits show on Home (matrix, compact label, full reading on hover)");
+    assert.ok(await js("!!document.querySelector('.rd-usage-provider[data-provider=codex] [data-quota-tone=crit]')"), "A limit past 80% shows as critical");
+    assert.ok(await js("!!document.querySelector('.rd-usage-provider[data-provider=claude] [data-quota-tone=watch]')"), "A limit between 50% and 80% shows as watch");
     await capture("desktop-home-limits");
     // Compact Home (2026-10-09): Agents and Tool Store cards and the "waiting on
     // you" chip for admins, hidden for everyone else; the Store card never fetches.
@@ -2126,8 +2180,8 @@ app.whenReady().then(async () => {
       { provider: "codex", status: "ok", updated_at: Math.floor(Date.now() / 1000) - 3600, note: "", windows: [{ name: "5-hour", used_percent: 40, resets_at: Math.floor(Date.now() / 1000) + 600 }] },
     ], recorded: [] };
     await navigate("home");
-    await waitFor("document.querySelector('.dashboard-quota[data-provider=claude]')?.textContent.includes('Sign in to Claude Code')");
-    assert.ok(await js("document.querySelector('.dashboard-quota[data-provider=codex]').textContent.includes('Updated 1h ago')"), "A stale reading says how old it is");
+    await waitFor("document.querySelector('.rd-usage-provider[data-provider=claude]')?.textContent.includes('Sign in to Claude Code')");
+    assert.ok(await js("document.querySelector('.rd-usage-provider[data-provider=codex]').textContent.includes('Updated 1h ago')"), "A stale reading says how old it is");
     delete demoState.quotas;
 
     // Layout (layout.js): Agents sits third by default; a moved and a hidden
@@ -2136,12 +2190,12 @@ app.whenReady().then(async () => {
     assert.deepEqual((await navOrder()).slice(0, 3), ["home", "chat", "agents"], "Agents sits with Home and Chats");
     await js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); l.groups.main = ['home', 'notes', 'chat', 'agents']; l.groups.workspace = l.groups.workspace.filter(t => t !== 'notes'); l.hiddenTabs = ['cookbook']; l.home = ['models', 'stats', 'chats', 'schedule', 'projects', 'activity', 'system']; l.hiddenHome = ['projects']; m.saveLayout(l); })`);
     await waitFor("document.querySelectorAll('#nav .nav-item[data-tab]')[1]?.dataset.tab === 'notes'");
-    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid').firstElementChild === document.querySelector('.dashboard-grid .dashboard-section:has(.dashboard-quota)') && document.querySelectorAll('.dashboard-grid > .dashboard-section').length === 8 && document.querySelector('.dashboard-grid > [data-home-section=store]') === document.querySelector('.dashboard-grid').lastElementChild"), "Layout changes apply live; sections added later join at the end");
+    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8 && document.querySelector('.dashboard-grid > [data-home-section=store]') === document.querySelector('.dashboard-grid').lastElementChild"), "Layout changes apply live; sections added later join at the end");
     await win.loadURL(base);
     await waitFor("document.querySelectorAll('#nav .nav-item[data-tab]').length >= 10");
     assert.deepEqual((await navOrder()).slice(0, 4), ["home", "notes", "chat", "agents"], "The sidebar layout survives a reload");
-    await waitFor("document.querySelectorAll('.dashboard-grid > *').length === 8");
-    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid').firstElementChild.querySelector('.dashboard-section-header h2').textContent === 'Models'"), "Home's layout survives a reload");
+    await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8");
+    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelector('[data-home-section=models] h2').textContent === 'Model usage'"), "Home's layout survives a reload");
     // The Layout page lists every tab, with Home's switch locked on.
     await js("document.querySelector('.sidebar-settings-btn').click()");
     await waitFor("!!document.querySelector('.settings-nav-item[data-section=layout]')");
@@ -2156,7 +2210,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=cookbook]')"), "Reset shows hidden tabs again");
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await navigate("home");
-    assert.deepEqual(await js("[...document.querySelector('.dashboard-grid').children].map(n => n.dataset.homeSection)"), ['needs', 'chats', 'schedule', 'models', 'system'], "Reset restores Home's default cards");
+    assert.deepEqual(await js("[...document.querySelectorAll('.dashboard-grid > [data-home-section]')].map(n => n.dataset.homeSection)"), ['needs', 'working', 'chats', 'schedule', 'models', 'system'], "Reset restores Home's default cards");
     await navigate("home");
     await waitFor("document.querySelector('.dashboard-core')?.classList.contains('is-dithered')");
     await capture("desktop-reduced-motion");
@@ -2232,7 +2286,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.title"), "Kairos (dev)");
     for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "agents", "cookbook", "school"]) {
       await navigate(tab);
-      if (tab === "home") await waitFor("!!document.querySelector('[data-home-section=chats] .dashboard-empty') && !!document.querySelector('[data-home-section=schedule] .dashboard-empty')");
+      if (tab === "home") await waitFor("!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('[data-home-section=chats], [data-home-section=schedule]')");
       assert.deepEqual(await overflow(), [], "empty " + tab);
     }
     // The desktop title bar (style.css .titlebar), checked by switching on the
@@ -2360,7 +2414,7 @@ app.whenReady().then(async () => {
     win.setContentSize(1440, 900);
     unavailable = true;
     await navigate("home");
-    await waitFor("document.querySelector('.dashboard-system-pill')?.textContent === 'Status unavailable'");
+    await waitFor("document.querySelector('[data-home-section=system] .dashboard-empty')?.textContent === \"Couldn't load this section. Try opening it again.\"");
     await capture("desktop-status-unavailable");
     assert.deepEqual(errors, [], "Renderer errors");
     // Explicit opt-in only: these are actual renderer captures with synthetic

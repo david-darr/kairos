@@ -1,4 +1,6 @@
-import { api, el, customSelect, toast, confirmDialog, iconButton, emptyState } from "../api.js";
+import { api, el, customSelect, toast, iconButton } from "../api.js";
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
+import { renderTaskActivity } from '../taskActivity.js';
 import { ICONS } from "../icons.js";
 import { renderBoard } from "./taskBoard.js";
 import { renderTriggers } from "./taskTriggers.js";
@@ -86,12 +88,14 @@ export async function render(container) {
 
   form.querySelector('summary').dataset.mobileDock = 'create';
   form.querySelector('summary').dataset.mobileCreateLabel = 'Schedule a task';
-  const list = el("div", { id: "tasks-list", style: "margin-top:14px;" });
+  const list = el("div", { id: "tasks-list", class: 'rd-stagger', style: "margin-top:14px;" });
+  const activity = el('section', { class: 'task-activity', hidden: !redesignOn() });
+  list.activity = activity;
   list.builtinCard = builtinCard;
   const boardCard = el("div", { class: "glass card task-board-card" });
   // Webhook triggers (2026-10-05): outside events that start work.
   const triggersCard = el("div", { class: "glass card triggers-card" });
-  const wrap = el("div", { class: "view-constrained" }, [header, boardCard, form, list, triggersCard, builtinCard]);
+  const wrap = el("div", { class: "view-constrained" }, [header, activity, boardCard, form, list, triggersCard, builtinCard]);
   wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search tasks and cards";  // phone dock search (mobileDock.js)
   container.append(wrap);
   await renderBoard(boardCard);
@@ -139,7 +143,7 @@ async function refreshBuiltins(card) {
     el("div", { class: "title", text: "Automation library" }),
     el("div", { class: "meta", style: "margin:4px 0 18px;", text: "Useful routines, ready to make your own." }),
   );
-  const grid = el("div", { class: "automation-grid" });
+  const grid = el("div", { class: "automation-grid rd-stagger" });
   for (const b of builtins.sort((a, b) => Number(Boolean(b.enabled)) - Number(Boolean(a.enabled)))) {
     const channelSelect = customSelect({ style: "font-size:11px;", disabled: b.enabled }, [
       el("option", { value: "", text: "Tasks tab only" }),
@@ -185,16 +189,22 @@ async function refresh(list) {
   // Cards live on the work board above, not in the scheduled list.
   const tasks = allTasks.filter((t) => t.schedule_kind !== "card").sort((a, b) => Number(!a.enabled) - Number(!b.enabled));
   list.innerHTML = "";
+  const recordedRuns = [];
+  if (redesignOn() && !list.activity.childElementCount) list.activity.append(el('p', { class: 'meta', role: 'status', text: 'Loading recorded runs…' }));
   // While something runs, keep the list current so its Stop button and then
   // its result appear without a reload (roadmap phase 4).
   if (tasks.some((t) => t.run_started_at)) {
     list.pollTimer = setTimeout(() => { if (document.body.contains(list)) refresh(list); }, POLL_MS);
   }
   if (tasks.length === 0) {
+    if (redesignOn()) renderTaskActivity(list.activity, recordedRuns);
     list.appendChild(emptyState({
       icon: ICONS.tasks, mascot: "sleeping",
       title: "No scheduled tasks",
       hint: "Choose a routine from the library below, or schedule your own prompt. Output can be delivered straight to Discord.",
+      actionLabel: 'Schedule a task', onAction: () => {
+        const form = list.parentElement.querySelector('details.disclosure-panel'); form.open = true; form.querySelector('input')?.focus();
+      },
     }));
     return;
   }
@@ -308,6 +318,7 @@ async function refresh(list) {
     }
     if (task.last_run_at) {
       const runs = await api(`/api/tasks/${task.id}/runs`);
+      recordedRuns.push(...runs);
       const last = runs[0];
       if (last) {
         const chan = channels.find((c) => c.id === task.deliver_to_channel);
@@ -341,4 +352,5 @@ async function refresh(list) {
       }
     }
   }
+  if (redesignOn() && list.isConnected) renderTaskActivity(list.activity, recordedRuns);
 }

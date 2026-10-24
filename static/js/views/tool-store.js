@@ -6,6 +6,7 @@ import { shareButton, githubStrip } from "../storePublish.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { initToolStoreMobile } from "../redesignToolStoreMobile.js";
+import { workspaceEmpty, redesignOn } from '../workspaceParts.js';
 
 // Redesign hook: tag confirmation panels so the Tool Store sheet can style them.
 function confirmDialog(options) {
@@ -48,8 +49,14 @@ export async function render(container) {
     button.addEventListener("click", () => openBuilderBrief(button, config.brief, config.title, container));
     return { ...config, button };
   });
-  const popup = (title, body, opener, onClose) => openPanelDialog({ title, body, opener, owner: view,
-    wide: true, group: "tool-store", className: "tool-store-dialog", onClose });
+  const popup = (title, body, opener, onClose) => {
+    const dialog = openPanelDialog({ title, body, opener, owner: view,
+      wide: true, group: "tool-store", className: "tool-store-dialog rd-sheet-in", onClose });
+    dialog.panel.dataset.view = 'tool-store';
+    dialog.panel.addEventListener('animationend', () => dialog.panel.classList.remove('rd-sheet-in'), { once: true });
+    dialog.panel.parentElement.classList.add('rd-scrim-in');
+    return dialog;
+  };
   manageSkills.setAttribute("aria-haspopup", "dialog");
   manageTools.setAttribute("aria-haspopup", "dialog");
   manageSkills.addEventListener("click", () => showSkillManager());
@@ -260,6 +267,12 @@ export async function render(container) {
       return;
     }
     const q = state.query;
+    if (redesignOn() && state.admin && state.kind === 'all' && !q && !state.installed) {
+      const featured = el('section', { class: 'tool-store-feature' }, [el('small', { text: 'Featured' }),
+        el('h3', { text: 'Build a custom tab' }), el('p', { text: 'Describe it, and Kairos builds it.' }),
+        el('button', { type: 'button', class: 'btn', text: 'Start', 'aria-haspopup': 'dialog', onclick: openTabBuilder })]);
+      results.append(featured);
+    }
     // Redesign only: surface a community update above the lists.
     const pendingUpdate = document.documentElement.classList.contains("kairos-redesign") && state.admin
       ? state.community.find(item => item.installed && item.update_available) : null;
@@ -294,13 +307,13 @@ export async function render(container) {
     count.textContent = `${total} result${total === 1 ? "" : "s"}`;
     if (skills.length) {
       results.append(el("h3", { class: "tool-store-heading", text: `Skills · ${skills.length}` }));
-      const grid = el("div", { class: "tool-store-grid" });
+      const grid = el("div", { class: "tool-store-grid rd-stagger" });
       for (const item of skills) grid.append(skillCard(item));
       results.append(grid);
     }
     if (tools.length || custom.length || addons.length) {
       results.append(el("h3", { class: "tool-store-heading", text: `Tools · ${tools.length + custom.length + addons.length}` }));
-      const grid = el("div", { class: "tool-store-grid" });
+      const grid = el("div", { class: "tool-store-grid rd-stagger" });
       for (const item of addons) grid.append(addonCard(item));
       for (const item of tools) grid.append(toolCard(item));
       for (const item of custom) grid.append(customToolCard(item));
@@ -312,7 +325,7 @@ export async function render(container) {
       const offerBuild = kind === "user" && state.kind === "tabs" && !q;
       if (!entries.length && !offerBuild) continue;
       results.append(el("h3", { class: "tool-store-heading", text: `${label} · ${entries.length}` }));
-      const grid = el("div", { class: "tool-store-grid" });
+      const grid = el("div", { class: "tool-store-grid rd-stagger" });
       for (const item of entries) grid.append(tabCard(item));
       if (offerBuild) grid.append(buildTabCard());
       results.append(grid);
@@ -322,13 +335,13 @@ export async function render(container) {
       results.append(el("h3", { class: "tool-store-heading", text: `Community · ${community.length}`, "data-community-heading": "" }));
       results.append(githubHost);
       if (state.communityError) results.append(el("div", { class: "tool-store-notice", role: "status", text: state.communityError }));
-      const grid = el("div", { class: "tool-store-grid tool-store-community" });
+      const grid = el("div", { class: "tool-store-grid tool-store-community rd-stagger" });
       for (const item of community) grid.append(communityCard(item));
       results.append(grid);
     }
     if (offTabs.length) {
       results.append(el("h3", { class: "tool-store-heading", text: `Turned off · ${offTabs.length}`, "data-disabled-tabs": "" }));
-      const grid = el("div", { class: "tool-store-grid" });
+      const grid = el("div", { class: "tool-store-grid rd-stagger" });
       for (const item of offTabs) grid.append(tabCard(item));
       results.append(grid);
     }
@@ -340,7 +353,10 @@ export async function render(container) {
       results.append(el("div", { class: "tool-store-notice", text: state.skillsError }));
     }
     if (!total && !state.tabsError && !(["all", "tools"].includes(state.kind) && state.catalogError) && !(["all", "skills"].includes(state.kind) && state.skillsError)) {
-      results.append(el("div", { class: "tool-store-empty", text: q ? "No matches. Try another search." : "Nothing in this view yet." }));
+      results.append(redesignOn() ? workspaceEmpty({ title: q ? 'No matches' : 'Nothing here yet', hint: 'Try another search or category.',
+        actionLabel: 'Show all', onAction: () => { state.kind = 'all'; state.query = ''; state.installed = false;
+          search.value = ''; installed.querySelector('input').checked = false; draw(); } })
+        : el("div", { class: "tool-store-empty", text: q ? "No matches. Try another search." : "Nothing in this view yet." }));
     }
     mobile.sync();
   }

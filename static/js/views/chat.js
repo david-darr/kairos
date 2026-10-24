@@ -32,6 +32,7 @@ import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileModelSheet } from '../mobileModelSheet.js';
 import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
+import { createMascot } from '../mascot.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -105,7 +106,8 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   if (role === 'assistant') {
     const mark = el('span', { class: 'chat-author-mark', 'aria-hidden': 'true' });
     mark.innerHTML = KAIROS_MARK;
-    card.prepend(el('div', { class: 'chat-author' }, [mark, el('span', { text: 'Kairos' })]));
+    const phoneKip = el('span', { class: 'rd-chat-author-kip', 'aria-hidden': 'true' }, [createMascot({ state: 'idle', size: 34, decorative: true })]);
+    card.prepend(el('div', { class: 'chat-author' }, [mark, phoneKip, el('span', { text: 'Kairos' }), el('span', { class: 'rd-chat-author-time', text: ` · ${time}` })]));
   }
   if (role === 'user' && failure?.references?.length) card.insertBefore(renderReferenceChips(failure.references), actions);
   if (role === "user" && imageSources.length) {
@@ -1078,6 +1080,9 @@ export async function render(container, tabId, options = {}) {
   // The same controls keep their listeners, draft and permissions. Secondary
   // composer actions live in More so the phone input stays one usable row.
   const composerOptions = el('div', { class: 'composer-menu-options' }, [permissionControl, openMicBtn]);
+  const phoneDictation = menuItem(ICON_MIC, 'Dictate a message', () => { closeMenu(overflowMenu); micBtn.click(); });
+  phoneDictation.classList.add('rd-chat-dictation-action'); phoneDictation.hidden = micBtn.hidden;
+  composerOptions.append(phoneDictation);
   openMicBtn.append(el('span', { text: 'Open Mic' }));
   const composerDivider = el('div', { class: 'overflow-menu-divider' });
   inputLeft.replaceChildren(overflowWrap, workspacePill);

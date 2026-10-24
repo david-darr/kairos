@@ -228,7 +228,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await waitFor("document.querySelectorAll('.design-card').length === 2");
   assert.equal(await js("!!document.querySelector('.nav-item[data-tab=\"design\"]')"), false, 'no Design tab in the sidebar');
   assert.equal(await js("document.querySelector('.nav-item[data-tab=\"library\"]')?.getAttribute('aria-current')"), 'page', 'designs live in Library');
-  assert.equal(await js("document.querySelector('.library-tabs .segmented-tab.active')?.textContent"), 'Designs');
+  assert.equal(await js("document.querySelector('[data-library-section=designs][aria-checked=true], [data-library-section=designs][aria-pressed=true]')?.textContent"), 'Designs');
   assert.match(await js("document.querySelector('.design-card').textContent"), /Habit onboarding.*3 boards/);
   await capture('design-library');
   await js("document.querySelector('.design-card').click()");

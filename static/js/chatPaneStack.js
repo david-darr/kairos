@@ -28,7 +28,7 @@ export function mountStackedPane(host, panel, close, options, mount) {
     stack = { root, entries, state, expanded: null };
     stacks.set(host, stack);
     stack.layout = mount(host, root, () => { for (const e of [...entries]) e.close(); }, {
-      sharedRoot: true, onDrag: value => entries.forEach(e => e.onDrag?.(value)),
+      sharedRoot: true, animate: panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel'), onDrag: value => entries.forEach(e => e.onDrag?.(value)),
     });
     root.addEventListener('pane-maximize', event => {
       if (event.detail || !stack.expanded) return;
@@ -53,7 +53,11 @@ export function mountStackedPane(host, panel, close, options, mount) {
   // Documents, files, native browser and computer retain their exclusivity.
   const kind = options.kind || 'documents';
   const exclusive = value => !['design', 'background'].includes(value);
-  for (const entry of [...stack.entries]) if (entry.kind === kind || (exclusive(entry.kind) && exclusive(kind))) entry.close();
+  // Keep the shared root (and its split) mounted while an exclusive pane replaces the last one,
+  // so the chat column neither jumps nor animates a second time.
+  stack.replacing = true;
+  try { for (const entry of [...stack.entries]) if (entry.kind === kind || (exclusive(entry.kind) && exclusive(kind))) entry.close(); }
+  finally { stack.replacing = false; }
   // Replacing the final exclusive entry may have disposed this root.
   if (!stacks.has(host)) return mountStackedPane(host, panel, close, options, mount);
   holdReadingPositions();
@@ -78,7 +82,7 @@ export function mountStackedPane(host, panel, close, options, mount) {
       stack.entries.splice(stack.entries.indexOf(entry), 1); stack.state.close(kind);
       panel.classList.remove('chat-stacked-pane'); panel.style.removeProperty('flex'); panel.hidden = false; panel.inert = false;
       if (artifactClass) panel.classList.add('artifact-panel');
-      if (!stack.entries.length) {
+      if (!stack.entries.length && !stack.replacing) {
         stack.dividers?.forEach(node => node.remove()); stack.layout.dispose(); stack.root.remove(); stacks.delete(host);
         document.removeEventListener('keydown', stack.escape, true); window.removeEventListener('resize', stack.breakpoint);
       } else paint();

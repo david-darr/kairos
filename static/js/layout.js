@@ -24,11 +24,14 @@ export const HOME_SECTIONS = [
 // of the layout (and listed in Settings > Layout) only while the preview is on,
 // so with the preview off this module behaves exactly as before.
 const NEEDS = { id: "needs", label: "Needs you" };
+const WORKING = { id: "working", label: "Working now" };
 const needsOn = () => document.documentElement.classList.contains("kairos-redesign");
 function syncNeeds() {
-  const at = HOME_SECTIONS.indexOf(NEEDS);
-  if (needsOn() && at < 0) HOME_SECTIONS.push(NEEDS);
-  else if (!needsOn() && at >= 0) HOME_SECTIONS.splice(at, 1);
+  for (const section of [NEEDS, WORKING]) {
+    const at = HOME_SECTIONS.indexOf(section);
+    if (needsOn() && at < 0) HOME_SECTIONS.push(section);
+    else if (!needsOn() && at >= 0) HOME_SECTIONS.splice(at, 1);
+  }
 }
 // Home is never hidden: it's the way back from anywhere.
 export const ALWAYS_SHOWN = "home";
@@ -40,7 +43,7 @@ const DEFAULT_GROUPS = {
 };
 const defaults = () => (syncNeeds(), {
   groups: structuredClone(DEFAULT_GROUPS), hiddenTabs: [],
-  home: HOME_SECTIONS.map((s) => s.id), hiddenHome: needsOn() ? ["needs"] : [],
+  home: HOME_SECTIONS.map((s) => s.id), hiddenHome: needsOn() ? ["needs", "working"] : [],
 });
 
 let layout = defaults(), storageKey = "", known = [], cards = [];
@@ -62,7 +65,9 @@ function normalize(raw = {}) {
   value.home = [...order, ...homeIds.filter((id) => !order.includes(id))];
   value.hiddenHome = ids(raw.hiddenHome, Infinity).filter((id) => homeIds.includes(id) || tabCardId(id));
   // A card added after this arrangement was saved starts hidden, like a new tab card.
-  if (needsOn() && !ids(raw.home, Infinity).includes("needs") && !value.hiddenHome.includes("needs")) value.hiddenHome.push("needs");
+  for (const id of ["needs", "working"]) {
+    if (needsOn() && !ids(raw.home, Infinity).includes(id) && !value.hiddenHome.includes(id)) value.hiddenHome.push(id);
+  }
   return value;
 }
 
@@ -83,7 +88,7 @@ export function saveLayout(next) {
 export function resetSidebarLayout() { const d = defaults(); saveLayout({ ...layout, groups: d.groups, hiddenTabs: [] }); }
 export function resetHomeLayout() {
   const tabIds = layout.home.filter(tabCardId);
-  saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: [...(needsOn() ? ["needs"] : []), ...tabIds] });
+  saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: [...(needsOn() ? ["needs", "working"] : []), ...tabIds] });
 }
 
 // Remember placement even when a tab is off. Only newly discovered cards

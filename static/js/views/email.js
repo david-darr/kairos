@@ -1,4 +1,5 @@
-import { api, el, toast, confirmDialog, iconButton, emptyState } from "../api.js";
+import { api, el, toast, iconButton } from "../api.js";
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats, redesignOn } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
 
 export async function render(container) {
@@ -41,10 +42,13 @@ export async function render(container) {
 
   form.querySelector('summary').dataset.mobileDock = 'create';
   form.querySelector('summary').dataset.mobileCreateLabel = 'Connect an email account';
-  const list = el("div", { id: "email-accounts-list", style: "margin-top:14px;" });
-  const triage = el("div", { id: "email-triage", style: "margin-top:14px;" });
+  const list = el("div", { id: "email-accounts-list", class: 'rd-stagger', style: "margin-top:14px;" });
+  const triage = el("div", { id: "email-triage", class: 'rd-stagger', style: "margin-top:14px;" });
   wrap.append(header, triage, form, list);
   container.append(wrap);
+  if (redesignOn()) header.append(el('button', { type: 'button', class: 'btn email-accounts-trigger', text: 'Accounts', onclick: () => {
+    form.open = !form.open; if (form.open) emailInput.focus();
+  } }));
   refreshTriage(triage);
 
   addBtn.addEventListener("click", async () => {
@@ -105,12 +109,19 @@ async function refreshTriage(host) {
     : "Runs automatically each morning at 5:50. Nothing checked yet.";
 
   const body = [];
+  if (redesignOn() && data.generated_at) body.push(workspaceStats([
+    { label: 'Unread scanned', value: data.scanned ?? 0 },
+    { label: 'Important', value: data.items?.length || 0 },
+  ]));
   if (data.error) {
     body.push(el("div", { class: "meta", style: "color:var(--danger);", text: data.error }));
   }
   if (!data.items || data.items.length === 0) {
-    body.push(el("div", { class: "meta", style: "margin-top:8px;", text:
-      data.generated_at ? "Nothing important in the last day." : "No results yet — run it to see what's worth your attention." }));
+    body.push(redesignOn() ? emptyState({ title: data.generated_at ? 'Nothing needs your attention' : 'Your inbox, with room to think',
+      hint: data.generated_at ? 'Nothing important in the last day.' : 'Run triage to see what needs you.',
+      actionLabel: 'Refresh now', onAction: () => runBtn.click() })
+      : el("div", { class: "meta", style: "margin-top:8px;", text:
+        data.generated_at ? "Nothing important in the last day." : "No results yet — run it to see what's worth your attention." }));
   } else {
     for (const it of data.items) {
       // Class hooks and the sender's initial are for the redesign look; the

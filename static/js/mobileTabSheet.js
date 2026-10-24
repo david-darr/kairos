@@ -1,3 +1,4 @@
+import { openNotifications } from './mobileActions.js';
 import { button, mobileOn, haptic, reduced } from './mobileShared.js';
 import { activityItems } from './mobileActivity.js';
 import { sidebarLayout } from './layout.js';
@@ -22,7 +23,7 @@ export function closeMoreSheet() {
 export function openMoreSheet(from) {
   if (!mobileOn()) return;
   if (!sheet) {
-    sheet = document.createElement('dialog'); sheet.className = 'ms-tab-sheet ms-more-sheet'; sheet.id = 'ms-more-sheet';
+    sheet = document.createElement('dialog'); sheet.className = 'ms-tab-sheet ms-more-sheet rd-sheet-in'; sheet.id = 'ms-more-sheet';
     sheet.setAttribute('aria-label', 'More');
     sheet.addEventListener('click', e => { if (e.target === sheet) closeMoreSheet(); });
     sheet.addEventListener('cancel', e => { e.preventDefault(); closeMoreSheet(); });
@@ -52,7 +53,7 @@ export function openMoreSheet(from) {
   const grids = new Map();
   // Kairos's bar tabs, and Forge's only tab (Forge Home), are on the bar already.
   const forge = document.documentElement.dataset.appMode === 'forge';
-  const listed = sources.filter(n => !(forge || ON_BAR.has(n.dataset.tab)));
+  const listed = sources.filter(n => !['design', 'designs'].includes(n.dataset.tab) && !(forge || ON_BAR.has(n.dataset.tab)));
   for (const group of sidebarLayout(listed.map(n => n.dataset.tab))) {
     if (!group.ids.length) continue;
     const section = document.createElement('section'); section.className = 'ms-tab-group'; section.dataset.group = group.id;
@@ -91,6 +92,11 @@ export function openMoreSheet(from) {
   const name = document.querySelector('.sidebar-user-name')?.textContent || 'Account';
   // Profile: the account's initial and name; it opens Switch User and Log Out.
   const account = button('', () => {
+    if (document.documentElement.classList.contains('kairos-redesign')) {
+      closeMoreSheet();
+      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(from));
+      return;
+    }
     account.setAttribute('aria-expanded', String(accountActions.hidden === false ? false : true));
     accountActions.hidden = !accountActions.hidden;
   }, 'ms-account-row ms-profile-row');
@@ -106,7 +112,7 @@ export function openMoreSheet(from) {
   }
   const settings = button('', () => { closeMoreSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row ms-settings-row');
   settings.innerHTML = `${ICONS.settings}<span>Settings</span>`; settings.firstElementChild?.setAttribute('aria-hidden', 'true'); settings.setAttribute('aria-label', 'Settings');
-  footer.append(account, accountActions, settings);
+  footer.append(button('Notifications', () => { closeMoreSheet(); openNotifications(from); }, 'ms-account-row'), account, accountActions, settings);
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeMoreSheet(); native.click(); }, 'ms-account-row'));
   const { live, done } = activityItems();
@@ -124,7 +130,9 @@ export function openMoreSheet(from) {
       row.append(button(`${item.title} · ${item.status}`, () => { closeMoreSheet(); item.go(); }, 'ms-sheet-activity-main')); work.append(row);
     }
   }
-  panel.append(grab, heading, modeRow, groups, projects, work, footer); sheet.replaceChildren(panel);
+  const header = document.createElement('header'); header.className = 'ms-more-header';
+  header.append(heading, button('Close', closeMoreSheet, 'ms-sheet-close'));
+  panel.append(grab, header, modeRow, groups, projects, work, footer); sheet.replaceChildren(panel);
   sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); setExpanded(true);
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });

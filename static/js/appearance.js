@@ -14,6 +14,9 @@ const STATUS = {
   dark: { danger: [240, 128, 136], success: [140, 200, 172], warn: [217, 182, 125] },
 };
 let settings, storageKey = '', imageBitmap = null;
+// A control can change the look while authentication is still resolving.
+// Carry those explicit changes into the first account load, then consume them.
+let startupPatch = null;
 let imageCanvas, shaderCanvas, previewCanvas, glScene, animation = 0, lastFrame = 0, time = 0;
 let storageIssue = '', imageRevision = 0, identityRevision = 0, imageQueue = Promise.resolve();
 
@@ -164,6 +167,10 @@ export async function initAppearance(username) {
   storageKey = 'jarvis:appearance:v1:' + String(username || 'local');
   try { settings = normalize(JSON.parse(localStorage.getItem(storageKey) || '{}')); }
   catch { settings = normalize(DEFAULTS); }
+  if (startupPatch) {
+    const patch = startupPatch; startupPatch = null;
+    updateAppearance(patch);
+  }
   ensureCanvases();
   apply();
   try {
@@ -186,9 +193,10 @@ export async function initAppearance(username) {
 }
 
 export function updateAppearance(patch) {
+  if (!storageKey) startupPatch = { ...startupPatch, ...patch };
   settings = normalize({ ...settings, ...patch });
   storageIssue = '';
-  try { localStorage.setItem(storageKey, JSON.stringify(settings)); }
+  try { if (storageKey) localStorage.setItem(storageKey, JSON.stringify(settings)); }
   catch { storageIssue = 'Preview applied, but preferences could not be saved on this device.'; }
   apply();
 }
@@ -197,8 +205,8 @@ export function updateAppearance(patch) {
 export function restoreWelcomeAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem('jarvis:welcome-appearance:v1') || '{}');
-    settings = normalize(saved && typeof saved === 'object' ? saved : {}); apply();
-  } catch { settings = { ...DEFAULTS }; apply(); }
+    settings = normalize({ ...(saved && typeof saved === 'object' ? saved : {}), ...startupPatch }); apply();
+  } catch { settings = normalize({ ...DEFAULTS, ...startupPatch }); apply(); }
 }
 
 // Validate, decode and downsample a picture (shared by the Image background

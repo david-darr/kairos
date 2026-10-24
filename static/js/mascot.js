@@ -250,8 +250,8 @@ export function ajarMarkup(rawSpec, { state = 'idle', clipId = 'ajc' + (++uid), 
     + `<g class="aj-body" clip-path="url(#${clipId})">${SHAPES[spec.shape] || SHAPES.round}${halftone ? `<image class="aj-tone" href="${tone}" x="0" y="0" width="140" height="140" preserveAspectRatio="none"/>` : ''}</g>`
     + (acc.neck || '')
     + '<g class="aj-face"><g class="aj-brows"><path class="aj-brow l" d="M48 54 L61 52"/><path class="aj-brow r" d="M73 52 L86 54"/></g>'
-    + '<g class="aj-eyes"><rect class="aj-eye" x="49" y="62" width="12" height="26" rx="6"/><rect class="aj-eye" x="73" y="62" width="12" height="26" rx="6"/>'
-    + '<path class="aj-happy" d="M48 79 q7 -13 14 0 M72 79 q7 -13 14 0"/><path class="aj-shut" d="M48 78 h14 M72 78 h14"/></g>'
+    + '<g class="aj-eyes"><g class="aj-gaze"><rect class="aj-eye" x="49" y="62" width="12" height="26" rx="6"/><rect class="aj-eye" x="73" y="62" width="12" height="26" rx="6"/>'
+    + '<path class="aj-happy" d="M48 79 q7 -13 14 0 M72 79 q7 -13 14 0"/><path class="aj-shut" d="M48 78 h14 M72 78 h14"/></g></g>'
     + '<rect class="aj-mouth" x="61" y="96" width="12" height="4" rx="2"/>'
     + (acc.face || '') + '</g>'
     + (acc.front || '')
@@ -373,10 +373,65 @@ function watch(node) {
 }
 const SUCCESS_MS = 1800;
 
+// One pointer listener and one animation frame for all opted-in live mascots.
+export function pointerEyeOffset(x, y, rect) {
+  const dx = x - (rect.left + rect.width / 2), dy = y - (rect.top + rect.height / 2);
+  const distance = Math.hypot(dx, dy);
+  const scale = distance ? Math.min(4, distance / 30) / distance : 0;
+  return { x: dx * scale, y: dy * scale };
+}
+export function pointerFollowAllowed({ reduced, noHover, hidden, mascotOff }) {
+  return !reduced && !noHover && !hidden && !mascotOff;
+}
+const pointerFollowers = new Set();
+let pointerFrame = 0, pointerWatching = false, pointerCleanup = null;
+function followPointer(node, enabled) {
+  if (enabled) pointerFollowers.add(node);
+  else { pointerFollowers.delete(node); node.querySelector('.aj-gaze')?.removeAttribute('transform'); }
+  if (pointerFollowers.size && !pointerCleanup) {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)'), noHover = matchMedia('(hover: none)');
+    let point = null;
+    const allowed = () => pointerFollowAllowed({ reduced: reduce.matches, noHover: noHover.matches,
+      hidden: document.hidden, mascotOff: document.documentElement.dataset.mascot === 'off' });
+    const draw = () => {
+      pointerFrame = 0;
+      if (!allowed() || !point) return;
+      for (const follower of pointerFollowers) {
+        if (!follower.isConnected) continue;
+        const offset = pointerEyeOffset(point.clientX, point.clientY, follower.getBoundingClientRect());
+        follower.querySelector('.aj-gaze')?.setAttribute('transform', `translate(${offset.x.toFixed(2)} ${offset.y.toFixed(2)})`);
+      }
+    };
+    const move = event => { point = event; if (!pointerFrame) pointerFrame = requestAnimationFrame(draw); };
+    const sync = () => {
+      const enabled = allowed();
+      if (enabled !== pointerWatching) {
+        window[enabled ? 'addEventListener' : 'removeEventListener']('pointermove', move);
+        pointerWatching = enabled;
+      }
+      if (!enabled) {
+        cancelAnimationFrame(pointerFrame); pointerFrame = 0; point = null;
+        for (const follower of pointerFollowers) follower.querySelector('.aj-gaze')?.removeAttribute('transform');
+      }
+    };
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-mascot'] });
+    reduce.addEventListener('change', sync); noHover.addEventListener('change', sync);
+    document.addEventListener('visibilitychange', sync);
+    pointerCleanup = () => {
+      window.removeEventListener('pointermove', move); pointerWatching = false;
+      cancelAnimationFrame(pointerFrame); pointerFrame = 0;
+      observer.disconnect(); reduce.removeEventListener('change', sync); noHover.removeEventListener('change', sync);
+      document.removeEventListener('visibilitychange', sync);
+    };
+    sync();
+  } else if (!pointerFollowers.size && pointerCleanup) { pointerCleanup(); pointerCleanup = null; }
+}
+
 // Node (scripts/test_mascot.cjs) loads this module without a DOM.
 const ElementBase = typeof HTMLElement === 'undefined' ? class {} : HTMLElement;
 export class KairosMascot extends ElementBase {
-  static get observedAttributes() { return ['state', 'size', 'bot', 'spec', 'label', 'decorative', 'finish']; }
+  static get observedAttributes() { return ['state', 'size', 'bot', 'spec', 'label', 'decorative', 'finish', 'follow-pointer']; }
   constructor() { super(); this._agent = null; this._timer = 0; this._clip = 'ajc-live-' + (++uid); this._drawn = ''; }
   set agent(value) { this._agent = value || null; if (value) rememberBot(value); this._render(); }
   get agent() { return this._agent; }
@@ -395,15 +450,18 @@ export class KairosMascot extends ElementBase {
     ensurePoseSheet();
     this._render();
     watch(this);
+    followPointer(this, this.hasAttribute('follow-pointer'));
     if (!this._onAppearance) { this._onAppearance = () => { if (this.spec.finish === 'halftone') { this._drawn = ''; this._render(); } }; }
     document.addEventListener('kairos:appearance', this._onAppearance);
   }
   disconnectedCallback() {
+    followPointer(this, false);
     clearTimeout(this._timer); visibility?.unobserve(this);
     document.removeEventListener('kairos:appearance', this._onAppearance);
   }
   attributeChangedCallback(name, before, after) {
     if (before === after) return;
+    if (name === 'follow-pointer') { if (this.isConnected) followPointer(this, after !== null); return; }
     if (name === 'state' || name === 'label' || name === 'decorative') this._sync();
     else this._render();
   }
@@ -445,12 +503,13 @@ if (hasDom && typeof customElements !== 'undefined' && !customElements.get('kair
 
 // A live mascot node. label is the accessible name; pass decorative when a
 // text status sits beside it (most places).
-export function createMascot({ state = 'idle', size, spec, agent, label, decorative = true, finish } = {}) {
+export function createMascot({ state = 'idle', size, spec, agent, label, decorative = true, finish, followPointer = false } = {}) {
   const node = document.createElement('kairos-mascot');
   if (size) node.setAttribute('size', String(size));
   if (spec) node.setAttribute('spec', JSON.stringify(spec));
   if (label) node.setAttribute('label', label);
   if (finish) node.setAttribute('finish', finish);
+  if (followPointer) node.setAttribute('follow-pointer', '');
   if (decorative) node.setAttribute('decorative', '');
   node.setAttribute('state', state);
   if (agent) node.agent = agent;

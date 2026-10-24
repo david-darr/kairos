@@ -20,7 +20,9 @@ export function mountHistory(page) {
   const toggle = button('Filter', () => { filters.hidden = !filters.hidden; toggle.setAttribute('aria-expanded', String(!filters.hidden)); });
   toggle.setAttribute('aria-label', 'Filter chats'); toggle.setAttribute('aria-expanded', 'false');
   if (working) toggle.textContent = 'Working';
-  const dock = el('div', { class: 'ms-history-dock ms-glass', 'data-mobile-hook': 'history-dock' }, [edgeBlur('bottom'), search, toggle, filters]);
+  const searchIcon = el('span', { class: 'rd-chat-search-icon', 'aria-hidden': 'true' });
+  searchIcon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>';
+  const dock = el('div', { class: 'ms-history-dock ms-glass', 'data-mobile-hook': 'history-dock' }, [edgeBlur('bottom'), searchIcon, search, toggle, filters]);
   const closeFilters = () => { filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
   const outside = e => { if (!dock.contains(e.target)) closeFilters(); };
   document.addEventListener('click', outside);
@@ -57,7 +59,9 @@ export function mountHistory(page) {
     if (!filtered.length) {
       const empty = emptyState({ mascotState: 'sleeping', title: sessions.length ? 'No matching chats' : 'No chats yet',
       text: sessions.length ? 'Try another search or filter.' : 'Start a conversation in New.',
-      ...(!sessions.length ? { action: { text: 'New chat', onClick: () => go('chat', { mobilePage: 0 }) } } : {}) });
+      action: sessions.length ? { text: 'Clear search and filters', onClick: () => {
+        search.value = ''; query = ''; working = false; model = ''; filter.value = 'all'; modelFilter.value = ''; toggle.textContent = 'Filter'; draw();
+      } } : { text: 'New chat', onClick: () => go('chat', { mobilePage: 0 }) } });
       empty.setAttribute('role', 'status'); list.append(empty);
     }
     for (const session of filtered) {

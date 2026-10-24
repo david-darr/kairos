@@ -398,7 +398,7 @@ async function buildSidebar() {
     item.classList.toggle("active", item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab));
     if (item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab)) item.setAttribute("aria-current", "page");
   });
-  buildSidebarFooter();
+  await buildSidebarFooter();
   return customTabs.filter((item) => !NAV.some((builtIn) => builtIn.id === item.id));
 }
 
@@ -410,7 +410,6 @@ async function buildSidebar() {
 // thing.
 async function buildSidebarFooter() {
   const footer = document.getElementById("sidebar-footer");
-  footer.innerHTML = "";
 
   const status = await api("/api/auth/status").catch(() => null);
   const displayName = !status ? "…" : status.username === "local" ? "Local User" : status.username || "Local User";
@@ -480,7 +479,12 @@ async function buildSidebarFooter() {
   const cardWrap = document.createElement("div");
   cardWrap.style.cssText = "position:relative;flex:1;min-width:0;";
   cardWrap.append(card, menu);
-  card.addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("hidden"); });
+  card.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (document.documentElement.classList.contains('kairos-redesign')) {
+      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(card));
+    } else menu.classList.toggle("hidden");
+  });
   document.addEventListener("click", () => menu.classList.add("hidden"));
 
   const settingsBtn = document.createElement("button");
@@ -492,7 +496,9 @@ async function buildSidebarFooter() {
   settingsBtn.addEventListener("click", openSettings);
 
   row.append(cardWrap, settingsBtn);
-  footer.appendChild(row);
+  // Layout changes rebuild this asynchronously. Keep Settings and Account
+  // available while auth is loading, then replace the footer in one step.
+  footer.replaceChildren(row);
   if (navigator.userAgent.includes('KairosMobile/')) {
     const nativeSettings = document.createElement('a');
     nativeSettings.className = 'nav-item native-mobile-settings';

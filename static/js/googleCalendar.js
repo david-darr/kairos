@@ -1,6 +1,7 @@
 import { mountSheetSurface } from './mobileSheet.js';
 import { api, el, toast, openPanelDialog } from './api.js';
 import { repeatControls } from './calendarRepeat.js';
+import { redesignOn, workspaceEmpty } from './workspaceParts.js';
 
 export function dateOnly(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -30,10 +31,15 @@ export function itemsOnDay(items, day) {
 
 export async function googleCalendars(host, onChange) {
   const auth = await api('/api/auth/status');
-  if (!auth.is_admin) return [];
+  if (!auth.is_admin) {
+    if (redesignOn()) host.append(el('p', { class: 'meta', text: 'Calendar connections are managed by an admin on this Kairos.' }));
+    return [];
+  }
   const status = await api('/api/google/status');
   if (!status.connected) {
-    host.append(el('div', { class: 'meta', text: 'Connect Google in Library to add your calendars.' }));
+    host.append(redesignOn() ? workspaceEmpty({ title: 'Connect your calendar', hint: 'Connect Google in Library to see your calendars here.',
+      actionLabel: 'Open Google connection', onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) })
+      : el('div', { class: 'meta', text: 'Connect Google in Library to add your calendars.' }));
     return [];
   }
   if (!status.calendar_connected) {
@@ -64,7 +70,9 @@ export async function googleCalendars(host, onChange) {
   }
   const calendars = await api('/api/google/calendar/calendars');
   const selected = new Set(status.calendar_ids ?? calendars.filter(c => c.selected).map(c => c.id));
-  host.append(el('strong', { text: 'Google calendars' }));
+  host.classList.add('rd-stagger');
+  host.append(redesignOn() ? el('div', { class: 'cal-account-heading' }, [el('strong', { text: 'Google' }),
+    el('span', { class: 'meta', text: status.email || 'Connected' })]) : el('strong', { text: 'Google calendars' }));
   for (const calendar of calendars) {
     const checkbox = el('input', { type: 'checkbox', checked: selected.has(calendar.id) });
     const label = eventColor(el('label', { class: 'cal-calendar-choice' }, [checkbox, calendar.name]), { source: 'google', color: calendar.color });
@@ -145,7 +153,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   updateFields();
   const close = el('button', { type: 'button', class: 'btn quiet', text: 'Cancel' });
   const save = el('button', { type: 'submit', class: 'btn primary', text: item ? 'Save event' : 'Create event' });
-  const form = el('form', { class: 'glass modal-panel cal-event-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': item ? 'Edit event' : 'Create event' }, [
+  const form = el('form', { class: 'glass modal-panel cal-event-dialog rd-sheet-in', role: 'dialog', 'aria-modal': 'true', 'aria-label': item ? 'Edit event' : 'Create event' }, [
     el('h3', { text: item ? 'Edit event' : 'Create event' }),
     el('div', { class: 'form-grid' }, [
       el('div', { class: 'field field-grow' }, [el('label', { text: 'Event title' }), title]),
@@ -158,7 +166,13 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
       repeat.host,
     ]), feedback, el('div', { class: 'row-actions' }, [close, save]),
   ]);
-  const backdrop = el('div', { class: 'modal-backdrop' }, [form]);
+  const backdrop = el('div', { class: 'modal-backdrop rd-scrim-in' }, [form]);
+  form.addEventListener('animationend', () => form.classList.remove('rd-sheet-in'), { once: true });
+  if (redesignOn()) {
+    form.dataset.view = 'calendar';
+    backdrop.dataset.view = 'calendar';
+    form.prepend(el('span', { class: 'cal-sheet-grabber', 'aria-hidden': 'true' }));
+  }
   const opener = document.activeElement;
   const dispose = () => { disposeSheet(); backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
   const disposeSheet = mountSheetSurface(form, dispose);
@@ -239,7 +253,10 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
   ]);
   // The shared dialog footer, as confirmDialog uses; .row-actions is hover-revealed.
   const dialog = openPanelDialog({ title: 'Delete this event?', body, footer: el('div', {}, [cancel, remove]),
-    className: 'confirm-panel cal-delete-dialog', owner, opener: document.activeElement, group: 'calendar-delete' });
+    className: 'confirm-panel cal-delete-dialog rd-sheet-in', owner, opener: document.activeElement, group: 'calendar-delete' });
+  dialog.panel.dataset.view = 'calendar';
+  dialog.panel.parentElement.classList.add('rd-scrim-in');
+  dialog.panel.addEventListener('animationend', () => dialog.panel.classList.remove('rd-sheet-in'), { once: true });
   cancel.onclick = () => dialog.close();
   remove.onclick = async () => {
     remove.disabled = true;
@@ -253,7 +270,7 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
   };
 }
 
-export function weekGrid(grid, start, items, selectDay, edit) {
+export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
   grid.classList.add('cal-week-grid');
   const header = el('div', { class: 'cal-week-header' }, [el('span', { text: 'All day' })]);
   const timeline = el('div', { class: 'cal-week-timeline' });
@@ -265,7 +282,10 @@ export function weekGrid(grid, start, items, selectDay, edit) {
   const today = new Date();
   // Class hooks only (restyle): the source of each item and today's column.
   const source = item => ` cal-src-${item.source || 'event'}`;
-  for (let day = 0; day < 7; day++) {
+  if (dayCount !== 7) {
+    header.style.gridTemplateColumns = timeline.style.gridTemplateColumns = `52px repeat(${dayCount}, minmax(0, 1fr))`;
+  }
+  for (let day = 0; day < dayCount; day++) {
     const date = new Date(start); date.setDate(date.getDate() + day);
     const next = new Date(date); next.setDate(next.getDate() + 1);
     const dayItems = itemsOnDay(items, date);
@@ -288,6 +308,7 @@ export function weekGrid(grid, start, items, selectDay, edit) {
     for (const event of events) {
       const node = eventColor(el('button', { type: 'button', class: 'cal-week-event' + source(event.item), text: event.item.title, title: event.item.title,
         onclick: () => edit(event.item, date, dayItems) }), event.item);
+      if (redesignOn()) node.append(el('span', { class: 'cal-event-time', text: new Date(event.item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }));
       node.style.top = `${event.from * .7}px`; node.style.height = `${Math.max(18, (event.to - event.from) * .7)}px`;
       node.style.left = `${event.lane * 100 / lanes.length}%`; node.style.width = `${100 / lanes.length}%`;
       column.append(node);

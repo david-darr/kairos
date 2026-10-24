@@ -156,7 +156,7 @@ module.exports = async function checkArtifactPanes({ js, win, waitFor, capture, 
   await capture('artifact-overlay-900');
   win.setContentSize(390, 844); await delay(250);
   assert.equal(await js("Math.round(document.querySelector('.artifact-panel').getBoundingClientRect().width)"), 390);
-  assert.ok(await js("[...document.querySelectorAll('.artifact-viewer button')].filter(b => b.getBoundingClientRect().width > 0).every(b => b.getBoundingClientRect().width >= 44 && b.getBoundingClientRect().height >= 44)"), 'Phone controls have 44px targets');
+  assert.deepEqual(await js("[...document.querySelectorAll('.artifact-viewer button')].filter(b => b.getBoundingClientRect().width > 0 && (b.getBoundingClientRect().width < 43.99 || b.getBoundingClientRect().height < 43.99)).map(b => b.className + '|' + (b.getAttribute('aria-label') || b.textContent.trim()).slice(0, 24) + '|' + b.getBoundingClientRect().width + 'x' + b.getBoundingClientRect().height)"), [], 'Phone controls have 44px targets');
   await js("document.documentElement.classList.add('electron-shell')");
   // The conversation reveals with a clip, not a transform, so the fixed pane is correct even mid-animation.
   assert.equal(await js("document.querySelector('.artifact-panel').getBoundingClientRect().top"), 36, 'Phone preview clears the desktop titlebar');

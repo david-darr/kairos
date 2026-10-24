@@ -189,9 +189,11 @@ async function run(ctx) {
 
   await navigate('calendar');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.cal-month-label').textContent");
-  eq((await dockInfo()).buttons.map(b => b.text), ['+', 'Today', 'Month', 'Week'], 'Calendar dock offers + Today Month Week');
-  eq(await pressed(), { '+': null, Today: null, Month: 'true', Week: 'false' }, 'Calendar dock shows Month selected');
-  ok(await js("[...document.querySelectorAll('.cal-nav button')].filter(b => b.getClientRects().length).every(b => !['Today', 'Month', 'Week'].includes(b.textContent.trim()))"), 'The page does not repeat what the dock offers');
+  eq((await dockInfo()).buttons.map(b => b.text), ['+', 'Today', 'Day', 'Week', 'Month'], 'Calendar dock offers + Today Day Week Month');
+  eq(await pressed(), { '+': null, Today: null, Day: 'false', Week: 'false', Month: 'true' }, 'Calendar dock shows Month selected');
+  ok(await js("!!document.querySelector('.cal-calendars-trigger').getClientRects().length && !!document.querySelector('.cal-create-bar button').getClientRects().length"), 'Calendar keeps Your calendars and Add in its phone header');
+  eq(await js("[...document.querySelectorAll('.cal-range-switch button')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())"), ['Day', 'Week', 'Month'], 'Calendar keeps the mockup range switch beside the period');
+  ok(await js("!document.querySelector('[data-mobile-dock=today]').getClientRects().length"), 'Today remains reachable in the dock');
   eq(await small('.cal-nav button'), [], 'Calendar page controls stay 44px');
   const monthNow = await monthLabel();
   await js("[...document.querySelectorAll('.cal-nav button')].find(b => b.textContent.includes('Next')).click()");
@@ -201,14 +203,18 @@ async function run(ctx) {
   await delay(300);
   eq(await monthLabel(), monthNow, 'Dock Today returns to the current month');
   ok(await js("!!document.querySelector('.cal-day-panel') && document.querySelector('.cal-day-panel').textContent.length > 0"), 'Dock Today selects the day and shows its panel');
+  await dockButton('Day');
+  await waitFor("!!document.querySelector('.cal-single-day') && document.querySelectorAll('.cal-week-day').length === 1");
+  eq((await pressed()).Day, 'true', 'Dock Day opens a one-day timeline');
+  await shot('calendar-day');
   await dockButton('Week');
-  await waitFor("document.querySelector('.cal-view-switch button:nth-child(2)').getAttribute('aria-pressed') === 'true'");
+  await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Week').getAttribute('aria-pressed') === 'true'");
   eq((await pressed()).Week, 'true', 'Dock Week follows the original control');
   eq((await pressed()).Month, 'false', 'Dock Month clears');
   eq(await docks(), 1, 'Switching to Week keeps one dock');
   await shot('calendar-week');
   await dockButton('Month');
-  await waitFor("document.querySelector('.cal-view-switch button:first-child').getAttribute('aria-pressed') === 'true'");
+  await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Month').getAttribute('aria-pressed') === 'true'");
   eq((await pressed()).Month, 'true', 'Dock Month returns');
   // The event sheet and its four ways out.
   const sheetUp = "!!document.querySelector('.cal-event-dialog.ms-sheet-surface')";
@@ -242,7 +248,11 @@ async function run(ctx) {
   ok(writes.slice(eventWrites).some(w => w.method === 'POST' && /\/api\/(google\/)?calendar\//.test(w.path) && String(w.body).includes('Dock event')), 'The sheet creates the event through the existing route');
 
   // ---- D. Library: documents, vault, drive, editor -----------------------------------------
-  const libTab = text => js(`[...document.querySelectorAll('.segmented-tab')].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`);
+  const libTab = text => {
+    const section = { Vault: 'vault', Files: 'documents', Designs: 'designs', 'Google Drive': 'google' }[text];
+    assert.ok(section, 'Known Library section: ' + text);
+    return js(`document.querySelector('[data-library-section="${section}"]').click()`);
+  };
   await navigate('library');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length === 3");
   const docSearch = await js("document.querySelector('.ms-dock input').placeholder");
@@ -302,7 +312,7 @@ async function run(ctx) {
   await js("document.querySelector('.ms-dock button').click()");
   ok(await js("!!document.querySelector('details[open] > summary[data-mobile-dock=create], details.drive-new[open]') || [...document.querySelectorAll('details')].some(d => d.open && /New/.test(d.querySelector('summary')?.textContent || ''))"), 'Drive + opens the New menu');
   await shot('library-drive');
-  for (const name of ['Documents & files', 'Vault', 'Google Drive', 'Documents & files', 'Vault']) {
+  for (const name of ['Files', 'Vault', 'Google Drive', 'Files', 'Vault']) {
     await libTab(name); await delay(500);
     ok(await docks() <= 1 && (await js("document.querySelectorAll('.ms-dock input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);
   }
@@ -417,11 +427,22 @@ async function run(ctx) {
   await navigate('calendar'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
   await js("document.querySelector('.ms-dock button').focus(); document.querySelector('.ms-dock button').click()");
   await waitFor("!!document.querySelector('.cal-event-dialog.ms-sheet-surface')");
-  ok(await js("getComputedStyle(document.querySelector('.cal-event-dialog')).animationName === 'none'"), 'Reduced motion removes the sheet rise');
+  // Phase 3 uses phase 1's reduced-motion contract: a 120ms opacity fade,
+  // with no translated frames or transition, rather than removing the fade.
+  const sheetMotion = await js(`(() => {
+    const node = document.querySelector('.cal-event-dialog'), style = getComputedStyle(node);
+    return { name: style.animationName, duration: style.animationDuration, transform: style.transform,
+      transition: style.transitionDuration,
+      frames: node.getAnimations().filter(a => a.effect?.target === node).flatMap(a => a.effect.getKeyframes()).map(f => ({ transform: f.transform || 'none', opacity: f.opacity })) };
+  })()`);
+  eq(sheetMotion.name, 'rd-opacity', 'Reduced motion uses the shared opacity fade');
+  eq(sheetMotion.duration, '0.12s', 'Reduced motion fades sheets for 120ms');
+  eq(sheetMotion.frames.map(f => f.opacity), ['0', '1'], 'The sheet animation changes opacity only');
+  ok(sheetMotion.transform === 'none' && /^0s(, 0s)*$/.test(sheetMotion.transition) && sheetMotion.frames.length >= 2 && sheetMotion.frames.every(f => f.transform === 'none'), 'Reduced motion removes all sheet movement: ' + JSON.stringify(sheetMotion));
   await press('Escape'); await waitFor("!document.querySelector('.cal-event-dialog')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // Resize cycle: the live search node moves to the dock and back, never cloned, never duplicated.
-  await navigate('library'); await libTab('Documents & files');
+  await navigate('library'); await libTab('Files');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.library-view .card-row input')");
   await js("window.__search = document.querySelector('.ms-dock input'); window.__search.value = 'keep me'");
   for (let i = 0; i < 3; i++) {
@@ -596,7 +617,7 @@ async function run(ctx) {
     ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0, 12],
     ['browser or Android (no fold)', 393, 852, 852, 47, 34, 0],
   ];
-  // 2026-10-21 (David): popups sit cleanly above the page, titles sit on the top row on the right,
+  // 2026-10-23 (David, Motion board): popups sit cleanly above the page, titles lead the top row,
   // and no tab's first content starts above the bottom of that row.
   const popupClear = async (selector, label, top) => {
     const r = await js(`(() => {
@@ -614,21 +635,31 @@ async function run(ctx) {
     })()`);
     ok(r.open && !r.bad.length && r.ownHit && r.ownTop >= top, `${label}: sits above the page, its own header clear of the status bar and of the page header: ${JSON.stringify(r)}`);
   };
-  // The top row: 44px tall, 6px under the status bar (plus the nudge). With the avatar gone it holds the title alone.
+  // The top row clears the status bar by 6px (plus the nudge). Root titles
+  // lead; up to two round actions follow. Pushed Settings has Back on the left.
   const titleRow = async (label, rowTop) => {
     const r = await js(`(() => {
       const box = n => { const b = n.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
-      const row = { l: 0, r: 16, t: ${rowTop}, b: ${rowTop} + 44 };
+      const row = { l: 20, r: innerWidth - 20, t: ${rowTop}, b: ${rowTop} + 46 };
       const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
+      const header = title?.closest('.view-header, .agents-workspace-bar, .settings-titlebar, .ms-header-row');
+      const headerButtons = [...(header?.querySelectorAll('button') || [])].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().top < row.b);
+      const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
+      const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
       const v = document.getElementById('view-content');
-      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
+      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth };
+      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
     })()`);
+    // Home's independently redesigned hero has no shell title; keep checking
+    // its first-content clearance without treating a section heading as one.
+    if (!label.endsWith(': home')) ok(r.title && r.text, `${label}: the page title is present`);
     if (r.title) {
-      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.r - (r.width - 16)) <= 1 && r.title.l >= r.row.r - 0.5,
-        `${label}: the title sits on the top row, on the right: ${JSON.stringify(r)}`);
+      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.l - r.row.l) <= 1 && r.title.r <= r.row.r + 1 && r.align === 'left' && r.italic === 'italic' && /serif/i.test(r.family),
+        `${label}: the serif italic title leads the top row on the left: ${JSON.stringify(r)}`);
+      ok(r.buttons.filter(b => !b.back).length <= 2, `${label}: at most two header actions`);
+      for (const b of r.buttons) ok(b.r - b.l >= 44 && b.b - b.t >= 44 && b.radius >= (b.b - b.t) / 2 && b.l >= r.row.l - 1 && b.r <= r.row.r + 1 && b.t >= r.row.t - 1 && b.b <= r.row.b + 1 && (b.back ? Math.abs(b.l - r.row.l) <= 1 : b.l >= r.title.r - 1), `${label}: round header buttons clear the title and stay in the top row: ${JSON.stringify(b)}`);
     }
     ok(!r.first || r.first.t >= r.row.b - 0.5, `${label}: the first content starts below the top row: ${JSON.stringify(r.first)} row ${JSON.stringify(r.row)}`);
   };

@@ -1,4 +1,6 @@
-import { api, el, toast, confirmDialog, emptyState } from "../api.js";
+import { api, el, toast } from "../api.js";
+import { workspaceConfirm as confirmDialog, redesignOn, workspaceEmpty as emptyState } from '../workspaceParts.js';
+import { segmented } from '../kairosParts.js';
 import { ICONS } from "../icons.js";
 import { createVaultExplorer } from "../vaultExplorer.js";
 import { createVaultGraph } from "../vaultGraph.js";
@@ -62,10 +64,29 @@ function libraryChrome(container, current) {
         : "A home for your references, drafts, and ideas worth keeping." }),
     ]),
   ]);
+  if (redesignOn()) {
+    const change = async id => {
+      if (id === current) return;
+      if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
+      if (id === 'vault') renderVault(container);
+      else if (id === 'designs') await renderDesigns(container);
+      else if (id === 'google') renderGoogle(container);
+      else await renderList(container);
+    };
+    const sections = [{ value: 'vault', text: 'Vault' }, { value: 'documents', text: 'Files' }, { value: 'designs', text: 'Designs' }];
+    const control = segmented({ label: 'Library section',
+      value: current === 'google' ? 'documents' : current,
+      options: sections, onChange: change });
+    [...control.querySelectorAll('button')].forEach((button, index) => { button.dataset.librarySection = sections[index].value; });
+    const tabs = el('div', { class: 'library-section-nav' }, [control, el('button', { type: 'button', class: 'btn library-drive-link', text: 'Google Drive',
+        'data-library-section': 'google',
+        'aria-pressed': String(current === 'google'), onclick: () => change('google') })]);
+    return [header, tabs];
+  }
   const tabs = el("div", { class: "segmented-tabs library-tabs", role: "group", "aria-label": "Library section" });
   for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"], ["designs", "Designs"]]) {
     const button = el("button", { type: "button", class: "segmented-tab" + (id === current ? " active" : ""),
-      text: label, "aria-pressed": id === current ? "true" : "false" });
+      text: label, 'data-library-section': id, "aria-pressed": id === current ? "true" : "false" });
     button.addEventListener("click", async () => {
       if (id === current) return;
       if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
@@ -165,8 +186,8 @@ async function renderList(container) {
     el("div", { style: "margin-top:6px;" }, [importStatus]),
   ]);
 
-  const grid = el("div", { id: "library-grid", class: "document-grid" });
-  const chatFiles = el("div", { class: "library-chat-files" });
+  const grid = el("div", { id: "library-grid", class: "document-grid rd-stagger" });
+  const chatFiles = el("div", { class: "library-chat-files rd-stagger" });
   const documentsSection = section("Documents", "Notes and drafts saved to your Library", "notes", grid);
   const filesSection = section("Files by chat", "Attachments and files created in conversations", "chats", chatFiles);
   const openChats = new Set();
@@ -264,7 +285,10 @@ async function refreshChatFileGroups(host, query, section, openChats, current) {
   }
   section.count.textContent = String(shown);
   if (wanted && shown) section.node.open = true;
-  if (!shown) host.append(el("div", { class: "library-empty", text: query ? "No chat files match this search." : "Files sent to or created in chats will appear here." }));
+  if (!shown) host.append(redesignOn() ? emptyState({ title: query ? 'No chat files match' : 'No chat files yet',
+    hint: 'Files sent to or created in chats will appear here.', actionLabel: 'Open chats',
+    onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'chat' } })) })
+    : el("div", { class: "library-empty", text: query ? "No chat files match this search." : "Files sent to or created in chats will appear here." }));
 }
 
 async function refreshGrid(grid, container, query, section, current) {
@@ -336,7 +360,7 @@ async function renderEditor(container, docId) {
   });
   contentArea.value = doc.content; // el() sets textContent via "text", but a <textarea>'s live value needs .value too
 
-  container.append(el("div", { class: "view-constrained library-editor" }, [header, contentArea]));
+  container.append(el("div", { class: "view-constrained library-editor rd-push-in" }, [header, contentArea]));
 
   // Unsaved-changes guard (audit 2026-09-03) — leaving the editor used to
   // silently discard everything typed since the last save.

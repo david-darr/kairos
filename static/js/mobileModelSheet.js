@@ -103,7 +103,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
   };
   const options = () => {
     restoreOptions(); root.hidden = true;
-    optionsPage = el('section', { class: 'ms-model-options' });
+    optionsPage = el('section', { class: 'ms-model-options rd-push-in' });
     const back = button('Back to models', () => { restoreOptions(); optionsButton.focus(); });
     optionsPage.append(back, el('h3', { text: 'Options' }));
     const levels = [...menu.querySelectorAll('.model-effort-btn')];
@@ -146,7 +146,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     menu.removeAttribute('role');
     trigger.setAttribute('aria-expanded', 'true');
     arming = true; setTimeout(() => { arming = false; }, 0);
-    sheet = openMobileSheet({ title: 'Model and effort', content: root, opener: trigger, fullHeight: true, onClose: () => {
+    sheet = openMobileSheet({ title: 'Model', content: root, opener: trigger, fullHeight: true, onClose: () => {
       restoreOptions();
       menu.querySelectorAll('[hidden]').forEach(node => { if (node.matches('.model-connection-item, .model-catalog-item')) node.hidden = false; });
       menu.querySelectorAll('.ms-provider-heading, .ms-default-badge').forEach(node => node.remove());

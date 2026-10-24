@@ -15,7 +15,7 @@ let current = null;
 
 // Every right-hand pane registers here so even rapid opens close the native
 // browser synchronously. The registration owns the divider and its listeners.
-export function mountChatPane(host, panel, close, { onDrag, sharedRoot = false, kind } = {}) {
+export function mountChatPane(host, panel, close, { onDrag, sharedRoot = false, animate = false, kind } = {}) {
   if (!sharedRoot && desktopPanes(host)) return mountStackedPane(host, panel, close, { onDrag, kind }, mountChatPane);
   holdReadingPositions(); // Capture before the pane's first layout can move the reader.
   const main = host.querySelector('#chat-main');
@@ -117,7 +117,7 @@ export function mountChatPane(host, panel, close, { onDrag, sharedRoot = false, 
     if (window.innerWidth <= 1100) { stopDrag(); setMaximized(false); }
     sync();
   };
-  const animateDocuments = !replacingPane && (panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel'))
+  const animateDocuments = !replacingPane && (panel.classList.contains('artifact-viewer') || panel.classList.contains('chat-files-panel') || (sharedRoot && animate))
     && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const split = window.innerWidth > 1100 && main && !host.classList.contains('forge-conversation');
   // Disable the CSS resize transition before installing the split, including

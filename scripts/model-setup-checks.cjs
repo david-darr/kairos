@@ -83,7 +83,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       await waitFor("!!document.querySelector('[data-setup-kind=local]')");
       assert.equal(demoState.setupLocal.status, 'downloading', label + ' local keeps downloading after return');
       assert.ok(writes.slice(writeIndex).some(w => w.path.includes('/api/cookbook/engine/setup/')), label + ' Cookbook owns the local handoff');
-      // Finish a skipped wizard, then open from both empty views and the picker.
+      // Finish a skipped wizard, then re-enter from Home, empty Chat and the picker.
       demoState.setupConnections = [];
       await click('Skip for now', '.onboarding-card');
       await waitFor("document.querySelector('.onboarding-card h2')?.textContent === 'Your vault'");
@@ -91,10 +91,17 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       await click('Skip / Continue', '.onboarding-card'); await click('Enter Kairos', '.onboarding-card');
       await waitFor("document.getElementById('onboarding-overlay').classList.contains('hidden')");
       await navigate('home');
-      await waitFor("!!document.querySelector('.model-setup-empty button')");
-      await click('Set up a model', '.model-setup-empty');
+      await waitFor("!!document.querySelector('[data-home-section=system] [data-system=models]')");
+      assert.ok(await js("!document.querySelector('.dashboard-content .model-setup-empty')"), label + ' Home has no model setup placeholder');
+      await js("document.querySelector('[data-home-section=system] [data-system=models]').click()");
+      const homeSetupNav = (width <= 768 ? '#view-content.settings-mobile-page' : '.modal-backdrop:not(.hidden) .settings-window') + ' .settings-nav-item[data-section=add-models]';
+      await waitFor(`!!document.querySelector(${JSON.stringify(homeSetupNav)})`);
+      await js(`document.querySelector(${JSON.stringify(homeSetupNav)}).click()`);
+      await waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Help me set up a model')");
+      await click('Help me set up a model', 'body');
       await waitFor("!!document.querySelector('.model-setup-panel [data-setup-kind=claude]')");
       await js("document.querySelector('.model-setup-panel [aria-label=Close]').click()");
+      if (width > 768) await js("document.querySelector('.settings-window button[title=Close]').click()");
       await navigate('chat');
       await waitFor("!!document.querySelector('#chat-main > .model-setup-empty button')");
       await click('Set up a model', '#chat-main > .model-setup-empty');

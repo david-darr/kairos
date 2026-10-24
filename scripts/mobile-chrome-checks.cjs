@@ -69,7 +69,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
   assert.equal(await js("!document.querySelector('.ms-your-day')"), true, 'Dashboard has no Your day toggle');
   assert.equal(await js(`(() => {const v=document.getElementById('view-content');
     const spacer=document.createElement('div');spacer.style.cssText='height:1600px;flex:none';v.append(spacer);
-    v.scrollTop=0;const heading=v.querySelector('.dashboard-header'), before=heading.getBoundingClientRect().top;
+    v.scrollTop=0;const heading=v.querySelector('.hm-heading, .dashboard-header'), before=heading.getBoundingClientRect().top;
     v.scrollTop=180;const after=heading.getBoundingClientRect().top;
     const ok=v.scrollTop>0 && after<before;spacer.remove();v.scrollTop=0;return ok;})()`), true, 'Page still scrolls beneath the fixed scrim');
 };

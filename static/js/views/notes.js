@@ -1,4 +1,5 @@
-import { api, el, toast, confirmDialog, iconButton, emptyState } from "../api.js";
+import { api, el, toast, iconButton } from "../api.js";
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
 
 export async function render(container) {
@@ -27,14 +28,24 @@ export async function render(container) {
     ]),
   ]);
 
-  const list = el("div", { id: "notes-list", style: "margin-top:14px;" });
+  const list = el("div", { id: "notes-list", class: 'rd-stagger', style: "margin-top:14px;" });
+  const stats = el('div', { class: 'notes-overview', hidden: !redesignOn() });
+  list.overview = stats;
+  if (redesignOn()) {
+    const sort = el('select', { class: 'notes-sort', 'aria-label': 'Sort notes' }, [
+      el('option', { value: 'saved', text: 'Saved order' }), el('option', { value: 'due', text: 'Due time' }),
+      el('option', { value: 'title', text: 'A–Z' }),
+    ]);
+    sort.onchange = () => { list.sortOrder = sort.value; refresh(list, textInput); };
+    header.append(sort);
+  }
   // Redesign preview only: a bar above the list with "Clear finished". It stays
   // hidden unless the switch is on and at least one note is done (see refresh).
   const finishedBar = el("div", { class: "notes-finished-bar", hidden: true });
   list.finishedBar = finishedBar;
 
   header.append(finishedBar);  // right side of the page header, so it adds no row of its own
-  wrap.append(header, form, list);
+  wrap.append(header, stats, form, list);
   container.append(wrap);
   const onAppearance = () => {
     if (!wrap.isConnected) { document.removeEventListener("kairos:appearance", onAppearance); return; }
@@ -111,6 +122,15 @@ function dueNode(note, dueText) {
 
 async function refresh(list, focusTarget) {
   const notes = await api("/api/notes");
+  if (list.sortOrder === 'due') notes.sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : Infinity) - (b.due_date ? new Date(b.due_date).getTime() : Infinity));
+  if (list.sortOrder === 'title') notes.sort((a, b) => a.text.localeCompare(b.text));
+  if (list.overview) list.overview.hidden = !redesignOn();
+  const now = new Date();
+  const end = new Date(now); end.setDate(end.getDate() + 7);
+  list.overview?.replaceChildren(workspaceStats([
+    { label: 'Finished', value: notes.filter(n => n.completed).length },
+    { label: 'Due this week', value: notes.filter(n => !n.completed && n.due_date && new Date(n.due_date) >= now && new Date(n.due_date) < end).length },
+  ]));
   list.innerHTML = "";
   drawFinishedBar(list, focusTarget, notes);
   if (notes.length === 0) {

@@ -277,7 +277,7 @@ export function render(container, tabId, options = {}) {
   }
   // Each request fills its own card. Quota or store reads cannot hold up chats.
   const data = {};
-  redesign = mountRedesignHome({ container, content, hero, header, grid, parts, data: () => data, refresh: () => refresh(), rearrange: () => arrange() });
+  redesign = mountRedesignHome({ container, content, hero, header, grid, parts, data: () => data, refresh: () => refresh(), rearrange: () => arrange(), launchSurface: !!options.mobileLaunchSurface });
   arrange();
   const statSpecs = [
     ["sessions", "chats", "chat"], ["notes", "open notes", "notes"],
@@ -297,6 +297,10 @@ export function render(container, tabId, options = {}) {
   function drawModels() {
     if (data.endpoints === undefined) return;
     const { endpoints, usage, quotas } = data;
+    data.modelAccounting = (endpoints || []).flatMap(endpoint => {
+      const label = usageLabel(endpoint, usage?.[endpoint.id]);
+      return label ? [{ ...label, name: endpoint.name }] : [];
+    });
     models.body.replaceChildren();
     if (endpoints && !endpoints.length) models.body.append(el("div", { class: "model-setup-empty" }, [
       ...(rd() ? [el("h3", { text: "Set up a model" }), el("p", { text: "Choose how Kairos thinks. We'll help you connect it." })] : [icon('brain')]),
@@ -346,7 +350,7 @@ export function render(container, tabId, options = {}) {
     }
     for (const [name, value, state] of values) {
       if (quiet) {
-        chips.append(el("button", { type: "button", class: "dashboard-system-chip", "aria-label": `${name}: ${value}`, onclick: () => navigate("settings") }, [
+        chips.append(el("button", { type: "button", class: "dashboard-system-chip", "data-system": name.toLowerCase(), "aria-label": `${name}: ${value}`, onclick: () => navigate("settings") }, [
           el("span", { class: "status-dot " + state }), el("span", { text: name }), el("span", { class: "meta", text: value }),
         ]));
         continue;
@@ -364,12 +368,14 @@ export function render(container, tabId, options = {}) {
     if (!data.auth?.is_admin) return;
     const { skills, integrations, tabs, catalog, addons } = data;
     store.body.replaceChildren();
+    store.panel.dataset.hasItems = 'false';
     if (Array.isArray(skills) && Array.isArray(integrations) && Array.isArray(tabs)) {
       // Match Tool Store's installed entries: MCP servers, configured services,
       // and installed user tabs or enabled built-in templates.
       const tools = integrations.filter((i) => i.kind === "mcp_server" || i.configured);
       const installedTabs = tabs.filter((t) => !addons?.some(addon => addon.id === t.slug) && (t.kind === "user" || t.enabled));
       const toolCount = tools.length + (addons?.filter(a=>a.installed).length || 0);
+      store.panel.dataset.hasItems = String(skills.length + toolCount + installedTabs.length > 0);
       if (rd()) store.body.append(row("Installed", `${skills.length} skills · ${toolCount} tools · ${installedTabs.length} tabs`, () => navigate("tool-store")));
       const categories = el('div', { class: 'dashboard-store-categories', 'aria-label': 'Installed' });
       for (const [name, count, mark] of [['Skills',skills.length,'brain'],['Tools',toolCount,'store'],['Tabs',installedTabs.length,'library']]) {
@@ -378,6 +384,7 @@ export function render(container, tabId, options = {}) {
       if (!rd()) store.body.append(categories);
     }
     if (Array.isArray(catalog?.items)) {
+      if (catalog.items.some(i => i.installed || !i.install_blocked)) store.panel.dataset.hasItems = 'true';
       const updates = catalog.items.filter((i) => i.installed && i.update_available);
       if (rd()) {
         if (updates.length) store.body.append(row("Update available", updates.length <= 2 ? updates.map((i) => i.name).join(", ") : `${updates.length} items`, () => navigate("tool-store")));
@@ -568,11 +575,13 @@ export function render(container, tabId, options = {}) {
       ["projects", "/api/projects"], ["endpoints", "/api/models"], ["usage", "/api/models/usage"],
       ["status", "/api/system/status"], ["feed", "/api/system/events?limit=5"], ["quotas", "/api/models/quotas"],
       ["tabCards", "/api/home/tab-cards"],
+      ...(rd() ? [["week", "/api/home/week"]] : []),
     ].map(([key, path]) => request(key, path));
     const adminReads = (async () => {
       const auth = await api("/api/auth/status").catch(() => null);
       if (disposed) return;
       data.auth = auth;
+      redesign?.update("auth");
       if (!auth?.is_admin) {
         agents.panel.hidden = store.panel.hidden = waiting.hidden = true;
         delete data.settings;

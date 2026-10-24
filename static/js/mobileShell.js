@@ -7,6 +7,8 @@ import { initMoreSheet } from './mobileTabSheet.js';
 import { initActivity, attachActivity, activityMetadata, refreshActivity } from './mobileActivity.js';
 import { emptyState } from './kairosParts.js';
 import * as chatStream from './chatStream.js';
+import { openMobileSheet } from './mobileSheet.js';
+import { openNotifications } from './mobileActions.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
@@ -20,6 +22,35 @@ export function phoneRoute(tab, options) {
 }
 export function initMobileShell() { initMoreSheet(); initActivity(); }
 
+// Enter/Space activate on keydown: the native click can be missed while focus is still settling.
+const activateOnKey = action => event => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  event.preventDefault(); event.stopPropagation();
+  if (!event.repeat) action();
+};
+export function mountChatActions(opener, { history, search, notifications }) {
+  let sheet;
+  const show = () => {
+    if (sheet?.dialog.isConnected) { sheet.dialog.focus(); return; }
+    const actions = el('nav', { class: 'ms-quick-create', 'aria-label': 'Chat actions' });
+    for (const [label, action] of [['Chat history', history], ['Search and filter chats', search], ['Notifications', notifications]]) {
+      const row = button(label, () => { sheet.close(); action(); }, 'ms-account-row');
+      row.addEventListener('keydown', activateOnKey(() => row.click()));
+      actions.append(row);
+    }
+    sheet = openMobileSheet({ title: 'Chat actions', content: actions, opener,
+      onClose: () => opener.setAttribute('aria-expanded', 'false') });
+    opener.setAttribute('aria-expanded', String(!!sheet));
+  };
+  const click = event => { event.stopPropagation(); show(); };
+  // Own activation so Enter/Space do not depend on a synthesized native click
+  // while the asynchronously mounted launch composer is settling focus.
+  const key = activateOnKey(show);
+  opener.setAttribute('aria-haspopup', 'dialog'); opener.setAttribute('aria-expanded', 'false');
+  opener.addEventListener('click', click); opener.addEventListener('keydown', key);
+  return () => { sheet?.close(); opener.removeEventListener('click', click); opener.removeEventListener('keydown', key); };
+}
+
 export function mountMobileHome({ container, content, banner, options }) {
   if (!options.mobileLaunchSurface) return { update() {}, dispose() {} };
   const shell = el('section', { class: 'ms-shell', 'aria-label': 'Launch workspace' });
@@ -28,31 +59,34 @@ export function mountMobileHome({ container, content, banner, options }) {
   [newTab, chatsTab].forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `ms-tab-${i}`; tab.setAttribute('aria-controls', `ms-page-${i}`); });
   switcher.append(el('span', { class: 'ms-switch-thumb', 'aria-hidden': 'true' }), newTab, chatsTab);
   let pager;
-  const newChat = button('+', () => { pager.select(0); (launchHost?.querySelector('#chat-input') || input).focus(); }, 'rd-chat-round');
+  const newChat = button('', () => { pager.select(0); (launchHost?.querySelector('#chat-input') || input).focus(); }, 'rd-chat-round');
+  newChat.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
   newChat.setAttribute('aria-label', 'New chat');
-  const historyButton = button('…', () => { pager.select(1); history.querySelector('input[type=search]')?.focus(); }, 'rd-chat-round');
-  historyButton.setAttribute('aria-label', 'Search and filter chats');
+  const chatActions = button('…', () => {}, 'rd-chat-round');
+  chatActions.setAttribute('aria-label', 'Chat actions');
+  chatActions.setAttribute('aria-haspopup', 'dialog');
+  chatActions.setAttribute('aria-expanded', 'false');
   const modelChoice = el('select', { 'aria-label': 'Model for new chat', 'data-mobile-hook': 'model-picker' }, [el('option', { value: '', text: 'Choose a model' })]);
   modelChoice.addEventListener('change', () => { selectedModelId = modelChoice.value; });
   const context = el('div', { class: 'ms-context' }, [modelChoice]);
   // Chats owns the title and switch; global navigation stays in the tab bar.
   const header = el('header', { class: 'ms-header rd-chats-header' }, [edgeBlur('top'),
-    el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, historyButton])]), switcher, context]);
+    el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, chatActions])]), switcher, context]);
   const launch = el('section', { class: 'ms-page ms-launch', id: 'ms-page-0', role: 'tabpanel', 'aria-labelledby': newTab.id });
   const history = el('section', { class: 'ms-page ms-history', id: 'ms-page-1', role: 'tabpanel', 'aria-labelledby': chatsTab.id });
-  const intro = emptyState({ mascotState: 'sleeping', title: 'What should we work on?', text: 'Kip is resting until you need it.' });
+  const intro = emptyState({ mascotState: 'sleeping', mascotSize: 120, title: 'What should we work on?', text: 'Kip is resting until you need it.' });
   intro.classList.add('ms-intro');
   let introBusy;
   const syncIntro = () => {
     const busy = chatStream.listInFlight().some(entry => entry.status === 'processing');
     if (busy === introBusy) return;
     introBusy = busy;
-    intro.querySelector('p').textContent = busy ? 'Start something new while your other work continues.' : 'Kip is resting until you need it.';
+    intro.querySelector('p').textContent = busy ? 'Start something new while your other work continues.' : 'Nothing is running. Kip is resting until you need it.';
     intro.querySelector('kairos-mascot')?.setAttribute('state', busy ? 'idle' : 'sleeping');
   };
   const detachIntro = chatStream.subscribeAll(syncIntro); syncIntro();
   const activitySlot = el('div', { class: 'ms-activity-slot' });
-  const input = el('textarea', { rows: '1', placeholder: 'Plan, ask, build...', 'aria-label': 'Message Kairos', value: launchDraft });
+  const input = el('textarea', { rows: '1', placeholder: 'Ask anything…', 'aria-label': 'Message Kairos', value: launchDraft });
   input.value = launchDraft;
   input.addEventListener('input', () => { launchDraft = input.value; input.style.height = 'auto'; input.style.height = `${Math.min(160, input.scrollHeight)}px`; });
   const start = send => {
@@ -64,10 +98,20 @@ export function mountMobileHome({ container, content, banner, options }) {
   const send = button('Send', () => start(true));
   const composer = el('div', { class: 'ms-launch-composer ms-glass', 'data-mobile-hook': 'composer' }, [more, input, send]);
   const bottom = el('div', { class: 'ms-launch-bottom' }, [edgeBlur('bottom'), activitySlot, composer]);
-  launch.append(intro, bottom);
+  const prompts = el('div', { class: 'rd-chat-prompts', 'aria-label': 'Ideas for a new chat' },
+    ['Plan my week', 'Summarise my inbox', 'Design a poster'].map(text => button(text, () => {
+      const field = launchHost?.querySelector('#chat-input') || input;
+      field.value = text; field.dispatchEvent(new Event('input')); field.focus();
+    }, 'rd-chat-prompt')));
+  launch.append(intro, prompts, bottom);
   const track = el('div', { class: 'ms-page-track' }, [launch, history]);
   shell.append(header, el('div', { class: 'ms-page-window' }, [track])); content.prepend(shell);
   const historyUI = mountHistory(history);
+  const disposeActions = mountChatActions(chatActions, {
+    history: () => { pager.select(1); chatsTab.focus(); },
+    search: () => { pager.select(1); history.querySelector('input[type=search]')?.focus({ preventScroll: true }); },
+    notifications: () => openNotifications(chatActions),
+  });
   pager = mountPager(shell, [launch, history], [newTab, chatsTab], options.mobilePage ?? selectedPage, value => {
     selectedPage = value; historyUI.closeRows();
     if (value === 1 && shell.contains(document.activeElement) && document.activeElement.matches('textarea')) document.activeElement.blur();
@@ -138,14 +182,17 @@ export function mountMobileHome({ container, content, banner, options }) {
     }
     shell.style.setProperty('--ms-launch-clearance', `${Math.max(0, shell.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10)}px`);
   };
-  const dockSize = new ResizeObserver(placeDock);
+  // The bar glides into place after a resize or rotation without changing size, so measure again when it settles.
+  let settleTimer = 0;
+  const settleDock = () => { placeDock(); clearTimeout(settleTimer); settleTimer = setTimeout(placeDock, 450); };
+  const dockSize = new ResizeObserver(settleDock);
   dockSize.observe(shell);
   const tabbar = document.querySelector('.ms-tabbar');
   if (tabbar) dockSize.observe(tabbar);
-  const dockState = new MutationObserver(placeDock);
-  if (tabbar) dockState.observe(tabbar, { attributes: true, attributeFilter: ['data-state'] });
-  window.addEventListener('resize', placeDock);
-  document.addEventListener('kairos:appearance', placeDock);
+  const dockState = new MutationObserver(settleDock);
+  if (tabbar) { dockState.observe(tabbar, { attributes: true, attributeFilter: ['data-state'] }); tabbar.addEventListener('transitionend', placeDock); }
+  window.addEventListener('resize', settleDock);
+  document.addEventListener('kairos:appearance', settleDock);
   placeDock();
   phone.addEventListener('change', sync); document.addEventListener('kairos:appearance', sync);
   return { update(key, value) {
@@ -157,11 +204,12 @@ export function mountMobileHome({ container, content, banner, options }) {
     }
     if (key === 'sessions') activityMetadata(value, null);
   }, dispose() {
+    disposeActions();
     disposed = true; detachIntro(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
     dockSize.disconnect(); dockState.disconnect();
-    window.removeEventListener('resize', placeDock);
-    document.removeEventListener('kairos:appearance', placeDock);
+    window.removeEventListener('resize', settleDock);
+    document.removeEventListener('kairos:appearance', settleDock); clearTimeout(settleTimer); tabbar?.removeEventListener('transitionend', placeDock);
     phone.removeEventListener('change', sync); document.removeEventListener('kairos:appearance', sync);
     shell.remove(); bannerAnchor.remove();
   } };
@@ -172,7 +220,7 @@ export function mountMobileChat(container, actions) {
   const title = container.querySelector('.chat-title');
   const menu = container.querySelector('.chat-phone-tools .overflow-menu');
   if (!header || !menu || !title) return () => {};
-  const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to workspace');
+  const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to Chats');
   const heading = el('div', { class: 'ms-chat-heading' }, [el('strong', { text: title.textContent }), el('small', { text: 'All chats' })]);
   const blur = edgeBlur('top'); header.prepend(blur, back, heading); refreshActivity();
   const extras = Object.entries(actions).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));
@@ -181,13 +229,17 @@ export function mountMobileChat(container, actions) {
   const main = container.querySelector('#chat-main');
   const syncTitle = () => {
     heading.firstChild.textContent = title.textContent;
-    heading.lastChild.textContent = projects.find(p => p.id === main?.dataset.projectId)?.name || container.querySelector('#project-picker-label')?.textContent || 'All chats';
+    const model = container.querySelector('#model-picker-label')?.textContent;
+    const workspace = projects.find(p => p.id === main?.dataset.projectId)?.name || container.querySelector('#project-picker-label')?.textContent;
+    heading.lastChild.textContent = [model, workspace].filter(Boolean).join(' · ') || 'All chats';
   };
   const observer = new MutationObserver(syncTitle);
   observer.observe(title, { childList: true, characterData: true, subtree: true });
   const project = container.querySelector('#project-picker-label'); if (project) observer.observe(project, { childList: true, characterData: true, subtree: true });
+  const modelLabel = container.querySelector('#model-picker-label'); if (modelLabel) observer.observe(modelLabel, { childList: true, characterData: true, subtree: true });
   if (main) observer.observe(main, { attributes: true, attributeFilter: ['data-project-id'] });
   if (mobileOn()) api('/api/projects').then(value => { if (container.isConnected) { projects = value; syncTitle(); } }).catch(() => {});
+  syncTitle();
   const capsule = el('div', { class: 'ms-chat-capsule ms-glass' }); header.append(capsule);
   const movable = [...header.querySelectorAll(':scope > .chat-files-toggle, :scope > .chat-documents-toggle, :scope > .chat-phone-tools, :scope > .context-pill')];
   const modelPill = container.querySelector('.chat-header-model');
