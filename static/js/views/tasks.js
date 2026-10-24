@@ -1,6 +1,7 @@
 import { api, el, customSelect, toast, iconButton } from "../api.js";
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
 import { renderTaskActivity } from '../taskActivity.js';
+import { phoneDetails } from '../phoneRowDetails.js';
 import { ICONS } from "../icons.js";
 import { renderBoard } from "./taskBoard.js";
 import { renderTriggers } from "./taskTriggers.js";
@@ -99,6 +100,10 @@ export async function render(container) {
   // Webhook triggers (2026-10-05): outside events that start work.
   const triggersCard = el("div", { class: "glass card triggers-card" });
   const routinesHeading = el('h3', { class: 'workspace-phone-only tasks-routines-heading', text: 'Routines' });
+  routinesHeading.append(el('button', { type: 'button', class: 'phone-section-link', text: 'See all', onclick: () => {
+    list.classList.toggle('tasks-show-all');
+    routinesHeading.lastElementChild.textContent = list.classList.contains('tasks-show-all') ? 'Show less' : 'See all';
+  } }));
   const wrap = el("div", { class: "view-constrained tasks-workspace" }, [header, activity, boardCard, form, routinesHeading, list, triggersCard, builtinCard]);
   container.append(wrap);
   await renderBoard(boardCard);
@@ -314,6 +319,18 @@ async function refresh(list) {
       runsHost,
     ]);
     list.appendChild(card);
+    if (redesignOn()) {
+      const details = el('div', { class: 'task-row-details' });
+      details.append(...card.children); card.append(details);
+      const next = task.next_run_at ? new Date(task.next_run_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'Not scheduled';
+      const row = el('button', { type: 'button', class: 'workspace-phone-only task-routine-row', 'aria-haspopup': 'dialog',
+        'aria-label': `${task.name}. Open task controls`, onclick: () => phoneDetails(task.name, [details], row) }, [
+        el('span', { class: 'task-schedule-icon', 'aria-hidden': 'true' }),
+        el('span', { class: 'task-routine-name', text: task.name }), el('span', { class: 'task-routine-next', text: next }),
+      ]);
+      row.firstElementChild.innerHTML = ICONS.calendar || ICONS.tasks;
+      card.prepend(row);
+    }
 
     if (task.run_started_at) {
       runsHost.append(el("div", { class: "meta", style: "margin-top:4px;color:var(--accent);",

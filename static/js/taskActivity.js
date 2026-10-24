@@ -31,8 +31,14 @@ export function renderTaskActivity(host, runs) {
       const day = cells.slice(i * 24, i * 24 + 24);
       return day.includes('b') ? 'b' : day.includes('a') ? 'a' : 'empty';
     });
-    body.replaceChildren(el('div', { class: 'task-activity-count' }, [el('span', { text: 'Recorded runs' }),
-      el('strong', { text: String(count) }), el('small', { text: `${done} succeeded · ${count - done} other outcomes` })]),
+    body.replaceChildren(el('div', { class: 'task-activity-count' }, [el('span', {}, [
+      el('span', { class: 'task-activity-desktop-label', text: 'Recorded runs' }),
+      el('span', { class: 'workspace-phone-only', text: range === 'week' ? 'Runs this week' : range === 'month' ? 'Runs this month' : 'Runs this year' }),
+    ]),
+      el('strong', { text: String(count) }), el('small', {}, [
+        el('span', { class: 'task-activity-desktop-label', text: `${done} succeeded · ${count - done} other outcomes` }),
+        el('span', { class: 'workspace-phone-only', text: `${done} done · ${count - done} other outcomes` }),
+      ])]),
       dotMatrix({ rows: range === 'week' ? 7 : Math.ceil(days / 24), cols: 24, cells: shown,
         label: `${count} recorded runs over the last ${days} days. ${done} succeeded. Ink: succeeded. Accent: other outcomes.` }),
       el('p', { class: 'meta', text: 'From retained scheduled-task history. Older runs may no longer be stored.' }));

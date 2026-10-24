@@ -103,10 +103,14 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
 
   // ---- Rows ----------------------------------------------------------------
   function decorate(card, kind) {
-    const name = card.querySelector("h4")?.textContent.trim() || "Item";
+    const heading = card.querySelector('h4');
+    const original = heading?.textContent.trim() || 'Item';
+    const name = heading?.getAttribute('data-display-name') || (/^[a-z0-9]+(?:[-_][a-z0-9]+)+$/.test(original)
+      ? original.replace(/[-_]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase()) : original);
+    if (heading) heading.replaceChildren(el('span', { class: 'ts-desktop-name', text: original }), el('span', { class: 'ts-phone-name', text: name }));
     const badge = card.querySelector(":scope > .tool-store-card-top > :is(.tool-store-badge, .pill)") || card.querySelector(":scope > .tool-store-badge");
     const raw = badge?.textContent.trim() || "";
-    const label = PILL_TEXT[raw.toLowerCase()] || raw;
+    const label = kind === 'skill' && raw === 'Available' ? 'On' : PILL_TEXT[raw.toLowerCase()] || raw;
     card.dataset.tsKind = kind;
     card.dataset.tsKey = `${kind}:${name}`;
     const tile = el("span", { class: "ts-row-tile", "aria-hidden": "true" });

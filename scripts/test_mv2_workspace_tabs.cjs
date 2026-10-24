@@ -19,7 +19,8 @@ class Node {
     this.style = { setProperty(name, value) { this[name] = value; }, removeProperty(name) { delete this[name]; } };
     Object.assign(this, attrs); if (attrs.text !== undefined) this.textContent = attrs.text; this.append(...children);
   }
-  append(...nodes) { for (const n of nodes.filter(Boolean)) { if (typeof n === 'object') n.parentElement = this; this.children.push(n); } }
+  get firstElementChild() { return this.children.find(n => typeof n === 'object'); }
+  append(...nodes) { for (const n of nodes.filter(Boolean)) { if (typeof n === 'object') { if (n.parentElement) n.parentElement.children = n.parentElement.children.filter(c => c !== n); n.parentElement = this; } this.children.push(n); } }
   appendChild(n) { this.append(n); return n; }
   prepend(...nodes) { for (const n of nodes.filter(Boolean)) n.parentElement = this; this.children.unshift(...nodes.filter(Boolean)); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
@@ -27,6 +28,7 @@ class Node {
   setAttribute(k, v) { this.attrs[k] = v; if (k === 'class') this.classes = new Set(v.split(/\s+/)); }
   getAttribute(k) { return this.attrs[k] ?? null; }
   replaceWith(node) { const p = this.parentElement; p.children[p.children.indexOf(this)] = node; node.parentElement = p; }
+  before(node) { const p = this.parentElement; p.children.splice(p.children.indexOf(this), 0, node); node.parentElement = p; }
   addEventListener(k, fn) { this['on' + k] = fn; }
   click() { return this.onclick?.({ currentTarget: this }); }
   insertAdjacentHTML() {}
@@ -35,16 +37,20 @@ class Node {
 }
 const descendants = n => n.children.flatMap(c => typeof c === 'object' ? [c, ...descendants(c)] : []);
 const el = (...args) => new Node(...args);
-let segments, requests = [], redesign = true, phone = true, responses = {};
+let segments, requests = [], redesign = true, phone = true, responses = {}, sheetOptions;
 const context = vm.createContext({ console, Date, Intl, URL, Set, Map, Promise, Math, String, Number,
-  document: { createElement: tag => el(tag), documentElement: { dataset: { mascot: 'on' }, classList: { contains: () => redesign } }, body: new Node('body') },
+  document: { createElement: tag => el(tag), createComment: () => el('#comment'), documentElement: { dataset: { mascot: 'on' }, classList: { contains: () => redesign } }, body: new Node('body') },
   window: { matchMedia: () => ({ matches: phone }) },
   MutationObserver: class { observe() {} disconnect() {} }, setInterval: () => 0, clearInterval() {},
 });
 const cache = new Map();
 const mocks = {
   'api.js': { el, modelMark: () => el('span'), api: async url => { requests.push(url); return responses[url] ?? []; }, iconButton: () => el('button'), openPanelDialog() {}, toast() {} },
-  'mobileSheet.js': { mountSheetSurface() {} }, 'calendarRepeat.js': { repeatControls() {} },
+  'mobileSheet.js': { mountSheetSurface() {}, openMobileSheet(options) {
+    sheetOptions = options;
+    let closed = false;
+    return { close() { if (!closed) { closed = true; options.onClose(); } } };
+  } }, 'calendarRepeat.js': { repeatControls() {} },
   'mascot.js': { createMascot: ({ state, size }) => el('kairos-mascot', { state, size }) },
   'workspaceParts.js': { redesignOn: () => redesign, workspaceEmpty: () => el('section'), workspaceConfirm: async () => false },
   'kairosParts.js': { segmented: options => { segments = options; return el('div'); }, dotMatrix: options => options },
@@ -185,17 +191,34 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   const modelsHost = el('div'); await cookbook.render(modelsHost);
   assert.equal(modelsHost.querySelectorAll('.cookbook-running').length, 1);
   assert.equal(modelsHost.querySelector('.cookbook-running').querySelector('strong').textContent, 'fixture:small');
-  assert.deepEqual(modelsHost.querySelector('.cookbook-installed-list').querySelectorAll('button').map(b => b.textContent), ['Use in Chat', 'Delete']);
+  assert.deepEqual(modelsHost.querySelector('.cookbook-installed-list').querySelectorAll('button').map(b => b.textContent), ['Use in Chat', 'Delete', '…']);
   const changeEngine = segments.onChange;
   await changeEngine('engine');
   assert.equal(modelsHost.querySelector('.cookbook-status').querySelector('code').textContent, 'http://localhost:9123/v1');
   assert.equal(modelsHost.querySelector('.cookbook-running').querySelector('strong').textContent, 'fixture.gguf');
-  assert.deepEqual(modelsHost.querySelector('.cookbook-installed-list').querySelectorAll('button').map(b => b.textContent), ['Running', 'Use in Chat', 'Delete']);
+  assert.deepEqual(modelsHost.querySelector('.cookbook-installed-list').querySelectorAll('button').map(b => b.textContent), ['Running', 'Use in Chat', 'Delete', '…']);
+  assert.equal(modelsHost.querySelector('.cookbook-model-tile').textContent, 'F');
+  assert.equal(modelsHost.querySelector('.cookbook-model-count').textContent, '1 model · 2.0 GB');
   const stop = modelsHost.querySelector('.cookbook-running').querySelector('button');
   responses['/api/cookbook/engine/status'] = { running: false, model: null, base_url: null };
   await stop.click();
   assert.ok(requests.includes('/api/cookbook/engine/stop'));
-  assert.equal(modelsHost.querySelector('.cookbook-installed-list').querySelector('button').textContent, 'Start');
+  assert.equal(modelsHost.querySelector('.cookbook-model-options').querySelector('button').textContent, 'Start');
+  // Sheets move original nodes; closing restores identity, order and handlers.
+  const details = (await moduleAt('static/js/phoneRowDetails.js')).namespace;
+  const first = el('button', { text: 'Model' }), second = el('button', { text: 'Delete' });
+  const home = el('div', {}, [first, second]), opener = el('button');
+  const handler = () => {}; first.onclick = handler;
+  const sheet = details.phoneDetails('Task', [first, second], opener, 'Full task text');
+  assert.equal(first.parentElement, sheetOptions.content);
+  assert.equal(sheetOptions.opener, opener);
+  assert.equal(sheetOptions.content.querySelector('p').textContent, 'Full task text');
+  sheet.close();
+  assert.deepEqual(home.children, [first, second]);
+  assert.equal(first.onclick, handler);
+  details.phoneDetails('Task', [second], opener);
+  sheetOptions.content.onclick({ target: { closest: () => ({ matches: () => true, textContent: 'Delete' }) } });
+  assert.deepEqual(home.children, [first, second], 'Destructive actions restore their controls before opening a confirmation');
   responses = {};
 
   // Exercise the real API helper and adapter, including both caller contracts.

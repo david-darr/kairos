@@ -3,7 +3,42 @@ import { segmented, dotMatrix } from '../kairosParts.js';
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
 import { openModelSetup } from '../modelSetup.js';
 import { createMascot } from '../mascot.js';
+import { phoneDetails } from '../phoneRowDetails.js';
 const phoneCookbook = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+
+function modelRow(card, model, primary, extras, running) {
+  if (!redesignOn()) return;
+  const row = card.firstElementChild;
+  row.prepend(el('span', { class: 'workspace-phone-only cookbook-model-tile', text: model.name.charAt(0).toUpperCase(), 'aria-hidden': 'true' }));
+  const actions = primary.parentElement;
+  const advanced = extras.map(control => {
+    const host = el('div', { class: 'cookbook-model-options' });
+    control.before(host); host.append(control); return host;
+  });
+  const more = el('button', { type: 'button', class: 'workspace-phone-only cookbook-model-more', text: '…', 'aria-label': `${model.name} options`,
+    onclick: () => phoneDetails(model.name, advanced, more) });
+  actions.append(more);
+  const name = card.querySelector('.title'), meta = card.querySelector('.meta');
+  name.replaceChildren(el('span', { class: 'cookbook-desktop-meta', text: name.textContent }),
+    el('span', { class: 'workspace-phone-only', text: model.name }));
+  meta.replaceChildren(el('span', { class: 'cookbook-desktop-meta', text: meta.textContent }),
+    el('span', { class: 'workspace-phone-only', text: [Number.isFinite(model.size) ? `${(model.size / 1e9).toFixed(1)} GB` : '', running ? 'running' : 'installed'].filter(Boolean).join(' · ') }));
+}
+
+function modelCount(section, models) {
+  if (!redesignOn()) return;
+  const known = models.every(m => Number.isFinite(m.size));
+  section.querySelector('.title').append(el('small', { class: 'workspace-phone-only cookbook-model-count',
+    text: `${models.length} model${models.length === 1 ? '' : 's'}${known ? ` · ${(models.reduce((sum, m) => sum + m.size, 0) / 1e9).toFixed(1)} GB` : ''}` }));
+}
+
+function browseCatalog(section, grid) {
+  if (!redesignOn()) return;
+  const browse = el('button', { type: 'button', class: 'workspace-phone-only phone-section-link', text: 'Browse all', onclick: () => {
+    grid.classList.toggle('cookbook-show-all'); browse.textContent = grid.classList.contains('cookbook-show-all') ? 'Show less' : 'Browse all';
+  } });
+  section.querySelector('.title').append(browse);
+}
 
 function downloadProgress(host, pct, label) {
   host.replaceChildren(document.createTextNode(label));
@@ -175,6 +210,7 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
   }
 
   const runningNames = new Set(running.map((r) => r.name));
+  modelCount(installedSection, installed);
   if (redesignOn()) {
     const statusCard = el('section', { class: 'cookbook-status workspace-phone-only' }, [
       el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
@@ -225,6 +261,7 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
       ]),
     ]);
     installedList.appendChild(card);
+    modelRow(card, m, registerBtn, [delBtn], runningNames.has(m.name));
   }
 }
 
@@ -237,6 +274,7 @@ async function renderOllamaCatalog(catalogSection, installedSection) {
   const grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;" });
   grid.classList.add('cookbook-catalog-list');
   catalogSection.appendChild(grid);
+  browseCatalog(catalogSection, grid);
 
   for (const item of catalog) {
     const statusEl = el("span", { class: "meta" });
@@ -335,6 +373,7 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
   downloadedSection.appendChild(el("div", { class: "title", style: "margin-bottom:8px;", text: phoneCookbook() ? 'Installed' : "Downloaded" }));
 
   const downloaded = await api("/api/cookbook/engine/downloaded");
+  modelCount(downloadedSection, downloaded);
   const st = await api("/api/cookbook/engine/status");
   if (downloaded.length === 0) {
     downloadedSection.appendChild(redesignOn() ? emptyState({ title: 'No models downloaded yet', text: 'Choose a model to run on this computer.',
@@ -386,6 +425,7 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
       ]),
     ]);
     installedList.appendChild(card);
+    modelRow(card, m, registerBtn, [startBtn, delBtn], isRunning);
   }
 }
 
@@ -398,10 +438,11 @@ async function renderEngineCatalog(catalogSection, downloadedSection, statusRow)
   const grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;" });
   grid.classList.add('cookbook-catalog-list');
   catalogSection.appendChild(grid);
+  browseCatalog(catalogSection, grid);
 
   for (const item of catalog) {
     const statusEl = el("span", { class: "meta" });
-    const downloadBtn = el("button", { class: "btn", text: "Download" });
+    const downloadBtn = el("button", { class: "btn", text: phoneCookbook() ? 'Pull' : "Download" });
     downloadBtn.addEventListener("click", async () => {
       downloadBtn.disabled = true;
       await api(`/api/cookbook/engine/download/${encodeURIComponent(item.name)}`, { method: "POST" });

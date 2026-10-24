@@ -621,7 +621,7 @@ export async function render(container) {
         el("span", { class: "tool-store-mark" }, [svg(ICONS.brain)]),
         el("span", { class: "tool-store-badge blocked", text: "Can't be read" }),
       ]),
-      el("h4", { text: item.slug }),
+      el("h4", { text: item.slug, "data-display-name": item.display_name || item.name || "" }),
       el("p", { text: `${item.error} No model is offered it until it is fixed or deleted.` }),
       el("div", { class: "tool-store-card-foot" }, [
         el("span", { class: "meta", text: "Unreadable skill" }),
@@ -713,7 +713,7 @@ export async function render(container) {
         el("span", { class: "tool-store-mark" }, [svg(ICONS.brain)]),
         el("span", { class: "tool-store-badge" + (blocked ? " blocked" : ""), text: blocked ? "Needs approval" : "Available" }),
       ]),
-      el("h4", { text: item.slug }),
+      el("h4", { text: item.slug, "data-display-name": item.display_name || item.name || "" }),
       el("p", { text: item.description || "No description provided." }),
       el("div", { class: "tool-store-card-foot" }, [
         item.version ? el("span", { class: "tool-store-version" }, [sourceLabel, el("span", { class: "meta", text: ` · v${item.version}` })]) : sourceLabel,

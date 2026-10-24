@@ -12,9 +12,22 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   };
   const assert = require('node:assert/strict');
   const writeStart = writes.length;
+  const phone = label === 'mobile';
+  const driveOptions = async () => {
+    if (!phone) return;
+    await js("document.querySelector('.library-drive-options').click()");
+    await waitFor("!!document.querySelector('dialog.ms-sheet[open] .google-toolbar')");
+  };
+  const closeDriveOptions = async () => {
+    if (phone) await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  };
   await navigate('library', { section: 'google' });
   await waitFor("document.querySelectorAll('.google-file-row').length === 8");
-  await waitFor("document.querySelector('.google-thumbnail img')?.naturalWidth > 0");
+  if (phone) {
+    assert.ok(await js("!!document.querySelector('.drive-connected-dot') && document.querySelector('.drive-account-copy').textContent.includes('demo@example.com')"));
+    assert.ok(await js("[...document.querySelectorAll('.drive-file-extension')].every(n => n.textContent.length > 0)"));
+    await driveOptions();
+  } else await waitFor("document.querySelector('.google-thumbnail img')?.naturalWidth > 0");
   assert.equal(await js("document.querySelectorAll('.google-rail .google-section').length"), 5);
   assert.ok(await js("document.querySelector('.google-storage').textContent.includes('2.0 GB')"));
   assert.deepEqual(await overflow(), [], label + ' Drive grid fits');
@@ -30,6 +43,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     await waitFor(`document.querySelectorAll('.google-file-row').length === ${count}`);
   }
   await js("[...document.querySelectorAll('.google-toolbar button')].find(b=>b.textContent==='Grid').click()");
+  await closeDriveOptions();
   const folderRead = reads.length;
   await js("document.querySelector('[data-file-id=drive-folder] .google-file-open').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))");
   await requestAfter(reads, folderRead, r => r.path === '/api/google/drive/files' && r.query.parent === 'drive-folder');

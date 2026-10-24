@@ -1,6 +1,7 @@
 import { renderPDF } from './pdfViewer.js';
 import { api, el, toast, confirmDialog } from './api.js';
 import { ICONS } from './icons.js';
+import { phoneDetails } from './phoneRowDetails.js';
 
 const BASE = '/api/google';
 const MIME = {
@@ -101,9 +102,11 @@ function renderDrive(host, status, refreshAll, header) {
   const more = button('Load more', () => load(true)); more.hidden = true;
   const uploadInput = el('input', { type: 'file', multiple: true, hidden: true });
   const newMenu = el('details', { class: 'google-new-menu' }, [el('summary', { class: 'btn primary', text: '+ New' })]);
+  let newSheet;
   header.querySelector('.library-drive-create')?.remove();
   const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round library-drive-create', 'aria-label': 'Create or upload in Drive', onclick: () => {
-    newMenu.open = true; newMenu.scrollIntoView({ block: 'center' }); newMenu.querySelector('button')?.focus();
+    newMenu.open = true;
+    newSheet = phoneDetails('New in Drive', [newMenu], create);
   } });
   create.innerHTML = ICONS.plus; header.append(create);
 
@@ -124,6 +127,8 @@ function renderDrive(host, status, refreshAll, header) {
         await load();
       })),
   ]));
+  // Creation prompts live in the existing details pane, outside the sheet.
+  newMenu.addEventListener('click', event => { if (event.target.closest('button')) newSheet?.close(); }, true);
   rail.append(newMenu, uploadInput);
   for (const [id, label] of sections) rail.append(button(label, () => {
     state.section = id; state.parent = null; state.trail = []; state.query = ''; search.value = ''; load();
@@ -147,6 +152,19 @@ function renderDrive(host, status, refreshAll, header) {
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
   host.append(el('div', { class: 'google-account-line' }, [el('strong', { text: status.email || 'Google account' }), disconnect]),
     el('div', { class: 'google-browser' }, [rail, main]));
+  header.querySelectorAll('.library-drive-search, .library-drive-options').forEach(node => node.remove());
+  const find = button('Search Drive', () => { search.scrollIntoView({ block: 'center' }); search.focus(); }, 'btn workspace-phone-only workspace-round library-drive-search');
+  find.setAttribute('aria-label', 'Search Drive'); find.innerHTML = ICONS.search;
+  header.insertBefore(find, create);
+  const options = button('…', () => phoneDetails('Drive options', [rail, main.querySelector('.google-toolbar'), disconnect], options), 'btn workspace-phone-only workspace-round library-drive-options');
+  options.setAttribute('aria-label', 'Drive options');
+  host.querySelector('.google-account-line').append(options);
+  const account = el('div', { class: 'workspace-phone-only drive-account-copy' }, [
+    el('span', { class: 'drive-account-avatar', text: (status.email || 'G').charAt(0).toUpperCase(), 'aria-hidden': 'true' }),
+    el('div', {}, [el('strong', { text: 'Google Drive' }), el('small', { text: status.email || 'Google account' })]),
+    el('span', { class: 'drive-connected-dot', role: 'img', 'aria-label': 'Connected' }),
+  ]);
+  host.querySelector('.google-account-line').prepend(account);
   api(`${BASE}/drive/storage`).then(result => {
     const quota = result.storageQuota || {};
     const gb = value => `${(Number(value || 0) / 1024 ** 3).toFixed(1)} GB`;
@@ -251,13 +269,17 @@ function renderDrive(host, status, refreshAll, header) {
         } else if (matchMedia('(pointer: coarse)').matches) return openFile(file);
         else return showDetail(file);
       }, 'google-file-open');
-      const thumbnail = el('div', { class: 'google-thumbnail' }, [el('span', { class: 'google-type', text: type.toUpperCase() })]);
+      const extension = type === 'folder' ? 'DIR' : type === 'file' ? (file.name.split('.').length > 1 ? file.name.split('.').pop().toUpperCase() : 'FILE') : type.toUpperCase();
+      const thumbnail = el('div', { class: 'google-thumbnail' }, [el('span', { class: 'google-type', text: type.toUpperCase() }),
+        el('span', { class: 'workspace-phone-only drive-file-extension', text: extension })]);
       if (file.thumbnailLink && type !== 'folder') {
         const img = el('img', { src: `${BASE}/drive/files/${encodeURIComponent(file.id)}/thumbnail`, alt: '', loading: 'lazy' });
         img.onerror = () => img.remove(); thumbnail.append(img);
       }
+      const date = file.modifiedTime && new Date(file.modifiedTime).toLocaleDateString();
       open.replaceChildren(thumbnail, el('span', { class: 'google-file-copy' }, [el('strong', { text: file.name }),
-        el('small', { text: [type, file.modifiedTime && new Date(file.modifiedTime).toLocaleDateString()].filter(Boolean).join(' · ') })]));
+        el('small', { class: 'drive-desktop-meta', text: [type, date].filter(Boolean).join(' · ') }),
+        el('small', { class: 'workspace-phone-only drive-phone-meta', text: [file.size != null ? `${(Number(file.size) / 1024).toFixed(0)} KB` : type, date].filter(Boolean).join(' · ') })]));
       open.addEventListener('dblclick', () => openFile(file).catch(error => toast(error.message, 'error')));
       open.addEventListener('keydown', event => {
         if (event.key === 'Enter') { event.preventDefault(); openFile(file).catch(error => toast(error.message, 'error')); }
