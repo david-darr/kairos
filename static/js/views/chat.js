@@ -1,6 +1,7 @@
 import { keepReadingPosition } from '../chatScrollAnchor.js';
 import { mountBackgroundTasks } from '../backgroundTasks.js';
 import { mountChatPaneToolbar } from '../chatPaneToolbar.js';
+import { showConversationMenu, closeConversationMenu } from '../redesignConversations.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
 import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
@@ -2513,6 +2514,7 @@ async function refreshSessions(sessionsList, messages) {
   const allSessions = await api("/api/sessions");
   setArtifactContext(activeSessionId, allSessions);
   if (!sessionsList.isConnected) return;
+  closeConversationMenu();
   // Projects (David's ask 2026-09-12) — narrows the list to whatever
   // project is currently selected in the picker above; null (the default,
   // "All Chats") shows everything, unchanged from before this feature.
@@ -2541,6 +2543,13 @@ async function refreshSessions(sessionsList, messages) {
         e.preventDefault();
         showSessionMenu(e.clientX, e.clientY, session, item, sessionsList, messages);
       },
+      onkeydown: (e) => {
+        if (e.target !== item || !matchMedia('(min-width: 769px)').matches) return;
+        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault(); e.stopPropagation();
+          showSessionMenu(undefined, undefined, session, item, sessionsList, messages);
+        }
+      },
     });
     if (session.starred) item.appendChild(el("span", { class: "star-mark", text: "★ " }));
     item.appendChild(document.createTextNode(session.title));
@@ -2563,6 +2572,7 @@ async function refreshSessions(sessionsList, messages) {
 let openMenu = null;
 
 function closeSessionMenu() {
+  closeConversationMenu();
   if (openMenu) { openMenu.remove(); openMenu = null; }
   document.removeEventListener("click", closeSessionMenu);
 }
@@ -2634,6 +2644,26 @@ function showSessionMenu(x, y, session, item, sessionsList, messages) {
     text: "Open side by side",
     onclick: () => { closeSessionMenu(); openSideChat(session.id); },
   }) : null;
+  if (matchMedia('(min-width: 769px)').matches) {
+    const invoke = node => () => node.click();
+    showConversationMenu({ row: item, session, x, y, open: () => openSession(session.id, sessionsList, messages), actions: [
+      { label: 'Rename', icon: '\u270e', run: invoke(renameItem) },
+      { label: session.starred ? 'Unstar' : 'Star', icon: '\u2606', run: invoke(starItem) },
+      { label: 'Move to Project', icon: '\u25a1', run: async () => {
+        const projects = await api('/api/projects').catch(() => []);
+        if (!item.isConnected || !matchMedia('(min-width: 769px)').matches) return;
+        showConversationMenu({ row: item, session, actions: [{ id: null, name: 'No Project' }, ...projects].map(project => ({
+          label: project.name, icon: session.project_id === project.id ? '\u2713' : '\u25a1', run: async () => {
+            await api(`/api/sessions/${session.id}/project`, { method: 'POST', body: JSON.stringify({ project_id: project.id }) });
+            await refreshSessions(sessionsList, messages);
+          },
+        })) });
+      } },
+      ...(sideItem ? [{ label: 'Open side by side', icon: '\u25eb', run: invoke(sideItem) }] : []),
+      { label: 'Delete', icon: '\u00d7', danger: true, run: invoke(deleteItem) },
+    ] });
+    return;
+  }
   menu.append(renameItem, starItem, moveItem, ...(sideItem ? [sideItem] : []), deleteItem);
   document.body.appendChild(menu);
   openMenu = menu;

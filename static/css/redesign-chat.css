@@ -4,6 +4,21 @@
    state keep the layout in interface.css untouched. */
 
 @media (min-width: 769px) {
+  .rd-conversation-menu {
+    position: fixed; z-index: 10010; box-sizing: border-box; width: 240px; max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px;
+    border: 1px solid var(--rd-line, var(--border)); border-radius: 16px;
+    background: var(--rd-surface-solid, var(--bg-panel-solid)); color: var(--rd-ink, var(--text));
+    box-shadow: var(--rd-shadow, var(--shadow-elevated));
+  }
+  .rd-conversation-menu-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px;
+    border: 0; border-radius: 10px; background: transparent; color: inherit; text-align: left;
+    font: 13px var(--rd-font-ui, sans-serif); cursor: pointer;
+  }
+  .rd-conversation-menu-item:is(:hover, :focus-visible) { background: var(--rd-surface-2, var(--bg-hover)); outline: 2px solid var(--rd-focus, var(--accent)); outline-offset: -2px; }
+  .rd-conversation-menu-item.danger { color: var(--danger); }
+  .rd-conversation-menu-icon { display: inline-flex; justify-content: center; width: 18px; font-size: 18px; }
   /* -- Conversations button ------------------------------------------------- */
   .kairos-redesign .chat-mobile-header.rd-chat-header { align-items: center; gap: 14px; }
   .kairos-redesign .rd-chat-header #chat-history-toggle {
