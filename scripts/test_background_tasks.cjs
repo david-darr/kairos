@@ -34,7 +34,7 @@ class Element {
   global.CSS = { escape: s => s }; global.matchMedia = () => ({ matches: phone });
   const interval = global.setInterval; global.setInterval = () => 1; global.clearInterval = () => {};
   let phone = false, sheet;
-  global.openMobileSheet = ({ content }) => { sheet = new Element('dialog'); sheet.className = 'ms-sheet'; sheet.append(content); return { close() {} }; };
+  global.openMobileSheet = ({ content }) => { sheet = new Element('dialog'); sheet.className = 'ms-sheet'; sheet.classList = { add() {} }; sheet.append(content); return { dialog: sheet, close() {} }; };
   const item = { id: 'card:one', kind: 'agent', status: 'done', label: '<img src=x onerror=alert(1)>', endedAt: 20 };
   const details = { item, prompt: 'A prose prompt', steps: [{ name: 'Read', text: 'core/brain.py', kind: 'tool' }],
     summary: 'A prose result', command: 'echo test', output: 'test output', outputTruncated: false,

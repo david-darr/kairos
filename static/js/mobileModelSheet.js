@@ -10,27 +10,35 @@ export const knownQuota = value => value !== null && value !== undefined && valu
 // For embedded Forge sessions, render presentation from the controller's
 // already-fetched choices. All saves are callbacks into that controller.
 export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, effort, catalog, onConnection, onModel, onEffort }) {
+  // The same structure the composer menu builds (views/chat.js), so one set of rules styles both.
   const fragment = document.createDocumentFragment();
+  const connections = el('div', { class: 'model-connection-list' });
   for (const endpoint of endpoints) {
     const row = button(endpoint.name, () => onConnection(endpoint.id), `model-picker-item model-connection-item${endpoint.id === endpointId ? ' active' : ''}`);
     row.dataset.provider = endpoint.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', api: 'API connections' }[endpoint.kind] || endpoint.kind);
-    fragment.append(row);
+    connections.append(row);
   }
+  fragment.append(connections);
   const endpoint = endpoints.find(item => item.id === endpointId);
   const effective = (model ?? endpoint?.model) || '';
   const selected = catalog.find(item => item.id === effective || item.alias === effective);
+  const section = el('div', { class: 'model-version-section' });
+  const list = el('div', { class: 'model-catalog-list' });
   for (const entry of catalog) {
-    const row = button(entry.display_name || entry.id, () => onModel(entry.id), `model-picker-item model-catalog-item${entry === selected ? ' active' : ''}`);
+    const row = el('button', { type: 'button', class: `model-picker-item model-catalog-item${entry === selected ? ' active' : ''}`, onclick: () => onModel(entry.id) },
+      [el('span', { class: 'model-catalog-name', text: entry.display_name || entry.id }), el('span', { class: 'model-catalog-desc', text: entry.description || entry.id })]);
     row.dataset.modelSearch = `${entry.id} ${entry.display_name || ''} ${entry.description || ''}`;
     row.dataset.modelDefault = String(!!endpoint?.model && (entry.id === endpoint.model || entry.alias === endpoint.model));
-    fragment.append(row);
+    list.append(row);
   }
-  if (endpoint) fragment.append(button('Use endpoint setting', () => onModel(null), 'model-picker-item'));
+  section.append(list);
+  fragment.append(section);
+  if (endpoint) section.append(button('Use endpoint setting', () => onModel(null), 'model-picker-item model-use-endpoint'));
   else if (!endpoints.length) fragment.append(el('p', { text: 'Add a model in Settings.' }));
   if (selected?.supported_efforts?.length) {
-    const row = el('div', { class: 'model-effort-row' });
+    const row = el('div', { class: 'model-effort-row', role: 'group', 'aria-label': 'Reasoning' }, [el('span', { class: 'model-effort-label', text: 'Reasoning' })]);
     for (const level of [{ effort: null }, ...selected.supported_efforts]) row.append(button(level.effort || 'Default', () => onEffort(level.effort), `model-effort-btn${(effort ?? null) === level.effort ? ' active' : ''}`));
-    fragment.append(row);
+    section.append(row);
   }
   menu.replaceChildren(fragment); menu.dispatchEvent(new Event('kairos:model-menu-updated'));
 }
@@ -123,16 +131,71 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     sheet.body.append(optionsPage); back.focus();
   };
   const decorate = () => {
-    if (!sheet) return;
+    if (!sheet) { decorateDesktop(); return; }
     menu.querySelectorAll('.ms-provider-heading, .ms-default-badge').forEach(node => node.remove());
     let provider = null;
     for (const item of menu.querySelectorAll('.model-connection-item')) {
       const name = item.dataset.provider || 'Models';
-      if (provider !== name) { item.before(el('h3', { class: 'ms-provider-heading', text: name })); provider = name; }
+      provider = name;
       item.setAttribute('aria-pressed', String(item.classList.contains('active')));
+      item.setAttribute('role', 'tab');
+      item.setAttribute('aria-selected', String(item.classList.contains('active')));
     }
-    for (const item of menu.querySelectorAll('[data-model-default="true"]')) item.append(el('small', { class: 'ms-default-badge', text: 'Default' }));
+    for (const item of menu.querySelectorAll('.model-catalog-item')) {
+      item.setAttribute('role', 'radio'); item.setAttribute('aria-checked', String(item.classList.contains('active')));
+    }
+    menu.querySelector('.model-connection-list')?.setAttribute('role', 'tablist');
+    menu.querySelector('.model-catalog-list')?.setAttribute('role', 'radiogroup');
+    nameEffort();
     filter();
+  };
+  // The board calls the effort row "Effort"; the controller's own label and buttons stay as they are.
+  const nameEffort = () => { const label = menu.querySelector('.model-effort-label'); if (label) label.textContent = 'Effort'; };
+  // Enhance the existing composer menu without changing its controller or data.
+  // Catalogs remain loaded by the selected connection, never guessed here. The board lists
+  // models under their provider, so each provider gets a label, and the active connection's
+  // models sit right under its row. Only CSS order moves things, so DOM and focus order stay put.
+  const decorateDesktop = () => {
+    if (!document.documentElement.classList.contains('kairos-redesign') || menu.classList.contains('ms-model-menu')) return;
+    menu.classList.add('rd-model-picker');
+    nameEffort();
+    menu.querySelectorAll('.rd-model-group').forEach(node => node.remove());
+    const icon = () => { const mark = el('span', { class: 'rd-model-search-icon', 'aria-hidden': 'true' }); mark.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>'; return mark; };
+    let row = menu.querySelector('.model-version-search');
+    if (row) { if (!row.querySelector('.rd-model-search-icon')) row.prepend(icon()); row.classList.add('rd-model-search-row'); }
+    else {
+      row = menu.querySelector('.rd-model-search-row');
+      if (!row) {
+        const input = el('input', { type: 'search', class: 'rd-model-search', placeholder: 'Search models', 'aria-label': 'Search models' });
+        input.addEventListener('input', () => {
+          const query = input.value.trim().toLowerCase();
+          for (const item of menu.querySelectorAll('.model-connection-item, .model-catalog-item')) item.hidden = !`${item.dataset.provider || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
+          for (const group of menu.querySelectorAll('.rd-model-group')) group.hidden = !group.dataset.rows.split(',').some(id => !menu.querySelector(`[data-endpoint-id="${CSS.escape(id)}"]`)?.hidden);
+        });
+        row = el('label', { class: 'rd-model-search-row' }, [icon(), input]); menu.prepend(row);
+      }
+    }
+    row.style.order = '-1';
+    let step = 0, provider = null, group = null;
+    const catalog = menu.querySelector('.model-catalog-list');
+    for (const item of menu.querySelectorAll('.model-connection-item')) {
+      const name = item.dataset.provider || 'Models';
+      if (name !== provider) {
+        step += 10; provider = name;
+        group = el('div', { class: 'rd-model-group', text: name }); group.dataset.rows = '';
+        group.style.order = String(step); item.before(group);
+      }
+      group.dataset.rows += (group.dataset.rows ? ',' : '') + (item.dataset.endpointId || '');
+      item.style.order = String(step + 1);
+      if (item.classList.contains('active') && catalog) catalog.style.order = String(step + 2);
+    }
+    // The effort buttons share one track, with the label beside it.
+    for (const levels of menu.querySelectorAll('.model-effort-row')) {
+      if (levels.querySelector('.rd-effort-seg')) continue;
+      const seg = el('div', { class: 'rd-effort-seg' }); seg.append(...levels.querySelectorAll('.model-effort-btn')); levels.append(seg);
+    }
+    for (const node of menu.querySelectorAll('.model-effort-row, .model-custom-details, .model-use-endpoint')) node.style.order = '900';
+    for (const node of menu.querySelectorAll('.model-add-item')) node.style.order = '1000';
   };
   const open = () => {
     if (!mobileOn() || trigger.disabled) return false;
@@ -142,19 +205,26 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     optionsButton = button('Options', options); account = el('details', { class: 'ms-account-card' });
     empty = el('p', { text: 'No models match that search.', hidden: true, role: 'status' });
     home = document.createComment('Model menu home'); menu.before(home);
-    root.append(search, optionsButton, account, empty, menu); menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
+    menu.querySelectorAll('.rd-model-search-row:not(.model-version-search), .rd-model-group').forEach(node => node.remove());
+    menu.classList.remove('rd-model-picker'); menu.querySelectorAll('[style*="order"]').forEach(node => node.style.removeProperty('order'));
+    const extras = el('details', { class: 'ms-model-extras' }, [el('summary', { text: 'Search and account' }), search, optionsButton, account]);
+    root.append(menu, empty, extras); menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
     menu.removeAttribute('role');
     trigger.setAttribute('aria-expanded', 'true');
     arming = true; setTimeout(() => { arming = false; }, 0);
-    sheet = openMobileSheet({ title: 'Model', content: root, opener: trigger, fullHeight: true, onClose: () => {
+    sheet = openMobileSheet({ title: 'Model', content: root, opener: trigger, onClose: () => {
       restoreOptions();
       menu.querySelectorAll('[hidden]').forEach(node => { if (node.matches('.model-connection-item, .model-catalog-item')) node.hidden = false; });
       menu.querySelectorAll('.ms-provider-heading, .ms-default-badge').forEach(node => node.remove());
+      for (const row of menu.querySelectorAll('.model-connection-item, .model-catalog-item')) {
+        row.removeAttribute('role'); row.removeAttribute('aria-selected'); row.removeAttribute('aria-checked');
+      }
       if (home?.isConnected) home.after(menu); home?.remove(); home = null;
       menu.classList.add('hidden'); menu.classList.remove('ms-model-menu'); trigger.setAttribute('aria-expanded', 'false'); sheet = null;
       if (menuRole) menu.setAttribute('role', menuRole);
       if (originalControls) trigger.setAttribute('aria-controls', originalControls); else trigger.removeAttribute('aria-controls');
     } });
+    sheet.dialog.classList.add('ms-model-sheet');
     trigger.setAttribute('aria-controls', sheet.dialog.id);
     search.addEventListener('input', filter); decorate(); loadAccount(account); return true;
   };

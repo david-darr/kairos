@@ -154,7 +154,7 @@ app.whenReady().then(async () => {
     assert(above, 'Phone pill sits above the composer and is at least 44px');
     await click(pill);
     await wait("document.querySelector('.ms-sheet[open] .bg-tasks-list')");
-    assert.equal(await js("[...document.querySelectorAll('.ms-sheet[open] h2, .ms-sheet[open] h3')].filter(n => n.textContent === 'Background tasks').length", 'Phone sheet heading count'), 1, 'Phone sheet has one Background tasks heading');
+    assert.equal(await js("[...document.querySelectorAll('.ms-sheet[open] h2, .ms-sheet[open] h3')].filter(n => ['Background tasks', 'In the background'].includes(n.textContent)).length", 'Phone sheet heading count'), 1, 'Phone sheet has one heading, titled In the background (Mobile v2 board)');
     await capture('phone-sheet-list'); await click(survey);
     await wait("document.querySelector('.ms-sheet[open] .bg-task-detail')");
     await capture('phone-sheet-detail');

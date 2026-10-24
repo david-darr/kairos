@@ -90,7 +90,7 @@ async function run(ctx) {
     ok(await noAvatar(), tab + ' has the tab bar instead of an avatar or hamburger');
     eq(await barCurrent(), tab === 'calendar' ? 'calendar' : 'more', tab + ' marks its item on the tab bar');
     const tabbar = await rect('.ms-tabbar');
-    ok(tabbar && Math.abs(tabbar.b - (844 - 12)) <= 1 && tabbar.l >= 15.5 && tabbar.r <= 390 - 15.5 && tabbar.h === 62, tab + ' tab bar floats 12px above the bottom with 16px sides: ' + JSON.stringify(tabbar));
+    ok(tabbar && Math.abs(tabbar.b - (844 - 28)) <= 1 && Math.abs(tabbar.l - 18) <= 0.5 && Math.abs(tabbar.r - (390 - 18)) <= 0.5 && tabbar.h === 62, tab + ' tab bar floats 28px above the bottom with 18px sides (TabBar board): ' + JSON.stringify(tabbar));
     const label = tab + ' dock';
     eq(await docks(), 1, label + ' mounts exactly once');
     ok(await js("document.querySelector('.ms-dock').parentElement === document.body"), label + ' lives outside the animating view');
@@ -368,7 +368,7 @@ async function run(ctx) {
   await navigate('home'); await delay(400); await openSheet();
   let modes = await modeState();
   eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview'], ['true', 'false'], [0, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
-  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 1 && modes.caption[0] === modes.described[0], 'Each mode has a one-line description; the checked one is shown: ' + JSON.stringify(modes));
+  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 0, 'Each mode keeps its one-line description for assistive technology; the MoreSheet board shows only the two names: ' + JSON.stringify(modes));
   ok(modes.sizes.every(Boolean) && modes.aboveTabs && modes.thumb, 'Mode options are 44px, sit at the top of the sheet, and the thumb marks Kairos: ' + JSON.stringify(modes));
   ok(!modes.readout, 'The temporary Safari readout is gone from the sheet');
   eq(await small('.ms-tab-sheet[open] .ms-mode-switch button'), [], 'Mode switch has no control under 44px');
@@ -390,7 +390,7 @@ async function run(ctx) {
   await openSheet();
   modes = await modeState();
   eq([modes.checked, modes.tabs, modes.mode], [['false', 'true'], [-1, 0], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
-  ok(modes.caption.length === 1 && modes.caption[0] === modes.described[1] && modes.thumb && modes.sizes.every(Boolean), 'Forge description shows and the thumb sits on Forge: ' + JSON.stringify(modes));
+  ok(modes.caption.length === 0 && modes.described[1].length > 10 && modes.thumb && modes.sizes.every(Boolean), 'Forge keeps its description for assistive technology and the thumb sits on Forge: ' + JSON.stringify(modes));
   await shot('sheet-mode-forge');
   await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
   ok(await js("document.querySelector('.ms-mode-switch[data-active=kairos] [data-mode=kairos][aria-checked=true]') !== null"), 'Tapping Kairos moves the thumb before the switch');
@@ -666,7 +666,7 @@ async function run(ctx) {
   for (const [name, w, layout, screen, top, bottom, nudge] of devices) {
     await resize(w, layout);
     await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '${nudge}px'); })()`);
-    const gap = Math.max(12, bottom);
+    const gap = Math.max(28, bottom);
     await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
     const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
     eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
@@ -674,7 +674,7 @@ async function run(ctx) {
     ok(await noAvatar(), `${name}: no avatar on the launch page`);
     await barShown();
     const bar = await rect('.ms-tabbar');
-    ok(Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 16) <= 1 && Math.abs(bar.r - (w - 16)) <= 1, `${name}: the tab bar sits ${gap}px above the true screen bottom, 16px from each side: ${JSON.stringify(bar)}`);
+    ok(Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 18) <= 1 && Math.abs(bar.r - (w - 18)) <= 1, `${name}: the tab bar sits ${gap}px above the true screen bottom, 18px from each side: ${JSON.stringify(bar)}`);
     const composer = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
     ok(composer && Math.abs(composer.b - (bar.t - 10)) <= 1, `${name}: launch composer sits 10px above the tab bar: ${JSON.stringify(composer)}`);
     const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");

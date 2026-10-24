@@ -42,7 +42,8 @@ class Node {
     './mobileShared.js': { mobileOn: () => enabled, phone: { addEventListener() {} }, button: (label, action) => ({ label, action }), go: (tab, options) => posts.push([tab, options]) },
     './mobileActions.js': { openNotifications() {} },
     './api.js': { el: make }, './kairosParts.js': { pill: attrs => Object.assign(new Node(), attrs), emptyState: attrs => attrs },
-    './mobileSheet.js': { openMobileSheet: ({ content }) => { sheetContent = content; return { close() { closed++; } }; } },
+    './mobileSheet.js': { openMobileSheet: ({ content }) => { sheetContent = content; return { dialog: new Node(), dismiss: new Node(), close() { closed++; } }; } },
+    './mascot.js': { createMascot: () => new Node() },
     './mobileActivity.js': { activityItems: () => ({ live: [], done: [] }) }, './icons.js': { ICONS: {} },
   };
   async function load(file) {
