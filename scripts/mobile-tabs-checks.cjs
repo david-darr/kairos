@@ -655,6 +655,8 @@ async function run(ctx) {
       const row = { l: 20, r: innerWidth - 20, t: ${rowTop}, b: ${rowTop} + 46 };
       const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .design-page-identity h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
       const header = title?.closest('.view-header, .design-page-header, .agents-workspace-bar, .settings-titlebar, .ms-header-row');
+      const forgeTitle = title?.matches('.mf-dashboard-title');
+      if (forgeTitle) row.b = row.t + header.getBoundingClientRect().height;
       const headerButtons = [...(header?.querySelectorAll('button') || [])].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().top < row.b);
       const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
       const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
@@ -662,7 +664,7 @@ async function run(ctx) {
       const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { row, title: title && box(title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
+      return { row, title: title && box(forgeTitle ? title.parentElement : title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
     })()`);
     // Home's independently redesigned hero has no shell title; keep checking
     // its first-content clearance without treating a section heading as one.
@@ -742,10 +744,10 @@ async function run(ctx) {
     if (!nudge) continue;
     // Titles and first content on every tab, Settings and one of its pages included.
     for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
-      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + (['notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store'].includes(tab) ? 18 : 6));
+      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + (['notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'forgeHome'].includes(tab) ? 18 : 6));
       ok(await noAvatar(), `${name}: ${tab} has no avatar`);
       if (tab === 'forgeHome') {
-        ok(await js("!!document.querySelector('.mf-dashboard .forge-toolbar .mf-dashboard-new') && !document.querySelector('.mf-dashboard .ms-header .mf-dashboard-new')"), `${name}: Forge Home's New session sits on the toolbar beside Customize`);
+        ok(await js("!!document.querySelector('.mf-dashboard .ms-header .mf-dashboard-new') && !!document.querySelector('.mf-dashboard .ms-header [aria-label=\"Switch project\"]') && !document.querySelector('.mf-dashboard .forge-toolbar .mf-dashboard-new')"), `${name}: Forge Home's project and New session actions sit in the header`);
         await shot(`fold-${w}x${screen}-${nudge ? 'iphone' : 'other'}-forge-home`);
       }
       if (tab === 'tool-store') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'tool-store');

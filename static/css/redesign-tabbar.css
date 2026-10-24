@@ -88,6 +88,25 @@
     scroll-padding-bottom: var(--ms-tabbar-space);
   }
   .kairos-redesign .ms-launch-bottom { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
+  /* Forge New reserves the bottom group's actual flex size. Only the intro
+     scrolls, so activity updates and composer growth cannot cover its copy.
+     Safe centering keeps the start reachable when the intro overflows. */
+  .kairos-redesign .mf-project .ms-launch { overflow: hidden; }
+  .kairos-redesign .mf-project .ms-intro { flex: 1 1 0; min-height: 0; padding-block: 0; overflow-y: auto; justify-content: safe center; }
+  .kairos-redesign .mf-project .ms-intro > * { flex-shrink: 0; }
+  .kairos-redesign .mf-project .ms-intro > :first-child { margin-top: 12px; }
+  .kairos-redesign .mf-project .ms-intro > :last-child { margin-bottom: 12px; }
+  .kairos-redesign .mf-project .ms-launch-bottom { position: relative; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: 100%; box-sizing: border-box; }
+  .kairos-redesign .mf-project .ms-activity-slot { min-height: 0; overflow-y: auto; }
+  .kairos-redesign .mf-project .ms-launch-bottom > :not(.ms-activity-slot) { flex-shrink: 0; }
+  @media (max-height: 700px) {
+    .kairos-redesign .mf-project .ms-finished-deck > button,
+    .kairos-redesign .mf-project .forge-composer-hint { display: none; }
+  }
+  @media (max-height: 480px) {
+    /* New / Sessions remain available in the tab bar on landscape phones. */
+    .kairos-redesign[data-view="forgeHome"] .mf-project .ms-switch { display: none; }
+  }
   .kairos-redesign .ms-history { padding-bottom: calc(max(var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)), 12px) + var(--ms-tabbar-space)); }
   .kairos-redesign .mf-dashboard-body { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space)); }
 
