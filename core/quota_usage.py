@@ -222,7 +222,53 @@ def _provider(name, reader, force=False):
         return _failed(name, old, "unavailable")
 
 
-READERS = {"claude": ("claude_cli", lambda: _claude_windows()), "codex": ("codex_cli", lambda: _codex_windows())}
+def parse_antigravity_limits(data):
+    """Only provider-reported fractions; credit amounts have no denominator.
+
+    Older CLI builds without a machine-readable quota map return no windows.
+    Never scrape a text progress bar or infer a limit from token totals.
+    """
+    if not isinstance(data, dict):
+        return []
+    quotas = data.get('quota')
+    if not isinstance(quotas, dict):
+        return []
+    windows = []
+    for name, part in quotas.items():
+        if not isinstance(part, dict) or part.get('disabled'):
+            continue
+        remaining = part.get('remaining_fraction')
+        if isinstance(remaining, bool) or not isinstance(remaining, (int, float)) or not math.isfinite(remaining):
+            continue
+        if not 0 <= remaining <= 1:
+            continue
+        entry = _window(str(name), (1 - remaining) * 100, part.get('reset_time'))
+        if entry:
+            windows.append(entry)
+    return windows
+
+
+def _antigravity_windows():
+    from core.antigravity_cli import find_antigravity, run_readonly, auth_error
+    executable = find_antigravity()
+    if not executable:
+        return []
+    # CLI-owned report, never a model turn. Slash reports cannot be sent to
+    # the streaming conversation process.
+    code, out, err = run_readonly(executable, '-p', '/usage', '--output-format', 'json',
+                                  '--disable-slash-commands=false', timeout=12)
+    if auth_error(err):
+        raise SignInNeeded()
+    if code:
+        return []
+    try:
+        return parse_antigravity_limits(json.loads(out))
+    except ValueError:
+        return []
+
+
+READERS = {"claude": ("claude_cli", lambda: _claude_windows()), "codex": ("codex_cli", lambda: _codex_windows()),
+           "antigravity": ("antigravity_cli", lambda: _antigravity_windows())}
 
 
 def get_usage_overlay(force_provider=None):
@@ -234,7 +280,9 @@ def get_usage_overlay(force_provider=None):
     providers = []
     for name, (kind, reader) in READERS.items():
         if kind in kinds:
-            providers.append(_provider(name, reader, force=(name == force_provider)))
+            reading = _provider(name, reader, force=(name == force_provider))
+            if name != 'antigravity' or reading.get('windows'):
+                providers.append(reading)
     totals = token_usage.get_usage_summary()
     recorded = [{"name": ep["name"], "kind": ep["kind"],
                  "total_tokens": totals.get(ep["id"], {}).get("total_tokens")}

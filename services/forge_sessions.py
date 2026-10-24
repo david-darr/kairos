@@ -153,7 +153,7 @@ class ForgeSessions:
         if model_override is not None:
             model_override = model_override.strip() or None
         if model_override is not None:
-            if not endpoint or endpoint['kind'] not in ('claude_cli', 'codex_cli', 'api'):
+            if not endpoint or endpoint['kind'] not in ('claude_cli', 'codex_cli', 'antigravity_cli', 'api'):
                 raise ValueError('Exact models are available only for CLI and API agents.')
             if len(model_override) > 160 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/+\[\]-]*', model_override):
                 raise ValueError('Enter a valid model ID (160 characters maximum).')

@@ -321,6 +321,30 @@ def _codex_item(sid, item, phase):
     _changed(sid)
 
 
+def antigravity_step(sid, step):
+    """Only metadata emitted by agy: no transcript/log URI is opened.
+
+    A DONE spawn step is not proof a child completed. Without a reported
+    child status the turn cleanup labels it stopped, just as Codex does.
+    """
+    info = step.get('subagent_info')
+    if not isinstance(info, dict):
+        return
+    data = _session(sid)
+    for child in info.get('subagents') or []:
+        if not isinstance(child, dict) or not isinstance(child.get('conversation_id'), str):
+            continue
+        ident = 'antigravity:' + child['conversation_id']
+        entry = data['items'].setdefault(ident, _new(ident, 'subagent', 'antigravity', child.get('role') or child.get('type_name')))
+        status = {'running': 'running', 'completed': 'done', 'failed': 'failed', 'stopped': 'stopped'}.get(str(child.get('status', '')).lower())
+        if status:
+            entry['status'] = status
+            if status in TERMINAL:
+                entry['endedAt'] = entry['endedAt'] or time.time()
+                _note(data, entry)
+    _changed(sid)
+
+
 def end_source(sid, source, reason):
     if not sid:
         return

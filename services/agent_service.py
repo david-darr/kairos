@@ -210,7 +210,7 @@ def _check_model(endpoint_id: Optional[str], override: Optional[str], effort: Op
     if endpoint_id and endpoint is None:
         raise ValueError("endpoint_id must name a model added in Settings")
     if override is not None:
-        if not endpoint or endpoint["kind"] not in ("claude_cli", "codex_cli", "api"):
+        if not endpoint or endpoint["kind"] not in ("claude_cli", "codex_cli", "antigravity_cli", "api"):
             raise ValueError("Model versions are available only for CLI and API endpoints")
         if not isinstance(override, str):
             raise ValueError("Enter a valid model ID (160 characters maximum)")

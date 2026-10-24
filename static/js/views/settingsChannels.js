@@ -22,7 +22,7 @@ function modelPicker(models, selected, emptyLabel) {
   return customSelect({}, [
     el("option", { value: "", text: emptyLabel, ...(selected ? {} : { selected: "" }) }),
     ...models.map((m) => el("option", { value: m.id, ...(m.id === selected ? { selected: "" } : {}),
-      text: m.kind === "claude_cli" || m.kind === "codex_cli" ? `${m.name} (${m.model || "CLI default"})` : `${m.name} (${m.model})` })),
+      text: m.kind === "claude_cli" || m.kind === "codex_cli" || m.kind === "antigravity_cli" ? `${m.name} (${m.model || "CLI default"})` : `${m.name} (${m.model})` })),
   ]);
 }
 

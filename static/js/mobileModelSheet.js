@@ -15,7 +15,7 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
   const connections = el('div', { class: 'model-connection-list' });
   for (const endpoint of endpoints) {
     const row = button(endpoint.name, () => onConnection(endpoint.id), `model-picker-item model-connection-item${endpoint.id === endpointId ? ' active' : ''}`);
-    row.dataset.provider = endpoint.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', api: 'API connections' }[endpoint.kind] || endpoint.kind);
+    row.dataset.provider = endpoint.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', antigravity_cli: 'Antigravity', api: 'API connections' }[endpoint.kind] || endpoint.kind);
     connections.append(row);
   }
   fragment.append(connections);
@@ -53,9 +53,9 @@ async function loadAccount(card) {
   const summary = el('summary'), body = el('div', { class: 'ms-account-body' }), brief = [];
   summary.append(el('strong', { text: 'Account' }));
   card.replaceChildren(summary, body);
-  for (const id of ['claude', 'codex']) {
+  for (const id of ['claude', 'codex', ...(data.providers?.some(p => p.provider === 'antigravity') ? ['antigravity'] : [])]) {
     const raw = data.providers?.find(provider => provider.provider === id);
-    const name = id === 'claude' ? 'Claude' : 'Codex';
+    const name = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' }[id];
     const section = el('section', { class: 'ms-account-provider' }, [el('strong', { text: name })]);
     body.append(section);
     if (!raw) { section.append(el('p', { text: 'Usage unknown' })); brief.push(`${name} unknown`); continue; }

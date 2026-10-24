@@ -79,6 +79,8 @@ def mark_for(endpoint: dict) -> Optional[str]:
         return "claude"
     if kind == "codex_cli":
         return "openai"
+    if kind == "antigravity_cli":
+        return "gemini"
     model = (endpoint.get("model") or "").lower()
     for mark, pattern in _MODEL_FAMILIES:
         if model and re.search(pattern, model):

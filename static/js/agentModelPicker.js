@@ -52,7 +52,7 @@ export function agentModelPicker(models, initial = {}, onChange = () => {}) {
   const load = async (wanted = null, wantedEffort = null) => {
     const stamp = ++generation, id = connection.value;
     const endpoint = models.find(item => item.id === id);
-    const selectable = endpoint && ['claude_cli', 'codex_cli', 'api'].includes(endpoint.kind);
+    const selectable = endpoint && ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'].includes(endpoint.kind);
     version.disabled = true;
     const entries = selectable ? await api(`/api/models/${id}/catalog`).catch(() => []) : [];
     if (stamp !== generation || connection.value !== id) return;

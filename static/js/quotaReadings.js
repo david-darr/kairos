@@ -11,8 +11,9 @@
 export const PROVIDERS = [
   { id: 'claude', name: 'Claude', mark: 'claude' },
   { id: 'codex', name: 'Codex', mark: 'openai' },
+  { id: 'antigravity', name: 'Antigravity', mark: 'gemini' },
 ];
-export const SIGN_IN = { claude: 'Sign in to Claude Code to see usage.', codex: 'Sign in to Codex to see usage.' };
+export const SIGN_IN = { antigravity: 'Sign in to Antigravity to see usage.', claude: 'Sign in to Claude Code to see usage.', codex: 'Sign in to Codex to see usage.' };
 const WINDOW_IDS = { '5-hour': 'session', 'Weekly': 'weekly' };
 const WINDOW_LABELS = { '5-hour': '5-hour limit', 'Weekly': 'Weekly limit' };
 const STATUS = { ok: 'ok', stale: 'stale', needs_sign_in: 'needsAuth', rate_limited: 'stale', unavailable: 'stale' };

@@ -34,7 +34,7 @@ function restorePageBehind() {
 // model, CLI-aware) — duplicated rather than shared since the two modules
 // build their pickers with different components (native menu vs. customSelect).
 function modelLabel(ep) {
-  return ep.kind === "claude_cli" || ep.kind === "codex_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
+  return ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
 }
 
 const errorText = (problem) => (problem?.message || String(problem)).replace(/^\d+: /, "");
@@ -659,7 +659,7 @@ const KNOWN_API_PROVIDERS = [
 ];
 
 function modelForm(title, subtitle, kind, onAdded) {
-  const isCliKind = kind === "claude_cli" || kind === "codex_cli";
+  const isCliKind = kind === "claude_cli" || kind === "codex_cli" || kind === "antigravity_cli";
   const nameInput = el("input", { placeholder: kind === "local" ? "Local Ollama" : kind === "claude_cli" ? "Claude" : kind === "codex_cli" ? "Codex" : "OpenRouter" });
   const urlInput = el("input", { placeholder: kind === "local" ? "http://localhost:11434/v1" : "https://api.openrouter.ai/v1" });
   const modelInput = el("input", { placeholder: isCliKind ? (kind === "claude_cli" ? "claude-sonnet-4-5" : "gpt-5-codex") : "Model id" });
@@ -735,6 +735,10 @@ function renderAddModelsPanel(body) {
     ]),
     modelForm("Claude Code CLI", "Uses the claude CLI already installed and signed in on this machine. No key needed.", "claude_cli", done),
     modelForm("Codex CLI", "Uses the codex CLI already installed and signed in on this machine. No key needed.", "codex_cli", done),
+    group({ title: "Antigravity (Gemini)", description: "Connect your signed-in Antigravity CLI (agy). Check status, version and available Gemini models in the setup guide." }, [
+      row({ title: "Antigravity connection", description: "Sign in in the Antigravity app or CLI. Kairos never handles your credentials.",
+        control: el("button", { class: "btn", text: "Connect / Recheck", onclick: () => openModelSetup({ kind: "antigravity" }) }) }),
+    ]),
     modelForm("Local model server", "Ollama, llama.cpp, vLLM or any server on this machine or your network.", "local", done),
     modelForm("API provider", "A cloud provider such as OpenAI, Anthropic or OpenRouter.", "api", done),
   );
@@ -766,7 +770,7 @@ async function renderAddedModelsPanel(body, _status, page) {
       toast("Model removed", "success");
       await selectSection("added-models");
     } });
-    const meta = ep.kind === "claude_cli" || ep.kind === "codex_cli"
+    const meta = ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli"
       ? `Model: ${ep.model || "CLI default"}`
       : [ep.model, ep.base_url, ep.has_api_key ? "key saved" : null, ep.kind === "local" && ep.num_ctx ? `context ${ep.num_ctx}` : null].filter(Boolean).join(" · ");
     const controls = [result];
@@ -790,7 +794,7 @@ async function renderAddedModelsPanel(body, _status, page) {
       cls: "model-row", attrs: { "data-endpoint": ep.id } });
   }
 
-  const kinds = [["claude_cli", "Claude Code CLI"], ["codex_cli", "Codex CLI"], ["local", "Local"], ["api", "API"]];
+  const kinds = [["claude_cli", "Claude Code CLI"], ["codex_cli", "Codex CLI"], ["antigravity_cli", "Antigravity"], ["local", "Local"], ["api", "API"]];
   const settings = await api("/api/settings").catch(() => ({}));
   // Roadmap phase 3 (2026-10-05): local and API models have small windows
   // and never compact themselves (services/chat_service.py).

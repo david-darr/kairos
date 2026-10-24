@@ -8,7 +8,7 @@ import { api, el, toast } from './api.js';
 import { renderMobileCatalogMenu } from './mobileModelSheet.js';
 import { getInFlight, subscribe } from './chatStream.js';
 
-const EDITABLE = ['claude_cli', 'codex_cli', 'api'];
+const EDITABLE = ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'];
 
 export function mountDesignModelPicker(host, { getSession }) {
   let sessionId = null, choice = { endpointId: null, model: null, effort: null }, endpoints = [], catalog = [];

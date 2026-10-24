@@ -279,7 +279,7 @@ export function render(container, tabId, options = {}) {
     const version = ++variantVersion;
     const endpoint = models.find(m => m.id === modelSelect?.value);
     variantSelect = null; variantField.hidden = true; variantField.replaceChildren(); mobileCatalog = []; refreshPhoneMenu();
-    if (!endpoint || !['claude_cli', 'codex_cli', 'api'].includes(endpoint.kind)) return;
+    if (!endpoint || !['claude_cli', 'codex_cli', 'antigravity_cli', 'api'].includes(endpoint.kind)) return;
     let choices = [];
     try { choices = await api(`/api/models/${encodeURIComponent(endpoint.id)}/catalog`); } catch { /* Default model only. */ }
     if (disposed || version !== variantVersion || !choices.length) return;

@@ -113,7 +113,7 @@ def _available_tools(session_id, is_admin, user) -> list[dict]:
     endpoint = model_endpoints.get_endpoint(session.get("model_endpoint_id")) if session.get("model_endpoint_id") else None
     if endpoint is None:
         return []
-    surface = {"claude_cli": tool_registry.CLAUDE, "codex_cli": tool_registry.CODEX}.get(endpoint["kind"], tool_registry.OPENAI)
+    surface = {"claude_cli": tool_registry.CLAUDE, "codex_cli": tool_registry.CODEX, "antigravity_cli": tool_registry.CODEX}.get(endpoint["kind"], tool_registry.OPENAI)
     read_only = (session.get("forge") or {}).get("mode") == "plan"
     disabled = set(settings.get_setting("disabled_tools") or [])
     tools = [{"id": "builtin:" + spec.name, "name": spec.name, "description": spec.description}

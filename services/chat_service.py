@@ -28,13 +28,14 @@ from core import attachments, chat_files, file_checkpoints, helpers, logs as log
 from core import brain as brain_module
 from core.brain import Brain
 from core.codex_brain import CodexBrain
+from core.antigravity_brain import AntigravityBrain
 from core.external_brain import ExternalBrain
 from core.session_manager import sent_text, session_manager
 from core.vault import resolve_vault_dir
 
 logger = logging.getLogger(__name__)
 
-AnyBrain = Union[Brain, ExternalBrain, CodexBrain]
+AnyBrain = Union[Brain, ExternalBrain, CodexBrain, AntigravityBrain]
 
 _brains: dict[str, AnyBrain] = {}
 _busy: set[str] = set()
@@ -254,8 +255,9 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
                      project_id=project_id, effort=effort,
                      resume_session_id=(session or {}).get("claude_session_id"), agent_id=agent_id,
                      agent_prompt=agent_prompt, **forge_options)
-    if endpoint["kind"] == "codex_cli":
-        return CodexBrain(cwd_override=workspace_dir, session_id=session_id, integration_ids=integration_ids,
+    if endpoint["kind"] in ("codex_cli", "antigravity_cli"):
+        brain_class = AntigravityBrain if endpoint["kind"] == "antigravity_cli" else CodexBrain
+        return brain_class(cwd_override=workspace_dir, session_id=session_id, integration_ids=integration_ids,
                           model=cli_model or None, is_admin=is_admin, project_id=project_id,
                           effort=effort, agent_prompt=agent_prompt,
                           agent_auto=bool(agent_id and session is None), agent_id=agent_id, **forge_options)
@@ -1113,6 +1115,8 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
         raise HTTPException(status_code=502, detail="the summary came back empty")
 
     session_manager.compact_session(session_id, through_index, summary)
+    if endpoint["kind"] == "antigravity_cli":
+        session_manager.set_antigravity_conversation_id(session_id, None)
     if endpoint["kind"] == "codex_cli":
         # Codex CLI owns its own server-side thread and cannot be seeded with
         # a summary mid-thread — the next turn starts a fresh one, primed

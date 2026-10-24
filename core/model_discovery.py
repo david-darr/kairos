@@ -33,6 +33,8 @@ def provider_for_endpoint(endpoint: dict) -> str | None:
         return "anthropic"
     if kind == "codex_cli":
         return "codex"
+    if kind == "antigravity_cli":
+        return "antigravity"
     if kind != "api":
         return None
     parsed = urlparse(endpoint.get("base_url") or "")
@@ -213,6 +215,21 @@ async def _codex_cli_models() -> list[dict]:
 async def list_for_endpoint(endpoint: dict, *, force: bool = False) -> list[dict]:
     provider = provider_for_endpoint(endpoint)
     kind = endpoint.get("kind")
+    if kind == "antigravity_cli":
+        from core.antigravity_cli import find_antigravity, probe
+        cache_key = "antigravity_cli:" + str(find_antigravity())
+        cached = _cache.get(cache_key)
+        if cached and not force and time.monotonic() - cached[0] < _TTL_SECONDS:
+            return cached[1]
+        current = await asyncio.to_thread(probe)
+        if current['signed_in']:
+            live = current['models']
+            model_catalog.remember_antigravity_live(live, _TTL_SECONDS)
+            _cache[cache_key] = (time.monotonic(), live)
+            return live
+        if current['status'] in ('missing', 'needs_sign_in'):
+            return []
+        return cached[1] if cached else model_catalog.list_models(kind)
     if kind == "codex_cli":
         cache_key = "codex_cli"
         cached = _cache.get(cache_key)

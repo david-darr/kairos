@@ -65,7 +65,7 @@ _MAX_CACHE_BYTES = 8 * 1024 * 1024
 # Only these two endpoint kinds have a model/effort catalog. local/api
 # endpoints already carry their own explicit model string in the endpoint
 # record (core/model_endpoints.py) and are configured in Settings, not here.
-CATALOG_KINDS = ("claude_cli", "codex_cli")
+CATALOG_KINDS = ("claude_cli", "codex_cli", "antigravity_cli")
 
 # Fallback only — the live value is derived from the installed SDK in
 # _claude_efforts() below, so a newer SDK that adds a level is picked up
@@ -126,6 +126,23 @@ def _codex_cache_path() -> str:
 # be re-rendered on every session switch, so it is parsed only when the file
 # on disk actually changes.
 _codex_cache: tuple[tuple[float, int], list[dict]] | None = None
+_antigravity_live: tuple[float, list[dict]] | None = None
+
+
+def remember_antigravity_live(models, ttl_seconds=300):
+    global _antigravity_live
+    _antigravity_live = (time.monotonic() + ttl_seconds, models)
+
+
+def _antigravity_models():
+    if _antigravity_live:
+        return _antigravity_live[1]
+    from core.antigravity_cli import parse_models
+    return parse_models("\n".join(f"{base}-{level}  {name}"
+        for base, name in (("gemini-4-argon", "Gemini 4 Argon"), ("gemini-3.8-flash", "Gemini 3.8 Flash"))
+        for level in ("low", "medium", "high")), source="curated")
+
+
 _codex_live: tuple[float, list[dict]] | None = None
 
 
@@ -212,6 +229,8 @@ def list_models(kind: str) -> list[dict]:
     a kind with no catalog, or when Codex's cache isn't present — the custom
     model-ID field stays available either way, so the picker degrades to
     exactly the pre-catalog behaviour instead of blocking."""
+    if kind == "antigravity_cli":
+        return _antigravity_models()
     if kind == "codex_cli":
         if _codex_live and time.monotonic() < _codex_live[0]:
             return _codex_live[1]

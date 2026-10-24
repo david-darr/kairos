@@ -152,7 +152,7 @@ async def set_session_model(session_id: str, body: SetModelRequest, user: str = 
         raise HTTPException(400, "model endpoint not found")
     override = body.model_override
     if override is not None:
-        if not endpoint or endpoint["kind"] not in ("claude_cli", "codex_cli", "api"):
+        if not endpoint or endpoint["kind"] not in ("claude_cli", "codex_cli", "antigravity_cli", "api"):
             raise HTTPException(400, "Model versions are available only for CLI and API endpoints")
         override = override.strip()
         import re
@@ -192,6 +192,8 @@ async def set_session_model(session_id: str, body: SetModelRequest, user: str = 
             # through CLI defaults, with saved transcript replay, when the
             # user explicitly resets to an unpinned model.
             session_manager.set_codex_thread_id(session_id, None)
+        if endpoint and endpoint["kind"] == "antigravity_cli" and not (endpoint.get("model") if override is None else override) and previous.get("model_override") != override:
+            session_manager.set_antigravity_conversation_id(session_id, None)
         session_manager.set_model_endpoint(session_id, body.model_endpoint_id, override, effort)
     return {"ok": True, "model_endpoint_id": body.model_endpoint_id, "model_override": override, "effort": effort}
 
