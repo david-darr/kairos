@@ -13,7 +13,7 @@ router = APIRouter(prefix='/api/model-setup', tags=['model-setup'], dependencies
 
 class ConnectionRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    kind: Literal['claude', 'codex', 'claude_cli', 'codex_cli', 'api']
+    kind: Literal['claude', 'codex', 'antigravity', 'claude_cli', 'codex_cli', 'antigravity_cli', 'api']
     provider: Literal['openai', 'anthropic', 'openrouter', 'google'] | None = None
     key: str = Field(default='', max_length=4096)
 

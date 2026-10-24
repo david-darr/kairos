@@ -81,7 +81,7 @@ async def complete(endpoint_id, system, prompt, timeout=180, model=None):
         endpoint = model_endpoints.get_endpoint(endpoint_id)
         if endpoint is None:
             raise ValueError("Choose a completion model")
-        if endpoint["kind"] == "codex_cli":
+        if endpoint["kind"] in ("codex_cli", "antigravity_cli"):
             raise ValueError("Select Claude CLI, a local model or an API model for tool-free completion")
         if endpoint["kind"] == "claude_cli":
             # Callers check membership against model_choices() when the choice

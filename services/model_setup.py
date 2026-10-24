@@ -28,7 +28,7 @@ import zipfile
 import httpx
 import claude_agent_sdk
 
-from core import claude_cli, model_discovery, model_endpoints, permissions
+from core import antigravity_cli, claude_cli, model_discovery, model_endpoints, permissions
 from core.codex_cli import find_codex, managed_bin
 from core.providers import openai_compatible
 from services.forge_apps import child_env, command_args, resolve_command, CHOICES
@@ -93,12 +93,13 @@ def status():
                 version = match.group(0)
         except (OSError, subprocess.SubprocessError):
             pass
-    connections = {kind: [] for kind in ('claude_cli', 'codex_cli', 'api', 'local')}
+    connections = {kind: [] for kind in ('claude_cli', 'codex_cli', 'antigravity_cli', 'api', 'local')}
     for ep in model_endpoints.list_endpoints():
         connections.setdefault(ep['kind'], []).append({k: ep[k] for k in ('id', 'name', 'kind', 'model')})
     return {'claude': {'available': bool(claude), 'source': source,
                        'signed_in': bool(model_discovery._claude_cli_token())},
             'codex': {'installed': bool(codex), 'version': version, 'path': codex, 'signed_in': _codex_signed_in()},
+            'antigravity': antigravity_cli.probe(),
             'node': {'npm': npm_available()}, 'connections': connections}
 
 
@@ -437,15 +438,15 @@ async def test_api_key(provider, key):
 
 
 async def create_connection(kind, **fields):
-    kind = {'claude_cli': 'claude', 'codex_cli': 'codex'}.get(kind, kind)
-    if kind in ('claude', 'codex'):
+    kind = {'claude_cli': 'claude', 'codex_cli': 'codex', 'antigravity_cli': 'antigravity'}.get(kind, kind)
+    if kind in ('claude', 'codex', 'antigravity'):
         current = await asyncio.to_thread(status)
         if not current[kind]['signed_in'] or not current[kind].get('available', current[kind].get('installed')):
-            raise ValueError('Finish signing in before connecting.')
+            raise ValueError(antigravity_cli.SIGN_IN if kind == 'antigravity' else 'Finish signing in before connecting.')
         endpoint_kind = kind + '_cli'
         existing = current['connections'].get(endpoint_kind) or []
         endpoint = existing[0] if existing else model_endpoints.create_endpoint(
-            name='Claude Code' if kind == 'claude' else 'ChatGPT with Codex', kind=endpoint_kind)
+            name={'claude': 'Claude Code', 'codex': 'ChatGPT with Codex', 'antigravity': 'Antigravity (Gemini)'}[kind], kind=endpoint_kind)
     elif kind == 'api':
         name, url, model = provider_preset(fields.get('provider'))
         key = fields.get('key', '')

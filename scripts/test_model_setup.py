@@ -50,6 +50,7 @@ class ModelSetupTests(unittest.TestCase):
         self.stack.enter_context(patch.object(setup.claude_cli, 'preferred_cli_path', return_value=None))
         self.stack.enter_context(patch.object(setup, '_claude_path', return_value=(None, 'bundled')))
         self.stack.enter_context(patch.object(setup, 'find_codex', return_value=None))
+        self.stack.enter_context(patch.object(setup.antigravity_cli, 'find_antigravity', return_value=None))
         self.stack.enter_context(patch.object(setup, 'npm_available', return_value=False))
         self.stack.enter_context(patch.object(setup.model_discovery, '_claude_cli_token', return_value=None))
         self.stack.enter_context(patch.object(setup.platform, 'system', return_value='Windows'))

@@ -162,6 +162,13 @@ async def _codex_summary(prompt: str, model: str | None) -> str:
 async def _model_summary(endpoint: dict, model: str | None, prompt: str) -> str:
     if endpoint["kind"] == "claude_cli":
         return await _claude_summary(prompt, model)
+    if endpoint["kind"] == "antigravity_cli":
+        from core.antigravity_brain import AntigravityBrain
+        brain = AntigravityBrain(model=model, read_only=True)
+        try:
+            return (await brain.run_turn(prompt)).strip()
+        finally:
+            await brain.disconnect()
     if endpoint["kind"] == "codex_cli":
         return await _codex_summary(prompt, model)
     base_url, runtime_model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])

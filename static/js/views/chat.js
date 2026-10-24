@@ -234,7 +234,7 @@ async function offerFallback(session, failedIndex, card) {
   const source = endpoints.find(endpoint => endpoint.id === failed.failure_model_endpoint_id);
   const needsImages = !!original.image_attachment_ids?.length;
   const alternatives = endpoints.filter(endpoint => endpoint.id !== failed.failure_model_endpoint_id &&
-    (!needsImages || endpoint.supports_images || ['claude_cli', 'codex_cli'].includes(endpoint.kind)));
+    (!needsImages || endpoint.supports_images || ['claude_cli', 'codex_cli', 'antigravity_cli'].includes(endpoint.kind)));
   alternatives.sort((a, b) => Number(a.kind === source?.kind) - Number(b.kind === source?.kind));
   if (!alternatives.length) {
     choices.append(el('span', { class: 'meta', text: needsImages
@@ -1022,7 +1022,7 @@ export async function render(container, tabId, options = {}) {
   const computerTimer = setInterval(syncComputer, 2000);
   const autoModeOption = el('option', { value: 'auto', text: 'Auto', disabled: true });
   const permissionMode = el('select', { id: 'chat-permission-mode', 'aria-label': 'Chat permission mode',
-    title: 'Base uses current permissions. Auto approves chat tool requests; Codex Auto also removes its workspace sandbox. Admin only.' }, [
+    title: 'Base uses current permissions. Auto approves chat tool requests; Codex and Antigravity Auto also remove their workspace sandbox. Admin only.' }, [
     el('option', { value: 'base', text: 'Base' }), autoModeOption,
   ]);
   const permissionControl = el('label', { class: 'chat-permission-control', 'data-mode': 'base' }, [
@@ -1111,7 +1111,7 @@ export async function render(container, tabId, options = {}) {
   syncComposerHint();
   desktopChat.addEventListener('change', syncComposerHint);
   const permissionNotice = el('div', { id: 'chat-permission-notice', class: 'chat-permission-notice', hidden: true,
-    text: 'Auto approves chat permission requests, including after reading outside content. Codex Auto also removes its workspace sandbox.' });
+    text: 'Auto approves chat permission requests, including after reading outside content. Codex and Antigravity Auto also remove their workspace sandbox.' });
   composerOptions.append(permissionNotice);
   const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
   const dock = el('div', { class: 'chat-composer-dock' }, [bgHost, questionHost, queueHost, attachStrip, composer]);
@@ -2173,12 +2173,12 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   const connectionList = el("div", { class: "model-connection-list" });
   menu.appendChild(connectionList);
   for (const ep of endpoints) {
-    const optName = ep.kind === "claude_cli" || ep.kind === "codex_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
+    const optName = ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli" ? `${ep.name} (${ep.model || "CLI default"})` : `${ep.name} (${ep.model})`;
     const isCurrent = ep.id === (currentEndpointId || "");
     const item = el("button", {
       type: 'button',
       'data-endpoint-id': ep.id,
-      'data-provider': ep.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', api: 'API connections' }[ep.kind] || ep.kind),
+      'data-provider': ep.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', antigravity_cli: 'Antigravity', api: 'API connections' }[ep.kind] || ep.kind),
       class: "model-picker-item model-connection-item" + (isCurrent ? " active" : ""),
       onclick: async () => {
         if (chatStream.getInFlight(activeSessionId)?.status === 'processing') return;
@@ -2224,7 +2224,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   const setupItem = () => el("button", { type: "button", class: "model-picker-item model-add-item", text: "Set up a model",
     onclick: () => { closeMenu(menu); setupChatModel(); } });
 
-  const selectable = ep && ['claude_cli', 'codex_cli', 'api'].includes(ep.kind);
+  const selectable = ep && ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'].includes(ep.kind);
   if (!selectable) {
     menu.appendChild(setupItem());
     if (hadFocus) (menu.querySelector('.model-picker-item.active') || menu.querySelector('.model-picker-item'))?.focus();

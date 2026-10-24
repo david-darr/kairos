@@ -166,6 +166,12 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_admin)) ->
             return {"ok": False, "detail": str(e)[:300]}
         finally:
             await brain.disconnect()
+    if ep.get("kind") == "antigravity_cli":
+        from core.antigravity_cli import probe
+        import asyncio
+        current = await asyncio.to_thread(probe)
+        return {"ok": current['signed_in'], "detail": current['message'],
+                "latency_ms": round((time.monotonic() - started) * 1000)}
     if ep.get("kind") == "codex_cli":
         # Same honest-test posture as claude_cli above: the real question is
         # whether the `codex` CLI is installed and logged in on this

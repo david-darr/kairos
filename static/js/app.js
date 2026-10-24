@@ -631,7 +631,7 @@ async function startApp() {
     const models = await api("/api/models").catch(() => []);
     window.jarvis.screenGrab.replyModels(requestId, models.map(({ id, name, model, kind, supports_images }) =>
       ({ id, supportsImages: supports_images,
-        label: `${name} (${kind === "claude_cli" || kind === "codex_cli" ? model || "CLI default" : model})` })));
+        label: `${name} (${kind === "claude_cli" || kind === "codex_cli" || kind === "antigravity_cli" ? model || "CLI default" : model})` })));
   });
   window.jarvis?.screenGrab?.onQuickDraft(async (draft) => {
     try {

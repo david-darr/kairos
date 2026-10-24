@@ -70,7 +70,7 @@ def _masked(ep: dict) -> dict:
         "has_api_key": bool(ep.get("api_key_encrypted")),
         "kind": ep.get("kind", "api"),
         "num_ctx": ep.get("num_ctx"),
-        "supports_images": ep.get("kind") in ("claude_cli", "codex_cli") or bool(ep.get("supports_images")),
+        "supports_images": ep.get("kind") in ("claude_cli", "codex_cli", "antigravity_cli") or bool(ep.get("supports_images")),
     }
 
 
@@ -84,9 +84,9 @@ def get_endpoint(endpoint_id: str) -> Optional[dict]:
 
 def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Optional[str] = None,
                      kind: str = "api", num_ctx: Optional[int] = None, supports_images: bool = False) -> dict:
-    if kind not in ("local", "api", "claude_cli", "codex_cli"):
-        raise ValueError("kind must be 'local', 'api', 'claude_cli', or 'codex_cli'")
-    if kind not in ("claude_cli", "codex_cli") and not base_url:
+    if kind not in ("local", "api", "claude_cli", "codex_cli", "antigravity_cli"):
+        raise ValueError("kind must be 'local', 'api', 'claude_cli', 'codex_cli', or 'antigravity_cli'")
+    if kind not in ("claude_cli", "codex_cli", "antigravity_cli") and not base_url:
         raise ValueError("base_url is required for local/api endpoints")
     data = _load()
     endpoint_id = uuid.uuid4().hex[:12]

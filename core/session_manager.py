@@ -65,6 +65,7 @@ class SessionManager:
             # <thread_id>` gives real cross-restart conversation continuity,
             # so this is persisted here rather than only held in memory.
             "codex_thread_id": None,
+            "antigravity_conversation_id": None,
             # The Claude Code CLI's own session id, and how many of this
             # chat's saved messages that CLI session has seen. Together they
             # let a reconnect resume the real conversation (core/brain.py)
@@ -121,6 +122,7 @@ class SessionManager:
             "model_effort": source.get("model_effort"),
             "workspace_dir": source.get("workspace_dir"),
             "codex_thread_id": None,
+            "antigravity_conversation_id": None,
             "claude_session_id": None,
             "claude_synced_through": 0,
             "project_id": source.get("project_id"),
@@ -299,6 +301,7 @@ class SessionManager:
             # A different endpoint must not resume an old provider's thread.
             # Saved messages are replayed into a fresh Codex thread instead.
             session["codex_thread_id"] = None
+            session["antigravity_conversation_id"] = None
             # Same for Claude: turns answered by another model in between are
             # not in the CLI's session, so it would resume with a hole in it.
             _clear_claude_session(session)
@@ -321,6 +324,7 @@ class SessionManager:
         # Codex resumes with the sandbox chosen at thread creation. A mode
         # change must start a new thread so the old policy cannot survive.
         session["codex_thread_id"] = None
+        session["antigravity_conversation_id"] = None
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
     def bind_execution_admin(self, session_id: str, is_admin: bool) -> bool:
@@ -332,11 +336,12 @@ class SessionManager:
         """
         session = self._require(session_id)
         previous = session.get("execution_admin")
-        unknown_thread = previous is None and bool(session.get("claude_session_id") or session.get("codex_thread_id"))
+        unknown_thread = previous is None and bool(session.get("claude_session_id") or session.get("codex_thread_id") or session.get("antigravity_conversation_id"))
         changed = previous is not None and previous != is_admin
         if unknown_thread or changed:
             _clear_claude_session(session)
             session["codex_thread_id"] = None
+            session["antigravity_conversation_id"] = None
         if previous is None or changed or unknown_thread:
             session["execution_admin"] = is_admin
             store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
@@ -377,6 +382,11 @@ class SessionManager:
         session = self._require(session_id)
         session["claude_session_id"] = claude_session_id
         session["claude_synced_through"] = synced_through if claude_session_id else 0
+        return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
+
+    def set_antigravity_conversation_id(self, session_id: str, conversation_id: Optional[str]) -> dict:
+        session = self._require(session_id)
+        session["antigravity_conversation_id"] = conversation_id
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
     def set_codex_thread_id(self, session_id: str, thread_id: Optional[str]) -> dict:
@@ -545,6 +555,7 @@ class SessionManager:
         session["messages"] = messages[:keep]
         _clear_claude_session(session)
         session["codex_thread_id"] = None
+        session["antigravity_conversation_id"] = None
         session["context_state"] = None
         if session.get("open_mic_started_at", 0) > keep:
             session.pop("open_mic_started_at", None)
@@ -559,6 +570,7 @@ class SessionManager:
         injected at connection time."""
         session = self._require(session_id)
         session["project_id"] = project_id
+        session["antigravity_conversation_id"] = None
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
     def set_agent(self, session_id: str, agent_id: str, agent_prompt: str, *, unattended: bool = False) -> dict:
@@ -597,6 +609,7 @@ class SessionManager:
         if session.get('forge') and workspace_dir != session['forge']['worktree']:
             raise ValueError('A Forge workspace is fixed for the life of its session.')
         session["workspace_dir"] = workspace_dir
+        session["antigravity_conversation_id"] = None
         # The CLI files its sessions by working folder, so one started in the
         # old folder cannot be resumed from the new one.
         _clear_claude_session(session)
@@ -608,6 +621,7 @@ class SessionManager:
         if previous.get('mode') != details.get('mode'):
             _clear_claude_session(session)
             session['codex_thread_id'] = None
+            session['antigravity_conversation_id'] = None
         session['forge'] = copy.deepcopy(details)
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 

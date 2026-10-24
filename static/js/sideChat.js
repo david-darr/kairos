@@ -96,7 +96,7 @@ function build(session) {
   const close = el('button', { type: 'button', class: 'input-icon-btn side-chat-close', 'aria-label': 'Close side chat', title: 'Close', text: '×' });
   const autoOption = el('option', { value: 'auto', text: 'Auto', disabled: true });
   const modeSelect = el('select', { class: 'side-chat-permission-mode', 'aria-label': 'Side chat permission mode',
-    title: 'Base uses current permissions. Auto approves chat tool requests; Codex Auto also removes its workspace sandbox. Admin only.' }, [
+    title: 'Base uses current permissions. Auto approves chat tool requests; Codex and Antigravity Auto also remove their workspace sandbox. Admin only.' }, [
     el('option', { value: 'base', text: 'Base' }), autoOption,
   ]);
   modeSelect.value = session.permission_mode === 'auto' ? 'auto' : 'base';
@@ -105,7 +105,7 @@ function build(session) {
     el('span', { text: 'Mode' }), modeSelect,
   ]);
   const modeNotice = el('div', { class: 'chat-permission-notice', hidden: modeSelect.value !== 'auto',
-    text: 'Auto approvals on. Codex Auto removes its workspace sandbox.' });
+    text: 'Auto approvals on. Codex and Antigravity Auto remove their workspace sandbox.' });
   api('/api/auth/status').then(status => { autoOption.disabled = !status.is_admin; }).catch(() => {});
   const divider = el('div', { class: 'side-chat-divider', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize side chat', tabindex: '0' });
   pane = el('section', { class: 'side-chat', 'aria-label': `Side chat: ${session.title}`, 'data-session-id': session.id }, [

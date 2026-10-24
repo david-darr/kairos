@@ -23,7 +23,7 @@ import { creativeSelectionButton } from './creativeConnections.js';
 import { mountSessionAttachments, attachmentHistory } from './sessionAttachments.js';
 import { agentCall } from './agentCall.js';
 
-const CLI_KINDS = ['claude_cli', 'codex_cli'];
+const CLI_KINDS = ['claude_cli', 'codex_cli', 'antigravity_cli'];
 const queues = new Map();
 const pausedQueues = new Set();
 
@@ -392,7 +392,7 @@ export async function mountSessionChat(host, options = {}) {
     let admin = false;
     try { admin = !!(await api('/api/auth/status')).is_admin; } catch { /* Base remains available. */ }
     if (disposed || !host.isConnected) return;
-    const description = 'Auto approves routine chat tool requests. Codex Auto also removes its workspace sandbox. Blender and Higgsfield requests still require approval.';
+    const description = 'Auto approves routine chat tool requests. Codex and Antigravity Auto also remove their workspace sandbox. Blender and Higgsfield requests still require approval.';
     const picker = customSelect({}, [el('option', { value: 'base', text: 'Base' }),
       el('option', { value: 'auto', text: 'Auto', disabled: !admin })]);
     picker.querySelector('button').setAttribute('aria-label', 'Chat permission mode');

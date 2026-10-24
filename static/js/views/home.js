@@ -76,7 +76,7 @@ function compactTokens(n) {
 // Everything else shows tokens actually spent through Kairos, with cache
 // reuse - cheap re-reads of a prompt the provider already holds - kept apart.
 function usageLabel(endpoint, usage) {
-  if (!usage || endpoint.kind === "claude_cli" || endpoint.kind === "codex_cli") return null;
+  if (!usage || endpoint.kind === "claude_cli" || endpoint.kind === "codex_cli" || endpoint.kind === "antigravity_cli") return null;
   const spent = usage.fresh_tokens + usage.unsplit_tokens;
   if (!spent) return null;
   const cached = usage.cache_read_tokens ? ` · ${compactTokens(usage.cache_read_tokens)} reused from cache` : "";
@@ -89,7 +89,7 @@ function usageLabel(endpoint, usage) {
 // A subscription's account limits, as the desktop overlay shows them (David,
 // 2026-10-07): each window's bar, how much is used and left, and when it
 // resets; or why there's no reading. Shared wording: quotaReadings.js.
-const QUOTA_PROVIDER = { claude_cli: "claude", codex_cli: "codex" };
+const QUOTA_PROVIDER = { claude_cli: "claude", codex_cli: "codex", antigravity_cli: "antigravity" };
 function quotaBlock(providerId, reading) {
   const snap = toSnap(reading);
   const block = el("div", { class: "dashboard-quota", "data-provider": providerId });
@@ -324,7 +324,7 @@ export function render(container, tabId, options = {}) {
         if (reading && !quotaShown.has(providerId)) {
           quotaShown.add(providerId);
           block.append(quotaBlock(providerId, reading));
-        } else if (providerId && !quotaShown.has(providerId) && quotas !== undefined) {
+        } else if (providerId && providerId !== "antigravity" && !quotaShown.has(providerId) && quotas !== undefined) {
           block.append(el("span", { class: "dashboard-quota-note", text: "Usage limits unavailable." }));
         }
         models.body.append(block);
