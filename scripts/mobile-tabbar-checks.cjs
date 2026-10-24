@@ -46,7 +46,9 @@ module.exports = async function tabBarChecks(c) {
     await barShown(); await delay(400);
     eq(await barState(), 'shown', `${label}: bar shown`);
     ok(await js("!document.querySelector('.ms-tabbar').inert && document.documentElement.classList.contains('ms-tabbar-up')"), `${label}: bar accessible and space reserved`);
-    eq(await js("(() => { const p = document.createElement('i'); p.style.cssText = 'position:fixed;height:var(--ms-tabbar-space)'; document.body.append(p); const h = getComputedStyle(p).height; p.remove(); return h; })()"), '72px', `${label}: reserves 72px`);
+    // 62px bar + 10px gap, plus the 28px lift the board wants beyond the usual 12px (less whatever the home-indicator inset already provides).
+    const inset = await js("(() => { const p = document.createElement('i'); p.style.cssText = 'position:fixed;height:var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))'; document.body.append(p); const h = p.getBoundingClientRect().height; p.remove(); return h; })()");
+    eq(await js("(() => { const p = document.createElement('i'); p.style.cssText = 'position:fixed;height:var(--ms-tabbar-space)'; document.body.append(p); const h = getComputedStyle(p).height; p.remove(); return h; })()"), `${72 + Math.max(0, 28 - Math.max(12, inset))}px`, `${label}: reserves the bar, the 10px gap and the board lift`);
     eq(await barCurrent(), current, `${label}: current tab`);
     if (back) await backControl(label, back);
     const bar = await rect('.ms-tabbar');
@@ -82,8 +84,8 @@ module.exports = async function tabBarChecks(c) {
   const forgePage = { back: '.mf-session .mf-back', composer: '.mf-session .forge-transcript-composer', current: 'sessions' };
   const geometry = async (label, screen, gap, width) => {
     const bar = await rect('.ms-tabbar');
-    ok(bar && Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 16) <= 1 && Math.abs(bar.r - (width - 16)) <= 1,
-      `${label}: the bar floats ${gap}px above the true bottom, 62px tall, 16px from each side: ${JSON.stringify(bar)}`);
+    ok(bar && Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 18) <= 1 && Math.abs(bar.r - (width - 18)) <= 1,
+      `${label}: the bar floats ${gap}px above the true bottom, 62px tall, 18px from each side (TabBar board): ${JSON.stringify(bar)}`);
     return bar;
   };
 
@@ -93,18 +95,19 @@ module.exports = async function tabBarChecks(c) {
   eq(await items(), ['home', 'chats', 'agents', 'calendar', 'more'], 'Kairos bar items');
   eq(await labels(), ['Home', 'Chats', 'Agents', 'Calendar', 'More'], 'Each item carries its label');
   ok(await js("[...document.querySelectorAll('.ms-tabbar-item')].every(n => n.querySelector(':scope > svg')?.getAttribute('aria-hidden') === 'true')"), 'Each item has a decorative SVG icon');
-  ok(await js("['home', 'chat', 'agents', 'calendar'].every((tab, i) => document.querySelector(`#nav .nav-item[data-tab=${tab}] svg`).innerHTML === document.querySelectorAll('.ms-tabbar-item > svg')[i].innerHTML)"), 'The icons are the app\'s own nav icons');
+  eq(await js("[...document.querySelectorAll('.ms-tabbar-item > svg')].map(n => n.firstElementChild.tagName + ':' + (n.firstElementChild.getAttribute('d') || n.firstElementChild.getAttribute('cx') || n.firstElementChild.getAttribute('x')))"),
+    ['path:M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z', 'path:M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'circle:9', 'rect:4', 'rect:4'], 'The icons are the TabBar board glyphs (home, chat, agents, calendar, grid)');
   eq(await js("[document.querySelector('.ms-tabbar').tagName, document.querySelector('.ms-tabbar').getAttribute('aria-label')]"), ['NAV', 'Tabs'], 'The bar is a navigation landmark');
   eq(await js("[...document.querySelectorAll('.ms-tabbar-item')].filter(n => n.getAttribute('aria-current') === 'page').map(n => n.dataset.tabbar)"), ['home'], 'Exactly one item is current');
   eq(await small('.ms-tabbar-item'), [], 'Bar items are 44px targets');
   eq(await js("[document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-haspopup'), document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-controls')]"), ['dialog', 'ms-more-sheet'], 'More announces its sheet');
   const glass = await js(`(() => { const g = document.querySelector('.ms-tabbar-glass'), s = getComputedStyle(g), a = getComputedStyle(g, '::after'), b = getComputedStyle(g, '::before'), p = getComputedStyle(document.querySelector('.ms-tabbar-pill'));
     return { filter: s.backdropFilter || s.webkitBackdropFilter, radius: s.borderTopLeftRadius, shadow: s.boxShadow, bg: s.backgroundColor,
-      specular: a.content !== 'none' && a.backgroundImage.includes('gradient') && a.height === '1px' && a.top === '0px', sheen: b.backgroundImage.includes('gradient'),
+      specular: a.display !== 'none' && a.content !== 'none' && a.backgroundImage.includes('gradient') && a.height === '1px' && a.top === '0px', sheen: b.display !== 'none' && b.backgroundImage.includes('gradient'),
       pill: { radius: p.borderTopLeftRadius, shadow: p.boxShadow, transition: p.transitionProperty + ' ' + p.transitionDuration } }; })()`);
-  ok(/blur\(22px\)/.test(glass.filter) && /saturate\(1\.9\)/.test(glass.filter), 'Liquid glass: backdrop blur and saturation: ' + glass.filter);
+  ok(glass.filter === 'none' || glass.filter === '', 'The TabBar board draws a flat floating pill, not blurred glass: ' + glass.filter);
   ok(/(rgba\(.*, 0?\.\d+\)|\/ 0?\.\d+\))$/.test(glass.bg), 'The glass is translucent: ' + glass.bg);
-  ok(glass.specular && glass.sheen && glass.shadow.includes('inset'), 'A bright specular top edge and a soft sheen: ' + JSON.stringify(glass));
+  ok(!glass.specular && !glass.sheen && glass.shadow.includes('inset'), 'The pill keeps only the board soft drop shadow and inset top highlight, no specular streak or sheen: ' + JSON.stringify(glass));
   ok(parseFloat(glass.radius) >= 31 && parseFloat(glass.pill.radius) >= 20 && glass.pill.shadow.includes('inset'), 'A capsule with a glass pill inside: ' + JSON.stringify(glass));
   ok(/transform/.test(glass.pill.transition) && !/^0s$/.test(glass.pill.transition.split(' ').at(-1)), 'The pill slides between items: ' + glass.pill.transition);
   ok(await pillOn(), 'The pill sits on Home');
@@ -117,7 +120,7 @@ module.exports = async function tabBarChecks(c) {
     await navigate(tab, options); await delay(400); await barShown();
     eq(await barCurrent(), want, `${tab}: the bar marks ${want}`);
     ok(await noAvatar(), `${tab}: no avatar`);
-    await geometry(tab, H, 12, W);
+    await geometry(tab, H, 28, W);
     ok(await pillOn(), `${tab}: the pill sits on ${want}`);
     const clear = await clearsBar();
     ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${tab}: the last content scrolls clear of the bar: ${JSON.stringify(clear)}`);
@@ -182,7 +185,7 @@ module.exports = async function tabBarChecks(c) {
   ok(more.activity >= 1, 'Work in progress is listed in More');
   eq(await small('.ms-more-sheet[open] button'), [], 'More controls are 44px');
   ok(await js("![...document.querySelectorAll('.ms-more-sheet[open] *')].some(n => n.childElementCount === 0 && n.textContent.includes(String.fromCharCode(8212)))"), 'More copy has no em dash');
-  ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-more-sheet')); return /blur/.test(s.backdropFilter) && /saturate/.test(s.backdropFilter) && /(rgba\\(.*, 0?\\.\\d+\\)|\\/ 0?\\.\\d+\\))$/.test(s.backgroundColor); })()"), 'More is a glass sheet');
+  ok(await js("(() => { const s = getComputedStyle(document.querySelector('.ms-more-sheet')); return s.backdropFilter === 'none' && /^rgb[(]/.test(s.backgroundColor) && parseFloat(s.borderTopLeftRadius) === 32; })()"), 'More is a solid parchment sheet with a 32px top radius (MoreSheet board)');
   ok(await js("(() => { const r = document.querySelector('.ms-more-sheet').getBoundingClientRect(); return Math.round(r.bottom) === innerHeight && r.left === 0 && r.width === innerWidth; })()"), 'More rises from the bottom edge, full width');
   await js("document.querySelector('.ms-profile-row').click()");
   await waitFor("!!document.querySelector('.workspace-profile-actions button')");
@@ -275,7 +278,7 @@ module.exports = async function tabBarChecks(c) {
   eq(await labels(), ['Forge Home', 'New', 'Sessions', 'More'], 'Forge mode bar labels');
   eq(await barCurrent(), 'forgeHome', 'Forge Home is current on the overview');
   ok(await pillOn(), 'The pill sits on Forge Home');
-  await geometry('Forge Home', H, 12, W);
+  await geometry('Forge Home', H, 28, W);
   const forgeClear = await clearsBar();
   ok(!forgeClear.last || forgeClear.last.b <= forgeClear.barTop + 0.5, 'Forge Home content scrolls clear of the bar: ' + JSON.stringify(forgeClear));
   await tap('new'); await waitFor("!!document.querySelector('.mf-project') && document.getElementById('mf-tab-0').getAttribute('aria-selected') === 'true'"); await barShown();
@@ -315,7 +318,7 @@ module.exports = async function tabBarChecks(c) {
   for (const [name, w, layout, screen, top, bottom, nudge] of devices) {
     await resize(w, layout);
     await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '${nudge}px'); })()`);
-    const gap = Math.max(12, bottom);
+    const gap = Math.max(28, bottom);
     for (const [tab, options, want] of [['home', {}, 'home'], ['chat', {}, 'chats'], ['agents', {}, 'agents'], ['calendar', {}, 'calendar']]) {
       await navigate(tab, options); await delay(500); await barShown();
       eq(await barCurrent(), want, `${name} ${tab}: ${want} is current`);
@@ -365,7 +368,7 @@ module.exports = async function tabBarChecks(c) {
     await js(`(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '12px'); })()`);
     for (const [tab, options] of [['home', {}], ['chat', {}], ['agents', {}], ['calendar', {}]]) {
       await navigate(tab, options); await delay(600); await barShown(); await pillOn();
-      await geometry(`${name} ${tab} (picture)`, screen, Math.max(12, bottom), w);
+      await geometry(`${name} ${tab} (picture)`, screen, Math.max(28, bottom), w);
       await shot(`tabbar-${name}-${tab === 'chat' ? 'chats' : tab}`);
     }
     await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(500);

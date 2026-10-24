@@ -5,6 +5,7 @@ import { ICONS } from "./icons.js";
 import { subscribeActivity } from "./redesignShell.js";
 import { dotMatrix, pill, usageCard } from "./kairosParts.js";
 import { toSnap } from "./quotaReadings.js";
+import { openNotifications } from './mobileActions.js';
 import { getLayout, saveLayout, homeLayout, resetHomeLayout, knownHomeCards, HOME_SECTIONS } from "./layout.js";
 
 const on = () => document.documentElement.classList.contains("kairos-redesign");
@@ -125,9 +126,11 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
   heading.append(el('div', {}, [el('p', { text: new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) }),
     el('h1', { text: `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}` })]));
   const controls = el('div', { class: 'hm-heading-actions' }, [pill({ text: 'New chat', onClick: () => navigate('chat') })]);
-  const calendarButton = el('button', { type: 'button', class: 'hm-phone-calendar', 'aria-label': 'Calendar', onclick: () => navigate('calendar') });
-  calendarButton.innerHTML = ICONS.calendar;
-  controls.append(calendarButton);
+  const notificationsButton = el('button', { type: 'button', class: 'hm-phone-notifications', 'aria-label': 'Notifications', onclick: () => openNotifications(notificationsButton) });
+  notificationsButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+  const settingsButton = el('button', { type: 'button', class: 'hm-phone-settings', 'aria-label': 'Settings', onclick: () => navigate('settings') });
+  settingsButton.innerHTML = ICONS.settings;
+  controls.append(settingsButton, notificationsButton);
   heading.append(controls, bannerParking);
   const week = el('section', { class: 'dashboard-section hm-week', 'aria-label': 'This week' });
   const makeSection = (title, id, link, go) => {
@@ -243,6 +246,9 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
       const calendarTitle = parts.schedule.querySelector('h2');
       calendarTitle.dataset.classicTitle = calendarTitle.textContent; calendarTitle.textContent = 'Coming up';
       controls.prepend(customizeButton); drawGreeting(); drawActivity(); drawWeek(); drawUsage();
+      // Customize remains available without taking a third root-header slot.
+      const phoneCustomize = el('button', { type: 'button', class: 'hm-phone-customize', text: 'Customize Home', onclick: openSheet });
+      content.append(phoneCustomize);
     }
     const cards = order.filter(id => id === 'system' || (!hidden.includes(id) && hasItems(id)));
     if (!cards.includes('system')) cards.push('system');
@@ -275,7 +281,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
   function deactivate() {
     if (!active) return;
     clearTimeout(entranceTimer); grid.classList.remove('rd-stagger');
-    active = false; closeSheet(false); heading.remove(); customizeButton?.remove(); customizeButton = null;
+    active = false; closeSheet(false); heading.remove(); content.querySelector('.hm-phone-customize')?.remove(); customizeButton?.remove(); customizeButton = null;
     classicChrome.forEach(({ node, anchor }) => anchor.after(node));
     bannerAnchor.after(banner); heroAnchor.after(hero); heroMascot?.removeAttribute('follow-pointer'); content.classList.remove('hm-home');
     for (const id of ['chats', 'schedule', 'system']) {

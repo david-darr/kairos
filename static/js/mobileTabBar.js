@@ -24,6 +24,19 @@ const SUBPAGE = [
 const nav = id => document.querySelector(`#nav .nav-item[data-tab="${id}"]`);
 const forge = () => document.documentElement.dataset.appMode === 'forge';
 const pagerTab = index => document.getElementById(`mf-tab-${index}`);
+// Board glyphs are local to the phone shell; desktop and Classic keep their icons.
+const shellIcon = (name) => {
+  const paths = {
+    home: '<path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
+    chats: '<path d="M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M8 10h8M8 13h5"/>',
+    agents: '<circle cx="9" cy="9" r="3.5"/><path d="M3 19c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5"/><circle cx="17" cy="8" r="2.5"/><path d="M16 13.5c2.4 0 4.2 1.2 5 3.5"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    more: '<rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/>',
+    code: '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 6l-2 12"/>',
+    sessions: '<path d="M5 6h14M5 12h14M5 18h9"/>',
+  };
+  return paths[name] ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${paths[name]}</svg>` : ICONS[name] || '';
+};
 
 // Kairos items delegate to the sidebar's own nav items, so Settings > Layout
 // visibility and every navigation rule stay in one place.
@@ -41,9 +54,9 @@ const KAIROS = [
 ];
 const FORGE = [
   { id: 'forgeHome', label: 'Forge Home', icon: 'home', source: 'forgeHome', badge: 'activity' },
-  { id: 'new', label: 'New', icon: 'newChat', source: 'forgeHome',
+  { id: 'new', label: 'New', icon: 'code', source: 'forgeHome',
     open: () => pagerTab(0)?.isConnected ? pagerTab(0).click() : go('forgeHome', { projectId: rememberedProject(), mobilePage: 0 }) },
-  { id: 'sessions', label: 'Sessions', icon: 'chats', source: 'forgeHome',
+  { id: 'sessions', label: 'Sessions', icon: 'sessions', source: 'forgeHome',
     open: () => pagerTab(1)?.isConnected ? pagerTab(1).click() : go('forgeHome', { projectId: rememberedProject(), mobilePage: 1 }) },
 ];
 
@@ -72,7 +85,7 @@ function build() {
   const items = (forge() ? FORGE : KAIROS).filter(item => nav(item.source));
   const nodes = items.map(item => {
     const node = document.createElement('button'); node.type = 'button'; node.className = 'ms-tabbar-item'; node.dataset.tabbar = item.id;
-    node.innerHTML = `${ICONS[item.icon] || ''}<span class="ms-tabbar-label"></span>`;
+    node.innerHTML = `${shellIcon(item.icon)}<span class="ms-tabbar-label"></span>`;
     node.querySelector('.ms-tabbar-label').textContent = item.label;
     node.firstElementChild?.setAttribute('aria-hidden', 'true');
     if (item.badge) node.dataset.badge = item.badge;
@@ -92,7 +105,7 @@ function build() {
     return node;
   });
   more = document.createElement('button'); more.type = 'button'; more.className = 'ms-tabbar-item'; more.dataset.tabbar = 'more';
-  more.innerHTML = `${ICONS.more}<span class="ms-tabbar-label">More</span>`;
+  more.innerHTML = `${shellIcon('more')}<span class="ms-tabbar-label">More</span>`;
   more.firstElementChild.setAttribute('aria-hidden', 'true');
   more.setAttribute('aria-haspopup', 'dialog'); more.setAttribute('aria-controls', 'ms-more-sheet');
   more.addEventListener('click', () => openMoreSheet(more));
@@ -148,7 +161,7 @@ export function mountTabBar() {
   bar = document.createElement('nav'); bar.className = 'ms-tabbar'; bar.setAttribute('aria-label', 'Tabs');
   glass = document.createElement('div'); glass.className = 'ms-tabbar-glass';
   const create = document.createElement('button'); create.type = 'button'; create.className = 'ms-tabbar-create';
-  create.textContent = '+'; create.setAttribute('aria-label', 'Quick create'); create.setAttribute('aria-haspopup', 'dialog');
+  create.innerHTML = ICONS.plus; create.setAttribute('aria-label', 'Quick create'); create.setAttribute('aria-haspopup', 'dialog');
   create.addEventListener('click', () => openQuickCreate(create));
   bar.append(glass, create); document.body.append(bar);
   // The page on screen, the pager page, the agents badge and the pushed

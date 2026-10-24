@@ -164,3 +164,337 @@
     box-sizing: border-box; width: 62px; height: 44px; border: 9px solid transparent; background-clip: padding-box;
   }
 }
+/* ==== PHONE-AGENTS-GENERATED-BELOW ==== */
+
+/* ==========================================================================
+   Phones: Agents in the "Kairos Mobile v2" boards (2026-10-23, David: restyle
+   Agents on phone to the mobile v2 boards, keeping the messenger, ecosystem
+   and calls). Desktop and the classic look are untouched: every rule is under
+   .kairos-redesign[data-view=agents] and a phone width. Colours are theme
+   tokens only; the boards' parchment hexes map to --rd-* tokens.
+   Boards: Agents (list, needs you and working), AgentDM, AgentsClear, Motion.
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* -- Page: 20px gutters; the header row holds the title and two round 46px buttons --- */
+  .kairos-redesign[data-view=agents] .view.agents-shell-view { padding-inline: 20px; }
+  .kairos-redesign[data-view=agents] .agents-workspace { gap: 18px; }
+  .kairos-redesign[data-view=agents] .agents-workspace-bar { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 0; padding: 0; min-height: 0; margin-top: 8px; }
+  .kairos-redesign[data-view=agents] .agents-workspace-controls { display: contents; }
+  .kairos-redesign[data-view=agents] .agents-workspace-controls .agents-chats-open { display: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-phone-actions {
+    position: absolute; z-index: 3; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); right: 20px;
+    display: flex; gap: 8px; height: 46px;
+  }
+  .kairos-redesign[data-view=agents] .agents-phone-round, .kairos-redesign[data-view=agents] .agent-call-open, .kairos-redesign[data-view=agents] .is-messages .agent-more, .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-conversation-back:not([hidden]) {
+    box-sizing: border-box; display: grid; place-items: center; width: 46px; height: 46px; min-width: 46px; min-height: 46px; padding: 0;
+    border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); color: var(--rd-ink);
+    box-shadow: none; cursor: pointer; font: inherit;
+  }
+  .kairos-redesign[data-view=agents] :is(.agents-phone-round, .agent-call-open, .is-messages .agent-more, .agents-conversation-back):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign[data-view=agents] .agents-phone-round:active, .kairos-redesign[data-view=agents] .agent-call-open:active, .kairos-redesign[data-view=agents] .is-messages .agent-more:active { background: var(--rd-surface-2); }
+
+  /* Options menu: scales in from the button (menus and pickers, 160ms). */
+  .kairos-redesign[data-view=agents] .agents-phone-menu:not([hidden]) {
+    position: absolute; z-index: 40; top: 54px; right: 0; display: flex; flex-direction: column; min-width: 220px; padding: 6px;
+    border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+    transform-origin: top right;
+  }
+  .kairos-redesign[data-view=agents] .agents-phone-menu-item {
+    display: flex; align-items: center; min-height: 46px; padding: 10px 14px; border: 0; border-radius: 16px; background: transparent;
+    color: var(--rd-ink); font: 400 15px var(--rd-font-ui); text-align: left; cursor: pointer;
+  }
+  .kairos-redesign[data-view=agents] .agents-phone-menu-item:is(:hover, :focus-visible) { background: var(--rd-surface-2); outline: none; }
+
+  /* -- Segmented control: sunk track, raised selection that slides (240ms) ------- */
+  .kairos-redesign[data-view=agents] .agents-workspace-tabs {
+    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; width: 100%; box-sizing: border-box;
+    padding: 5px; border: 0; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); box-shadow: none;
+  }
+  .kairos-redesign[data-view=agents] .agents-workspace-tabs::before {
+    content: ''; position: absolute; z-index: -1; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 2); border-radius: var(--rd-radius-pill);
+    background: var(--rd-surface-solid); box-shadow: 0 2px 8px rgba(var(--shade-rgb), .1); transition: transform var(--rd-dur-tab) var(--rd-ease);
+  }
+  .kairos-redesign[data-view=agents] .agents-workspace-tabs:has(button:nth-child(2)[aria-selected=true])::before { transform: translateX(100%); }
+  .kairos-redesign[data-view=agents] .agents-workspace-tabs button {
+    box-sizing: border-box; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--rd-radius-pill); background: transparent;
+    color: var(--rd-ink-dim); font: 400 15px var(--rd-font-ui); box-shadow: none;
+  }
+  .kairos-redesign[data-view=agents] .agents-workspace-tabs button[aria-selected=true] { background: transparent; border: 0; box-shadow: none; color: var(--rd-ink); font-weight: 500; }
+
+  /* -- The list page: the rail is the page until a chat is picked ---------------- */
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-messenger { display: block; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-messenger-body,
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-rail-scrim { display: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-chat-rail {
+    display: flex; flex-direction: column; gap: 18px; position: static; width: auto; max-width: none; padding: 0; border: 0; border-radius: 0;
+    background: transparent; box-shadow: none; overflow: visible;
+  }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) :is(.agents-rail-top, .agents-rail-create, .agents-rail-history, .agents-rail-inbox) { display: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-rail-search { display: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-messenger.is-searching .agents-rail-search {
+    display: block; box-sizing: border-box; width: 100%; height: 46px; padding: 0 20px; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill);
+    background: var(--rd-surface-solid); color: var(--rd-ink); font: 400 15px var(--rd-font-ui);
+  }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) :is(.agents-phone-top, .agents-phone-listhead) { display: flex; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-rail-lists .rd-empty-state { display: block; }
+  .kairos-redesign[data-view=agents] .agents-phone-top { flex-direction: column; gap: 18px; }
+  .kairos-redesign[data-view=agents] .agents-phone-top:empty { display: none; }
+  .kairos-redesign[data-view=agents] .agents-section-head, .kairos-redesign[data-view=agents] .agents-phone-listhead { display: flex; justify-content: space-between; align-items: baseline; }
+  .kairos-redesign[data-view=agents] :is(.agents-section-head, .agents-phone-listhead) h2 { margin: 0; font: italic 600 26px/1.2 var(--rd-font-title); color: var(--rd-ink); }
+  /* The boards' small link is 14px text; its tap area is 44px tall inside the row's rhythm. */
+  .kairos-redesign[data-view=agents] :is(.agents-see-all, .agents-mark-read) {
+    min-width: 44px; min-height: 44px; margin: -12px 0; padding: 0; display: inline-flex; align-items: center; justify-content: flex-end;
+    border: 0; background: none; color: var(--accent); font: 400 14px var(--rd-font-ui); cursor: pointer;
+  }
+  .kairos-redesign[data-view=agents] :is(.agents-see-all, .agents-mark-read):is(:hover, :focus-visible) { text-decoration: underline; }
+  .kairos-redesign[data-view=agents] .agents-phone-top .agents-working-now { display: flex; flex-direction: column; gap: 12px; }
+  .kairos-redesign[data-view=agents] .agents-working-strip { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 2px 20px 4px; }
+  .kairos-redesign[data-view=agents] .agents-working-strip::-webkit-scrollbar { display: none; }
+  .kairos-redesign[data-view=agents] .agents-working-chip {
+    flex: none; width: 58px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; border: 0; background: none;
+    color: var(--rd-ink); font: inherit; cursor: pointer;
+  }
+  .kairos-redesign[data-view=agents] .agents-working-face {
+    position: relative; box-sizing: border-box; width: 58px; height: 58px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid);
+  }
+  .kairos-redesign[data-view=agents] .agents-working-dot {
+    position: absolute; right: 1px; bottom: 1px; width: 14px; height: 14px; box-sizing: border-box; border: 2px solid var(--rd-ground);
+    border-radius: var(--rd-radius-pill); background: var(--rd-ink-faint);
+  }
+  .kairos-redesign[data-view=agents] .agents-working-chip[data-state=needs_you] .agents-working-dot { background: var(--k-gold); }
+  .kairos-redesign[data-view=agents] .agents-working-chip[data-state=working] .agents-working-dot { background: var(--success); }
+  .kairos-redesign[data-view=agents] .agents-working-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .agents-working-chip:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; border-radius: 18px; }
+
+  /* Inbox card and the all-caught-up card: 26px cards. */
+  .kairos-redesign[data-view=agents] :is(.agents-inbox-card, .agents-clear-card, .agents-next-card) {
+    box-sizing: border-box; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid);
+    box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05); color: var(--rd-ink);
+  }
+  .kairos-redesign[data-view=agents] .agents-inbox-card { display: flex; align-items: center; gap: 14px; padding: 16px 18px; }
+  .kairos-redesign[data-view=agents] .agents-inbox-card-copy, .kairos-redesign[data-view=agents] .agents-clear-copy { flex: 1; min-width: 0; }
+  .kairos-redesign[data-view=agents] .agents-inbox-card-label { font-size: 11px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] :is(.agents-inbox-card-title, .agents-clear-title) { font: 600 22px/1.25 var(--rd-font-title); }
+  .kairos-redesign[data-view=agents] .agents-inbox-card .rd-pill { min-height: 44px; padding: 0 18px; font-size: 14px; }
+  .kairos-redesign[data-view=agents] .agents-clear-card { display: flex; align-items: center; gap: 16px; padding: 18px; }
+  .kairos-redesign[data-view=agents] .agents-clear-faces { display: flex; }
+  .kairos-redesign[data-view=agents] .agents-clear-faces > * + * { margin-left: -12px; }
+  .kairos-redesign[data-view=agents] .agents-clear-sub { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .agents-next-up { display: flex; flex-direction: column; gap: 12px; }
+  .kairos-redesign[data-view=agents] .agents-next-card { padding: 4px 16px; }
+  .kairos-redesign[data-view=agents] .agents-next-row { display: flex; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--rd-surface-2); }
+  .kairos-redesign[data-view=agents] .agents-next-row:last-child { border-bottom: 0; }
+  .kairos-redesign[data-view=agents] .agents-next-name { flex: 1; min-width: 0; font-size: 15px; }
+  .kairos-redesign[data-view=agents] .agents-next-time { font-size: 13px; color: var(--rd-ink-dim); white-space: nowrap; }
+
+  /* Your agents: one 26px card of rows. */
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-rail-lists { display: block; }
+  .kairos-redesign[data-view=agents] .agents-rail-group {
+    display: flex; flex-direction: column; margin: 0; padding: 2px 16px; box-sizing: border-box; border: 1px solid var(--rd-line);
+    border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05);
+  }
+  .kairos-redesign[data-view=agents] .agents-rail-group:empty { display: none; }
+  .kairos-redesign[data-view=agents] .agents-rail-row { position: relative; border-bottom: 1px solid var(--rd-surface-2); }
+  .kairos-redesign[data-view=agents] .agents-rail-row:last-child { border-bottom: 0; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-item, .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-item:hover, .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-item[aria-current=page] {
+    box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 0; padding: 13px 0; border: 0; border-radius: 0;
+    background: transparent; box-shadow: none; color: var(--rd-ink); font-family: var(--rd-font-ui); text-align: left; text-decoration: none; cursor: pointer;
+  }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-item .agent-avatar { width: 44px !important; height: 44px !important; flex: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-copy { flex: 1; min-width: 0; display: block; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-copy > strong { display: block; font-size: 15px; font-weight: 500; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-copy > span:not(.agents-row-role) {
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--rd-ink-dim);
+  }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-meta { display: flex; flex-direction: column; align-items: flex-end; align-self: center; gap: 6px; padding: 0; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-unread {
+    box-sizing: border-box; min-width: 22px; height: 22px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
+    border-radius: var(--rd-radius-pill); background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-size: 12px;
+  }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-pin { font-size: 11px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-row-menu { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-team-avatar { width: 44px; height: 44px; flex: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-team-avatar .agent-avatar { width: 28px !important; height: 28px !important; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-rail-item:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; border-radius: 18px; }
+  .kairos-redesign[data-view=agents] :is(.agents-rail-no-match, .agents-team-error) { margin: 12px 0 0; font-size: 13px; color: var(--rd-ink-dim); text-align: center; }
+  .kairos-redesign[data-view=agents] .agents-rail-lists .rd-empty-state { padding: 24px 0; }
+  .kairos-redesign[data-view=agents] .agents-rail-lists .rd-empty-state h2 { font: italic 600 26px/1.2 var(--rd-font-title); margin: 12px 0 6px; }
+  .kairos-redesign[data-view=agents] .agents-rail-lists .rd-empty-state p { margin: 0 0 18px; font-size: 14px; }
+
+  /* All answered (AgentsClear): the agents become a two-column grid of cards. */
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-chat-rail[data-clear=true] .agents-rail-group {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  }
+  .kairos-redesign[data-view=agents] .agents-chat-rail[data-clear=true] .agents-rail-row {
+    border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05);
+  }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-rail-item { padding: 14px; gap: 10px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-rail-item .agent-avatar { width: 38px !important; height: 38px !important; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-rail-copy > span:not(.agents-row-role) { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-row-role { display: block; font-size: 12px; color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-rail-meta time, .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-chat-pin { display: none; }
+  .kairos-redesign[data-view=agents] .agents-chat-rail[data-clear=true] .agents-mark-read { display: none; }
+  .kairos-redesign[data-view=agents] .agents-chat-rail[data-clear=true] .agents-rail-meta:not(:has(.agents-chat-unread)) { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agents-chat-rail[data-clear=true] .agents-chat-unread { position: absolute; top: 10px; right: 12px; }
+}
+
+/* -- AgentDM board: Back, Call, More; the bot card; bubbles; a floating pill composer ---- */
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation { gap: 0; }
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-workspace-bar { margin: 0; }
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-workspace-bar > h2,
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-workspace-tabs,
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-chats-open { display: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-conversation-back:not([hidden]) {
+    position: absolute; z-index: 3; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); left: 20px; margin: 0; font-size: 0;
+  }
+  .kairos-redesign[data-view=agents] .agents-conversation-back svg { width: 20px; height: 20px; }
+  /* The conversation sits on the page, not in a frame. */
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-messenger-stage { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+  .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-messenger-page { padding: 0; overflow: visible; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page { padding: 0; gap: 12px; overflow: visible; background: transparent; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page .agent-conversation-topbar {
+    position: absolute; z-index: 3; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); right: 20px; left: auto; display: flex; gap: 8px;
+    height: 46px; width: auto; margin: 0; padding: 0; border: 0; grid-template-columns: none;
+  }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-topbar > :is(.agent-back, .agent-mobile-menu-slot, .agent-tabs) { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { display: flex; align-items: center; gap: 8px; width: auto; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools .agent-info-toggle { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools .agent-call-open .agent-call-open-label { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools .agent-call-open .agent-call-open-icon { display: grid; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-call-open.is-call-active { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: var(--rd-primary-bg); }
+  .kairos-redesign[data-view=agents] .agents-messenger .is-messages .agent-more[aria-expanded=true], .kairos-redesign[data-view=agents] .agents-messenger .agent-more[aria-expanded=true] { background: var(--rd-surface-2); }
+  .kairos-redesign[data-view=agents] .agent-more-menu:not([hidden]) {
+    top: 54px; right: 0; min-width: 230px; padding: 6px; border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-surface-solid);
+    box-shadow: var(--rd-shadow); animation: rd-menu var(--rd-dur-menu) var(--rd-ease) backwards; transform-origin: top right;
+  }
+  .kairos-redesign[data-view=agents] .agent-more-menu .agent-more-item { min-height: 46px; border-radius: 16px; font: 400 15px var(--rd-font-ui); color: var(--rd-ink); }
+  .kairos-redesign[data-view=agents] .agent-more-menu .agent-more-item:is(:hover, :focus-visible) { background: var(--rd-surface-2); }
+
+  /* The bot card: Kip 76, serif italic name 30, role, two pills. */
+  .kairos-redesign[data-view=agents] .agent-conversation-page .agent-dm-card {
+    display: block; margin: -6px 0 0; padding: 18px; box-sizing: border-box; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card);
+    background: var(--rd-surface-solid); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05);
+  }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .agent-dm-card:empty { display: none; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-header { display: block; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face {
+    display: grid; grid-template-columns: 76px minmax(0, 1fr); grid-template-rows: auto auto 38px; column-gap: 16px; align-items: center; width: 100%;
+    min-height: 76px; max-width: none; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--rd-ink); text-align: left; cursor: pointer;
+  }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 4px; border-radius: 18px; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face .agent-avatar { grid-row: 1 / 4; grid-column: 1; width: 76px !important; height: 76px !important; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face h2 { grid-column: 2; grid-row: 1; align-self: end; max-width: none; margin: 0; font: italic 600 30px/1 var(--rd-font-title); color: var(--rd-ink); }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-dm-role { grid-column: 2; grid-row: 2; display: block; margin-top: 4px; font: 400 13px/1.3 var(--rd-font-ui); color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-dm-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: -28px 0 0 92px; position: relative; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-dm-pill { padding: 5px 10px; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); color: var(--rd-ink); font-size: 12px; line-height: 1.3; }
+
+  /* Messages */
+  .kairos-redesign[data-view=agents] .is-messages .agent-conversation-stream { padding: 4px 0 8px; }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages { gap: 12px; padding: 0; }
+  .kairos-redesign[data-view=agents] .is-messages .agent-message-byline { display: none; }
+  .kairos-redesign[data-view=agents] .is-messages .agent-message-date { padding: 0; align-self: center; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg { max-width: 80%; gap: 0; }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg.user { max-width: 72%; }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg + .msg, .kairos-redesign[data-view=agents] .is-messages .msg.user + .msg.user { margin-top: 0; }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg > .msg-body {
+    padding: 13px 16px; border-radius: 22px 22px 22px 6px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); color: var(--rd-ink);
+    font-size: 15px; line-height: 1.45; max-width: none;
+  }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg.user > .msg-body { border-radius: 22px 22px 6px 22px; border-color: var(--rd-primary-bg); background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg > .msg-body p { margin: 0; }
+  .kairos-redesign[data-view=agents] .is-messages .session-chat-messages .msg > .msg-body p + p { margin-top: 8px; }
+
+  /* Waiting-for-your-response cards inside the thread (the board's bubble). */
+  .kairos-redesign[data-view=agents] .agent-conversation-page .agent-approval-card {
+    gap: 10px; max-width: 84%; padding: 14px 16px; box-sizing: border-box; border: 1px solid var(--rd-line-strong); border-radius: 22px;
+    background: var(--rd-surface-solid); box-shadow: none; animation: none;
+  }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-blocked-status { order: -1; font-size: 11px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-head { display: flex; flex-wrap: wrap; gap: 6px; }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-head .agent-avatar, .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-kind, .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-time { display: none; }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-title { font-size: 15px; font-weight: 400; color: var(--rd-ink); }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-body { color: var(--rd-ink-dim); font-size: 13px; }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-actions { flex-direction: row; gap: 8px; }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-actions .btn {
+    flex: 0 0 auto; min-height: 44px; padding: 0 16px; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: transparent;
+    color: var(--rd-ink); font: 400 13px var(--rd-font-ui); text-decoration: none;
+  }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-actions .btn.primary { order: -1; border-color: var(--rd-primary-bg); background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-compose { gap: 8px; flex-wrap: wrap; }
+  .kairos-redesign[data-view=agents] .agent-approval-card .agent-inbox-compose input { flex: 1 1 100%; border-radius: var(--rd-radius-pill); }
+
+  /* Composer: one floating pill (input and send); the model row opens with focus. */
+  .kairos-redesign[data-view=agents] .is-messages .agent-composer-row { padding-top: 0; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px 44px; align-items: center; gap: 4px; padding: 8px; box-sizing: border-box;
+    border: 1px solid var(--rd-line); border-radius: 30px; background: var(--rd-surface-solid); box-shadow: 0 10px 30px rgba(var(--shade-rgb), .1);
+  }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .agent-composer-add { grid-row: 1; grid-column: 1; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .side-chat-input-top { grid-row: 1; grid-column: 2; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .agent-composer-mic { grid-row: 1; grid-column: 3; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .side-chat-send { grid-row: 1; grid-column: 4; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .side-chat-input { min-height: 44px; padding: 11px 6px; font: 400 15px var(--rd-font-ui); }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer .session-chat-tools { display: none; grid-row: 2; grid-column: 1 / -1; padding: 4px 4px 0; }
+  .kairos-redesign[data-view=agents] .is-messages .side-chat-composer:focus-within .session-chat-tools { display: flex; }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send):not(.primary):not(.danger) { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)::before { inset: 1px; }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .side-chat-composer .agent-composer-add::before { background: transparent; }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .side-chat-composer .side-chat-send::before { background: var(--rd-primary-bg); }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .side-chat-composer .side-chat-send::after { background: var(--rd-primary-fg); }
+  .kairos-redesign[data-view=agents] .is-messages .agent-chat-empty .title { font: italic 600 26px/1.2 var(--rd-font-title); }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face kairos-mascot { width: 76px !important; height: 76px !important; }
+  .kairos-redesign[data-view=agents] :is(.agents-inbox-card-title, .agents-clear-title) { font-style: normal; }
+  .kairos-redesign[data-view=agents] .is-messages .agent-conversation-stream { overflow-y: auto; overscroll-behavior: contain; }
+  .kairos-redesign[data-view=agents] .agent-conversation-page .agent-chat-main, .kairos-redesign[data-view=agents] .agent-conversation-page .session-chat { overflow: hidden; }
+}
+
+/* Features without a board take the boards' language: 26px cards, serif italic titles, pills. */
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=agents] .agents-inbox-view .view-header h2 { font: italic 600 30px/1.1 var(--rd-font-title); }
+  .kairos-redesign[data-view=agents] .agents-view :is(.glass.card, .agent-inbox) { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05); }
+  .kairos-redesign[data-view=agents] .agents-view .glass.card > .title, .kairos-redesign[data-view=agents] .agents-view .agent-inbox > .title { font: italic 600 22px/1.2 var(--rd-font-title); }
+  .kairos-redesign[data-view=agents] .agents-view .agent-inbox-kind { letter-spacing: .16em; font-size: 11px; font-weight: 500; }
+  .kairos-redesign[data-view=agents] .agents-view :is(.agent-inbox-actions, .agent-inbox-compose) .btn {
+    min-height: 44px; padding: 0 18px; border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: transparent;
+    color: var(--rd-ink); font: 400 14px var(--rd-font-ui); text-decoration: none;
+  }
+  .kairos-redesign[data-view=agents] .agents-view :is(.agent-inbox-actions, .agent-inbox-compose) .btn.primary { border-color: var(--rd-primary-bg); background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign[data-view=agents] .agents-view .agent-inbox-item { border-top-color: var(--rd-surface-2); }
+  .kairos-redesign[data-view=agents] .agents-view :is(.agent-assignment-card, .agent-routine-preview) { border-radius: 18px; }
+  .kairos-redesign[data-view=agents] .agents-view .disclosure-panel { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); }
+  .kairos-redesign[data-view=agents] .agent-ecosystem { border-radius: var(--rd-radius-card); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05); }
+  .kairos-redesign[data-view=agents] .agent-ecosystem .ecosystem-header h2 { font: italic 600 26px/1.2 var(--rd-font-title); }
+  .kairos-redesign[data-view=agents] .agent-ecosystem :is(.ecosystem-control, .ecosystem-more > summary) { border-radius: var(--rd-radius-pill); }
+  .kairos-redesign[data-view=agents] .agents-messenger .swarm-view h1 { font: italic 600 30px/1.1 var(--rd-font-title); }
+  .kairos-redesign[data-view=agents] .agents-messenger .swarm-composer { border-radius: 30px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .swarm-message { border-radius: 22px 22px 22px 6px; }
+  .kairos-redesign[data-view=agents] .agents-messenger :is(.swarm-view, .swarm-layout > section) { background: transparent; }
+  .kairos-redesign[data-view=agents] .agent-call .agent-call-action { border-radius: var(--rd-radius-pill); }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=agents] .view.agents-shell-view { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  .kairos-redesign[data-view=agents] .view.agents-shell-view:has(.agents-workspace.has-conversation) { padding-bottom: var(--ms-tabbar-space, 0px); }
+}
+
+@media (max-width: 768px) {
+  /* The list page scrolls as a page; the conversation and the village keep their own fixed frames. */
+  .kairos-redesign[data-view=agents] .view.agents-shell-view:has(.agents-workspace:not(.has-conversation) > .agents-messenger:not([hidden])) { overflow-y: auto; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation):has(> .agents-messenger:not([hidden])) { flex: none; min-height: auto; }
+  .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) > .agents-messenger:not([hidden]) { flex: none; min-height: auto; }
+}
+
+@media (max-width: 768px) {
+  /* The title box ends where the two round buttons begin. */
+  .kairos-redesign[data-view=agents] #view-content .agents-workspace-bar > h2 { right: auto; width: auto; max-width: calc(100% - 140px); }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page .agent-conversation-topbar, .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { align-items: flex-start; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { height: 46px; }
+}

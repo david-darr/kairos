@@ -103,7 +103,9 @@ export function openMoreSheet(from) {
   const initial = document.createElement('span'); initial.className = 'ms-profile-initial'; initial.setAttribute('aria-hidden', 'true');
   initial.textContent = document.querySelector('.sidebar-avatar')?.textContent || name.slice(0, 1).toUpperCase() || 'K';
   const who = document.createElement('span'); who.className = 'ms-profile-name'; who.textContent = name;
-  account.append(initial, who); account.setAttribute('aria-label', `${name}, account`);
+  const profileDetail = document.createElement('small'); profileDetail.className = 'ms-profile-detail'; profileDetail.textContent = 'Profile, switch user, log out';
+  const copy = document.createElement('span'); copy.className = 'ms-profile-copy'; copy.append(who, profileDetail);
+  account.append(initial, copy); account.setAttribute('aria-label', `${name}, account`);
   account.setAttribute('aria-expanded', 'false');
   const accountActions = document.createElement('div'); accountActions.hidden = true;
   for (const source of document.querySelectorAll('#sidebar-footer .overflow-menu-item')) {
@@ -112,7 +114,10 @@ export function openMoreSheet(from) {
   }
   const settings = button('', () => { closeMoreSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row ms-settings-row');
   settings.innerHTML = `${ICONS.settings}<span>Settings</span>`; settings.firstElementChild?.setAttribute('aria-hidden', 'true'); settings.setAttribute('aria-label', 'Settings');
-  footer.append(button('Notifications', () => { closeMoreSheet(); openNotifications(from); }, 'ms-account-row'), account, accountActions, settings);
+  const extras = document.createElement('details'); extras.className = 'ms-more-extras';
+  const extrasLabel = document.createElement('summary'); extrasLabel.textContent = 'More options'; extras.append(extrasLabel);
+  extras.append(button('Notifications', () => { closeMoreSheet(); openNotifications(from); }, 'ms-account-row'), projects);
+  footer.append(account, accountActions, settings);
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeMoreSheet(); native.click(); }, 'ms-account-row'));
   const { live, done } = activityItems();
@@ -131,8 +136,10 @@ export function openMoreSheet(from) {
     }
   }
   const header = document.createElement('header'); header.className = 'ms-more-header';
-  header.append(heading, button('Close', closeMoreSheet, 'ms-sheet-close'));
-  panel.append(grab, header, modeRow, groups, projects, work, footer); sheet.replaceChildren(panel);
+  extras.append(work);
+  const closeButton = button('', closeMoreSheet, 'ms-sheet-close'); closeButton.innerHTML = ICONS.close; closeButton.setAttribute('aria-label', 'Close');
+  header.append(heading, closeButton);
+  panel.append(grab, header, modeRow, groups, extras, footer); sheet.replaceChildren(panel);
   sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); setExpanded(true);
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });

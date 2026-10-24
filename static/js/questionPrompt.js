@@ -23,6 +23,14 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
   const head = el('div', { class: 'question-head' }, [el('span', { class: 'question-pulse', 'aria-hidden': 'true' }), el('h2', { id: headingId, text: 'Waiting for your response' })]);
   const chip = text => el('span', { class: 'question-chip', text });
   if (request.questions.length === 1 && request.questions[0].header) head.append(chip(request.questions[0].header));
+  if (phoneSheet) {
+    // Phone sheet: the label over one quiet line (the question's header and when it stops waiting).
+    const topic = head.querySelector('.question-chip'); topic?.remove();
+    const when = request.expires_at ? `waits until ${new Date(request.expires_at * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
+    const title = head.querySelector('h2'), line = [topic?.textContent, when].filter(Boolean).join(' \u00b7 ');
+    const copy = el('div', { class: 'question-head-copy' }, line ? [el('p', { class: 'question-head-sub', text: line })] : []);
+    title.replaceWith(copy); copy.prepend(title);
+  }
   function answers() {
     const values = readers.map(read => read());
     return values.some(value => value === null) ? null : Object.fromEntries(request.questions.map((q, i) => [q.question, values[i]]));
@@ -42,7 +50,9 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     }
     for (const option of q.options) options.push({ input: choice(option.label, option.description), label: option.label });
     const other = q.options.length ? choice('Other') : null;
+    if (other && phoneSheet) other.parentElement.classList.add('question-other-choice');
     const text = el('input', { type: 'text', 'aria-label': other ? 'Other answer' : 'Your answer', placeholder: other ? 'Type your own answer' : 'Your answer', maxlength: '4000' });
+    if (other && phoneSheet) text.placeholder = 'Other: type your own answer';
     item.append(other ? text : el('label', { class: 'question-free' }, [el('span', { text: 'Your answer' }), text]));
     text.addEventListener('input', () => { if (other) other.checked = true; update(); });
     text.addEventListener('keydown', event => { if (event.key === 'Enter' && !submit.disabled) { event.preventDefault(); send(false); } });
@@ -69,7 +79,10 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     import('./mobileSheet.js').then(({ mountSheetSurface }) => {
       if (!removed) disposeSurface = mountSheetSurface(dialog, closePhoneSheet);
     });
-    head.append(el('button', { type: 'button', class: 'ms-sheet-close', text: 'Close', onclick: closePhoneSheet }));
+    import('./mascot.js').then(({ createMascot }) => {
+      if (!removed && document.documentElement.dataset.mascot !== 'off') head.prepend(createMascot({ state: 'needs', size: 48, decorative: true }));
+    });
+    head.append(el('button', { type: 'button', class: 'ms-sheet-close', text: '×', 'aria-label': 'Close', onclick: closePhoneSheet }));
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;
       const r = dialog.getBoundingClientRect();

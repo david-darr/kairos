@@ -30,6 +30,7 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
   const pill = button('', () => opened ? close() : open(), 'bg-tasks-pill');
   const dot = node('span', 'bg-tasks-dot'); dot.setAttribute('aria-hidden', 'true');
   const caption = node('span', 'bg-tasks-caption'); pill.append(dot, caption);
+  const summary = node('p', 'bg-tasks-summary');
   const panel = node('section', 'bg-tasks-panel'); panel.id = `bg-tasks-${++sequence}`;
   panel.setAttribute('aria-label', 'Background tasks'); panel.hidden = true;
   pill.setAttribute('aria-controls', panel.id); pill.setAttribute('aria-expanded', 'false');
@@ -47,9 +48,13 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     if (disposed || !sessionId) return;
     opened = true; panel.hidden = false; pill.setAttribute('aria-expanded', 'true');
     if (!sheet && matchMedia('(max-width: 768px)').matches && document.querySelector('.kairos-redesign')) {
-      sheet = openMobileSheet({ title: 'Background tasks', content: panel, opener: pill, onClose: () => {
+      sheet = openMobileSheet({ title: 'In the background', content: panel, opener: pill, onClose: () => {
         sheet = null; opened = false; panel.hidden = true; host.append(panel); pill.setAttribute('aria-expanded', 'false');
       } });
+      sheet.dialog.classList.add('ms-background-sheet');
+      // The counts sit under the sheet's title, as in the board.
+      const title = sheet.dialog.querySelector?.('.ms-sheet-header h2');
+      if (title?.before) { const block = node('div', 'ms-sheet-titles'); title.before(block); block.append(title, summary); }
     }
     selected = id;
     if (id) loadDetail(); else renderList();
@@ -68,10 +73,16 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.itemId : null;
     panel.replaceChildren();
     if (!panel.closest('.ms-sheet')) panel.append(node('h3', 'bg-tasks-heading', 'Background tasks'));
+    else summary.textContent = [
+      [items.filter(item => ['running', 'queued'].includes(item.status)).length, 'running'],
+      [items.filter(item => item.status === 'waiting').length, 'waiting on you'],
+      [items.filter(item => item.status === 'done').length, 'done'],
+    ].filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(' · ');
     const list = node('div', 'bg-tasks-list');
     for (const item of items) {
       const row = button('', () => { selected = item.id; loadDetail(); }, 'bg-task-row');
       row.dataset.itemId = item.id;
+      row.dataset.status = item.status;
       const top = node('span', 'bg-task-top');
       top.append(node('span', 'bg-task-kind', kinds[item.kind] || 'Task'), node('span', `bg-task-status bg-task-status-${item.status}`, statuses[item.status] || item.status));
       const label = node('span', 'bg-task-label', item.label);
