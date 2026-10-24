@@ -555,9 +555,13 @@ async function run(ctx) {
   ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
   eq(await js("document.getElementById('settings-content').getClientRects().length === 0 || document.getElementById('settings-content').getBoundingClientRect().height === 0"), true, 'No page content shares the screen with the list');
   const ids = await sectionIds();
+  eq(await js("[...document.querySelectorAll('.settings-nav-group')].map(n => n.textContent)"), ['General', 'Intelligence', 'Your data', 'Access', 'Advanced'], 'Settings follows the board group order');
+  eq(await js("[...document.querySelectorAll('.settings-nav-item')].slice(0, 3).map(n => n.dataset.section)"), ['appearance', 'notifications', 'speech'], 'General starts with appearance, notifications and voice');
+  ok(await js("document.querySelector('[data-section=appearance] .settings-nav-value').textContent.length > 0"), 'Appearance shows its saved theme value');
+
   ok(ids.length >= 10, 'The list holds every section: ' + ids.length);
   eq(await js("[...document.querySelectorAll('.settings-nav-item')].filter(n => n.getClientRects().length && n.getBoundingClientRect().height < 51.5).length"), 0, 'Rows are at least 52px');
-  eq(await js("[...new Set([...document.querySelectorAll('.settings-nav-block')].map(n => getComputedStyle(n).borderTopLeftRadius))]"), ['22px'], 'Groups are inset with a 22px radius');
+  eq(await js("[...new Set([...document.querySelectorAll('.settings-nav-block')].map(n => getComputedStyle(n).borderTopLeftRadius))]"), ['24px'], 'Groups match the board with a 24px radius');
   eq(await js("document.activeElement?.classList?.contains('settings-nav-item') || false"), false, 'A fresh list does not draw a focus ring on its first row');
   ok(await noSideways(), 'The list does not scroll sideways');
   await shot('settings-list');

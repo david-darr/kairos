@@ -31,7 +31,7 @@ import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
 import { fitMenu } from '../menuFit.js';
 import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
-import { mountMobileModelSheet } from '../mobileModelSheet.js';
+import { mountMobileModelSheet, appendEndpointCatalogs } from '../mobileModelSheet.js';
 import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
 import { createMascot } from '../mascot.js';
 
@@ -863,7 +863,10 @@ export async function render(container, tabId, options = {}) {
   const openModelMenu = (focusFirst = false) => {
     if (mobileModelSheet.open()) return;
     if (modelMenu.classList.contains('hidden')) toggleMenu(modelMenu, modelBtn);
-    if (focusFirst) (modelMenu.querySelector('.model-picker-item.active') || modelMenu.querySelector('.model-picker-item'))?.focus();
+    if (focusFirst) {
+      const items = [...modelMenu.querySelectorAll('.model-picker-item')].filter(item => item.getClientRects().length);
+      (items.find(item => item.classList.contains('active')) || items[0])?.focus();
+    }
   };
   modelBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(modelMenu, modelBtn); });
   modelBtn.addEventListener('keydown', e => {
@@ -873,7 +876,7 @@ export async function render(container, tabId, options = {}) {
   // next; a click inside must not reach the document handler that closes menus.
   modelMenu.addEventListener('click', e => e.stopPropagation());
   modelMenu.addEventListener('keydown', e => {
-    const items = [...modelMenu.querySelectorAll('.model-picker-item, .model-effort-btn, #chat-model-search, .model-custom-details > summary')]
+    const items = [...modelMenu.querySelectorAll('.model-picker-item, .model-effort-btn, #chat-model-search, .rd-model-search, .model-custom-details > summary')]
       .filter(node => !node.disabled && node.getClientRects().length);
     const at = items.indexOf(document.activeElement);
     if (e.key === 'Escape') { e.preventDefault(); closeMenu(modelMenu); modelBtn.focus(); }
@@ -2188,6 +2191,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     const item = el("button", {
       type: 'button',
       'data-endpoint-id': ep.id,
+      'data-endpoint-name': ep.name,
       'data-provider': ep.provider || ({ claude_cli: 'Claude', codex_cli: 'Codex', antigravity_cli: 'Antigravity', api: 'API connections' }[ep.kind] || ep.kind),
       class: "model-picker-item model-connection-item" + (isCurrent ? " active" : ""),
       onclick: async () => {
@@ -2236,6 +2240,14 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
 
   const selectable = ep && ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'].includes(ep.kind);
   if (!selectable) {
+    if (ep && document.documentElement.classList.contains('kairos-redesign')) {
+      menu.append(el('div', { class: 'model-version-section' }, [el('div', { class: 'model-catalog-list' }, [
+        el('button', { type: 'button', class: 'model-picker-item model-catalog-item active', 'aria-current': 'true', onclick: () => closeMenu(menu) }, [
+          el('span', { class: 'model-catalog-name', text: ep.model || ep.name }),
+          el('span', { class: 'model-catalog-desc', text: ep.name }),
+        ]),
+      ])]));
+    }
     menu.appendChild(setupItem());
     if (hadFocus) (menu.querySelector('.model-picker-item.active') || menu.querySelector('.model-picker-item'))?.focus();
     menu.dispatchEvent(new Event('kairos:model-menu-updated'));
@@ -2302,7 +2314,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     }
   };
   // A search box only earns its place on a long list.
-  if (catalog.length > 8) {
+  if (catalog.length > 8 && !document.documentElement.classList.contains('kairos-redesign')) {
     section.appendChild(el('div', { class: 'model-version-search' }, [el('input', {
       id: 'chat-model-search', type: 'search', placeholder: 'Search models',
       autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Search models',
@@ -2319,6 +2331,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   if (known && known.supported_efforts.length) {
     const effortRow = el('div', { class: 'model-effort-row', role: 'group', 'aria-label': 'Reasoning' },
       [el('span', { class: 'model-effort-label', text: 'Reasoning' })]);
+    effortRow.dataset.defaultEffort = known.default_effort || '';
     const levels = [{ effort: null, description: known.default_effort
       ? `Provider default (${known.default_effort})` : 'Provider default' }, ...known.supported_efforts];
     for (const level of levels) {
@@ -2345,6 +2358,17 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     ...(ep.kind === 'api' ? [] : [el('button', { type: 'button', class: 'model-picker-item', text: 'Use CLI default', onclick: () => save('') })]),
     el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) })]));
   menu.append(section, setupItem());
+  if (document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches) {
+    const catalogs = await Promise.all(endpoints.filter(other => other.id !== ep.id).map(async other => [other.id, await loadModelCatalog(other)]));
+    if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
+    appendEndpointCatalogs(menu, catalogs, async (endpointId, model) => {
+      if (activeSessionId !== sessionId || chatStream.getInFlight(sessionId)?.status === 'processing') return;
+      try {
+        const result = await api(`/api/sessions/${sessionId}/model`, { method: 'POST', body: JSON.stringify({ model_endpoint_id: endpointId, model_override: model, effort: null }) });
+        if (activeSessionId === sessionId) { closeMenu(menu); await refreshModelPicker(endpointId, result.model_override, result.effort ?? null); }
+      } catch (_) { /* api displays mutation errors */ }
+    });
+  }
   menu.dispatchEvent(new Event('kairos:model-menu-updated'));
   if (hadFocus) (section.querySelector('.model-catalog-item.active') || section.querySelector('#chat-model-search, .model-catalog-item'))?.focus();
   syncChatBusy(chatStream.getInFlight(activeSessionId)?.status === 'processing');

@@ -46,7 +46,10 @@ class Surface {
         else if (key === 'text') { node.textContent = value; const text = context.document.createElement('#text'); text.textContent = value; node.append(text); }
         else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
         else if (key === 'value') node.value = value;
-        else node.setAttribute(key, value);
+        else {
+          node.setAttribute(key, value);
+          if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+        }
       }
       node.append(...children); return node;
     } }, './brand.js': { ICON: '' }, './icons.js': { ICONS: {} },
@@ -182,6 +185,7 @@ class Surface {
     getBoundingClientRect() { return { left: 0, top: 100, right: 390, bottom: 844 }; }
   }
   doc.body = new Element('body'); doc.body.isRoot = true;
+  doc.documentElement = new Element('html');
   doc.createDocumentFragment = () => new Element('#fragment');
   doc.createElement = tag => new Element(tag); doc.createComment = () => new Element('#comment');
   context.document = doc;
@@ -289,7 +293,7 @@ class Surface {
   grabber.emit('pointerdown', { button: 0, clientX: 100, clientY: 20, pointerId: 1 });
   grabber.emit('pointerup', { clientX: 102, clientY: 100, pointerId: 1 }); assert.equal(swipeSheet.dialog.isConnected, false);
   const resizeSheet = openMobileSheet({ title: 'Resize', content: new Element('section'), opener }); enabled = false; shared.phone.emit('change'); assert.equal(resizeSheet.dialog.isConnected, false); enabled = true;
-  const { quotaTone, knownQuota, renderMobileCatalogMenu, mountMobileModelSheet } = (await load('./mobileModelSheet.js')).namespace;
+  const { quotaTone, knownQuota, renderMobileCatalogMenu, mountMobileModelSheet, appendEndpointCatalogs } = (await load('./mobileModelSheet.js')).namespace;
   assert.equal(quotaTone(79.99), 'normal'); assert.equal(quotaTone(80), 'warning'); assert.equal(quotaTone(89.99), 'warning'); assert.equal(quotaTone(90), 'danger');
   for (const value of [null, undefined, '', 'unknown', NaN]) assert.equal(knownQuota(value), false);
   for (const value of [0, 80, '90']) assert.equal(knownQuota(value), true);
@@ -313,6 +317,39 @@ class Surface {
   modelDialog.emit('click', { target: modelDialog.querySelector('input'), stopPropagation() { sheetClickStopped = true; } });
   assert.equal(sheetClickStopped, true, 'Sheet search/options clicks cannot reach the chat outside-click handler');
   modelPicker.dispose(); assert.equal(permission.parentNode, toolbar); assert.equal(modelMenu.parentNode, toolbar); assert.equal(modelMenu.classList.contains('hidden'), true);
+  // Board controls still delegate to the real model/effort callbacks, and
+  // unsupported efforts never appear. Exercise both presentations without Electron.
+  doc.documentElement.classList.add('kairos-redesign');
+  const boardMenu = new Element('div'), boardTrigger = new Element('button'); toolbar.append(boardMenu, boardTrigger);
+  const fixture = { endpoints: [{ id: 'claude', name: 'My Claude', kind: 'claude_cli', model: 'sonnet' }, { id: 'local', name: 'Cookbook', kind: 'local', model: 'qwen' }],
+    endpointId: 'claude', model: 'sonnet', effort: 'high', catalog: [{ id: 'sonnet', display_name: 'Sonnet 5.5', description: 'Balanced', supported_efforts: [{ effort: 'low' }, { effort: 'high' }] }],
+    onConnection: id => { pickedConnection = id; }, onModel: id => { pickedModel = id; }, onEffort: effort => { pickedEffort = effort; } };
+  renderMobileCatalogMenu(boardMenu, fixture);
+  const boardPicker = mountMobileModelSheet({ trigger: boardTrigger, menu: boardMenu }); boardPicker.open();
+  const providerTabs = boardMenu.querySelector('.ms-provider-tabs').querySelectorAll('button');
+  assert.deepEqual(providerTabs.map(tab => tab.textContent), ['Claude', 'Local']);
+  providerTabs[1].click(); assert.equal(pickedConnection, 'local');
+  assert.equal(boardMenu.querySelector('.model-catalog-item').attrs['aria-checked'], 'true');
+  const directEffort = boardMenu.querySelector('.model-effort-row');
+  directEffort.querySelectorAll('button').find(node => node.textContent === 'high').click(); assert.equal(pickedEffort, 'high');
+  assert.equal(directEffort.attrs['aria-label'], 'Effort');
+  renderMobileCatalogMenu(boardMenu, { ...fixture, catalog: [{ id: 'sonnet', display_name: 'Sonnet', supported_efforts: [] }] });
+  assert.equal(boardMenu.querySelector('.model-effort-row'), null);
+  boardPicker.dispose();
+  enabled = false;
+  renderMobileCatalogMenu(boardMenu, fixture);
+  let otherPick;
+  appendEndpointCatalogs(boardMenu, [['local', [{ id: 'qwen', display_name: 'qwen3:8b', description: 'Cookbook' }]]], (id, model) => { otherPick = [id, model]; });
+  const otherList = boardMenu.querySelector('.model-other-catalog-list'); otherList.dataset.endpointId = 'local';
+  const desktopPicker = mountMobileModelSheet({ trigger: boardTrigger, menu: boardMenu });
+  boardMenu.dispatchEvent(new context.Event('kairos:model-menu-updated'));
+  assert.deepEqual(boardMenu.querySelectorAll('.rd-model-group').map(node => node.textContent), ['My Claude', 'Cookbook']);
+  otherList.querySelector('button').click(); assert.deepEqual(otherPick, ['local', 'qwen']);
+  assert.ok(boardMenu.querySelector('.model-manage-item'));
+  const desktopSearch = boardMenu.querySelector('.rd-model-search'); desktopSearch.value = 'qwen'; desktopSearch.emit('input');
+  assert.equal(boardMenu.querySelector('.model-catalog-item').hidden, true);
+  assert.equal(otherList.querySelector('button').hidden, false);
+  desktopPicker.dispose(); enabled = true; doc.documentElement.classList.remove('kairos-redesign');
   await Promise.resolve(); // The account request may settle after dismissal.
   const { mountMobileVoiceRow } = (await load('./mobileVoiceRow.js')).namespace;
   const voiceComposer = new Element('div'), voiceMic = new Element('button'), openMic = new Element('button'); doc.body.append(voiceComposer); voiceComposer.append(voiceMic, openMic);

@@ -134,6 +134,12 @@ export function halftoneSharedChatPicture() {
   return !!figure.hash && figure.hash === sky.hash;
 }
 
+export function appearanceName(value = getAppearance()) {
+  const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite' };
+  return value.mode === 'default' ? 'Parchment' : value.mode === 'color'
+    ? palette[value.color?.toLowerCase()] || value.color : { image: 'Image', shader: 'Flow' }[value.mode];
+}
+
 export function getAppearance() {
   return { ...settings, effectOptions: structuredClone(settings.effectOptions), hasImage: !!imageBitmap, storageIssue,
     staticFallback: settings.mode === 'shader' && glScene === false,

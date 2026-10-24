@@ -299,11 +299,15 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await waitFor("/Claude/.test(document.querySelector('.design-model-btn')?.textContent || '')");
   await js("document.querySelector('.design-model-btn').click()");
   await waitFor("!document.querySelector('.design-model-menu').hidden && document.querySelectorAll('.design-model-menu .model-connection-item').length >= 2");
-  await js("[...document.querySelectorAll('.design-model-menu .model-connection-item')].find(b => b.textContent.includes('Codex')).click()");
+  // The desktop board lists each connection's models directly; its old
+  // connection-only row is hidden when a catalog is available.
+  await waitFor("!!document.querySelector('.design-model-menu .model-other-catalog-list[data-endpoint-id=\"m2\"] .model-other-catalog-item')?.offsetParent");
+  await js("[...document.querySelectorAll('.design-model-menu .model-other-catalog-list[data-endpoint-id=\"m2\"] .model-other-catalog-item')].find(b => b.textContent.includes('Workspace Fast')).click()");
   await waitFor("/^Codex/.test(document.querySelector('.design-model-btn').textContent) && !!document.querySelector('.design-model-menu .model-catalog-item')");
-  assert.deepEqual(state.posts.filter(p => p.path === '/api/sessions/dz1/model').at(-1).body, { model_endpoint_id: 'm2' });
+  assert.deepEqual(state.posts.filter(p => p.path === '/api/sessions/dz1/model').at(-1).body, { model_endpoint_id: 'm2', model_override: 'workspace-fast', effort: null });
+  await js("document.querySelector('.design-model-btn').click()");
   await js("[...document.querySelectorAll('.design-model-menu .model-catalog-item')].find(b => b.textContent.includes('Workspace Fast')).click()");
-  await waitFor("document.querySelector('.design-model-btn').textContent === 'Codex · Workspace Fast'");
+  await waitFor("document.querySelector('.design-model-btn').textContent === 'Codex · Workspace Fast' && document.querySelector('.design-model-menu').hidden");
   await js("document.querySelector('.design-model-btn').click()");
   await waitFor("!!document.querySelector('.design-model-menu .model-effort-btn')");
   await js("[...document.querySelectorAll('.design-model-menu .model-effort-btn')].find(b => b.textContent === 'high').click()");
@@ -665,9 +669,23 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
       }) && m.top >= title.bottom && document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2)?.closest('.design-model-btn') === model;
     })()`), `chat Design keeps its phone header and accessible model picker at ${width}`);
     await js("document.querySelector('.chat-design-pane .design-model-btn').click()");
-    await waitFor("document.querySelector('.chat-design-pane .design-model-btn').getAttribute('aria-expanded') === 'true' && document.querySelectorAll('.chat-design-pane .model-connection-item').length >= 2");
+    // Phone menus move into the board's modal sheet, outside the chat pane.
+    // Follow the trigger's ownership link and check the visible provider tabs
+    // as well as the original connection choices and model radio rows.
+    await waitFor(`(() => {
+      const trigger = document.querySelector('.chat-design-pane .design-model-btn');
+      const sheet = document.getElementById(trigger.getAttribute('aria-controls'));
+      return trigger.getAttribute('aria-expanded') === 'true' && sheet?.matches('.ms-model-sheet[open]')
+        && sheet.querySelectorAll('.model-connection-item').length >= 2
+        && [...sheet.querySelectorAll('.ms-provider-tabs [role="tab"]')].filter(n => n.getClientRects().length).length >= 2
+        && !!sheet.querySelector('.ms-provider-tabs [aria-selected="true"]')
+        && !!sheet.querySelector('.model-catalog-item[role="radio"]')?.offsetParent;
+    })()`);
     await capture(`design-chat-phone-${width}`);
+    await js("document.querySelector('.ms-model-sheet .ms-sheet-header [aria-label=\"Close\"]').click()");
+    await waitFor("!document.querySelector('.ms-model-sheet') && document.querySelector('.chat-design-pane .design-model-btn').getAttribute('aria-expanded') === 'false' && document.querySelectorAll('.chat-design-pane .model-connection-item').length >= 2 && document.activeElement === document.querySelector('.chat-design-pane .design-model-btn')");
     await js("document.querySelector('.chat-design-pane [aria-label=\"Close design\"]').click()");
+    await waitFor("!document.querySelector('.chat-design-pane')");
   }
   win.setContentSize(1440, 900); await delay(300);
   await navigate('library', { section: 'documents' });

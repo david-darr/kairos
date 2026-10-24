@@ -1,4 +1,5 @@
 import { mobileOn } from '../mobileShared.js';
+import { appearanceName } from '../appearance.js';
 import { api, el, customSelect, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { shortcutGroups, readQuickEntry } from '../shortcuts.js';
@@ -323,6 +324,8 @@ export async function renderMobilePage(container, section, onExit) {
       barTitle.textContent = "Settings";
       this.subBack = null;
       content.replaceChildren();
+      const themeValue = nav.querySelector('[data-section="appearance"] .settings-nav-value');
+      if (themeValue) themeValue.textContent = appearanceName() || '';
       if (mobileOn()) {
         nav.scrollTop = this.listScroll;
         // Only coming back from a page returns focus to its row; a fresh list shows no focus ring.
@@ -531,10 +534,26 @@ function attachResizeHandles(panel) {
 // Which sections this user can actually reach. One place, so the nav, the
 // search, and selectSection() can never disagree about it.
 function visibleSections() {
-  return SECTION_GROUPS
+  const groups = SECTION_GROUPS
     .filter((group) => !group.admin || cachedStatus.is_admin)
     .map((group) => ({ ...group, sections: group.sections.filter((section) => !section.admin || cachedStatus.is_admin) }))
     .filter((group) => group.sections.length);
+  if (!document.documentElement.classList.contains('kairos-redesign')) return groups;
+  // Regroup only after applying both group and section authorization gates.
+  // The original section objects retain their renderers, keywords and deep links.
+  const sections = new Map(groups.flatMap(group => group.sections).map(section => [section.id, section]));
+  for (const [id, label] of [['added-models', 'Models and connections'], ['speech', 'Voice / Speech'], ['integrations', 'Calendar and email'], ['system', 'Backups and system']]) {
+    const section = sections.get(id);
+    if (section) sections.set(id, { ...section, label, keywords: [...section.keywords, section.label.toLowerCase()] });
+  }
+  return [
+    ['general', 'General', ['appearance', 'notifications', 'speech']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions']],
+    ['your-data', 'Your data', ['vault', 'integrations', 'file-checkpoints', 'system']],
+    ['access', 'Access', ['remote', 'account', 'users']],
+    ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'channels', 'forge', 'hooks', 'runs', 'sandbox-changes']],
+  ].map(([id, label, ids]) => ({ id, label, sections: ids.map(id => sections.get(id)).filter(Boolean) }))
+    .filter(group => group.sections.length);
 }
 
 function buildNav() {
@@ -571,7 +590,11 @@ function buildNav() {
         type: "button",
         class: "settings-nav-item" + (sec.id === activeSectionId ? " active" : ""),
         onclick: () => selectSection(sec.id),
-      }, [icon, el("span", { text: sec.label })]);
+      }, [icon, el("span", { class: 'settings-nav-label', text: sec.label })]);
+      if (sec.id === 'appearance') {
+        const value = appearanceName();
+        if (value) item.append(el('span', { class: 'settings-nav-value', text: value }));
+      }
       // data-section rather than matching on text: two groups could hold
       // panels with the same label.
       item.dataset.section = sec.id;
