@@ -2,6 +2,58 @@ import { el } from './api.js';
 import { createMascot } from './mascot.js';
 import * as chatStream from './chatStream.js';
 
+let activeMenu = null;
+export function closeConversationMenu() { activeMenu?.(); }
+
+// Body-mounted so the scrollable history cannot clip the menu.
+export function showConversationMenu({ row, session, x, y, actions, open }) {
+  closeConversationMenu();
+  const menu = el('div', { class: 'rd-conversation-menu rd-menu-in', role: 'menu', 'aria-label': 'Conversation actions' });
+  const items = open ? [
+    { label: 'Open', icon: '\u2192', run: open },
+    ...(typeof window.jarvis?.openChatWindow === 'function' ? [{ label: 'Open in new window', icon: '\u2197', run: () => window.jarvis.openChatWindow(session.id) }] : []),
+    ...actions,
+  ] : actions;
+  const close = () => {
+    if (activeMenu !== close) return;
+    activeMenu = null; menu.remove();
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('click', outside, true);
+    document.removeEventListener('scroll', dismiss, true);
+    document.removeEventListener('keydown', keydown, true);
+    window.removeEventListener('resize', dismiss);
+    row.focus({ preventScroll: true });
+  };
+  const outside = event => { if (!menu.contains(event.target)) close(); };
+  const dismiss = () => close();
+  const buttons = items.map(action => el('button', {
+    type: 'button', role: 'menuitem', tabindex: '-1', class: `rd-conversation-menu-item${action.danger ? ' danger' : ''}`,
+    onclick: event => { event.stopPropagation(); close(); action.run(); },
+  }, [el('span', { class: 'rd-conversation-menu-icon', text: action.icon, 'aria-hidden': 'true' }), el('span', { text: action.label })]));
+  const keydown = event => {
+    const index = buttons.indexOf(document.activeElement);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    } else if (event.key === 'Escape' || event.key === 'Tab') {
+      event.preventDefault(); event.stopPropagation(); close();
+    }
+  };
+  menu.append(...buttons); document.body.append(menu); activeMenu = close;
+  const anchor = row.getBoundingClientRect();
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x ?? anchor.left, window.innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y ?? anchor.bottom, window.innerHeight - rect.height - 8))}px`;
+  document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('click', outside, true);
+  document.addEventListener('scroll', dismiss, true);
+  document.addEventListener('keydown', keydown, true);
+  window.addEventListener('resize', dismiss);
+  buttons[0]?.focus({ preventScroll: true });
+  return close;
+}
+
 // Use local calendar boundaries, including DST. Weeks start on Monday.
 export function conversationGroups(sessions, inflight = [], now = new Date()) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -47,6 +99,7 @@ export function mountConversations(container) {
   }
   function draw() {
     if (!enabled()) {
+      closeConversationMenu();
       if (applied) { restore(); panel.insertBefore(newChat, newNext?.parentNode === panel ? newNext : list); added.forEach(node => node.remove()); applied = false; }
       return;
     }
@@ -106,6 +159,7 @@ export function mountConversations(container) {
   });
   draw();
   return () => {
+    closeConversationMenu();
     state.disconnect(); detach(); restore();
     if (applied) panel.insertBefore(newChat, newNext?.parentNode === panel ? newNext : list);
     added.forEach(node => node.remove());
