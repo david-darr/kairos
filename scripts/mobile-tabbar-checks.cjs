@@ -124,7 +124,7 @@ module.exports = async function tabBarChecks(c) {
     ok(await pillOn(), `${tab}: the pill sits on ${want}`);
     const clear = await clearsBar();
     ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${tab}: the last content scrolls clear of the bar: ${JSON.stringify(clear)}`);
-    // A dock (search, Calendar's Today / Month) sits above the bar, never under it.
+    // A dock (search and +) sits above the bar, never under it.
     const dock = await rect('.ms-dock');
     if (dock) ok(!hit(dock, await rect('.ms-tabbar')) && dock.b <= (await rect('.ms-tabbar')).t - 8, `${tab}: the dock sits above the bar: ${JSON.stringify(dock)}`);
     ok(await noSideways(), `${tab}: nothing scrolls sideways`);
@@ -287,6 +287,12 @@ module.exports = async function tabBarChecks(c) {
   await geometry('Forge Home', H, 28, W);
   const forgeClear = await clearsBar();
   ok(!forgeClear.last || forgeClear.last.b <= forgeClear.barTop + 0.5, 'Forge Home content scrolls clear of the bar: ' + JSON.stringify(forgeClear));
+  // Mobile v2 keeps the original dashboard in a disclosure. Its expanded
+  // cards must have the same clearance as the default overview.
+  await js("document.querySelector('.mf-dashboard-extra').open = true");
+  const expandedForgeClear = await clearsBar();
+  ok(!expandedForgeClear.last || expandedForgeClear.last.b <= expandedForgeClear.barTop + 0.5, 'Expanded Forge Home content scrolls clear of the bar: ' + JSON.stringify(expandedForgeClear));
+  await js("document.querySelector('.mf-dashboard-extra').open = false");
   await tap('new'); await waitFor("!!document.querySelector('.mf-project') && document.getElementById('mf-tab-0').getAttribute('aria-selected') === 'true'"); await barShown();
   eq(await barCurrent(), 'new', 'New opens the project New page');
   ok(await js("document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom <= document.querySelector('.ms-tabbar').getBoundingClientRect().top - 8"), 'The Forge composer sits above the bar');
@@ -339,8 +345,8 @@ module.exports = async function tabBarChecks(c) {
         await require('./chat-header-checks.cjs')(c, name, top + nudge + 6);
       }
       if (tab === 'calendar') {
-        const dock = await rect('.ms-dock');
-        ok(dock && Math.abs(dock.b - (bar.t - 10)) <= 1, `${name}: Calendar's dock sits 10px above the bar: ${JSON.stringify(dock)}`);
+        // Calendar has no bottom dock (David, 2026-10-24); Add and the range switch live in its header.
+        eq(await js("document.querySelectorAll('.ms-dock').length"), 0, `${name}: Calendar has no bottom dock`);
       }
       if (tab !== 'chat') {
         const clear = await clearsBar();

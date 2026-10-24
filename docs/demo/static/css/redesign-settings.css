@@ -475,3 +475,6 @@
 .kairos-redesign .rd-flyout { transform-origin: top left; }
 /* Search filters must win over the phone rows' explicit flex display. */
 .kairos-redesign .settings-nav :is(.settings-nav-item, .settings-nav-group, .settings-nav-block)[hidden] { display: none !important; }
+
+/* The phone list reset must not square off the selected section or its focus ring. */
+.kairos-redesign .settings-nav .settings-nav-item:is(.active, :focus-visible) { border-radius: 14px; }

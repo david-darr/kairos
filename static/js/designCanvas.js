@@ -676,7 +676,8 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
     const close = el('button', { type: 'button', class: 'btn quiet', text: 'Close', 'aria-label': 'Close focus', onclick: () => closeFocus() });
     const stageFocus = el('div', { class: 'design-focus-stage' }, [device]);
     const overlay = el('div', { class: 'design-focus', role: 'dialog', 'aria-label': `${info.title}, focus` }, [
-      el('header', { class: 'design-focus-bar' }, [el('strong', { text: `${at + 1} / ${all.length} · ${info.title}` }), widths, el('span', { class: 'design-spacer' }), prev, next, close]),
+      el('header', { class: 'design-focus-bar' }, [el('strong', { text: `${at + 1} / ${all.length} · ${info.title}` }),
+        el('div', { class: 'design-focus-controls' }, [widths, el('span', { class: 'design-spacer' }), prev, next]), close]),
       stageFocus]);
     root.append(overlay);
     const fit = () => {

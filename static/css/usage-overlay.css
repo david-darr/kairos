@@ -34,7 +34,7 @@
    reverse colors. Every color below is one of these. */
 :root{--n-body:#241A14;--n-card:#2A1F18;--n-line:#4A3A2E;--n-line-soft:#3A2C22;--n-text:#F3EADB;--n-text-dim:#D2C3AF;
   --n-text-faint:#A8957F;--n-track:#4A3A2E;--n-face:#33261D;--n-button:#3A2C22;--n-button-hover:#4A3A2E;
-  --n-button-line:#6B5646;--n-button-line-hover:#A8957F;--n-ample:#A9C49A;--n-watch:#D9B260;--n-crit:#E0846F}
+  --n-button-line:#6B5646;--n-button-line-hover:#A8957F;--n-ample:#A9C49A;--n-watch:#D9B260;--n-crit:#E0846F;--n-shell:#120D0A;--n-tile:#1E1611;--n-glow:#B8893B;--n-black:#000000}
 .c-auth{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .c-auth button{font:inherit;font-size:11px;color:var(--n-text);background:var(--n-button);border:1px solid var(--n-button-line);border-radius:7px;padding:6px 9px;cursor:pointer}
 .c-auth button:hover,.c-auth button:focus-visible{background:var(--n-button-hover);border-color:var(--n-button-line-hover)}
@@ -266,3 +266,104 @@ body[data-edge="left"] #notice{left:100px;right:10px;margin-left:0;margin-right:
    MIT). CodeNotch inlines the SVG; a mask keeps SVG markup out of the page. The
    sizes above (.glyph .mark, .c-head .mark) are CodeNotch's own. */
 .mark{background:currentColor;-webkit-mask:var(--mark) center/contain no-repeat;mask:var(--mark) center/contain no-repeat}
+
+
+/* ---- Phase 1: the top-centre notch -------------------------------------------
+   Drawn to the Kairos Mobile v2 boards NotchCollapsed and NotchWorking. The
+   legacy edge rules and their MIT notice remain above. */
+#notch-shell{display:contents}
+body:not([data-edge="top-centre"]) #notch-shell > :not(#pill){display:none}
+body[data-edge="top-centre"] #pill{display:none}
+body[data-edge="top-centre"] #notch-shell{position:absolute;display:block;left:50%;top:0;transform:translateX(-50%);max-width:100%;
+  background:var(--n-shell);color:var(--n-text);border-radius:0 0 22px 22px;overflow:hidden;
+  box-shadow:0 8px 24px color-mix(in srgb,var(--n-black) 35%,transparent);transition:box-shadow 400ms,background-color 400ms}
+body[data-edge="top-centre"] #notch-shell[data-state="thinking"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 25%,transparent),0 8px 24px color-mix(in srgb,var(--n-glow) 35%,transparent)}
+body[data-edge="top-centre"] #notch-shell[data-state="needs"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 50%,transparent),0 8px 26px color-mix(in srgb,var(--n-watch) 45%,transparent)}
+body[data-edge="top-centre"] #notch-shell[data-state="error"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-crit) 50%,transparent),0 8px 26px color-mix(in srgb,var(--n-crit) 45%,transparent)}
+body[data-edge="top-centre"] #notch-shell.expanded{border-radius:0 0 30px 30px;box-shadow:0 18px 50px color-mix(in srgb,var(--n-black) 50%,transparent)}
+
+/* Kip, recoloured for the dark notch: a parchment body and eyes cut in the surface behind it */
+#notch-shell{--kip-eye:var(--n-shell)}
+#notch-shell .n-now{--kip-eye:var(--n-tile)}
+#notch-shell kairos-mascot{flex:none}
+#notch-shell kairos-mascot .ajar .aj-body{fill:var(--n-text)}
+#notch-shell kairos-mascot .ajar :is(.aj-eye,.aj-mouth){fill:var(--kip-eye)}
+#notch-shell kairos-mascot .ajar :is(.aj-happy,.aj-shut,.aj-brow){stroke:var(--kip-eye)}
+#notch-shell kairos-mascot .ajar .aj-point{fill:var(--n-watch);stroke:none}
+#notch-shell kairos-mascot .ajar[data-state=error] .aj-point{fill:var(--n-crit)}
+#notch-shell kairos-mascot .ajar .aj-halo{stroke:var(--n-watch)}
+#notch-shell kairos-mascot .ajar :is(.aj-shadow,.aj-voice){display:none}
+#notch-shell.hide-kip kairos-mascot{display:none}
+/* The mascot's box is wider than the body the boards draw; the margin gives it the board's footprint */
+#notch-kip{width:28px;height:28px;margin:-2px}
+#notch-kip-large{width:92px;height:92px;margin:-4px}
+
+/* Collapsed */
+#notch-bar{display:flex;align-items:center;gap:16px;height:40px;padding:0 14px;white-space:nowrap}
+#notch-shell:is([data-state="thinking"],[data-state="needs"],[data-state="error"]) #notch-bar{gap:12px}
+#notch-usage{display:flex;align-items:center;gap:8px;font-size:12px;color:color-mix(in srgb,var(--n-text) 70%,transparent)}
+.n-reading{display:flex;align-items:center;gap:8px}
+.n-reading svg{display:block;flex:none}
+.n-reading .n-track{stroke:color-mix(in srgb,var(--n-text) 15%,transparent)}
+.n-reading .n-arc{stroke:var(--arc)}
+#notch-cluster{display:grid;grid-template-columns:repeat(2,8px);gap:3px;font-size:9px;line-height:8px}
+#notch-cluster .n-more{grid-column:1 / -1;text-align:center;color:color-mix(in srgb,var(--n-text) 55%,transparent)}
+#notch-cluster:empty{display:none}
+#notch-status{font-size:12px;max-width:420px;overflow:hidden;text-overflow:ellipsis}
+#notch-status:empty,#notch-signal:empty{display:none}
+#notch-signal{display:flex;align-items:center}
+.n-dot{display:block;flex:none;width:var(--size,8px);height:var(--size,8px);border-radius:999px;background:var(--dot)}
+.n-count{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--n-watch);color:var(--n-shell);font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center}
+#notch-shell[data-state="error"] .n-count{background:var(--n-crit)}
+#notch-shell:is([data-state="thinking"],[data-state="needs"],[data-state="error"]) :is(#notch-usage,#notch-cluster){display:none}
+#notch-shell:is([data-state="idle"],[data-state="sleeping"]) :is(#notch-status,#notch-signal){display:none}
+#notch-shell.expanded #notch-bar{display:none}
+
+/* Expanded */
+#notch-panel{display:none}
+#notch-shell.expanded #notch-panel{display:flex;flex-direction:column;gap:12px;width:820px;max-width:100%;padding:12px 14px 14px}
+.n-top{display:flex;align-items:center;gap:8px}
+.n-ic{width:30px;height:30px;flex:none;border-radius:999px;border:0;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);transition:background-color 160ms}
+.n-ic:hover,.n-ic:focus-visible{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
+.n-ic svg{display:block}
+#notch-readings{margin-left:auto;display:flex;gap:14px;font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.n-word{cursor:default;white-space:nowrap}
+.n-row{display:flex;gap:10px}
+.n-now{flex:0 0 330px;min-width:0;display:flex;align-items:center;gap:16px;padding:16px;border-radius:22px;background:var(--n-tile);
+  box-shadow:inset 0 -38px 50px -30px color-mix(in srgb,var(--n-glow) 70%,transparent)}
+#notch-shell:is([data-state="idle"],[data-state="sleeping"]) .n-now{box-shadow:none}
+#notch-shell[data-state="error"] .n-now{box-shadow:inset 0 -38px 50px -30px color-mix(in srgb,var(--n-crit) 60%,transparent)}
+.n-lines{display:flex;flex-direction:column;gap:6px;min-width:0}
+.n-lines span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.n-quiet{font-size:12px;opacity:.4}
+.n-quiet:empty{display:none}
+.n-current{font-size:16px;font-weight:500}
+.n-chips{flex:1;min-width:0;padding:14px;border-radius:22px;background:var(--n-tile);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-content:center}
+.n-chip{--tint:var(--n-watch);display:flex;align-items:center;gap:8px;min-width:0;padding:8px 12px;border-radius:999px;font-size:13px;white-space:nowrap;
+  background:color-mix(in srgb,var(--tint) 14%,transparent);color:color-mix(in srgb,var(--tint) 45%,var(--n-text))}
+.n-chip[data-tone="rest"]{background:color-mix(in srgb,var(--n-text) 6%,transparent);color:color-mix(in srgb,var(--n-text) 50%,transparent)}
+.n-chip-text{overflow:hidden;text-overflow:ellipsis}
+.n-empty{grid-column:1 / -1;font-size:13px;color:color-mix(in srgb,var(--n-text) 50%,transparent)}
+.n-rail{flex:0 0 40px;padding:8px 0;border-radius:22px;background:var(--n-tile);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.n-rail[hidden]{display:none}
+.n-rail .n-dim{opacity:.4}
+
+/* Light themes: the expanded notch follows Appearance (spec 4a); collapsed it always stays dark */
+body.notch-light #notch-shell.expanded{--n-shell:var(--k-parchment);--n-tile:var(--k-surface);--n-text:var(--k-ink);--n-glow:var(--k-gold-hi)}
+body.notch-light #notch-shell.expanded .n-now{--kip-eye:var(--k-surface)}
+body[data-edge="top-centre"].notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
+
+/* The usage card opens under the notch; the edge notch's tail and handles do not apply */
+body[data-edge="top-centre"] #card{right:auto;bottom:auto;transform:none;margin-left:0}
+body[data-edge="top-centre"] #tail,body[data-edge="top-centre"] .handle{display:none}
+/* Folded, only the small rest tab shows */
+body[data-edge="top-centre"] #rest{left:50%;right:auto;top:0;transform:translateX(-50%);width:79px;height:10px;border-radius:0 0 6px 6px;opacity:0;pointer-events:none;background:var(--n-shell);border:0}
+body.folded[data-edge="top-centre"] #rest{opacity:1}
+body.folded[data-edge="top-centre"] #notch-shell{opacity:0;pointer-events:none}
+body[data-edge="top-centre"].notch-offline #root{visibility:hidden}
+body[data-edge="top-centre"].notch-reduced #notch-shell{transition:none}
+body[data-edge="top-centre"].notch-reduced #notch-shell *{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){body[data-edge="top-centre"] #notch-shell,body[data-edge="top-centre"] #notch-shell *{transition:none}}
+
+:root{--text:var(--k-parchment);--bg-panel-solid:var(--n-body);--point:var(--k-gold-hi);--danger:var(--n-crit)}

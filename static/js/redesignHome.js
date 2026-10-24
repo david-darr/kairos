@@ -347,9 +347,9 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     if (focused) sheet.list.querySelector(`[data-focus="${CSS.escape(focused)}"]`)?.focus();
   }
 
-  function openSheet() {
+  function openSheet(event) {
     if (sheet) return;
-    const returnTo = document.activeElement;
+    const returnTo = event?.currentTarget || document.activeElement;
     const done = el("button", { type: "button", class: "hm-btn hm-btn-primary", text: "Done", onclick: () => closeSheet(true) });
     const list = el("div", { class: "hm-sheet-list" });
     const panel = el("aside", { class: "hm-sheet", role: "dialog", "aria-modal": "true", "aria-label": "Customize Home" }, [

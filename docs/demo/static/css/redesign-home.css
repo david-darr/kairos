@@ -398,3 +398,8 @@
   .kairos-redesign[data-view="home"] .hm-home [data-home-section="system"] .dashboard-system-chips { gap: 4px 14px; font-size: 13px; color: var(--rd-ink-dim); }
   .kairos-redesign[data-view="home"] .hm-home [data-home-section="system"] .dashboard-system-chip { font-size: 13px; }
 }
+
+/* Leave the provider separators untouched; only the phone card entrance grows. */
+@media (max-width: 768px) {
+  .kairos-redesign .hm-home .rd-usage-card { padding-top: 8px; }
+}

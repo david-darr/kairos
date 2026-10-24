@@ -26,6 +26,8 @@ class Node {
     return null;
   }
   addEventListener() {}
+  focus() { document.activeElement = this; }
+  get isConnected() { return this === document.body || !!this.parentElement?.isConnected; }
   setAttribute(k, v) { this.attributes.set(k, v); }
   removeAttribute(k) { this.attributes.delete(k); }
 }
@@ -39,6 +41,7 @@ const order = ['needs', 'working', 'models', 'chats', 'schedule', 'system', 'sta
 let layout = { home: order, hiddenHome: order.slice(5) };
 const data = {};
 const content = el('div'), banner = el('div', { class: 'dashboard-core' }), mascot = el('kairos-mascot'), header = el('header', { class: 'dashboard-header' }), next = el('span', { class: 'dashboard-next' }), hero = el('section', { class: 'dashboard-hero' }, [banner, header, mascot, next]), grid = el('div');
+document.body = el('body'); document.body.append(content);
 content.append(hero, grid);
 const parts = {};
 for (const id of order.filter(id => !['needs', 'working'].includes(id))) parts[id] = el('section', { 'data-home-section': id }, [el('div', { class: 'dashboard-section-header' }, [el('h2'), el('button', { textContent: 'arrow' })])]);
@@ -163,6 +166,18 @@ ui.swap('tab:crm:follow-ups', -1);
 assert.deepEqual(layout.home.slice(0, 3), ['tab:crm:follow-ups', 'needs', 'tab:crm:open-count'], 'Customize restores mixed order');
 layout = savedLayout;
 phone.matches = true; arrange();
+// Programmatic/touch activation can leave focus on a different element.
+// Closing Customize must return to the actual opener on either surface.
+for (const selector of ['.hm-phone-customize', '.hm-customize']) {
+  const opener = content.querySelector(selector);
+  document.activeElement = document.body;
+  opener.onclick({ currentTarget: opener });
+  const done = document.body.querySelector('.hm-sheet-top button');
+  assert.equal(document.activeElement, done, 'Customize focuses Done when opened');
+  done.onclick();
+  assert.equal(document.activeElement, opener, `Customize restores focus to ${selector} after an unfocused click`);
+  assert.equal(document.body.querySelector('.hm-sheet-root'), null, 'Customize removes the sheet on Done');
+}
 on = false; assert.equal(arrange(), false);
 assert.equal(banner.parentElement, hero, 'Classic gets the original backdrop back');
 assert.equal(hero.parentElement, content, 'Classic restores hero above the grid');

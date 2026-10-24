@@ -163,6 +163,14 @@
 .design-focus { position: absolute; inset: 0; z-index: 25; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--bg); }
 .design-focus-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--hairline-soft); background: var(--bg-panel-solid); }
 .design-focus-widths { display: inline-flex; gap: 2px; }
+.design-focus-controls { display: contents; }
+.chat-design-pane { min-height: 0; }
+.chat-design-pane > .design-model-host { flex: none; padding: 8px 12px; }
+.chat-design-pane > .chat-side-pane-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.chat-design-pane .chat-pane-heading { flex: 1; min-width: 0; }
+.chat-design-pane .chat-pane-heading small { display: block; color: var(--text-dim); }
+.chat-design-canvas { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.chat-design-canvas > .design-canvas { flex: 1; min-width: 0; }
 .design-focus-stage { position: relative; display: grid; place-items: start center; overflow: auto; padding: 16px; touch-action: pan-y pinch-zoom; }
 .design-focus-device { position: relative; overflow: hidden; border-radius: 6px; box-shadow: var(--shadow-elevated); background: var(--bg-panel-solid); }
 .design-focus-device[data-frame="phone"] { border-radius: 28px; box-shadow: 0 0 0 10px var(--text), var(--shadow-elevated); margin: 10px; }
@@ -227,10 +235,21 @@
   .kairos-redesign .design-model-btn { width: 100%; max-width: none; justify-content: flex-start; }
   .kairos-redesign .design-model-menu { position: fixed; top: auto; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: auto; }
   .kairos-redesign .design-model-menu .model-picker-item, .kairos-redesign .design-model-menu .model-effort-btn { min-height: 44px; }
+  .kairos-redesign .chat-design-pane > .chat-side-pane-header { display: grid; grid-template-columns: minmax(0, 1fr) 46px 46px; gap: 8px; padding: 12px; }
+  .kairos-redesign .chat-design-pane .chat-side-pane-header > [aria-hidden],
+  .kairos-redesign .chat-design-pane .chat-side-pane-header > .chat-design-expand { display: none; }
+  .kairos-redesign .chat-design-pane .chat-pane-heading { display: contents; }
+  .kairos-redesign .chat-design-pane .chat-pane-heading strong { grid-column: 1; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: italic 600 32px/46px var(--rd-font-title); }
+  .kairos-redesign .chat-design-pane .chat-pane-heading small { grid-column: 1 / -1; grid-row: 2; font: 12px var(--rd-font-ui); }
+  .kairos-redesign .chat-design-pane .chat-pane-icon { grid-row: 1; display: grid; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); color: var(--rd-ink); font: 24px var(--rd-font-ui); cursor: pointer; }
+  .kairos-redesign .chat-design-pane .design-model-btn { min-height: 44px; }
   .kairos-redesign .design-page-header .danger { display: none; }
-  .kairos-redesign .design-focus { position: fixed; inset: 0; z-index: 9000; padding-top: env(safe-area-inset-top); }
-  .kairos-redesign .design-focus-bar { flex-wrap: nowrap; gap: 4px; }
-  .kairos-redesign .design-focus-bar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Keep the board pager inside its canvas, below the page header and model picker. */
+  .kairos-redesign .design-focus-bar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; gap: 8px; }
+  .kairos-redesign .design-focus-bar strong { grid-column: 1; grid-row: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: italic 600 28px/46px var(--rd-font-title); }
+  .kairos-redesign .design-focus-controls { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .kairos-redesign .design-focus-bar > [aria-label="Close focus"] { grid-column: 2; grid-row: 1; width: 46px; height: 46px; padding: 0; border-radius: 50%; font-size: 0; }
+  .kairos-redesign .design-focus-bar > [aria-label="Close focus"]::after { content: '×'; font: 24px var(--rd-font-ui); }
   .kairos-redesign .design-focus-bar .btn { min-height: 44px; min-width: 44px; }
   .kairos-redesign .design-focus-stage { padding: 12px 0; }
   .kairos-redesign .design-focus-device[data-frame="phone"] { margin: 6px; box-shadow: 0 0 0 6px var(--text), var(--shadow-elevated); }

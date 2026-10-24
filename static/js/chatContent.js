@@ -4,6 +4,7 @@ import { installDesignAutoOpen } from './designAutoOpen.js';
 import { mountChatPane } from './chatPaneLayout.js';
 import { desktopPanes } from './chatPaneStack.js';
 import { openChatDesign, designPaneOpen } from './chatDesignPane.js';
+import { mobileOn } from './mobileShared.js';
 import { renderArtifact, loadingSkeleton } from './artifactViewer.js';
 import { mountArtifactReview } from './artifactReview.js';
 import { mountForeignReview } from './artifactForeignReview.js';
@@ -211,7 +212,7 @@ export async function mountArtifactPane(host) {
       let saved;
       try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { /* Invalid or disabled storage. */ }
       let tabs = Array.isArray(saved?.tabs) ? saved.tabs.slice(0, 20).filter(tab => typeof tab?.sessionId === 'string' && typeof tab.name === 'string' && typeof tab.url === 'string' && tab.url.length <= 500 && ARTIFACT_URL.test(tab.url)) : [];
-      if (desktopPanes(host)) {
+      if (desktopPanes(host) || mobileOn()) {
         const design = tabs.find(tab => DESIGN_URL.test(tab.url));
         tabs = tabs.filter(tab => !DESIGN_URL.test(tab.url));
         if (design && design.sessionId === context.sessionId) await openChatDesign(design.sessionId, design.url.match(DESIGN_URL)[1]);
@@ -373,7 +374,7 @@ async function renderDesignTab(tab) {
 
 export async function openDesignTab(sessionId, designId, opener, options = {}) {
   const host = document.querySelector('.chat-layout');
-  if (host && desktopPanes(host)) {
+  if (host && (desktopPanes(host) || mobileOn())) {
     // Mount the design beside the placeholder first and drop the placeholder after, so the shared root never
     // empties: tearing it down would reflow the chat at full width and the browser's scroll anchoring would
     // move the reader before the width observer could restore their place.

@@ -3,6 +3,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+// The real modules load through vm.SourceTextModule, which needs this flag; relaunch with it when run plainly.
+if (!vm.SourceTextModule) {
+  const run = require('node:child_process').spawnSync(process.execPath, ['--experimental-vm-modules', '--no-warnings', __filename], { stdio: 'inherit' });
+  process.exit(run.status ?? 1);
+}
 const path = require('node:path');
 
 class Node {
@@ -71,6 +76,8 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   google.weekGrid(grid, start, events, () => {}, () => {}, 1);
   assert.equal(grid.querySelectorAll('.cal-week-day').length, 1);
   assert.equal(grid.querySelectorAll('.cal-week-event').length, 1);
+  assert.equal(grid.querySelector('.cal-week-date').textContent, '23', 'Week numbers have their own today-marker area');
+  assert.ok(grid.querySelector('.cal-week-weekday').textContent, 'Weekday stays outside the date marker');
   assert.equal(grid.children[0].style.gridTemplateColumns, '52px repeat(1, minmax(0, 1fr))');
   google.weekGrid(grid, start, events, () => {}, () => {});
   assert.equal(grid.querySelectorAll('.cal-week-day').length, 7);
@@ -88,9 +95,13 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(host.querySelector('.cal-nav').parentElement, phoneHeader.parentElement, 'Period and view controls follow the header');
   assert.equal(host.querySelectorAll('.cal-weekday')[0].textContent, 'Mon');
   assert.equal(host.querySelector('.cal-phone-days').children.length, 7);
+  const currentDates = host.querySelector('.cal-phone-days').children.filter(b => b.getAttribute('aria-current') === 'date');
+  assert.equal(currentDates.length, 1, 'Only today is marked current, independently of the selected day');
+  assert.equal(currentDates[0].getAttribute('aria-label'), new Date().toDateString());
   assert.deepEqual(Array.from(segments.options, x => x.value), ['day', 'week', 'month']);
   const rangeButtons = host.querySelector('.cal-range-switch').querySelectorAll('button');
-  assert.deepEqual(rangeButtons.map(b => b.dataset.mobileDock), ['day', 'week', 'month']);
+  assert.deepEqual(rangeButtons.map(b => b.textContent), ['Day', 'Week', 'Month']);
+  assert.ok(descendants(host).every(b => !b.dataset.mobileDock && !b.getAttribute('data-mobile-dock')), 'Calendar controls stay in the header, without dock proxies');
   assert.deepEqual(rangeButtons.map(b => b.getAttribute('aria-pressed')), ['false', 'false', 'true']);
   assert.equal(host.querySelectorAll('.cal-day').length, 42);
   rangeButtons[0].onclick(); await flush();

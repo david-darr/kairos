@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("usageOverlay", {
   // Whether the pointer is over the pill or card: the window takes clicks only then.
   setInteractive: (on) => ipcRenderer.send("usage-overlay:interactive", !!on),
-  openApp: () => ipcRenderer.send("usage-overlay:open-app"),
+  openApp: (target = "home") => { if (["home", "chat", "settings"].includes(target)) ipcRenderer.send("usage-overlay:open-app", target); },
   hide: () => ipcRenderer.send("usage-overlay:hide"),
   // The main process reads the native cursor in DIPs; DOM screen coordinates
   // are not used for placement on mixed-DPI monitors.

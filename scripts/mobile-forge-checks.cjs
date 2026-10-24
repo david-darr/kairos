@@ -14,6 +14,15 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
     ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), name + ' fits the viewport');
     ok((await overflow()).length === 0, name + ' has no page overflow');
   };
+  const phoneSizes = async name => {
+    const original = win.getContentSize();
+    for (const [width, height] of [[390, 844], [430, 932]]) {
+      win.setContentSize(width, height); await delay(300);
+      await fit(`${name} ${width}x${height}`);
+      await capture(`mobile-forge-${name}-${width}x${height}`);
+    }
+    win.setContentSize(...original); await delay(300);
+  };
   const sheetNamed = async title => {
     await waitFor(`document.querySelector('dialog.ms-sheet[open]')?.getAttribute('aria-label') === ${JSON.stringify(title)}`);
     ok(await js("document.querySelector('dialog.ms-sheet[open]').contains(document.activeElement)"), title + ' owns focus');
@@ -31,17 +40,23 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await waitFor("!!document.querySelector('.mf-dashboard .forge-activity-total') && ![...document.querySelectorAll('.mf-dashboard .forge-widget-body')].some(b => b.textContent.trim() === 'Loading...')");
   await delay(300);
   ok(await js("!document.querySelector('.mf-project') && !document.querySelector('dialog.ms-sheet[open]')"), 'Home opens the overview as a page, not the pager or a sheet');
-  ok(await js("document.querySelector('.mf-dashboard-title').textContent === 'Forge Home' && !document.querySelector('.ms-avatar, #mobile-menu-btn')"), 'Overview uses the phone header, with no avatar');
+  ok(await js("document.querySelector('.mf-dashboard-title').textContent === document.querySelector('[aria-label=Project]').textContent.trim() && !!document.querySelector('.mf-title-copy small') && !document.querySelector('.ms-avatar, #mobile-menu-btn')"), 'Overview uses the phone header, with no avatar');
   await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.querySelector('.ms-tabbar-label').textContent)"), ['Forge Home', 'New', 'Sessions', 'More']); assertions++;
   ok(await js("parseFloat(getComputedStyle(document.querySelector('.mf-dashboard .ms-header')).paddingTop) >= 6"), 'Overview header clears the safe area');
+  ok(await js("!!document.querySelector('.mf-board .mf-activity .rd-dot-matrix') && !!document.querySelector('.mf-board .mf-working-section') && document.querySelectorAll('.mf-summary-grid > section').length === 2"), 'Overview presents real activity, working sessions and paired summary cards');
+  ok(await js("getComputedStyle(document.querySelector('.mf-dashboard-title')).fontStyle === 'italic' && getComputedStyle(document.querySelector('.mf-card')).borderRadius === '26px' && [...document.querySelectorAll('.mf-dashboard .ms-header-row > button')].filter(n => n.getClientRects().length).length === 2 && [...document.querySelectorAll('.mf-dashboard .mf-icon')].every(n => n.getBoundingClientRect().width === 46 && n.getBoundingClientRect().height === 46)"), 'Overview uses the board title, 26px cards and exactly two round 46px actions');
+  await click('.mf-dashboard-extra > summary');
   assert.deepEqual(await js("[...document.querySelectorAll('.mf-dashboard .forge-widget-grid > section > header h2')].map(n => n.textContent)"), cards); assertions++;
   ok(await js("(() => { const s = [...document.querySelectorAll('.mf-dashboard .forge-widget-grid > section')].map(n => n.getBoundingClientRect()); return s.every(r => Math.abs(r.left - s[0].left) < 1 && Math.abs(r.width - s[0].width) < 1) && s.every((r, i) => !i || r.top >= s[i - 1].bottom); })()"), 'Overview cards stack in one full-width column');
   ok(await js("getComputedStyle(document.querySelector('.mf-dashboard .forge-panel')).borderRadius !== '0px' && getComputedStyle(document.querySelector('.mf-dashboard .forge-panel')).boxShadow !== 'none'"), 'Overview cards use the redesign card style');
   ok(await js("[...document.querySelectorAll('.mf-dashboard button, .mf-dashboard .custom-select-btn')].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => { const r = n.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; })"), 'Overview controls are 44px');
   ok(await js("![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Project overview')"), 'The Project overview sheet button is gone');
   await fit('Forge overview');
+  await click('.mf-dashboard-extra > summary');
   await capture('mobile-forge-overview');
+  await phoneSizes('home');
+  await click('.mf-dashboard-extra > summary');
   await js("document.querySelector('.mf-dashboard-body').scrollTop = document.querySelector('.mf-dashboard-body').scrollHeight"); await delay(200);
   await capture('mobile-forge-overview-lifespan');
   await js("document.querySelector('.mf-dashboard-body').scrollTop = 0");
@@ -63,7 +78,58 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('#mf-tab-0');
   ok(await js("document.querySelector('#mf-new').inert === false && document.querySelector('#mf-sessions').inert"), 'New is the only interactive page');
   ok(await js("document.querySelector('.mf-project .ms-intro h1').textContent === 'What should we work on?'"), 'Project has the phone introduction');
+  ok(await js("document.querySelector('.mf-page-title').textContent === 'New session' && document.querySelector('.mf-home-trigger').getAttribute('aria-label') === 'Back to Forge Home'"), 'New has a serif page title and home action');
   await fit('Project New');
+  await phoneSizes('new');
+  // Sticky positioning alone can pass the fold checks while painting the
+  // activity pills over the intro. Exercise real layout with a finished card,
+  // changing activity height, and copy that must scroll within the intro.
+  const originalSize = win.getContentSize();
+  await js(`(() => {
+    const slot = document.querySelector('#mf-new .ms-activity-slot');
+    window.__forgeLayoutActivity = [...slot.children].map(node => [node, node.style.display]);
+    for (const [node] of window.__forgeLayoutActivity) node.style.display = 'none';
+    const activity = document.createElement('section'); activity.className = 'ms-activity';
+    activity.dataset.forgeLayoutFixture = '';
+    activity.innerHTML = '<div class="ms-finished-deck"><button>Finished (1)</button><button>Clear all</button><div class="ms-finished-cards"><button class="ms-finished-card ms-glass">Chat · Reply ready</button></div></div>';
+    slot.append(activity);
+    const caption = document.querySelector('#mf-new .mf-project-caption');
+    window.__forgeLayoutCaption = caption.textContent;
+    caption.textContent = 'A project with a long name that wraps across several lines on a narrow phone';
+  })()`);
+  try {
+    for (const [width, height] of [[320, 568], [375, 667], [390, 844], [430, 932], [667, 375]]) {
+      win.setContentSize(width, height); await delay(300);
+      for (const activityHeight of [0, 96]) {
+        await js(`document.querySelector('[data-forge-layout-fixture]').style.paddingTop = '${activityHeight}px'`);
+        await delay(50);
+        const layout = await js(`(() => {
+          const intro = document.querySelector('#mf-new .ms-intro'), bottom = document.querySelector('#mf-new .ms-launch-bottom');
+          const box = intro.getBoundingClientRect(), group = bottom.getBoundingClientRect();
+          intro.scrollTop = 0;
+          const first = [...intro.children].find(n => n.getClientRects().length);
+          const start = first.getBoundingClientRect().top;
+          intro.scrollTop = intro.scrollHeight;
+          const end = intro.lastElementChild.getBoundingClientRect().bottom;
+          const bar = document.querySelector('.ms-tabbar').getBoundingClientRect();
+          const last = Math.max(...[...bottom.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height).map(n => n.getBoundingClientRect().bottom));
+          intro.scrollTop = 0;
+          return { separate: box.bottom <= group.top + 1, start: start >= box.top - 1, end: end <= box.bottom + 1, gap: bar.top - last };
+        })()`);
+        ok(layout.separate && layout.start && layout.end, `Forge intro scrolls fully above activity at ${width}x${height}, growth ${activityHeight}: ${JSON.stringify(layout)}`);
+        ok(Math.abs(layout.gap - 10) <= 1, `Forge bottom content stays 10px above the bar at ${width}x${height}: ${JSON.stringify(layout)}`);
+      }
+      await capture(`mobile-forge-new-clearance-${width}x${height}`);
+    }
+  } finally {
+    await js(`(() => {
+      document.querySelector('[data-forge-layout-fixture]').remove();
+      for (const [node, display] of window.__forgeLayoutActivity) node.style.display = display;
+      document.querySelector('#mf-new .mf-project-caption').textContent = window.__forgeLayoutCaption;
+      delete window.__forgeLayoutActivity; delete window.__forgeLayoutCaption;
+    })()`);
+    win.setContentSize(...originalSize); await delay(300);
+  }
   ok(await barCurrent() === 'new', 'The tab bar marks New current on the pager');
   await click('#mf-tab-1'); await delay(200);
   ok(await barCurrent() === 'sessions', 'Swiping the pager to Sessions moves the bar to Sessions');
@@ -81,6 +147,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await delay(300);
   await click('.mf-project-trigger'); await sheetNamed('Projects');
   ok(await js("document.querySelector('dialog.ms-sheet').contains(document.activeElement)"), 'Projects receives focus');
+  await phoneSizes('projects');
   await input('dialog.ms-sheet input', 'no-such-project');
   ok(await js("document.querySelector('dialog.ms-sheet').textContent.includes('No projects match.')"), 'Project search has an empty state');
   await input('dialog.ms-sheet input', '');
@@ -98,11 +165,14 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('#mf-tab-1');
   await waitFor("document.querySelectorAll('#mf-sessions .ms-history-row').length > 0");
   ok(await js("document.querySelector('#mf-new').inert && !document.querySelector('#mf-sessions').inert"), 'Sessions owns interaction after paging');
+  ok(await js("document.querySelector('#mf-sessions').firstElementChild.classList.contains('ms-history-dock') && [...document.querySelectorAll('.mf-session-group h2')].every(n => ['Today', 'Earlier'].includes(n.textContent))"), 'Sessions puts search above its date-grouped cards');
+  await phoneSizes('sessions');
   await input('#mf-sessions input[type=search]', 'no-matching-session'); await delay(300);
   ok(await js("document.querySelector('#mf-sessions').textContent.includes('No matching sessions.')"), 'Session search has an empty state');
   await input('#mf-sessions input[type=search]', ''); await delay(300);
   await textButton('#mf-sessions .ms-history-dock', 'Filter');
   ok(await js("!!document.querySelector('#mf-sessions [aria-label=\"Filter sessions\"]') && !!document.querySelector('#mf-sessions [aria-label=\"Filter by model\"]')"), 'Search dock offers state and model filters');
+  ok(await js("document.querySelector('#mf-sessions .ms-history-filters').getBoundingClientRect().top >= document.querySelector('#mf-sessions .ms-history-dock').getBoundingClientRect().bottom"), 'Top search opens its filter menu below the dock');
   await click('#mf-sessions .ms-row-more');
   ok(await js("['Rename', 'Delete'].every(t => document.querySelector('.ms-actions-open').textContent.includes(t))"), 'Session row actions are reachable without gestures');
   await click('#mf-sessions .ms-history-main'); // dismiss revealed actions
@@ -123,6 +193,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("!!document.querySelector('.mf-session-header strong') && !!document.querySelector('.mf-count')"), 'Session title, subtitle and changes badge are present');
   ok(await js("getComputedStyle(document.querySelector('.forge-surface-bar')).display === 'none' && document.querySelector('.forge-shell').dataset.split === 'false'"), 'Phone has neither desktop tabs nor side-by-side panes');
   await fit('Conversation'); await capture('mobile-forge-session');
+  await phoneSizes('session');
   await menu();
   ok(await js("['Run app', 'Terminal', 'Explorer', 'Editor', 'End session', 'Rename', 'Session baseline changes', 'Open sessions and tools'].every(t => document.querySelector('dialog.ms-sheet').textContent.includes(t))"), 'Session menu retains every tool and lifecycle action');
   await close();
@@ -144,6 +215,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await waitFor("!!document.querySelector('.forge-pane .forge-app-preview-surface iframe')");
   ok(writes.slice(appStart).some(w => w.path.endsWith('/app/start')), 'App startup uses the existing handler');
   ok(await js("document.querySelector('.forge-shell').dataset.split === 'false' && !!document.querySelector('.mf-back')"), 'App preview replaces the conversation and has Back');
+  await phoneSizes('preview');
   for (const preset of ['phone', 'tablet', 'desktop']) {
     await click(`[data-preview-width=${preset}]`);
     ok(await js(`document.querySelector('[data-preview-width=${preset}]').getAttribute('aria-pressed') === 'true'`), 'Preview retains ' + preset + ' sizing');
@@ -164,6 +236,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await waitFor("!!document.querySelector('.forge-pane .forge-transcript-composer')");
   await click('.mf-changes'); await sheetNamed('Changes');
   await waitFor("!!document.querySelector('.mf-git-dock')");
+  await phoneSizes('changes');
   ok(await js("[...document.querySelectorAll('.mf-git .forge-git-files > strong')].map(n => n.textContent).join(',') === 'Staged,Changes'"), 'Changes separates staged and unstaged files');
   ok(await js("['Stage all', 'Unstage all'].every(t => [...document.querySelectorAll('.mf-git button')].some(b => b.textContent === t))"), 'Both bulk staging actions are retained');
   const before = writes.length;
@@ -223,7 +296,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("document.querySelectorAll('.mf-project').length === 1 && document.querySelectorAll('#forge-message').length === 1"), 'Resize back creates one phone workspace with the original input');
   await navigate('forgeHome');
   await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
-  for (const [width, height] of [[320, 640], [667, 375]]) {
+  for (const [width, height] of [[390, 844], [430, 932], [320, 640], [667, 375]]) {
     win.setContentSize(width, height); await delay(250); await fit(`Forge overview ${width}x${height}`);
   }
   win.setContentSize(1440, 900); await delay(250);

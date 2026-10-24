@@ -275,3 +275,165 @@
   .kairos-redesign :is(.forge-app-preview-surface, .forge-preview-toolbar) :is(.btn, input, summary) , .kairos-redesign .forge-preview-logs > summary, .kairos-redesign input.forge-preview-path { min-height: 44px !important; }
   .kairos-redesign .panel-dialog :is(.forge-form, [data-forge-form]) input { min-height: 44px; }
 }
+/* Mobile v2 Forge boards. Keep phone rules view-scoped so desktop and Classic
+   retain their existing layout. Shared motion and parts supply Kip and charts. */
+@media (max-width: 768px) {
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) {
+    --mf-card: var(--rd-surface-solid);
+    --mf-font-mono: "JetBrains Mono", var(--font-mono);
+  }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard, .mf-project) .ms-header {
+    padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 18px) 20px 16px;
+  }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard, .mf-project) .ms-header-row {
+    display: flex; height: auto; min-height: 46px; gap: 8px;
+  }
+  .kairos-redesign[data-view="forgeHome"] .mf-title-copy { flex: 1; min-width: 0; }
+  .kairos-redesign[data-view="forgeHome"] .mf-title-copy > small { display: block; font: 500 11px/1.5 var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard-title, .mf-page-title) {
+    margin: 0; text-align: left; font: italic 600 38px/1 var(--rd-font-title); color: var(--rd-ink); min-width: 0;
+  }
+  .kairos-redesign[data-view="forgeHome"] .mf-page-title { flex: 1; font-size: 40px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-icon {
+    display: grid; place-items: center; flex: 0 0 46px; width: 46px; height: 46px; padding: 0;
+    border: 1px solid var(--rd-line); border-radius: 999px; background: var(--mf-card); color: var(--rd-ink);
+  }
+  .kairos-redesign[data-view="forgeHome"] .mf-icon svg { width: 20px; height: 20px; }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard, .mf-project) .forge-banner.ms-background { display: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-dashboard-body { padding: 0 20px calc(max(28px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  .kairos-redesign[data-view="forgeHome"] .mf-board { display: flex; flex-direction: column; gap: 16px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-card { border: 1px solid var(--rd-line); border-radius: 26px; background: var(--mf-card); box-shadow: 0 1px 2px rgba(var(--shade-rgb), .05); }
+  .kairos-redesign[data-view="forgeHome"] .mf-workspace-line { justify-content: flex-start; gap: 10px; padding: 12px 16px; border: 1px solid var(--rd-line); border-radius: 999px; background: var(--mf-card); font: 400 13px/1.4 var(--mf-font-mono) !important; color: var(--rd-ink); }
+  .kairos-redesign[data-view="forgeHome"] .mf-workspace-line .forge-counts { margin-left: auto; white-space: nowrap; }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity { padding: 18px; display: grid; gap: 12px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity-heading { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity-heading small { font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity-heading strong { display: block; font-size: 30px; font-weight: 600; line-height: 1.1; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-pill { border-radius: 999px; padding: 6px 10px; background: var(--rd-ground); font-size: 13px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-section { display: grid; gap: 12px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-section > header { display: flex; align-items: baseline; justify-content: space-between; }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-working-section, .mf-session-group) h2 { margin: 0; font: italic 600 26px/1.2 var(--rd-font-title); text-transform: none; letter-spacing: 0; color: var(--rd-ink); }
+  .kairos-redesign[data-view="forgeHome"] .mf-see-all { border: 0; background: transparent; color: var(--rd-ink-dim); font-size: 14px; padding: 0 4px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-list { padding: 4px 16px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 0; border: 0; border-radius: 0; background: transparent; text-align: left; color: var(--rd-ink); }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-row + .mf-working-row { border-top: 1px solid var(--rd-line); }
+  .kairos-redesign[data-view="forgeHome"] .mf-status-dot { width: 10px; height: 10px; flex: 0 0 10px; background: var(--point); border-radius: 999px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-status-approval .mf-status-dot { background: var(--danger); }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-copy { flex: 1; min-width: 0; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-copy :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-copy strong { font-size: 15px; font-weight: 500; }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-copy small { font: 400 12px/1.5 var(--mf-font-mono); color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] .mf-working-row > small { font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] .mf-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-summary-grid > section { padding: 16px 18px; min-width: 0; }
+  .kairos-redesign[data-view="forgeHome"] .mf-summary-grid small { display: block; color: var(--rd-ink-dim); font-size: 12px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-summary-grid strong { display: block; font-size: 22px; font-weight: 600; }
+  .kairos-redesign[data-view="forgeHome"] .mf-service-link { border: 0; background: transparent; color: var(--rd-ink-dim); font: 400 12px/1.4 var(--mf-font-mono); padding: 0; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+  .kairos-redesign[data-view="forgeHome"] .mf-dashboard-extra { margin-top: 20px; }
+  /* Closed details can retain descendant layout boxes in Chromium. Remove the
+     retained dashboard from layout until expanded so it cannot extend through
+     the overview's bottom clearance or participate in scroll measurements. */
+  .kairos-redesign[data-view="forgeHome"] .mf-dashboard-extra:not([open]) > :not(summary) { display: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-dashboard-extra > summary { padding: 12px 0; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-switch { grid-column: auto; width: 100%; height: 54px; margin-top: 16px; padding: 5px; box-sizing: border-box; border: 0; border-radius: 999px; background: var(--rd-surface-2); box-shadow: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-switch-thumb { inset: 5px auto 5px 5px; width: calc(50% - 5px); background: var(--mf-card); box-shadow: var(--rd-shadow); transition: transform var(--rd-dur-tab) var(--rd-ease); }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-segment { margin: 0; font-size: 15px; font-weight: 400; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-segment[aria-selected="true"] { font-weight: 500; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .mf-workspace-line { margin-top: 16px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .mf-project-trigger { display: block; width: 100%; height: 44px; padding: 0 16px; margin-top: 8px; border-radius: 999px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project[data-forge-page="1"] :is(.mf-workspace-line, .mf-project-trigger) { display: none; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions { padding: 0 20px calc(max(16px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); gap: 16px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { flex: none; min-height: 54px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--mf-card); box-shadow: none; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock .ms-blur { display: none; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-list { padding: 0 0 16px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group { display: grid; gap: 12px; margin-bottom: 20px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group > .mf-card { padding: 4px 16px; overflow: hidden; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-row { border: 0; border-radius: 0; background: transparent; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-row + .ms-history-row { border-top: 1px solid var(--rd-line); }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-row::before { display: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-main { padding: 13px 40px 13px 22px; gap: 4px 8px; background: transparent; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-main::before { content: ''; position: absolute; left: 0; top: 24px; width: 10px; height: 10px; border-radius: 999px; background: var(--rd-line-strong); }
+  .kairos-redesign[data-view="forgeHome"] .ms-history-row[data-status="working"] .ms-history-main::before { background: var(--point); }
+  .kairos-redesign[data-view="forgeHome"] .ms-history-row[data-status="approval"] .ms-history-main::before { background: var(--danger); }
+  .kairos-redesign[data-view="forgeHome"] .ms-history-row[data-status="done"] .ms-history-main::before { background: var(--success); }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-main strong { font-size: 15px; font-weight: 500; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-meta { justify-content: flex-start; gap: 0; font-family: var(--mf-font-mono); font-size: 12px !important; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-meta > span + span::before { content: ' · '; white-space: pre; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .forge-counts { grid-column: 2; grid-row: 2; font: 400 12px/1.5 var(--mf-font-mono); }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .mf-session-meta { grid-column: 1; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session-heading strong { font: italic 600 24px/1.1 var(--rd-font-title); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session-heading small { font: 400 12px/1.5 var(--mf-font-mono); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session { animation: rd-push var(--rd-dur-push) var(--rd-ease) backwards; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) :is(.forge-transcript-composer, .forge-inline-diff, .forge-turn-review, .forge-inline-permission) { border-radius: 26px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-running-strip button { border-radius: 999px; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) :is(.forge-added) { color: var(--success); }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) :is(.forge-removed) { color: var(--danger); }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) :is(.mf-projects, .mf-workspace-options, .mf-session-actions) button { border-radius: 999px; background: var(--rd-surface-solid); }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) :is(.mf-projects input, .forge-preview-path) { border-radius: 999px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); color: var(--rd-ink); padding: 12px 16px; max-width: 100%; }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-view="forgeHome"] .mf-home { background: var(--rd-ground); }
+  .kairos-redesign[data-view="forgeHome"]:not([data-halftone="off"]):not([data-halftone="none"]) .mf-home {
+    background-image: radial-gradient(rgba(var(--ink-rgb), .07) 1px, transparent 1.3px); background-size: 7px 7px;
+  }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .mf-mark { opacity: 1; font-size: inherit; }
+  .kairos-redesign[data-view="forgeHome"][data-mascot="off"] .mf-mark { display: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-intro h1 { font: italic 600 32px/1.1 var(--rd-font-title); }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .forge-composer { border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign[data-view="forgeHome"] .mf-project .ms-page-track { transition: transform var(--rd-dur-tab) var(--rd-ease); }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity .rd-dot { border-radius: 3px; }
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-see-all, .mf-service-link, .mf-dashboard-extra > summary) { min-height: 44px; min-width: 44px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session .forge-plan-note {
+    display: block; margin: 12px 20px; padding: 14px 16px; border: 1px solid var(--rd-line); border-radius: 26px;
+    background: var(--rd-surface-solid); color: var(--rd-ink-dim); font-size: 13px; line-height: 1.5;
+  }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session .forge-transcript-document { padding: 16px 20px 24px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session .forge-prompt { padding: 12px 16px; border-radius: 26px 26px 8px 26px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) :is(.forge-composer-context, .forge-branch, .forge-file-title, .forge-preview-origin) { font-family: var(--mf-font-mono); font-size: 12px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-tool .forge-git-files { background: var(--rd-surface-solid); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-tool .forge-git-files > strong { font: italic 600 26px/1.2 var(--rd-font-title); letter-spacing: 0; text-transform: none; color: var(--rd-ink); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-toolbar { padding: 12px 16px; gap: 8px; background: var(--rd-surface-solid); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-options { padding: 12px 16px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-widths { padding: 5px; gap: 0; border-radius: 999px; background: var(--rd-surface-2); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-widths button { border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); padding-inline: 16px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-widths [aria-pressed="true"] { background: var(--rd-surface-solid); color: var(--rd-ink); box-shadow: var(--rd-shadow); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-logs { margin: 12px 16px; border: 1px solid var(--rd-line); border-radius: 26px; padding: 12px 16px; background: var(--rd-surface-solid); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-preview-logs summary { font: italic 600 26px/1.2 var(--rd-font-title); min-height: 44px; }
+}
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) :is(.rd-stagger > *, .rd-enter-rise, .mf-session) { animation: rd-opacity 120ms var(--rd-ease) both !important; animation-delay: 0ms !important; }
+  .kairos-redesign[data-view="forgeHome"] .mf-project :is(.ms-switch-thumb, .ms-page-track) { transition: none; }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-view="forgeHome"] .mf-branch-icon { display: flex; flex: 0 0 16px; }
+  /* Notifications remains available in More. Shared chrome may append its
+     shortcut here; the boards reserve these rows for project/new or Home. */
+  .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard, .mf-project) .ms-header-row > .ms-notifications-open { display: none; }
+  .kairos-redesign[data-view="forgeHome"] .mf-branch-icon svg { width: 16px; height: 16px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; padding-left: 18px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-search-icon { display: flex; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view="forgeHome"] .mf-search-icon svg { width: 18px; height: 18px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-filters { grid-column: 1 / -1; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock input { padding-inline: 6px; font-size: 15px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { height: 54px; padding-block: 0; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-filters { top: calc(100% + 8px); bottom: auto; z-index: 5; }
+  .kairos-redesign[data-view="forgeHome"] .mf-summary-grid > section > small:first-child { font-size: 13px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-activity .rd-dot-matrix { gap: 3px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .ms-history-age { text-align: right; font-size: 12px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-session-group .forge-counts { white-space: nowrap; justify-content: flex-end; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects > div { display: grid; gap: 10px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects .mf-project-row > button:first-child { border-radius: 26px; padding: 14px 16px; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects .mf-project-row :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects .mf-project-row strong { font-size: 15px; font-weight: 500; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects .mf-project-row small { font: 400 12px/1.6 var(--mf-font-mono); opacity: .8; }
+  .kairos-redesign[data-view="forgeHome"] .mf-projects > .rd-pill-primary { background: var(--rd-primary-bg); color: var(--rd-primary-fg); text-align: center; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session-header { padding: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 16px; gap: 8px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session-header > :is(.mf-back, [aria-label="Session actions"]) { display: grid; place-items: center; padding: 0; width: 46px; height: 46px; flex: 0 0 46px; border-color: var(--rd-line); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .mf-session-header > button svg { width: 20px; height: 20px; }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-running-strip { padding: 8px 20px; gap: 8px; background: var(--rd-ground); }
+  .kairos-redesign:is([data-view="forgeShell"], [data-view="forgeSession"]) .forge-running-strip button { padding: 10px 16px; font: 400 12px/1.5 var(--mf-font-mono); }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) .ms-sheet:has(.mf-projects, .mf-workspace-options, .mf-session-actions, .mf-tool, .mf-commit) { border-radius: 32px 32px 0 0; }
+  .kairos-redesign:is([data-view="forgeHome"], [data-view="forgeShell"], [data-view="forgeSession"]) .ms-sheet:has(.mf-projects, .mf-workspace-options, .mf-session-actions, .mf-tool, .mf-commit) .ms-sheet-header h2 { font: italic 600 30px/1.1 var(--rd-font-title); }
+}
