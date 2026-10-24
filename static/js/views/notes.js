@@ -1,6 +1,7 @@
 import { api, el, toast, iconButton } from "../api.js";
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
+import { phoneDetails } from '../phoneRowDetails.js';
 
 export async function render(container) {
   container.innerHTML = "";
@@ -66,6 +67,9 @@ export async function render(container) {
     const sortHome = el('span', { class: 'notes-sort-home' });
     header.append(sortHome);
     const sort = heading.querySelector('select');
+    const sortButton = el('button', { type: 'button', class: 'phone-section-link notes-sort-trigger', text: 'Sort', 'aria-haspopup': 'dialog',
+      onclick: () => phoneDetails('Sort notes', [sort], sortButton) });
+    heading.append(sortButton);
     const phone = window.matchMedia('(max-width: 768px)');
     const placeSort = () => { if (phone.matches) heading.append(sort); else sortHome.append(sort); };
     placeSort(); phone.addEventListener('change', placeSort);
@@ -216,5 +220,12 @@ async function refresh(list, focusTarget) {
       ]),
     ]);
     list.appendChild(card);
+    if (redesignOn()) {
+      const actions = card.querySelector('.row-actions');
+      const open = el('button', { type: 'button', class: 'workspace-phone-only note-open', text: note.text, 'aria-label': `Note details: ${note.text}`, 'aria-haspopup': 'dialog',
+        onclick: () => phoneDetails('Note', [actions], open, note.text) });
+      title.replaceChildren(el('span', { class: 'note-desktop-text', text: note.text }), open);
+      if (!dueText) title.after(el('div', { class: 'meta workspace-phone-only', text: 'No date' }));
+    }
   }
 }

@@ -921,3 +921,128 @@
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .cal-agenda-clock { display: block; position: absolute; right: 0; top: 16px; color: var(--rd-ink-dim); font-size: 13px; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .cal-agenda-clock::before { content: none; }
 }
+
+/* Compact phone rows from the Tasks / Drive / Email / School / Notes /
+   Cookbook / Tool Store boards. Desktop wrappers have no layout box. */
+.task-row-details, .cookbook-model-options { display: contents; }
+.ts-phone-name { display: none; }
+.email-item-time::before { content: ' ? '; }
+@media (max-width: 768px) {
+  .kairos-redesign .phone-row-details { display: flex; flex-direction: column; gap: 16px; color: var(--rd-ink); }
+  .kairos-redesign .phone-row-details :is(.task-row-details, .cookbook-model-options) { display: flex; flex-direction: column; gap: 12px; }
+  .kairos-redesign .phone-row-details .card-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .kairos-redesign .phone-row-details .row-actions { opacity: 1; }
+  .kairos-redesign .phone-row-details :is(button, select, summary, .custom-select-btn) { min-height: 44px; }
+  .kairos-redesign [data-view] .phone-section-link { border: 0; background: transparent; color: var(--rd-ink-dim); font: 14px var(--rd-font-ui); padding: 0; box-shadow: none; letter-spacing: 0; text-transform: none; }
+  .kairos-redesign #view-content[data-view="tasks"] .tasks-routines-heading { display: flex; justify-content: space-between; align-items: center; }
+  .kairos-redesign #view-content[data-view="tasks"] #tasks-list::before { content: none; }
+  .kairos-redesign #view-content[data-view="tasks"] #tasks-list:has(> .card) { padding: 4px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign #view-content[data-view="tasks"] #tasks-list > .card { padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .kairos-redesign #view-content[data-view="tasks"] #tasks-list > .card + .card { border-top: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="tasks"] #tasks-list .task-row-details { display: none; }
+  .kairos-redesign [data-view="tasks"] .task-routine-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 70px; padding: 13px 0; border: 0; border-radius: 0; background: transparent; color: var(--rd-ink); text-align: left; font: 500 15px var(--rd-font-ui); }
+  .kairos-redesign [data-view="tasks"] .task-schedule-icon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 14px; background: var(--rd-ground); }
+  .kairos-redesign [data-view="tasks"] .task-schedule-icon svg { width: 22px; height: 22px; }
+  .kairos-redesign [data-view="tasks"] .task-routine-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="tasks"] .task-routine-next { flex: 0 1 100px; text-align: right; font-size: 13px; font-weight: 400; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="tasks"] #tasks-list:not(.tasks-show-all):not(:has(.ms-filtered-out)) > .card:nth-of-type(n+4) { display: none; }
+  .kairos-redesign [data-view="tasks"] .task-activity-desktop-label { display: none; }
+  .kairos-redesign [data-view="tasks"] .task-activity-body > p { display: none; }
+  .kairos-redesign [data-view="tasks"] .task-activity-body { margin-bottom: 18px; }
+  .kairos-redesign [data-view="tasks"] .task-activity-count > small { max-width: 170px; font-size: 12px; border-radius: var(--rd-radius-pill); padding: 6px 10px; background: var(--rd-surface-2); }
+  .kairos-redesign #view-content[data-view="notes"] .notes-due-toggle.btn { border: 1px solid var(--rd-line-strong); background: transparent; border-radius: var(--rd-radius-pill); justify-self: start; }
+  .kairos-redesign #view-content[data-view="notes"] .notes-list-heading > select { display: none; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list { border-radius: 26px; padding: 4px 16px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list > .card { padding: 13px 0; align-items: flex-start; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list > .card > .card-row > .card-row { align-items: flex-start; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list > .card > .card-row > .card-row > div { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-title { flex: 1; white-space: normal; font-size: 14px; line-height: 1.45; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { margin: 0 0 0 auto; white-space: nowrap; font-size: 12px; padding: 5px 10px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"] { margin-top: -10px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"]::before { border-radius: 2px; }
+  .kairos-redesign [data-view="library"] .google-browser > .google-rail,
+  .kairos-redesign [data-view="library"] .google-main > .google-toolbar,
+  .kairos-redesign [data-view="library"] .google-account-line > :is(strong, .btn:not(.library-drive-options)) { display: none; }
+  .kairos-redesign [data-view="library"] .google-account-line { display: flex; align-items: center; padding: 14px 16px; gap: 8px; margin: 0 0 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="library"] .drive-account-copy { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+  .kairos-redesign [data-view="library"] .drive-account-copy > div { flex: 1; min-width: 0; }
+  .kairos-redesign [data-view="library"] .drive-account-copy strong { display: block; font-size: 15px; font-weight: 500; }
+  .kairos-redesign [data-view="library"] .drive-account-copy small { display: block; font-size: 12px; color: var(--rd-ink-dim); overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="library"] .drive-account-avatar { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: var(--rd-ground); }
+  .kairos-redesign [data-view="library"] .drive-connected-dot { flex: 0 0 9px; height: 9px; border-radius: 50%; background: var(--success); }
+  .kairos-redesign [data-view="library"] .google-breadcrumbs { padding: 0; margin-bottom: 12px; gap: 6px; font-size: 13px; }
+  .kairos-redesign [data-view="library"] .google-breadcrumbs .btn { padding: 0; border: 0; background: transparent; font-size: 13px; }
+  .kairos-redesign [data-view="library"] .google-file-row { display: flex; align-items: center; gap: 6px; }
+  .kairos-redesign [data-view="library"] .google-file-row > input { flex: 0 0 22px; min-width: 22px !important; min-height: 22px !important; width: 22px; height: 22px; }
+  .kairos-redesign [data-view="library"] .google-file-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-align: left; }
+  .kairos-redesign [data-view="library"] .google-thumbnail { display: grid; place-items: end center; flex: 0 0 40px; width: 40px; height: 44px; padding-bottom: 6px; box-sizing: border-box; background: var(--rd-ground); border: 1px solid var(--rd-line); border-radius: 10px; }
+  .kairos-redesign [data-view="library"] .google-thumbnail > :is(img, .google-type) { display: none; }
+  .kairos-redesign [data-view="library"] .drive-file-extension { font: 9px var(--font-mono, monospace); }
+  .kairos-redesign [data-view="library"] .google-file-copy { min-width: 0; }
+  .kairos-redesign [data-view="library"] .google-file-copy strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign #view-content[data-view="email"] .email-view > :is(details.disclosure-panel, #email-accounts-list) { display: none; }
+  .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center !important; }
+  .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row > .btn { grid-column: 2; justify-self: start; min-height: 36px; }
+  .kairos-redesign #view-content[data-view="email"] .email-summary .title { font: 500 15px var(--rd-font-ui); }
+  .kairos-redesign [data-view="email"] .email-item-avatar { width: 42px; height: 42px; flex-basis: 42px; }
+  .kairos-redesign [data-view="email"] .email-item-from { display: flex; gap: 8px; justify-content: space-between; }
+  .kairos-redesign [data-view="email"] .email-item-from > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign [data-view="email"] .email-item-time { flex: none; max-width: 42%; font-size: 12px; font-weight: 400; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="email"] .email-item-time::before { content: none; }
+  .kairos-redesign [data-view="email"] .email-item-reason { display: block; padding: 0; border-radius: 0; background: transparent; color: var(--rd-ink-dim) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign [data-view="school"] .school-classes-heading { display: flex; align-items: center; justify-content: space-between; }
+  .kairos-redesign [data-view="school"] .school-overview > .document-grid { margin-bottom: 18px; }
+  .kairos-redesign [data-view="school"] .school-overview .school-course-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 12px; text-align: left; }
+  .kairos-redesign [data-view="school"] .school-course-card .school-course-code { display: grid; place-items: center; grid-row: 1 / 3; width: 44px; height: 44px; border: 1px solid var(--rd-line); border-radius: 14px; background: var(--rd-ground); font: 600 12px var(--rd-font-ui); }
+  .kairos-redesign [data-view="school"] .school-course-code:empty { display: none; }
+  .kairos-redesign [data-view="school"] .school-course-card .title { grid-column: 2; font-size: 15px !important; font-weight: 500; }
+  .kairos-redesign [data-view="school"] .school-course-card .meta { grid-column: 2; margin: 0 !important; font-size: 12px !important; }
+  .kairos-redesign [data-view="school"] .school-course-card:has(.school-course-code:empty) { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign [data-view="school"] .school-course-card:has(.school-course-code:empty) > :is(.title, .meta) { grid-column: 1; }
+  .kairos-redesign [data-view="school"] .school-overview > .document-grid:not(.school-show-all) > .school-course-card:nth-child(n+4) { display: none; }
+  .kairos-redesign [data-view="school"] .school-overview > details.disclosure-panel { width: 100%; box-sizing: border-box; align-self: stretch; padding: 0; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="school"] .school-overview > details.disclosure-panel > summary { display: flex; width: 100%; box-sizing: border-box; justify-content: space-between; align-items: center; padding: 14px 18px; border: 0; border-radius: 26px; background: transparent; }
+  .kairos-redesign [data-view="school"] .school-overview > details.disclosure-panel[open] { padding: 16px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list { display: block; padding: 2px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card { margin: 0 !important; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; box-shadow: none; background: transparent; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card:last-child { border-bottom: 0; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card > .card-row { flex-wrap: nowrap; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-model-tile { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 14px; background: var(--rd-surface-2); font: italic 600 18px var(--rd-font-title); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .card-row > div:first-of-type { flex: 1; min-width: 0; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .card-row > div:last-child { flex: none; display: flex; flex-wrap: nowrap; gap: 4px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .title { font: 500 15px var(--rd-font-ui) !important; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-installed-list .meta { display: flex; flex-wrap: wrap; font: 11px var(--font-mono, monospace); }
+  .kairos-redesign [data-view="cookbook"] .cookbook-model-options { display: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-model-more { display: grid; place-items: center; padding: 0; width: 44px; border: 0; background: transparent; color: var(--rd-ink); }
+  .kairos-redesign [data-view="cookbook"] :is(.cookbook-installed, .cookbook-catalog) > .title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-model-count { font: 12px var(--rd-font-ui); color: var(--rd-ink-dim); text-align: right; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog > .meta { display: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .meta { grid-column: 1; margin: 0 !important; font-size: 12px; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .card-row { grid-column: 2; grid-row: 1 / 3; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list:not(.cookbook-show-all):not(:has(.ms-filtered-out)) > .card:nth-child(n+4) { display: none; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-card:not(.ts-in-sheet) .ts-desktop-name { display: none; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-card:not(.ts-in-sheet) .ts-phone-name { display: inline; font: 500 15px var(--rd-font-ui); }
+  .kairos-redesign [data-view="tool-store"] .tool-store-card:not(.ts-in-sheet) .ts-row-chev { display: none; }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign [data-view="library"] .drive-desktop-meta { display: none; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-card:not(.ts-in-sheet) { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 1px 12px; padding: 12px 16px; }
+  .kairos-redesign [data-view="tool-store"] .tool-store-card:not(.ts-in-sheet) > .ts-row-tile { width: 44px; height: 44px; border-radius: 14px; background: var(--rd-ground); }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="notes"] #notes-list :is(.note-desktop-text, .row-actions) { display: none; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-open { display: block; width: 100%; min-width: 0 !important; min-height: 22px !important; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; font: inherit; line-height: inherit; white-space: normal; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="notes"] #notes-list > .card { min-height: 54px; padding-block: 5px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-open { min-height: 44px !important; display: flex; align-items: center; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { margin-top: 8px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"] { margin-top: 0; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-desktop-meta { display: none; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .card-row:has(.cookbook-progress) { grid-column: 1 / -1; grid-row: 3; }
+  .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list .card-row > .meta:has(.cookbook-progress) { flex: 1; min-width: 0; }
+}

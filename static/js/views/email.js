@@ -2,6 +2,7 @@ import { api, el, toast, iconButton } from "../api.js";
 import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats, redesignOn } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
 import { createMascot } from '../mascot.js';
+import { phoneDetails } from '../phoneRowDetails.js';
 
 export async function render(container) {
   container.innerHTML = "";
@@ -45,6 +46,7 @@ export async function render(container) {
   container.append(wrap);
   if (redesignOn()) {
     const accounts = el('button', { type: 'button', class: 'btn email-accounts-trigger', 'aria-label': 'Accounts', text: 'Accounts', onclick: () => {
+    if (window.matchMedia('(max-width: 768px)').matches) { phoneDetails('Email accounts', [form, list], accounts); return; }
     form.open = !form.open; if (form.open) emailInput.focus();
     } });
     accounts.insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="9" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/></svg>'); header.append(accounts);
@@ -130,7 +132,10 @@ async function refreshTriage(host) {
         el("span", { class: "email-item-avatar", "aria-hidden": "true", text: (String(it.from || "").match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
         el("div", { class: "email-item-body" }, [
           el("div", { class: "title", style: "font-size:12.5px;", text: it.subject || "(no subject)" }),
-          el("div", { class: "meta email-item-from", style: "margin-top:2px;", text: `${it.from || ""}${it.date ? " · " + it.date : ""}` }),
+          el("div", { class: "meta email-item-from", style: "margin-top:2px;" }, [
+            el('span', { text: it.from || '' }),
+            it.date ? el('time', { class: 'email-item-time', text: it.date }) : null,
+          ]),
           el("div", { class: "meta email-item-reason", style: "margin-top:3px;color:var(--accent);", text: it.reason || "" }),
         ]),
       ]));

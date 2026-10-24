@@ -130,6 +130,10 @@ async function run(ctx) {
   ok(await js("document.querySelector('.ms-page-search-note').hidden"), 'No stale note after clearing');
   await js("document.querySelector('.view-header [aria-label=\"New note\"]').click()");
   ok(await js("document.activeElement === document.querySelector('.view-constrained .form-grid input')"), 'Notes + focuses the new note field');
+  await js("document.querySelector('.notes-sort-trigger').click()");
+  ok(await js("document.querySelector('dialog.ms-sheet[open] .notes-sort')?.options.length === 3"), 'Quiet Sort opens all existing sort options in a sheet');
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  ok(await js("document.activeElement === document.querySelector('.notes-sort-trigger')"), 'Sort closes back to its text control');
 
   for (const [tab, q] of [['tasks', 'Write'], ['cookbook', 'local'], ['email', 'Project']]) {
     await navigate(tab);
@@ -149,11 +153,18 @@ async function run(ctx) {
     eq(await shown(), total, tab + ' clearing restores rows');
   }
   await navigate('tasks'); await waitFor("!!document.querySelector('.ms-page-search')");
+  await waitFor("!!document.querySelector('.task-routine-row')");
+  ok(await js("[...document.querySelectorAll('#tasks-list .task-row-details')].every(n => !n.getClientRects().length)"), 'Routine rows keep desktop controls out of the list');
+  await js("document.querySelector('.task-routine-row').click()");
+  ok(await js("!!document.querySelector('dialog.ms-sheet[open] .task-row-details .custom-select') && /Turn off|Turn on/.test(document.querySelector('dialog.ms-sheet[open]').textContent) && /Run now|Stop/.test(document.querySelector('dialog.ms-sheet[open]').textContent)"), 'Tapping a routine opens its real model, delivery, toggle and run controls');
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  ok(await js("document.activeElement === document.querySelector('.task-routine-row')"), 'Task sheet returns focus to the routine');
   await js("document.querySelector('.view-header [aria-label=\"New task\"]').click()");
   ok(await js("!!document.activeElement.closest('details')?.open"), 'Header Tasks + opens and focuses the schedule form');
   await navigate('email'); await waitFor("!!document.querySelector('.ms-page-search')");
   await js("document.querySelector('.view-header [aria-label=Accounts]').click()");
-  ok(await js("!!document.activeElement.closest('details')?.open"), 'Header Accounts opens and focuses Connect an account');
+  ok(await js("!!document.querySelector('dialog.ms-sheet[open] #email-accounts-list') && !!document.querySelector('dialog.ms-sheet[open] details.disclosure-panel')"), 'Header Accounts opens connection and account management together');
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
   await navigate('cookbook'); await waitFor("!!document.querySelector('.ms-page-search')");
   const downloads = writes.length;
   await js("document.querySelector('.view-header [aria-label=\"Setup guide\"]').click()");
@@ -332,10 +343,11 @@ async function run(ctx) {
   ok(await docks() === 0, 'Vault Map has no bottom dock');
   await libTab('Google Drive');
   await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && /Search in Drive/.test(document.querySelector('.ms-page-search input')?.placeholder || '')");
-  ok(await js("!!document.querySelector('.google-new-menu summary')"), 'Drive retains New menu in page');
+  ok(await js("!!document.querySelector('.google-new-menu summary') && !document.querySelector('.google-rail').getClientRects().length"), 'Drive retains New and sections behind header/account controls');
   await js("document.querySelector('.view-header [aria-label=\"Create or upload in Drive\"]').click()");
-  ok(await js("!!document.querySelector('details.google-new-menu[open]') || [...document.querySelectorAll('details')].some(d => d.open && /New/.test(d.querySelector('summary')?.textContent || ''))"), 'Drive + opens the New menu');
+  ok(await js("!!document.querySelector('dialog.ms-sheet[open] details.google-new-menu[open]') && document.querySelectorAll('dialog.ms-sheet[open] .google-new-actions button').length === 4"), 'Drive + opens all existing New actions in a sheet');
   await shot('library-drive');
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
   for (const name of ['Files', 'Vault', 'Google Drive', 'Files', 'Vault']) {
     await libTab(name); await delay(500);
     ok(await docks() === 0 && (await js("document.querySelectorAll('.ms-page-search input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);

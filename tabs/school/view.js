@@ -122,8 +122,13 @@ async function renderOverview(body) {
       el('h3', { text: next.title }), el('p', { class: 'meta', text: `${next.course} · ${formatDue(next.due)}` }),
       el('button', { type: 'button', class: 'btn primary', text: 'Start with Kairos', onclick: () => openAssignment(body, next.id) })]));
   }
-  body.appendChild(el("div", { class: "title school-classes-heading", style: "margin:18px 0 10px;font-size:15px;", text: redesignOn() && window.matchMedia('(max-width: 768px)').matches ? 'Classes' : "Courses" }));
+  const classesHeading = el("div", { class: "title school-classes-heading", style: "margin:18px 0 10px;font-size:15px;", text: redesignOn() && window.matchMedia('(max-width: 768px)').matches ? 'Classes' : "Courses" });
+  body.appendChild(classesHeading);
   const grid = el("div", { class: "document-grid rd-stagger" });
+  if (redesignOn()) classesHeading.append(el('button', { type: 'button', class: 'workspace-phone-only phone-section-link', text: 'See all', onclick: () => {
+    grid.classList.toggle('school-show-all');
+    classesHeading.lastElementChild.textContent = grid.classList.contains('school-show-all') ? 'Show less' : 'See all';
+  } }));
   body.appendChild(grid);
   if (courses.length === 0) {
     grid.appendChild(redesignOn() ? emptyState({ title: 'Your classes belong here', text: 'Connect Canvas and sync your assignments.',
@@ -135,6 +140,7 @@ async function renderOverview(body) {
     if (c.overdue_count > 0) bits.push(`${c.overdue_count} overdue`);
     bits.push(`${c.assignment_count} total`);
     grid.appendChild(el(redesignOn() ? 'button' : 'div', { ...(redesignOn() ? { type: 'button' } : {}), class: "glass bracket card school-course-card", style: "cursor:pointer;padding:20px 18px;", onclick: () => openCourse(body, c.name) }, [
+      redesignOn() ? el('span', { class: 'workspace-phone-only school-course-code', text: c.course_code || '', 'aria-hidden': 'true' }) : null,
       el("div", { class: "title", style: "font-size:16px;", text: c.name }),
       el("div", { class: "meta", style: "margin-top:8px;font-size:12.5px;" + (c.overdue_count > 0 ? "color:var(--danger);" : ""), text: bits.join(" · ") }),
     ]));
