@@ -66,7 +66,7 @@ export function render(container, tabId, options = {}) {
   // same catalog as Chat's model picker; hidden for agents without one.
   let models = [], variantSelect = null, variantVersion = 0;
   const variantField = el('div', { class: 'forge-variant-pill', hidden: true });
-  let isolationSelect, modeSelect, branchSelect, branchField, branchVersion = 0, starting = false, branchesReady = false, sessionGroups = [];
+  let isolationSelect, modeSelect, branchSelect, branchField, branchVersion = 0, starting = false, branchesReady = false, sessionGroups = [], runningApps;
   let pendingStart = null;
   const approvalController = new AbortController();
   let locationSheet, mobileCatalog = [], launchEffort = null;
@@ -163,6 +163,9 @@ export function render(container, tabId, options = {}) {
       const result = await api(`/api/forge/projects/${lifespanSelect.value}/summary`);
       if (disposed || version !== summaryVersion) return;
       if (!['ok', 'empty'].includes(result.state)) { body.textContent = result.message || 'Repository unavailable.'; return; }
+      const selected = projects.find(p => p.id === lifespanSelect.value);
+      if (selected) selected.git = result;
+      phoneWorkspace?.update(false);
       const life = result.lifespan;
       body.replaceChildren(el('div', { class: 'forge-stats' }, [
         statCard('Commits', life.commits, life.delta.commits), statCard('Contributors', life.contributors, life.delta.contributors),
@@ -179,7 +182,7 @@ export function render(container, tabId, options = {}) {
     try {
       const [result, groups, apps] = await Promise.all([api('/api/forge/activity'), projectSessions(projects), api('/api/forge/apps/running')]);
       if (disposed) return;
-      sessionGroups = groups; phoneWorkspace.update(); drawWorking();
+      sessionGroups = groups; runningApps = apps; phoneWorkspace.update(); drawWorking();
       bodies.services.replaceChildren(...(apps.length ? apps.map(app => {
         const group = groups.find(g => g.project.id === app.project_id), session = group?.sessions.find(s => s.id === app.session_id);
         return el('button', { class: 'dashboard-row forge-running-service', 'data-app-session': app.session_id,
@@ -288,7 +291,7 @@ export function render(container, tabId, options = {}) {
   }
   message.onkeydown = event => { if (shouldSendOnEnter(event)) { event.preventDefault(); composer.requestSubmit(); } };
   phoneWorkspace = mountMobileForge({ page, composer, banner, toolbar: page.querySelector('.forge-toolbar'), grid, hint,
-    getState: () => { const project = projects.find(p => p.id === projectSelect?.value); return { projects, project, models, location: isolationSelect, sessions: sessionGroups.find(g => g.project.id === project?.id)?.sessions || [] }; },
+    getState: () => { const project = projects.find(p => p.id === projectSelect?.value); return { projects, project, models, apps: runningApps, location: isolationSelect, sessions: sessionGroups.find(g => g.project.id === project?.id)?.sessions || [] }; },
     pickProject: id => { if (!projectSelect) return; projectSelect.value = id; lifespanSelect.value = id; locationChanged(); lifespan(); }, refresh: refreshActivity, initialPage: options.mobilePage, overview: wantsOverview(options) });
   composer.addEventListener('change', phoneWorkspace.update);
   load();

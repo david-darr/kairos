@@ -278,6 +278,12 @@ module.exports = async function tabBarChecks(c) {
   await geometry('Forge Home', H, 12, W);
   const forgeClear = await clearsBar();
   ok(!forgeClear.last || forgeClear.last.b <= forgeClear.barTop + 0.5, 'Forge Home content scrolls clear of the bar: ' + JSON.stringify(forgeClear));
+  // Mobile v2 keeps the original dashboard in a disclosure. Its expanded
+  // cards must have the same clearance as the default overview.
+  await js("document.querySelector('.mf-dashboard-extra').open = true");
+  const expandedForgeClear = await clearsBar();
+  ok(!expandedForgeClear.last || expandedForgeClear.last.b <= expandedForgeClear.barTop + 0.5, 'Expanded Forge Home content scrolls clear of the bar: ' + JSON.stringify(expandedForgeClear));
+  await js("document.querySelector('.mf-dashboard-extra').open = false");
   await tap('new'); await waitFor("!!document.querySelector('.mf-project') && document.getElementById('mf-tab-0').getAttribute('aria-selected') === 'true'"); await barShown();
   eq(await barCurrent(), 'new', 'New opens the project New page');
   ok(await js("document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom <= document.querySelector('.ms-tabbar').getBoundingClientRect().top - 8"), 'The Forge composer sits above the bar');

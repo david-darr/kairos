@@ -4,7 +4,9 @@ import { mountPager } from './mobilePager.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { attachActivity, refreshActivity } from './mobileActivity.js';
 import { mountForgeSessions } from './mobileForgeSessions.js';
-import { diffCounts, changeTotals } from './forgeUi.js';
+import { emptyState, dotMatrix } from './kairosParts.js';
+import { createMascot } from './mascot.js';
+import { sessionStatus, diffCounts, changeTotals } from './forgeUi.js';
 import { watchKeyboard } from './mobileDock.js';
 import { ICONS } from './icons.js';
 
@@ -17,27 +19,29 @@ export const wantsOverview = (options = {}) => options.mobilePage == null && !op
 // Own only phone arrangement. All moved controls keep their handlers and state.
 export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, getState, pickProject, refresh, initialPage, overview = false }) {
   if (initialPage != null) lastPage = initialPage;
-  let metaVersion = 0;
+  let metaVersion = 0, boardSignature;
   let shell, pager, history, sheet, detachActivity, keyboard, newSession, homes = [];
   const move = (node, target) => { const home = document.createComment('Forge desktop home'); node.before(home); homes.push([node, home]); target.append(node); };
   function projects(opener) {
     const body = el('div', { class: 'mf-projects' });
+    const addProject = () => { sheet.close(); document.querySelector('#nav .forge-project-section > header button')?.forgeProjectActions?.(opener); };
     const search = el('input', { type: 'search', placeholder: 'Search projects', 'aria-label': 'Search projects' });
     const list = el('div');
     const draw = () => {
       list.replaceChildren();
       for (const project of getState().projects.filter(p => p.name.toLowerCase().includes(search.value.toLowerCase()))) {
         const source = [...document.querySelectorAll('#nav [data-forge-project]')].find(n => n.dataset.forgeProject === project.id);
-        const pick = button(project.name, () => { pickProject(project.id); update(); sheet.close(); });
+        const pick = button('', () => { pickProject(project.id); update(); sheet.close(); });
+        pick.append(el('strong', { text: project.name }), el('small', { text: project.path || '' }));
         pick.setAttribute('aria-pressed', String(project.id === getState().project?.id)); pick.title = project.path;
         const actions = button('...', () => { sheet.close(); source?.forgeProjectActions?.(opener); });
         actions.setAttribute('aria-label', `Project actions for ${project.name}`);
         list.append(el('div', { class: 'mf-project-row' }, [pick, actions]));
       }
-      if (!list.childElementCount) list.append(el('p', { text: 'No projects match.' }));
+      if (!list.childElementCount) list.append(emptyState({ title: 'No projects match.', text: 'Try another name or add a project.', action: { text: 'Add project', onClick: addProject } }));
     };
     search.oninput = draw; draw();
-    body.append(search, list, button('Add project', () => { sheet.close(); document.querySelector('#nav .forge-project-section > header button')?.forgeProjectActions?.(opener); }));
+    body.append(search, list, button('Add project', addProject, 'rd-pill rd-pill-primary'));
     sheet = openMobileSheet({ title: 'Projects', content: body, opener, fullHeight: true });
   }
   function workspace(opener) {
@@ -59,28 +63,37 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
   }
   // Home: the desktop dashboard's toolbar (Customize) and cards, moved into a phone page.
   function enableOverview() {
+    boardSignature = null;
     shell = el('section', { class: 'ms-shell mf-dashboard', 'aria-label': 'Forge overview' });
-    // The title sits on the top row on the right, like every phone tab; New session joins Customize on the toolbar.
-    newSession = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'ms-settings ms-glass mf-dashboard-new');
+    newSession = button('', () => go('forgeHome', { projectId: getState().project?.id, mobilePage: 0 }), 'mf-icon mf-dashboard-new');
     newSession.innerHTML = ICONS.plus; newSession.setAttribute('aria-label', 'New session');
-    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [el('h1', { class: 'mf-dashboard-title', text: 'Forge Home' })])]);
+    const projectButton = button('', () => projects(projectButton), 'mf-icon mf-project-trigger');
+    projectButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h6l2 2h8v10H4z"/></svg>';
+    projectButton.setAttribute('aria-label', 'Switch project');
+    const header = el('header', { class: 'ms-header' }, [el('div', { class: 'ms-header-row' }, [
+      el('div', { class: 'mf-title-copy' }, [el('small', { text: 'Forge' }), el('h1', { class: 'mf-dashboard-title' })]), projectButton, newSession])]);
     const body = el('div', { class: 'mf-dashboard-body mf-overview' });
-    shell.append(header, body); page.prepend(shell);
-    move(banner, shell); banner.classList.add('ms-background'); move(toolbar, body); move(grid, body); toolbar.append(newSession);
+    const board = el('div', { class: 'mf-board rd-stagger' });
+    const extra = el('details', { class: 'mf-dashboard-extra' }, [el('summary', { text: 'Dashboard & repository details' })]);
+    body.append(board, extra); shell.append(header, body); page.prepend(shell);
+    move(banner, shell); banner.classList.add('ms-background'); move(toolbar, extra); move(grid, extra);
     page.classList.add('mf-home');
   }
   function enable() {
-    if (overview) { enableOverview(); return; }
+    if (overview) { enableOverview(); update(); return; }
     shell = el('section', { class: 'ms-shell mf-project', 'aria-label': 'Forge project' });
     const projectButton = button('Projects', () => projects(projectButton)); projectButton.classList.add('mf-project-trigger');
     const tabs = [button('New', () => {}, 'ms-segment'), button('Sessions', () => {}, 'ms-segment')];
     const switcher = el('div', { class: 'ms-switch ms-glass', role: 'tablist', 'aria-label': 'Forge pages' }, [el('span', { class: 'ms-switch-thumb', 'aria-hidden': 'true' }), ...tabs]);
     const line = button('', () => workspace(line), 'mf-workspace-line');
-    const header = el('header', { class: 'ms-header' }, [edgeBlur('top'), el('div', { class: 'ms-header-row' }, [switcher, projectButton]), line]);
+    const homeButton = button('', () => go('forgeHome'), 'mf-icon mf-home-trigger');
+    homeButton.innerHTML = ICONS.home; homeButton.setAttribute('aria-label', 'Back to Forge Home');
+    const header = el('header', { class: 'ms-header' }, [el('div', { class: 'ms-header-row' }, [el('h1', { class: 'mf-page-title', text: 'New session' }), homeButton]), switcher, line, projectButton]);
     const launch = el('section', { class: 'ms-page ms-launch', role: 'tabpanel', id: 'mf-new' });
     const sessionsPage = el('section', { class: 'ms-page ms-history', role: 'tabpanel', id: 'mf-sessions' });
     tabs.forEach((tab, i) => { tab.setAttribute('role', 'tab'); tab.id = `mf-tab-${i}`; tab.setAttribute('aria-controls', i ? 'mf-sessions' : 'mf-new'); [launch, sessionsPage][i].setAttribute('aria-labelledby', tab.id); });
     const mark = el('div', { class: 'mf-mark', 'aria-hidden': 'true' });
+    if (document.documentElement.dataset.mascot !== 'off') mark.append(createMascot({ state: 'idle', size: 84, decorative: true }));
     const caption = el('p', { class: 'mf-project-caption' });
     launch.append(el('div', { class: 'ms-intro' }, [mark, el('h1', { text: 'What should we work on?' }), caption]));
     const bottom = el('div', { class: 'ms-launch-bottom' }), activity = el('div', { class: 'ms-activity-slot' }); bottom.append(activity); launch.append(bottom);
@@ -88,7 +101,7 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     shell.append(header, el('div', { class: 'ms-page-window' }, [track])); page.prepend(shell);
     move(banner, shell); banner.classList.add('ms-background'); move(composer, bottom); move(hint, bottom);
     page.classList.add('mf-home');
-    pager = mountPager(shell, [launch, sessionsPage], tabs, lastPage, index => { lastPage = index; });
+    pager = mountPager(shell, [launch, sessionsPage], tabs, lastPage, index => { lastPage = index; shell.dataset.forgePage = String(index); shell.querySelector('.mf-page-title').textContent = index ? 'Sessions' : 'New session'; });
     // As on the Chats launch: the shell fills the page and the keyboard lift pads its bottom.
     keyboard = watchKeyboard(shell);
     history = mountForgeSessions(sessionsPage); detachActivity = attachActivity(activity, item => getState().sessions.some(s => s.id === item.sessionId)); update();
@@ -104,13 +117,50 @@ export function mountMobileForge({ page, composer, banner, toolbar, grid, hint, 
     await Promise.allSettled(sessions.filter(s => !s.forge.removed).map(async s => { s._changes = (await api(`/api/forge/sessions/${encodeURIComponent(s.id)}/changes`)).files; }));
     if (version === metaVersion && shell) paint();
   }
-  function update(refreshCounts = true) { paint(); if (shell && refreshCounts && !overview) loadCounts(); }
+  function update(refreshCounts = true) { paint(); if (shell && refreshCounts) loadCounts(); }
   function paint() {
     if (!shell) return;
     const { project, sessions, models, location } = getState();
     if (project) lastProject = project.id;
-    if (overview) return;
-    shell.querySelector('.mf-mark').textContent = project?.name.slice(0, 1).toUpperCase() || 'K';
+    if (overview) {
+      shell.querySelector('.mf-dashboard-title').textContent = project?.name || 'Forge Home';
+      const board = shell.querySelector('.mf-board');
+      const signature = JSON.stringify([project, sessions.map(s => [s.id, s.title, s.forge, s.model_endpoint_id, s.model_override, s._changes, sessionStatus(s)]), models, getState().apps]);
+      if (signature === boardSignature) return;
+      boardSignature = signature;
+      const summary = project?.git, days = summary?.activity;
+      const files = sessions.filter(s => !s.forge.removed && s.forge.isolation === 'in_place').slice(0, 1).flatMap(s => s._changes || []);
+      const checkout = sessions.find(s => !s.forge.removed && s.forge.isolation === 'in_place');
+      const branch = button('', () => workspace(branch), 'mf-workspace-line');
+      const branchIcon = el('span', { class: 'mf-branch-icon', 'aria-hidden': 'true' });
+      branchIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>';
+      branch.append(branchIcon, el('span', { text: `${summary?.branch || 'Current checkout'}${checkout?._changes ? ` \u00b7 ${files.length} files` : ''}` }));
+      if (checkout?._changes) branch.append(diffCounts(changeTotals(files)));
+      board.replaceChildren(branch);
+      if (!project) { board.append(emptyState({ title: 'Choose a project', text: 'Open a project to start building.', action: { text: 'Projects', onClick: event => projects(event.currentTarget) } })); return; }
+      const working = sessions.filter(s => !s.forge.removed && ['approval', 'working'].includes(sessionStatus(s).key)).sort((a, b) => sessionStatus(a).rank - sessionStatus(b).rank);
+      const workingCount = working.filter(s => sessionStatus(s).key === 'working').length;
+      if (days?.length) {
+        const total = days.reduce((n, d) => n + d.commits, 0), max = Math.max(1, ...days.map(d => d.commits));
+        board.append(el('section', { class: 'mf-activity mf-card' }, [el('div', { class: 'mf-activity-heading' }, [
+          el('div', {}, [el('small', { text: `Commits, last ${days.length} days` }), el('strong', { text: String(total) })]),
+          el('span', { class: 'mf-working-pill', text: `${workingCount} session${workingCount === 1 ? '' : 's'} working` })]),
+          dotMatrix({ rows: 1, cols: days.length, cells: days.map(d => !d.commits ? 'empty' : d.commits / max > .5 ? 'a' : 'dim'), label: days.map(d => `${d.date}: ${d.commits} commits`).join(', ') })]));
+      }
+      const all = button('See all', () => go('forgeHome', { projectId: project.id, mobilePage: 1 }), 'mf-see-all');
+      const rows = el('div', { class: 'mf-card mf-working-list rd-stagger' });
+      for (const session of working) {
+        const status = sessionStatus(session), model = session.model_override || models.find(m => m.id === session.model_endpoint_id)?.name;
+        rows.append(button('', () => go('forgeShell', { sessionId: session.id }), `mf-working-row mf-status-${status.key}`));
+        rows.lastChild.append(el('span', { class: 'mf-status-dot', 'aria-hidden': 'true' }), el('span', { class: 'mf-working-copy' }, [el('strong', { text: session.title }), el('small', { text: [session.forge.branch || 'In place', model].filter(Boolean).join(' · ') })]), el('small', { text: status.key === 'approval' ? 'Needs you' : 'Working' }));
+      }
+      board.append(el('section', { class: 'mf-working-section' }, [el('header', {}, [el('h2', { text: working.some(s => sessionStatus(s).key === 'approval') ? 'Needs you & working' : 'Working now' }), all]), working.length ? rows : emptyState({ title: 'Ready to build', text: 'No Forge sessions running.', action: { text: 'New session', onClick: () => newSession.click() } })]));
+      const services = getState().apps?.filter(app => app.project_id === project.id);
+      const stats = el('div', { class: 'mf-summary-grid' });
+      if (services) stats.append(el('section', { class: 'mf-card' }, [el('small', { text: 'Running services' }), el('strong', { text: String(services.length) }), ...services.map(app => button(`:${app.port} preview`, () => go('forgeShell', { sessionId: app.session_id, previewSessionId: app.session_id }), 'mf-service-link'))]));
+      if (summary?.lifespan) stats.append(el('section', { class: 'mf-card' }, [el('small', { text: 'Repo age' }), el('strong', { text: `${summary.lifespan.age_days} days` }), el('small', { text: summary.lifespan.first_commit ? 'since first commit' : 'No commits yet' })]));
+      board.append(stats); return;
+    }
     shell.querySelector('.mf-project-caption').textContent = project?.name || 'Choose a project';
     const files = location?.value === 'new_worktree' ? [] : sessions.filter(s => !s.forge.removed && s.forge.isolation === 'in_place').slice(0, 1).flatMap(s => s._changes || []);
     shell.querySelector('.mf-workspace-line').replaceChildren(el('span', { text: `${location?.value === 'new_worktree' ? 'New worktree' : project?.git?.branch || 'Current checkout'} · ${files.length} files` }), diffCounts(changeTotals(files)));

@@ -71,8 +71,10 @@ export function mountMobileForgeSession(shell, bridge) {
     if (mobileOn() && !header) {
       header = el('header', { class: 'mf-session-header' });
       const changes = button('Changes', () => tool('git'), 'mf-changes ms-glass');
-      const more = button('...', () => menu(more)); more.setAttribute('aria-label', 'Session actions');
-      const backButton = button('Back', back); backButton.classList.add('mf-back');
+      const more = button('', () => menu(more)); more.setAttribute('aria-label', 'Session actions');
+      more.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+      const backButton = button('', back); backButton.classList.add('mf-back'); backButton.setAttribute('aria-label', 'Back');
+      backButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>';
       header.append(edgeBlur('top'), backButton, el('div', { class: 'mf-session-heading' }, [el('strong'), el('small')]), changes, more); shell.prepend(header); const status = bridge.status; statusHome = document.createComment('Forge status home'); status.before(statusHome); header.after(status); update();
     } else if (!mobileOn() && header) { sheet?.close(); statusHome?.after(bridge.status); statusHome?.remove(); header.remove(); header = null; }
   };
