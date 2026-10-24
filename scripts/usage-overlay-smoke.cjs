@@ -15,6 +15,11 @@ app.setPath('userData', path.join(root, 'data', 'usage-overlay-smoke-profile'));
 const output = path.join(root, 'data', 'usage-overlay-review');
 const now = Date.now() / 1000;
 let claudeStatus = 'ok';
+let liveRuns = {};
+// Four agents, as on the v2 boards, so the notch's dots, chips and rail have something to show.
+let agents = [];
+const BOARD_AGENTS = [['scout', 'Scout', '#B9D2E3'], ['quill', 'Quill', '#E9C9A8'], ['atlas', 'Atlas', '#B8C9A6'], ['sol', 'Sol', '#D9B260']]
+  .map(([id, name, color]) => ({ id, name, color, status: 'idle' }));
 const refreshes = [];
 function quota() {
   const claude = claudeStatus === 'needs_sign_in'
@@ -34,6 +39,8 @@ const files = {
   '/static/js/usage-overlay.js': ['static/js/usage-overlay.js', 'text/javascript'],
   '/static/js/quotaReadings.js': ['static/js/quotaReadings.js', 'text/javascript'],
 };
+for (const name of ['notchShell', 'activityModel', 'chatStream', 'mascot', 'agentAvatar', 'dither', 'kip']) files[`/static/js/${name}.js`] = [`static/js/${name}.js`, 'text/javascript'];
+for (const name of ['kairos-theme', 'mascot']) files[`/static/css/${name}.css`] = [`static/css/${name}.css`, 'text/css'];
 const server = http.createServer((req, res) => {
   if (req.url === '/api/models/quotas' || req.url === '/api/models/quotas/refresh') {
     if (req.method === 'POST') {
@@ -44,6 +51,13 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(quota()));
     return;
+  }
+  if (req.url === '/api/chat/live/events') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"type":"snapshot","runs":{}}\n\n'); return; }
+  if (req.url === '/api/chat/live/snapshot') {
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ runs: liveRuns })); return;
+  }
+  if (req.url === '/api/auth/status' || req.url === '/api/agents' || req.url === '/api/agents/inbox' || req.url === '/api/triggers' || req.url === '/api/notifications') {
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agents' ? agents : { runs: {}, username: 'local' })); return;
   }
   const markMatch = /^\/static\/img\/model-marks\/([a-z0-9-]+\.svg)$/.exec(req.url);
   if (markMatch) {
@@ -181,6 +195,49 @@ async function run() {
     fs.writeFileSync(path.join(output, `edge-${edge}.png`), (await win.webContents.capturePage()).toPNG());
     await move(-1, -1);
   }
+
+  // Phase-1 shell: collapsed and expanded geometry at renderer scale factors.
+  for (const zoom of [1, 1.25, 1.5]) {
+    win.webContents.setZoomFactor(zoom); win.setContentSize(Math.round(860 * zoom), Math.round(440 * zoom));
+    win.webContents.send('usage-overlay:config', { edge: 'top-centre', foldOnHover: false });
+    await waitFor("document.body.dataset.edge === 'top-centre'");
+    await move(-1, -1); await delay(550);
+    const size = () => js("(r => [Math.round(r.width), Math.round(r.height), Math.round(r.top), Math.round(r.left + r.width / 2)])(document.getElementById('notch-shell').getBoundingClientRect())");
+    // Collapsed (NotchCollapsed): 40 DIP tall, as wide as its contents, centred and flush with the top.
+    const collapsed = async () => { const [w, h, t, c] = await size(); assert.ok(h === 40 && t === 0 && w >= 120 && w <= 480 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'collapsed ' + JSON.stringify([w, h, t, c, await js('[innerWidth, document.getElementById("notch-usage").outerHTML.slice(0,300), document.getElementById("notch-shell").dataset.state, document.getElementById("pill").dataset.cells]')])); };
+    await collapsed();
+    fs.writeFileSync(path.join(output, `notch-collapsed-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
+    await move(430, 15); await delay(450);
+    // Expanded (NotchWorking): 820 DIP wide; the status row and the cards set the height.
+    { const [w, h, t, c] = await size(); assert.ok(w === 820 && h >= 150 && h <= 220 && t === 0 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'expanded ' + JSON.stringify([w, h, t, c])); }
+    fs.writeFileSync(path.join(output, `notch-expanded-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
+    await move(-1, -1); await delay(550);
+    assert.equal(interactive.at(-1), false, 'outside notch is click-through');
+    await collapsed();
+  }
+  win.webContents.setZoomFactor(1);
+
+  // Feed the real activity model through the stub snapshot, with no backend work.
+  win.setContentSize(860, 440);
+  const shot = async name => { await delay(400); fs.writeFileSync(path.join(output, name), (await win.webContents.capturePage()).toPNG()); };
+  const both = async name => { await move(-1, -1); await delay(450); await shot(`${name}-collapsed.png`); await move(430, 15); await delay(450); await shot(`${name}-expanded-light.png`);
+    // A dark Appearance theme: the boards themselves.
+    await js("document.body.classList.remove('notch-light')"); await shot(`${name}-expanded-dark.png`); await js("document.body.classList.add('notch-light')"); };
+  // Resting with the board's four agents: the rings, the dots and four resting chips.
+  agents = BOARD_AGENTS.map(agent => ({ ...agent }));
+  await delay(15500); // the notch's agent poll
+  await both('notch-resting');
+  liveRuns = { 'smoke-chat': { status: 'processing', sessionTitle: 'Drafting the Q4 summary', text: 'Working', revision: 1 } };
+  await js("import('/static/js/chatStream.js').then(stream => stream.sync())");
+  await waitFor("document.getElementById('notch-shell').dataset.state === 'thinking'");
+  assert.equal(await js("document.getElementById('notch-status').textContent"), 'Drafting the Q4 summary', 'the current line reads inline');
+  await both('notch-working');
+  liveRuns['smoke-chat'] = { ...liveRuns['smoke-chat'], permission: { id: 'smoke-approval' }, revision: 2 };
+  await js("import('/static/js/chatStream.js').then(stream => stream.sync())");
+  await waitFor("document.getElementById('notch-shell').dataset.state === 'needs'");
+  assert.equal(await js("document.querySelector('#notch-signal .n-count')?.textContent"), '1', 'a count appears when something needs you');
+  await both('notch-needs-you');
+  liveRuns = {}; agents = [];
 
   // Nothing the page renders may come from a script-capable source.
   assert.equal(await js("document.querySelectorAll('#card script, #card img, #card iframe').length"), 0);

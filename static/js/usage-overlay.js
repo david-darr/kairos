@@ -68,7 +68,7 @@ function renderRing() {
   if (pill.dataset.cells !== want) {
     pill.innerHTML = ps.map((p, i) => `<div class="cell" data-p="${p.id}" style="--i:${i}">
       <div class="ringwrap"><svg class="ring" viewBox="0 0 56 56"></svg><svg class="reading" viewBox="0 0 56 56"></svg><svg class="activity" viewBox="0 0 56 56"></svg><div class="glyph">${markHtml(p.mark)}</div></div>
-      <div class="pct">—</div></div>`).join('');
+      <span class="provider-label">${esc(p.name)}</span><div class="pct">—</div></div>`).join('');
     pill.dataset.cells = want;
   }
   for (const p of ps) {
@@ -93,6 +93,7 @@ function renderRing() {
     glyph.classList.toggle('dim', !!(h && h.used >= 1));
     wrap.classList.toggle('stale', staleOf(p.snap));
   }
+  notchShell?.readings(ps);
   updateInteractive();
 }
 
@@ -125,6 +126,13 @@ function edgeIsVertical() { return notchEdge === 'left' || notchEdge === 'right'
 // it is centred on the cell's height; lying flat, on its width, and pushed clear
 // of the pill with the tail spanning the 30 px gap.
 function placeCard() {
+  if (notchEdge === 'top-centre') {
+    // Under the notch, right-aligned with the hovered reading in the status row.
+    const shell = document.getElementById('notch-shell').getBoundingClientRect();
+    const word = document.querySelector(`#notch-readings [data-p="${hoverId}"]`)?.getBoundingClientRect() || shell;
+    card.style.left = Math.round(Math.max(8, Math.min(innerWidth - 254, word.right - 246))) + 'px';
+    card.style.top = Math.round(shell.bottom + 8) + 'px'; return;
+  }
   const cell = pill.querySelector(`.cell[data-p="${hoverId}"]`) || pill;
   const cr = cell.getBoundingClientRect();
   const rr = (cell.querySelector('.ringwrap') || cell).getBoundingClientRect();
@@ -160,10 +168,12 @@ function scheduleHide() { if (hideTimer === null) hideTimer = setTimeout(hideCar
 
 function inRect(x, y, r, pad) { return x >= r.left - pad && y >= r.top - pad && x < r.right + pad && y < r.bottom + pad; }
 function cellAt(x, y) {
-  for (const el of pill.querySelectorAll('.cell')) { if (inRect(x, y, el.getBoundingClientRect(), 6)) return el.dataset.p; }
+  const cells = notchEdge === 'top-centre' ? document.querySelectorAll('#notch-readings [data-p]') : pill.querySelectorAll('.cell');
+  for (const el of cells) { if (inRect(x, y, el.getBoundingClientRect(), 6)) return el.dataset.p; }
   return null;
 }
 function pointerInHot(x, y) {
+  if (notchEdge === 'top-centre') return notchShell?.hot(x, y) || false;
   const p = pill.getBoundingClientRect();
   if (inRect(x, y, p, 4)) return true;
   if (!card.classList.contains('show')) return false;
@@ -183,13 +193,14 @@ function wakeHit(x, y) {
   const r = document.getElementById('rest').getBoundingClientRect();
   // Deepened into the screen from whichever edge the notch is on
   const band = notchEdge === 'left' ? { left: r.left, top: r.top, right: r.right + WAKE_BAND, bottom: r.bottom }
-    : notchEdge === 'top' ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom + WAKE_BAND }
+    : (notchEdge === 'top' || notchEdge === 'top-centre') ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom + WAKE_BAND }
     : notchEdge === 'bottom' ? { left: r.left, top: r.top - WAKE_BAND, right: r.right, bottom: r.bottom }
     : { left: r.left - WAKE_BAND, top: r.top, right: r.right, bottom: r.bottom };
   return inRect(x, y, band, 0);
 }
 function overNotch(x, y) {
   if (x == null) return false;
+  if (notchEdge === 'top-centre') return notchShell?.hot(x, y) || false;
   if (folded) return wakeHit(x, y);
   return pointerInHot(x, y) || !!onHandle(x, y);
 }
@@ -247,6 +258,8 @@ function put(el, x, y) {
   return { x, y, reach: HANDLE_REACH };
 }
 function placeHandles() {
+  // The top-centre notch has its own Settings button and does not move along its edge.
+  if (notchEdge === 'top-centre') { orbAt = moveAt = null; orb.classList.remove('placed'); moveHandle.classList.remove('placed'); return true; }
   const r = pill.getBoundingClientRect();
   if (!r.width) return false;
   const R = parseFloat(getComputedStyle(pill).getPropertyValue('--fillet')) || 38.7;
@@ -303,6 +316,16 @@ let press = null;
 function pointerMoved(e) {
   lastPointer = { x: e.clientX, y: e.clientY };
   if (carrying) { bridge.moveTo && bridge.moveTo(); return; }
+  if (notchEdge === 'top-centre') {
+    const hot = notchShell?.pointer(e.clientX, e.clientY) || false;
+    pointerIn = hot;
+    if (hot && folded) unfold();
+    if (!hot) scheduleFold(); else cancelFold();
+    setHovered(notchShell?.isExpanded() ? onHandle(e.clientX, e.clientY) : null);
+    const id = cellAt(e.clientX, e.clientY);
+    if (id && notchShell?.isExpanded()) { hoverId = id; showCard(); } else if (!inRect(e.clientX, e.clientY, card.getBoundingClientRect(), 0)) scheduleHide();
+    updateInteractive(); return;
+  }
   const over = overNotch(e.clientX, e.clientY);
   if (over && folded) { pointerIn = true; unfold(); }
   pointerIn = over || pointerInHot(e.clientX, e.clientY);
@@ -341,7 +364,7 @@ orb.addEventListener('click', e => {
   if (!near(orbAt, e.clientX, e.clientY)) return;
   orb.style.setProperty('--spins', ++orbSpins);
   pressIn(orb);
-  bridge.openApp && bridge.openApp();
+  bridge.openApp && bridge.openApp(notchEdge === 'top-centre' ? 'settings' : 'home');
 });
 moveHandle.addEventListener('mousedown', e => {
   if (e.button !== 0 || !near(moveAt, e.clientX, e.clientY)) return;
@@ -356,15 +379,23 @@ moveHandle.addEventListener('mousedown', e => {
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ---- Edge and settings, from the main process --------------------------------- */
-let notchEdge = 'right';
-function applyConfig(config) {
+let notchEdge = 'right', notchShell = null, configRevision = 0;
+async function applyConfig(config) {
+  const revision = ++configRevision;
   // Changing displays/edges cancels the main process drag as well.
   carrying = false;
   moveHandle.classList.remove('armed');
   setHovered(null);
   cancelFold();
-  const edge = config && ['left', 'top', 'bottom'].includes(config.edge) ? config.edge : 'right';
+  const edge = config && ['left', 'top', 'bottom', 'top-centre'].includes(config.edge) ? config.edge : 'right';
+  if (edge === 'top-centre' && !notchShell) {
+    const { createNotchShell } = await import('./notchShell.js');
+    if (revision !== configRevision) return;
+    notchShell = createNotchShell({ pill, card, bridge, hideCard, renderRing });
+    renderRing(); // the shell exists only now, so hand it the readings already on hand
+  }
   notchEdge = edge;
+  notchShell?.reset();
   document.body.dataset.edge = edge;
   onHover = !(config && config.foldOnHover === false);
   if (!onHover) setFolded(false); else if (!pointerIn) setFolded(true);
@@ -377,7 +408,7 @@ Promise.resolve(bridge.getConfig ? bridge.getConfig() : null).then(applyConfig).
 async function refresh() {
   try {
     const response = await fetch('/api/models/quotas', { credentials: 'same-origin', cache: 'no-store' });
-    if (response.status === 401 || response.status === 403) { notice('Open Kairos and sign in to see usage.'); return; }
+    if (response.status === 401 || response.status === 403) { snaps = {}; renderRing(); hideCard(); return; }
     if (!response.ok) throw new Error('unavailable');
     applyReadings(await response.json());
   } catch {

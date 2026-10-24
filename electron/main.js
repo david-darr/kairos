@@ -100,7 +100,8 @@ const { createBotWindow } = require("./bot-window");
 let botWindow = null;
 let overlayTracking = null;
 const OVERLAY_EDGES = placement.EDGES;
-let overlayConfig = { edge: "right", displayId: null, offset: 0.5, foldOnHover: true };
+const { overlayPreferences } = require("./usage-overlay-preferences");
+let overlayConfig = overlayPreferences();
 let overlayDrag = null;
 
 // Size and position live in electron/usage-overlay-placement.js, pure and tested.
@@ -138,12 +139,7 @@ function loadOverlayPreference() {
   try {
     const saved = JSON.parse(fs.readFileSync(overlayPreferenceFile(), "utf8"));
     usageOverlayVisible = saved.visible === true;
-    overlayConfig = {
-      edge: OVERLAY_EDGES.includes(saved.edge) ? saved.edge : "right",
-      displayId: Number.isFinite(saved.displayId) ? saved.displayId : null,
-      offset: Number.isFinite(saved.offset) ? Math.min(1, Math.max(0, saved.offset)) : 0.5,
-      foldOnHover: saved.foldOnHover !== false,
-    };
+    overlayConfig = overlayPreferences(saved);
   } catch { usageOverlayVisible = false; }
 }
 function overlayBounds() { return placement.boundsFor(overlayConfig, overlayDisplay()); }
@@ -613,7 +609,7 @@ for (const [channel, fn] of [['back', forgePreview.goBack], ['forward', forgePre
 }
 
 function fromOverlayWindow(event) {
-  return !!usageOverlay && !usageOverlay.isDestroyed() && event.sender === usageOverlay.webContents;
+  return !!usageOverlay && !usageOverlay.isDestroyed() && event.sender === usageOverlay.webContents && event.senderFrame === usageOverlay.webContents.mainFrame;
 }
 ipcMain.handle("usage-overlay:state", (event) => fromAppWindow(event) ? overlayState() : { visible: false, supported: false });
 ipcMain.handle("bot-window:state", (event) => (fromAppWindow(event) && botWindow ? botWindow.state() : { visible: false }));
@@ -622,16 +618,16 @@ ipcMain.handle("bot-window:set-visible", (event, visible) =>
 // A desktop notification was clicked: bring the app forward (2026-10-14).
 ipcMain.on("app:show", (event) => { if (fromAppWindow(event)) showWindow(); });
 ipcMain.handle("usage-overlay:set-visible", (event, visible) => {
-  if (!fromAppWindow(event)) return { visible: false, supported: false };
+  if (!fromAppWindow(event) || typeof visible !== "boolean") return { visible: false, supported: false };
   return setUsageOverlayVisible(visible);
 });
 ipcMain.handle("usage-overlay:set-config", (event, changes) => {
-  if (!fromAppWindow(event)) return overlayState();
+  if (!fromAppWindow(event) || !changes || typeof changes !== "object" || Array.isArray(changes)) return overlayState();
   return setOverlayConfig(changes);
 });
 ipcMain.handle("usage-overlay:config", (event) => fromOverlayWindow(event) ? overlayConfig : null);
 ipcMain.on("usage-overlay:interactive", (event, on) => {
-  if (!fromOverlayWindow(event)) return;
+  if (!fromOverlayWindow(event) || typeof on !== "boolean") return;
   if (on) usageOverlay.setIgnoreMouseEvents(false);
   else usageOverlay.setIgnoreMouseEvents(true, { forward: true });
 });
@@ -662,7 +658,11 @@ ipcMain.on("usage-overlay:move-end", (event) => {
 ipcMain.on("usage-overlay:hide", (event) => {
   if (fromOverlayWindow(event)) setUsageOverlayVisible(false).catch(console.error);
 });
-ipcMain.on("usage-overlay:open-app", (event) => { if (fromOverlayWindow(event)) showWindow(); });
+ipcMain.on("usage-overlay:open-app", (event, target = "home") => {
+  if (!fromOverlayWindow(event) || !["home", "chat", "settings"].includes(target)) return;
+  showWindow();
+  mainWindow?.webContents.send("usage-overlay:navigate", target);
+});
 
 ipcMain.handle("google:open-sign-in", async (event, url) => {
   if (!fromAppWindow(event)) return false;

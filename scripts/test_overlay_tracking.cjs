@@ -19,7 +19,7 @@ for (const display of [primary, left, above, rightTaskbar, small]) {
     const b = boundsFor({ edge, offset }, display);
     assert.ok(b.x >= a.x && b.y >= a.y && b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height);
     assert.equal({ left: b.x - a.x, right: a.x + a.width - b.x - b.width,
-      top: b.y - a.y, bottom: a.y + a.height - b.y - b.height }[edge], 0, `${edge} is flush on display ${display.id}`);
+      top: b.y - a.y, bottom: a.y + a.height - b.y - b.height }[edge === 'top-centre' ? 'top' : edge], 0, `${edge} is flush on display ${display.id}`);
     for (const scaleFactor of [1, 1.25, 1.5, 1.75, 2]) {
       assert.deepEqual(boundsFor({ edge, offset }, { ...display, scaleFactor }), b, 'scaleFactor never multiplies screen DIPs');
     }
@@ -153,3 +153,18 @@ async function rendererChecks() {
   console.log('PASS: actual renderer native hover, stationary recovery, repeated samples, grace timers and click-through');
 }
 rendererChecks().catch(error => { console.error(error); process.exitCode = 1; });
+
+// Default/migration and top-centre placement on negative and inset work areas.
+const { overlayPreferences } = require('../electron/usage-overlay-preferences');
+assert.equal(overlayPreferences().edge, 'top-centre');
+for (const edge of ['left', 'right', 'top', 'bottom']) assert.equal(overlayPreferences({ edge }).edge, edge);
+assert.deepEqual(overlayPreferences({ edge: 'left', offset: .2, displayId: 2, foldOnHover: false }),
+  { edge: 'left', offset: .2, displayId: 2, foldOnHover: false });
+for (const display of [primary, left, above, rightTaskbar, small]) {
+  const b = boundsFor({ edge: 'top-centre', offset: .5 }, display), a = display.workArea;
+  assert.equal(b.y, a.y);
+  assert.ok(Math.abs(b.x + b.width / 2 - (a.x + a.width / 2)) <= .5);
+  assert.equal(b.width, Math.min(860, a.width));
+  assert.equal(b.height, Math.min(440, a.height));
+}
+require('./test_notch_shell.cjs');

@@ -594,6 +594,9 @@ async function startApp() {
     const { tab, ...options } = event.detail;
     tab === "settings" ? openSettings(options) : switchTab(tab, options);
   });
+  window.jarvis?.usageOverlay?.onNavigate?.(tab => {
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...(tab === 'settings' ? { section: 'appearance' } : {}) } }));
+  });
   // Adding/removing a tab in the Tool Store rebuilds the nav so it
   // appears immediately instead of after a reload.
   document.addEventListener("jarvis:tabs-changed", async () => {

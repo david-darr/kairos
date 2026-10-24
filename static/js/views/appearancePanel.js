@@ -228,10 +228,10 @@ export function renderAppearancePanel(content, _status, page) {
   const overlay = window.jarvis?.usageOverlay;
   const overlayToggle = toggle({ label: 'Show above other windows' });
   overlayToggle.id = 'usage-overlay-toggle';
-  const overlayNote = el('span', { text: 'A notch at the screen edge showing your Claude Code and Codex account limits. Hidden by default.' });
+  const overlayNote = el('span', { text: 'Kip, activity and Claude Code and Codex account limits at the screen edge. Hidden by default.' });
   // The notch's edge and fold (design from CodeNotch; see static/css/usage-overlay.css)
   const overlayEdge = el('select', { id: 'usage-overlay-edge' }, [
-    el('option', { value: 'right', text: 'Right edge' }), el('option', { value: 'left', text: 'Left edge' }),
+    el('option', { value: 'top-centre', text: 'Top centre (notch)' }), el('option', { value: 'right', text: 'Right edge' }), el('option', { value: 'left', text: 'Left edge' }),
     el('option', { value: 'top', text: 'Top edge' }), el('option', { value: 'bottom', text: 'Bottom edge' })]);
   const overlayDisplay = el('select', { id: 'usage-overlay-display' });
   // Where along the edge: 0 is the top (or left) end, 100 the bottom (or right).
@@ -240,7 +240,7 @@ export function renderAppearancePanel(content, _status, page) {
   const overlayFold = toggle({ label: 'Fold to a sliver' });
   overlayFold.id = 'usage-overlay-fold';
   const overlaySection = el('div', { class: 'appearance-overlay-setting' }, [
-    group({ title: 'Desktop usage overlay' }, [
+    group({ title: 'The notch' }, [
       row({ title: 'Show above other windows', description: overlayNote, control: overlayToggle }),
       row({ title: 'Monitor', control: overlayDisplay }),
       row({ title: 'Screen edge', control: overlayEdge }),
@@ -253,7 +253,7 @@ export function renderAppearancePanel(content, _status, page) {
       overlayToggle.disabled = !state.supported;
       overlayToggle.checked = !!state.visible;
       overlayEdge.disabled = overlayFold.disabled = overlayDisplay.disabled = overlayOffset.disabled = !state.supported;
-      overlayEdge.value = ['left', 'top', 'bottom'].includes(state.edge) ? state.edge : 'right';
+      overlayEdge.value = ['left', 'top', 'bottom', 'top-centre'].includes(state.edge) ? state.edge : 'right';
       overlayFold.checked = state.foldOnHover !== false;
       // The monitors present right now; a saved one that was unplugged reads as the main display
       const displays = Array.isArray(state.displays) ? state.displays : [];
@@ -261,7 +261,7 @@ export function renderAppearancePanel(content, _status, page) {
         ...displays.map(d => el('option', { value: String(d.id), text: d.label })));
       overlayDisplay.value = displays.some(d => d.id === state.displayId) ? String(state.displayId) : '';
       if (document.activeElement !== overlayOffset) overlayOffset.value = String(Math.round((Number(state.offset) || 0) * 100));
-      offsetLabel.textContent = (state.edge === 'top' || state.edge === 'bottom') ? 'Position along the edge (left to right)' : 'Position along the edge (top to bottom)';
+      offsetLabel.textContent = (state.edge === 'top' || state.edge === 'bottom' || state.edge === 'top-centre') ? 'Position along the edge (left to right)' : 'Position along the edge (top to bottom)';
       if (!state.supported) overlayNote.textContent = 'The desktop overlay is currently available on Windows.';
     };
     overlay.state().then(syncOverlay).catch(() => { overlayNote.textContent = 'Overlay setting unavailable.'; });

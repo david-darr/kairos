@@ -5,7 +5,7 @@
 // All sizes and coordinates are DIPs. scaleFactor is only for display labels;
 // multiplying these rectangles by it would move the notch away from the edge.
 
-const EDGES = ["right", "left", "top", "bottom"];
+const EDGES = ["right", "left", "top", "bottom", "top-centre"];
 
 // CodeNotch's window sizes (notch_window_size in its main.rs): upright it is
 // NOTCH_W wide and NOTCH_LONG tall, room for the 70 px pill and the 246 px
@@ -17,6 +17,8 @@ const NOTCH_LONG = 650;
 function isVertical(edge) { return edge === "left" || edge === "right"; }
 
 function sizeFor(edge) {
+  // The v2 board's 820 DIP expanded notch, its shadow, and the usage card below it.
+  if (edge === "top-centre") return { width: 860, height: 440 };
   return isVertical(edge) ? { width: NOTCH_W, height: NOTCH_LONG } : { width: NOTCH_LONG, height: NOTCH_LONG };
 }
 
@@ -37,6 +39,7 @@ function boundsFor(config, display) {
   const along = (room) => Math.round(Math.max(0, room) * offset);
   switch (edge) {
     case "left": return { x: area.x, y: area.y + along(area.height - height), width, height };
+    case "top-centre":
     case "top": return { x: area.x + along(area.width - width), y: area.y, width, height };
     case "bottom": return { x: area.x + along(area.width - width), y: area.y + area.height - height, width, height };
     default: return { x: area.x + area.width - width, y: area.y + along(area.height - height), width, height };

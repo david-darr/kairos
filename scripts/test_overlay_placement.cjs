@@ -70,5 +70,15 @@ check("unknown values fall back rather than misplace the window", () => {
   assert.deepEqual(p.boundsFor({ edge: "diagonal", offset: 7 }, main), p.boundsFor({ edge: "right", offset: 1 }, main));
 });
 
+check("top-centre uses a top-anchored 860 DIP shell centred in the work area", () => {
+  for (const display of displays) for (const scaleFactor of [1, 1.25, 1.5]) {
+    const b = p.boundsFor({ edge: "top-centre", offset: .5 }, { ...display, scaleFactor });
+    assert.equal(b.y, display.workArea.y);
+    assert.equal(b.width, 860);
+    assert.equal(b.height, 440);
+    assert.ok(Math.abs(b.x + 430 - display.workArea.x - display.workArea.width / 2) <= .5);
+  }
+});
+
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all placement checks passed");
