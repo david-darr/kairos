@@ -282,7 +282,7 @@
   .kairos-redesign .settings-mobile-page .settings-nav { padding: 0 20px 40px; }
   .kairos-redesign .settings-mobile-page .settings-search:not(#_) { min-height: 52px; border-radius: 999px; padding: 0 18px; font-size: 15px; margin: 0 0 4px; }
   .kairos-redesign .settings-mobile-page .settings-nav-group { padding: 16px 6px 8px; font-size: 11px; letter-spacing: .16em; text-shadow: none; }
-  .kairos-redesign .settings-mobile-page .settings-nav-block { padding: 2px 14px; border-radius: 26px; background: var(--rd-surface-solid); }
+  .kairos-redesign .settings-mobile-page .settings-nav-block { padding: 2px 14px; border-radius: 24px; background: var(--rd-surface-solid); }
   .kairos-redesign .settings-mobile-page .settings-nav-item { min-height: 56px; padding: 0; gap: 12px; }
   .kairos-redesign .settings-mobile-page .settings-nav-icon { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border-radius: 12px; border: 1px solid var(--rd-line); background: var(--rd-ground); color: var(--rd-focus); }
   .kairos-redesign .settings-mobile-page .settings-nav-icon svg { display: block; width: 18px; height: 18px; }
@@ -478,3 +478,16 @@
 
 /* The phone list reset must not square off the selected section or its focus ring. */
 .kairos-redesign .settings-nav .settings-nav-item:is(.active, :focus-visible) { border-radius: 14px; }
+/* Board navigation: values belong to phone rows; desktop keeps a flat list. */
+.settings-nav-value { display: none; }
+@media (max-width: 768px) {
+  /* Outrank the shared phone reset, which loads after this stylesheet. */
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav { background: transparent; padding: 0 20px 40px; }
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav-block { padding: 2px 14px; border-radius: 24px; }
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav-item { min-height: 56px; padding: 0; gap: 12px; font-size: 15px; }
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav-item + .settings-nav-item { border-top: 1px solid var(--rd-line); }
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav-item:is(.active, :focus-visible) { border-radius: 14px; }
+  .kairos-redesign .settings-mobile-page[data-view='settings'] .settings-nav-item::after { margin-left: 0; }
+  .kairos-redesign .settings-mobile-page .settings-nav-label { flex: 1; min-width: 0; text-align: left; }
+  .kairos-redesign .settings-mobile-page .settings-nav-value { display: block; flex: none; margin-left: auto; font-size: 12px; color: var(--rd-ink-dim); }
+}

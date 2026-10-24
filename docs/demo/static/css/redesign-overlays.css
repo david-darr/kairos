@@ -290,3 +290,35 @@
   .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-choices .btn.primary { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: var(--rd-primary-bg); }
   .kairos-redesign .permission-dialog:not(.agent-inline-permission) .permission-choices .btn.danger { color: var(--danger); }
 }
+/* Model boards: content-sized card and visible, data-driven effort controls. */
+.model-other-catalog-list, .model-manage-item { display: none; }
+@media (max-width: 768px) {
+  .kairos-redesign .ms-sheet.ms-model-sheet .ms-model-menu { margin-top: 0; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .model-version-section,
+  .kairos-redesign .ms-sheet.ms-model-sheet .model-catalog-list { flex: 0 0 auto; min-height: 0; height: auto; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .ms-model-menu .model-effort-row { display: grid; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .model-effort-btn { min-height: 44px; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .model-connection-item { min-height: 44px; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .model-catalog-item { flex: none; }
+}
+@media (min-width: 769px) {
+  .kairos-redesign .rd-model-picker .rd-connection-has-catalog { display: none; }
+  .kairos-redesign .rd-model-picker .model-other-catalog-list { display: flex; flex: none; flex-direction: column; gap: 2px; }
+  .kairos-redesign .model-picker-menu.rd-model-picker .model-catalog-list { padding: 0; }
+  .kairos-redesign .rd-model-picker .model-other-catalog-item:not(#_) { display: grid; grid-template-columns: 9px minmax(0, 1fr) 16px; gap: 0 12px; align-items: center; }
+  .kairos-redesign .rd-model-picker .model-other-catalog-item::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--rd-line-strong); grid-row: 1 / 3; }
+  .kairos-redesign .rd-model-picker .model-catalog-item:not(#_) { grid-template-columns: 9px minmax(0, 1fr) 16px; }
+  .kairos-redesign .rd-model-picker .model-catalog-item.active::after { content: ''; position: static; grid-column: 3; grid-row: 1 / 3; margin: 0; background: var(--rd-ink); }
+  .kairos-redesign .rd-model-picker .model-catalog-desc { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .kairos-redesign .rd-model-picker .model-manage-item { display: block; order: 1100; padding: 8px 12px 6px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign .design-model-menu.rd-model-picker:not([hidden]) { display: flex; flex-direction: column; }
+}
+@media (max-width: 768px) {
+  .kairos-redesign .ms-model-sheet .ms-model-menu > .model-connection-list { display: none; }
+  .kairos-redesign .ms-model-sheet .ms-provider-tabs { display: flex; padding: 5px; margin-bottom: 16px; border-radius: 999px; background: var(--rd-surface-2); overflow-x: auto; }
+  .kairos-redesign .ms-model-sheet .ms-provider-tabs button { flex: 1 0 auto; min-height: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 14px; }
+  .kairos-redesign .ms-model-sheet .ms-provider-tabs button[aria-selected='true'] { background: var(--rd-surface-solid); color: var(--rd-ink); box-shadow: 0 1px 3px rgba(var(--shade-rgb), .1); }
+  .kairos-redesign .ms-extra-connections { font-size: 13px; color: var(--rd-ink-dim); }
+}
+.kairos-redesign :is(.rd-model-picker, .ms-model-menu) .rd-effort-default { display: none; }
+.kairos-redesign :is(.rd-model-picker, .ms-model-menu) [hidden] { display: none !important; }
