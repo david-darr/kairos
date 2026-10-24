@@ -159,7 +159,8 @@ class Surface {
     matches(selector) { return selector.split(',').some(part => {
       part = part.trim();
       if (part === '[data-model-default="true"]') return this.dataset.modelDefault === 'true';
-      if (part === '[data-mobile-dock]') return !!this.dataset.mobileDock;
+      if (part === '[data-page-search]') return !!this.dataset.pageSearch;
+      if (part === '[data-mobile-row]') return !!this.dataset.mobileRow;
       if (part === '[hidden]') return this.hidden;
       if (part === '[inert]') return this.inert;
       if (part === '[tabindex]') return this.attrs.tabindex !== undefined;
@@ -185,31 +186,83 @@ class Surface {
   doc.createElement = tag => new Element(tag); doc.createComment = () => new Element('#comment');
   context.document = doc;
   const win = new Surface(); win.visualViewport = Object.assign(new Surface(), { height: 500, offsetTop: 20 }); context.window = win;
-  const { dockTabs, keyboardLift, mountMobileDock } = (await load('./mobileDock.js')).namespace;
+  const { keyboardLift, watchKeyboard, mountGitDock } = (await load('./mobileDock.js')).namespace;
   assert.equal(keyboardLift(844, { height: 500, offsetTop: 20 }), 324);
   assert.equal(keyboardLift(500, { height: 600, offsetTop: 0 }), 0);
   assert.equal(keyboardLift(844, null), 0);
   // Sub-pixel visual viewport rounding is not a keyboard (2026-10-21).
   assert.equal(keyboardLift(793, { height: 792.4, offsetTop: 0 }), 0);
-  assert.ok(!dockTabs.includes('agents'), 'Messenger retains its own composer and rail search');
-  assert.ok(!dockTabs.includes('forgeSession'), 'Forge retains its session composer');
-  const view = new Element('section'), toolbar = new Element('div'), searchInput = new Element('input'), create = new Element('button');
-  doc.body.append(view); view.append(toolbar); toolbar.append(searchInput, create);
-  searchInput.dataset.mobileDock = 'search'; searchInput.value = 'retained query'; create.dataset.mobileDock = 'create';
-  let creates = 0, searches = 0; create.addEventListener('click', () => creates++); searchInput.addEventListener('input', () => searches++);
-  const disposeDock = mountMobileDock(view, 'library');
-  const dock = doc.body.querySelector('.ms-dock');
-  assert.equal(dock.querySelector('input'), searchInput, 'The live search node moves without cloning');
+  assert.equal((await load('./mobileDock.js')).namespace.mountMobileDock, undefined, 'Retired dock API is gone');
+  const { mountPageSearch } = (await load('./mobilePageSearch.js')).namespace;
+  const view = new Element('section'), toolbar = new Element('div'), header = new Element('header');
+  header.className = 'view-header'; doc.body.append(view); view.append(header, toolbar);
+  const searchInput = new Element('input'); searchInput.dataset.pageSearch = 'true'; searchInput.value = 'retained query'; toolbar.append(searchInput);
+  let searches = 0; searchInput.addEventListener('input', () => searches++);
+  const disposeSearch = mountPageSearch(view, 'library');
+  assert.equal(header.nextElementSibling.className, 'ms-page-search', 'Search pill is immediately under title');
+  assert.equal(header.nextElementSibling.querySelector('input'), searchInput, 'Native field identity is retained');
   assert.equal(searchInput.value, 'retained query'); searchInput.emit('input'); assert.equal(searches, 1);
-  dock.querySelector('button').click(); assert.equal(creates, 1, 'Dock create delegates exactly once');
-  assert.equal(dock.values['--ms-keyboard'], '324px');
+  assert.equal(doc.body.querySelector('.ms-dock'), null, 'No bottom dock exists');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    enabled = false; shared.phone.emit('change');
+    assert.equal(searchInput.parentNode, toolbar, 'Desktop restores native field');
+    enabled = true; shared.phone.emit('change');
+    assert.equal(searchInput.parentNode, header.nextElementSibling); assert.equal(searchInput.value, 'retained query');
+    assert.equal(view.querySelectorAll('.ms-page-search').length, 1, 'Resize creates one pill');
+  }
+  disposeSearch(); assert.equal(searchInput.parentNode, toolbar);
+  // Vault retains its header while Browse/Map replace the native search host.
+  const disposeSubviewSearch = mountPageSearch(view, 'library');
+  const oldPill = view.querySelector('.ms-page-search');
+  const mapToolbar = new Element('div'), mapSearch = new Element('input');
+  mapSearch.dataset.pageSearch = 'true'; mapToolbar.append(mapSearch);
+  let mapSearches = 0; mapSearch.addEventListener('input', () => mapSearches++);
+  toolbar.remove(); view.append(mapToolbar);
+  for (const observer of mutationObservers.filter(o => o.active)) observer.callback();
+  assert.equal(oldPill.isConnected, false, 'Subview replacement removes stale search pill');
+  assert.equal(searchInput.isConnected, false, 'Removed subview field leaves the page');
+  assert.equal(header.nextElementSibling.querySelector('input'), mapSearch, 'Retained header uses the new subview field');
+  assert.equal(view.querySelectorAll('.ms-page-search').length, 1, 'Subview replacement keeps exactly one pill');
+  mapSearch.value = 'Projects note 4'; mapSearch.emit('input');
+  assert.equal(mapSearches, 1, 'Typing reaches the new subview listener');
+  assert.equal(searches, 1, 'Typing no longer reaches the old subview listener');
   enabled = false; shared.phone.emit('change');
-  assert.equal(searchInput.parentNode, toolbar, 'Desktop restores the original search location'); assert.equal(dock.isConnected, false);
-  enabled = true; shared.phone.emit('change'); assert.equal(searchInput.parentNode, dock);
-  disposeDock(); assert.equal(searchInput.parentNode, toolbar); assert.equal(dock.isConnected, false);
-  assert.equal(mountMobileDock(view, 'agents')(), undefined);
-  const noSearch = new Element('section'), createOnly = new Element('button'); createOnly.dataset.mobileDock = 'create'; noSearch.append(createOnly); doc.body.append(noSearch);
-  const disposeCreateOnly = mountMobileDock(noSearch, 'notes'); assert.equal(doc.body.querySelector('.ms-dock').children.length, 1); disposeCreateOnly();
+  assert.equal(mapSearch.parentNode, mapToolbar, 'Desktop restores search to the new subview');
+  enabled = true; shared.phone.emit('change');
+  const browseSearch = new Element('input'); browseSearch.dataset.pageSearch = 'true'; toolbar.append(browseSearch);
+  mapToolbar.remove(); view.append(toolbar);
+  for (const observer of mutationObservers.filter(o => o.active)) observer.callback();
+  assert.equal(header.nextElementSibling.querySelector('input'), browseSearch, 'Returning to Browse mounts its new native search under the retained title');
+  assert.equal(mapSearch.isConnected, false, 'Map field leaves with its subview');
+  assert.equal(view.querySelectorAll('.ms-page-search').length, 1, 'Return transition also keeps exactly one pill');
+  disposeSubviewSearch(); assert.equal(browseSearch.parentNode, toolbar); browseSearch.remove();
+  for (const tab of ['notes', 'tasks', 'email', 'cookbook']) {
+    searchInput.remove();
+    const row = new Element('div'); row.dataset.mobileRow = 'true'; row.textContent = 'Matching item'; toolbar.append(row);
+    const dispose = mountPageSearch(view, tab), field = view.querySelector('input'), pill = view.querySelector('.ms-page-search');
+    const note = view.querySelector('.ms-page-search-note');
+    field.value = 'matching'; field.emit('input'); assert.equal(row.classList.contains('ms-filtered-out'), false);
+    field.value = 'absent'; field.emit('input'); assert.equal(row.classList.contains('ms-filtered-out'), true);
+    assert.equal(note.hidden, false); assert.ok(note.textContent.includes('absent')); assert.equal(note.parentNode, header.parentNode, 'No-match note lives in page');
+    const replacement = new Element('div'); replacement.dataset.mobileRow = 'true'; replacement.textContent = 'New item'; row.remove(); toolbar.append(replacement);
+    for (const observer of mutationObservers.filter(o => o.active)) observer.callback();
+    assert.equal(field.value, 'absent', 'Query survives row refresh'); assert.equal(replacement.classList.contains('ms-filtered-out'), true, 'Refresh reapplies query');
+    assert.equal(view.querySelectorAll('.ms-page-search').length, 1);
+    field.value = ''; field.emit('input'); assert.equal(replacement.classList.contains('ms-filtered-out'), false); assert.equal(note.hidden, true);
+    field.value = 'new'; field.emit('input');
+    enabled = false; shared.phone.emit('change'); assert.equal(pill.isConnected, false); assert.equal(view.querySelectorAll('.ms-filtered-out').length, 0);
+    enabled = true; shared.phone.emit('change'); assert.equal(view.querySelector('input').value, 'new', 'Phone query survives desktop round trip');
+    dispose(); replacement.remove();
+  }
+  assert.equal(mountPageSearch(view, 'calendar')(), undefined, 'Calendar keeps its existing header controls');
+  const keyboardNode = new Element('div'), unwatch = watchKeyboard(keyboardNode);
+  assert.equal(keyboardNode.values['--ms-keyboard'], '324px'); unwatch(); assert.equal(keyboardNode.values['--ms-keyboard'], undefined);
+  const message = new Element('input'), commit = new Element('button'), push = new Element('button');
+  let commits = 0, pushes = 0; commit.addEventListener('click', () => commits++); push.addEventListener('click', () => pushes++);
+  const disposeLegacyGit = mountGitDock(view, { files: [{ staged: true }], message, commit, push });
+  const gitDock = view.querySelector('.ms-git-dock'); gitDock.querySelector('button').click(); assert.equal(doc.activeElement, message);
+  message.value = 'Fix'; gitDock.querySelector('button').click(); assert.equal(commits, 1); gitDock.querySelectorAll('button')[1].click(); assert.equal(pushes, 1);
+  assert.equal(gitDock.values['--ms-keyboard'], '324px'); disposeLegacyGit(); assert.equal(gitDock.isConnected, false);
   const { composerExpanded, mountMobileComposer } = (await load('./mobileComposer.js')).namespace;
   for (const reason of ['focused', 'draft', 'attachments', 'recording', 'busy']) assert.equal(composerExpanded({ [reason]: true }), true);
   assert.equal(composerExpanded({}), false);
@@ -309,6 +362,14 @@ class Surface {
   assert.match(css, /prefers-reduced-motion: reduce/); assert.match(css, /transition: border-radius 280ms/);
   assert.ok(mutationObservers.every(observer => !observer.active), 'All mounted observers disconnect');
   const source = name => fs.readFileSync(path.join(__dirname, '../static/js', name), 'utf8');
+  for (const dir of ['js', 'css']) {
+    for (const file of fs.readdirSync(path.join(__dirname, '../static', dir), { recursive: true })) {
+      if (!/\.(js|css)$/.test(file)) continue;
+      const text = fs.readFileSync(path.join(__dirname, '../static', dir, file), 'utf8');
+      assert.doesNotMatch(text, /ms-dock(?:[\s.:,>{]|$)|ms-dock-note|ms-has-dock|ms-history-dock|data-mobile-dock|dataset\.mobileDock|mountMobileDock/, 'No retired dock code or styles in ' + file);
+    }
+  }
+
   assert.doesNotMatch(source('app.js'), /registerMobileDrawer/);
   assert.match(source('mobileChrome.js'), /mountTabBar\(\)/);
   assert.doesNotMatch(source('mobileChrome.js') + source('mobileShell.js') + source('mobileForge.js') + source('app.js'), /openTabSheet|ms-avatar|mobile-menu-btn/, 'The avatar and its workspace sheet are gone');
@@ -338,5 +399,5 @@ class Surface {
   assert.doesNotMatch(source('mobileShell.js'), /Your day|touchstart/);
   assert.match(css, /position: fixed; top: 0; left: 0; right: 0; height: calc/);
   assert.match(css, /line-height: 24px; padding-block: 10px/);
-  console.log('PASS: A1-A3 routing/pager; A4 dock delegation, keyboard and restore; A5 input/draft identity; A6 sheet focus/swipe/resize and quota boundaries; A7 grouped geometry and reduced-motion contract; Forge phone Git delegation, commit-sheet drafts and desktop restoration');
+  console.log('PASS: A1-A3 routing/pager; A4 page search/filter persistence, keyboard, Git actions and desktop restore; A5 input/draft identity; A6 sheet focus/swipe/resize and quota boundaries; A7 grouped geometry and reduced-motion contract; Forge phone Git delegation, commit-sheet drafts and desktop restoration');
 })().catch(error => { console.error(error); process.exitCode = 1; });

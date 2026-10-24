@@ -14,7 +14,7 @@ import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { mountMobileChrome } from './mobileChrome.js';
-import { mountMobileDock } from './mobileDock.js';
+import { mountPageSearch } from './mobilePageSearch.js';
 import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 import { hasLeaveGuard, canLeaveView } from './leaveGuard.js';
 
@@ -216,9 +216,9 @@ async function performSwitch(tabId, options = {}) {
       else result();
     }
     if (version === navigationVersion) {
-      const disposeDock = mountMobileDock(nextView, tabId);
+      const disposeSearch = mountPageSearch(nextView, tabId);
       const previousUnmount = activeUnmount;
-      activeUnmount = () => { disposeDock(); previousUnmount?.(); };
+      activeUnmount = () => { disposeSearch(); previousUnmount?.(); };
     }
   } catch (error) {
     if (version !== navigationVersion) return;

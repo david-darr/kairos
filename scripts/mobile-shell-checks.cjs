@@ -42,14 +42,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await waitFor("!!document.querySelector('dialog[aria-label=\"Chat actions\"]')");
   await js("[...document.querySelectorAll('dialog[aria-label=\"Chat actions\"] button')].find(n => n.textContent === 'Search and filter chats').click()");
   assert.equal(await page(), 1, 'Tapping Search and filter chats opens history');
-  assert.ok(await js("document.activeElement.matches('.ms-history-dock input[type=search]')"), 'History search receives focus');
+  assert.ok(await js("document.activeElement.matches('.ms-history-search input[type=search]')"), 'History search receives focus');
   await js("document.getElementById('ms-tab-0').click(); document.querySelector('.ms-header-row button[aria-label=\"Chat actions\"]').focus()");
   await press('Enter', 'Enter', 13);
   await waitFor("!!document.querySelector('dialog[aria-label=\"Chat actions\"]')");
   await js("[...document.querySelectorAll('dialog[aria-label=\"Chat actions\"] button')].find(n => n.textContent === 'Search and filter chats').focus()");
   await press('Enter', 'Enter', 13);
   assert.equal(await page(), 1, 'Keyboard activation opens history');
-  assert.ok(await js("document.activeElement.matches('.ms-history-dock input[type=search]')"), 'Keyboard history access focuses search');
+  assert.ok(await js("document.activeElement.matches('.ms-history-search input[type=search]')"), 'Keyboard history access focuses search');
   await js("document.getElementById('ms-tab-0').click(); document.activeElement?.blur()");
   await delay(450);
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-header-row ~ .ms-switch .ms-segment')].map(n => n.textContent)"), ['New', 'Chats'], 'The original New/Chats switch follows the title row');
@@ -118,19 +118,21 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("document.querySelectorAll('.ms-history-main strong').length"), ids.length);
   assert.ok(await js("[...document.querySelectorAll('.ms-history-age')].every(n => /^(Now|\\d+[mhd]|Working)$/.test(n.textContent))"), 'Rows show an age or Working');
   assert.deepEqual(await small(), [], 'History controls are at least 44px');
-  await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.focus(); s.value = 'week'; s.dispatchEvent(new Event('input')); })()");
+  await js("(() => { const s = document.querySelector('.ms-history-search input'); s.focus(); s.value = 'week'; s.dispatchEvent(new Event('input')); })()");
   await delay(120); assert.equal(await js("document.querySelectorAll('.ms-history-row').length"), ids.length, 'Search is debounced');
   await waitFor("document.querySelectorAll('.ms-history-row').length === 1");
   assert.equal(await js("document.querySelector('.ms-history-main strong').textContent"), 'Planning the week ahead');
-  await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = 'zzzz'; s.dispatchEvent(new Event('input')); })()");
+  await js("(() => { const s = document.querySelector('.ms-history-search input'); s.value = 'zzzz'; s.dispatchEvent(new Event('input')); })()");
   const noMatchingChats = "document.querySelector('.ms-history-list [role=status] h2')?.textContent === 'No matching chats' && document.querySelector('.ms-history-list [role=status] p')?.textContent === 'Try another search or filter.' && document.querySelectorAll('.ms-history-row').length === 0";
   await waitFor(noMatchingChats);
   await capture('shell-chats-no-match');
-  await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
+  await js("(() => { const s = document.querySelector('.ms-history-search input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === " + ids.length);
+  assert.ok(await js("document.querySelectorAll('.ms-history-search').length === 1 && !document.querySelector('.ms-dock, .ms-history-dock') && getComputedStyle(document.querySelector('.ms-history-search')).position !== 'fixed'"), 'Chats has one in-page search and no bottom dock');
+  assert.ok(await js("(() => { const p = document.querySelector('.ms-history-search'), i = getComputedStyle(p.querySelector('input')), r = p.getBoundingClientRect(); return p === p.parentElement.firstElementChild && r.height >= 52 && parseFloat(getComputedStyle(p).borderRadius) >= 26 && !!p.querySelector('svg') && i.backgroundColor === 'rgba(0, 0, 0, 0)' && i.borderTopWidth === '0px'; })()"), 'Chats search is the first page row, a single-surface pill with magnifier');
   // Filter popup
-  await js("document.querySelector('.ms-history-dock > button').click()"); await delay(250);
-  assert.equal(await js("!document.querySelector('.ms-history-filters').hidden && document.querySelector('.ms-history-dock > button').getAttribute('aria-expanded')"), 'true');
+  await js("document.querySelector('.ms-history-search > button').click()"); await delay(250);
+  assert.equal(await js("!document.querySelector('.ms-history-filters').hidden && document.querySelector('.ms-history-search > button').getAttribute('aria-expanded')"), 'true');
   await js("(() => { const f = document.querySelector('.ms-history-filters select'); f.value = 'working'; f.dispatchEvent(new Event('change')); })()");
   await waitFor(noMatchingChats);
   await js("(() => { const f = document.querySelector('.ms-history-filters select'); f.value = 'all'; f.dispatchEvent(new Event('change')); })()");
@@ -169,7 +171,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.querySelector('.ms-history-list').dispatchEvent(new Event('scroll'))");
 
   // ---- A2: a conversation pushes in and back keeps the list
-  await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = 'clearer'; s.dispatchEvent(new Event('input')); })()");
+  await js("(() => { const s = document.querySelector('.ms-history-search input'); s.value = 'clearer'; s.dispatchEvent(new Event('input')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === 1");
   await js("document.querySelector('.ms-history-row[data-session-id=s1] .ms-history-main').click()");
   await waitFor("!!document.querySelector('.ms-conversation .msg')");
@@ -204,9 +206,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await waitFor("!!document.querySelector('.ms-shell') && !document.querySelector('.ms-conversation:not(.ms-launch-chat)')");
   await delay(500);
   assert.equal(await page(), 1, 'Back returns to Chats');
-  assert.equal(await js("document.querySelector('.ms-history-dock input').value"), 'clearer', 'The search survives the round trip');
+  assert.equal(await js("document.querySelector('.ms-history-search input').value"), 'clearer', 'The search survives the round trip');
   assert.equal(await js("document.querySelectorAll('.ms-history-row').length"), 1);
-  await js("(() => { const s = document.querySelector('.ms-history-dock input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
+  await js("(() => { const s = document.querySelector('.ms-history-search input'); s.value = ''; s.dispatchEvent(new Event('input')); })()");
   await waitFor("document.querySelectorAll('.ms-history-row').length === " + ids.length);
 
   // ---- A3: the More sheet (opened from the tab bar)

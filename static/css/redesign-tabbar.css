@@ -80,10 +80,7 @@
   .kairos-redesign .ms-tabbar-badge[hidden] { display: none; }
 
   /* Everything that used to meet the bottom edge now meets the bar. */
-  .kairos-redesign .ms-dock { bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space) - var(--ms-below-fold, 0px)); }
-  .kairos-redesign .ms-dock-note { bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px + var(--ms-tabbar-space) - var(--ms-below-fold, 0px)); }
-  .kairos-redesign .ms-has-dock { padding-bottom: calc(90px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)) + var(--ms-tabbar-space)) !important; scroll-padding-bottom: calc(100px + var(--ms-tabbar-space)); }
-  .kairos-redesign.ms-tabbar-up #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home):not(.ms-has-dock):not(:has(.mf-home, .mf-session)) {
+  .kairos-redesign.ms-tabbar-up #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home):not(:has(.mf-home, .mf-session)) {
     padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
     scroll-padding-bottom: var(--ms-tabbar-space);
   }
@@ -130,7 +127,7 @@
     scroll-padding-bottom: var(--ms-tabbar-space);
   }
   /* The Design board list: its sticky composer sits 10px above the bar, as every dock does. */
-  .kairos-redesign.ms-tabbar-up #view-content.view:has(.design-composer):not(.chat-layout):not(.settings-mobile-page):not(.ms-home):not(.ms-has-dock) {
+  .kairos-redesign.ms-tabbar-up #view-content.view:has(.design-composer):not(.chat-layout):not(.settings-mobile-page):not(.ms-home) {
     padding-bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space));
   }
   .kairos-redesign.ms-tabbar-up .design-composer { padding-bottom: 10px; }

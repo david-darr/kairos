@@ -7,7 +7,6 @@ export async function render(container) {
   container.innerHTML = "";
 
   const wrap = el("div", { class: "view-constrained email-view" });
-  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search mail and accounts";  // phone dock search (mobileDock.js)
 
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
@@ -40,9 +39,6 @@ export async function render(container) {
       addBtn,
     ]),
   ]);
-
-  form.querySelector('summary').dataset.mobileDock = 'create';
-  form.querySelector('summary').dataset.mobileCreateLabel = 'Connect an email account';
   const list = el("div", { id: "email-accounts-list", class: 'rd-stagger', style: "margin-top:14px;" });
   const triage = el("div", { id: "email-triage", class: 'rd-stagger', style: "margin-top:14px;" });
   wrap.append(header, triage, form, list);

@@ -1,5 +1,5 @@
 import { el, toast } from './api.js';
-import { button, go, longPress, edgeBlur } from './mobileShared.js';
+import { button, go, longPress } from './mobileShared.js';
 import { ICONS } from './icons.js';
 import { emptyState } from './kairosParts.js';
 import { diffCounts, changeTotals, sessionStatus } from './forgeUi.js';
@@ -16,11 +16,11 @@ export function mountForgeSessions(page) {
   const filters = el('div', { class: 'ms-history-filters ms-glass', hidden: true }, [state, provider]);
   const toggle = button('Filter', () => { filters.hidden = !filters.hidden; toggle.setAttribute('aria-expanded', String(!filters.hidden)); });
   toggle.setAttribute('aria-expanded', 'false');
-  const dock = el('div', { class: 'ms-history-dock ms-glass' }, [edgeBlur('bottom'), search, toggle, filters]);
+  const searchRow = el('div', { class: 'ms-history-search' }, [search, toggle, filters]);
   const searchIcon = el('span', { class: 'mf-search-icon', 'aria-hidden': 'true' }); searchIcon.innerHTML = ICONS.search;
-  dock.prepend(searchIcon); page.append(dock, list);
+  searchRow.prepend(searchIcon); page.append(searchRow, list);
   const close = () => { opened?.classList.remove('ms-actions-open'); opened = null; };
-  const outside = event => { if (!dock.contains(event.target)) { filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } };
+  const outside = event => { if (!searchRow.contains(event.target)) { filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } };
   document.addEventListener('click', outside);
   async function action(kind, main, session) {
     try {
@@ -79,7 +79,7 @@ export function mountForgeSessions(page) {
   state.onchange = () => { working = !!state.value; draw(); };
   provider.onchange = () => { model = provider.value; draw(); };
   list.addEventListener('scroll', close, { passive: true });
-  dock.addEventListener('keydown', event => { if (event.key === 'Escape' && !filters.hidden) { event.preventDefault(); filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); } });
+  searchRow.addEventListener('keydown', event => { if (event.key === 'Escape' && !filters.hidden) { event.preventDefault(); filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); } });
   return { update(next, endpoints, reload) { sessions = next; models = endpoints; refresh = reload;
     provider.replaceChildren(el('option', { value: '', text: 'Any model' }), ...models.map(m => el('option', { value: m.id, text: m.name }))); provider.value = model; draw();
   }, dispose() { clearTimeout(timer); presses.forEach(dispose => dispose()); document.removeEventListener('click', outside); } };

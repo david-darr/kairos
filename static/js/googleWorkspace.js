@@ -1,5 +1,6 @@
 import { renderPDF } from './pdfViewer.js';
 import { api, el, toast, confirmDialog } from './api.js';
+import { ICONS } from './icons.js';
 
 const BASE = '/api/google';
 const MIME = {
@@ -28,7 +29,7 @@ export async function renderGoogleWorkspace(container, header, tabs) {
   }
   if (!body.isConnected) return;
   if (!status.configured || !status.connected) { renderConnection(body, status, () => renderGoogleWorkspace(container, header, tabs)); return; }
-  renderDrive(body, status, () => renderGoogleWorkspace(container, header, tabs));
+  renderDrive(body, status, () => renderGoogleWorkspace(container, header, tabs), header);
 }
 
 function renderConnection(host, status, refresh) {
@@ -73,7 +74,7 @@ function renderConnection(host, status, refresh) {
   ]));
 }
 
-function renderDrive(host, status, refreshAll) {
+function renderDrive(host, status, refreshAll, header) {
   host.replaceChildren();
   const state = { parent: null, trail: [], kind: 'all', query: '', section: 'my_drive', page: null,
     selected: null, files: [], selection: new Set(), layout: 'grid', selectionAnchor: null };
@@ -100,8 +101,12 @@ function renderDrive(host, status, refreshAll) {
   const more = button('Load more', () => load(true)); more.hidden = true;
   const uploadInput = el('input', { type: 'file', multiple: true, hidden: true });
   const newMenu = el('details', { class: 'google-new-menu' }, [el('summary', { class: 'btn primary', text: '+ New' })]);
-  newMenu.querySelector('summary').dataset.mobileDock = 'create';
-  newMenu.querySelector('summary').dataset.mobileCreateLabel = 'Create or upload in Drive';
+  header.querySelector('.library-drive-create')?.remove();
+  const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round library-drive-create', 'aria-label': 'Create or upload in Drive', onclick: () => {
+    newMenu.open = true; newMenu.scrollIntoView({ block: 'center' }); newMenu.querySelector('button')?.focus();
+  } });
+  create.innerHTML = ICONS.plus; header.append(create);
+
   newMenu.append(el('div', { class: 'google-new-actions' }, [
     button('New folder', async () => {
       detail.hidden = false;
@@ -147,7 +152,7 @@ function renderDrive(host, status, refreshAll) {
     const gb = value => `${(Number(value || 0) / 1024 ** 3).toFixed(1)} GB`;
     storage.textContent = `${gb(quota.usage)} used${quota.limit ? ` of ${gb(quota.limit)}` : ''}`;
   }).catch(() => { storage.textContent = 'Storage unavailable'; });
-  search.dataset.mobileDock = 'search';
+  search.dataset.pageSearch = 'true';
   search.addEventListener('input', () => { state.query = search.value.trim(); state.parent = null; state.trail = []; schedule(); });
   kind.addEventListener('change', () => { state.kind = kind.value; load(); });
   uploadInput.addEventListener('change', async () => {

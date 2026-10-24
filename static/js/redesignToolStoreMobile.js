@@ -42,6 +42,19 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
   toolbar.append(chips);
   top.append(header, toolbar);
 
+  const search = toolbar.querySelector('.tool-store-search');
+  const searchPill = el('label', { class: 'ts-search-pill' });
+  search.before(searchPill);
+  const searchIcon = el('span', { 'aria-hidden': 'true' }); searchIcon.innerHTML = ICONS.search;
+  const filterButton = el('button', { type: 'button', class: 'ts-search-filter', 'aria-label': 'Show added items only', 'aria-pressed': 'false' });
+  filterButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 5h16l-6 7v7l-4-2v-5z"/></svg>';
+  filterButton.addEventListener('click', () => {
+    const checkbox = installed.querySelector('input'); checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  installed.querySelector('input').addEventListener('change', () => filterButton.setAttribute('aria-pressed', String(installed.querySelector('input').checked)));
+  searchPill.append(searchIcon, search, filterButton);
+
   const plus = el("button", { type: "button", class: "ts-plus", "aria-label": "Add or manage", "aria-haspopup": "true", "aria-expanded": "false" }, [markup(PLUS)]);
   header.append(plus);
   menu.setAttribute("role", "group");
@@ -109,6 +122,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
 
   // Keep the active chip in view and fade the right edge while more chips scroll.
   function syncChips() {
+    filterButton.setAttribute('aria-pressed', String(installed.querySelector('input').checked));
     const target = installed.querySelector("input")?.checked ? installed : filters.querySelector(".active");
     if (target && chips.scrollWidth > chips.clientWidth) {
       const box = chips.getBoundingClientRect(), at = target.getBoundingClientRect();
