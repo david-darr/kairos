@@ -17,6 +17,7 @@ import { registerLeaveGuard } from "../leaveGuard.js";
 let activeSection = "documents";
 let activeVaultView = null;
 let docGuard = null;
+const phoneLibrary = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
 
 export async function render(container, tabId, options = {}) {
   const unguard = registerLeaveGuard(async () => {
@@ -26,11 +27,14 @@ export async function render(container, tabId, options = {}) {
     if (designModule?.canLeaveDesign && !await designModule.canLeaveDesign()) return false;
     return true;
   });
-  if (["vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
+  if (["all", "vault", "documents", "google", "designs"].includes(options.section)) activeSection = options.section;
+  else if (phoneLibrary() && activeSection === 'documents') activeSection = 'all';
+  if (activeSection === 'all' && !phoneLibrary()) activeSection = 'documents';
   if (activeSection === "designs" && options.designId) await renderDesign(container, options.designId, options);
   else if (activeSection === "designs") await renderDesigns(container);
   else if (activeSection === "vault") renderVault(container, options.vaultPath || null);
   else if (activeSection === "google") renderGoogle(container);
+  else if (activeSection === 'all') await renderAll(container);
   else await renderList(container);
   return () => { unguard(); docGuard = null; disposeVault(); closeDesignPage(); };
 }
@@ -54,6 +58,7 @@ async function renderDesign(container, designId, options = {}) {
 }
 
 function libraryChrome(container, current) {
+  container.dataset.librarySection = current;
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
       el("h2", { text: "Library" }),
@@ -68,7 +73,8 @@ function libraryChrome(container, current) {
     const change = async id => {
       if (id === current) return;
       if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
-      if (id === 'vault') renderVault(container);
+      if (id === 'all') await renderAll(container);
+      else if (id === 'vault') renderVault(container);
       else if (id === 'designs') await renderDesigns(container);
       else if (id === 'google') renderGoogle(container);
       else await renderList(container);
@@ -81,6 +87,11 @@ function libraryChrome(container, current) {
     const tabs = el('div', { class: 'library-section-nav' }, [control, el('button', { type: 'button', class: 'btn library-drive-link', text: 'Google Drive',
         'data-library-section': 'google',
         'aria-pressed': String(current === 'google'), onclick: () => change('google') })]);
+    const chips = el('nav', { class: 'library-phone-sections workspace-phone-only', 'aria-label': 'Library sections' });
+    for (const [id, text] of [['all', 'All'], ['vault', 'Vault'], ['designs', 'Designs'], ['documents', 'Documents'], ['google', 'Drive']]) {
+      chips.append(el('button', { type: 'button', class: 'btn', text, 'data-library-section': id, 'aria-pressed': String(current === id), onclick: () => change(id) }));
+    }
+    tabs.append(chips);
     return [header, tabs];
   }
   const tabs = el("div", { class: "segmented-tabs library-tabs", role: "group", "aria-label": "Library section" });
@@ -100,6 +111,75 @@ function libraryChrome(container, current) {
   return [header, tabs];
 }
 
+// The phone overview joins existing sources; unavailable sources stay absent.
+async function renderAll(container) {
+  disposeVault(); activeSection = 'all';
+  const [header, tabs] = libraryChrome(container, 'all');
+  const search = el('input', { type: 'search', class: 'library-overview-search', placeholder: 'Search documents, notes, designs…', 'aria-label': 'Search library' });
+  const vault = el('div');
+  const recent = el('div', { class: 'library-recent-list rd-stagger' });
+  const picker = el('input', { type: 'file', accept: '.md,.txt', hidden: true, 'aria-label': 'Upload a document' });
+  picker.addEventListener('change', async () => {
+    const file = picker.files[0]; picker.value = '';
+    if (!file) return;
+    try {
+      const doc = await api('/api/documents/import', { method: 'POST', body: JSON.stringify({ filename: file.name, content: await file.text() }) });
+      if (wrap.isConnected) await renderEditor(container, doc.id);
+      toast(`Imported ${file.name}`, 'success');
+    } catch (error) { toast(`Import failed: ${error.message}`, 'error'); }
+  });
+  const upload = el('button', { type: 'button', class: 'btn workspace-round', 'aria-label': 'Upload a document', onclick: () => picker.click() });
+  upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>'; header.append(upload);
+  const wrap = el('div', { class: 'view-constrained library-overview' }, [header, picker, search, tabs, vault, el('h3', { text: 'Recent' }), recent]);
+  container.replaceChildren(wrap);
+  const media = window.matchMedia('(max-width: 768px)');
+  const restoreDocuments = () => { if (wrap.isConnected && !phoneLibrary()) renderList(container); };
+  media.addEventListener('change', restoreDocuments);
+  document.addEventListener('kairos:appearance', restoreDocuments);
+  const observer = new MutationObserver(() => {
+    if (!wrap.isConnected) {
+      media.removeEventListener('change', restoreDocuments);
+      document.removeEventListener('kairos:appearance', restoreDocuments);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  const sources = await Promise.allSettled([api('/api/documents'), api('/api/designs'), api('/api/vault/graph')]);
+  if (!wrap.isConnected) return;
+  const value = index => sources[index].status === 'fulfilled' ? sources[index].value : null;
+  const docs = value(0) || [], designs = value(1) || [], graph = value(2);
+  const notes = (graph?.nodes || []).filter(n => n.type !== 'folder');
+  if (graph) {
+    const map = el('span', { class: 'vault-overview-map', 'aria-hidden': 'true' });
+    const links = (graph.edges || []).filter(edge => edge.kind === 'link');
+    const ids = [...new Set(links.flatMap(edge => [edge.source, edge.target]))].slice(0, 6);
+    const points = new Map(ids.map((id, i) => [id, [28 + (i % 3) * 48, 24 + Math.floor(i / 3) * 48]]));
+    // Only draw links returned by the vault; positions are decorative.
+    map.innerHTML = `<svg viewBox="0 0 160 100" width="160" height="100">${links.filter(edge => points.has(edge.source) && points.has(edge.target)).map(edge => {
+      const [x1, y1] = points.get(edge.source), [x2, y2] = points.get(edge.target);
+      return `<path d="M${x1} ${y1}L${x2} ${y2}"/>`;
+    }).join('')}${ids.map((id, i) => { const [cx, cy] = points.get(id); return `<circle cx="${cx}" cy="${cy}" r="${i % 2 ? 6 : 9}"/>`; }).join('')}</svg>`;
+    vault.append(el('button', { type: 'button', class: 'vault-overview-card', onclick: () => renderVault(container) }, [
+      el('span', { class: 'vault-overview-copy' }, [el('small', { text: 'Vault' }), el('strong', { text: `${notes.length} notes` }), el('span', { text: 'Explore your notes' })]), map,
+    ]));
+  }
+  const items = [
+    ...docs.map(d => ({ name: d.title, kind: 'MD', meta: 'Document', time: d.updated_at || 0, open: () => renderEditor(container, d.id) })),
+    ...designs.map(d => ({ name: d.title, kind: 'DSN', meta: `Design · ${d.boards} boards`, time: d.updated || 0, open: () => renderDesign(container, d.id) })),
+    ...notes.map(n => ({ name: n.name || n.id, kind: 'MD', meta: 'Vault', time: n.mtime || 0, open: () => renderVault(container, n.id) })),
+  ].sort((a, b) => b.time - a.time);
+  const draw = () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    const matches = items.filter(item => item.name.toLocaleLowerCase().includes(query)).slice(0, query ? 50 : 8);
+    recent.replaceChildren(...matches.map(item => el('button', { type: 'button', class: 'library-recent-row', onclick: item.open }, [
+      el('span', { class: 'library-file-kind', text: item.kind }), el('span', {}, [el('strong', { text: item.name }), el('small', { text: item.meta })]),
+    ])));
+    if (!matches.length) recent.append(emptyState({ title: query ? 'No matches' : 'Your library starts here', hint: query ? 'Try another title.' : 'Save your first document.',
+      actionLabel: query ? 'Clear search' : 'New document', onAction: () => query ? (search.value = '', draw()) : renderList(container) }));
+  };
+  search.addEventListener('input', draw); draw();
+}
+
 // Library > Designs (the Design canvas): every design, the home for designs.
 async function renderDesigns(container) {
   disposeVault();
@@ -109,6 +189,13 @@ async function renderDesigns(container) {
   container.replaceChildren(header, tabs, host);
   designModule = await import("./design.js");
   await designModule.renderDesignList(host);
+  if (redesignOn()) {
+    const back = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '‹', 'aria-label': 'Back to Library', onclick: () => renderAll(container) });
+    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New design', onclick: () => host.querySelector('.design-home-actions > .primary')?.click() });
+    create.innerHTML = ICONS.plus;
+    header.append(back, create);
+    header.classList.add('library-designs-header');
+  }
 }
 
 function renderGoogle(container) {
@@ -178,13 +265,20 @@ async function renderList(container) {
   // so import is no longer gated behind window.jarvis (see skillManager.js's
   // matching change and the real "null" bug it fixed there).
   const fileInput = el("input", { type: "file", accept: ".md,.txt", style: "display:none;" });
-  const importBtn = el("button", { class: "btn", text: "Import from File...", onclick: () => fileInput.click() });
+  const importBtn = el("button", { class: "btn library-import", text: "Import from File...", onclick: () => fileInput.click() });
   const importStatus = el("span", { class: "meta" });
 
   const toolbar = el("div", { class: "glass card" }, [
     el("div", { class: "card-row", style: "gap:8px;" }, [searchInput, newBtn, importBtn, fileInput]),
     el("div", { style: "margin-top:6px;" }, [importStatus]),
   ]);
+  toolbar.classList.add('library-document-toolbar');
+  if (redesignOn()) {
+    const search = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Search library', onclick: () => searchInput.focus() });
+    search.innerHTML = ICONS.search;
+    const upload = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Upload a document', onclick: () => fileInput.click() });
+    upload.innerHTML = ICONS.plus; header.append(search, upload);
+  }
 
   const grid = el("div", { id: "library-grid", class: "document-grid rd-stagger" });
   const chatFiles = el("div", { class: "library-chat-files rd-stagger" });
@@ -343,13 +437,13 @@ async function renderEditor(container, docId) {
   const doc = await api(`/api/documents/${docId}`);
   container.innerHTML = "";
 
-  const backBtn = el("button", { class: "btn", text: "← Back to Library" });
+  const backBtn = el("button", { class: "btn library-editor-back", text: "← Back to Library" });
   const titleInput = el("input", { style: "flex:1;font-size:15px;", value: doc.title });
   const saveStatus = el("span", { class: "meta" });
   const saveBtn = el("button", { class: "btn", text: "Save" });
   const delBtn = el("button", { class: "btn danger", text: "Delete" });
 
-  const header = el("div", { class: "view-header" }, [
+  const header = el("div", { class: "view-header library-editor-toolbar" }, [
     el("div", { class: "card-row", style: "flex:1;gap:10px;" }, [backBtn, titleInput]),
     el("div", { class: "card-row", style: "gap:8px;" }, [saveStatus, saveBtn, delBtn]),
   ]);
@@ -360,7 +454,11 @@ async function renderEditor(container, docId) {
   });
   contentArea.value = doc.content; // el() sets textContent via "text", but a <textarea>'s live value needs .value too
 
-  container.append(el("div", { class: "view-constrained library-editor rd-push-in" }, [header, contentArea]));
+  const phoneHeader = el('div', { class: 'view-header workspace-phone-only' }, [
+    el('div', {}, [el('h2', { text: 'Library' })]),
+    el('button', { type: 'button', class: 'btn workspace-round', text: '‹', 'aria-label': 'Back to Library', onclick: () => backBtn.click() }),
+  ]);
+  container.append(el("div", { class: "view-constrained library-editor rd-push-in" }, [phoneHeader, header, contentArea]));
 
   // Unsaved-changes guard (audit 2026-09-03) — leaving the editor used to
   // silently discard everything typed since the last save.

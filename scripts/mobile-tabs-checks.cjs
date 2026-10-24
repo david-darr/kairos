@@ -84,7 +84,7 @@ async function run(ctx) {
     ['calendar', { input: null, plus: 'New event' }],
   ];
   for (const [tab, want] of TABS) {
-    await navigate(tab);
+    await navigate(tab, tab === 'library' ? { section: 'documents' } : {});
     await waitFor("document.querySelectorAll('.ms-dock').length === 1");
     await delay(250);
     ok(await noAvatar(), tab + ' has the tab bar instead of an avatar or hamburger');
@@ -192,9 +192,12 @@ async function run(ctx) {
   eq((await dockInfo()).buttons.map(b => b.text), ['+', 'Today', 'Day', 'Week', 'Month'], 'Calendar dock offers + Today Day Week Month');
   eq(await pressed(), { '+': null, Today: null, Day: 'false', Week: 'false', Month: 'true' }, 'Calendar dock shows Month selected');
   ok(await js("!!document.querySelector('.cal-calendars-trigger').getClientRects().length && !!document.querySelector('.cal-create-bar button').getClientRects().length"), 'Calendar keeps Your calendars and Add in its phone header');
+  eq(await js("[...document.querySelectorAll('.cal-left > .view-header button')].filter(b => b.getClientRects().length).map(b => b.getAttribute('aria-label'))"), ['Your calendars', 'Add'], 'Calendar header has exactly the two named actions');
+  ok(await js("[...document.querySelectorAll('.cal-left > .view-header button')].every(b => { const r = b.getBoundingClientRect(), h = b.closest('.view-header').getBoundingClientRect(); return r.width === 46 && r.height === 46 && parseFloat(getComputedStyle(b).borderRadius) >= 23 && r.top >= h.top && r.bottom <= h.bottom; })"), 'Calendar header actions are round 46px buttons inside the title row');
   eq(await js("[...document.querySelectorAll('.cal-range-switch button')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())"), ['Day', 'Week', 'Month'], 'Calendar keeps the mockup range switch beside the period');
   ok(await js("!document.querySelector('[data-mobile-dock=today]').getClientRects().length"), 'Today remains reachable in the dock');
-  eq(await small('.cal-nav button'), [], 'Calendar page controls stay 44px');
+  ok(await js("[...document.querySelectorAll('.cal-range-switch button')].every(b => b.getBoundingClientRect().height >= 36)"), 'Calendar range pills match the board layout: 36px controls');
+  eq(await small('.cal-nav > .btn'), [], 'Calendar navigation keeps 44px touch targets');
   const monthNow = await monthLabel();
   await js("[...document.querySelectorAll('.cal-nav button')].find(b => b.textContent.includes('Next')).click()");
   await delay(250);
@@ -205,7 +208,9 @@ async function run(ctx) {
   ok(await js("!!document.querySelector('.cal-day-panel') && document.querySelector('.cal-day-panel').textContent.length > 0"), 'Dock Today selects the day and shows its panel');
   await dockButton('Day');
   await waitFor("!!document.querySelector('.cal-single-day') && document.querySelectorAll('.cal-week-day').length === 1");
-  eq((await pressed()).Day, 'true', 'Dock Day opens a one-day timeline');
+  eq((await pressed()).Day, 'true', 'Dock Day selects the day agenda');
+  eq(await js("document.querySelector('.cal-single-day').getClientRects().length"), 0, 'Phone Day uses the board layout: agenda instead of the desktop timeline');
+  eq(await js("document.querySelectorAll('.cal-phone-days button').length"), 7, 'Day agenda has seven selectable dates');
   await shot('calendar-day');
   await dockButton('Week');
   await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Week').getAttribute('aria-pressed') === 'true'");
@@ -253,7 +258,11 @@ async function run(ctx) {
     assert.ok(section, 'Known Library section: ' + text);
     return js(`document.querySelector('[data-library-section="${section}"]').click()`);
   };
-  await navigate('library');
+  await navigate('library', { section: 'all' });
+  await waitFor("!!document.querySelector('.library-overview-search') && document.querySelectorAll('.library-phone-sections button').length === 5");
+  ok(await js("!!document.querySelector('.library-recent-list')"), 'Library opens the board layout: searchable All overview');
+  await shot('library-all');
+  await libTab('Files');
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length === 3");
   const docSearch = await js("document.querySelector('.ms-dock input').placeholder");
   ok(/Search documents/.test(docSearch), 'Library Documents dock holds the page search');
@@ -268,7 +277,7 @@ async function run(ctx) {
   await delay(250);
   eq(await docks(), 0, 'The dock leaves while the editor is open');
   await barShown(); eq(await barCurrent(), 'more', 'The editor keeps the tab bar');
-  ok(await js("[...document.querySelectorAll('.library-editor button')].some(b => b.textContent.includes('Back to Library') && b.getClientRects().length)"), 'The editor keeps Back to Library');
+  ok(await js("!!document.querySelector('.library-editor button[aria-label=\"Back to Library\"]').getClientRects().length"), 'The editor keeps Back to Library');
   ok(writes.slice(viewWritesBefore).some(w => w.method === 'POST' && w.path === '/api/documents'), 'Dock + creates through the existing route');
   eq(await small('.library-editor button, .library-editor input'), [], 'Editor controls are 44px');
   await shot('library-editor');
@@ -280,12 +289,12 @@ async function run(ctx) {
   await waitFor("!document.querySelector('.confirm-panel')");
   eq(await js("document.querySelector('.library-editor textarea').value"), 'changed', 'Cancel preserves the document edit');
   eq(await js("document.documentElement.dataset.view"), 'library', 'Cancel keeps the document editor in Library');
-  await js("[...document.querySelectorAll('.library-editor button')].find(b => b.textContent.includes('Back to Library')).click()");
+  await js("document.querySelector('.library-editor button[aria-label=\"Back to Library\"]').click()");
   await waitFor("!!document.querySelector('.confirm-panel, .panel-dialog')");
   await press('Escape');
   await waitFor("!document.querySelector('.confirm-panel, .panel-dialog')");
   ok(await js("!!document.querySelector('.library-editor textarea')"), 'Cancelling the dirty guard stays in the editor');
-  await js("[...document.querySelectorAll('.library-editor button')].find(b => b.textContent.includes('Back to Library')).click()");
+  await js("document.querySelector('.library-editor button[aria-label=\"Back to Library\"]').click()");
   await waitFor("!!document.querySelector('.confirm-panel .btn, .panel-dialog .btn')");
   await js("[...document.querySelectorAll('.confirm-panel .btn, .panel-dialog .btn')].find(b => /Discard/.test(b.textContent)).click()");
   await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length >= 3");
@@ -486,7 +495,7 @@ async function run(ctx) {
   for (const [w, h, name] of [[320, 640, 'small'], [430, 932, 'large'], [667, 375, 'landscape']]) {
     await resize(w, h);
     for (const [tab] of TABS) {
-      await navigate(tab); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
+      await navigate(tab, tab === 'library' ? { section: 'documents' } : {}); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
       await delay(500);
       const r = await rect('.ms-dock');
       ok(r.l >= 0 && r.r <= w && r.b <= h && r.h >= 50 && (name !== 'landscape' || r.h <= 60), `${tab} dock fits at ${name}: ` + JSON.stringify(r));
@@ -614,6 +623,7 @@ async function run(ctx) {
   const devices = [
     // The last field is the iPhone nudge (style.css --ms-ios-nudge): 12px on an iPhone, 0 elsewhere.
     ['iPhone home-screen app, Dynamic Island', 393, 793, 852, 59, 34, 12],
+    ['iPhone home-screen app, 390×844', 390, 797, 844, 47, 34, 12],
     ['iPhone home-screen app, no notch', 375, 647, 667, 20, 0, 12],
     ['browser or Android (no fold)', 393, 852, 852, 47, 34, 0],
   ];
@@ -641,8 +651,8 @@ async function run(ctx) {
     const r = await js(`(() => {
       const box = n => { const b = n.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
       const row = { l: 20, r: innerWidth - 20, t: ${rowTop}, b: ${rowTop} + 46 };
-      const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
-      const header = title?.closest('.view-header, .agents-workspace-bar, .settings-titlebar, .ms-header-row');
+      const title = [...document.querySelectorAll('#view-content .view-header h2, #view-content .design-page-identity h2, #view-content .agents-workspace-bar > h2, .settings-mobile-page .settings-titlebar .title, .mf-dashboard-title')].find(n => n.getClientRects().length);
+      const header = title?.closest('.view-header, .design-page-header, .agents-workspace-bar, .settings-titlebar, .ms-header-row');
       const headerButtons = [...(header?.querySelectorAll('button') || [])].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().top < row.b);
       const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
       const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
@@ -730,7 +740,7 @@ async function run(ctx) {
     if (!nudge) continue;
     // Titles and first content on every tab, Settings and one of its pages included.
     for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
-      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + 6);
+      await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + (['notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store'].includes(tab) ? 18 : 6));
       ok(await noAvatar(), `${name}: ${tab} has no avatar`);
       if (tab === 'forgeHome') {
         ok(await js("!!document.querySelector('.mf-dashboard .forge-toolbar .mf-dashboard-new') && !document.querySelector('.mf-dashboard .ms-header .mf-dashboard-new')"), `${name}: Forge Home's New session sits on the toolbar beside Customize`);
@@ -739,6 +749,13 @@ async function run(ctx) {
       if (tab === 'tool-store') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'tool-store');
       if (tab === 'notes') await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'notes-title');
     }
+    for (const section of ['all', 'vault', 'documents', 'google', 'designs']) {
+      await navigate('library', { section }); await delay(500);
+      await titleRow(`${name}: Library ${section}`, top + nudge + 18);
+    }
+    await js("document.querySelector('.design-card').click()");
+    await waitFor("!!document.querySelector('.design-page-identity h2')"); await delay(500);
+    await titleRow(`${name}: Library design view`, top + nudge + 18);
     await openSettings('notes'); await titleRow(`${name}: Settings`, top + nudge + 6);
     await js("document.querySelector('.settings-nav-item[data-section=\"remote\"]').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'"); await delay(400);
     await titleRow(`${name}: a Settings page`, top + nudge + 6);
