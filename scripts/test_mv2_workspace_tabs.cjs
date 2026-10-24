@@ -3,6 +3,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+// The real modules load through vm.SourceTextModule, which needs this flag; relaunch with it when run plainly.
+if (!vm.SourceTextModule) {
+  const run = require('node:child_process').spawnSync(process.execPath, ['--experimental-vm-modules', '--no-warnings', __filename], { stdio: 'inherit' });
+  process.exit(run.status ?? 1);
+}
 const path = require('node:path');
 
 class Node {
