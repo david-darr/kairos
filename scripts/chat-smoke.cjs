@@ -107,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     // whole point of reproducing it here is that a CSP difference between
     // fixture and product hides exactly this class of bug.
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https:");
-    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"><link rel="stylesheet" href="/static/css/mascot.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
+    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"><link rel="stylesheet" href="/static/css/mascot.css"><link rel="stylesheet" href="/static/css/redesign-chat.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
   }
   if (url.pathname.startsWith('/api/')) {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -322,6 +322,28 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#library-smoke').remove()");
     await js("document.querySelector('#chat-messages').scrollTop=0");
     await capture('desktop-chat');
+    // Conversations sidebar: right-click a chat row -> menu with "Open in new window" (stubbed IPC, no real window).
+    // History starts collapsed on desktop, so open it the way a user does.
+    await click('#chat-history-toggle');
+    await waitFor("!document.querySelector('#chat-sessions').inert && !!document.querySelector('.session-item')");
+    await js("window.jarvis = { ...(window.jarvis || {}), openChatWindow: id => { (window.__newWindowIds ||= []).push(id); return Promise.resolve({ ok: true }); } }; true");
+    const rowPoint = await js("(() => { const row = document.querySelector('.session-item'); const r = row.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, id: row.dataset.sessionId }; })()");
+    const rightClick = async () => { for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: rowPoint.x, y: rowPoint.y, button: 'right', clickCount: 1 }); };
+    await rightClick();
+    await waitFor("!!document.querySelector('.rd-conversation-menu')");
+    assert.ok((await js("[...document.querySelectorAll('.rd-conversation-menu [role=menuitem]')].map(b => b.textContent)")).some(t => t.includes('Open in new window')));
+    assert.equal(await js("(() => { const r = document.querySelector('.rd-conversation-menu').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()"), true, 'menu sits inside the window');
+    await capture('desktop-conversation-menu');
+    await js("[...document.querySelectorAll('.rd-conversation-menu [role=menuitem]')].find(b => b.textContent.includes('Open in new window')).click()");
+    assert.deepEqual(await js('window.__newWindowIds'), [rowPoint.id], 'Open in new window passes the row session id');
+    assert.equal(await js("!!document.querySelector('.rd-conversation-menu')"), false, 'choosing an item closes the menu');
+    await rightClick();
+    await waitFor("!!document.querySelector('.rd-conversation-menu')");
+    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor("!document.querySelector('.rd-conversation-menu')");
+    assert.equal(await js("document.activeElement?.classList.contains('session-item')"), true, 'Escape returns focus to the row');
+    await click('#chat-history-toggle');
+    await waitFor("document.querySelector('#chat-sessions').inert");
     await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("!!document.querySelector('#chat-model-id')");
     await js("document.querySelector('#chat-model-id').value='exact-test-model'; document.querySelector('.model-version-form').requestSubmit()");
