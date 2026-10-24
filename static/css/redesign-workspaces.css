@@ -672,3 +672,80 @@
   .kairos-redesign [data-view="profile"] .modal-header > span { min-width: 0; }
   .kairos-redesign [data-view="profile"] .modal-close-btn { flex: none; padding: 0; }
 }
+
+/* Pill inputs own a single surface. General form styles must not paint a second
+   rectangle inside search wrappers, including when their input has focus. */
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock:has(> input)) {
+  border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock) input,
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock) input:focus {
+  appearance: none; border: 0 !important; outline: 0 !important; box-shadow: none !important;
+  background: transparent !important; border-radius: inherit;
+}
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search) {
+  appearance: none; border-radius: var(--rd-radius-pill);
+}
+.kairos-redesign :is(.rd-conversations-search, .rd-model-search-row, .ms-history-search, .rd-chat-search-row, .ms-history-dock, .ms-dock:has(> input)):focus-within,
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search):focus-visible {
+  outline: 2px solid var(--rd-focus); outline-offset: 2px;
+}
+
+/* Today marks the number area, never the full cell or the selected date tray. */
+.kairos-redesign .cal-day.today .cal-day-num,
+.kairos-redesign .cal-week-heading.is-today .cal-week-date,
+.kairos-redesign [data-view="calendar"] .cal-phone-days [aria-current="date"] > span {
+  display: grid; place-items: center; box-sizing: border-box; width: 32px; height: 32px;
+  min-width: 32px; padding: 0; margin-inline: auto; border: 0; border-radius: 10px;
+  background: var(--rd-ink); color: var(--rd-surface-solid); box-shadow: none; outline: 0;
+}
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day.today .cal-day-num { width: 32px; height: 32px; border-radius: 10px; }
+  /* Italic N has a left overhang. Give the glyph real space inside the scroll clip. */
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel-title {
+    padding: 2px 4px; line-height: 1.25; overflow: visible;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel > .card {
+    box-sizing: border-box; min-height: 44px; padding: 6px 12px; margin-bottom: 6px; border-radius: 16px;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .title { font-size: 13px; line-height: 1.25; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .meta { font-size: 10px; line-height: 1.2; margin-top: 2px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-upcoming-day-label { font-size: 10px; margin-top: 12px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card :is(.btn, .row-action-btn) { min-height: 44px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card input[type="checkbox"] { margin: 0; }
+}
+
+.kairos-redesign .cal-week-heading .cal-week-date { display: inline-grid; place-items: center; width: 32px; height: 32px; }
+.kairos-redesign .cal-week-heading .cal-week-weekday { display: block; font-size: 10px; font-weight: 400; }
+.kairos-redesign .cal-week-heading .btn.quiet { line-height: 1; }
+.kairos-redesign .cal-week-heading.is-today .btn.quiet { background: transparent; color: var(--rd-ink); border-radius: 10px; }
+
+/* Shared phone icon geometry, including SVG and generated +/back icons. */
+@media (max-width: 768px) {
+  .kairos-redesign :is(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]) {
+    display: grid; place-items: center; /* not !important: a button hidden by its own rules must stay hidden */ grid-template: 1fr / 1fr;
+    padding: 0 !important; gap: 0 !important; line-height: 1; text-indent: 0;
+  }
+  .kairos-redesign :is(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]) svg {
+    display: block; grid-area: 1 / 1; margin: 0 !important; vertical-align: middle;
+  }
+  .kairos-redesign :is(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden])::after,
+  .kairos-redesign :is(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden])::before { grid-area: 1 / 1; margin: 0; line-height: 1; }
+  .kairos-redesign :is(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-dock > button):not([hidden]):has(> svg) { font-size: 0; }
+  /* Equal specificity and a later file: restate that phone Home keeps Customize out of its two-button header. */
+  .kairos-redesign[data-view="home"] .hm-home .hm-heading-actions > .hm-customize { display: none; }
+}
+
+.kairos-redesign .cal-completion-hit { display: contents; }
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-completion-hit {
+    display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; cursor: pointer;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-completion-hit input { align-self: center; }
+}
+
+.kairos-redesign :is(input[type="search"], .settings-search, .design-search, .library-overview-search, .rd-chat-search):focus { box-shadow: none; }
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card-row > div { min-width: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel .card .title { overflow-wrap: anywhere; }
+}

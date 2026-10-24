@@ -124,7 +124,7 @@ module.exports = async function tabBarChecks(c) {
     ok(await pillOn(), `${tab}: the pill sits on ${want}`);
     const clear = await clearsBar();
     ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${tab}: the last content scrolls clear of the bar: ${JSON.stringify(clear)}`);
-    // A dock (search, Calendar's Today / Month) sits above the bar, never under it.
+    // A dock (search and +) sits above the bar, never under it.
     const dock = await rect('.ms-dock');
     if (dock) ok(!hit(dock, await rect('.ms-tabbar')) && dock.b <= (await rect('.ms-tabbar')).t - 8, `${tab}: the dock sits above the bar: ${JSON.stringify(dock)}`);
     ok(await noSideways(), `${tab}: nothing scrolls sideways`);
@@ -339,8 +339,8 @@ module.exports = async function tabBarChecks(c) {
         await require('./chat-header-checks.cjs')(c, name, top + nudge + 6);
       }
       if (tab === 'calendar') {
-        const dock = await rect('.ms-dock');
-        ok(dock && Math.abs(dock.b - (bar.t - 10)) <= 1, `${name}: Calendar's dock sits 10px above the bar: ${JSON.stringify(dock)}`);
+        // Calendar has no bottom dock (David, 2026-10-24); Add and the range switch live in its header.
+        eq(await js("document.querySelectorAll('.ms-dock').length"), 0, `${name}: Calendar has no bottom dock`);
       }
       if (tab !== 'chat') {
         const clear = await clearsBar();
