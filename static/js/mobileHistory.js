@@ -1,6 +1,6 @@
 import { api, el, toast } from './api.js';
 import * as chatStream from './chatStream.js';
-import { button, go, haptic, longPress, edgeBlur } from './mobileShared.js';
+import { button, go, haptic, longPress } from './mobileShared.js';
 import { emptyState } from './kairosParts.js';
 import { workingChats, chatAge } from './redesignChatParts.js';
 
@@ -22,12 +22,12 @@ export function mountHistory(page) {
   if (working) toggle.textContent = 'Working';
   const searchIcon = el('span', { class: 'rd-chat-search-icon', 'aria-hidden': 'true' });
   searchIcon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>';
-  const dock = el('div', { class: 'ms-history-dock ms-glass', 'data-mobile-hook': 'history-dock' }, [edgeBlur('bottom'), searchIcon, search, toggle, filters]);
+  const searchRow = el('div', { class: 'ms-history-search' }, [searchIcon, search, toggle, filters]);
   const closeFilters = () => { filters.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
-  const outside = e => { if (!dock.contains(e.target)) closeFilters(); };
+  const outside = e => { if (!searchRow.contains(e.target)) closeFilters(); };
   document.addEventListener('click', outside);
-  dock.addEventListener('keydown', e => { if (e.key === 'Escape' && !filters.hidden) { e.preventDefault(); closeFilters(); toggle.focus(); } });
-  page.append(dock, activity, recent, list);
+  searchRow.addEventListener('keydown', e => { if (e.key === 'Escape' && !filters.hidden) { e.preventDefault(); closeFilters(); toggle.focus(); } });
+  page.append(searchRow, activity, recent, list);
   const refresh = async () => {
     try { const value = await api('/api/sessions'); if (!disposed) { sessions = value; draw(true); } }
     catch { if (!disposed) toast('Could not refresh chats', 'error'); }

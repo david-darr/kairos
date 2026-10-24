@@ -31,7 +31,7 @@ module.exports = async function tabBarChecks(c) {
       for (let a = n.parentElement; a && a !== document.documentElement; a = a.parentElement) { const s = getComputedStyle(a); if (s.overflowX !== 'visible' || s.overflowY !== 'visible') { const q = a.getBoundingClientRect(); t = Math.max(t, q.top); b = Math.min(b, q.bottom); } }
       return b - t > 0.5 ? b : null; };
     const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, .dither-canvas, [inert], .ms-activity');
-    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-dock, .ms-launch-composer')));
+    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-search, .ms-launch-composer')));
     const bottoms = nodes.map(n => ({ b: clip(n), n: String(n.className || n.tagName).slice(0, 40) })).filter(x => x.b !== null).sort((a, b) => b.b - a.b);
     v.scrollTo?.(0, 0); for (const n of v.querySelectorAll('*')) if (n.scrollTop) n.scrollTop = 0;
     return { last: bottoms[0], barTop };
@@ -125,14 +125,15 @@ module.exports = async function tabBarChecks(c) {
     const clear = await clearsBar();
     ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${tab}: the last content scrolls clear of the bar: ${JSON.stringify(clear)}`);
     // A dock (search and +) sits above the bar, never under it.
-    const dock = await rect('.ms-dock');
-    if (dock) ok(!hit(dock, await rect('.ms-tabbar')) && dock.b <= (await rect('.ms-tabbar')).t - 8, `${tab}: the dock sits above the bar: ${JSON.stringify(dock)}`);
+    ok(await js("!document.querySelector('.ms-dock')"), `${tab}: no bottom search dock`);
+    const search = await rect('.ms-page-search');
+    if (search) ok(search.b < (await rect('.ms-tabbar')).t, `${tab}: search stays in the page above the tab bar`);
     ok(await noSideways(), `${tab}: nothing scrolls sideways`);
   }
   // The Chats list's own search dock sits above the bar too.
   await navigate('chat', { mobilePage: 1 }); await barShown(); await delay(400);
-  const historyDock = await rect('.ms-history-dock');
-  ok(historyDock && historyDock.b <= (await rect('.ms-tabbar')).t - 8, 'The Chats search dock sits above the bar: ' + JSON.stringify(historyDock));
+  const historyDock = await rect('.ms-history-search');
+  ok(historyDock && historyDock.b <= (await rect('.ms-tabbar')).t - 8 && await js("document.querySelector('.ms-history-search').parentElement.classList.contains('ms-history') && getComputedStyle(document.querySelector('.ms-history-search')).position !== 'fixed'"), 'Chats search stays under the switch in its page: ' + JSON.stringify(historyDock));
   eq(await barCurrent(), 'chats', 'The Chats list keeps Chats current');
 
   // ---- 3. What each item opens --------------------------------------------------------------
@@ -259,18 +260,21 @@ module.exports = async function tabBarChecks(c) {
   const libraryBack = '.library-editor button[aria-label="Back to Library"]';
   await pushedPage('Library editor', { back: libraryBack, current: 'more' });
   await js(`document.querySelector(${JSON.stringify(libraryBack)}).click()`);
-  await waitFor("!document.querySelector('.library-editor') && !!document.querySelector('.library-document-card') && document.querySelectorAll('.ms-dock').length === 1");
-  ok(true, 'Library editor: visible Back returns to documents and restores the dock');
+  await waitFor("!document.querySelector('.library-editor') && !!document.querySelector('.library-document-card') && document.querySelectorAll('.ms-page-search').length === 1 && !document.querySelector('.ms-dock')");
+  ok(true, 'Library editor: visible Back returns to documents and restores in-page search');
   await navigate('library'); await waitFor("!!document.querySelector('[data-library-section=vault]')");
   await js("document.querySelector('[data-library-section=vault]').click()"); await waitFor("!!document.querySelector('.library-vault-note')");
   await js("document.querySelector('.library-vault-note').click()"); await waitFor("!!document.querySelector('.vault-phone-detail')");
   await pushedPage('Vault note', { back: '.vault-phone-back', current: 'more' });
   await openDesign();
   await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
-  await pushedPage('Design draft', { composer: '.design-composer', current: 'more' });
+  const designPage = { back: '.design-back', composer: '.design-composer', current: 'more' };
+  await pushedPage('Design draft', designPage);
   await js("document.querySelector('.design-list-card').click()"); await waitFor("!!document.querySelector('.design-focus')");
   await away('Design focus'); await backControl('Design focus', '[aria-label="Close focus"]');
   await js("document.querySelector('[aria-label=\"Close focus\"]').click()"); await barShown();
+  await pushedPage('Design draft after focus', designPage);
+  eq(await js("document.querySelector('.design-composer-input').value"), 'warmer', 'Design focus preserves the composer draft');
   await openForgeSession(); await pushedPage('Forge session', forgePage);
   await tap('sessions'); await waitFor("!!document.querySelector('#mf-tab-1[aria-selected=true]') && !document.querySelector('.mf-session')");
   ok(true, 'Current Sessions pops the session to the Sessions list');
@@ -299,8 +303,8 @@ module.exports = async function tabBarChecks(c) {
   await tap('sessions'); await waitFor("document.getElementById('mf-tab-1').getAttribute('aria-selected') === 'true'"); await delay(100);
   eq(await barCurrent(), 'sessions', 'Sessions opens the sessions list');
   ok(await pillOn(), 'The pill slid to Sessions');
-  const sessionsDock = await rect('#mf-sessions .ms-history-dock');
-  ok(sessionsDock && sessionsDock.b <= (await rect('.ms-tabbar')).t - 8, 'The sessions search dock sits above the bar: ' + JSON.stringify(sessionsDock));
+  const sessionsDock = await rect('#mf-sessions .ms-history-search');
+  ok(sessionsDock && sessionsDock.b <= (await rect('.ms-tabbar')).t - 8, 'Sessions search stays in its page above the bar: ' + JSON.stringify(sessionsDock));
   await js("document.getElementById('mf-tab-0').click()"); await delay(200);
   eq(await barCurrent(), 'new', 'Swiping the pager back to New moves the bar with it');
   await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(300);

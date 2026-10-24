@@ -1,4 +1,4 @@
-// Phone checks for the tabs, the shared dock and sheet, and Settings
+// Phone checks for the tabs, in-page search and sheets, and Settings
 // navigation. Two ways to run it:
 //   node scripts/run-electron-test.cjs scripts/mobile-tabs-checks.cjs   (standalone)
 //   require('./mobile-tabs-checks.cjs').run(context)                    (from ui-smoke)
@@ -29,7 +29,6 @@ async function run(ctx) {
   const setTheme = color => js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: ${JSON.stringify(color)} }))`);
   const PARCHMENT = '#f3eadb', FOREST = '#23302e';
   const docks = () => js("document.querySelectorAll('.ms-dock').length");
-  const dockInfo = () => js(`(() => { const d = document.querySelector('.ms-dock'); if (!d) return null; return { input: d.querySelector('input')?.placeholder || null, inputInDock: !!d.querySelector('input'), buttons: [...d.querySelectorAll('button')].map(b => ({ text: b.textContent.trim(), label: b.getAttribute('aria-label'), pressed: b.getAttribute('aria-pressed'), disabled: b.disabled })) }; })()`);
   const view = '#view-content';
 
   await setTheme(PARCHMENT);
@@ -74,93 +73,94 @@ async function run(ctx) {
     ok(measured.centers.length >= 3 && measured.spread <= 1, selector + (expanded ? ' bottom row' : ' resting controls and text') + ' centered within 1px: ' + JSON.stringify(measured));
   };
 
-  // ---- A. Every dock tab: geometry, controls, content clearance -------------------------
+  // ---- A. In-page search geometry, header actions and tab-bar clearance -----------------
   const TABS = [
-    ['notes', { input: 'Search notes', plus: 'Add note' }],
-    ['library', { input: /Search documents/, plus: 'New document' }],
-    ['tasks', { input: 'Search tasks and cards', plus: 'Schedule a task' }],
-    ['cookbook', { input: 'Search models', plus: 'Add a local model' }],
-    ['email', { input: 'Search mail and accounts', plus: 'Connect an email account' }],
-    // Calendar has no bottom dock (David, 2026-10-24): its header holds the range switch and Add; section C checks that.
+    ['notes', { input: 'Search notes', plus: 'New note' }],
+    ['library', { input: /Search documents/, plus: 'Upload a document' }],
+    ['tasks', { input: 'Search tasks and cards', plus: 'New task' }],
+    ['cookbook', { input: 'Search models', plus: 'Setup guide' }],
+    ['email', { input: 'Search mail and accounts', plus: 'Accounts' }],
   ];
   for (const [tab, want] of TABS) {
     await navigate(tab, tab === 'library' ? { section: 'documents' } : {});
-    await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-    await delay(250);
-    ok(await noAvatar(), tab + ' has the tab bar instead of an avatar or hamburger');
-    eq(await barCurrent(), tab === 'calendar' ? 'calendar' : 'more', tab + ' marks its item on the tab bar');
-    const tabbar = await rect('.ms-tabbar');
-    ok(tabbar && Math.abs(tabbar.b - (844 - 28)) <= 1 && Math.abs(tabbar.l - 18) <= 0.5 && Math.abs(tabbar.r - (390 - 18)) <= 0.5 && tabbar.h === 62, tab + ' tab bar floats 28px above the bottom with 18px sides (TabBar board): ' + JSON.stringify(tabbar));
-    const label = tab + ' dock';
-    eq(await docks(), 1, label + ' mounts exactly once');
-    ok(await js("document.querySelector('.ms-dock').parentElement === document.body"), label + ' lives outside the animating view');
-    const early = await rect('.ms-dock'); ok(early && Math.abs(early.b - (tabbar.t - 10)) <= 1, label + ' is already in place on arrival, 10px above the tab bar: ' + JSON.stringify(early));
-    const info = await dockInfo();
-    if (want.input instanceof RegExp) ok(want.input.test(info.input), label + ' search is the page search: ' + info.input);
-    else if (want.input) eq(info.input, want.input, label + ' search placeholder');
-    else ok(!info.inputInDock, label + ' has no search field');
-    ok(info.buttons.some(b => b.label === want.plus && b.text === '+'), label + ' has a "+" named ' + want.plus + ': ' + JSON.stringify(info.buttons));
-    const d = await rect('.ms-dock');
-    ok(d && d.l >= 11 && d.r <= 379 && d.h >= 50 && Math.abs(d.b - (tabbar.t - 10)) <= 1 && !hit(d, tabbar), label + ' sits in the thumb zone, above the tab bar, with margins ' + JSON.stringify(d));
-    eq(await small('.ms-dock button, .ms-dock input'), [], label + ' controls are 44px');
-    ok(await noSideways(), label + ' does not scroll sideways');
-    eq(await overflow(), [], label + ' no overflow');
-    // The last content must scroll clear of the dock.
-    const clear = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); window.scrollTo(0, 1e6); const dock = document.querySelector('.ms-dock').getBoundingClientRect(); const items = [...v.querySelectorAll('.view-constrained > *, .view-constrained .cal-day-panel')].filter(n => n.getClientRects().length); const last = Math.max(...items.map(n => n.getBoundingClientRect().bottom)); return { last, top: dock.top }; })()`);
-    ok(clear.last <= clear.top + 1, label + ' last content clears the dock ' + JSON.stringify(clear));
-    const pill = await rect('.ms-activity-floating');
-    if (pill) ok(!hit(pill, d), label + ' activity pill clears the dock');
-    await js(`document.querySelector('${view}').scrollTo(0, 0)`);
-    await shot('dock-' + tab);
+    await waitFor("!!document.querySelector('.ms-page-search input')"); await delay(250);
+    eq(await docks(), 0, tab + ' has no bottom search dock');
+    eq(await js("document.querySelectorAll('.ms-page-search input').length"), 1, tab + ' has exactly one page search');
+    ok(await noAvatar(), tab + ' uses tab-bar chrome');
+    eq(await barCurrent(), 'more', tab + ' selects More');
+    const geometry = await js(`(() => {
+      const p = document.querySelector('.ms-page-search'), h = document.querySelector('.view-header');
+      const r = p.getBoundingClientRect(), hr = h.getBoundingClientRect(), cs = getComputedStyle(p), i = getComputedStyle(p.querySelector('input'));
+      const actions = [...h.querySelectorAll('button')].filter(n => n.getClientRects().length);
+      return { under: h.nextElementSibling === p && r.top >= hr.bottom && r.top <= hr.bottom + 24, width: r.width, headerWidth: hr.width,
+        height: r.height, radius: parseFloat(cs.borderRadius), line: cs.borderTopWidth, font: i.fontSize,
+        surface: i.backgroundColor, inputBorder: i.borderTopWidth, icon: !!p.querySelector('svg'), fixed: cs.position === 'fixed',
+        actions: actions.map(n => ({ label: n.getAttribute('aria-label'), w: n.getBoundingClientRect().width, h: n.getBoundingClientRect().height })) };
+    })()`);
+    ok(geometry.under && Math.abs(geometry.width - geometry.headerWidth) <= 1 && !geometry.fixed, tab + ' search is full-width immediately below title');
+    ok(geometry.height >= 52 && geometry.height <= 56 && geometry.radius >= 26 && geometry.line === '1px' && geometry.icon, tab + ' search matches the board pill');
+    ok(geometry.surface === 'rgba(0, 0, 0, 0)' && geometry.inputBorder === '0px' && geometry.font === '15px', tab + ' search has one surface and 15px type');
+    ok(geometry.actions.length <= 2 && geometry.actions.some(a => a.label === want.plus && a.w >= 44 && a.h >= 44), tab + ' named action is in the header with a 44px target');
+    eq(await small('.ms-page-search input, .view-header .workspace-round'), [], tab + ' search/header targets are 44px');
+    ok(await noSideways(), tab + ' has no sideways scroll'); eq(await overflow(), [], tab + ' no overflow');
+    const clear = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: document.querySelector('.ms-tabbar').getBoundingClientRect().top }; })()`);
+    ok(clear.last <= clear.top + 1, tab + ' last content clears only the tab bar: ' + JSON.stringify(clear));
+    await js(`document.querySelector('${view}').scrollTo(0, 0)`); await shot('page-search-' + tab);
   }
 
   // ---- B. Search fields: filter, no-match note, persistence across re-render -------------
   await navigate('notes');
   await waitFor("document.querySelectorAll('[data-mobile-row]').length === 3");
   eq(await rowState(), [1, 1, 1], 'Notes start unfiltered');
-  await type('.ms-dock input', 'workspa');
+  await type('.ms-page-search input', 'workspa');
   eq(await shown(), 1, 'Notes search "workspa" keeps one row');
-  await type('.ms-dock input', 'zzz-nothing');
-  ok(await js("!!document.querySelector('.ms-dock-note') && document.querySelector('.ms-dock-note').textContent.includes('zzz-nothing')"), 'Notes shows a no-match note');
+  await type('.ms-page-search input', 'zzz-nothing');
+  ok(await js("!document.querySelector('.ms-page-search-note').hidden && document.querySelector('.ms-page-search-note').textContent.includes('zzz-nothing')"), 'Notes shows a no-match note');
   eq(await shown(), 0, 'Notes search with no match hides every row');
-  const note = await rect('.ms-dock-note'), dock = await rect('.ms-dock'), pill = await rect('.ms-activity-floating');
-  ok(note.b <= dock.t && note.l >= 11 && (!pill || !hit(note, pill)), 'The no-match note sits above the dock and clear of the pill');
+  ok(await js("document.querySelector('.ms-page-search').nextElementSibling.matches('.ms-page-search-note') && document.getElementById('view-content').contains(document.querySelector('.ms-page-search-note'))"), 'No-match status stays in the page directly below search');
   await shot('notes-no-match');
-  await type('.ms-dock input', 'Review');
+  await type('.ms-page-search input', 'Review');
   await js("document.querySelector('[data-mobile-row]:not(.ms-filtered-out) input[type=checkbox]').click()");
   await delay(900);
   await waitFor("document.querySelectorAll('[data-mobile-row]').length === 3");
-  eq(await js("document.querySelector('.ms-dock input').value"), 'Review', 'The dock keeps the typed query through a re-render');
+  eq(await js("document.querySelector('.ms-page-search input').value"), 'Review', 'The search keeps the typed query through a re-render');
   eq(await shown(), 1, 'Notes re-render keeps the filter applied');
-  await type('.ms-dock input', '');
+  await type('.ms-page-search input', '');
   eq(await rowState(), [1, 1, 1], 'Clearing the search restores every note');
-  ok(await js("!document.querySelector('.ms-dock-note')"), 'No stale note after clearing');
-  await js("document.querySelector('.ms-dock button').click()");
+  ok(await js("document.querySelector('.ms-page-search-note').hidden"), 'No stale note after clearing');
+  await js("document.querySelector('.view-header [aria-label=\"New note\"]').click()");
   ok(await js("document.activeElement === document.querySelector('.view-constrained .form-grid input')"), 'Notes + focuses the new note field');
 
   for (const [tab, q] of [['tasks', 'Write'], ['cookbook', 'local'], ['email', 'Project']]) {
     await navigate(tab);
-    await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('[data-mobile-row]').length > 0");
+    await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && document.querySelectorAll('[data-mobile-row]').length > 0");
     const total = (await rowState()).length;
-    await type('.ms-dock input', q);
+    await type('.ms-page-search input', q);
     ok(await shown() >= 1, `${tab} search "${q}" keeps a matching row`);
-    await type('.ms-dock input', 'qqqq-none');
+    await type('.ms-page-search input', 'qqqq-none');
     eq(await shown(), 0, tab + ' search with no match hides rows');
-    ok(await js("!!document.querySelector('.ms-dock-note')"), tab + ' shows the no-match note');
-    await type('.ms-dock input', '');
+    ok(await js("!document.querySelector('.ms-page-search-note').hidden"), tab + ' shows the no-match note');
+    ok(await js(`(() => { const p = document.querySelector('.ms-page-search').getBoundingClientRect(),
+      n = document.querySelector('.ms-page-search-note').getBoundingClientRect();
+      const activity = document.querySelector('.task-activity')?.getBoundingClientRect();
+      return n.top >= p.bottom && n.top <= p.bottom + 24 && (!activity || n.bottom <= activity.top);
+    })()`), tab + ' no-match note renders directly below search and before task activity');
+    await type('.ms-page-search input', '');
     eq(await shown(), total, tab + ' clearing restores rows');
   }
-  await navigate('tasks'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-  await js("document.querySelector('.ms-dock button').click()");
-  ok(await js("!!document.activeElement.closest('details')?.open"), 'Tasks + opens the schedule form and focuses a field');
-  await navigate('email'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-  await js("document.querySelector('.ms-dock button').click()");
-  ok(await js("!!document.activeElement.closest('details')?.open"), 'Email + opens Connect an account and focuses a field');
-  await navigate('cookbook'); await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('[data-mobile-catalog]')");
+  await navigate('tasks'); await waitFor("!!document.querySelector('.ms-page-search')");
+  await js("document.querySelector('.view-header [aria-label=\"New task\"]').click()");
+  ok(await js("!!document.activeElement.closest('details')?.open"), 'Header Tasks + opens and focuses the schedule form');
+  await navigate('email'); await waitFor("!!document.querySelector('.ms-page-search')");
+  await js("document.querySelector('.view-header [aria-label=Accounts]').click()");
+  ok(await js("!!document.activeElement.closest('details')?.open"), 'Header Accounts opens and focuses Connect an account');
+  await navigate('cookbook'); await waitFor("!!document.querySelector('.ms-page-search')");
   const downloads = writes.length;
-  await js("document.querySelector('.ms-dock button').click()");
-  ok(await js("!!document.activeElement.closest('[data-mobile-catalog]')"), 'Cookbook + reveals the catalog and focuses a control');
-  eq(writes.slice(downloads).filter(w => /pull|download/.test(w.path)).length, 0, 'Cookbook + never starts a download');
+  await js("document.querySelector('.view-header [aria-label=\"Setup guide\"]').click()");
+  ok(await js("!!document.querySelector('.panel-dialog, .ms-sheet[open]')"), 'Header Cookbook help opens setup guide');
+  eq(writes.slice(downloads).filter(w => /pull|download/.test(w.path)).length, 0, 'Help never starts a download');
+  await js("document.querySelector('.model-setup-panel .modal-close-btn, .panel-dialog .modal-close-btn')?.click()");
+  await waitFor("!document.querySelector('.model-setup-panel')");
 
   // ---- C. Calendar: Today / Month-Week / "+", and the event sheet -------------------------
   const cdp = (method, params) => win.webContents.debugger.sendCommand(method, params);
@@ -182,19 +182,29 @@ async function run(ctx) {
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', buttons: 0, clickCount: 1 });
     await delay(300);
   };
-  const dockButton = label => js(`(() => { const b = [...document.querySelectorAll('.ms-dock button')].find(n => n.getAttribute('aria-label') === ${JSON.stringify(label)} || n.textContent.trim() === ${JSON.stringify(label)}); if (!b) throw new Error('no dock button ' + ${JSON.stringify(label)}); b.focus(); b.click(); })()`);
   const calendarButton = label => js(`(() => { const b = [...document.querySelectorAll('.cal-nav button, .cal-create-bar button')].find(n => n.getAttribute('aria-label') === ${JSON.stringify(label)} || n.textContent.trim() === ${JSON.stringify(label)}); if (!b) throw new Error('no Calendar header control ' + ${JSON.stringify(label)}); b.focus(); b.click(); })()`);
   const pressed = () => js("Object.fromEntries([...document.querySelectorAll('.cal-nav button, .cal-create-bar button')].map(b => [b.textContent.trim(), b.getAttribute('aria-pressed')]))");
   const monthLabel = () => js("document.querySelector('.cal-month-label').textContent");
   const inCalendarHeader = () => js("document.activeElement === document.querySelector('.cal-create-bar button')");
+  // Exact DOMRects below must be read after the page/sheet entrance motion.
+  // A populated month label only means data arrived, not that view-in ended.
+  const settleMotion = selector => js(`Promise.all(document.querySelector(${JSON.stringify(selector)}).getAnimations({ subtree: true })
+    .filter(a => Number.isFinite(a.effect.getComputedTiming().endTime))
+    .map(a => a.finished.catch(() => {}))).then(() => true)`);
 
   await navigate('calendar');
   await waitFor("document.querySelectorAll('.ms-dock').length === 0 && !!document.querySelector('.cal-month-label').textContent");
+  await settleMotion('#view-content');
   eq(await docks(), 0, 'Calendar has no duplicate bottom dock');
   eq(await js("[...document.querySelectorAll('.cal-range-switch button')].map(b => b.getAttribute('aria-pressed'))"), ['false', 'false', 'true'], 'Header switch shows Month selected');
   ok(await js("!!document.querySelector('.cal-calendars-trigger').getClientRects().length && !!document.querySelector('.cal-create-bar button').getClientRects().length"), 'Calendar keeps Your calendars and Add in its phone header');
   eq(await js("[...document.querySelectorAll('.cal-left > .view-header button')].filter(b => b.getClientRects().length).map(b => b.getAttribute('aria-label'))"), ['Your calendars', 'Add'], 'Calendar header has exactly the two named actions');
-  ok(await js("[...document.querySelectorAll('.cal-left > .view-header button')].every(b => { const r = b.getBoundingClientRect(), h = b.closest('.view-header').getBoundingClientRect(); return r.width === 46 && r.height === 46 && parseFloat(getComputedStyle(b).borderRadius) >= 23 && r.top >= h.top && r.bottom <= h.bottom; })"), 'Calendar header actions are round 46px buttons inside the title row');
+  const calendarActions = await js(`([...document.querySelectorAll('.cal-left > .view-header button')].map(b => {
+    const r = b.getBoundingClientRect(), h = b.closest('.view-header').getBoundingClientRect();
+    return { label: b.getAttribute('aria-label'), button: r.toJSON(), header: h.toJSON(), radius: getComputedStyle(b).borderRadius,
+      valid: r.width === 46 && r.height === 46 && parseFloat(getComputedStyle(b).borderRadius) >= 23 && r.top >= h.top && r.bottom <= h.bottom };
+  }))`);
+  ok(calendarActions.every(b => b.valid), 'Calendar header actions are round 46px buttons inside the title row: ' + JSON.stringify(calendarActions));
   eq(await js("[...document.querySelectorAll('.cal-range-switch button')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())"), ['Day', 'Week', 'Month'], 'Calendar keeps the mockup range switch beside the period');
   ok(await js("[...document.querySelectorAll('.cal-nav > button')].find(b => b.textContent === 'Today').getClientRects().length > 0"), 'Today remains visible in the header navigation');
   ok(await js("[...document.querySelectorAll('.cal-range-switch button')].every(b => b.getBoundingClientRect().height >= 36)"), 'Calendar range pills match the board layout: 36px controls');
@@ -227,7 +237,7 @@ async function run(ctx) {
   const eventDismiss = async how => {
     await calendarButton('Add');
     await waitFor(sheetUp);
-    await delay(260);
+    await settleMotion('.cal-event-dialog');
     const panel = await rect('.cal-event-dialog'), grab = await rect('.ms-sheet-grabber');
     ok(panel.l === 0 && panel.w === 390 && panel.b <= 844 + 1, 'Event sheet fills the phone width: ' + JSON.stringify(panel));
     ok(grab && grab.h >= 43.5 && grab.w >= 43.5, 'Event sheet has a 44px grabber');
@@ -242,7 +252,7 @@ async function run(ctx) {
     ok(await js("!document.documentElement.classList.contains('panel-dialog-open')"), `Scrolling unlocks after ${how}`);
   };
   for (const how of ['escape', 'cancel', 'grabber click', 'swipe down']) await eventDismiss(how);
-  await calendarButton('Add'); await waitFor(sheetUp); await delay(260);
+  await calendarButton('Add'); await waitFor(sheetUp); await settleMotion('.cal-event-dialog');
   await shot('calendar-event-sheet');
   eq(await small('.cal-event-dialog button, .cal-event-dialog input, .cal-event-dialog select'), [], 'Event sheet controls are 44px');
   const reach = await js(`(() => { const form = document.querySelector('.cal-event-dialog'); const scroller = [form, ...form.querySelectorAll('*')].find(n => n.scrollHeight > n.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(n).overflowY)) || form; scroller.scrollTop = 1e6; const b = [...form.querySelectorAll('button')].find(n => /^Create event$/.test(n.textContent.trim())).getBoundingClientRect(); return { b: b.bottom, h: b.height, vh: innerHeight }; })()`);
@@ -264,16 +274,16 @@ async function run(ctx) {
   ok(await js("!!document.querySelector('.library-recent-list')"), 'Library opens the board layout: searchable All overview');
   await shot('library-all');
   await libTab('Files');
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length === 3");
-  const docSearch = await js("document.querySelector('.ms-dock input').placeholder");
-  ok(/Search documents/.test(docSearch), 'Library Documents dock holds the page search');
-  await type('.ms-dock input', 'Design');
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && document.querySelectorAll('.library-document-card').length === 3");
+  const docSearch = await js("document.querySelector('.ms-page-search input').placeholder");
+  ok(/Search documents/.test(docSearch), 'Library Documents keeps search under its title');
+  await type('.ms-page-search input', 'Design');
   await waitFor("document.querySelectorAll('.library-document-card').length === 1");
-  ok(await js("document.querySelector('.library-document-card').textContent.includes('Design principles')"), 'Dock search filters documents after the existing debounce');
-  await type('.ms-dock input', '');
+  ok(await js("document.querySelector('.library-document-card').textContent.includes('Design principles')"), 'Page search filters documents after the existing debounce');
+  await type('.ms-page-search input', '');
   await waitFor("document.querySelectorAll('.library-document-card').length === 3");
   const viewWritesBefore = writes.length;
-  await dockButton('New document');
+  await js("[...document.querySelectorAll('.library-document-toolbar button')].find(b => /New document/.test(b.textContent)).click()");
   await waitFor("!!document.querySelector('.library-editor textarea')");
   await delay(250);
   eq(await docks(), 0, 'The dock leaves while the editor is open');
@@ -298,37 +308,37 @@ async function run(ctx) {
   await js("document.querySelector('.library-editor button[aria-label=\"Back to Library\"]').click()");
   await waitFor("!!document.querySelector('.confirm-panel .btn, .panel-dialog .btn')");
   await js("[...document.querySelectorAll('.confirm-panel .btn, .panel-dialog .btn')].find(b => /Discard/.test(b.textContent)).click()");
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1 && document.querySelectorAll('.library-document-card').length >= 3");
-  eq(await docks(), 1, 'The dock returns once after Back');
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && document.querySelectorAll('.library-document-card').length >= 3");
+  eq(await docks(), 0, 'Back restores page search without a dock');
   await barShown(); eq(await barCurrent(), 'more', 'The tab bar slides back after the editor');
   await libTab('Vault');
-  await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.ms-dock input')");
+  await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-page-search').length === 1 && !!document.querySelector('.ms-page-search input')");
   await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree summary').length > 0");
   await delay(400);
-  // Library Vault Polish (2026-10-22): the dock's "+" is Today's note, the only create.
-  eq((await dockInfo()).buttons.map(b => b.label), ["Today's note"], "Vault dock offers Today's note and nothing else");
-  eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Search vault', 'Vault Browse search lives in the dock');
-  await type('.ms-dock input', 'Daily');
+  // Vault retains its native Today's note action.
+  ok(await js("!!document.querySelector('.vault-today-btn')"), "Vault keeps Today's note in page");
+  eq(await js("document.querySelector('.ms-page-search input').placeholder"), 'Search vault', 'Vault Browse search lives under the title');
+  await type('.ms-page-search input', 'Daily');
   await delay(300);
-  ok(await js("[...document.querySelectorAll('.vault-group-names .library-vault-note')].length > 0 && [...document.querySelectorAll('.vault-group-names .library-vault-note')].every(b => /daily/i.test(b.textContent))"), 'Vault dock search narrows the list to matching names');
+  ok(await js("[...document.querySelectorAll('.vault-group-names .library-vault-note')].length > 0 && [...document.querySelectorAll('.vault-group-names .library-vault-note')].every(b => /daily/i.test(b.textContent))"), 'Vault page search narrows the list to matching names');
   await shot('library-vault');
-  await type('.ms-dock input', '');
+  await type('.ms-page-search input', '');
   await js("[...document.querySelectorAll('.vault-mode-pill')].find(b => b.textContent.trim() === 'Map')?.click()");
   await delay(600);
-  ok(await docks() <= 1, 'Vault Map keeps one dock at most');
+  ok(await docks() === 0, 'Vault Map has no bottom dock');
   await libTab('Google Drive');
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1 && /Search in Drive/.test(document.querySelector('.ms-dock input')?.placeholder || '')");
-  ok((await dockInfo()).buttons.some(b => b.label === 'New' || b.text === '+'), 'Drive dock has a "+" for the New menu');
-  await js("document.querySelector('.ms-dock button').click()");
-  ok(await js("!!document.querySelector('details[open] > summary[data-mobile-dock=create], details.drive-new[open]') || [...document.querySelectorAll('details')].some(d => d.open && /New/.test(d.querySelector('summary')?.textContent || ''))"), 'Drive + opens the New menu');
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && /Search in Drive/.test(document.querySelector('.ms-page-search input')?.placeholder || '')");
+  ok(await js("!!document.querySelector('.google-new-menu summary')"), 'Drive retains New menu in page');
+  await js("document.querySelector('.view-header [aria-label=\"Create or upload in Drive\"]').click()");
+  ok(await js("!!document.querySelector('details.google-new-menu[open]') || [...document.querySelectorAll('details')].some(d => d.open && /New/.test(d.querySelector('summary')?.textContent || ''))"), 'Drive + opens the New menu');
   await shot('library-drive');
   for (const name of ['Files', 'Vault', 'Google Drive', 'Files', 'Vault']) {
     await libTab(name); await delay(500);
-    ok(await docks() <= 1 && (await js("document.querySelectorAll('.ms-dock input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);
+    ok(await docks() === 0 && (await js("document.querySelectorAll('.ms-page-search input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);
   }
   await navigate('notes');
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-  ok(await js("document.querySelector('.ms-dock input').placeholder === 'Search notes' && !document.querySelector('.library-view')"), 'Leaving Library leaves no Library search behind');
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1");
+  ok(await js("document.querySelector('.ms-page-search input').placeholder === 'Search notes' && !document.querySelector('.library-view')"), 'Leaving Library leaves no Library search behind');
 
   // ---- E. Tool Store keeps its own header search, "+" menu and sheet ------------------------
   await navigate('tool-store');
@@ -338,6 +348,20 @@ async function run(ctx) {
   ok(await js("getComputedStyle(document.querySelector('.tool-store-search')).display !== 'none'"), 'Its header search is visible');
   eq(await js("[...document.querySelectorAll('button')].filter(b => b.getClientRects().length && /Add or manage|Manage skills/.test(b.getAttribute('aria-label') || b.textContent)).length"), 1, 'One add/manage control, not a header plus a dock');
   eq(await small('.ts-plus, .tool-store-search, .ts-row-hit'), [], 'Tool Store phone controls are 44px');
+  ok(await js("(() => { const p = document.querySelector('.ts-search-pill'), i = getComputedStyle(p.querySelector('input')); return !!p.querySelector('svg') && !!p.querySelector('.ts-search-filter') && p.getBoundingClientRect().height >= 52 && i.backgroundColor === 'rgba(0, 0, 0, 0)' && i.borderTopWidth === '0px'; })()"), 'Tool Store search is one pill with magnifier and round filter');
+  eq(await small('.ts-search-filter'), [], 'Tool Store filter target is at least 44px');
+  const storeTotal = await js("document.querySelectorAll('.tool-store-card').length");
+  await type('.tool-store-search', 'qqqq-none');
+  eq(await js("document.querySelectorAll('.tool-store-card').length"), 0, 'Store search filters all nonmatching cards');
+  ok(await js("document.querySelector('.tool-store-results .empty-state-title')?.textContent === 'No matches'"), 'Store no-match state lives in page results');
+  await js("document.querySelector('.ts-search-filter').click()");
+  ok(await js("document.querySelector('.tool-store-installed input').checked && document.querySelector('.ts-search-filter').getAttribute('aria-pressed') === 'true'"), 'Round filter activates existing Added only filter');
+  eq(await js("document.querySelector('.tool-store-search').value"), 'qqqq-none', 'Store query survives filter rerender');
+  await js("document.querySelector('.ts-search-filter').click()");
+  ok(await js("!document.querySelector('.tool-store-installed input').checked && document.querySelector('.ts-search-filter').getAttribute('aria-pressed') === 'false'"), 'Round filter clears existing Added only filter');
+  await type('.tool-store-search', '');
+  eq(await js("document.querySelectorAll('.tool-store-card').length"), storeTotal, 'Clearing store search restores all cards');
+
   await js("document.querySelector('.ts-plus').click()");
   ok(await js("document.querySelector('.ts-plus').getAttribute('aria-expanded') === 'true'"), 'Tool Store + opens its menu');
   await press('Escape');
@@ -418,22 +442,18 @@ async function run(ctx) {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
-  await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(600);
-  // A 300px keyboard (visualViewport shortened): the tab bar steps aside and the dock lands on the keyboard.
+  await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1"); await delay(600);
+  const beforeKeyboard = await rect('.ms-page-search');
   await js("(() => { window.__realVV = window.visualViewport; Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => ({ height: innerHeight - 300, offsetTop: 0, width: innerWidth, addEventListener() {}, removeEventListener() {} }) }); dispatchEvent(new Event('resize')); })()");
   await barGone();
-  const lifted = await rect('.ms-dock');
-  ok(Math.abs(lifted.b - (844 - 300 - 12)) <= 1 && !(await js("document.documentElement.classList.contains('ms-tabbar-up')")), 'With the keyboard up the tab bar steps aside and the dock rides the keyboard: ' + JSON.stringify(lifted));
-  await js("(() => { Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__realVV }); dispatchEvent(new Event('resize')); })()");
-  await barShown();
-  ok(Math.abs((await rect('.ms-dock')).b - ((await rect('.ms-tabbar')).t - 10)) <= 1, 'Keyboard down: the bar slides back and the dock returns above it');
+  ok(Math.abs((await rect('.ms-page-search')).t - beforeKeyboard.t) <= 1 && await docks() === 0, 'Keyboard hides bar while page search stays in normal flow');
+  await js("(() => { Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__realVV }); dispatchEvent(new Event('resize')); })()"); await barShown();
+  ok(Math.abs((await rect('.ms-page-search')).t - beforeKeyboard.t) <= 1, 'Keyboard down preserves page search position');
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '34px')");
-  const safe = await rect('.ms-dock'), safeBar = await rect('.ms-tabbar');
-  ok(Math.abs(safeBar.b - (844 - 34)) <= 1 && Math.abs(safe.b - (safeBar.t - 10)) <= 1, 'The tab bar clears a 34px bottom safe area and the dock sits above it: ' + JSON.stringify([safe, safeBar]));
+  ok((await rect('.ms-tabbar')).b <= 844 - 34 + 1 && await docks() === 0, 'Safe area affects tab bar without creating a search dock');
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
-  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  await delay(150);
-  ok(await js("[document.querySelector('.ms-dock'), document.querySelector('.ms-dock button')].every(n => getComputedStyle(n).animationName === 'none' && /^0s(, 0s)*$/.test(getComputedStyle(n).transitionDuration))"), 'Reduced motion removes dock motion');
+  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }); await delay(150);
+  ok(await js("getComputedStyle(document.querySelector('.ms-page-search')).transform === 'none'"), 'Reduced motion leaves search in normal flow');
   // Calendar's Add lives in its header now (no bottom dock).
   await navigate('calendar'); await waitFor("document.querySelectorAll('.ms-dock').length === 0 && !!document.querySelector('.cal-create-bar button')");
   await js("document.querySelector('.cal-create-bar button').focus(); document.querySelector('.cal-create-bar button').click()");
@@ -452,20 +472,20 @@ async function run(ctx) {
   ok(sheetMotion.transform === 'none' && /^0s(, 0s)*$/.test(sheetMotion.transition) && sheetMotion.frames.length >= 2 && sheetMotion.frames.every(f => f.transform === 'none'), 'Reduced motion removes all sheet movement: ' + JSON.stringify(sheetMotion));
   await press('Escape'); await waitFor("!document.querySelector('.cal-event-dialog')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  // Resize cycle: the live search node moves to the dock and back, never cloned, never duplicated.
+  // Resize cycle: the live search node moves under the title and back, never cloned, never duplicated.
   await navigate('library'); await libTab('Files');
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1 && !!document.querySelector('.library-view .card-row input')");
-  await js("window.__search = document.querySelector('.ms-dock input'); window.__search.value = 'keep me'");
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && !!document.querySelector('.ms-page-search input')");
+  await js("window.__search = document.querySelector('.ms-page-search input'); window.__search.value = 'keep me'");
   for (let i = 0; i < 3; i++) {
     await resize(1440, 900);
     ok(await js("document.querySelectorAll('.ms-dock').length === 0 && document.querySelector('.library-view .card-row').contains(window.__search)"), 'Desktop puts the search back in its toolbar (cycle ' + i + ')');
     await resize(390, 844);
-    ok(await js("document.querySelectorAll('.ms-dock').length === 1 && document.querySelector('.ms-dock').contains(window.__search) && window.__search.value === 'keep me'"), 'Phone moves the same search node into the dock with its text (cycle ' + i + ')');
+    ok(await js("document.querySelectorAll('.ms-page-search').length === 1 && document.querySelector('.ms-page-search').contains(window.__search) && window.__search.value === 'keep me'"), 'Phone moves the same search node under the title with its text (cycle ' + i + ')');
   }
-  await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-  await type('.ms-dock input', 'workspa');
+  await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1");
+  await type('.ms-page-search input', 'workspa');
   await resize(1440, 900);
-  ok(await js("document.querySelectorAll('.ms-dock, .ms-dock-note').length === 0 && document.querySelectorAll('.ms-filtered-out').length === 0"), 'Desktop shows every note again and leaves no dock behind');
+  ok(await js("document.querySelectorAll('.ms-dock, .ms-page-search, .ms-page-search-note').length === 0 && document.querySelectorAll('.ms-filtered-out').length === 0"), 'Desktop shows every note again and leaves no dock behind');
   await resize(390, 844);
 
   // ---- I. Dark base and small phones ------------------------------------------------------
@@ -475,20 +495,20 @@ async function run(ctx) {
     const over = (top, base) => ({ r: top.r * top.a + base.r * (1 - top.a), g: top.g * top.a + base.g * (1 - top.a), b: top.b * top.a + base.b * (1 - top.a), a: 1 });
     const lum = c => { const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }; return .2126 * f(c.r) + .7152 * f(c.g) + .0722 * f(c.b); };
     const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
-    const dock = document.querySelector('.ms-dock'); const page = parse(getComputedStyle(document.documentElement).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+    const dock = document.querySelector('.ms-page-search'); const page = parse(getComputedStyle(document.documentElement).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
     const surface = over(parse(getComputedStyle(dock).backgroundColor), over(parse(getComputedStyle(document.body).backgroundColor) || page, { r: 128, g: 128, b: 128, a: 1 }));
     const input = dock.querySelector('input'); const out = {};
     out.typed = ratio(parse(getComputedStyle(input).color), surface);
     out.placeholder = ratio(over(parse(getComputedStyle(input, '::placeholder').color), surface), surface);
-    out.plus = ratio(parse(getComputedStyle(dock.querySelector('button')).color), surface);
+    out.plus = ratio(parse(getComputedStyle(document.querySelector('.view-header .workspace-round')).color), surface);
     return out; })()`);
   for (const [name, color] of [['parchment', PARCHMENT], ['forest', FOREST]]) {
     await setTheme(color);
-    await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
+    await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1");
     await delay(300);
     const c = await contrast();
-    ok(c.typed >= 4.5 && c.plus >= 4.5, `${name}: dock text and + are AA readable ` + JSON.stringify(c));
-    ok(c.placeholder >= 3, `${name}: dock placeholder is readable ` + JSON.stringify(c));
+    ok(c.typed >= 4.5 && c.plus >= 4.5, `${name}: search and header action are AA readable ` + JSON.stringify(c));
+    ok(c.placeholder >= 3, `${name}: search placeholder is readable ` + JSON.stringify(c));
     await shot('dock-notes-' + name);
     await navigate('calendar'); await waitFor("document.querySelectorAll('.ms-dock').length === 0 && !!document.querySelector('.cal-month-label').textContent");
     await shot('calendar-' + name);
@@ -497,16 +517,23 @@ async function run(ctx) {
   for (const [w, h, name] of [[320, 640, 'small'], [430, 932, 'large'], [667, 375, 'landscape']]) {
     await resize(w, h);
     for (const [tab] of TABS) {
-      await navigate(tab, tab === 'library' ? { section: 'documents' } : {}); await waitFor("document.querySelectorAll('.ms-dock').length === 1");
+      await navigate(tab, tab === 'library' ? { section: 'documents' } : {}); await waitFor("document.querySelectorAll('.ms-page-search').length === 1");
       await delay(500);
-      const r = await rect('.ms-dock');
-      ok(r.l >= 0 && r.r <= w && r.b <= h && r.h >= 50 && (name !== 'landscape' || r.h <= 60), `${tab} dock fits at ${name}: ` + JSON.stringify(r));
+      const r = await rect('.ms-page-search');
+      const header = await rect('.view-header');
+      ok(r.l >= 0 && r.r <= w && r.t >= 0 && r.b <= h && r.h >= 50 && (name !== 'landscape' || r.h <= 60), `${tab} search pill fits at ${name}: ` + JSON.stringify(r));
+      ok(r.t >= header.b && r.t <= header.b + 24, `${tab} search pill is directly below the title at ${name}`);
+      if (tab === 'tasks') {
+        const activity = await rect('.task-activity');
+        ok(r.b <= activity.t, `Tasks search precedes activity and routines at ${name}`);
+      }
       ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), `${tab} does not scroll sideways at ${name}`);
-      eq(await small('.ms-dock button, .ms-dock input'), [], `${tab} dock controls are 44px at ${name}`);
-      const reach = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const d = document.querySelector('.ms-dock').getBoundingClientRect(); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: d.top, kb: getComputedStyle(document.querySelector('.ms-dock')).getPropertyValue('--ms-keyboard'), vv: [visualViewport.height, innerHeight], scroll: v.scrollTop, sh: v.scrollHeight, ch: v.clientHeight }; })()`);
-      ok(reach.last <= reach.top + 1, `${tab} last content clears the dock at ${name}: ` + JSON.stringify(reach));
+      eq(await small('.view-header .workspace-round, .ms-page-search input'), [], `${tab} search controls are 44px at ${name}`);
+      const reach = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const d = document.querySelector('.ms-tabbar').getBoundingClientRect(); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: d.top, kb: getComputedStyle(document.querySelector('.ms-tabbar')).getPropertyValue('--ms-keyboard'), vv: [visualViewport.height, innerHeight], scroll: v.scrollTop, sh: v.scrollHeight, ch: v.clientHeight }; })()`);
+      ok(reach.last <= reach.top + 1, `${tab} last content clears the tab bar at ${name}: ` + JSON.stringify(reach));
     }
-    await shot('dock-library-' + name);
+    await js(`document.querySelector('${view}').scrollTo(0, 0)`);
+    await shot('page-search-' + name);
   }
   await resize(390, 844);
 
@@ -589,8 +616,8 @@ async function run(ctx) {
   await waitFor("document.querySelector('.settings-mobile-page')?.dataset.mobileView === 'list'");
   await backBtn();
   await waitFor("!document.querySelector('.settings-mobile-page') && document.documentElement.dataset.view === 'notes'");
-  await waitFor("document.querySelectorAll('.ms-dock').length === 1");
-  ok(await js("document.querySelector('.ms-dock input').placeholder === 'Search notes'"), 'Back from the list returns to the tab underneath, dock included');
+  await waitFor("document.querySelectorAll('.ms-page-search').length === 1");
+  ok(await js("document.querySelector('.ms-page-search input').placeholder === 'Search notes'"), 'Back from the list returns to the tab underneath, search included');
   // Small phone and landscape: the list still scrolls and nothing spills.
   for (const [w, h, name] of [[320, 640, 'small'], [667, 375, 'landscape']]) {
     await resize(w, h);
@@ -661,7 +688,7 @@ async function run(ctx) {
       const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
       const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
       const v = document.getElementById('view-content');
-      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && !n.closest('.ms-dock') && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
+      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
       return { row, title: title && box(forgeTitle ? title.parentElement : title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
@@ -705,11 +732,11 @@ async function run(ctx) {
     const chat = await rect('.ms-conversation .ms-composer');
     ok(Math.abs(chatBar.b - (screen - gap)) <= 1 && Math.abs(chat.b - (chatBar.t - 10)) <= 1, `${name}: the bar clears the screen bottom and the conversation composer sits 10px above it: ${JSON.stringify(chat)}`);
     ok(Math.round((await rect('#view-content')).b) === screen, `${name}: conversation fills the screen`);
-    // A docked tab: the fixed dock and a bottom sheet.
-    await navigate('notes'); await waitFor("document.querySelectorAll('.ms-dock').length === 1"); await delay(300);
+    // A searchable tab: in-page search and a bottom sheet.
+    await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1"); await delay(300);
     await barShown();
-    const dock = await rect('.ms-dock'), dockBar = await rect('.ms-tabbar');
-    ok(Math.abs(dockBar.b - (screen - gap)) <= 1 && Math.abs(dock.b - (dockBar.t - 10)) <= 1, `${name}: the fixed dock sits 10px above the tab bar, which sits ${gap}px above the screen bottom: ${JSON.stringify([dock, dockBar])}`);
+    const dock = await rect('.ms-page-search'), dockBar = await rect('.ms-tabbar');
+    ok(Math.abs(dockBar.b - (screen - gap)) <= 1 && dock.b < dockBar.t && await docks() === 0, `${name}: the search stays in the page while the tab bar sits ${gap}px above the screen bottom: ${JSON.stringify([dock, dockBar])}`);
     const globalFrost = await rect('.ms-global-frost');
     ok(!globalFrost || globalFrost.b <= top + 0.5, `${name}: page frost stays within the status bar`);
     await js("import('/static/js/mobileSheet.js').then(m => { const p = document.createElement('p'); p.textContent = 'Fold check'; window.__foldSheet = m.openMobileSheet({ title: 'Fold check', content: p, fullHeight: true }); })");
@@ -827,7 +854,7 @@ if (process.argv.slice(1).some(arg => path.resolve(arg) === __filename)) {
     await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton'))");
     const result = await require('./mobile-tabs-checks.cjs').run({ js, win, waitFor, delay, navigate, capture, overflow, writes, reads, demoState, calendarFixtures, errors, openPopup, closePopup, liveChange, liveChunk, mutate, fixture });
     assert.deepEqual(errors, [], 'No renderer errors');
-    console.log('PASS: phone tabs, dock, sheets and Settings navigation' + (result ? ' (' + result.assertions + ' assertions).' : '.'));
+    console.log('PASS: phone tabs, in-page search, sheets and Settings navigation' + (result ? ' (' + result.assertions + ' assertions).' : '.'));
     console.log('Screenshots: ' + output);
 `;
   const src = head + '\n' + body + lines.slice(catchAt).join('\n');

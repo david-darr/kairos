@@ -85,9 +85,6 @@ export async function render(container) {
       addBtn,
     ])
   );
-
-  form.querySelector('summary').dataset.mobileDock = 'create';
-  form.querySelector('summary').dataset.mobileCreateLabel = 'Schedule a task';
   if (redesignOn()) {
     const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New task', onclick: () => { form.open = true; nameInput.focus(); } });
     create.innerHTML = ICONS.plus;
@@ -103,7 +100,6 @@ export async function render(container) {
   const triggersCard = el("div", { class: "glass card triggers-card" });
   const routinesHeading = el('h3', { class: 'workspace-phone-only tasks-routines-heading', text: 'Routines' });
   const wrap = el("div", { class: "view-constrained tasks-workspace" }, [header, activity, boardCard, form, routinesHeading, list, triggersCard, builtinCard]);
-  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search tasks and cards";  // phone dock search (mobileDock.js)
   container.append(wrap);
   await renderBoard(boardCard);
   await renderTriggers(triggersCard).catch(() => triggersCard.remove()); // admin only

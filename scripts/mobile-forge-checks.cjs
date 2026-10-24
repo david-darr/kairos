@@ -165,14 +165,14 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('#mf-tab-1');
   await waitFor("document.querySelectorAll('#mf-sessions .ms-history-row').length > 0");
   ok(await js("document.querySelector('#mf-new').inert && !document.querySelector('#mf-sessions').inert"), 'Sessions owns interaction after paging');
-  ok(await js("document.querySelector('#mf-sessions').firstElementChild.classList.contains('ms-history-dock') && [...document.querySelectorAll('.mf-session-group h2')].every(n => ['Today', 'Earlier'].includes(n.textContent))"), 'Sessions puts search above its date-grouped cards');
+  ok(await js("document.querySelector('#mf-sessions').firstElementChild.classList.contains('ms-history-search') && [...document.querySelectorAll('.mf-session-group h2')].every(n => ['Today', 'Earlier'].includes(n.textContent))"), 'Sessions puts search above its date-grouped cards');
   await phoneSizes('sessions');
   await input('#mf-sessions input[type=search]', 'no-matching-session'); await delay(300);
   ok(await js("document.querySelector('#mf-sessions').textContent.includes('No matching sessions.')"), 'Session search has an empty state');
   await input('#mf-sessions input[type=search]', ''); await delay(300);
-  await textButton('#mf-sessions .ms-history-dock', 'Filter');
+  await textButton('#mf-sessions .ms-history-search', 'Filter');
   ok(await js("!!document.querySelector('#mf-sessions [aria-label=\"Filter sessions\"]') && !!document.querySelector('#mf-sessions [aria-label=\"Filter by model\"]')"), 'Search dock offers state and model filters');
-  ok(await js("document.querySelector('#mf-sessions .ms-history-filters').getBoundingClientRect().top >= document.querySelector('#mf-sessions .ms-history-dock').getBoundingClientRect().bottom"), 'Top search opens its filter menu below the dock');
+  ok(await js("document.querySelector('#mf-sessions .ms-history-filters').getBoundingClientRect().top >= document.querySelector('#mf-sessions .ms-history-search').getBoundingClientRect().bottom"), 'Top search opens its filter menu below the dock');
   await click('#mf-sessions .ms-row-more');
   ok(await js("['Rename', 'Delete'].every(t => document.querySelector('.ms-actions-open').textContent.includes(t))"), 'Session row actions are reachable without gestures');
   await click('#mf-sessions .ms-history-main'); // dismiss revealed actions

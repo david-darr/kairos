@@ -96,7 +96,7 @@ const rows = [
   { id: 'needs', title: 'Needs review', updated_at: now, needs_approval: true, forge: { branch: 'review' } },
 ];
 history.update(rows, [], () => {});
-assert.equal(historyPage.firstElementChild.classList.contains('ms-history-dock'), true);
+assert.equal(historyPage.firstElementChild.classList.contains('ms-history-search'), true);
 const groups = historyPage.querySelector('.ms-history-list').children;
 assert.equal(groups.length, 2);
 assert.equal(groups[0].querySelector('h2').textContent, 'Today');

@@ -17,12 +17,11 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
   const openFolders = new Set();
 
   const search = el('input', { type: 'search', class: 'library-vault-search', placeholder: 'Search vault', 'aria-label': 'Search vault notes', autocomplete: 'off' });
-  search.dataset.mobileDock = 'search';
+  search.dataset.pageSearch = 'true';
   const homeBtn = el('button', { type: 'button', class: 'vault-mode-pill active', 'aria-pressed': 'true', title: 'Vault Home' }, [icon('home'), el('span', { text: 'Home' })]);
   const mapBtn = el('button', { type: 'button', class: 'vault-mode-pill', 'aria-pressed': 'false', title: 'Map of links' }, [icon('map'), el('span', { text: 'Map' })]);
   const todayBtn = el('button', { type: 'button', class: 'vault-today-btn', title: "Today's note", 'aria-label': "Today's note", hidden: true }, [icon('today')]);
   const refreshBtn = el('button', { type: 'button', class: 'vault-refresh-btn', title: 'Reload the vault from disk', 'aria-label': 'Refresh vault' }, [icon('refresh')]);
-  todayBtn.dataset.mobileDock = 'create'; todayBtn.dataset.mobileCreateLabel = "Today's note";
   const count = el('div', { class: 'vault-count', 'aria-live': 'polite', text: 'Loading vault...' });
   const tree = el('div', { class: 'library-vault-tree', role: 'navigation', 'aria-label': 'Vault notes' });
   const sidebar = el('aside', { class: 'library-vault-sidebar' }, [

@@ -221,7 +221,7 @@
   .kairos-redesign[data-view=mobileLaunch] .ms-context { display: none; }
   .kairos-redesign[data-view=mobileLaunch] .ms-context:has(select:not([hidden])) { display: block; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-dragging) .ms-page-track { transition: transform var(--rd-dur-tab) var(--rd-ease); }
-  .kairos-redesign[data-view=mobileLaunch] .ms-history-dock { order: -1; flex-shrink: 0; margin: 4px 0 0; border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-history-search { order: -1; flex-shrink: 0; margin: 4px 0 0; border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); }
   .kairos-redesign[data-view=mobileLaunch] .ms-history-filters { bottom: auto; top: calc(100% + 8px); z-index: 5; }
   .kairos-redesign[data-view=mobileLaunch] .ms-history-list { flex: 1; min-height: 0; border-radius: var(--rd-radius-card); }
   .kairos-redesign[data-view=mobileLaunch] .ms-history-main { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 4px 12px; min-height: 80px; padding: 13px 48px 13px 16px; }
@@ -360,11 +360,11 @@
   .kairos-redesign[data-view=mobileLaunch] .ms-live-chat .rd-chat-prompts { display: none; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom { margin-top: 0; padding-inline: 20px; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history { padding: 0 20px var(--ms-tabbar-space, 120px); gap: 18px; overflow-y: auto; }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-dock { display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px; align-items: center; gap: 10px; min-height: 54px; margin: 0; padding: 4px 5px 4px 18px; box-shadow: none; backdrop-filter: none; }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-dock input { height: 44px; padding: 0; font: 15px var(--rd-font-ui); }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-dock > button { width: 44px; height: 44px; padding: 0; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); font-size: 0; background: var(--rd-surface-solid); }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-dock > button::before { content: ''; display: block; width: 18px; height: 18px; margin: auto; background: currentColor; clip-path: polygon(5% 10%,95% 10%,62% 52%,62% 95%,38% 80%,38% 52%); }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-dock > button[aria-expanded=true] { background: var(--rd-surface-2); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search { display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px; align-items: center; gap: 10px; min-height: 54px; margin: 0; padding: 4px 5px 4px 18px; box-shadow: none; backdrop-filter: none; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search input { height: 44px; padding: 0; font: 15px var(--rd-font-ui); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search > button { width: 44px; height: 44px; padding: 0; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); font-size: 0; background: var(--rd-surface-solid); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search > button::before { content: ''; display: block; width: 18px; height: 18px; margin: auto; background: currentColor; clip-path: polygon(5% 10%,95% 10%,62% 52%,62% 95%,38% 80%,38% 52%); }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search > button[aria-expanded=true] { background: var(--rd-surface-2); }
   .kairos-redesign[data-view=mobileLaunch] .rd-chat-search-icon { display: grid; place-items: center; color: var(--rd-ink-dim); }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell :is(.rd-chat-recent, .rd-chat-working h2) { margin: 0; font: italic 600 26px/1.2 var(--rd-font-title); }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .rd-chat-working-row { padding-top: 12px; gap: 14px; }

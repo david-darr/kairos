@@ -101,7 +101,7 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(Array.from(segments.options, x => x.value), ['day', 'week', 'month']);
   const rangeButtons = host.querySelector('.cal-range-switch').querySelectorAll('button');
   assert.deepEqual(rangeButtons.map(b => b.textContent), ['Day', 'Week', 'Month']);
-  assert.ok(descendants(host).every(b => !b.dataset.mobileDock && !b.getAttribute('data-mobile-dock')), 'Calendar controls stay in the header, without dock proxies');
+  assert.ok(descendants(host).every(b => !b.classList.contains('ms-dock')), 'Calendar controls stay in the header, without dock proxies');
   assert.deepEqual(rangeButtons.map(b => b.getAttribute('aria-pressed')), ['false', 'false', 'true']);
   assert.equal(host.querySelectorAll('.cal-day').length, 42);
   rangeButtons[0].onclick(); await flush();

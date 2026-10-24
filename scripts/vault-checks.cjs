@@ -33,13 +33,14 @@ async function run(ctx) {
   ok(await js("[...document.querySelectorAll('.vault-home-card')].find(c => c.textContent.startsWith('Recently changed')).textContent.includes('Chat: Connecting ideas across the vault')"), 'Recently changed names the chat that changed a note');
   if (phone) {
     ok(await js("document.querySelector('.vault-home-host').parentElement.classList.contains('library-vault-sidebar')"), 'phone: Home sits on the list page above the folders');
-    await waitFor("!!document.querySelector('.ms-dock input')");
-    eq(await js("document.querySelector('.ms-dock input').placeholder"), 'Search vault', 'phone: the vault search is in the dock');
-    eq(await js("[...document.querySelectorAll('.ms-dock button')].map(b => b.getAttribute('aria-label'))"), ["Today's note"], "phone: the dock's + is Today's note");
-    eq(await small('.library-vault-browser button, .library-vault-browser summary, .ms-dock button, .ms-dock input'), [], 'phone: list page controls are 44px');
+    await waitFor("!!document.querySelector('.ms-page-search input')");
+    eq(await js("document.querySelector('.ms-page-search input').placeholder"), 'Search vault', 'phone: the vault search is in the page');
+    ok(await js("document.querySelector('.view-header').nextElementSibling.matches('.ms-page-search') && document.querySelectorAll('.ms-page-search').length === 1 && !document.querySelector('.ms-dock')"), 'phone: one search pill sits directly under the title, with no bottom dock');
+    eq(await js("[...document.querySelectorAll('.vault-today-btn')].map(b => b.getAttribute('aria-label'))"), ["Today's note"], "phone: Today's note stays in the page");
+    eq(await small('.library-vault-browser button, .library-vault-browser summary, .vault-today-btn, .ms-page-search input'), [], 'phone: list page controls are 44px');
     await delay(300);
-    const barDock = await js("(() => { const bar = document.querySelector('.ms-tabbar'); const dock = document.querySelector('.ms-dock'); if (!bar || !dock) return null; return { up: document.documentElement.classList.contains('ms-tabbar-up'), dock: dock.getBoundingClientRect().bottom, bar: bar.getBoundingClientRect().top }; })()");
-    ok(barDock && barDock.up && barDock.dock <= barDock.bar + 0.5, 'phone: the tab bar shows on the list page and the dock sits above it: ' + JSON.stringify(barDock));
+    const barSearch = await js("(() => { const bar = document.querySelector('.ms-tabbar'); const search = document.querySelector('.ms-page-search'); if (!bar || !search) return null; return { up: document.documentElement.classList.contains('ms-tabbar-up'), search: search.getBoundingClientRect().bottom, bar: bar.getBoundingClientRect().top }; })()");
+    ok(barSearch && barSearch.up && barSearch.search <= barSearch.bar + 0.5, 'phone: the tab bar shows on the list page below the in-page search: ' + JSON.stringify(barSearch));
   }
   await capture(label + '-vault-home');
   eq(await overflow(), [], 'Vault Home has no overflow');
@@ -61,7 +62,7 @@ async function run(ctx) {
   ok(projects.indexOf('Projects note 2') < projects.indexOf('Projects note 10'), 'note 2 comes before note 10');
 
   // -- Full-text search with highlighting -----------------------------------------------
-  const searchField = '.library-vault-search'; // on a phone it lives in the dock
+  const searchField = '.library-vault-search'; // on a phone it lives in the in-page pill
   await js(`(() => { const i = document.querySelector('${searchField}'); i.value = 'connected place'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await waitFor("!!document.querySelector('.vault-group-text .vault-search-hit mark')");
   eq(await js("[...document.querySelectorAll('.vault-group-text .vault-search-hit mark')].map(m => m.textContent).slice(0, 2)"), ['connected', 'place'], 'a phrase inside a note body is found with its words highlighted');
@@ -211,7 +212,7 @@ async function run(ctx) {
 
   // -- Today's note and the index prompt ------------------------------------------------------
   start = writes.length;
-  if (phone) { await js("document.querySelector('.ms-dock button[aria-label=\"Today\\'s note\"]').click()"); }
+  if (phone) { await js("document.querySelector('.vault-today-btn[aria-label=\"Today\\'s note\"]').click()"); }
   else await click('.vault-create-today');
   await waitFor("!!document.querySelector('.vault-index-prompt')");
   ok(since(start).some(w => w.path === '/api/vault/daily' && w.method === 'POST'), "today's note is created through POST /api/vault/daily");
@@ -254,7 +255,14 @@ async function run(ctx) {
   await clickText('.vault-map-filters .vault-map-pill', 'Orphans');
   // Focus mode at depth 2 shows only notes connected within two links.
   if (phone) {
-    await js("(() => { const i = document.querySelector('.ms-dock input') || document.querySelector('.vault-search'); i.value = 'Projects note 4'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    await waitFor("document.querySelector('.ms-page-search input') === document.querySelector('.vault-search')");
+    ok(await js("document.querySelectorAll('.ms-page-search').length === 1 && !document.querySelector('.library-vault-search') && document.querySelector('.view-header').nextElementSibling.matches('.ms-page-search')"), 'phone: Map replaces Browse search with its own field under the retained title');
+    await js("(() => { const i = document.querySelector('.ms-page-search input'); i.value = 'no-such-vault-node'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    await waitFor("document.querySelector('.vault-search-results')?.textContent.includes('No matching notes or folders')");
+    ok(await js("!document.querySelector('.vault-search-result')"), 'phone: Map search reports no matches in the page');
+    await js("(() => { const i = document.querySelector('.ms-page-search input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    eq(await js("document.querySelector('.vault-search-results').childElementCount"), 0, 'phone: clearing Map search clears the no-match message');
+    await js("(() => { const i = document.querySelector('.ms-page-search input'); i.value = 'Projects note 4'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await waitFor("!!document.querySelector('.vault-search-result')");
     await click('.vault-search-result');
     await waitFor("!!document.querySelector('dialog.ms-sheet[open] .vault-peek')");

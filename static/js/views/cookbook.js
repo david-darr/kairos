@@ -124,7 +124,6 @@ export async function render(container) {
   }
 
   const wrap = el("div", { class: "view-constrained" }, [header, tabs, body]);
-  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search models";  // phone dock search (mobileDock.js)
   container.append(wrap);
   await switchSection(activeSection);
 
@@ -231,15 +230,12 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
 
 async function renderOllamaCatalog(catalogSection, installedSection) {
   catalogSection.innerHTML = "";
-  catalogSection.dataset.mobileDock = 'create'; catalogSection.dataset.mobileCatalog = 'true';
-  catalogSection.dataset.mobileCreateLabel = 'Add a local model';
   catalogSection.appendChild(el("div", { class: "title", style: "margin-bottom:8px;", text: "Catalog" }));
   catalogSection.appendChild(el("div", { class: "meta", style: "margin-bottom:10px;", text: "A curated list, not a live search of every model Ollama offers." }));
 
   const catalog = await api("/api/cookbook/catalog");
   const grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;" });
   grid.classList.add('cookbook-catalog-list');
-  catalogSection.dataset.mobileCatalog = 'true';
   catalogSection.appendChild(grid);
 
   for (const item of catalog) {
@@ -395,8 +391,6 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
 
 async function renderEngineCatalog(catalogSection, downloadedSection, statusRow) {
   catalogSection.innerHTML = "";
-  catalogSection.dataset.mobileDock = 'create'; catalogSection.dataset.mobileCatalog = 'true';
-  catalogSection.dataset.mobileCreateLabel = 'Add a local model';
   catalogSection.appendChild(el("div", { class: "title", style: "margin-bottom:8px;", text: "Catalog" }));
   catalogSection.appendChild(el("div", { class: "meta", style: "margin-bottom:10px;", text: "A curated list of GGUF models, each verified reachable before being listed." }));
 

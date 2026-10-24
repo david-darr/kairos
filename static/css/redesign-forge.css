@@ -343,8 +343,7 @@
   .kairos-redesign[data-view="forgeHome"] .mf-project .mf-project-trigger { display: block; width: 100%; height: 44px; padding: 0 16px; margin-top: 8px; border-radius: 999px; }
   .kairos-redesign[data-view="forgeHome"] .mf-project[data-forge-page="1"] :is(.mf-workspace-line, .mf-project-trigger) { display: none; }
   .kairos-redesign[data-view="forgeHome"] #mf-sessions { padding: 0 20px calc(max(16px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); gap: 16px; }
-  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { flex: none; min-height: 54px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--mf-card); box-shadow: none; }
-  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock .ms-blur { display: none; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-search { flex: none; min-height: 54px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--mf-card); box-shadow: none; }
   .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-list { padding: 0 0 16px; }
   .kairos-redesign[data-view="forgeHome"] .mf-session-group { display: grid; gap: 12px; margin-bottom: 20px; }
   .kairos-redesign[data-view="forgeHome"] .mf-session-group > .mf-card { padding: 4px 16px; overflow: hidden; }
@@ -412,12 +411,12 @@
      shortcut here; the boards reserve these rows for project/new or Home. */
   .kairos-redesign[data-view="forgeHome"] :is(.mf-dashboard, .mf-project) .ms-header-row > .ms-notifications-open { display: none; }
   .kairos-redesign[data-view="forgeHome"] .mf-branch-icon svg { width: 16px; height: 16px; }
-  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; padding-left: 18px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-search { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; padding-left: 18px; }
   .kairos-redesign[data-view="forgeHome"] .mf-search-icon { display: flex; color: var(--rd-ink-dim); }
   .kairos-redesign[data-view="forgeHome"] .mf-search-icon svg { width: 18px; height: 18px; }
   .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-filters { grid-column: 1 / -1; }
-  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock input { padding-inline: 6px; font-size: 15px; }
-  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-dock { height: 54px; padding-block: 0; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-search input { padding-inline: 6px; font-size: 15px; }
+  .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-search { height: 54px; padding-block: 0; }
   .kairos-redesign[data-view="forgeHome"] #mf-sessions .ms-history-filters { top: calc(100% + 8px); bottom: auto; z-index: 5; }
   .kairos-redesign[data-view="forgeHome"] .mf-summary-grid > section > small:first-child { font-size: 13px; }
   .kairos-redesign[data-view="forgeHome"] .mf-activity .rd-dot-matrix { gap: 3px; }

@@ -76,12 +76,11 @@
   .kairos-redesign .ms-actions-open .ms-history-main { width: 100%; transform: translateX(-136px); }
   .kairos-redesign .ms-actions-open .ms-row-more { display: none; }
   .kairos-redesign .ms-actions-open .ms-row-actions { visibility: visible; }
-  .kairos-redesign .ms-history-dock { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; padding: 5px; border-radius: 26px; }
-  .kairos-redesign .ms-history-dock input { min-width: 0; width: 100%; height: 50px; padding-inline: 14px; border: 0; background: transparent; font-size: 16px; }
-  .kairos-redesign .ms-history-dock > button { border: 0; background: transparent; padding-inline: 12px; }
+  .kairos-redesign .ms-history-search { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; padding: 5px; border-radius: 26px; }
+  .kairos-redesign .ms-history-search input { min-width: 0; width: 100%; height: 50px; padding-inline: 14px; border: 0; background: transparent; font-size: 16px; }
+  .kairos-redesign .ms-history-search > button { border: 0; background: transparent; padding-inline: 12px; }
   .kairos-redesign .ms-history-filters { position: absolute; bottom: calc(100% + 8px); right: 0; padding: 8px; border-radius: 20px; display: flex; flex-direction: column; max-width: 100%; }
   .kairos-redesign .ms-history-filters select { max-width: 100%; padding: 0 8px; border: 0; background: transparent; font-size: 13px; }
-  .kairos-redesign .ms-history-dock .ms-blur { z-index: -1; }
   .kairos-redesign .ms-tab-sheet { position: fixed; inset: auto 0 calc(-1 * var(--ms-below-fold, 0px)); padding: 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; border: 1px solid var(--rd-line-strong); border-radius: 28px 28px 0 0; background: var(--rd-surface-solid); overflow: auto; box-sizing: border-box; }
   .kairos-redesign .ms-tab-sheet[open] { animation: ms-sheet-in 280ms cubic-bezier(.22, 1, .36, 1); }
   .kairos-redesign .ms-tab-sheet::backdrop { background: rgba(var(--shade-rgb), .4); }
@@ -149,30 +148,16 @@
 
 /* Shared interaction zone, composer and pushed pages. Desktop has no rules. */
 @media (max-width: 768px) {
-  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer, .settings-mobile-page) [hidden] { display: none !important; }
-  .kairos-redesign :is(.ms-sheet, .ms-dock, .ms-git-dock, .ms-composer) { color: var(--rd-ink); font-family: var(--rd-font-ui); box-sizing: border-box; }
-  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :is(button, input:not([type=checkbox]):not([type=radio]), select, textarea, summary) { min-height: 44px; min-width: 44px; box-sizing: border-box; font: inherit; }
-  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-dock, .ms-git-dock, .ms-composer) :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
-  .kairos-redesign .ms-has-dock { padding-bottom: calc(90px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) !important; scroll-padding-bottom: 100px; }
-  .kairos-redesign .ms-dock { position: fixed; z-index: 110; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); right: max(12px, var(--mobile-safe-right, env(safe-area-inset-right, 0px))); bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) - var(--ms-below-fold, 0px)); padding: 3px; min-height: 50px; display: flex; gap: 4px; align-items: center; }
-  .kairos-redesign .ms-dock > input { flex: 1; width: 0; min-width: 0; border: 0; background: transparent; padding: 0 14px; border-radius: 999px; font-size: 16px; }
-  .kairos-redesign .ms-dock > button { flex: 1; padding: 0 12px; border: 0; box-shadow: none; background: transparent; font-size: 15px; }
-  .kairos-redesign .ms-dock:has(input) > button { flex: 0 0 44px; font-size: 24px; }
-  .kairos-redesign .ms-dock button[aria-pressed=true] { background: var(--rd-surface-2); }
-  /* The shared activity pill rides above the dock, so it never covers a page's title row or description. */
-  .kairos-redesign:has(.ms-has-dock) .ms-activity-floating { bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px); }
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-git-dock, .ms-composer, .settings-mobile-page) [hidden] { display: none !important; }
+  .kairos-redesign :is(.ms-sheet, .ms-git-dock, .ms-composer) { color: var(--rd-ink); font-family: var(--rd-font-ui); box-sizing: border-box; }
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-git-dock, .ms-composer) :is(button, input:not([type=checkbox]):not([type=radio]), select, textarea, summary) { min-height: 44px; min-width: 44px; box-sizing: border-box; font: inherit; }
+  .kairos-redesign :is(.ms-sheet, .ms-sheet-surface, .ms-git-dock, .ms-composer) :focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   /* Forge: the pill clears the session composer and the sticky Git action pill, and steps aside while drafting. */
   .kairos-redesign:is(:has(.forge-transcript-composer), :has(.ms-git-dock)) .ms-activity-floating { bottom: calc(max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 74px); }
   .kairos-redesign:has(.forge-transcript-composer.ms-composer-expanded) .ms-activity-floating { display: none; }
-  /* A page button the dock already offers is not shown twice. The dock proxies still click the hidden original. */
-  .kairos-redesign .ms-has-dock :is(button[data-mobile-dock], .cal-view-switch, .cal-create-bar) { display: none !important; }
   .kairos-redesign .ms-filtered-out { display: none !important; }
   /* A checkbox row inside a phone sheet is a full 44px target. */
   .kairos-redesign .ms-sheet-surface :is(label.cal-checkbox-label, label:has(> input[type=checkbox])), .kairos-redesign .ms-sheet :is(label:has(> input[type=checkbox])) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-  .kairos-redesign .ms-dock-note { position: fixed; z-index: 109; left: max(12px, var(--mobile-safe-left, env(safe-area-inset-left, 0px))); max-width: calc(100vw - 200px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + 62px - var(--ms-below-fold, 0px)); padding: 10px 16px; font-size: 14px; color: var(--rd-ink-dim); text-align: left; }
-  /* A dock holding only "+" is a round thumb button on the right, not an empty bar. */
-  .kairos-redesign .ms-dock:has(> button:only-child) { left: auto; width: 56px; height: 56px; padding: 0; }
-  .kairos-redesign .ms-dock > button:only-child { flex: 1; font-size: 26px; border-radius: 999px; }
   .kairos-redesign[data-view=agents] .ms-activity-floating { top: calc(64px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))); bottom: auto; }
   .kairos-redesign .ms-git-dock { position: sticky; bottom: calc(var(--ms-keyboard, 0px) + max(12px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); display: flex; justify-content: center; gap: 4px; padding: 3px; margin-top: 16px; z-index: 2; }
   .kairos-redesign .ms-git-dock > button { border: 0; background: transparent; box-shadow: none; padding-inline: 12px; flex: 1; }
@@ -301,8 +286,8 @@
     .kairos-redesign .ms-composer { background: color-mix(in srgb, var(--rd-surface-solid) 86%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .kairos-redesign :is(.ms-dock, .ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page),
-    .kairos-redesign :is(.ms-dock, .ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    .kairos-redesign :is(.ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page),
+    .kairos-redesign :is(.ms-git-dock, .ms-sheet, .ms-sheet-surface, .ms-composer, .settings-mobile-page) * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 }
 

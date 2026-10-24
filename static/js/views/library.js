@@ -115,7 +115,7 @@ function libraryChrome(container, current) {
 async function renderAll(container) {
   disposeVault(); activeSection = 'all';
   const [header, tabs] = libraryChrome(container, 'all');
-  const search = el('input', { type: 'search', class: 'library-overview-search', placeholder: 'Search documents, notes, designs…', 'aria-label': 'Search library' });
+  const search = el('input', { 'data-page-search': 'true', type: 'search', class: 'library-overview-search', placeholder: 'Search documents, notes, designs…', 'aria-label': 'Search library' });
   const vault = el('div');
   const recent = el('div', { class: 'library-recent-list rd-stagger' });
   const picker = el('input', { type: 'file', accept: '.md,.txt', hidden: true, 'aria-label': 'Upload a document' });
@@ -257,9 +257,8 @@ async function renderList(container) {
   const [header, tabs] = libraryChrome(container, "documents");
 
   const searchInput = el("input", { placeholder: "Search documents and chat files...", style: "flex:1;" });
-  searchInput.dataset.mobileDock = 'search'; searchInput.setAttribute('aria-label', 'Search documents and chat files');
+  searchInput.dataset.pageSearch = 'true'; searchInput.setAttribute('aria-label', 'Search documents and chat files');
   const newBtn = el("button", { class: "btn primary", text: "+ New document" });
-  newBtn.dataset.mobileDock = 'create'; newBtn.dataset.mobileCreateLabel = 'New document';
   // Plain file input + FileReader (David's ask 2026-09-01) — works
   // identically in the Electron shell and the plain-HTTP web-access path,
   // so import is no longer gated behind window.jarvis (see skillManager.js's
@@ -274,10 +273,8 @@ async function renderList(container) {
   ]);
   toolbar.classList.add('library-document-toolbar');
   if (redesignOn()) {
-    const search = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Search library', onclick: () => searchInput.focus() });
-    search.innerHTML = ICONS.search;
     const upload = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Upload a document', onclick: () => fileInput.click() });
-    upload.innerHTML = ICONS.plus; header.append(search, upload);
+    upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>'; header.append(upload);
   }
 
   const grid = el("div", { id: "library-grid", class: "document-grid rd-stagger" });

@@ -6,7 +6,6 @@ export async function render(container) {
   container.innerHTML = "";
 
   const wrap = el("div", { class: "view-constrained" });
-  wrap.dataset.mobileDock = "filter"; wrap.dataset.mobileFilterLabel = "Search notes";  // phone dock search (mobileDock.js)
 
   const header = el("div", { class: "view-header" }, [
     el("div", {}, [
@@ -16,7 +15,6 @@ export async function render(container) {
   ]);
 
   const textInput = el("input", { placeholder: "e.g. Finish the CS 571 lab writeup", 'aria-label': 'New note' });
-  textInput.dataset.mobileDock = 'create'; textInput.dataset.mobileCreateLabel = 'Add note';
   const dueInput = el("input", { type: "datetime-local" });
   const addBtn = el("button", { class: "btn primary", text: "Add note" });
 
