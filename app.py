@@ -293,7 +293,9 @@ async def service_worker() -> FileResponse:
 
 @app.get("/usage-overlay")
 async def usage_overlay_page() -> FileResponse:
-    return FileResponse(f"{STATIC_DIR}/usage-overlay.html")
+    # The path has no .html suffix, so the middleware's no-store rule misses it;
+    # a cached copy kept the retired edge handles on screen after an update.
+    return FileResponse(f"{STATIC_DIR}/usage-overlay.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/health")

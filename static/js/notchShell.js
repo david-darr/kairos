@@ -49,6 +49,9 @@ function headline(snap) { const ws = snap?.windows || []; return ws.find(w => w.
 function percent(used) { return Math.round(Math.min(Math.max(used || 0, 0), 1) * 100); }
 
 export function createNotchShell({ card, bridge, hideCard, renderReadings, refreshQuota }) {
+  // An overlay document cached before round 6 can still contain the old handles.
+  // Their SVG arcs have no size or hiding rules in the shell's stylesheet.
+  for (const id of ['tail', 'move', 'orb', 'pill']) document.getElementById(id)?.remove();
   const shell = build('section'); shell.id = 'notch-shell'; shell.setAttribute('aria-label', 'Kairos notch');
   const kip = (size, id) => { const face = createMascot({ state: 'idle', size, spec: KAIROS_SPEC }); face.id = id; return face; };
 

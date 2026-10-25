@@ -14,7 +14,8 @@ function element(tag = 'div') {
     // A node lives in one parent, as in a real DOM: adding it elsewhere takes it out of the old one.
     append(...nodes) { nodes.forEach(n => detach(n, this)); this.children.push(...nodes); },
     prepend(node) { detach(node, this); this.children.unshift(node); },
-    remove() {}, set innerHTML(value) { this.html = value; },
+    remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; elements.delete(this.id); },
+    set innerHTML(value) { this.html = value; },
     replaceChildren(...nodes) { nodes.forEach(n => detach(n, this)); this.children = nodes; },
     setAttribute(k, v) { attrs.set(k, v); }, getAttribute: k => attrs.get(k), toggleAttribute() {},
     addEventListener: (n, fn) => events.set(n, fn), events, querySelector: () => null,
@@ -76,7 +77,15 @@ const steps = {}; vm.createContext(steps);
 vm.runInContext(fs.readFileSync(require.resolve('../static/js/notchSteps.js'), 'utf8').replace(/^export /gm, '') + '\nthis.api = { chatRows, taskRows };', steps);
 Object.assign(context, steps.api);
 vm.createContext(context); vm.runInContext(source + '\nthis.make = createNotchShell;', context);
+// A cached pre-round-6 document still has the edge pill and unsized handle SVGs.
+const retired = ['tail', 'move', 'orb', 'pill'].map(id => {
+  const node = element(); node.id = id; root.append(node);
+  if (id === 'move' || id === 'orb') node.append(element('svg'));
+  return node;
+});
 const controller = context.make({ card, bridge: {}, renderReadings() {}, hideCard() { card.classList.remove('show'); } });
+assert.ok(retired.every(node => !node.parent), 'shell initialization removes legacy nodes and their unsized SVGs from a cached document');
+assert.deepEqual(root.children, [elements.get('notch-shell')], 'only the shell is added to the page root');
 assert.equal(controller.isExpanded(), false);
 controller.pointer(200, 10); advance(80); controller.pointer(200, 10); advance(69);
 assert.equal(controller.isExpanded(), false, 'hover waits 150 ms'); advance(1);

@@ -168,7 +168,14 @@ const server = http.createServer(async (req, res) => {
   const file = files[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'Content-Type': file[1] });
-  res.end(fs.readFileSync(path.join(root, file[0])));
+  let content = fs.readFileSync(path.join(root, file[0]));
+  // Reproduce a cached legacy document loading the current scripts and CSS.
+  if (req.url === '/usage-overlay') content = content.toString().replace('<div id="root">', `<div id="root">
+    <div id="tail"></div><div id="pill"></div>
+    ${['move', 'orb'].map(id => `<div id="${id}" class="handle"><svg class="h-rest" viewBox="-36 -36 72 72" aria-hidden="true">
+      <circle r="28.5" fill="none" stroke="currentColor" stroke-width="6.8" stroke-linecap="round" stroke-dasharray="44.77 179.07"/>
+    </svg></div>`).join('')}`);
+  res.end(content);
 });
 const servedMarks = [];
 const interactive = [];
@@ -202,6 +209,25 @@ async function run() {
   const js = code => win.webContents.executeJavaScript(code);
   const waitFor = async (cond) => { for (let i = 0; i < 60; i++) { if (await js(cond)) return; await delay(50); } throw new Error('Timed out: ' + cond); };
   const move = (x, y) => js(`document.dispatchEvent(new MouseEvent('mousemove',{clientX:${x},clientY:${y},bubbles:true}))`);
+  const collapsedPage = async () => {
+    assert.equal(await js("document.body.dataset.edge === 'top-centre' && !document.getElementById('notch-shell').classList.contains('expanded')"), true);
+    const outside = await js(`(() => {
+      const shell = document.getElementById('notch-shell');
+      return [...document.body.querySelectorAll('*')].filter(node => {
+        if (node.id === 'root' || shell.contains(node)) return false;
+        if (node.closest('#rest') && document.body.classList.contains('folded')) return false;
+        if (node.closest('#card.show, #notice.show')) return false;
+        for (let parent = node; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+        }
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      }).map(node => ({ tag: node.tagName, id: node.id, class: node.getAttribute('class'),
+        width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height }));
+    })()`);
+    assert.deepEqual(outside, [], 'collapsed top-centre page has no visible boxes outside the shell except shown rest/card/notice');
+  };
 
   await waitFor("document.body.dataset.edge === 'top-centre' && document.querySelectorAll('#notch-usage .n-reading').length === 2");
   await delay(600);  // capturing before the first frame has painted fails with UnknownVizError
@@ -218,6 +244,7 @@ async function run() {
     assert.equal(await js("document.querySelector('#notch-usage .n-models')?.textContent"), '+3');
     const collapsed = async () => { const [w, h, t, c] = await size(); assert.ok(h === 40 && t === 0 && w >= 120 && w <= 480 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'collapsed ' + JSON.stringify([w, h, t, c, await js('[innerWidth, document.getElementById("notch-usage").outerHTML.slice(0,300), document.getElementById("notch-shell").dataset.state]')])); };
     await collapsed();
+    await collapsedPage();
     fs.writeFileSync(path.join(output, `notch-collapsed-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
     await move(430, 15); await delay(450);
     await waitFor("document.getElementById('notch-shell').getAnimations().length === 0");
@@ -251,6 +278,7 @@ async function run() {
     await move(-1, -1); await delay(550);
     assert.equal(interactive.at(-1), false, 'outside notch is click-through');
     await collapsed();
+    await collapsedPage();
   }
   win.webContents.setZoomFactor(1);
 
