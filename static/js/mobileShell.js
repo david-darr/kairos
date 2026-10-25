@@ -1,4 +1,5 @@
 import { api, el } from './api.js';
+import { ICONS } from './icons.js';
 import { mobileOn, phone, go, button, edgeBlur, haptic } from './mobileShared.js';
 import { mountPager } from './mobilePager.js';
 import { mountHistory } from './mobileHistory.js';
@@ -62,7 +63,7 @@ export function mountMobileHome({ container, content, banner, options }) {
   const newChat = button('', () => { pager.select(0); (launchHost?.querySelector('#chat-input') || input).focus(); }, 'rd-chat-round');
   newChat.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
   newChat.setAttribute('aria-label', 'New chat');
-  const chatActions = button('…', () => {}, 'rd-chat-round');
+  const chatActions = button('', () => {}, 'rd-chat-round'); chatActions.innerHTML = ICONS.dots;
   chatActions.setAttribute('aria-label', 'Chat actions');
   chatActions.setAttribute('aria-haspopup', 'dialog');
   chatActions.setAttribute('aria-expanded', 'false');
@@ -220,7 +221,7 @@ export function mountMobileChat(container, actions) {
   const title = container.querySelector('.chat-title');
   const menu = container.querySelector('.chat-phone-tools .overflow-menu');
   if (!header || !menu || !title) return () => {};
-  const back = button('‹', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.setAttribute('aria-label', 'Back to Chats');
+  const back = button('', () => { launchDraft = container.querySelector('#chat-input')?.value || ''; haptic(); go('chat', { mobilePage: selectedPage }); }, 'ms-chat-back ms-glass'); back.innerHTML = ICONS.back; back.setAttribute('aria-label', 'Back to Chats');
   const heading = el('div', { class: 'ms-chat-heading' }, [el('strong', { text: title.textContent }), el('small', { text: 'All chats' })]);
   const blur = edgeBlur('top'); header.prepend(blur, back, heading); refreshActivity();
   const extras = Object.entries(actions).map(([label, action]) => button(label, () => { menu.classList.add('hidden'); action(); }, 'overflow-menu-item ms-chat-action'));

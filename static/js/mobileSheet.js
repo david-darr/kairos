@@ -1,4 +1,4 @@
-import { mobileOn, phone, button } from './mobileShared.js';
+import { mobileOn, phone, button, reduced } from './mobileShared.js';
 import { watchKeyboard, keyboardLift, belowFold } from './mobileDock.js';
 import { ICONS } from './icons.js';
 let sheetId = 0;
@@ -15,19 +15,117 @@ export function mountSheetSurface(panel, close) {
   };
   gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
   grabber.setAttribute('aria-label', 'Close sheet'); panel.prepend(grabber);
-  let start = null;
-  const down = event => { if (mobileOn() && event.button === 0) start = { x: event.clientX, y: event.clientY, id: event.pointerId }; };
-  const up = event => {
-    if (start && start.id === event.pointerId && event.clientY - start.y > 64 && Math.abs(event.clientX - start.x) < 48) close();
-    start = null;
+  const disposeDrag = attachSheetDrag(panel, close, { enabled: mobileOn });
+  return () => { disposeDrag(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); grabber.remove(); panel.classList.remove('ms-sheet-surface', 'rd-sheet-in'); };
+}
+
+// Swipe down to dismiss, shared by every phone sheet and popup. The sheet follows
+// the finger 1:1 and the scrim fades with the distance; letting go past a quarter
+// of the height (or with a downward flick) slides it away and then runs the same
+// close() the close button runs, otherwise it springs back. Only a downward drag
+// that starts on the handle or header, or on content scrolled to its top, counts.
+const HANDLE = '.ms-sheet-grabber, .ms-sheet-grab, .ts-sheet-grip, .agent-item-grip';
+const HEADER = '.ms-sheet-header, .ms-more-header, .modal-header, .permission-head, .question-head, .ts-sheet-bar, .agent-item-portrait';
+const OWN_GESTURE = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="slider"], [data-no-sheet-drag]';
+export function attachSheetDrag(panel, close, { enabled = () => phone.matches } = {}) {
+  let scrim = panel;
+  const abort = new AbortController(), { signal } = abort;
+  let gesture = null, settling = false, swallow = false;
+  const atTop = target => {
+    for (let node = target; node; node = node.parentElement) {
+      if (node.scrollTop > 0) return false;
+      if (node === panel) break;
+    }
+    return true;
   };
-  const cancel = () => { start = null; };
-  grabber.addEventListener('pointerdown', down); grabber.addEventListener('pointerup', up);
-  grabber.addEventListener('pointercancel', cancel);
-  // Pointer capture keeps a downward drag on the grabber as it leaves its hit area.
-  const capture = event => { grabber.setPointerCapture?.(event.pointerId); };
-  grabber.addEventListener('pointerdown', capture);
-  return () => { phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); grabber.remove(); panel.classList.remove('ms-sheet-surface', 'rd-sheet-in'); };
+  const clear = () => {
+    for (const node of [panel, scrim]) { node.style.transition = ''; node.style.removeProperty('--sheet-drag'); node.removeAttribute('data-sheet-dragging'); }
+    panel.style.transform = ''; panel.style.willChange = ''; panel.getAnimations().forEach(animation => animation.cancel()); settling = false; gesture = null;
+  };
+  const progress = value => scrim.style.setProperty('--sheet-drag', String(Math.min(1, Math.max(0, value))));
+  const start = (x, y, target, pointer) => {
+    scrim = panel.matches('dialog') ? panel : panel.parentElement || panel;
+    if (settling || !enabled() || !target?.closest || target.closest(OWN_GESTURE)) return;
+    const handle = target.closest(HANDLE);
+    if (pointer && !handle && !target.closest(HEADER)) return;
+    if (!handle && !atTop(target)) return;
+    const selection = window.getSelection?.();
+    if (selection && !selection.isCollapsed && panel.contains(selection.anchorNode)) return;
+    gesture = { x, y, active: false, dy: 0, height: panel.getBoundingClientRect().height || 1, samples: [{ y, t: performance.now() }] };
+  };
+  const move = (x, y, event) => {
+    if (!gesture) return;
+    const dx = x - gesture.x, dy = y - gesture.y;
+    if (!gesture.active) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (dy <= 0 || Math.abs(dx) > dy) { gesture = null; return; }
+      gesture.active = true;
+      panel.classList.remove('rd-sheet-in'); scrim.classList.remove('rd-scrim-in');
+      panel.style.transition = 'none'; scrim.style.transition = 'none'; panel.style.willChange = 'transform';
+      scrim.setAttribute('data-sheet-dragging', '');
+    }
+    if (event.cancelable) event.preventDefault();
+    gesture.dy = Math.max(0, dy);
+    const now = performance.now();
+    gesture.samples.push({ y, t: now });
+    while (gesture.samples.length > 2 && now - gesture.samples[0].t > 120) gesture.samples.shift();
+    if (!reduced.matches) { panel.style.transform = `translateY(${gesture.dy}px)`; progress(gesture.dy / gesture.height); }
+  };
+  const spring = () => {
+    settling = true;
+    const timing = 'var(--rd-dur-sheet) var(--rd-spring)';
+    panel.style.transition = `transform ${timing}`; scrim.style.transition = `--sheet-drag ${timing}`;
+    panel.style.transform = 'translateY(0)'; progress(0);
+    setTimeout(clear, 340);
+  };
+  const dismiss = () => {
+    settling = true;
+    // A dialog that closed is put back at rest at once, so the next open starts from its natural place.
+    const finish = () => { close(); if (panel.matches('dialog') && !panel.open) clear(); };
+    if (reduced.matches) {
+      panel.animate({ opacity: [1, 0] }, { duration: 120, easing: 'ease-out', fill: 'forwards' }); progress(1);
+      setTimeout(finish, 130);
+    } else {
+      const timing = 'var(--rd-dur-sheet) var(--rd-ease)';
+      panel.style.transition = `transform ${timing}`; scrim.style.transition = `--sheet-drag ${timing}`;
+      panel.style.transform = `translateY(${innerHeight - panel.getBoundingClientRect().top}px)`; progress(1);
+      let done = false;
+      const once = () => { if (!done) { done = true; finish(); } };
+      panel.addEventListener('transitionend', event => { if (event.target === panel && event.propertyName === 'transform') once(); }, { signal });
+      setTimeout(once, 360);
+    }
+    // A close that is answered asynchronously (or refused) must not leave an invisible sheet behind.
+    setTimeout(() => { if (panel.isConnected && panel.getClientRects().length && (!panel.matches('dialog') || panel.open)) spring(); }, 1200);
+  };
+  const end = () => {
+    const finished = gesture; gesture = null;
+    if (!finished?.active) return;
+    swallow = true; setTimeout(() => { swallow = false; }, 80);
+    const first = finished.samples[0], last = finished.samples.at(-1);
+    const flick = last.t > first.t && (last.y - first.y) / (last.t - first.t) > 0.5 && finished.dy > 24;
+    if (finished.dy > finished.height * 0.25 || flick) dismiss(); else spring();
+  };
+  const abandon = () => { const was = gesture; gesture = null; if (was?.active) spring(); };
+  panel.addEventListener('touchstart', event => {
+    if (event.touches.length === 1) start(event.touches[0].clientX, event.touches[0].clientY, event.target, false); else abandon();
+  }, { passive: true, signal });
+  panel.addEventListener('touchmove', event => { if (event.touches.length === 1) move(event.touches[0].clientX, event.touches[0].clientY, event); else abandon(); }, { passive: false, signal });
+  panel.addEventListener('touchend', end, { signal });
+  panel.addEventListener('touchcancel', abandon, { signal });
+  // A mouse or pen has no scroll gesture to compete with, so it drags by the handle and header only.
+  panel.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'touch' || event.button !== 0) return;
+    start(event.clientX, event.clientY, event.target, true);
+    if (gesture) panel.setPointerCapture?.(event.pointerId);
+  }, { signal });
+  panel.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') move(event.clientX, event.clientY, event); }, { signal });
+  panel.addEventListener('pointerup', event => { if (event.pointerType !== 'touch') end(); }, { signal });
+  panel.addEventListener('pointercancel', event => { if (event.pointerType !== 'touch') abandon(); }, { signal });
+  // The click that follows a drag released on the handle must not also close the sheet.
+  panel.addEventListener('click', event => { if (swallow) { event.stopImmediatePropagation(); event.preventDefault(); swallow = false; } }, { capture: true, signal });
+  // A reused dialog (the More sheet) opens again from its natural position.
+  panel.addEventListener('close', clear, { signal });
+  return () => { abort.abort(); clear(); };
 }
 
 export function openMobileSheet({ title, content, opener = document.activeElement, fullHeight = false, onClose }) {

@@ -2,6 +2,7 @@ import { api, el, toast } from './api.js';
 import * as chatStream from './chatStream.js';
 import { button, go, haptic, longPress } from './mobileShared.js';
 import { emptyState } from './kairosParts.js';
+import { ICONS } from './icons.js';
 import { workingChats, chatAge } from './redesignChatParts.js';
 
 const saved = { query: '', working: false, model: '', scroll: 0 };
@@ -90,7 +91,7 @@ export function mountHistory(page) {
       pressCleanups.push(longPress(main, showActions));
       main.addEventListener('keydown', e => { if (e.key === 'F10' && e.shiftKey) { e.preventDefault(); showActions(); rename.focus(); } });
       // Actions remain keyboard reachable without requiring a gesture.
-      const more = button('...', showActions, 'ms-row-more'); more.setAttribute('aria-label', `Actions for ${session.title || 'chat'}`);
+      const more = button('', showActions, 'ms-row-more'); more.innerHTML = ICONS.dots; more.setAttribute('aria-label', `Actions for ${session.title || 'chat'}`);
       let touch;
       row.addEventListener('touchstart', e => { const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
       row.addEventListener('touchmove', e => {

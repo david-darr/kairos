@@ -1,4 +1,5 @@
 import { mobileOn } from '../mobileShared.js';
+import { ICONS } from "../icons.js";
 import { appearanceName } from '../appearance.js';
 import { api, el, customSelect, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
@@ -306,7 +307,8 @@ export async function renderMobilePage(container, section, onExit) {
   cachedStatus = await api("/api/auth/status");
   container.innerHTML = "";
 
-  const backBtn = el("button", { class: "settings-titlebar-btn settings-mobile-back", title: "Back", "aria-label": "Back", text: "‹" });
+  const backBtn = el("button", { class: "settings-titlebar-btn settings-mobile-back", title: "Back", "aria-label": "Back" });
+  backBtn.innerHTML = ICONS.back;
   const barTitle = el("span", { class: "settings-mobile-title", text: "Settings" });
   const appearanceReset = el('button', { type: 'button', class: 'rd-mobile-appearance-reset', text: 'Reset',
     onclick: () => content.querySelector('.set-header-actions .btn')?.click() });

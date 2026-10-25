@@ -1,4 +1,5 @@
 import { el } from "./api.js";
+import { attachSheetDrag } from "./mobileSheet.js";
 import { ICONS } from "./icons.js";
 
 // Phone Tool Store (redesign only). The cards that tool-store.js already builds
@@ -219,33 +220,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
       if (event.shiftKey && (document.activeElement === first || document.activeElement === sheet)) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     });
-    // Swipe down from the handle or title bar to dismiss.
-    let drag = null;
-    const dragSurface = [sheet.firstElementChild, bar];
-    for (const surface of dragSurface) {
-      surface.addEventListener("pointerdown", event => {
-        if (event.target.closest("button")) return;
-        drag = { id: event.pointerId, y: event.clientY, dy: 0, t: performance.now() };
-        if (event.isTrusted) surface.setPointerCapture?.(event.pointerId);
-        sheet.style.transition = "none";
-      });
-      surface.addEventListener("pointermove", event => {
-        if (!drag || drag.id !== event.pointerId) return;
-        drag.dy = Math.max(0, event.clientY - drag.y);
-        sheet.style.transform = `translateY(${drag.dy}px)`;
-      });
-      const end = event => {
-        if (!drag || drag.id !== event.pointerId) return;
-        const fast = drag.dy / Math.max(1, performance.now() - drag.t) > 0.5;
-        const far = drag.dy > 90;
-        drag = null;
-        sheet.style.transition = "";
-        if (far || (fast && event.type === "pointerup")) closeSheet(true);
-        else sheet.style.transform = "";
-      };
-      surface.addEventListener("pointerup", end);
-      surface.addEventListener("pointercancel", end);
-    }
+    open.dragOff = attachSheetDrag(sheet, () => closeSheet(true));
     open.focusin = event => {
       if (!open || dialogUp() || sheet.contains(event.target) || event.target.closest?.(".toast")) return;
       open.close.focus();
@@ -261,10 +236,10 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     const { card, placeholder, backdrop, sheet, key } = open;
     document.removeEventListener("focusin", open.focusin);
     open.gone?.disconnect();
+    open.dragOff();
     open = null;
     card.classList.remove("ts-in-sheet");
     if (placeholder.parentNode) placeholder.replaceWith(card);
-    sheet.style.transform = "";
     sheet.classList.remove('rd-sheet-in');
     backdrop.classList.remove('rd-scrim-in');
     backdrop.classList.remove("open");

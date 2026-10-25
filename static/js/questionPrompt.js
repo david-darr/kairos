@@ -1,5 +1,6 @@
 // Model output must stay text: questions, headers, labels and descriptions can contain markup.
 import { api, el } from './api.js';
+import { ICONS } from './icons.js';
 
 let current = null;
 export function dismissQuestionPrompt(requestId = null) {
@@ -82,7 +83,7 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     import('./mascot.js').then(({ createMascot }) => {
       if (!removed && document.documentElement.dataset.mascot !== 'off') head.prepend(createMascot({ state: 'needs', size: 48, decorative: true }));
     });
-    head.append(el('button', { type: 'button', class: 'ms-sheet-close', text: '×', 'aria-label': 'Close', onclick: closePhoneSheet }));
+    const close = el('button', { type: 'button', class: 'ms-sheet-close', 'aria-label': 'Close', onclick: closePhoneSheet }); close.innerHTML = ICONS.close; head.append(close);
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;
       const r = dialog.getBoundingClientRect();

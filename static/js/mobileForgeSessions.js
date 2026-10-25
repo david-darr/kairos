@@ -58,7 +58,7 @@ export function mountForgeSessions(page) {
         el('small', { class: 'mf-session-meta' }, [el('span', { text: session.forge.removed ? 'Worktree removed' : session.forge.branch || 'In place' }), el('span', { text: session.model_override || models.find(m => m.id === session.model_endpoint_id)?.name || 'Default model' })]));
       if (session._changes) main.append(diffCounts(changeTotals(session._changes)));
       const actions = el('div', { class: 'ms-row-actions' }, [button('Rename', () => action('rename', main, session)), button('Delete', () => action('delete', main, session))]);
-      const more = button('...', reveal, 'ms-row-more'); more.setAttribute('aria-label', `Actions for ${session.title}`);
+      const more = button('', reveal, 'ms-row-more'); more.innerHTML = ICONS.dots; more.setAttribute('aria-label', `Actions for ${session.title}`);
       presses.push(longPress(main, reveal));
       let touch;
       row.addEventListener('touchstart', e => { const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });

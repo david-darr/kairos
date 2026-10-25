@@ -33,7 +33,7 @@ class Surface {
   const context = vm.createContext({
     document: { querySelector: () => modal, activeElement: {} },
     window: { getSelection: () => ({ isCollapsed: true }) },
-    queueMicrotask: callback => callback(), innerWidth: 390, performance: { now: () => 1000 }, setTimeout: action => action(),
+    queueMicrotask: callback => callback(), innerWidth: 390, performance: { now: () => 1000 }, setTimeout: action => action(), AbortController,
   });
   const shared = { mobileOn: () => enabled, reduced, haptic() {}, phone: new Surface(), go() {},
     button(label, action, className = 'ms-glass') { const node = context.document.createElement('button'); node.textContent = label; node.className = className; node.addEventListener('click', action); return node; }, edgeBlur() {} };
@@ -182,7 +182,8 @@ class Surface {
     dispatchEvent(event) { this.emit(event.type, event); }
     scrollIntoView() { this.scrolled = true; }
     showModal() { this.open = true; } close() { this.open = false; }
-    getBoundingClientRect() { return { left: 0, top: 100, right: 390, bottom: 844 }; }
+    getAnimations() { return []; } animate() {}
+    getBoundingClientRect() { return { left: 0, top: 100, right: 390, bottom: 844, width: 390, height: 744 }; }
   }
   doc.body = new Element('body'); doc.body.isRoot = true;
   doc.documentElement = new Element('html');
@@ -290,8 +291,16 @@ class Surface {
   sheet.dialog.emit('cancel', { preventDefault() {} }); assert.equal(sheet.dialog.isConnected, false); assert.equal(doc.activeElement, opener);
   const swipeSheet = openMobileSheet({ title: 'Swipe', content: new Element('section'), opener });
   const grabber = swipeSheet.dialog.querySelector('.ms-sheet-grabber');
-  grabber.emit('pointerdown', { button: 0, clientX: 100, clientY: 20, pointerId: 1 });
-  grabber.emit('pointerup', { clientX: 102, clientY: 100, pointerId: 1 }); assert.equal(swipeSheet.dialog.isConnected, false);
+  const mouse = (node, type, y, target = grabber) => swipeSheet.dialog.emit(type, { pointerType: 'mouse', button: 0, clientX: 100, clientY: y, pointerId: 1, target: node || target, cancelable: true, preventDefault() {} });
+  // Swipe down: below a quarter of the sheet height it springs back and stays open, past it the same close() runs once.
+  mouse(grabber, 'pointerdown', 20); mouse(grabber, 'pointermove', 60); mouse(grabber, 'pointerup', 60);
+  assert.equal(swipeSheet.dialog.isConnected, true, 'A short drag springs back');
+  assert.equal(swipeSheet.dialog.style.transform, '', 'The spring-back clears the drag transform');
+  const body = swipeSheet.dialog.querySelector('.ms-sheet-body');
+  mouse(body, 'pointerdown', 120); mouse(body, 'pointermove', 400); mouse(body, 'pointerup', 400);
+  assert.equal(swipeSheet.dialog.isConnected, true, 'A mouse drag from the body does not dismiss (text selection stays usable)');
+  mouse(grabber, 'pointerdown', 20); mouse(grabber, 'pointermove', 40); mouse(grabber, 'pointermove', 300); mouse(grabber, 'pointerup', 300);
+  assert.equal(swipeSheet.dialog.isConnected, false, 'Dragging the handle down past a quarter of the height closes the sheet');
   const resizeSheet = openMobileSheet({ title: 'Resize', content: new Element('section'), opener }); enabled = false; shared.phone.emit('change'); assert.equal(resizeSheet.dialog.isConnected, false); enabled = true;
   const { quotaTone, knownQuota, renderMobileCatalogMenu, mountMobileModelSheet, appendEndpointCatalogs } = (await load('./mobileModelSheet.js')).namespace;
   assert.equal(quotaTone(79.99), 'normal'); assert.equal(quotaTone(80), 'warning'); assert.equal(quotaTone(89.99), 'warning'); assert.equal(quotaTone(90), 'danger');

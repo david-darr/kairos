@@ -23,8 +23,8 @@ class Node {
 const document = { activeElement: null, body: new Node('body'), handlers: {}, addEventListener(name, fn) { this.handlers[name] = fn; } };
 const posts = [];
 const context = vm.createContext({ document, Date, Set, Object, encodeURIComponent, setTimeout, clearTimeout,
-  el: (tag, attrs, children) => new Node(tag, attrs, children), api: async (path, options) => posts.push([path, JSON.parse(options.body)]) });
-let code = fs.readFileSync('static/js/questionPrompt.js', 'utf8').replace(/^import .*$/m, '').replaceAll('export function ', 'function ');
+  el: (tag, attrs, children) => new Node(tag, attrs, children), ICONS: { close: '' }, api: async (path, options) => posts.push([path, JSON.parse(options.body)]) });
+let code = fs.readFileSync('static/js/questionPrompt.js', 'utf8').replace(/^import .*$/gm, '').replaceAll('export function ', 'function ');
 vm.runInContext(code + '\nglobalThis.show = showQuestionPrompt; globalThis.dismiss = dismissQuestionPrompt;', context);
 const request = { id: 'q', questions: [
   { question: '<img>Q', header: '<b>Title</b>', options: [{ label: '<script>Yes</script>' }], multiSelect: false },

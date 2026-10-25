@@ -29,11 +29,15 @@ export const ICONS = {
   settings: `<svg viewBox="0 0 24 24" ${S}><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.3-2l2-1.5-2-3.4-2.3.9a7 7 0 00-1.7-1L14 2h-4l-.7 2.6a7 7 0 00-1.7 1l-2.3-.9-2 3.4L5.3 10a7 7 0 000 4l-2 1.5 2 3.4 2.3-.9a7 7 0 001.7 1L10 22h4l.7-2.6a7 7 0 001.7-1l2.3.9 2-3.4-2-1.5c.2-.6.3-1.3.3-2z"/></svg>`,
   // Mobile drawer toggle (David's ask 2026-09-01) — hamburger / close.
   // The phone tab bar's More (an ellipsis in a circle, as iOS draws it).
-  bell: `<svg viewBox="0 0 24 24" ${S}><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>`,
+  bell: `<svg viewBox="0 0 24 24" ${S}><path d="M6 14.5v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 18.5a2 2 0 0 0 4 0"/></svg>`,
   more: `<svg viewBox="0 0 24 24" ${S}><circle cx="12" cy="12" r="9"/><circle cx="8" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>`,
   menu: `<svg viewBox="0 0 24 24" ${S}><path d="M4 7h16M4 12h16M4 17h16"/></svg>`,
   close: `<svg viewBox="0 0 24 24" ${S}><path d="M6 6l12 12M18 6L6 18"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" ${S}><path d="M12 5v14M5 12h14"/></svg>`,
+  // Chevrons and the three-dot menu replace the text glyphs (‹ › …) that sat off-centre in round buttons; each is drawn symmetric about the 24px box.
+  back: `<svg viewBox="0 0 24 24" ${S}><path d="M15.5 5l-7 7 7 7"/></svg>`,
+  forward: `<svg viewBox="0 0 24 24" ${S}><path d="M8.5 5l7 7-7 7"/></svg>`,
+  dots: `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>`,
   // Row-action + empty-state icons (David's ask 2026-09-03, professional
   // polish pass) — destructive row actions became hover-revealed icon
   // buttons instead of repeated text buttons, and empty states got a real
