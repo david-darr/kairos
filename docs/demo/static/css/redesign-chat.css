@@ -210,6 +210,8 @@
   }
   .kairos-redesign[data-view=mobileLaunch] .ms-intro { min-height: 0; overflow-y: auto; gap: 14px; padding: 20px 20px 24px; }
   .kairos-redesign[data-view=mobileLaunch] .ms-launch-bottom { flex-shrink: 0; }
+  /* The board has no blur band: it painted a hard-edged rectangle behind the rounded prompt. */
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom > .ms-blur-bottom { display: none; }
   .kairos-redesign.ms-tabbar-up[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom {
     padding-bottom: var(--ms-launch-clearance, calc(12px + var(--ms-tabbar-space)));
   }
@@ -394,7 +396,16 @@
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-mascot=off]) .ms-conversation .rd-chat-author-kip { display: inline-flex; position: absolute; left: 0; top: 0; }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-mascot=off]) .ms-conversation .chat-author-mark { display: none; }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .rd-chat-author-time { display: inline; }
-  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .ms-conversation .msg.assistant > :not(.chat-author) { margin-left: 44px; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .ms-conversation .msg.assistant > :not(.chat-author) { margin-left: 44px; max-width: calc(100% - 44px); min-width: 0; }
+  /* Files, cards and code fit the message column; long names ellipsize instead of pushing the page sideways. */
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg { min-width: 0; max-width: 100%; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg :is(.msg-body, .chat-prose, .msg-images, .chat-reference-chips) { min-width: 0; max-width: 100%; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg :is(.artifact-card, .chat-code-block, .chat-table-wrap, .msg-generated-image, .chat-prose img) { box-sizing: border-box; min-width: 0; max-width: 100%; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg .msg-generated-file { box-sizing: border-box; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg .msg-images img { max-width: min(100%, 320px); height: auto; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg .chat-prose pre { max-width: 100%; box-sizing: border-box; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg .artifact-info { flex: 1 1 auto; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .msg :is(.artifact-icon, .artifact-arrow) { flex-shrink: 0; }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .chat-composer-dock { padding-inline: 20px; }
 
   /* Idle is a two-row card; an open conversation keeps one compact row.

@@ -139,7 +139,6 @@
   .kairos-redesign [data-view="calendar"] .cal-left > .view-header .cal-calendars-trigger { grid-column: 2; grid-row: 1; width: 46px; height: 46px; padding: 0; font-size: 0; margin-bottom: 16px; }
   .kairos-redesign [data-view="calendar"] .cal-left > .cal-create-bar { grid-column: 3; grid-row: 1; margin-bottom: 16px; }
   .kairos-redesign [data-view="calendar"] .cal-create-bar .btn { display: inline-flex !important; justify-content: center; width: 46px; height: 46px; padding: 0; font-size: 0; border-radius: 50%; }
-  .kairos-redesign [data-view="calendar"] .cal-create-bar .btn::after { content: '+'; font-size: 24px; }
   .kairos-redesign [data-view="calendar"] .view-header .sub { display: none; }
   .kairos-redesign [data-view="calendar"] .cal-nav { display: flex; flex-wrap: wrap; }
   .kairos-redesign [data-view="calendar"] .cal-nav .btn { border-radius: var(--rd-radius-pill); margin-left: 0; }
@@ -164,7 +163,6 @@
   .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { max-width: 100%; white-space: normal; margin-left: 0; }
   .kairos-redesign [data-view="tasks"] .task-activity > .rd-segmented { width: 100%; }
   .kairos-redesign [data-view="tasks"] .view-header > .btn { width: 46px; min-width: 46px; height: 46px; padding: 0; font-size: 0; }
-  .kairos-redesign [data-view="tasks"] .view-header > .btn::after { content: '+'; font-size: 24px; }
   .kairos-redesign [data-view="tasks"] .task-activity-count > small { max-width: 150px; }
   .kairos-redesign [data-view="tool-store"] .tool-store-top { position: static; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
   /* The old inset header supplied the 12px padding these chips bled into. */
@@ -349,9 +347,17 @@
   .kairos-redesign [data-view="library"] :is(.library-document-card, .library-file-row) { border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; padding: 12px 0; box-shadow: none; background: transparent; }
   .kairos-redesign [data-view="library"] .google-browser { display: flex; flex-direction: column; background: transparent; border: 0; box-shadow: none; }
   .kairos-redesign [data-view="library"] .google-rail { flex-direction: row; overflow-x: auto; flex-wrap: wrap; border: 0; padding: 0 0 12px; }
-  .kairos-redesign [data-view="library"] .google-file-list { display: flex; flex-direction: column; gap: 0; padding: 2px 16px; border-radius: 26px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
-  .kairos-redesign [data-view="library"] .google-file-list .google-file-row { border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; padding: 12px 0; }
-  .kairos-redesign [data-view="library"] .google-grid .google-file-open { display: flex; align-items: center; gap: 12px; }
+  .kairos-redesign [data-view="library"] .google-file-list { display: flex; flex-direction: column; gap: 0; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-files { display: block; padding: 2px 16px; border-radius: 26px; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-files .google-file-row { border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; padding: 12px 0; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-files .google-file-row:last-child { border-bottom: 0; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-files .google-file-row > input { order: 1; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-folders { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 4px; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-folders .google-file-row { position: relative; min-height: 64px; padding: 10px 52px 10px 12px; border: 1px solid var(--rd-line); border-radius: 20px; background: var(--rd-surface-solid); }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-folders .google-file-row > input { position: absolute; top: 10px; right: 6px; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-folders .google-thumbnail { width: 36px; flex-basis: 36px; height: 40px; }
+  .kairos-redesign [data-view="library"] .google-file-list .drive-folders .google-file-copy small { display: none; }
+  .kairos-redesign [data-view="library"] .google-grid .google-file-open { display: flex; flex-direction: row; align-items: center; gap: 12px; }
   .kairos-redesign [data-view="library"] .google-grid .google-thumbnail { flex: none; width: 40px; height: 44px; }
   .kairos-redesign [data-view="library"] .google-file-copy strong { font-size: 15px; }
   .kairos-redesign [data-view="library"] .google-file-copy small { font-size: 12px; }
@@ -466,7 +472,6 @@
   .kairos-redesign [data-view="calendar"] .cal-day.selected .cal-event-pill { background: var(--rd-primary-fg); }
   .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-header { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 12px; font: italic 600 34px/1 var(--rd-font-title); }
   .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-close-btn { position: static; flex: none; width: 46px; height: 46px; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); font-size: 0; }
-  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-close-btn::after { content: '‹'; font-size: 28px; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog > .row-actions { position: static; padding: 0; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-checkbox-label { justify-content: space-between; flex-direction: row-reverse; padding-inline: 12px; }
   .kairos-redesign [data-view="library"] .library-document-toolbar { padding: 0; border: 0; background: transparent; box-shadow: none; }
@@ -484,7 +489,6 @@
   .kairos-redesign [data-view="library"] .design-page-identity strong { grid-column: 1 / -1; grid-row: 2; white-space: normal; font: 12px/1.5 var(--rd-font-ui); color: var(--rd-ink-dim); }
   .kairos-redesign [data-view="library"] .design-page-identity small { display: none; }
   .kairos-redesign [data-view="library"] .design-page-header > .design-back { width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 1px solid var(--rd-line); background: var(--rd-surface-solid); font-size: 0; }
-  .kairos-redesign [data-view="library"] .design-page-header > .design-back::after { content: '‹'; font-size: 28px; }
   .kairos-redesign [data-view="library"] .design-page-header > .design-page-options { display: none; }
   .kairos-redesign [data-view="library"].panel-dialog .design-page-options { display: flex; flex-wrap: wrap; gap: 12px; }
   .kairos-redesign [data-view="library"] .design-model-host { flex: none; min-width: 0; }
@@ -519,10 +523,8 @@
   .kairos-redesign [data-view="tasks"] .task-activity { order: -4; }
   .kairos-redesign [data-view="tasks"] .tasks-routines-heading { order: -3; margin: 0; font: italic 600 26px/1.15 var(--rd-font-title); }
   .kairos-redesign #view-content[data-view="tasks"] #tasks-list { order: -2; margin-top: 0 !important; }
-  .kairos-redesign [data-view="tasks"] .view-header > .workspace-round::after { content: none; }
   .kairos-redesign [data-view="tasks"] .view-header > .workspace-round { display: inline-flex; align-items: center; justify-content: center; background: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: 50%; }
   .kairos-redesign [data-view="tasks"] .workspace-round svg { width: 20px; height: 20px; }
-  .kairos-redesign [data-view="tasks"] .view-header > .tasks-build-button::after { content: '✧'; }
   .kairos-redesign [data-view="cookbook"] .cookbook-installed-list { display: flex; flex-direction: column; padding: 2px 16px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); }
   .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card { margin: 0 !important; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; box-shadow: none; }
   .kairos-redesign [data-view="cookbook"] .cookbook-installed-list > .card:last-child { border-bottom: 0; }
@@ -724,16 +726,47 @@
 /* Shared phone icon geometry, including SVG and generated +/back icons. :where() keeps it weaker than
    every button's own rules, so a button its own CSS hides or lays out stays that way. */
 @media (max-width: 768px) {
-  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button):not([hidden]) {
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button, .notes-finished-bar .btn, .email-accounts-trigger, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .agent-item-close, .vault-month-nav .btn, .design-back):not([hidden]) {
     display: grid; place-items: center; justify-content: center; align-items: center; grid-template: 1fr / 1fr;
     padding: 0 !important; gap: 0 !important; line-height: 1; text-indent: 0;
   }
-  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button):not([hidden]) svg {
-    display: block; grid-area: 1 / 1; margin: 0 !important; vertical-align: middle;
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button, .notes-finished-bar .btn, .email-accounts-trigger, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .agent-item-close, .vault-month-nav .btn, .design-back):not([hidden]) svg {
+    display: block; grid-area: 1 / 1; margin: 0 !important; vertical-align: middle; width: 20px; height: 20px;
   }
-  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button):not([hidden])::after,
-  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button):not([hidden])::before { grid-area: 1 / 1; margin: 0; line-height: 1; }
-  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button):not([hidden]):has(> svg) { font-size: 0; }
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button, .notes-finished-bar .btn, .email-accounts-trigger, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .agent-item-close, .vault-month-nav .btn, .design-back):not([hidden])::after,
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button, .notes-finished-bar .btn, .email-accounts-trigger, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .agent-item-close, .vault-month-nav .btn, .design-back):not([hidden])::before { grid-area: 1 / 1; margin: 0; line-height: 1; }
+  .kairos-redesign :where(.row-action-btn, .input-icon-btn, .ms-tabbar-create, .ms-row-more, .workspace-round, .rd-chat-round, .hm-phone-settings, .hm-phone-notifications, .hm-customize, .agents-phone-round, .agent-call-open, .is-messages .agent-more, .has-conversation .agents-conversation-back, .cal-calendars-trigger, .cal-create-bar .btn, [data-view="tasks"] .view-header > .btn, .ts-plus, .modal-close-btn, .ms-sheet-close, .ts-sheet-close, .rd-conversations-close, .rd-conversations-header .chat-new-btn, .ms-chat-back, .chat-phone-tools > button, .artifact-header-controls .btn, .design-back, .settings-mobile-back, .forge-icon-button, .mf-back, .ms-forge-add, .ms-forge-mic, .ms-settings, .ms-history-search > button, .notes-finished-bar .btn, .email-accounts-trigger, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .agent-item-close, .vault-month-nav .btn, .design-back):not([hidden]):has(> svg) { font-size: 0; }
+}
+
+/* Glyph buttons whose text or generated character sat off-centre are drawn as masks of the same strokes as static/js/icons.js,
+   so the ink is centred in the box by the grid above. The masks follow the button's text colour. */
+.kairos-redesign {
+  --rd-mask-plus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+  --rd-mask-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
+  --rd-mask-back: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.5 5l-7 7 7 7'/%3E%3C/svg%3E");
+  --rd-mask-forward: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 5l7 7-7 7'/%3E%3C/svg%3E");
+  --rd-mask-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='6' cy='12' r='1.7'/%3E%3Ccircle cx='12' cy='12' r='1.7'/%3E%3Ccircle cx='18' cy='12' r='1.7'/%3E%3C/svg%3E");
+  --rd-mask-spark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l2.2 6.3 6.3 2.2-6.3 2.2L12 20.5l-2.2-6.3L3.5 12l6.3-2.2z'/%3E%3C/svg%3E");
+}
+@media (max-width: 768px) {
+  .kairos-redesign :is([data-view="calendar"] .cal-create-bar .btn, .modal-close-btn, .agent-item-close, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .vault-month-nav .btn, .design-back, [data-view="library"] .workspace-round:not(:has(svg)), [data-view="tasks"] .view-header > .tasks-build-button, .design-focus-bar > [aria-label="Close focus"]):not(:has(> svg)) { font-size: 0; }
+  .kairos-redesign :is([data-view="calendar"] .cal-create-bar .btn, .modal-close-btn, .agent-item-close, .vault-phone-back, .vault-phone-options, .cookbook-model-more, .vault-month-nav .btn, .design-back, [data-view="library"] .workspace-round:not(:has(svg)), [data-view="tasks"] .view-header > .tasks-build-button, .design-focus-bar > [aria-label="Close focus"]):not(:has(> svg))::after {
+    content: ''; display: block; width: 20px; height: 20px; margin: 0; background: currentColor; font: 0 / 0 var(--rd-font-ui);
+    -webkit-mask: var(--rd-mask-plus) center / contain no-repeat; mask: var(--rd-mask-plus) center / contain no-repeat;
+  }
+  .kairos-redesign :is(.modal-close-btn, .agent-item-close, .design-focus-bar > [aria-label="Close focus"]):not(:has(> svg))::after { -webkit-mask-image: var(--rd-mask-close); mask-image: var(--rd-mask-close); }
+  .kairos-redesign :is(.vault-phone-back, .design-back, [data-view="library"] .workspace-round[aria-label^="Back to"], .vault-month-nav .btn[aria-label="Previous month"], [data-view="calendar"].cal-calendars-dialog .modal-close-btn):not(:has(> svg))::after { -webkit-mask-image: var(--rd-mask-back); mask-image: var(--rd-mask-back); }
+  .kairos-redesign .vault-month-nav .btn[aria-label="Next month"]::after { -webkit-mask-image: var(--rd-mask-forward); mask-image: var(--rd-mask-forward); }
+  .kairos-redesign :is(.vault-phone-options, .cookbook-model-more, [data-view="library"] .workspace-round[aria-label$="options"]):not(:has(> svg))::after { -webkit-mask-image: var(--rd-mask-dots); mask-image: var(--rd-mask-dots); }
+  .kairos-redesign [data-view="tasks"] .view-header > .tasks-build-button::after { -webkit-mask-image: var(--rd-mask-spark); mask-image: var(--rd-mask-spark); }
+}
+
+/* The title row of a workspace or intelligence tab (serif title and its round buttons) sits straight on the page, as on
+   Home, Chats and Agents: no card, glass, border, shadow or blur behind it, whatever else styles a header. */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-custom-tab="true"]) :is(.view-header, .view-header > div) {
+    background: none; border: 0; border-radius: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
 }
 
 .kairos-redesign .cal-completion-hit { display: contents; }
@@ -877,10 +910,7 @@
   .kairos-redesign #view-content[data-view="calendar"] .cal-selected-agenda .card .meta { font-size: 13px; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-selected-agenda > .cal-day-panel-title { display: none; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-agenda-card { position: relative; margin-left: 68px; padding: 14px 16px; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-agenda-source { display: block; position: absolute; top: 16px; right: 16px; color: var(--rd-ink-dim); font-size: 12px; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-selected-agenda .title { padding-right: 28%; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-selected-agenda .meta { display: none; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-agenda-clock { display: flex; gap: 6px; margin-top: 8px; color: var(--rd-ink-dim); font-size: 13px; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-agenda-clock::before { content: '\25f7'; }
   .kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-header, .cal-week-timeline) { grid-template-columns: 34px repeat(7, minmax(0, 1fr)); }
   .kairos-redesign #view-content[data-view="calendar"] .cal-week-grid:not(.cal-single-day) { min-height: 420px; max-height: 440px; }
@@ -892,7 +922,7 @@
   .kairos-redesign #view-content[data-view="calendar"] .cal-week-event { padding: 4px 2px; font-size: 9px; line-height: 1.2; border-radius: 8px; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-event-time { display: none; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-week-hours span { right: 4px; font-size: 9px; }
-  .kairos-redesign [data-view="calendar"].cal-event-dialog { display: grid; grid-template-rows: 24px auto auto auto; align-content: start; gap: 14px 8px; padding-top: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog { display: grid; grid-template-rows: auto auto auto auto; align-content: start; gap: 14px 8px; padding-top: 0; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog > .ms-sheet-grabber { grid-column: 1 / -1; grid-row: 1; align-self: start; justify-self: center; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog > .form-grid { grid-row: 3; gap: 14px; margin: 0; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog > .meta { grid-row: 4; }
@@ -916,9 +946,7 @@
 
 @media (max-width: 768px) {
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .card { position: relative; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .title { padding-right: 66px; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .meta { display: none; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .cal-agenda-clock { display: block; position: absolute; right: 0; top: 16px; color: var(--rd-ink-dim); font-size: 13px; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-selected-events .cal-agenda-clock::before { content: none; }
 }
 
@@ -980,6 +1008,39 @@
   .kairos-redesign [data-view="library"] .drive-file-extension { font: 9px var(--font-mono, monospace); }
   .kairos-redesign [data-view="library"] .google-file-copy { min-width: 0; }
   .kairos-redesign [data-view="library"] .google-file-copy strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign [data-view="library"] .drive-folders .google-file-copy strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="library"] .drive-group-title { margin: 18px 0 10px; font: italic 600 24px var(--rd-font-title); color: var(--rd-ink); }
+  .kairos-redesign [data-view="library"] .google-file-list > .drive-group-title:first-child { margin-top: 4px; }
+  .kairos-redesign [data-view="library"] .drive-section-chips { gap: 8px; overflow-x: auto; margin-bottom: 4px; scrollbar-width: none; }
+  .kairos-redesign [data-view="library"] .drive-section-chip { flex: none; min-height: 44px; padding: 0 16px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); color: var(--rd-ink); font: 14px var(--rd-font-ui); white-space: nowrap; }
+  .kairos-redesign [data-view="library"] .drive-section-chip[aria-pressed="true"] { border-color: var(--rd-primary-bg); background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign [data-view="library"] .drive-quick { display: block; margin-bottom: 4px; }
+  .kairos-redesign [data-view="library"] .drive-quick[hidden] { display: none; }
+  .kairos-redesign [data-view="library"] .drive-quick .drive-group-title { margin-top: 4px; }
+  .kairos-redesign [data-view="library"] .drive-quick-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .kairos-redesign [data-view="library"] .drive-quick-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: 0 0 132px; min-height: 132px; padding: 12px; border: 1px solid var(--rd-line); border-radius: 20px; background: var(--rd-surface-solid); color: var(--rd-ink); text-align: left; font: inherit; scroll-snap-align: start; }
+  .kairos-redesign [data-view="library"] .drive-quick-type { display: grid; place-items: end center; width: 40px; height: 44px; margin-bottom: auto; padding-bottom: 6px; box-sizing: border-box; border: 1px solid var(--rd-line); border-radius: 10px; background: var(--rd-ground); font: 9px var(--font-mono, monospace); color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .drive-quick-tile strong { width: 100%; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign [data-view="library"] .drive-quick-tile small { font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="library"] .google-breadcrumbs:not(:has(.google-crumb-sep)) { display: none; }
+  .kairos-redesign [data-view="library"] .google-crumb-sep { font-size: 0; }
+  .kairos-redesign [data-view="library"] .google-crumb-sep::before { content: "/"; font-size: 13px; }
+  .kairos-redesign [data-view="library"] .google-breadcrumbs .btn:last-child { color: var(--rd-ink); font-weight: 500; }
+  .kairos-redesign [data-view="library"] .drive-storage-meter { display: grid; gap: 4px; margin-top: 6px; }
+  .kairos-redesign [data-view="library"] .drive-storage-meter[hidden] { display: none; }
+  .kairos-redesign [data-view="library"] .drive-storage-bar { display: block; height: 4px; border-radius: var(--rd-radius-pill); background: var(--rd-ground); overflow: hidden; }
+  .kairos-redesign [data-view="library"] .drive-storage-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+  .kairos-redesign [data-view="library"] .google-account-line > .google-account-select { display: none; }
+  .kairos-redesign [data-view="library"] button.drive-account-copy { padding: 0; border: 0; background: transparent; color: var(--rd-ink); font: inherit; text-align: left; cursor: pointer; }
+  .kairos-redesign [data-view="library"] .drive-connected-dot.drive-account-error { background: var(--danger); }
+  .kairos-redesign .drive-account-sheet { display: grid; gap: 12px; }
+  .kairos-redesign .drive-account-list { display: grid; gap: 8px; }
+  .kairos-redesign .drive-account-choice { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px; border: 1px solid var(--rd-line); border-radius: 18px; background: var(--rd-surface-solid); color: var(--rd-ink); font: inherit; text-align: left; }
+  .kairos-redesign .drive-account-choice[aria-pressed="true"] { border-color: var(--rd-line-strong); background: var(--rd-surface-2); }
+  .kairos-redesign .drive-account-choice > span:last-child { flex: 1; min-width: 0; }
+  .kairos-redesign .drive-account-choice strong { display: block; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .kairos-redesign .drive-account-choice small { display: block; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign .drive-account-sheet .drive-account-avatar { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: var(--rd-ground); }
   .kairos-redesign #view-content[data-view="email"] .email-view > :is(details.disclosure-panel, #email-accounts-list) { display: none; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center !important; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row > .btn { grid-column: 2; justify-self: start; min-height: 36px; }
@@ -1045,4 +1106,71 @@
   .kairos-redesign [data-view="cookbook"] .cookbook-desktop-meta { display: none; }
   .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list > .card > .card-row:has(.cookbook-progress) { grid-column: 1 / -1; grid-row: 3; }
   .kairos-redesign [data-view="cookbook"] .cookbook-catalog-list .card-row > .meta:has(.cookbook-progress) { flex: 1; min-width: 0; }
+}
+
+/* Calendar phone cards reserve actions in normal flow at every agenda size. */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda.card {
+    display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 8px; min-width: 0;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda.card:has(.cal-completion-hit) { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda.card:not(:has(.row-actions)) { grid-template-columns: 44px minmax(0, 1fr); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda .cal-agenda-text { min-width: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda :is(.title, .cal-agenda-summary) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda .cal-agenda-summary { margin-top: 6px; font-size: 13px; color: var(--rd-ink-dim); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda.card .row-actions { position: static; display: flex; flex-direction: column; grid-column: auto; grid-row: auto; gap: 0; width: 44px; margin: 0; opacity: 1; visibility: visible; pointer-events: auto; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-phone-agenda.card .row-actions button { box-sizing: border-box; width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-phone-agenda.card { margin-left: 0; }
+
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendars-card { padding: 0; border: 0; background: transparent; margin: 0; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendars-card > h3 { display: none; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendar-list { display: flex; flex-direction: column; align-items: stretch; gap: 18px; width: 100%; padding: 0; border-radius: 0; background: transparent; box-sizing: border-box; }
+  .kairos-redesign [data-view="calendar"] .cal-account-card { padding: 16px 18px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); min-width: 0; }
+  .kairos-redesign [data-view="calendar"] .cal-provider-heading { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--rd-line); }
+  .kairos-redesign [data-view="calendar"] .cal-provider-tile { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border: 1px solid var(--rd-line); border-radius: 12px; background: var(--rd-ground); color: var(--rd-ink); font-weight: 600; }
+  .kairos-redesign [data-view="calendar"] .cal-account-name { flex: 1; min-width: 0; }
+  .kairos-redesign [data-view="calendar"] .cal-account-name > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign [data-view="calendar"] .cal-sync-status { padding: 5px 10px; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); color: var(--rd-ink); font-size: 12px; }
+  .kairos-redesign [data-view="calendar"] .cal-account-card h4 { margin: 0 0 6px; font: 500 11px var(--rd-font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendar-choice { display: flex; gap: 12px; min-height: 48px; padding: 4px 0; border: 0; border-bottom: 1px solid var(--rd-line); border-radius: 0; background: transparent; font-size: 15px; }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-swatch { display: inline-block; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 4px; background: var(--calendar-color, var(--rdc-kairos-fill)); }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-choice .cal-calendar-swatch { background: var(--calendar-color, var(--rdc-kairos-fill)); }
+  .kairos-redesign [data-view="calendar"] .cal-local-note .cal-calendar-swatch { background: var(--point); }
+  .kairos-redesign [data-view="calendar"] .cal-local-tab .cal-calendar-swatch { background: var(--rd-ink-dim); }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .kairos-redesign [data-view="calendar"] .cal-calendar-choice input { flex: none; width: 20px; height: 20px; accent-color: var(--rd-focus); }
+  .kairos-redesign [data-view="calendar"] .cal-account-manage { margin-top: 6px; min-height: 44px; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-connect { min-height: 54px; border: 1px dashed var(--rd-line-strong); border-radius: var(--rd-radius-pill); background: transparent; text-decoration: none; }
+  .kairos-redesign [data-view="calendar"] .cal-default-calendar { order: 1; margin: 0; text-align: center; color: var(--rd-ink-dim); font-size: 13px; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendars-card > .btn { min-height: 44px; margin-top: 12px; }
+
+  /* Day hides its timeline; keep its header at natural height without
+     changing the flex sizing used by the visible Week and Month grids. */
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-left { flex: none; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) { gap: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog { padding-inline: 20px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .form-grid { align-items: stretch; flex-wrap: nowrap; width: 100%; min-width: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field-grow { flex: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group { width: 100%; box-sizing: border-box; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog [data-repeat-controls] { align-items: stretch; flex-wrap: nowrap; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog [aria-label="Event title"]:not(:focus) { outline: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog > .meta:empty { display: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group [hidden] { display: none !important; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-date-pills { display: flex; flex: 1; justify-content: flex-end; gap: 6px; min-width: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-native-pill { position: relative; display: inline-flex; flex: none; align-items: center; min-height: 44px; padding: 0 8px; border-radius: 10px; background: var(--rd-surface-2); font: 13px var(--rd-font-ui); white-space: nowrap; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group .cal-native-pill > input { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-native-pill input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-native-pill:focus-within { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field > :is(input:not([type="checkbox"]), select, textarea) { flex: 1 1 0; width: 0; min-width: 0; text-align: right; text-overflow: ellipsis; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .field > label { min-width: 48px; flex: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-title-field > input[aria-label="Event title"] { width: 100%; text-align: left; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog [data-repeat-controls] > .meta:empty { display: none; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-checkbox-label { display: flex; }
+  .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group textarea { resize: vertical; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog { padding-inline: 20px; gap: 14px; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .modal-body { flex: 0 1 auto; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog :is(.modal-body, .cal-calendars-card, .cal-account-card) { width: 100%; min-width: 0; box-sizing: border-box; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-provider-heading { flex-wrap: wrap; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-account-name { flex-basis: 100px; }
+  .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-sync-status { flex: none; white-space: nowrap; }
 }
