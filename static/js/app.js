@@ -23,6 +23,7 @@ import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNo
 import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
 import { mascotPng } from './mascot.js';
 import { avatarSpec } from './agentAvatar.js';
+import { notchNavigation, whenReady } from './notchNavigate.js';
 
 let forgeRailCleanup = () => {};
 restoreSidebar();
@@ -588,8 +589,10 @@ async function startApp() {
     const { tab, ...options } = event.detail;
     tab === "settings" ? openSettings(options) : switchTab(tab, options);
   });
-  window.jarvis?.usageOverlay?.onNavigate?.(tab => {
-    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...(tab === 'settings' ? { section: 'appearance' } : {}) } }));
+  window.jarvis?.usageOverlay?.onNavigate?.((target, detail) => {
+    const { tab, options, then } = notchNavigation(target, detail);
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
+    if (then) whenReady(then);
   });
   // The notch's Open chat and its agent chips.
   window.jarvis?.usageOverlay?.onOpen?.(({ tab, id }) => {

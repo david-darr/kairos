@@ -99,6 +99,7 @@ const { setOverlayFocus, validId } = require("./usage-overlay-focus");
 let overlayTracking = null;
 const OVERLAY_EDGES = placement.EDGES;
 const { overlayPreferences } = require("./usage-overlay-preferences");
+const { navigation } = require("./usage-overlay-navigation");
 let overlayConfig = overlayPreferences();
 let overlayDrag = null;
 
@@ -651,10 +652,11 @@ ipcMain.on("usage-overlay:move-end", (event) => {
 ipcMain.on("usage-overlay:hide", (event) => {
   if (fromOverlayWindow(event)) setUsageOverlayVisible(false).catch(console.error);
 });
-ipcMain.on("usage-overlay:open-app", (event, target = "home") => {
-  if (!fromOverlayWindow(event) || !["home", "chat", "settings"].includes(target)) return;
+ipcMain.on("usage-overlay:open-app", (event, target = "home", detail) => {
+  const request = fromOverlayWindow(event) && navigation(target, detail);
+  if (!request) return;
   showWindow();
-  mainWindow?.webContents.send("usage-overlay:navigate", target);
+  mainWindow?.webContents.send("usage-overlay:navigate", request.target, request.detail);
 });
 for (const kind of ["chat", "agent"]) {
   ipcMain.on(`usage-overlay:open-${kind}`, (event, id) => {

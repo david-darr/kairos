@@ -8,20 +8,20 @@ import { createGlow } from './notchGlow.js';
 import { approvalPanel, cliPanel, questionPanel, errorPanel, recoveringPanel, donePanel, createTakeover } from './notchPanels.js';
 import { watchDrags, dropPanel } from './notchDrop.js';
 import { createComposer } from './notchComposer.js';
+import { ICONS } from './notchIcons.js';
+import { modelLogo, logoRing } from './notchModelMarks.js';
+import { createQuietView, createQuietData, layoutFor, workingAgents } from './notchQuiet.js';
+import { createSideNotch, isSideEdge, sideCardAt } from './notchSide.js';
 
-// The top-centre notch. Phase 1: the shell and status. Phase 2 (Kairos Notch
-// build spec, 4a): the step list, the panels that take over the left card,
-// rail mode and the halftone glows. Phase 3: the drop zone and the quick
-// composer. It never sends work by itself, and it answers a request only
-// from a deliberate click on that request's panel. Drawn to the Kairos Mobile
-// v2 boards: NotchCollapsed, NotchWorking, NotchQuestion, NotchError,
-// NotchDrop and NotchComposer.
-const ICONS = {
-  home: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
-  chats: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 5h14v11h-8l-5 3v-3H5z"/></svg>',
-  new: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
-  settings: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
-};
+// The desktop notch, at the top centre or on the left or right edge. Phase 1:
+// the shell and status. Phase 2 (Kairos Notch build spec, 4a): the step list,
+// the panels that take over the Kip card, rail mode and the halftone glows.
+// Phase 3: the drop zone and the quick composer. Round 6: model logos, the
+// quiet view (fewer than two agents at work, nothing in flight) and the side
+// notch. It never sends work by itself, and it answers a request only from a
+// deliberate click on that request's panel, in every layout. Drawn to the
+// Kairos Mobile v2 boards: NotchCollapsed, NotchWorking, NotchQuiet,
+// NotchSide, NotchQuestion, NotchError, NotchDrop and NotchComposer.
 const HEX = /^#[0-9a-f]{6}$/i;
 // The expanded status row fits four readings in the 820 DIP panel beside its buttons.
 const MAX_WORDS = 4;
@@ -48,7 +48,7 @@ function toneOf(used) { return used >= .8 ? 'var(--n-crit)' : used >= .5 ? 'var(
 function headline(snap) { const ws = snap?.windows || []; return ws.find(w => w.id === 'session') || ws[0] || null; }
 function percent(used) { return Math.round(Math.min(Math.max(used || 0, 0), 1) * 100); }
 
-export function createNotchShell({ pill, card, bridge, hideCard, renderRing, refreshQuota }) {
+export function createNotchShell({ card, bridge, hideCard, renderReadings, refreshQuota }) {
   const shell = build('section'); shell.id = 'notch-shell'; shell.setAttribute('aria-label', 'Kairos notch');
   const kip = (size, id) => { const face = createMascot({ state: 'idle', size, spec: KAIROS_SPEC }); face.id = id; return face; };
 
@@ -68,16 +68,16 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
   // the agent chips and the rail.
   const panel = build('div'); panel.id = 'notch-panel';
   const top = build('div', 'n-top');
+  const side = createSideNotch({ shell, bridge, onNewChat: () => openComposer() });
   const button = (id, label, icon, tab) => {
     const b = build('button', 'n-ic'); if (id) b.id = id; b.setAttribute('aria-label', label); b.innerHTML = icon;
     b.addEventListener('click', e => { e.stopPropagation(); bridge.openApp?.(tab); }); return b;
   };
   const readings = build('span'); readings.id = 'notch-readings';
-  // New opens the quick composer (phase 3).
-  const newChat = build('button', 'n-ic'); newChat.id = 'notch-new'; newChat.setAttribute('aria-label', 'New chat'); newChat.innerHTML = ICONS.new;
-  newChat.addEventListener('click', event => { event.stopPropagation(); openComposer(); });
-  top.append(button('notch-open', 'Open Kairos', ICONS.home), button('', 'Chats', ICONS.chats, 'chat'), newChat,
-    button('', 'Settings', ICONS.settings, 'settings'), readings);
+  // One New chat button in every layout; it opens the quick composer (phase 3).
+  side.newChat.id = 'notch-new';
+  top.append(button('notch-open', 'Open Kairos', ICONS.home), button('', 'Chats', ICONS.chats, 'chat'),
+    button('', 'Settings', ICONS.settings, 'settings'), side.newChat, readings);
   const row = build('div', 'n-row');
   const now = build('div', 'n-now');
   const bigKip = kip(92, 'notch-kip-large');
@@ -89,18 +89,24 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
   takeoverSlot.append(takeoverHost);
   const chips = build('div', 'n-chips');
   const rail = build('div', 'n-rail');
-  row.append(now, takeoverSlot, chips, rail); panel.append(top, row);
-  shell.append(bar, panel, pill);
+  row.append(now, takeoverSlot, chips, rail);
+  // With fewer than two agents at work and nothing in flight the quiet view takes the row's place; the side panel adds Up next and the quick actions.
+  const quietData = createQuietData(() => { renderQuiet(); side.update(quietData.data.events); });
+  const quiet = createQuietView({ bridge, bigKip, onNewChat: () => openComposer() });
+  panel.append(top, row, quiet.node, side.next, side.actions);
+  shell.append(bar, panel);
   document.getElementById('root').append(shell);
 
   const chats = new Map(), remote = { agents: [], inbox: { items: [], reviews: [] }, pending: [], devices: [] };
   let expanded = false, expandTimer = null, closeTimer = null, appearanceKey = '';
+  let edge = 'top-centre', working = 0, busy = false, activityInfo = null;
   const reducedMotion = () => document.body.classList.contains('notch-reduced') || matchMedia('(prefers-reduced-motion: reduce)').matches;
   function setExpanded(value) {
     if (expanded === value) return;
     const from = shell.getBoundingClientRect();
     expanded = value; shell.classList.toggle('expanded', value);
     shell.setAttribute('aria-expanded', String(value));
+    side.place(); if (value) quietData.refresh(true);
     shell.getAnimations().forEach(animation => animation.cancel());
     let morph;
     if (reducedMotion()) morph = shell.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
@@ -335,6 +341,12 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
     const doing = new Map();
     for (const item of [...work, ...need]) if (item.agent && !doing.has(item.agent.id))
       doing.set(item.agent.id, need.includes(item) || item.needsYou ? 'needs you' : (item.detail || 'working').toLowerCase());
+    // Fewer than two agents at work and no panel or turn in flight: the quiet view; otherwise the Kip card, chips and rail.
+    // The side panel always stacks both.
+    working = workingAgents(work);
+    busy = !!active || !!rows;  // a panel or a turn in flight keeps the Kip card in view
+    activityInfo = { state, focus, agents: remote.agents, doing };
+    applyLayout(); renderQuiet();
     const agents = remote.agents.slice(0, 4);
     const background = [...tasks].flatMap(([sessionId, items]) => items.filter(item => item.status === 'running').map(item => ({ ...item, sessionId })));
     const next = JSON.stringify([agents.map(a => [a.id, a.name, a.color, doing.get(a.id)]), remote.agents.length, work.filter(i => !i.agent).map(i => i.title),
@@ -355,6 +367,16 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
       rail.setAttribute('aria-label', `Agents: ${doing.size} running`);
       rail.hidden = !agents.length;
     }
+  }
+  function applyLayout() {
+    const layout = isSideEdge(edge) ? 'side' : busy ? 'agents' : layoutFor(working);
+    if (panel.dataset.layout === layout) return;
+    panel.dataset.layout = layout;
+    if (layout === 'quiet') quiet.holdKip(); else now.prepend(bigKip);
+    if (expanded) paintGlows();
+  }
+  function renderQuiet() {
+    if (activityInfo) quiet.update(activityInfo, quietData.data);
   }
   chatStream.subscribeAll((id, entry) => {
     const before = live.get(id)?.status;
@@ -410,7 +432,7 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
           if (hostFailures >= 2) { document.body.classList.add('notch-offline'); bridge.setInteractive?.(false); reset(); }
         }),
     ]);
-    renderActivity();
+    renderActivity(); quietData.refresh();
   }
   function applyAppearance() {
     let settings = {};
@@ -433,38 +455,46 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
   window.addEventListener('storage', event => { if (event.key === appearanceKey) applyAppearance(); });
   poll(); const timer = setInterval(poll, 15000); // Snapshot fallback while SSE reconnects; also refresh bot/inbox sources.
   window.addEventListener('pagehide', () => { clearInterval(timer); reset(); }, { once: true });
-  applyAppearance(); renderActivity(); renderRing();
+  applyAppearance(); renderActivity(); renderReadings();
+  // The tooltip, and the screen-reader name, of a model's logo.
+  const labelled = (node, name, label) => { node.title = name; node.setAttribute('aria-label', label); return node; };
   return { hot, pointer, reset, isExpanded: () => expanded,
     // Raw provider statuses (core/quota_usage.py): sign-in errors and pauses.
     quota(providers = []) { quotas = providers.map(p => ({ provider: p.provider, status: p.status })); renderActivity(); },
+    // Which edge the notch is on and how far along it (the side notch only has a place along its edge).
+    setEdge(value, offset) { edge = value; side.setEdge(value, offset); applyLayout(); },
+    // Where the usage card goes beside the side panel, level with the reading hovered.
+    cardAt(wordRect, cardSize) {
+      return sideCardAt(edge, shell.getBoundingClientRect(), wordRect, cardSize, { width: innerWidth, height: innerHeight });
+    },
     readings(providers, groups = []) {
-    // Collapsed: a ring and "Claude 34%" per subscription quota, then "+N" for
-    // the other connected models. Expanded: every model ("Claude 5h 34%",
-    // "qwen3 12K tokens today"), each opening its usage card on hover; past
-    // MAX_WORDS the last place is "+N", whose card lists them all.
+    // Logos, not names: the name is the tooltip and the aria-label. Collapsed: a
+    // ring with the model's logo inside and the percentage beside it for each
+    // subscription quota, then the next logo and "+N" for the other connected
+    // models. Expanded: every model's logo and short reading ("5h 34%", "2.1K
+    // today"), each opening its usage card on hover; past MAX_WORDS the last
+    // place is "+N", whose card lists them all.
     const rings = [];
     for (const provider of providers) {
       const h = headline(provider.snap), signedOut = provider.snap?.status === 'needsAuth';
       const pct = h && !signedOut ? `${percent(h.used)}%` : signedOut ? 'sign in' : '…';
-      const ring = build('span', 'n-reading');
-      const filled = h && !signedOut ? (RING * Math.min(Math.max(h.used, 0), 1)).toFixed(1) : '0';
-      ring.innerHTML = `<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" class="n-track" stroke-width="3"/><circle cx="10" cy="10" r="7.5" fill="none" stroke-width="3" stroke-dasharray="${filled} ${RING.toFixed(1)}" transform="rotate(-90 10 10)" class="n-arc"/></svg>`;
+      const ring = labelled(build('span', 'n-reading'), provider.name, signedOut ? `${provider.name}, sign in to see usage` : `${provider.name} ${pct} used`);
       ring.style.setProperty('--arc', h ? toneOf(h.used) : 'var(--n-text)');
-      ring.append(build('span', '', `${provider.name} ${pct}`));
+      ring.append(logoRing(provider, h && !signedOut ? h.used : 0), build('span', 'n-pct', pct));
       rings.push(ring);
     }
-    const others = groups.filter(group => !providers.some(provider => provider.id === group.id)).length;
-    if (others) {
-      const more = build('span', 'n-models', `+${others}`);
-      more.setAttribute('aria-label', `${others} more model${others === 1 ? '' : 's'}`);
+    const others = groups.filter(group => !providers.some(provider => provider.id === group.id));
+    if (others.length) {
+      const more = labelled(build('span', 'n-models'), others.map(group => group.name).join(', '), `${others.length} more model${others.length === 1 ? '' : 's'}: ${others.map(group => group.name).join(', ')}`);
+      more.append(modelLogo(others[0], 14), build('span', '', `+${others.length}`));
       rings.push(more);
     }
     const shown = groups.length > MAX_WORDS ? groups.slice(0, MAX_WORDS - 1) : groups;
     const words = shown.map(group => {
-      const reading = shortReading(group);
-      const word = build('span', 'n-word', `${group.name} ${reading}`);
+      const reading = shortReading(group).replace(/ tokens (today|this week)$/, ' $1');
+      const word = labelled(build('span', 'n-word'), group.name, `${group.name} usage, ${reading}. Hover for details.`);
       word.dataset.p = group.id;
-      word.setAttribute('aria-label', `${group.name} usage, ${reading}. Hover for details.`);
+      word.append(modelLogo(group, 14), build('span', 'n-word-text', reading));
       return word;
     });
     if (shown.length < groups.length) {
@@ -474,5 +504,6 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
       words.push(all);
     }
     usage.replaceChildren(...rings); readings.replaceChildren(...words);
+    quiet.usage(providers, quietData.data);
   } };
 }

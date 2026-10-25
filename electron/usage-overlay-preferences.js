@@ -1,6 +1,8 @@
 // The top-centre notch replaces the edge notch (Kairos Notch build spec, 4a).
 // A preference saved before it (no `notch` version) moves to the top centre
-// once; an edge chosen after that keeps its placement.
+// once; a left or right edge chosen after that keeps its placement (they are
+// the side notch now). The top and bottom edges the CodeNotch pill once offered
+// no longer exist and become the top centre.
 const { EDGES } = require('./usage-overlay-placement');
 // 3: the v2 pill at rest (an interim 2 kept the old fold-to-sliver default).
 const NOTCH_VERSION = 3;

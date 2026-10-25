@@ -73,7 +73,7 @@ contextBridge.exposeInMainWorld("jarvis", {
 
   usageOverlay: {
     onNavigate: handler => {
-      const wrapped = (_event, target) => { if (["home", "chat", "settings"].includes(target)) handler(target); };
+      const wrapped = (_event, target, detail) => { if (["home", "chat", "settings", "notes", "talk", "attach"].includes(target)) handler(target, detail || {}); };
       ipcRenderer.on("usage-overlay:navigate", wrapped);
       return () => ipcRenderer.removeListener("usage-overlay:navigate", wrapped);
     },

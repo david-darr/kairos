@@ -35,105 +35,23 @@
 :root{--n-body:#241A14;--n-card:#2A1F18;--n-line:#4A3A2E;--n-line-soft:#3A2C22;--n-text:#F3EADB;--n-text-dim:#D2C3AF;
   --n-text-faint:#A8957F;--n-track:#4A3A2E;--n-face:#33261D;--n-button:#3A2C22;--n-button-hover:#4A3A2E;
   --n-button-line:#6B5646;--n-button-line-hover:#A8957F;--n-ample:#A9C49A;--n-watch:#D9B260;--n-crit:#E0846F;--n-shell:#120D0A;--n-tile:#1E1611;--n-glow:#B8893B;--n-black:#000000}
-.c-auth{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.c-auth button{font:inherit;font-size:11px;color:var(--n-text);background:var(--n-button);border:1px solid var(--n-button-line);border-radius:7px;padding:6px 9px;cursor:pointer}
-.c-auth button:hover,.c-auth button:focus-visible{background:var(--n-button-hover);border-color:var(--n-button-line-hover)}
-.c-auth button:disabled{opacity:.5;cursor:wait}
-.c-auth-status{font-size:10px;line-height:1.4;color:var(--n-text-dim);margin-top:6px;overflow-wrap:anywhere}
-/* Visual reference: upstream docs/specs/2026-08-28-usage-notch-design.md, reproduced for Windows */
+
+/* The page. The notch itself is static/js/notchShell.js; the CodeNotch edge pill, its rings, fillets and
+   handles were retired with the round 6 notch (2026-10-25). What stays of the port is the usage card, the
+   fold's resting tab and the notice below. */
 *{box-sizing:border-box} /* content-box padding once pushed the card past the window's left edge */
 html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;user-select:none}
 body{font-family:var(--k-font-sans);color:var(--n-text)}
 #root{position:relative;width:100%;height:100%}
 
-/* The pill on the right edge */
-#pill{
-  position:absolute;right:0;top:50%;transform:translateY(-50%);
-  width:70px;padding:18px 0;background:var(--n-body);
-  border-radius:20px 0 0 20px;
-  /* Stays visible on dark wallpapers: a thin stroke plus a faint glow, the only outline when black sits on black */
-  border:1px solid var(--n-line);border-right:none;
-  box-shadow:none;
-  display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer;
-}
-/* Fillets: the concave arcs between the pill's top/bottom and the screen edge (the inverse rounded
-   corner in the upstream design frame). An R×R black square hugs the edge and a radial gradient
-   punches out the circle of radius R centred on its outer corner; what remains is the arc. A 1 px
-   ring in the stroke colour joins the pill's own stroke (the outline cue on black wallpapers). */
-#pill::before,#pill::after{
-  content:"";position:absolute;right:0;width:var(--fillet);height:var(--fillet);pointer-events:none;
-}
-/* The Mac's flare radius (38.7 pt against the same 70 pt body), so the settings orb that nests in
-   this pocket can be the Mac's own size */
-#pill{--fillet:38.7px}
-#pill::before{
-  top:calc(-1 * var(--fillet)); /* covers the 1 px stroke along the pill's top edge so there is no seam */
-  background:radial-gradient(circle at 0 0, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px));
-}
-#pill::after{
-  bottom:calc(-1 * var(--fillet));
-  background:radial-gradient(circle at 0 100%, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px));
-}
-.cell{display:flex;flex-direction:column;align-items:center;gap:6px}
-/* The ring takes the Mac's own share of the body, NotchLayout.ringDiameter against sideBodyDepth: 44 in
-   70. At 56 it left an outside weekly ring 2.8 px from the screen edge, where the Mac keeps it about 10
-   clear ("far enough in that the bezel is never touched"). The arcs are drawn in a 56-unit viewBox and
-   scale with the ring on their own; the glyphs are sized here in px, so they take the same factor. */
-:root{--ring:44px;--k:calc(44 / 56)}
-.ringwrap{position:relative;width:var(--ring);height:var(--ring);transition:transform .3s cubic-bezier(.34,1.4,.64,1)}
-.ringwrap.pressed{transform:scale(.93)}
-.ringwrap > svg.ring,.ringwrap > svg.reading,.ringwrap > svg.activity{position:absolute;inset:0;overflow:visible} /* pins only the ring itself; an inline logo svg must not match this or it ends up in the top-left corner */
-.glyph{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-size:calc(20px * var(--k));font-weight:700;color:var(--n-text);letter-spacing:-.5px;
-}
-.glyph.small{font-size:calc(15px * var(--k))}
-/* Glyphs: mark = the provider's own brand mark (monochrome, shown white); appicon = the installed app's icon (colour, rounded and shrunk) */
-.glyph img,.glyph svg{display:block;pointer-events:none;user-select:none}
-.glyph .mark{display:block;width:calc(26px * var(--k));height:calc(26px * var(--k));color:var(--n-text)}
-.glyph .mark svg{width:calc(26px * var(--k));height:calc(26px * var(--k));fill:currentColor} /* inline SVG follows currentColor, so it dims together with the cell */
-.glyph img.png{width:calc(26px * var(--k));height:calc(26px * var(--k));object-fit:contain}
-.glyph img.appicon{width:calc(30px * var(--k));height:calc(30px * var(--k));border-radius:calc(8px * var(--k));object-fit:cover}
+/* The usage card, opened by a reading in the notch and placed by static/js/usage-overlay.js (placeCard).
+   The 246 width matches the upstream spec. */
+#card{position:absolute;width:246px;max-width:calc(100% - 16px);background:var(--n-card);border-radius:16px;padding:16px;
+  overflow-wrap:anywhere;max-height:calc(100% - 16px);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin; /* actions stay reachable in a tall card */
+  display:none}
+#card.show{display:block}
 .c-head .mark{display:inline-block;width:16px;height:16px;color:var(--n-text);margin-right:2px}
 .c-head .mark svg{width:16px;height:16px;fill:currentColor}
-.pct{font-size:15px;font-weight:600;color:var(--n-text);font-variant-numeric:tabular-nums}
-.dim{opacity:.55}
-/* A stale reading dims the reading only. The track, the week and the glyph are all saying the same
-   old thing, but whether an agent is running right now is current either way, so the activity arc
-   keeps its strength — the Mac puts its own ActivityArc outside the opacity it gives the stale
-   stack (ProviderRing), and TASKS.md says it outright: dimming applies to the usage reading. */
-.ringwrap.stale > svg.ring,.ringwrap.stale > svg.reading,.ringwrap.stale > .glyph{opacity:.55}
-/* Session arc animation */
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-/* A 60 fps SVG transform animation in a transparent always-on-top window slows the whole desktop
-   compositor (other apps stutter). steps() drops repaints to ~10 fps; it still reads as spinning/breathing. */
-.arc-spin{animation:spin 1.2s steps(12) infinite;transform-origin:center}
-.arc-pulse{animation:pulse 1.1s steps(6) infinite}
-/* Windows' Animation effects switch: a still arc and a solid ring, as on the Mac under Reduce Motion */
-@media (prefers-reduced-motion: reduce){.arc-spin,.arc-pulse{animation:none}.ringwrap{transition:none}}
-
-/* Hover card, shown to the left of the pill */
-#card{
-  position:absolute;left:10px;right:100px;top:50%;transform:translateY(-50%);
-  /* Anchored on both sides = fluid width: whatever the WebView's real logical width, the card cannot
-     extend past the window's left edge (a fixed max-width got clipped when the DPI disagreed).
-     The 246 cap matches the upstream spec. */
-  max-width:246px;margin-left:auto;background:var(--n-card);border-radius:16px;padding:16px;
-  overflow-wrap:anywhere;min-width:0;
-  max-height:calc(100% - 16px);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin; /* actions stay reachable in a tall card */
-  display:none;
-}
-#card.show{display:block}
-/* The tail, its point on the hovered ring: the Mac's curved wedge (TooltipTail), whose shoulders
-   leave the card tangent to its edge so the two read as one shape. An element of its own rather
-   than ::after, so the card's overflow cannot clip it and it can be reported as hot. It spans the
-   whole gap, its tip tucked 1 px under the pill's edge so the two meet. */
-#tail{
-  position:absolute;right:69px;width:32px;height:36px;background:var(--n-card);display:none;
-  clip-path:path('M0 0C0 9 18.56 13.68 32 18C18.56 22.32 0 27 0 36Z');
-}
-#card.show + #tail{display:block}
 .c-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .c-title{font-size:14px;font-weight:700;color:var(--n-text)} /* the card's own text colour, which the light notch card redefines */
 .c-sub{font-size:11px;color:var(--n-text-faint);margin-bottom:10px}
@@ -147,117 +65,13 @@ body{font-family:var(--k-font-sans);color:var(--n-text)}
 .t-row{margin-top:8px;flex-wrap:nowrap}
 .t-row .w-label{min-width:0;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .t-row .mark{display:inline-block;flex:none;width:12px;height:12px}
-.g-head{font-size:12px;font-weight:700;color:var(--n-text);margin-top:12px}
-.g-box{border:1px solid var(--n-line-soft);border-radius:10px;padding:0 10px 8px;margin-top:6px}
 .c-note{font-size:12px;color:var(--n-text-dim);line-height:1.5;margin-top:6px}
-.c-sessions{margin-top:12px;border-top:1px solid var(--n-line-soft);padding-top:8px}
-.s-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--n-text-dim);padding:2px 0}
-.s-dot{width:6px;height:6px;border-radius:3px;flex:0 0 auto}
-.s-more{font-size:11px;color:var(--n-text-faint);padding:2px 0}
 
-/* ---- The other three edges -------------------------------------------------
-   The rules above draw the right-hand edge, the original layout and still the default. Each block
-   below mirrors or rotates that one for another edge. Two things stay in JavaScript because they
-   depend on measurement: where the card and the tail sit along the pill (`placeCard`), and, on the
-   flat edges, how far down or up the card clears a pill whose thickness follows its contents.
+/* Folded (opt-in): a small tab at the edge stands in for the notch; each edge places it below */
+#rest{position:absolute;box-sizing:border-box;pointer-events:none;opacity:0;transition:opacity .16s ease}
+body.folded #rest{opacity:1;transition:opacity .2s ease .18s}
+@media (prefers-reduced-motion: reduce){#rest,body.folded #rest{transition:none}}
 
-   The fillets follow one rule on every edge: the radial gradient is centred on the corner of the
-   R×R square *diagonally opposite* the corner where the pill meets the screen, so what stays black
-   is the concave arc between the two. */
-
-/* Left: the right-hand layout mirrored. */
-body[data-edge="left"] #pill{right:auto;left:0;border-radius:0 20px 20px 0;border-right:1px solid var(--n-line);border-left:none}
-body[data-edge="left"] #pill::before,body[data-edge="left"] #pill::after{right:auto;left:0}
-body[data-edge="left"] #pill::before{background:radial-gradient(circle at 100% 0, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-body[data-edge="left"] #pill::after{background:radial-gradient(circle at 100% 100%, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-body[data-edge="left"] #card{left:100px;right:10px;margin-left:0;margin-right:auto}
-body[data-edge="left"] #tail{right:auto;left:69px;clip-path:path('M32 0C32 9 13.44 13.68 0 18C13.44 22.32 32 27 32 36Z')}
-
-/* Top and bottom: the pill lies flat, so it is a row and its thickness comes from the cells rather
-   than a fixed 70 px column. The card is centred under (or over) the hovered ring by `placeCard`. */
-body[data-edge="top"] #pill,body[data-edge="bottom"] #pill{
-  right:auto;left:50%;top:auto;transform:translateX(-50%);
-  flex-direction:row;width:auto;height:auto;padding:12px 18px;
-}
-body[data-edge="top"] #pill::before,body[data-edge="top"] #pill::after,
-body[data-edge="bottom"] #pill::before,body[data-edge="bottom"] #pill::after{right:auto;top:auto;bottom:auto}
-body[data-edge="top"] #pill{top:0;border-radius:0 0 20px 20px;border-top:none}
-body[data-edge="top"] #pill::before{top:0;left:calc(-1 * var(--fillet));background:radial-gradient(circle at 0 100%, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-body[data-edge="top"] #pill::after{top:0;right:calc(-1 * var(--fillet));background:radial-gradient(circle at 100% 100%, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-body[data-edge="bottom"] #pill{bottom:0;border-radius:20px 20px 0 0;border-bottom:none}
-body[data-edge="bottom"] #pill::before{bottom:0;left:calc(-1 * var(--fillet));background:radial-gradient(circle at 0 0, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-body[data-edge="bottom"] #pill::after{bottom:0;right:calc(-1 * var(--fillet));background:radial-gradient(circle at 100% 0, transparent calc(var(--fillet) - 1.5px), var(--n-line) calc(var(--fillet) - 0.5px), var(--n-body) calc(var(--fillet) + 0.5px))}
-/* A fixed width here, not the fluid one the upright edges use: `placeCard` measures the card to
-   centre it, and a shrink-to-fit width would change as it moves. 246 is the upstream cap either way. */
-body[data-edge="top"] #card,body[data-edge="bottom"] #card{
-  left:8px;right:auto;top:0;transform:none;margin-left:0;
-  width:246px;max-height:calc(100% - 150px);
-}
-body[data-edge="top"] #tail,body[data-edge="bottom"] #tail{right:auto;width:36px;height:32px}
-body[data-edge="top"] #tail{clip-path:path('M0 32C9 32 13.68 13.44 18 0C22.32 13.44 27 32 36 32Z')}
-body[data-edge="bottom"] #tail{clip-path:path('M0 0C9 0 13.68 18.56 18 32C22.32 18.56 27 0 36 0Z')}
-
-/* Show on hover, the Mac's .onHover: folded, the notch rests as a small pill at the edge. Its size is
-   the Mac's NotchLayout.pillWidth × pillHeight, 26 × 210 of its design px — 10 × 79 of this page's,
-   the same unscaled measures the orb and the fillets use. The open pill keeps its whole layout and is
-   clipped down to that, so everything measured off it (the card's anchor, the handles, which ring is
-   under the pointer) stays true; `#rest` draws the outline the clip takes away, which is the only
-   thing that shows a black pill against a black wallpaper. */
-#pill{--clip-open:inset(-40px -1px -40px -1px round 0);
-  --clip-rest:inset(calc(50% - 39.5px) 0 calc(50% - 39.5px) calc(100% - 10px) round 6px 0 0 6px);
-  clip-path:var(--clip-open);transition:clip-path .36s cubic-bezier(.32,.72,.24,1)}
-body.folded #pill{clip-path:var(--clip-rest)}
-body[data-edge="left"] #pill{--clip-rest:inset(calc(50% - 39.5px) calc(100% - 10px) calc(50% - 39.5px) 0 round 0 6px 6px 0)}
-body[data-edge="top"] #pill,body[data-edge="bottom"] #pill{--clip-open:inset(-1px -40px -1px -40px round 0)}
-body[data-edge="top"] #pill{--clip-rest:inset(0 calc(50% - 39.5px) calc(100% - 10px) calc(50% - 39.5px) round 0 0 6px 6px)}
-body[data-edge="bottom"] #pill{--clip-rest:inset(calc(100% - 10px) calc(50% - 39.5px) 0 calc(50% - 39.5px) round 6px 6px 0 0)}
-#rest{position:absolute;box-sizing:border-box;background:var(--n-body);border:1px solid var(--n-line);pointer-events:none;
-  right:0;top:50%;translate:0 -50%;width:10px;height:79px;border-right:none;border-radius:6px 0 0 6px;
-  opacity:0;transition:opacity .16s ease}
-body.folded #rest{opacity:1;transition:opacity .2s ease .18s} /* arrives as the clip does */
-body[data-edge="left"] #rest{right:auto;left:0;border-right:1px solid var(--n-line);border-left:none;border-radius:0 6px 6px 0}
-body[data-edge="top"] #rest,body[data-edge="bottom"] #rest{right:auto;left:50%;top:auto;translate:-50% 0;width:79px;height:10px;border:1px solid var(--n-line)}
-body[data-edge="top"] #rest{top:0;border-top:none;border-radius:0 0 6px 6px}
-body[data-edge="bottom"] #rest{bottom:0;border-bottom:none;border-radius:6px 6px 0 0}
-/* The rings leave by fading and sliding a little toward the edge, one after another — the Mac's
-   NotchMotion.stagger, 28 of its design px (10 here), and no scaling: the clip does the concealing */
-.cell{transition:opacity .18s ease calc(var(--i,0) * 28ms),translate .3s cubic-bezier(.32,.72,.24,1) calc(var(--i,0) * 28ms)}
-body.folded .cell{opacity:0;translate:10px 0}
-body.folded[data-edge="left"] .cell{translate:-10px 0}
-body.folded[data-edge="top"] .cell{translate:0 -10px}
-body.folded[data-edge="bottom"] .cell{translate:0 10px}
-.handle{transition:opacity .2s ease}
-body.folded .handle{opacity:0;pointer-events:none}
-@media (prefers-reduced-motion: reduce){#pill,#rest,body.folded #rest,.cell,.handle{transition:none}}
-
-/* The two handles, one off each end of the pill, as on the Mac (SettingsOrb and MoveHandle):
-   settings past the far fillet, move past the near one. At rest each is a quarter arc tucked into
-   that fillet's pocket, concentric with it and a gap inside; under the pointer the same circle
-   fills in and takes its glyph. The Mac's measures, unscaled: arc radius 28.5, stroke 6.8, disc
-   46.6, glyph 21. `placeHandles` puts each box's centre on its fillet's centre. */
-.handle{position:absolute;width:57px;height:57px;display:none;--arc:270deg}
-.handle.placed{display:block}
-.handle.hover{cursor:pointer}
-.handle > *{position:absolute;left:50%;top:50%;pointer-events:none;transition:opacity .2s,transform .36s cubic-bezier(.34,1.3,.64,1)}
-.h-rest{width:72px;height:72px;margin:-36px 0 0 -36px;overflow:visible;transform:rotate(var(--arc)) scale(1)}
-.h-disc{width:46.6px;height:46.6px;margin:-23.3px 0 0 -23.3px;border-radius:50%;background:var(--n-body);border:1px solid var(--n-line);opacity:0;transform:scale(1.1)}
-.h-glyph{width:21px;height:21px;margin:-10.5px 0 0 -10.5px;fill:var(--n-text);opacity:0;
-  transform:rotate(calc(var(--spins,0) * 360deg - 60deg)) scale(.5);transition:opacity .2s,transform .55s cubic-bezier(.34,1.2,.64,1)}
-.handle.hover .h-rest{opacity:0;transform:rotate(var(--arc)) scale(.86)}
-.handle.hover .h-disc{opacity:1;transform:scale(1)}
-.handle.hover .h-glyph{opacity:1;transform:rotate(calc(var(--spins,0) * 360deg)) scale(1)}
-/* Carrying: the disc goes dashed and the hand stops turning — it is being held now, not offered */
-#move.armed .h-disc{border:2px dashed var(--n-text);background:var(--n-body)}
-/* The quarter that faces the fillet: up and outward past the far end on the right, and the same two
-   directions mirrored along the stack at the near end */
-body[data-edge="left"] #orb,body[data-edge="top"] #orb{--arc:180deg}
-body[data-edge="bottom"] #orb{--arc:90deg}
-#move{--arc:0deg}
-body[data-edge="left"] #move{--arc:90deg}
-body[data-edge="top"] #move{--arc:270deg}
-@media (prefers-reduced-motion: reduce){.handle > *{transition:none}}
-
-/* ---- Kairos additions ------------------------------------------------------ */
 /* A transient message on the page itself (CodeNotch styles its own elsewhere) */
 #notice{position:absolute;left:10px;right:100px;bottom:10px;margin-left:auto;max-width:246px;
   background:var(--n-card);border:1px solid var(--n-line);border-radius:10px;padding:8px 10px;font-size:11px;color:var(--n-text-dim);
@@ -266,17 +80,12 @@ body[data-edge="top"] #move{--arc:270deg}
 body[data-edge="left"] #notice{left:100px;right:10px;margin-left:0;margin-right:auto}
 
 /* Provider logos as masks in the text colour (static/img/model-marks/, LobeHub,
-   MIT). CodeNotch inlines the SVG; a mask keeps SVG markup out of the page. The
-   sizes above (.glyph .mark, .c-head .mark) are CodeNotch's own. */
+   MIT). CodeNotch inlines the SVG; a mask keeps SVG markup out of the page. */
 .mark{background:currentColor;-webkit-mask:var(--mark) center/contain no-repeat;mask:var(--mark) center/contain no-repeat}
 
 
 /* ---- Phase 1: the top-centre notch -------------------------------------------
-   Drawn to the Kairos Mobile v2 boards NotchCollapsed and NotchWorking. The
-   legacy edge rules and their MIT notice remain above. */
-#notch-shell{display:contents}
-body:not([data-edge="top-centre"]) #notch-shell > :not(#pill){display:none}
-body[data-edge="top-centre"] #pill{display:none}
+   Drawn to the Kairos Mobile v2 boards NotchCollapsed and NotchWorking. */
 body[data-edge="top-centre"] #notch-shell{position:absolute;display:block;left:50%;top:0;transform:translateX(-50%);max-width:100%;
   background:var(--n-shell);color:var(--n-text);border-radius:0 0 22px 22px;overflow:hidden;
   box-shadow:0 8px 24px color-mix(in srgb,var(--n-black) 35%,transparent);transition:box-shadow 400ms,background-color 400ms}
@@ -356,10 +165,8 @@ body.notch-light #notch-shell.expanded{--n-shell:var(--k-parchment);--n-tile:var
 body.notch-light #notch-shell.expanded :is(.n-now,.n-takeover){--kip-eye:var(--k-surface)}
 body[data-edge="top-centre"].notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
 
-/* The usage card opens under the notch; the edge notch's tail and handles do not apply */
-/* Above the shell, so its drop shadow does not fall across the card's title */
-body[data-edge="top-centre"] #card{right:auto;bottom:auto;transform:none;margin-left:0;z-index:1}
-body[data-edge="top-centre"] :is(#tail,#card.show + #tail),body[data-edge="top-centre"] .handle{display:none}
+/* The usage card opens under the notch, above the shell, so its drop shadow does not fall across the card's title */
+body[data-edge="top-centre"] #card{z-index:1}
 /* Folded, only the small rest tab shows */
 body[data-edge="top-centre"] #rest{left:50%;right:auto;top:0;transform:translateX(-50%);width:79px;height:10px;border-radius:0 0 6px 6px;opacity:0;pointer-events:none;background:var(--n-shell);border:0}
 body.folded[data-edge="top-centre"] #rest{opacity:1}
@@ -468,3 +275,143 @@ body.notch-light #notch-shell.expanded .n-panel-note[data-tone="good"]{color:var
 .n-compose-remove:hover{background:color-mix(in srgb,var(--n-text) 12%,transparent)}
 .n-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 :is(.n-compose-ic,.n-compose-send,.n-compose-model,.n-compose-remove,.n-act,.n-ic):focus-visible,.n-compose-field:focus-visible{outline:2px solid var(--n-watch);outline-offset:2px}
+
+/* ---- Round 6: logos, the quiet view and the side-edge notch ---------------------------------------------------------
+   Drawn to the boards NotchCollapsed, NotchWorking, NotchQuiet and NotchSide. Kept in one block, after the phase 1
+   rules, so it can be read (and merged) on its own. */
+
+/* Model logos: inlined marks follow the text colour; a file mark is a mask in it; no mark is an initial in a circle */
+.nm-logo{flex:none;display:block}
+.nm-file{width:var(--size,14px);height:var(--size,14px);background:currentColor;-webkit-mask:var(--mark) center/contain no-repeat;mask:var(--mark) center/contain no-repeat}
+.nm-initial{width:var(--size,14px);height:var(--size,14px);border-radius:999px;background:color-mix(in srgb,var(--n-text) 18%,transparent);color:var(--n-text);
+  display:flex;align-items:center;justify-content:center;font-size:calc(var(--size,14px) * .62);font-weight:600;line-height:1}
+.nm-ring{position:relative;width:26px;height:26px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--n-text)}
+.nm-ring > svg:first-child{position:absolute;inset:0}
+#notch-usage{gap:10px}
+#notch-usage .n-reading{gap:5px}
+.n-models{display:flex;align-items:center;gap:5px;opacity:.75}
+.n-word{display:flex;align-items:center;gap:6px}
+.n-word-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+/* The quiet view: shown in place of the agent chips when fewer than two agents are working */
+.nq-view,.ns-actions,.ns-next{display:none}
+.nq-view [hidden],.ns-next[hidden]{display:none}
+#notch-panel[data-layout="quiet"] .n-row{display:none}
+#notch-panel[data-layout="quiet"] .nq-view{display:grid;grid-template-columns:300px minmax(0,1fr) 112px;gap:10px}
+#notch-panel[data-layout="quiet"] .nq-view.nq-no-mid{grid-template-columns:minmax(0,1fr) 112px}
+.nq-tile{border-radius:22px;background:var(--n-tile)}
+.nq-label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--n-text) 45%,transparent)}
+.nq-sub{font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-kip-tile{display:flex;flex-direction:column;justify-content:space-between;gap:14px;padding:18px;min-width:0}
+.nq-head{display:flex;align-items:center;gap:14px}
+.nq-head-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.nq-greeting{font-family:var(--k-font-serif);font-style:italic;font-weight:600;font-size:24px;line-height:1.05}
+.nq-kip{--kip-eye:var(--n-tile);flex:none}
+.nq-kip #notch-kip-large,body:is([data-edge="left"],[data-edge="right"]) #notch-kip-large{width:64px;height:64px;margin:-4px}
+.nq-counts{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-counts b{display:block;font-size:20px;font-weight:500;color:var(--n-text)}
+.nq-line{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px;border-radius:16px;background:color-mix(in srgb,var(--n-text) 5%,transparent)}
+.nq-line-text{flex:1 1 auto;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-line .nq-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.nq-dot{flex:none;width:12px;height:12px;border-radius:999px;background:var(--dot)}
+.nq-mid{display:flex;flex-direction:column;gap:10px;min-width:0}
+.nq-next{display:flex;align-items:center;gap:14px;padding:14px 16px}
+.nq-next-mark{flex:none;width:40px;height:40px;border-radius:12px;background:color-mix(in srgb,var(--n-watch) 14%,transparent);color:var(--n-watch);display:flex;align-items:center;justify-content:center}
+.nq-next-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.nq-next-title{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-next-copy .nq-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-pill{flex:none;border:0;border-radius:999px;padding:7px 12px;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.nq-pill:hover,.nq-pill:focus-visible{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
+.nq-primary{padding:7px 14px;background:var(--n-text);color:var(--n-shell);font-weight:500}
+.nq-primary:hover,.nq-primary:focus-visible{background:var(--n-text);opacity:.88}
+.nq-lower{flex:1;display:flex;flex-direction:column;gap:10px;padding:14px 16px;min-width:0}
+.nq-pick{display:flex;flex-direction:column;gap:10px}
+.nq-pick-top{display:flex;align-items:center;gap:10px}
+.nq-pick-top .nq-label{flex:1}
+.nq-pick-row{display:flex;align-items:center;gap:12px}
+.nq-pick-words{flex:1;min-width:0;display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-pick-words .nq-sub{font-size:14px}
+.nq-usage{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--n-text) 8%,transparent)}
+.nq-usage:first-child{padding-top:0;border-top:0}
+.nq-usage-row{display:grid;grid-template-columns:auto minmax(0,1fr) 36px;gap:10px;align-items:center;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-dots{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:3px}
+.nq-dots i{display:block;aspect-ratio:1;border-radius:999px;background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+.nq-dots i.on{background:var(--tone)}
+.nq-actions{padding:14px 8px;display:grid;grid-template-rows:repeat(4,1fr);justify-items:center;align-items:center}
+.nq-qa{display:flex;flex-direction:column;align-items:center;gap:6px;padding:0;border:0;background:none;font:inherit;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent);cursor:pointer}
+.nq-qa-icon{width:42px;height:42px;border-radius:999px;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);display:flex;align-items:center;justify-content:center}
+.nq-qa:hover .nq-qa-icon,.nq-qa:focus-visible .nq-qa-icon{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
+.nq-pill:focus-visible,.nq-qa:focus-visible{outline:2px solid var(--n-watch);outline-offset:2px}
+
+/* The side-edge notch: the same shell on the left or right edge. A resting vertical 44 px pill, flush to the edge and
+   rounded on the inner side; expanded, a 380 px panel flush to the edge. The window spans the screen's height
+   (electron/usage-overlay-placement.js) and --ns-top, set by notchSide.js, puts the notch along it. */
+body[data-edge="left"]{--ns-dir:1}
+body[data-edge="right"]{--ns-dir:-1}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell{position:absolute;display:block;top:var(--ns-top,0px);background:var(--n-shell);color:var(--n-text);overflow:hidden;
+  box-shadow:calc(8px * var(--ns-dir)) 0 24px color-mix(in srgb,var(--n-black) 35%,transparent);
+  transition:box-shadow 400ms,background-color 400ms}
+body[data-edge="left"] #notch-shell{left:0;border-radius:0 22px 22px 0}
+body[data-edge="right"] #notch-shell{right:0;border-radius:22px 0 0 22px}
+body[data-edge="left"] #notch-shell.expanded{border-radius:0 30px 30px 0}
+body[data-edge="right"] #notch-shell.expanded{border-radius:30px 0 0 30px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell.expanded{box-shadow:calc(18px * var(--ns-dir)) 0 50px color-mix(in srgb,var(--n-black) 50%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="thinking"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 25%,transparent),calc(8px * var(--ns-dir)) 0 24px color-mix(in srgb,var(--n-glow) 35%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="needs"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 50%,transparent),calc(8px * var(--ns-dir)) 0 26px color-mix(in srgb,var(--n-watch) 45%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="error"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-crit) 50%,transparent),calc(8px * var(--ns-dir)) 0 26px color-mix(in srgb,var(--n-crit) 45%,transparent)}
+
+/* Resting: Kip on top, the count of what needs you under it, then the logo rings, "+N" and the agent dots */
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell:not(.expanded) > #notch-bar{display:flex}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-bar{flex-direction:column;align-items:center;width:44px;height:auto;padding:14px 0;gap:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-status{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-signal{order:1}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-signal .n-dot{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-usage{order:2;display:flex;flex-direction:column;align-items:center;gap:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-usage:empty{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage::before,body:is([data-edge="left"],[data-edge="right"]) #notch-usage::after{content:"";width:22px;height:1px;background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage .n-pct{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage .n-models{flex-direction:column;gap:2px;font-size:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-cluster{order:3}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-cluster:not(:empty){display:grid}
+
+/* Expanded: nav row, usage row, Kip card with its step line, agents, up next, quick actions, stacked */
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell.expanded > #notch-panel{display:flex;flex-direction:column;gap:10px;width:380px;padding:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-top{flex-wrap:wrap;row-gap:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-new{display:flex;order:2;margin-left:auto}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel #notch-readings{order:3;flex:1 1 100%;margin-left:0;justify-content:space-between;gap:8px;padding:10px 14px;border-radius:16px;background:var(--n-tile)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-row{flex-direction:column;gap:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-now{flex:none;padding:16px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chips{grid-template-columns:minmax(0,1fr);padding:12px;gap:8px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chips::before{content:"Agents";padding:0 4px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--n-text) 45%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chip{padding:9px 12px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-rail{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next:not([hidden]){display:block}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next{gap:12px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next-mark{width:36px;height:36px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next-title{font-size:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-actions{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:none;padding:12px 8px}
+
+/* Folded (opt-in): only a small tab shows at the edge, level with the notch */
+body:is([data-edge="left"],[data-edge="right"]) #rest{top:calc(var(--ns-mid,50%) - 39.5px);translate:none;width:10px;height:79px;border:0;background:var(--n-shell);opacity:0;pointer-events:none}
+body[data-edge="left"] #rest{left:0;right:auto;border-radius:0 6px 6px 0}
+body[data-edge="right"] #rest{right:0;left:auto;border-radius:6px 0 0 6px}
+body.folded:is([data-edge="left"],[data-edge="right"]) #rest{opacity:1}
+body.folded:is([data-edge="left"],[data-edge="right"]) #notch-shell{opacity:0;pointer-events:none}
+
+/* The usage card opens on the inner side, above the shell; the light notch re-themes it as at the top */
+body:is([data-edge="left"],[data-edge="right"]) #card{z-index:1}
+body:is([data-edge="left"],[data-edge="right"]).notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
+body:is([data-edge="left"],[data-edge="right"]).notch-offline #root{visibility:hidden}
+body:is([data-edge="left"],[data-edge="right"]).notch-reduced #notch-shell{transition:none}
+body:is([data-edge="left"],[data-edge="right"]).notch-reduced #notch-shell *{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){body:is([data-edge="left"],[data-edge="right"]) #notch-shell,body:is([data-edge="left"],[data-edge="right"]) #notch-shell *{transition:none}}
+
+/* ---- Merged: phases 2 and 3 in the side panel ---------------------------------------------------------------------------
+   A panel, the drop zone and the composer take the Kip card's place in the 380 px side panel; the agent chips stay. */
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-row.n-rail-mode .n-chips{display:grid}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-takeover{flex:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-panel:not(.n-drop){flex-wrap:wrap;align-items:flex-start;gap:12px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-panel-copy{flex:1 1 220px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-panel-actions{flex:1 1 100%;max-width:none;flex-direction:row;flex-wrap:wrap}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-panel-actions .n-act:not(.n-act-link){flex:1 1 auto}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-compose-hint{display:none}

@@ -6,7 +6,10 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("usageOverlay", {
   // Whether the pointer is over the pill or card: the window takes clicks only then.
   setInteractive: (on) => ipcRenderer.send("usage-overlay:interactive", !!on),
-  openApp: (target = "home") => { if (["home", "chat", "settings"].includes(target)) ipcRenderer.send("usage-overlay:open-app", target); },
+  // A chat can be opened by session id, or started with a draft to review; main checks both again (usage-overlay-navigation.js).
+  openApp: (target = "home", detail = {}) => {
+    if (["home", "chat", "settings", "notes", "talk", "attach"].includes(target)) ipcRenderer.send("usage-overlay:open-app", target, { sessionId: detail?.sessionId, draft: detail?.draft });
+  },
   // Open one chat or one agent in Kairos (a panel's Open chat, a chip).
   openChat: (sessionId) => ipcRenderer.send("usage-overlay:open-chat", String(sessionId)),
   openAgent: (agentId) => ipcRenderer.send("usage-overlay:open-agent", String(agentId)),
