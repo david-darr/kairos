@@ -373,3 +373,138 @@ body[data-edge="top-centre"].notch-reduced #notch-shell *{animation:none!importa
 @media(prefers-reduced-motion:reduce){body[data-edge="top-centre"] #notch-shell,body[data-edge="top-centre"] #notch-shell *{transition:none}}
 
 :root{--text:var(--k-parchment);--bg-panel-solid:var(--n-body);--point:var(--k-gold-hi);--danger:var(--n-crit)}
+
+
+/* ---- Round 6: logos, the quiet view and the side-edge notch ---------------------------------------------------------
+   Drawn to the boards NotchCollapsed, NotchWorking, NotchQuiet and NotchSide. Kept in one block, after the phase 1
+   rules, so it can be read (and merged) on its own. */
+
+/* Model logos: inlined marks follow the text colour; a file mark is a mask in it; no mark is an initial in a circle */
+.nm-logo{flex:none;display:block}
+.nm-file{width:var(--size,14px);height:var(--size,14px);background:currentColor;-webkit-mask:var(--mark) center/contain no-repeat;mask:var(--mark) center/contain no-repeat}
+.nm-initial{width:var(--size,14px);height:var(--size,14px);border-radius:999px;background:color-mix(in srgb,var(--n-text) 18%,transparent);color:var(--n-text);
+  display:flex;align-items:center;justify-content:center;font-size:calc(var(--size,14px) * .62);font-weight:600;line-height:1}
+.nm-ring{position:relative;width:26px;height:26px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--n-text)}
+.nm-ring > svg:first-child{position:absolute;inset:0}
+#notch-usage{gap:10px}
+#notch-usage .n-reading{gap:5px}
+.n-models{display:flex;align-items:center;gap:5px;opacity:.75}
+.n-word{display:flex;align-items:center;gap:6px}
+.n-word-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+/* The quiet view: shown in place of the agent chips when fewer than two agents are working */
+.nq-view,.ns-actions,.ns-next{display:none}
+.nq-view [hidden],.ns-next[hidden]{display:none}
+#notch-panel[data-layout="quiet"] .n-row{display:none}
+#notch-panel[data-layout="quiet"] .nq-view{display:grid;grid-template-columns:300px minmax(0,1fr) 112px;gap:10px}
+#notch-panel[data-layout="quiet"] .nq-view.nq-no-mid{grid-template-columns:minmax(0,1fr) 112px}
+.nq-tile{border-radius:22px;background:var(--n-tile)}
+.nq-label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--n-text) 45%,transparent)}
+.nq-sub{font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-kip-tile{display:flex;flex-direction:column;justify-content:space-between;gap:14px;padding:18px;min-width:0}
+.nq-head{display:flex;align-items:center;gap:14px}
+.nq-head-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.nq-greeting{font-family:var(--k-font-serif);font-style:italic;font-weight:600;font-size:24px;line-height:1.05}
+.nq-kip{--kip-eye:var(--n-tile);flex:none}
+.nq-kip #notch-kip-large,body:is([data-edge="left"],[data-edge="right"]) #notch-kip-large{width:64px;height:64px;margin:-4px}
+.nq-counts{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-counts b{display:block;font-size:20px;font-weight:500;color:var(--n-text)}
+.nq-line{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px;border-radius:16px;background:color-mix(in srgb,var(--n-text) 5%,transparent)}
+.nq-line-text{flex:1 1 auto;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-line .nq-sub{flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.nq-dot{flex:none;width:12px;height:12px;border-radius:999px;background:var(--dot)}
+.nq-mid{display:flex;flex-direction:column;gap:10px;min-width:0}
+.nq-next{display:flex;align-items:center;gap:14px;padding:14px 16px}
+.nq-next-mark{flex:none;width:40px;height:40px;border-radius:12px;background:color-mix(in srgb,var(--n-watch) 14%,transparent);color:var(--n-watch);display:flex;align-items:center;justify-content:center}
+.nq-next-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.nq-next-title{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-next-copy .nq-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-pill{flex:none;border:0;border-radius:999px;padding:7px 12px;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.nq-pill:hover,.nq-pill:focus-visible{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
+.nq-primary{padding:7px 14px;background:var(--n-text);color:var(--n-shell);font-weight:500}
+.nq-primary:hover,.nq-primary:focus-visible{background:var(--n-text);opacity:.88}
+.nq-lower{flex:1;display:flex;flex-direction:column;gap:10px;padding:14px 16px;min-width:0}
+.nq-pick{display:flex;flex-direction:column;gap:10px}
+.nq-pick-top{display:flex;align-items:center;gap:10px}
+.nq-pick-top .nq-label{flex:1}
+.nq-pick-row{display:flex;align-items:center;gap:12px}
+.nq-pick-words{flex:1;min-width:0;display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nq-pick-words .nq-sub{font-size:14px}
+.nq-usage{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--n-text) 8%,transparent)}
+.nq-usage:first-child{padding-top:0;border-top:0}
+.nq-usage-row{display:grid;grid-template-columns:auto minmax(0,1fr) 36px;gap:10px;align-items:center;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.nq-dots{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:3px}
+.nq-dots i{display:block;aspect-ratio:1;border-radius:999px;background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+.nq-dots i.on{background:var(--tone)}
+.nq-actions{padding:14px 8px;display:grid;grid-template-rows:repeat(4,1fr);justify-items:center;align-items:center}
+.nq-qa{display:flex;flex-direction:column;align-items:center;gap:6px;padding:0;border:0;background:none;font:inherit;font-size:11px;color:color-mix(in srgb,var(--n-text) 60%,transparent);cursor:pointer}
+.nq-qa-icon{width:42px;height:42px;border-radius:999px;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);display:flex;align-items:center;justify-content:center}
+.nq-qa:hover .nq-qa-icon,.nq-qa:focus-visible .nq-qa-icon{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
+.nq-pill:focus-visible,.nq-qa:focus-visible{outline:2px solid var(--n-watch);outline-offset:2px}
+.ns-new{display:none}
+
+/* The side-edge notch: the same shell on the left or right edge. A resting vertical 44 px pill, flush to the edge and
+   rounded on the inner side; expanded, a 380 px panel flush to the edge. The window spans the screen's height
+   (electron/usage-overlay-placement.js) and --ns-top, set by notchSide.js, puts the notch along it. */
+body:is([data-edge="left"],[data-edge="right"]) #pill,
+body:is([data-edge="left"],[data-edge="right"]) :is(#tail,#card.show + #tail),
+body:is([data-edge="left"],[data-edge="right"]) .handle{display:none}
+body[data-edge="left"]{--ns-dir:1}
+body[data-edge="right"]{--ns-dir:-1}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell{position:absolute;display:block;top:var(--ns-top,0px);background:var(--n-shell);color:var(--n-text);overflow:hidden;
+  box-shadow:calc(8px * var(--ns-dir)) 0 24px color-mix(in srgb,var(--n-black) 35%,transparent);
+  transition:box-shadow 400ms,background-color 400ms}
+body[data-edge="left"] #notch-shell{left:0;border-radius:0 22px 22px 0}
+body[data-edge="right"] #notch-shell{right:0;border-radius:22px 0 0 22px}
+body[data-edge="left"] #notch-shell.expanded{border-radius:0 30px 30px 0}
+body[data-edge="right"] #notch-shell.expanded{border-radius:30px 0 0 30px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell.expanded{box-shadow:calc(18px * var(--ns-dir)) 0 50px color-mix(in srgb,var(--n-black) 50%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="thinking"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 25%,transparent),calc(8px * var(--ns-dir)) 0 24px color-mix(in srgb,var(--n-glow) 35%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="needs"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-watch) 50%,transparent),calc(8px * var(--ns-dir)) 0 26px color-mix(in srgb,var(--n-watch) 45%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell[data-state="error"]:not(.expanded){box-shadow:0 0 0 1px color-mix(in srgb,var(--n-crit) 50%,transparent),calc(8px * var(--ns-dir)) 0 26px color-mix(in srgb,var(--n-crit) 45%,transparent)}
+
+/* Resting: Kip on top, the count of what needs you under it, then the logo rings, "+N" and the agent dots */
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell:not(.expanded) > #notch-bar{display:flex}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-bar{flex-direction:column;align-items:center;width:44px;height:auto;padding:14px 0;gap:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-status{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-signal{order:1}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-signal .n-dot{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-usage{order:2;display:flex;flex-direction:column;align-items:center;gap:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-usage:empty{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage::before,body:is([data-edge="left"],[data-edge="right"]) #notch-usage::after{content:"";width:22px;height:1px;background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage .n-pct{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-usage .n-models{flex-direction:column;gap:2px;font-size:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-cluster{order:3}
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell #notch-cluster:not(:empty){display:grid}
+
+/* Expanded: nav row, usage row, Kip card with its step line, agents, up next, quick actions, stacked */
+body:is([data-edge="left"],[data-edge="right"]) #notch-shell.expanded > #notch-panel{display:flex;flex-direction:column;gap:10px;width:380px;padding:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-top{flex-wrap:wrap;row-gap:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-new{display:flex;order:2;margin-left:auto}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel #notch-readings{order:3;flex:1 1 100%;margin-left:0;justify-content:space-between;gap:8px;padding:10px 14px;border-radius:16px;background:var(--n-tile)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-row{flex-direction:column;gap:10px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-now{flex:none;padding:16px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chips{grid-template-columns:minmax(0,1fr);padding:12px;gap:8px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chips::before{content:"Agents";padding:0 4px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb,var(--n-text) 45%,transparent)}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-chip{padding:9px 12px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .n-rail{display:none}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next:not([hidden]){display:block}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next{gap:12px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next-mark{width:36px;height:36px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-next .nq-next-title{font-size:14px}
+body:is([data-edge="left"],[data-edge="right"]) #notch-panel .ns-actions{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:none;padding:12px 8px}
+
+/* Folded (opt-in): only a small tab shows at the edge, level with the notch */
+body:is([data-edge="left"],[data-edge="right"]) #rest{top:calc(var(--ns-mid,50%) - 39.5px);translate:none;width:10px;height:79px;border:0;background:var(--n-shell);opacity:0;pointer-events:none}
+body[data-edge="left"] #rest{left:0;right:auto;border-radius:0 6px 6px 0}
+body[data-edge="right"] #rest{right:0;left:auto;border-radius:6px 0 0 6px}
+body.folded:is([data-edge="left"],[data-edge="right"]) #rest{opacity:1}
+body.folded:is([data-edge="left"],[data-edge="right"]) #notch-shell{opacity:0;pointer-events:none}
+
+/* The usage card opens on the inner side, above the shell; the light notch re-themes it as at the top */
+body:is([data-edge="left"],[data-edge="right"]) #card{right:auto;bottom:auto;transform:none;margin:0;z-index:1}
+body:is([data-edge="left"],[data-edge="right"]).notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
+body:is([data-edge="left"],[data-edge="right"]).notch-offline #root{visibility:hidden}
+body:is([data-edge="left"],[data-edge="right"]).notch-reduced #notch-shell{transition:none}
+body:is([data-edge="left"],[data-edge="right"]).notch-reduced #notch-shell *{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){body:is([data-edge="left"],[data-edge="right"]) #notch-shell,body:is([data-edge="left"],[data-edge="right"]) #notch-shell *{transition:none}}

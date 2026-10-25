@@ -3,15 +3,15 @@ import * as chatStream from './chatStream.js';
 import { createMascot, KAIROS_SPEC } from './mascot.js';
 import { shortReading } from './quotaReadings.js';
 import { kipStyleOf } from './kipStyle.js';
+import { ICONS } from './notchIcons.js';
+import { modelLogo, logoRing } from './notchModelMarks.js';
+import { createQuietView, createQuietData, layoutFor, workingAgents } from './notchQuiet.js';
+import { createSideNotch, isSideEdge, sideCardAt } from './notchSide.js';
 
 // Phase 1 owns only the shell and status. It never answers or sends work.
 // Drawn to the Kairos Mobile v2 boards: NotchCollapsed (resting, working,
-// needs you) and NotchWorking (expanded).
-const ICONS = {
-  home: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
-  chats: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 5h14v11h-8l-5 3v-3H5z"/></svg>',
-  settings: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
-};
+// needs you), NotchWorking (expanded), NotchQuiet (expanded with fewer than two
+// agents at work) and NotchSide (the same notch on the left or right edge).
 const HEX = /^#[0-9a-f]{6}$/i;
 // The expanded status row fits four readings in the 820 DIP panel beside its buttons.
 const MAX_WORDS = 4;
@@ -51,13 +51,14 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   // Expanded: the status row, then the Kip card, the agent chips and the rail.
   const panel = build('div'); panel.id = 'notch-panel';
   const top = build('div', 'n-top');
+  const side = createSideNotch({ shell, bridge });
   const button = (id, label, icon, tab) => {
     const b = build('button', 'n-ic'); if (id) b.id = id; b.setAttribute('aria-label', label); b.innerHTML = icon;
     b.addEventListener('click', e => { e.stopPropagation(); bridge.openApp?.(tab); }); return b;
   };
   const readings = build('span'); readings.id = 'notch-readings';
   top.append(button('notch-open', 'Open Kairos', ICONS.home), button('', 'Chats', ICONS.chats, 'chat'),
-    button('', 'Settings', ICONS.settings, 'settings'), readings);
+    button('', 'Settings', ICONS.settings, 'settings'), side.newChat, readings);
   const row = build('div', 'n-row');
   const now = build('div', 'n-now');
   const bigKip = kip(92, 'notch-kip-large');
@@ -66,18 +67,24 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   lines.append(before, current, after); now.append(bigKip, lines);
   const chips = build('div', 'n-chips');
   const rail = build('div', 'n-rail');
-  row.append(now, chips, rail); panel.append(top, row);
+  row.append(now, chips, rail);
+  // With fewer than two agents at work the quiet view takes the row's place; the side panel adds Up next and the quick actions.
+  const quietData = createQuietData(() => { renderQuiet(); side.update(quietData.data.events); });
+  const quiet = createQuietView({ bridge, bigKip });
+  panel.append(top, row, quiet.node, side.next, side.actions);
   shell.append(bar, panel, pill);
   document.getElementById('root').append(shell);
 
   const chats = new Map(), remote = { agents: [], inbox: { items: [], reviews: [] }, pending: [], devices: [] };
   let expanded = false, expandTimer = null, closeTimer = null, appearanceKey = '';
+  let edge = 'top-centre', working = 0, activityInfo = null;
   const reducedMotion = () => document.body.classList.contains('notch-reduced') || matchMedia('(prefers-reduced-motion: reduce)').matches;
   function setExpanded(value) {
     if (expanded === value) return;
     const from = shell.getBoundingClientRect();
     expanded = value; shell.classList.toggle('expanded', value);
     shell.setAttribute('aria-expanded', String(value));
+    side.place(); if (value) quietData.refresh(true);
     shell.getAnimations().forEach(animation => animation.cancel());
     if (reducedMotion()) shell.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
     else {
@@ -151,6 +158,10 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
     const doing = new Map();
     for (const item of [...work, ...need]) if (item.agent && !doing.has(item.agent.id))
       doing.set(item.agent.id, need.includes(item) || item.needsYou ? 'needs you' : (item.detail || 'working').toLowerCase());
+    // Fewer than two agents at work: the quiet view; otherwise the chips and the rail. The side panel always stacks both.
+    working = workingAgents(work);
+    activityInfo = { state, focus, agents: remote.agents, doing };
+    applyLayout(); renderQuiet();
     const agents = remote.agents.slice(0, 4);
     const next = JSON.stringify([agents.map(a => [a.id, a.name, a.color, doing.get(a.id)]), remote.agents.length, work.filter(i => !i.agent).map(i => i.title)]);
     if (next !== signature) {
@@ -165,6 +176,15 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
       rail.setAttribute('aria-label', `Agents: ${doing.size} running`);
       rail.hidden = !agents.length;
     }
+  }
+  function applyLayout() {
+    const layout = isSideEdge(edge) ? 'side' : layoutFor(working);
+    if (panel.dataset.layout === layout) return;
+    panel.dataset.layout = layout;
+    if (layout === 'quiet') quiet.holdKip(); else now.prepend(bigKip);
+  }
+  function renderQuiet() {
+    if (activityInfo) quiet.update(activityInfo, quietData.data);
   }
   chatStream.subscribeAll((id, entry) => {
     if (entry) chats.set(id, { title: entry.sessionTitle || 'Chat', status: entry.status, permission: !!entry.permission, text: !!entry.text });
@@ -190,7 +210,7 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
       chatStream.sync().then(() => { shell.dataset.connection = 'connected'; document.body.classList.remove('notch-offline'); })
         .catch(() => { shell.dataset.connection = 'reconnecting'; document.body.classList.add('notch-offline'); bridge.setInteractive?.(false); reset(); }),
     ]);
-    renderActivity();
+    renderActivity(); quietData.refresh();
   }
   function applyAppearance() {
     let settings = {};
@@ -211,34 +231,43 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   poll(); const timer = setInterval(poll, 15000); // Snapshot fallback while SSE reconnects; also refresh bot/inbox sources.
   window.addEventListener('pagehide', () => { clearInterval(timer); reset(); }, { once: true });
   applyAppearance(); renderActivity(); renderRing();
-  return { hot, pointer, reset, isExpanded: () => expanded, readings(providers, groups = []) {
-    // Collapsed: a ring and "Claude 34%" per subscription quota, then "+N" for
-    // the other connected models. Expanded: every model ("Claude 5h 34%",
-    // "qwen3 12K tokens today"), each opening its usage card on hover; past
-    // MAX_WORDS the last place is "+N", whose card lists them all.
+  // The tooltip, and the screen-reader name, of a model's logo.
+  const labelled = (node, name, label) => { node.title = name; node.setAttribute('aria-label', label); return node; };
+  return { hot, pointer, reset, isExpanded: () => expanded,
+    // Which edge the notch is on and how far along it (the side notch only has a place along its edge).
+    setEdge(value, offset) { edge = value; side.setEdge(value, offset); applyLayout(); },
+    // Where the usage card goes beside the side panel, level with the reading hovered.
+    cardAt(wordRect, cardSize) {
+      return sideCardAt(edge, shell.getBoundingClientRect(), wordRect, cardSize, { width: innerWidth, height: innerHeight });
+    },
+    readings(providers, groups = []) {
+    // Logos, not names: the name is the tooltip and the aria-label. Collapsed: a
+    // ring with the model's logo inside and the percentage beside it for each
+    // subscription quota, then the next logo and "+N" for the other connected
+    // models. Expanded: every model's logo and short reading ("5h 34%", "2.1K
+    // today"), each opening its usage card on hover; past MAX_WORDS the last
+    // place is "+N", whose card lists them all.
     const rings = [];
     for (const provider of providers) {
       const h = headline(provider.snap), signedOut = provider.snap?.status === 'needsAuth';
       const pct = h && !signedOut ? `${percent(h.used)}%` : signedOut ? 'sign in' : '…';
-      const ring = build('span', 'n-reading');
-      const filled = h && !signedOut ? (RING * Math.min(Math.max(h.used, 0), 1)).toFixed(1) : '0';
-      ring.innerHTML = `<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" class="n-track" stroke-width="3"/><circle cx="10" cy="10" r="7.5" fill="none" stroke-width="3" stroke-dasharray="${filled} ${RING.toFixed(1)}" transform="rotate(-90 10 10)" class="n-arc"/></svg>`;
+      const ring = labelled(build('span', 'n-reading'), provider.name, signedOut ? `${provider.name}, sign in to see usage` : `${provider.name} ${pct} used`);
       ring.style.setProperty('--arc', h ? toneOf(h.used) : 'var(--n-text)');
-      ring.append(build('span', '', `${provider.name} ${pct}`));
+      ring.append(logoRing(provider, h && !signedOut ? h.used : 0), build('span', 'n-pct', pct));
       rings.push(ring);
     }
-    const others = groups.filter(group => !providers.some(provider => provider.id === group.id)).length;
-    if (others) {
-      const more = build('span', 'n-models', `+${others}`);
-      more.setAttribute('aria-label', `${others} more model${others === 1 ? '' : 's'}`);
+    const others = groups.filter(group => !providers.some(provider => provider.id === group.id));
+    if (others.length) {
+      const more = labelled(build('span', 'n-models'), others.map(group => group.name).join(', '), `${others.length} more model${others.length === 1 ? '' : 's'}: ${others.map(group => group.name).join(', ')}`);
+      more.append(modelLogo(others[0], 14), build('span', '', `+${others.length}`));
       rings.push(more);
     }
     const shown = groups.length > MAX_WORDS ? groups.slice(0, MAX_WORDS - 1) : groups;
     const words = shown.map(group => {
-      const reading = shortReading(group);
-      const word = build('span', 'n-word', `${group.name} ${reading}`);
+      const reading = shortReading(group).replace(/ tokens (today|this week)$/, ' $1');
+      const word = labelled(build('span', 'n-word'), group.name, `${group.name} usage, ${reading}. Hover for details.`);
       word.dataset.p = group.id;
-      word.setAttribute('aria-label', `${group.name} usage, ${reading}. Hover for details.`);
+      word.append(modelLogo(group, 14), build('span', 'n-word-text', reading));
       return word;
     });
     if (shown.length < groups.length) {
@@ -248,5 +277,6 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
       words.push(all);
     }
     usage.replaceChildren(...rings); readings.replaceChildren(...words);
+    quiet.usage(providers, quietData.data);
   } };
 }
