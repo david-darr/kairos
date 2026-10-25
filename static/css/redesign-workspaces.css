@@ -753,6 +753,14 @@
   .kairos-redesign [data-view="tasks"] .view-header > .tasks-build-button::after { -webkit-mask-image: var(--rd-mask-spark); mask-image: var(--rd-mask-spark); }
 }
 
+/* The title row of a workspace or intelligence tab (serif title and its round buttons) sits straight on the page, as on
+   Home, Chats and Agents: no card, glass, border, shadow or blur behind it, whatever else styles a header. */
+@media (max-width: 768px) {
+  .kairos-redesign #view-content:is([data-view="calendar"], [data-view="library"], [data-view="notes"], [data-view="email"], [data-view="tasks"], [data-view="tool-store"], [data-view="cookbook"], [data-view="school"], [data-custom-tab="true"]) :is(.view-header, .view-header > div) {
+    background: none; border: 0; border-radius: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
+
 .kairos-redesign .cal-completion-hit { display: contents; }
 @media (max-width: 768px) {
   .kairos-redesign #view-content[data-view="calendar"] .cal-completion-hit {

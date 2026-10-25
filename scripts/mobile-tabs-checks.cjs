@@ -919,6 +919,11 @@ async function run(ctx) {
     await navigate(tab, opts); await delay(700);
     eq(await roundOffenders(), [], tab + ' round buttons centre their icons');
     if (tab === 'notes' || tab === 'chat') await shot('round-buttons-' + tab);
+    // 2026-10-25 (David): the title row of a workspace or intelligence tab has no container behind it.
+    if (['calendar', 'notes', 'library', 'tasks', 'tool-store', 'cookbook', 'email', 'school'].includes(tab)) {
+      const boxes = await js(`(() => { const out = []; for (let n = document.querySelector('#view-content .view-header'); n && n.id !== 'view-content'; n = n.parentElement) { const s = getComputedStyle(n); if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || parseFloat(s.borderTopWidth) || parseFloat(s.borderBottomWidth) || s.boxShadow !== 'none' || (s.backdropFilter && s.backdropFilter !== 'none')) out.push(String(n.className)); } return out; })()`);
+      eq(boxes, [], tab + ' title row sits on the page with no container');
+    }
   }
   await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
   eq(await roundOffenders(), [], 'The More sheet round buttons centre their icons');
