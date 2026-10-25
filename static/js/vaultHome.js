@@ -176,8 +176,18 @@ export function renderVaultHome(host, { store, admin, onOpen, onCreated }) {
         el('h2', { class: 'vault-home-title', text: 'Vault' }),
         el('p', { class: 'meta', text: `${notes} notes · ${folders} folders · ${store.graph.edges.filter(e => e.kind === 'link').length} links` }),
       ]),
-      el('div', { class: 'vault-home-grid rd-stagger' }, [todayCard(), pinnedCard(), monthStrip(), recentCard(), attentionCard(), filterCard()]),
+      cardGrid(),
     ]);
+  }
+
+  // Desktop leads with Browse by property, full width above the other cards. Phones keep it last.
+  function cardGrid() {
+    const filters = filterCard(), grid = el('div', { class: 'vault-home-grid rd-stagger' }, [todayCard(), pinnedCard(), monthStrip(), recentCard(), attentionCard()]);
+    const wide = matchMedia('(min-width: 769px)');
+    const place = () => wide.matches ? grid.prepend(filters) : grid.append(filters);
+    wide.addEventListener('change', () => { if (grid.isConnected) place(); });
+    place();
+    return grid;
   }
 
   function listView() {

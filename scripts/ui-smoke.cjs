@@ -422,6 +422,12 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['chat references'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--desktop-layout-only')) {  // Desktop Notes, Vault home and Tasks layouts alone.
+      await require('./desktop-layout-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
+      assert.deepEqual(errors, [], 'No desktop layout renderer errors');
+      console.log('PASS: desktop Notes, Vault home and Tasks layouts; screenshots: ' + output);
+      win.destroy(); server.close(); exitAfterFlush(0); return;
+    }
     await require('./home-redesign-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
     if (process.argv.includes('--home-only')) {
       assert.deepEqual(errors, [], 'No Home renderer errors');

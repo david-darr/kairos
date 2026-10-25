@@ -217,5 +217,21 @@ async function refresh(list, focusTarget) {
       onclick: () => phoneDetails('Note', [actions], open, note.text) });
     title.replaceChildren(el('span', { class: 'note-desktop-text', text: note.text }), open);
     if (!dueText) title.after(el('div', { class: 'meta workspace-phone-only', text: 'No date' }));
+    // Desktop clamps a very long note to a few lines; this reaches the rest (syncNoteMore shows it only when text is cut).
+    const more = el('button', { type: 'button', class: 'btn quiet note-more', text: 'Show more', 'aria-expanded': 'false', hidden: true, onclick: () => {
+      const expanded = card.classList.toggle('is-expanded');
+      more.textContent = expanded ? 'Show less' : 'Show more'; more.setAttribute('aria-expanded', String(expanded));
+    } });
+    title.parentElement.append(more);
+  }
+  if (!list.clampObserver) list.clampObserver = new ResizeObserver(() => syncNoteMore(list));
+  list.clampObserver.observe(list);
+  requestAnimationFrame(() => syncNoteMore(list));
+}
+
+function syncNoteMore(list) {
+  for (const card of list.querySelectorAll(':scope > .card:not(.is-expanded)')) {
+    const title = card.querySelector('.note-title'), more = card.querySelector('.note-more');
+    if (title && more) more.hidden = title.scrollHeight <= title.clientHeight + 1;
   }
 }
