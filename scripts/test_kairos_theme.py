@@ -98,10 +98,38 @@ def ratio(a, b) -> float:
     return (x + .05) / (y + .05)
 
 
+def unclosed_blocks(text: str) -> list[int]:
+    """Line numbers of `{` that never close, and of stray `}`: a lost brace
+    silently turns every later rule into part of the block above it."""
+    text = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group()), text, flags=re.S)
+    text = re.sub(r"\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'", '""', text)
+    line, opened, stray = 1, [], []
+    for ch in text:
+        if ch == "\n":
+            line += 1
+        elif ch == "{":
+            opened.append(line)
+        elif ch == "}":
+            if opened:
+                opened.pop()
+            else:
+                stray.append(line)
+    return opened + stray
+
+
 class ThemeTests(unittest.TestCase):
     def test_no_raw_colors_outside_the_theme(self):
         found = [hit for path in files() for hit in raw_colors(path)]
         self.assertEqual(found, [], "use a theme token (static/css/style.css :root):\n" + "\n".join(found))
+
+    def test_every_stylesheet_closes_its_blocks(self):
+        found = [f"{path.name}: line {line}" for path in sorted((STATIC / "css").glob("*.css"))
+                 for line in unclosed_blocks(path.read_text(encoding="utf-8"))]
+        self.assertEqual(found, [], "unbalanced braces:\n" + "\n".join(found))
+
+    def test_the_brace_check_would_catch_a_lost_brace(self):
+        self.assertEqual(unclosed_blocks("@media (max-width: 768px) {\n  .a { color: red; }\n.b { x: y; }\n"), [1])
+        self.assertEqual(unclosed_blocks(".a { content: '}'; } /* { */\n"), [])
 
     def test_the_check_would_catch_a_raw_color(self):
         probe = STATIC / "css" / "zz-probe.css"

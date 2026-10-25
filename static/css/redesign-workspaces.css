@@ -842,6 +842,7 @@
   .kairos-redesign #view-content.view:is([data-view="notes"], [data-view="library"], [data-view="tasks"], [data-view="email"], [data-view="cookbook"]) > .view-constrained {
     flex: none; padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px));
   }
+}
 
 /* Calendar v2 boards: shared phone/desktop structure, scoped to the redesign. */
 .kairos-redesign #view-content[data-view="calendar"] .cal-left { display: flex; flex-direction: column; gap: 0; }
