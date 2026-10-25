@@ -1709,6 +1709,7 @@ input[type="checkbox"]:checked::after { border-color: var(--text); }
 .google-trash-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; }
 .google-breadcrumbs { min-height: 28px; }
 .google-browser { display: grid; grid-template-columns: 175px minmax(0, 1fr); min-height: 540px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); overflow: hidden; }
+.drive-group { display: contents; }
 .google-file-list { min-width: 0; max-height: 70vh; overflow: auto; padding: 8px; border-right: 1px solid var(--border); }
 .google-file-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px; border: 0; border-radius: 8px; background: none; color: var(--text); text-align: left; cursor: pointer; }
 .google-file-row:hover, .google-file-row:focus-visible { background: var(--accent-dim); outline: none; }

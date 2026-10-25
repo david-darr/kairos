@@ -3,6 +3,25 @@
 Each installation supplies its own Desktop OAuth client ID. Tokens stay in the
 existing encrypted secret store. Only the fixed Google API hosts below are
 ever contacted with those tokens; callers cannot provide an arbitrary URL.
+
+Several Google accounts can be connected (2026-10-25, David: "allow users to
+add multiple google drives"). Each lives under `accounts` with an opaque id
+and the Kairos user who connected it; the one-account file of earlier
+versions migrates in place as a shared account (owner None), usable by
+every admin as before, and any admin may disconnect it, as before.
+
+Drive, Sheets and Forms always run against an account resolved for the
+Kairos user (`resolve_account`): the routes and the chat tools both check
+ownership, so one user's Drive is never reached from another user's chat.
+Calendar is installation-wide: one shared calendar, the `default_account`,
+used by the Calendar tab and tools for every admin, exactly as with the
+single account before. A user-owned account becomes that default only when
+its own user sets it (connecting without `add`, or the first account); when
+the default is disconnected it passes to a shared account, else to one owned
+by the user disconnecting, else Calendar is disconnected.
+
+File writes go through `_lock` (a re-entrant thread lock) so a
+read-modify-write is never interleaved with another thread's.
 """
 from __future__ import annotations
 
@@ -13,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -49,8 +69,10 @@ SCOPES = (
 )
 FILE_FIELDS = "nextPageToken,incompleteSearch,files(id,name,mimeType,size,parents,modifiedTime,webViewLink,description,starred,trashed,driveId,capabilities,owners,shared,thumbnailLink)"
 MAX_DOWNLOAD = 25 * 1024 * 1024
-_pending: dict[str, tuple[str, float]] = {}
-_refresh_lock = asyncio.Lock()
+ACCOUNT_KEYS = ("refresh_token", "access_token", "expires_at", "email", "granted_scopes", "calendar_ids")
+_pending: dict[str, dict] = {}
+_refresh_locks: dict[str, asyncio.Lock] = {}
+_lock = threading.RLock()
 _calendar_cache: dict[tuple, tuple[float, list[dict]]] = {}
 _calendar_generation = 0
 
@@ -66,7 +88,54 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    write_json_atomic(FILE, data)
+    with _lock:
+        write_json_atomic(FILE, data)
+
+
+def _state() -> dict:
+    """The saved connection, moving a one-account file into `accounts` once."""
+    with _lock:
+        data = _load()
+        if data.get("refresh_token") and not data.get("accounts"):
+            ident = "acct_" + secrets.token_urlsafe(12)
+            account = {key: data.pop(key) for key in ACCOUNT_KEYS if key in data}
+            # owner None: connected before accounts had owners, so every admin
+            # keeps the access they had to it.
+            data["accounts"] = {ident: {**account, "id": ident, "owner": None, "added_at": time.time()}}
+            data["default_account"] = ident
+            _save(data)
+        return data
+
+
+def _accounts(data: dict, user: str | None = None) -> list[dict]:
+    """Accounts this Kairos user may use, oldest first; None means all."""
+    items = sorted((data.get("accounts") or {}).values(), key=lambda item: item.get("added_at") or 0)
+    return [item for item in items if user is None or item.get("owner") in (None, user)]
+
+
+def _default(data: dict) -> dict | None:
+    return (data.get("accounts") or {}).get(data.get("default_account") or "")
+
+
+def resolve_account(user: str, account_id: str | None = None) -> str:
+    """The account a Drive request uses: the one named, if this user may use
+    it, else their default. Unknown and foreign ids get the same refusal."""
+    data = _state()
+    usable = _accounts(data, user)
+    if account_id:
+        match = next((item for item in usable if item["id"] == account_id), None)
+        if match is None:
+            raise GoogleError("Unknown Google account", 404)
+        return match["id"]
+    if not usable:
+        raise GoogleError("Connect Google Workspace in Library first", 401)
+    return next((item["id"] for item in usable if item["id"] == data.get("default_account")), usable[0]["id"])
+
+
+def _public(item: dict, chosen: str | None) -> dict:
+    # Never a token: only what the account switcher shows.
+    return {"id": item["id"], "email": item.get("email"), "default": item["id"] == chosen,
+            "error": item.get("error")}
 
 
 def _id(value: str) -> str:
@@ -75,48 +144,79 @@ def _id(value: str) -> str:
     return value
 
 
-def status() -> dict:
-    data = _load()
+def status(user: str | None = None) -> dict:
+    """Calendar fields describe the installation default account, as before;
+    `accounts`, `email` and `default_account` are the Drives this user can
+    browse and the one their Drive opens on."""
+    data = _state()
+    default = _default(data) or {}
+    usable = _accounts(data, user)
+    chosen = resolve_account(user, None) if user is not None and usable else default.get("id")
     return {"configured": bool(data.get("client_id")),
-            "connected": bool(data.get("refresh_token")),
-            "email": data.get("email"),
+            "connected": bool(usable),
+            "email": next((item.get("email") for item in usable if item["id"] == chosen), None),
             "client_id": data.get("client_id") or "",
-            "granted_scopes": data.get("granted_scopes") or [],
-            "calendar_connected": bool(data.get("refresh_token") and CALENDAR_SCOPE in (data.get("granted_scopes") or [])),
-            "calendar_ids": data.get("calendar_ids")}
+            "granted_scopes": default.get("granted_scopes") or [],
+            "calendar_connected": bool(default.get("refresh_token") and CALENDAR_SCOPE in (default.get("granted_scopes") or [])),
+            "calendar_ids": default.get("calendar_ids"),
+            "accounts": [_public(item, chosen) for item in usable],
+            "default_account": chosen if usable else None}
 
 
-def configure(client_id: str, client_secret: str = "") -> dict:
+def configure(client_id: str, client_secret: str = "", user: str | None = None) -> dict:
     client_id = client_id.strip()
     if len(client_id) > 256 or not client_id.endswith(".apps.googleusercontent.com"):
         raise GoogleError("Enter a Google OAuth Desktop client ID")
-    data = _load()
-    if data.get("client_id") != client_id:
-        invalidate_calendar()
-        data.pop("granted_scopes", None)
-        data.pop("calendar_ids", None)
-        data.pop("refresh_token", None)
-        data.pop("access_token", None)
-        data.pop("email", None)
-        data.pop("client_secret", None)
-    data["client_id"] = client_id
-    if client_secret:
-        data["client_secret"] = encrypt(client_secret.strip())
-    _save(data)
-    return status()
+    with _lock:
+        data = _state()
+        if data.get("client_id") != client_id:
+            # Tokens belong to the old client, so every account goes with it,
+            # and sign-ins started for the old client can no longer finish.
+            invalidate_calendar()
+            data.pop("accounts", None)
+            data.pop("default_account", None)
+            data.pop("client_secret", None)
+            _pending.clear()
+            _refresh_locks.clear()
+        data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = encrypt(client_secret.strip())
+        _save(data)
+    return status(user)
 
 
-def disconnect() -> dict:
-    data = _load()
-    for key in ("refresh_token", "access_token", "expires_at", "email", "granted_scopes", "calendar_ids"):
-        data.pop(key, None)
-    _save(data)
-    invalidate_calendar()
-    return status()
+def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
+    """Forget one of this user's accounts (their default when none is named);
+    the others stay. Disconnecting when nothing is connected is a no-op. A
+    shared (migrated) account may be disconnected by any admin, as before."""
+    with _lock:
+        if not _accounts(_state(), user) and account_id is None:
+            return status(user)
+        ident = resolve_account(user, account_id)
+        data = _state()
+        data["accounts"].pop(ident, None)
+        _refresh_locks.pop(ident, None)
+        if data.get("default_account") == ident:
+            # Calendar passes to a shared account, else to one of the
+            # disconnecting user's own, never to another user's account.
+            remaining = _accounts(data)
+            heir = (next((item for item in remaining if item.get("owner") is None), None)
+                    or next((item for item in remaining if item.get("owner") == user), None))
+            data["default_account"] = heir["id"] if heir else None
+            invalidate_calendar()
+        _save(data)
+    return status(user)
 
 
-def start_sign_in(redirect_uri: str) -> str:
-    client_id = _load().get("client_id")
+def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False,
+                  account_id: str | None = None) -> str:
+    """With `add` the default account stays; otherwise the account signed in
+    to becomes the default (the one-account behaviour, and Calendar's
+    reconnect). `account_id` reconnects that account, which must be one this
+    user may use (a shared account too) and must sign in as the same email."""
+    if account_id is not None:
+        account_id = resolve_account(owner, account_id)
+    client_id = _state().get("client_id")
     if not client_id:
         raise GoogleError("Set a Google OAuth Desktop client ID first")
     if not re.fullmatch(r"http://127\.0\.0\.1:\d+/api/google/oauth/callback", redirect_uri):
@@ -124,24 +224,28 @@ def start_sign_in(redirect_uri: str) -> str:
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
-    _pending[state] = (verifier, time.time() + 600)
-    for stale, (_, expires) in list(_pending.items()):
-        if expires < time.time():
+    # Single use, expiring, and bound to the Kairos user who started it: the
+    # callback can only finish a sign-in begun here, for that user.
+    _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
+                       "account": account_id, "client_id": client_id}
+    for stale, pending in list(_pending.items()):
+        if pending["expires"] < time.time():
             _pending.pop(stale, None)
+    # select_account: the chooser lets a second Google account be added.
     params = {"client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
-              "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent",
+              "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "select_account consent",
               "state": state, "code_challenge": challenge, "code_challenge_method": "S256"}
     return AUTH_URL + "?" + urlencode(params)
 
 
 async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error: str | None = None) -> str:
     pending = _pending.pop(state, None)
-    if not pending or pending[1] < time.time():
+    if not pending or pending["expires"] < time.time():
         raise GoogleError("This sign-in request expired or was not started here")
     if error or not code:
         raise GoogleError("Google sign-in was cancelled or denied")
-    data = _load()
-    body = {"client_id": data["client_id"], "code": code, "code_verifier": pending[0],
+    data = _state()
+    body = {"client_id": data["client_id"], "code": code, "code_verifier": pending["verifier"],
             "redirect_uri": redirect_uri, "grant_type": "authorization_code"}
     if data.get("client_secret"):
         body["client_secret"] = decrypt(data["client_secret"])
@@ -154,52 +258,110 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
         if not refresh:
             raise GoogleError("Google did not return an offline access token; reconnect and approve offline access")
         access = tokens.get("access_token")
-        email = None
-        if access:
-            profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
-                                       headers={"Authorization": f"Bearer {access}"})
-            if profile.is_success:
-                email = profile.json().get("email")
-    data["refresh_token"] = encrypt(refresh)
-    data["access_token"] = encrypt(access) if access else None
-    data["expires_at"] = time.time() + int(tokens.get("expires_in") or 3600)
-    data["email"] = email
-    data["granted_scopes"] = str(tokens.get("scope") or "").split()
-    _save(data)
+        # The email names the account in the switcher and finds it again on
+        # reconnect, so a sign-in without one is refused rather than saved.
+        profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
+                                   headers={"Authorization": f"Bearer {access}"}) if access else None
+        email = profile.json().get("email") if profile is not None and profile.is_success else None
+        if not email:
+            raise GoogleError("Could not read the Google account's email address; try signing in again", 502)
+    owner = pending["owner"]
+    with _lock:
+        data = _state()
+        # Reconnect in place: the account named when the sign-in started, or
+        # one with this email that this same user owns. A shared account is
+        # only refreshed when it was named explicitly.
+        named = (data.get("accounts") or {}).get(pending["account"] or "")
+        if pending["account"] and named is None:
+            raise GoogleError("That Google account was disconnected while signing in", 409)
+        if named is not None and named.get("email") != email:
+            raise GoogleError(f"Signed in as {email}, not {named.get('email')}. Choose that account to reconnect it", 409)
+        existing = named or next((item for item in _accounts(data) if item.get("owner") == owner and item.get("email") == email), None)
+    lock = _refresh_locks.setdefault(existing["id"], asyncio.Lock()) if existing else None
+    if lock:
+        await lock.acquire()
+    try:
+        with _lock:
+            data = _state()
+            if data.get("client_id") != pending["client_id"]:
+                raise GoogleError("The Google client ID changed during sign-in; sign in again", 409)
+            accounts = data.setdefault("accounts", {})
+            if existing:
+                account = accounts.get(existing["id"])
+                if account is None:
+                    raise GoogleError("That Google account was disconnected while signing in", 409)
+            else:
+                ident = "acct_" + secrets.token_urlsafe(12)
+                account = accounts[ident] = {"id": ident, "owner": owner, "added_at": time.time()}
+            account.update(refresh_token=encrypt(refresh), access_token=encrypt(access) if access else None,
+                           expires_at=time.time() + int(tokens.get("expires_in") or 3600), email=email,
+                           granted_scopes=str(tokens.get("scope") or "").split())
+            account.pop("error", None)
+            if not pending["add"] or not _default(data):
+                data["default_account"] = account["id"]
+            _save(data)
+    finally:
+        if lock:
+            lock.release()
     invalidate_calendar()
-    return email or "Google account"
+    return email
 
 
-async def _token(force: bool = False) -> str:
-    async with _refresh_lock:
-        data = _load()
-        if not data.get("refresh_token"):
+def _mark(ident: str, **fields) -> None:
+    """Update one account from a fresh read, so a refresh finishing for
+    another account at the same time is never overwritten."""
+    with _lock:
+        data = _state()
+        account = (data.get("accounts") or {}).get(ident)
+        if account is None:
+            return
+        for key, value in fields.items():
+            if value is None:
+                account.pop(key, None)
+            else:
+                account[key] = value
+        _save(data)
+
+
+async def _token(account_id: str | None = None, force: bool = False) -> str:
+    """An access token for one account; None means the default account."""
+    data = _state()
+    ident = account_id or data.get("default_account") or ""
+    # A forced refresh reuses a token another request refreshed while this
+    # one waited for the lock, instead of refreshing again.
+    stale = ((data.get("accounts") or {}).get(ident) or {}).get("access_token")
+    async with _refresh_locks.setdefault(ident, asyncio.Lock()):
+        data = _state()
+        account = (data.get("accounts") or {}).get(ident)
+        if not account or not account.get("refresh_token"):
             raise GoogleError("Connect Google Workspace in Library first", 401)
-        if not force and data.get("access_token") and (data.get("expires_at") or 0) > time.time() + 90:
-            return decrypt(data["access_token"])
-        body = {"client_id": data["client_id"], "refresh_token": decrypt(data["refresh_token"]),
+        if (account.get("access_token") and (account.get("expires_at") or 0) > time.time() + 90
+                and (not force or account["access_token"] != stale)):
+            return decrypt(account["access_token"])
+        body = {"client_id": data["client_id"], "refresh_token": decrypt(account["refresh_token"]),
                 "grant_type": "refresh_token"}
         if data.get("client_secret"):
             body["client_secret"] = decrypt(data["client_secret"])
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(TOKEN_URL, data=body)
         if response.status_code >= 400:
+            # Expired or revoked: flagged on this account only, until it reconnects.
+            _mark(ident, error="Google sign-in expired or was revoked. Reconnect this account.")
             raise GoogleError("Google authorization expired; reconnect the account", 401)
         tokens = response.json()
         access = tokens.get("access_token")
         if not access:
             raise GoogleError("Google did not return an access token", 502)
-        data["access_token"] = encrypt(access)
-        data["expires_at"] = time.time() + int(tokens.get("expires_in") or 3600)
-        if "scope" in tokens:
-            data["granted_scopes"] = tokens["scope"].split()
-        _save(data)
+        # Google may rotate the refresh token; keep the new one when it does.
+        _mark(ident, access_token=encrypt(access), expires_at=time.time() + int(tokens.get("expires_in") or 3600),
+              error=None, **({"granted_scopes": tokens["scope"].split()} if "scope" in tokens else {}),
+              **({"refresh_token": encrypt(tokens["refresh_token"])} if tokens.get("refresh_token") else {}))
         return access
 
 
 async def request(api: str, method: str, path: str, *, params: dict | None = None,
                   body: dict | None = None, content: bytes | None = None,
-                  content_type: str | None = None, raw: bool = False) -> dict | bytes:
+                  content_type: str | None = None, raw: bool = False, account: str | None = None) -> dict | bytes:
     decoded = path
     for _ in range(3):
         decoded = unquote(decoded)
@@ -209,7 +371,7 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         raise GoogleError("Invalid Google API request")
     url = HOSTS[api] + path
     for retry in range(2):
-        token = await _token(force=bool(retry))
+        token = await _token(account, force=bool(retry))
         headers = {"Authorization": f"Bearer {token}"}
         if content_type:
             headers["Content-Type"] = content_type
@@ -232,7 +394,11 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
     raise GoogleError("Google authorization expired; reconnect the account", 401)
 
 
-async def list_files(*, query: str = "", parent: str | None = None, kind: str = "all",
+def _scoped(account: str | None, api: str, method: str, path: str, **kwargs):
+    return request(api, method, path, account=account, **kwargs)
+
+
+async def list_files(*, account: str | None = None, query: str = "", parent: str | None = None, kind: str = "all",
                      trashed: bool = False, page_token: str | None = None, section: str = "all") -> dict:
     if section not in ("all", "my_drive", "shared", "starred", "recent", "trash"):
         raise GoogleError("Unknown Drive section")
@@ -259,21 +425,21 @@ async def list_files(*, query: str = "", parent: str | None = None, kind: str = 
               "supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
     if page_token:
         params["pageToken"] = page_token
-    return await request("drive", "GET", "/files", params=params)
+    return await _scoped(account, "drive", "GET", "/files", params=params)
 
 
-async def file_info(file_id: str) -> dict:
-    return await request("drive", "GET", f"/files/{_id(file_id)}",
+async def file_info(file_id: str, account: str | None = None) -> dict:
+    return await _scoped(account, "drive", "GET", f"/files/{_id(file_id)}",
                          params={"fields": FILE_FIELDS.split("files(", 1)[1].rstrip(")"),
                                  "supportsAllDrives": "true"})
 
 
-async def file_content(file_id: str, export_mime: str | None = None) -> bytes:
+async def file_content(file_id: str, export_mime: str | None = None, account: str | None = None) -> bytes:
     path = f"/files/{_id(file_id)}"
     params = {"mimeType": export_mime} if export_mime else {"alt": "media", "supportsAllDrives": "true"}
     if export_mime:
         path += "/export"
-    content = await request("drive", "GET", path, params=params, raw=True)
+    content = await _scoped(account, "drive", "GET", path, params=params, raw=True)
     if not isinstance(content, bytes):
         raise GoogleError("Google returned no file content", 502)
     if len(content) > MAX_DOWNLOAD:
@@ -281,8 +447,8 @@ async def file_content(file_id: str, export_mime: str | None = None) -> bytes:
     return content
 
 
-async def drive_storage() -> dict:
-    return await request("drive", "GET", "/about", params={"fields": "storageQuota"})
+async def drive_storage(account: str | None = None) -> dict:
+    return await _scoped(account, "drive", "GET", "/about", params={"fields": "storageQuota"})
 
 
 def image_mime(content: bytes) -> str:
@@ -297,47 +463,48 @@ def image_mime(content: bytes) -> str:
     raise GoogleError("This image format cannot be previewed safely", 415)
 
 
-async def file_thumbnail(file_id: str) -> tuple[bytes, str]:
-    info = await file_info(file_id)
+async def file_thumbnail(file_id: str, account: str | None = None) -> tuple[bytes, str]:
+    info = await file_info(file_id, account)
     url = urlsplit(info.get("thumbnailLink") or "")
     if (url.scheme != "https" or url.netloc != "lh3.googleusercontent.com"
             or url.username or url.password or url.fragment):
         raise GoogleError("No supported Google thumbnail for this file", 404)
-    content = await request("thumbnail", "GET", url.path, params=dict(parse_qsl(url.query)), raw=True)
+    content = await _scoped(account, "thumbnail", "GET", url.path, params=dict(parse_qsl(url.query)), raw=True)
     if not isinstance(content, bytes) or len(content) > MAX_DOWNLOAD:
         raise GoogleError("Thumbnail exceeds the 25 MB download limit", 413)
     return content, image_mime(content)
 
 
-async def file_preview(file_id: str) -> tuple[bytes, str]:
-    info = await file_info(file_id)
+async def file_preview(file_id: str, account: str | None = None) -> tuple[bytes, str]:
+    info = await file_info(file_id, account)
     mime = info.get("mimeType") or ""
     if int(info.get("size") or 0) > MAX_DOWNLOAD:
         raise GoogleError("This file is larger than Kairos's 25 MB download limit", 413)
     if mime == "application/vnd.google-apps.document":
         from core.google_preview import sanitize_html
-        content = await file_content(file_id, "text/html")
+        content = await file_content(file_id, "text/html", account)
         return sanitize_html(content.decode("utf-8", errors="replace")).encode("utf-8"), "text/html"
     if mime == "application/vnd.google-apps.presentation":
-        return await file_content(file_id, "application/pdf"), "application/pdf"
+        return await file_content(file_id, "application/pdf", account), "application/pdf"
     if mime == "application/pdf":
-        return await file_content(file_id), mime
+        return await file_content(file_id, account=account), mime
     if mime.startswith("image/"):
-        content = await file_content(file_id)
+        content = await file_content(file_id, account=account)
         return content, image_mime(content)
     extension = os.path.splitext(info.get("name") or "")[1].lower()
     if (mime.startswith("text/") or mime in ("application/json", "application/javascript", "application/xml")
             or extension in (".txt", ".md", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".css", ".html", ".xml", ".csv", ".sql", ".sh", ".c", ".cpp", ".java", ".rs")):
-        return await file_content(file_id), "text/plain"
+        return await file_content(file_id, account=account), "text/plain"
     raise GoogleError("Preview unavailable for this type; download or open in Google", 415)
 
 
 async def drive_action(action: str, *, file_id: str | None = None, name: str | None = None,
                        parent: str | None = None, permission_id: str | None = None,
                        email: str | None = None, role: str | None = None,
-                       permission_type: str | None = None, domain: str | None = None) -> dict:
+                       permission_type: str | None = None, domain: str | None = None,
+                       account: str | None = None) -> dict:
     if action == "create_folder":
-        return await request("drive", "POST", "/files", params={"fields": "id,name,mimeType,webViewLink"},
+        return await _scoped(account, "drive", "POST", "/files", params={"fields": "id,name,mimeType,webViewLink"},
                              body={"name": (name or "New folder")[:200], "mimeType": "application/vnd.google-apps.folder",
                                    **({"parents": [_id(parent)]} if parent else {})})
     ident = _id(file_id or "")
@@ -346,29 +513,29 @@ async def drive_action(action: str, *, file_id: str | None = None, name: str | N
     if action == "rename":
         if not name or len(name) > 255:
             raise GoogleError("Enter a file name under 256 characters")
-        return await request("drive", "PATCH", path, params=common, body={"name": name})
+        return await _scoped(account, "drive", "PATCH", path, params=common, body={"name": name})
     if action == "move":
         if not parent:
             raise GoogleError("Choose a destination folder")
-        info = await file_info(ident)
-        return await request("drive", "PATCH", path,
+        info = await file_info(ident, account)
+        return await _scoped(account, "drive", "PATCH", path,
                              params={**common, "addParents": _id(parent),
                                      "removeParents": ",".join(info.get("parents") or [])}, body={})
     if action == "copy":
-        return await request("drive", "POST", path + "/copy", params=common,
+        return await _scoped(account, "drive", "POST", path + "/copy", params=common,
                              body={**({"name": name[:255]} if name else {}),
                                    **({"parents": [_id(parent)]} if parent else {})})
     if action in ("trash", "restore"):
-        return await request("drive", "PATCH", path, params=common, body={"trashed": action == "trash"})
+        return await _scoped(account, "drive", "PATCH", path, params=common, body={"trashed": action == "trash"})
     if action == "star":
-        return await request("drive", "PATCH", path, params=common, body={"starred": True})
+        return await _scoped(account, "drive", "PATCH", path, params=common, body={"starred": True})
     if action == "unstar":
-        return await request("drive", "PATCH", path, params=common, body={"starred": False})
+        return await _scoped(account, "drive", "PATCH", path, params=common, body={"starred": False})
     if action == "delete":
-        await request("drive", "DELETE", path, params={"supportsAllDrives": "true"})
+        await _scoped(account, "drive", "DELETE", path, params={"supportsAllDrives": "true"})
         return {"deleted": True}
     if action == "permissions":
-        return await request("drive", "GET", path + "/permissions",
+        return await _scoped(account, "drive", "GET", path + "/permissions",
                              params={"supportsAllDrives": "true", "fields": "permissions(id,type,role,emailAddress,displayName,domain),nextPageToken"})
     if action == "share":
         kind = permission_type or "user"
@@ -383,26 +550,27 @@ async def drive_action(action: str, *, file_id: str | None = None, name: str | N
             permission["emailAddress"] = email
         elif kind == "domain":
             permission["domain"] = domain
-        return await request("drive", "POST", path + "/permissions",
+        return await _scoped(account, "drive", "POST", path + "/permissions",
                              params={"supportsAllDrives": "true", "sendNotificationEmail": "true" if kind in ("user", "group") else "false",
                                      "fields": "id,type,role,emailAddress,domain"}, body=permission)
     if action == "update_permission":
         if role not in ("reader", "commenter", "writer"):
             raise GoogleError("Choose reader, commenter, or writer access")
-        return await request("drive", "PATCH", path + f"/permissions/{_id(permission_id or '')}",
+        return await _scoped(account, "drive", "PATCH", path + f"/permissions/{_id(permission_id or '')}",
                              params={"supportsAllDrives": "true", "fields": "id,type,role,emailAddress,domain"},
                              body={"role": role})
     if action == "revoke":
-        await request("drive", "DELETE", path + f"/permissions/{_id(permission_id or '')}",
+        await _scoped(account, "drive", "DELETE", path + f"/permissions/{_id(permission_id or '')}",
                       params={"supportsAllDrives": "true"})
         return {"revoked": True}
     if action == "revisions":
-        return await request("drive", "GET", path + "/revisions",
+        return await _scoped(account, "drive", "GET", path + "/revisions",
                              params={"fields": "revisions(id,modifiedTime,keepForever,lastModifyingUser,originalFilename),nextPageToken"})
     raise GoogleError("Unknown Drive action")
 
 
-async def upload_file(name: str, data: bytes, mime_type: str, parent: str | None = None) -> dict:
+async def upload_file(name: str, data: bytes, mime_type: str, parent: str | None = None,
+                      account: str | None = None) -> dict:
     if not name or len(data) > MAX_DOWNLOAD:
         raise GoogleError("Choose a file under 25 MB", 413)
     boundary = "jarvis_" + secrets.token_hex(16)
@@ -410,66 +578,68 @@ async def upload_file(name: str, data: bytes, mime_type: str, parent: str | None
     payload = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
                + json.dumps(metadata) + f"\r\n--{boundary}\r\nContent-Type: {mime_type or 'application/octet-stream'}\r\n\r\n").encode("utf-8")
     payload += data + f"\r\n--{boundary}--\r\n".encode("ascii")
-    return await request("upload", "POST", "/files", params={"uploadType": "multipart", "fields": "id,name,mimeType,webViewLink"},
+    return await _scoped(account, "upload", "POST", "/files", params={"uploadType": "multipart", "fields": "id,name,mimeType,webViewLink"},
                          content=payload, content_type=f"multipart/related; boundary={boundary}")
 
 
-async def sheet_get(file_id: str, cell_range: str | None = None) -> dict:
+async def sheet_get(file_id: str, cell_range: str | None = None, account: str | None = None) -> dict:
     ident = _id(file_id)
     if cell_range:
-        return await request("sheets", "GET", f"/spreadsheets/{ident}/values/{quote(cell_range, safe='!:$')}" ,
+        return await _scoped(account, "sheets", "GET", f"/spreadsheets/{ident}/values/{quote(cell_range, safe='!:$')}" ,
                              params={"valueRenderOption": "FORMATTED_VALUE"})
-    return await request("sheets", "GET", f"/spreadsheets/{ident}",
+    return await _scoped(account, "sheets", "GET", f"/spreadsheets/{ident}",
                          params={"fields": "spreadsheetId,spreadsheetUrl,properties(title),sheets(properties(sheetId,title,index,gridProperties))"})
 
 
 async def sheet_action(action: str, *, file_id: str | None = None, title: str | None = None,
                        cell_range: str | None = None, values: list | None = None,
-                       requests: list | None = None) -> dict:
+                       requests: list | None = None, account: str | None = None) -> dict:
     if action == "create":
-        return await request("sheets", "POST", "/spreadsheets", body={"properties": {"title": title or "Untitled spreadsheet"}})
+        return await _scoped(account, "sheets", "POST", "/spreadsheets", body={"properties": {"title": title or "Untitled spreadsheet"}})
     ident = _id(file_id or "")
     if action == "batch":
         if not isinstance(requests, list) or len(requests) > 50:
             raise GoogleError("Provide at most 50 spreadsheet changes")
-        return await request("sheets", "POST", f"/spreadsheets/{ident}:batchUpdate", body={"requests": requests})
+        return await _scoped(account, "sheets", "POST", f"/spreadsheets/{ident}:batchUpdate", body={"requests": requests})
     if not cell_range or len(cell_range) > 300:
         raise GoogleError("Choose a cell range")
     path = f"/spreadsheets/{ident}/values/{quote(cell_range, safe='!:$')}"
     if action == "clear":
-        return await request("sheets", "POST", path + ":clear", body={})
+        return await _scoped(account, "sheets", "POST", path + ":clear", body={})
     if not isinstance(values, list) or len(values) > 1000:
         raise GoogleError("Provide at most 1,000 rows")
     if action == "update":
-        return await request("sheets", "PUT", path, params={"valueInputOption": "USER_ENTERED"},
+        return await _scoped(account, "sheets", "PUT", path, params={"valueInputOption": "USER_ENTERED"},
                              body={"range": cell_range, "majorDimension": "ROWS", "values": values})
     if action == "append":
-        return await request("sheets", "POST", path + ":append",
+        return await _scoped(account, "sheets", "POST", path + ":append",
                              params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
                              body={"values": values})
     raise GoogleError("Unknown Sheets action")
 
 
-async def form_get(file_id: str, responses: bool = False, page_token: str | None = None) -> dict:
+async def form_get(file_id: str, responses: bool = False, page_token: str | None = None,
+                   account: str | None = None) -> dict:
     path = f"/forms/{_id(file_id)}" + ("/responses" if responses else "")
-    return await request("forms", "GET", path, params={"pageSize": 100, **({"pageToken": page_token} if page_token else {})} if responses else None)
+    return await _scoped(account, "forms", "GET", path, params={"pageSize": 100, **({"pageToken": page_token} if page_token else {})} if responses else None)
 
 
 async def form_action(action: str, *, file_id: str | None = None, title: str | None = None,
-                      requests: list | None = None, published: bool | None = None) -> dict:
+                      requests: list | None = None, published: bool | None = None,
+                      account: str | None = None) -> dict:
     if action == "create":
         if not title:
             raise GoogleError("Enter a form title")
-        return await request("forms", "POST", "/forms", body={"info": {"title": title[:200]}})
+        return await _scoped(account, "forms", "POST", "/forms", body={"info": {"title": title[:200]}})
     ident = _id(file_id or "")
     if action == "batch":
         if not isinstance(requests, list) or len(requests) > 50:
             raise GoogleError("Provide at most 50 form changes")
-        return await request("forms", "POST", f"/forms/{ident}:batchUpdate", body={"requests": requests})
+        return await _scoped(account, "forms", "POST", f"/forms/{ident}:batchUpdate", body={"requests": requests})
     if action == "publish":
         if published is None:
             raise GoogleError("Choose a published state")
-        return await request("forms", "POST", f"/forms/{ident}:setPublishSettings",
+        return await _scoped(account, "forms", "POST", f"/forms/{ident}:setPublishSettings",
                              body={"publishSettings": {"publishState": {
                                  "isPublished": published, "isAcceptingResponses": published}},
                                    "updateMask": "publishState"})
@@ -497,11 +667,10 @@ def calendar_settings(calendar_ids: list[str]) -> dict:
     _calendar_access()
     for ident in calendar_ids:
         _calendar_id(ident)
-    data = _load()
-    data["calendar_ids"] = list(dict.fromkeys(calendar_ids))
-    _save(data)
+    chosen = list(dict.fromkeys(calendar_ids))
+    _mark(_state()["default_account"], calendar_ids=chosen)
     invalidate_calendar()
-    return {"calendar_ids": data["calendar_ids"]}
+    return {"calendar_ids": chosen}
 
 
 async def calendar_list() -> list[dict]:
@@ -612,7 +781,7 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
 async def selected_calendar_events(start: str, end: str) -> list[dict]:
     if not status()["calendar_connected"]:
         return []
-    ids = _load().get("calendar_ids")
+    ids = (_default(_state()) or {}).get("calendar_ids")
     if ids is None:
         ids = [c["id"] for c in await calendar_list() if c["selected"]]
     return await calendar_events(ids, start, end)

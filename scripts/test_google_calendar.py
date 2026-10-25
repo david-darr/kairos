@@ -111,17 +111,19 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
         from urllib.parse import parse_qs, urlsplit
         url = google.start_sign_in("http://127.0.0.1:8420/api/google/oauth/callback")
         args = parse_qs(urlsplit(url).query)
-        self.assertEqual(args["prompt"], ["consent"])
+        # 2026-10-25: select_account too, so a second Google account can be chosen.
+        self.assertEqual(args["prompt"], ["select_account consent"])
         self.assertIn(google.CALENDAR_SCOPE, args["scope"][0].split())
         await google.finish_sign_in(args["state"][0], "code", "http://127.0.0.1:8420/api/google/oauth/callback")
-        self.assertIn(google.CALENDAR_SCOPE, self.data["granted_scopes"])
+        self.assertIn(google.CALENDAR_SCOPE, self.data["accounts"][self.data["default_account"]]["granted_scopes"])
         result = await self.web("/api/google/status")
         self.assertTrue(result.json()["calendar_connected"])
         self.assertNotIn("refresh_token", result.json())
 
     async def test_missing_scope_and_legacy_account_offer_reconnect(self):
         for scopes in ([], ["https://www.googleapis.com/auth/drive"]):
-            self.data["granted_scopes"] = scopes
+            # A one-account file of earlier versions, migrated on first read.
+            self.data = {"client_id": "fixture.apps.googleusercontent.com", "refresh_token": "saved", "granted_scopes": scopes}
             self.assertTrue(google.status()["connected"])
             self.assertFalse(google.status()["calendar_connected"])
             response = await self.web("/api/google/calendar/calendars")

@@ -2,6 +2,7 @@ import { renderPDF } from './pdfViewer.js';
 import { api, el, toast, confirmDialog } from './api.js';
 import { ICONS } from './icons.js';
 import { phoneDetails } from './phoneRowDetails.js';
+import { openMobileSheet } from './mobileSheet.js';
 
 const BASE = '/api/google';
 const MIME = {
@@ -12,7 +13,37 @@ const MIME = {
   slides: 'application/vnd.google-apps.presentation',
 };
 const kindOf = file => Object.entries(MIME).find(([, mime]) => mime === file.mimeType)?.[0] || 'file';
-const action = (path, body) => api(`${BASE}${path}`, { method: 'POST', body: JSON.stringify(body) });
+const KIND_LABEL = { folder: 'Folder', sheet: 'Google Sheet', form: 'Google Form', doc: 'Google Doc', slides: 'Google Slides' };
+const extensionOf = file => {
+  const type = kindOf(file);
+  if (type === 'folder') return 'DIR';
+  if (type !== 'file') return type.toUpperCase();
+  return file.name.split('.').length > 1 ? file.name.split('.').pop().toUpperCase() : 'FILE';
+};
+const formatBytes = value => {
+  let size = Number(value || 0), unit = 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${unit ? size.toFixed(size < 10 ? 1 : 0) : size} ${units[unit]}`;
+};
+const shortDate = value => {
+  if (!value) return '';
+  const date = new Date(value), now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+};
+// Phone rows: size for stored files, the Google kind for native ones.
+const kindLabel = file => KIND_LABEL[kindOf(file)] || `${extensionOf(file)} file`;
+const phoneMeta = file => [file.size != null ? formatBytes(file.size) : kindLabel(file), shortDate(file.modifiedTime)].filter(Boolean).join(' · ');
+const phoneDrive = () => document.documentElement.classList.contains('kairos-redesign') && matchMedia('(max-width: 768px)').matches;
+// The Drive being browsed: an opaque account id from /status. Every Drive,
+// Sheets and Forms request names it; the server checks it is this user's.
+let driveAccount = null;
+const ACCOUNT_KEY = 'kairos.google.driveAccount';
+const scoped = path => driveAccount ? `${path}${path.includes('?') ? '&' : '?'}account=${encodeURIComponent(driveAccount)}` : path;
+const post = (path, body) => api(`${BASE}${path}`, { method: 'POST', body: JSON.stringify(body) });
+const action = (path, body) => api(scoped(`${BASE}${path}`), { method: 'POST', body: JSON.stringify(body) });
+const onHost = () => Boolean(window.jarvis?.openGoogleSignIn) || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
 const button = (label, onClick, cls = 'btn') => el('button', { type: 'button', class: cls, text: label,
   onclick: async event => { try { await onClick(event); } catch (error) { toast(error.message || 'Google action failed', 'error'); } },
 });
@@ -29,47 +60,54 @@ export async function renderGoogleWorkspace(container, header, tabs) {
     return;
   }
   if (!body.isConnected) return;
+  let saved = null;
+  try { saved = localStorage.getItem(ACCOUNT_KEY); } catch { /* storage unavailable */ }
+  driveAccount = (status.accounts || []).some(item => item.id === saved) ? saved : status.default_account || null;
   if (!status.configured || !status.connected) { renderConnection(body, status, () => renderGoogleWorkspace(container, header, tabs)); return; }
   renderDrive(body, status, () => renderGoogleWorkspace(container, header, tabs), header);
 }
 
+// Opens Google's consent page and waits until /status shows the change.
+function signInButton(label, request, changed, done) {
+  const control = button(label, async () => {
+    const result = await post('/oauth/start', request);
+    if (window.jarvis?.openGoogleSignIn) {
+      if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
+    } else window.open(result.url, '_blank', 'noopener');
+    control.disabled = true;
+    control.textContent = 'Waiting for Google…';
+    const started = Date.now();
+    const poll = async () => {
+      if (!control.isConnected || Date.now() - started > 10 * 60 * 1000) { control.disabled = false; control.textContent = label; return; }
+      try { if (changed(await api(`${BASE}/status`))) { done(); return; } } catch { /* retry */ }
+      setTimeout(poll, 1800);
+    };
+    poll();
+  }, 'btn primary');
+  control.disabled = !onHost();
+  return control;
+}
+
 function renderConnection(host, status, refresh) {
   host.replaceChildren();
-  const onHost = Boolean(window.jarvis?.openGoogleSignIn)
-    || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
   const client = el('input', { type: 'text', value: status.client_id || '',
     placeholder: 'Google OAuth Desktop client ID', 'aria-label': 'Google OAuth Desktop client ID' });
   const secret = el('input', { type: 'password', placeholder: 'Client secret, if provided',
     'aria-label': 'Google OAuth client secret' });
   const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, and Calendar APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
   const save = button('Save client ID', async () => {
-    await action('/client', { client_id: client.value.trim(), client_secret: secret.value });
+    await post('/client', { client_id: client.value.trim(), client_secret: secret.value });
     toast('Google client saved', 'success');
     refresh();
   }, 'btn primary');
-  const connect = button('Connect Google account', async () => {
-    const result = await action('/oauth/start', {});
-    if (window.jarvis?.openGoogleSignIn) {
-      if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
-    } else window.open(result.url, '_blank', 'noopener');
-    connect.disabled = true;
-    connect.textContent = 'Waiting for Google…';
-    const started = Date.now();
-    const poll = async () => {
-      if (!host.isConnected || Date.now() - started > 10 * 60 * 1000) { connect.disabled = false; connect.textContent = 'Connect Google account'; return; }
-      try { if ((await api(`${BASE}/status`)).connected) { refresh(); return; } } catch { /* retry */ }
-      setTimeout(poll, 1800);
-    };
-    poll();
-  }, 'btn primary');
-  connect.disabled = !onHost;
+  const connect = signInButton('Connect Google account', {}, next => next.connected, refresh);
   host.append(el('div', { class: 'glass card google-connect' }, [
     el('div', { class: 'title', text: status.configured ? 'Connect Google Workspace' : 'Set up Google Workspace' }),
     note,
     el('div', { class: 'google-field-row' }, [client, secret, save]),
     el('div', { class: 'google-field-row' }, [
       status.configured ? connect : el('span', { class: 'meta', text: 'Save a client ID to continue.' }),
-      !onHost ? el('span', { class: 'meta', text: 'Open Library on the Kairos host computer to connect.' }) : null,
+      !onHost() ? el('span', { class: 'meta', text: 'Open Library on the Kairos host computer to connect.' }) : null,
       el('a', { href: 'https://console.cloud.google.com/apis/credentials', target: '_blank', rel: 'noopener noreferrer', text: 'Google Cloud credentials ↗' }),
     ]),
   ]));
@@ -130,10 +168,16 @@ function renderDrive(host, status, refreshAll, header) {
   // Creation prompts live in the existing details pane, outside the sheet.
   newMenu.addEventListener('click', event => { if (event.target.closest('button')) newSheet?.close(); }, true);
   rail.append(newMenu, uploadInput);
-  for (const [id, label] of sections) rail.append(button(label, () => {
-    state.section = id; state.parent = null; state.trail = []; state.query = ''; search.value = ''; load();
-  }, 'btn quiet google-section'));
+  const openSection = id => { state.section = id; state.parent = null; state.trail = []; state.query = ''; search.value = ''; load(); };
+  for (const [id, label] of sections) rail.append(button(label, () => openSection(id), 'btn quiet google-section'));
   rail.append(storage);
+  // Phone: the same sections as chips under the account card, plus a
+  // Quick access row of recently viewed files on the My Drive home.
+  const chips = el('div', { class: 'workspace-phone-only drive-section-chips', role: 'group', 'aria-label': 'Drive views' },
+    sections.map(([id, label]) => button(label, () => openSection(id), 'drive-section-chip')));
+  const quickRow = el('div', { class: 'drive-quick-row' });
+  const quick = el('section', { class: 'workspace-phone-only drive-quick', 'aria-label': 'Quick access', hidden: true }, [
+    el('h3', { class: 'drive-group-title', text: 'Quick access' }), quickRow]);
   const gridButton = button('Grid', () => setLayout('grid'));
   const listButton = button('List', () => setLayout('list'));
   function setLayout(layout) {
@@ -142,16 +186,31 @@ function renderDrive(host, status, refreshAll, header) {
     listButton.setAttribute('aria-pressed', String(layout === 'list'));
   }
   setLayout('grid');
+  const accounts = status.accounts || [];
+  const current = accounts.find(item => item.id === driveAccount) || accounts[0] || {};
+  const label = item => item.email || 'Google account';
+  const choose = id => {
+    try { localStorage.setItem(ACCOUNT_KEY, id); } catch { /* storage unavailable */ }
+    driveAccount = id; refreshAll();
+  };
   const disconnect = button('Disconnect', async () => {
-    if (await confirmDialog({ title: 'Disconnect Google?', message: 'Kairos will forget the account tokens. Files stay in Google Drive.', confirmLabel: 'Disconnect' })) {
-      await api(`${BASE}/connection`, { method: 'DELETE' }); refreshAll();
+    if (await confirmDialog({ title: 'Disconnect Google?', message: `Kairos will forget the tokens for ${label(current)}. Its files stay in Google Drive${accounts.length > 1 ? ', and your other accounts stay connected' : ''}.`, confirmLabel: 'Disconnect' })) {
+      await api(`${BASE}/accounts/${encodeURIComponent(current.id)}`, { method: 'DELETE' }); refreshAll();
     }
   }, 'btn quiet');
+  const known = new Set(accounts.map(item => `${item.id}:${item.error || ''}`));
+  const accountsChanged = next => (next.accounts || []).some(item => !known.has(`${item.id}:${item.error || ''}`));
+  const addAccount = (before = () => {}) => signInButton('Add another Google account', { add: true }, accountsChanged, () => { before(); refreshAll(); });
+  const picker = accounts.length > 1 ? el('select', { class: 'google-account-select', 'aria-label': 'Google account' },
+    accounts.map(item => el('option', { value: item.id, text: label(item) + (item.error ? ' (reconnect needed)' : ''), selected: item.id === current.id }))) : null;
+  picker?.addEventListener('change', () => choose(picker.value));
+  const desktopAdd = addAccount(); desktopAdd.className = 'btn quiet';
+  const desktopReconnect = current.error ? signInButton('Reconnect', { add: true, account: current.id }, accountsChanged, refreshAll) : null;
   main.append(el('div', { class: 'google-toolbar' }, [search, kind, gridButton, listButton, button('Refresh', () => load())]),
-    breadcrumbs, selectionBar, statusLine,
+    quick, breadcrumbs, selectionBar, statusLine,
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
-  host.append(el('div', { class: 'google-account-line' }, [el('strong', { text: status.email || 'Google account' }), disconnect]),
-    el('div', { class: 'google-browser' }, [rail, main]));
+  host.append(el('div', { class: 'google-account-line' }, [picker || el('strong', { text: label(current) }), desktopReconnect, desktopAdd, disconnect]),
+    chips, el('div', { class: 'google-browser' }, [rail, main]));
   header.querySelectorAll('.library-drive-search, .library-drive-options').forEach(node => node.remove());
   const find = button('Search Drive', () => { search.scrollIntoView({ block: 'center' }); search.focus(); }, 'btn workspace-phone-only workspace-round library-drive-search');
   find.setAttribute('aria-label', 'Search Drive'); find.innerHTML = ICONS.search;
@@ -159,16 +218,43 @@ function renderDrive(host, status, refreshAll, header) {
   const options = button('…', () => phoneDetails('Drive options', [rail, main.querySelector('.google-toolbar'), disconnect], options), 'btn workspace-phone-only workspace-round library-drive-options');
   options.setAttribute('aria-label', 'Drive options');
   host.querySelector('.google-account-line').append(options);
-  const account = el('div', { class: 'workspace-phone-only drive-account-copy' }, [
-    el('span', { class: 'drive-account-avatar', text: (status.email || 'G').charAt(0).toUpperCase(), 'aria-hidden': 'true' }),
-    el('div', {}, [el('strong', { text: 'Google Drive' }), el('small', { text: status.email || 'Google account' })]),
-    el('span', { class: 'drive-connected-dot', role: 'img', 'aria-label': 'Connected' }),
+  const usage = el('div', { class: 'drive-storage-meter', hidden: true });
+  const avatar = item => el('span', { class: 'drive-account-avatar', text: label(item).charAt(0).toUpperCase(), 'aria-hidden': 'true' });
+  // Phone: the account card opens the account switcher.
+  const account = el('button', { type: 'button', class: 'workspace-phone-only drive-account-copy', 'aria-haspopup': 'dialog',
+    'aria-label': `Google Drive, ${label(current)}${current.error ? ', reconnect needed' : ''}. Switch or add an account`,
+    onclick: () => { const sheet = openMobileSheet({ title: 'Google accounts', content: accountSheet(() => sheet?.close()), opener: account }); } }, [
+    avatar(current),
+    el('div', {}, [el('strong', { text: 'Google Drive' }), el('small', { text: current.error || label(current) }), usage]),
+    el('span', { class: `drive-connected-dot${current.error ? ' drive-account-error' : ''}`, role: 'img', 'aria-label': current.error ? 'Reconnect needed' : 'Connected' }),
   ]);
   host.querySelector('.google-account-line').prepend(account);
-  api(`${BASE}/drive/storage`).then(result => {
+  // Close the sheet before re-rendering or opening a confirmation over it.
+  function accountSheet(close) {
+    const choices = accounts.flatMap(item => {
+      const row = button('', () => { close(); if (item.id !== current.id) choose(item.id); }, 'drive-account-choice');
+      row.setAttribute('aria-pressed', String(item.id === current.id));
+      row.append(avatar(item), el('span', {}, [el('strong', { text: label(item) }),
+        el('small', { text: item.error ? 'Sign-in expired or revoked' : item.id === current.id ? 'Browsing now' : 'Switch to this Drive' })]));
+      if (!item.error) return [row];
+      // Reconnecting names the account, so the same email refreshes it in place.
+      const reconnect = signInButton(`Reconnect ${label(item)}`, { add: true, account: item.id }, accountsChanged, () => { close(); refreshAll(); });
+      reconnect.className = 'btn quiet drive-account-reconnect';
+      return [row, reconnect];
+    });
+    const sheetDisconnect = button(`Disconnect ${label(current)}`, () => { close(); disconnect.click(); }, 'btn quiet danger');
+    return el('div', { class: 'drive-account-sheet' }, [el('div', { class: 'drive-account-list', role: 'group', 'aria-label': 'Connected Google accounts' }, choices),
+      addAccount(close), onHost() ? null : el('p', { class: 'meta', text: 'Add accounts on the computer running Kairos.' }), sheetDisconnect]);
+  }
+  api(scoped(`${BASE}/drive/storage`)).then(result => {
     const quota = result.storageQuota || {};
     const gb = value => `${(Number(value || 0) / 1024 ** 3).toFixed(1)} GB`;
     storage.textContent = `${gb(quota.usage)} used${quota.limit ? ` of ${gb(quota.limit)}` : ''}`;
+    // Unlimited plans report no limit, so they get the text without a bar.
+    const share = quota.limit ? Math.min(100, Number(quota.usage || 0) / Number(quota.limit) * 100) : null;
+    usage.replaceChildren(...(share == null ? [] : [el('span', { class: 'drive-storage-bar', 'aria-hidden': 'true' }, [
+      el('i', { style: `width:${share.toFixed(1)}%` })])]), el('small', { text: storage.textContent }));
+    usage.hidden = false;
   }).catch(() => { storage.textContent = 'Storage unavailable'; });
   search.dataset.pageSearch = 'true';
   search.addEventListener('input', () => { state.query = search.value.trim(); state.parent = null; state.trail = []; schedule(); });
@@ -186,7 +272,7 @@ function renderDrive(host, status, refreshAll, header) {
     for (const file of files) {
       if (file.size > 25 * 1024 * 1024) throw new Error('Choose files under 25 MB');
       const data = new FormData(); data.append('file', file); if (state.parent) data.append('parent', state.parent);
-      const response = await fetch(`${BASE}/drive/upload`, { method: 'POST', body: data });
+      const response = await fetch(scoped(`${BASE}/drive/upload`), { method: 'POST', body: data });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Upload failed');
       toast(`${file.name} uploaded`, 'success');
     }
@@ -202,9 +288,26 @@ function renderDrive(host, status, refreshAll, header) {
     breadcrumbs.replaceChildren(button(sections.find(([id]) => id === state.section)[1], () => {
       state.parent = null; state.trail = []; load();
     }, 'btn quiet'));
-    state.trail.forEach((item, index) => breadcrumbs.append(el('span', { class: 'meta', text: '›' }),
+    state.trail.forEach((item, index) => breadcrumbs.append(el('span', { class: 'meta google-crumb-sep', text: '›' }),
       button(item.name, () => { state.trail = state.trail.slice(0, index + 1); state.parent = item.id; load(); }, 'btn quiet')));
     rail.querySelectorAll('.google-section').forEach((node, index) => node.setAttribute('aria-current', String(sections[index][0] === state.section)));
+    chips.querySelectorAll('.drive-section-chip').forEach((node, index) => node.setAttribute('aria-pressed', String(sections[index][0] === state.section)));
+  }
+  const quickHome = () => state.section === 'my_drive' && !state.parent && !state.query && state.kind === 'all';
+  async function loadQuick(generation) {
+    if (!quickHome() || !phoneDrive()) { quick.hidden = true; return; }
+    try {
+      const result = await api(scoped(`${BASE}/drive/files?${new URLSearchParams({ section: 'recent', kind: 'all' })}`));
+      if (generation !== listGeneration || !host.isConnected) return;
+      const recent = (result.files || []).filter(file => kindOf(file) !== 'folder').slice(0, 10);
+      quickRow.replaceChildren(...recent.map(file => {
+        const tile = button('', () => openFile(file), 'drive-quick-tile');
+        tile.append(el('span', { class: 'drive-quick-type', text: extensionOf(file), 'aria-hidden': 'true' }),
+          el('strong', { text: file.name }), el('small', { text: shortDate(file.modifiedTime) || kindLabel(file) }));
+        return tile;
+      }));
+      quick.hidden = !recent.length;
+    } catch { quick.hidden = true; }
   }
   async function batch(operation) {
     const files = state.files.filter(file => state.selection.has(file.id));
@@ -246,7 +349,7 @@ function renderDrive(host, status, refreshAll, header) {
         if (label === 'Share') { const panel = detail.querySelector('details'); panel.open = true; }
         else [...detail.querySelectorAll('.google-actions button')].find(node => node.textContent === label)?.click();
       }))),
-      el('a', { class: 'btn', href: `${BASE}/drive/files/${encodeURIComponent(file.id)}/download`, text: 'Download' }),
+      el('a', { class: 'btn', href: scoped(`${BASE}/drive/files/${encodeURIComponent(file.id)}/download`), text: 'Download' }),
       button(file.trashed ? 'Restore' : 'Move to trash', run(async () => {
         if (file.trashed || await confirmDialog({ title: 'Move to trash?', message: file.name, confirmLabel: 'Move to trash' }))
           await driveAction({ file_id: file.id, action: file.trashed ? 'restore' : 'trash' });
@@ -259,6 +362,10 @@ function renderDrive(host, status, refreshAll, header) {
   }
   function drawFiles() {
     list.replaceChildren();
+    // Folders and files in their own groups: tiles and a card on a phone,
+    // `display: contents` (the one desktop grid) everywhere else.
+    const folders = el('div', { class: 'drive-group drive-folders' });
+    const files = el('div', { class: 'drive-group drive-files' });
     for (const file of state.files) {
       const type = kindOf(file);
       const checkbox = el('input', { type: 'checkbox', 'aria-label': `Select ${file.name}` });
@@ -269,24 +376,26 @@ function renderDrive(host, status, refreshAll, header) {
         } else if (matchMedia('(pointer: coarse)').matches) return openFile(file);
         else return showDetail(file);
       }, 'google-file-open');
-      const extension = type === 'folder' ? 'DIR' : type === 'file' ? (file.name.split('.').length > 1 ? file.name.split('.').pop().toUpperCase() : 'FILE') : type.toUpperCase();
       const thumbnail = el('div', { class: 'google-thumbnail' }, [el('span', { class: 'google-type', text: type.toUpperCase() }),
-        el('span', { class: 'workspace-phone-only drive-file-extension', text: extension })]);
+        el('span', { class: 'workspace-phone-only drive-file-extension', text: extensionOf(file) })]);
       if (file.thumbnailLink && type !== 'folder') {
-        const img = el('img', { src: `${BASE}/drive/files/${encodeURIComponent(file.id)}/thumbnail`, alt: '', loading: 'lazy' });
+        const img = el('img', { src: scoped(`${BASE}/drive/files/${encodeURIComponent(file.id)}/thumbnail`), alt: '', loading: 'lazy' });
         img.onerror = () => img.remove(); thumbnail.append(img);
       }
       const date = file.modifiedTime && new Date(file.modifiedTime).toLocaleDateString();
       open.replaceChildren(thumbnail, el('span', { class: 'google-file-copy' }, [el('strong', { text: file.name }),
         el('small', { class: 'drive-desktop-meta', text: [type, date].filter(Boolean).join(' · ') }),
-        el('small', { class: 'workspace-phone-only drive-phone-meta', text: [file.size != null ? `${(Number(file.size) / 1024).toFixed(0)} KB` : type, date].filter(Boolean).join(' · ') })]));
+        el('small', { class: 'workspace-phone-only drive-phone-meta', text: phoneMeta(file) })]));
       open.addEventListener('dblclick', () => openFile(file).catch(error => toast(error.message, 'error')));
       open.addEventListener('keydown', event => {
         if (event.key === 'Enter') { event.preventDefault(); openFile(file).catch(error => toast(error.message, 'error')); }
       });
       checkbox.addEventListener('click', event => selectFile(file, checkbox.checked, event.shiftKey));
       row.addEventListener('contextmenu', event => contextMenu(event, file));
-      row.append(checkbox, open); list.append(row);
+      row.append(checkbox, open); (type === 'folder' ? folders : files).append(row);
+    }
+    for (const [group, title] of [[folders, 'Folders'], [files, 'Files']]) {
+      if (group.childElementCount) list.append(el('h3', { class: 'workspace-phone-only drive-group-title', text: title }), group);
     }
     if (!state.files.length) list.append(el('div', { class: 'library-empty', text: 'No matching Google files.' }));
     drawSelection();
@@ -298,13 +407,22 @@ function renderDrive(host, status, refreshAll, header) {
     if (append && state.page) params.set('page_token', state.page);
     statusLine.textContent = 'Loading Drive…';
     try {
-      const result = await api(`${BASE}/drive/files?${params}`);
+      const result = await api(scoped(`${BASE}/drive/files?${params}`));
       if (generation !== listGeneration || !host.isConnected) return;
       state.files = append ? [...state.files, ...(result.files || [])] : (result.files || []);
       state.selection.clear(); state.selectionAnchor = null; state.page = result.nextPageToken || null; more.hidden = !state.page;
       drawFiles(); drawBreadcrumbs();
+      if (!append) loadQuick(generation);
       statusLine.textContent = result.incompleteSearch ? 'Google returned a partial result. Narrow the search.' : '';
-    } catch (error) { statusLine.textContent = `Could not load Drive: ${error.message}`; }
+    } catch (error) {
+      statusLine.textContent = `Could not load Drive: ${error.message}`;
+      // An expired or revoked sign-in marks this account's card, not the others.
+      if (error.message.startsWith('401:')) {
+        account.querySelector('small').textContent = error.message.replace(/^401: /, '');
+        account.querySelector('.drive-connected-dot').classList.add('drive-account-error');
+        account.querySelector('.drive-connected-dot').setAttribute('aria-label', 'Reconnect needed');
+      }
+    }
   }
   async function showDetail(file, preview = false) {
     const generation = ++detailGeneration;
@@ -338,7 +456,7 @@ function renderDrive(host, status, refreshAll, header) {
         if (await confirmDialog({ title: 'Delete permanently?', message: `${file.name} cannot be restored.`, confirmLabel: 'Delete forever' })) await apply({ action: 'delete' });
       }, 'btn danger') : null,
     ].filter(Boolean));
-    if (['file', 'sheet', 'doc', 'slides'].includes(type)) actions.append(el('a', { class: 'btn', href: `${BASE}/drive/files/${encodeURIComponent(file.id)}/download`, text: 'Download' }));
+    if (['file', 'sheet', 'doc', 'slides'].includes(type)) actions.append(el('a', { class: 'btn', href: scoped(`${BASE}/drive/files/${encodeURIComponent(file.id)}/download`), text: 'Download' }));
     const extras = el('div', { class: 'google-detail-extra' });
     detail.append(head, actions, extras);
     if (type === 'sheet') await sheetEditor(extras, file);
@@ -360,7 +478,7 @@ function renderDrive(host, status, refreshAll, header) {
 }
 
 async function fileViewer(host, actions, file, controller) {
-  const url = `${BASE}/drive/files/${encodeURIComponent(file.id)}/preview`;
+  const url = scoped(`${BASE}/drive/files/${encodeURIComponent(file.id)}/preview`);
   host.classList.add('google-viewer');
   host.textContent = 'Loading preview…';
   try {
@@ -424,7 +542,7 @@ function folderPicker(host) {
       if (append && page) params.set('page_token', page);
       if (!append) results.textContent = 'Loading folders…';
       try {
-        const data = await api(`${BASE}/drive/files?${params}`);
+        const data = await api(scoped(`${BASE}/drive/files?${params}`));
         if (own !== generation || !panel.isConnected) return;
         if (!append) results.replaceChildren();
         page = data.nextPageToken || null; next.hidden = !page;
@@ -482,7 +600,7 @@ async function sharing(host, file) {
 
 async function sheetEditor(host, file) {
   let meta;
-  try { meta = await api(`${BASE}/sheets/${encodeURIComponent(file.id)}`); }
+  try { meta = await api(scoped(`${BASE}/sheets/${encodeURIComponent(file.id)}`)); }
   catch (error) { host.textContent = `Could not open spreadsheet: ${error.message}`; return; }
   const sheets = meta.sheets || [];
   const tabs = el('div', { class: 'segmented-tabs' });
@@ -510,7 +628,7 @@ async function sheetEditor(host, file) {
     cells = []; loadedRange = '';
     try {
     const shape = dimensions();
-    const data = await api(`${BASE}/sheets/${encodeURIComponent(file.id)}?cell_range=${encodeURIComponent(`'${sheet.properties.title.replaceAll("'", "''")}'!${range.value}`)}`);
+    const data = await api(scoped(`${BASE}/sheets/${encodeURIComponent(file.id)}?cell_range=${encodeURIComponent(`'${sheet.properties.title.replaceAll("'", "''")}'!${range.value}`)}`));
     grid.style.setProperty('--google-sheet-columns', String(shape.cols));
     grid.replaceChildren(); cells = [];
     for (let r = 0; r < shape.rows; r++) {
@@ -539,7 +657,7 @@ async function sheetEditor(host, file) {
 }
 
 async function formEditor(host, file) {
-  const form = await api(`${BASE}/forms/${encodeURIComponent(file.id)}`);
+  const form = await api(scoped(`${BASE}/forms/${encodeURIComponent(file.id)}`));
   const list = el('div', { class: 'google-form-items' });
   const responses = el('div', { class: 'google-form-responses' });
   const title = el('input', { value: form.info?.title || file.name, 'aria-label': 'Form title' });
@@ -558,7 +676,7 @@ async function formEditor(host, file) {
         if (!await confirmDialog({ title: 'Remove question?', message: item.title || 'This question', confirmLabel: 'Remove' })) return;
         await action('/forms/action', { action: 'batch', file_id: file.id,
           requests: [{ deleteItem: { location: { index } } }] });
-        form.items = (await api(`${BASE}/forms/${encodeURIComponent(file.id)}`)).items;
+        form.items = (await api(scoped(`${BASE}/forms/${encodeURIComponent(file.id)}`))).items;
         drawItems(form.items);
       }, 'btn quiet'),
     ])));
@@ -589,11 +707,11 @@ async function formEditor(host, file) {
       await action('/forms/action', { action: 'batch', file_id: file.id,
         requests: [{ createItem: { item: { title: text, questionItem: { question: { required: false, ...q } } }, location: { index: (form.items || []).length } } }] });
       question.value = ''; options.value = '';
-      const updated = await api(`${BASE}/forms/${encodeURIComponent(file.id)}`);
+      const updated = await api(scoped(`${BASE}/forms/${encodeURIComponent(file.id)}`));
       form.items = updated.items; drawItems(updated.items);
     }, 'btn primary')]),
     button('Load responses', async () => {
-      const result = await api(`${BASE}/forms/${encodeURIComponent(file.id)}?responses=true`);
+      const result = await api(scoped(`${BASE}/forms/${encodeURIComponent(file.id)}?responses=true`));
       responses.replaceChildren(...(result.responses || []).map(item => el('pre', { text: JSON.stringify(item.answers || {}, null, 2) })));
       if (!responses.childElementCount) responses.textContent = 'No responses yet.';
     }), responses,

@@ -1,4 +1,9 @@
-"""Admin-owned Google Workspace connection and Library actions."""
+"""Admin-owned Google Workspace connection and Library actions.
+
+Drive, Sheets and Forms routes take an optional `account` query parameter:
+an opaque id from /status, checked against the signed-in user's own
+connected accounts before any token is used. Without it, the user's default
+account is used. Calendar keeps using the installation default account."""
 from __future__ import annotations
 
 import html
@@ -20,6 +25,11 @@ CALLBACK = "/google/oauth/callback"
 class ClientRequest(BaseModel):
     client_id: str
     client_secret: str = ""
+
+
+class SignInRequest(BaseModel):
+    add: bool = False
+    account: str | None = None  # reconnect this account
 
 
 class DriveActionRequest(BaseModel):
@@ -70,34 +80,56 @@ async def _run(coroutine):
         raise HTTPException(problem.status, str(problem)) from problem
 
 
+def _account(user: str, account: str | None) -> str:
+    try:
+        return google.resolve_account(user, account)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
+
+
 @router.get("/status")
 async def status(user: str = Depends(require_admin)) -> dict:
-    return google.status()
+    return google.status(user)
 
 
 @router.post("/client")
 async def configure(body: ClientRequest, user: str = Depends(require_admin)) -> dict:
     try:
-        return google.configure(body.client_id, body.client_secret)
+        return google.configure(body.client_id, body.client_secret, user)
     except google.GoogleError as problem:
         raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.delete("/connection")
 async def disconnect(user: str = Depends(require_admin)) -> dict:
-    return google.disconnect()
+    return google.disconnect(None, user)
+
+
+@router.delete("/accounts/{account_id}")
+async def disconnect_account(account_id: str, user: str = Depends(require_admin)) -> dict:
+    try:
+        return google.disconnect(account_id, user)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.post("/oauth/start")
-async def start(user: str = Depends(require_admin)) -> dict:
+async def start(body: SignInRequest | None = None, user: str = Depends(require_admin)) -> dict:
     try:
-        return {"url": google.start_sign_in(local_api_base() + CALLBACK)}
+        return {"url": google.start_sign_in(local_api_base() + CALLBACK, user, bool(body and body.add),
+                                            body.account if body else None)}
     except google.GoogleError as problem:
         raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.get("/oauth/callback", response_class=HTMLResponse)
 async def callback(state: str = "", code: str | None = None, error: str | None = None) -> HTMLResponse:
+    # No Kairos session check here, deliberately: Google sends the user back
+    # to this loopback address in the system browser, which has no Kairos
+    # cookie. The defence is the state: unguessable, single use, expiring in
+    # ten minutes and bound to the Kairos user who started the sign-in, plus
+    # PKCE (the code is useless without that sign-in's verifier) and a
+    # redirect that only reaches 127.0.0.1.
     try:
         account = await google.finish_sign_in(state, code, local_api_base() + CALLBACK, error)
         message, status_code = f"Connected {html.escape(account)}. Return to Kairos.", 200
@@ -110,31 +142,33 @@ async def callback(state: str = "", code: str | None = None, error: str | None =
 
 @router.get("/drive/files")
 async def files(q: str = "", parent: str | None = None, kind: str = "all", trashed: bool = False,
-                page_token: str | None = None, section: str = "all", user: str = Depends(require_admin)) -> dict:
-    return await _run(google.list_files(query=q, parent=parent, kind=kind, trashed=trashed, page_token=page_token, section=section))
+                page_token: str | None = None, section: str = "all", account: str | None = None,
+                user: str = Depends(require_admin)) -> dict:
+    return await _run(google.list_files(query=q, parent=parent, kind=kind, trashed=trashed, page_token=page_token,
+                                        section=section, account=_account(user, account)))
 
 
 @router.get("/drive/storage")
-async def storage(user: str = Depends(require_admin)) -> dict:
-    return await _run(google.drive_storage())
+async def storage(account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    return await _run(google.drive_storage(_account(user, account)))
 
 
 @router.get("/drive/files/{file_id}/thumbnail")
-async def thumbnail(file_id: str, user: str = Depends(require_admin)) -> Response:
-    content, mime = await _run(google.file_thumbnail(file_id))
+async def thumbnail(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+    content, mime = await _run(google.file_thumbnail(file_id, _account(user, account)))
     return Response(content, media_type=mime, headers={"Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/drive/files/{file_id}/preview")
-async def preview(file_id: str, user: str = Depends(require_admin)) -> Response:
-    content, mime = await _run(google.file_preview(file_id))
+async def preview(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+    content, mime = await _run(google.file_preview(file_id, _account(user, account)))
     return Response(content, media_type=mime, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                     "Content-Security-Policy": "default-src 'none'; sandbox"})
 
 
 @router.get("/drive/files/{file_id}")
-async def file_info(file_id: str, user: str = Depends(require_admin)) -> dict:
-    return await _run(google.file_info(file_id))
+async def file_info(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    return await _run(google.file_info(file_id, _account(user, account)))
 
 
 _EXPORTS = {
@@ -146,51 +180,53 @@ _EXPORTS = {
 
 
 @router.get("/drive/files/{file_id}/download")
-async def download(file_id: str, user: str = Depends(require_admin)) -> Response:
-    info = await _run(google.file_info(file_id))
+async def download(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+    account = _account(user, account)
+    info = await _run(google.file_info(file_id, account))
     mime = info.get("mimeType") or "application/octet-stream"
     if mime.startswith("application/vnd.google-apps.") and mime not in _EXPORTS:
         raise HTTPException(400, "This Google file cannot be exported; open it in Google instead")
     export_mime, suffix = _EXPORTS.get(mime, (None, ""))
-    data = await _run(google.file_content(file_id, export_mime))
+    data = await _run(google.file_content(file_id, export_mime, account))
     filename = (info.get("name") or "download") + suffix
     return Response(content=data, media_type=export_mime or mime,
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"})
 
 
 @router.post("/drive/upload")
-async def upload(file: UploadFile = File(...), parent: str | None = Form(None),
+async def upload(file: UploadFile = File(...), parent: str | None = Form(None), account: str | None = None,
                  user: str = Depends(require_admin)) -> dict:
+    account = _account(user, account)
     data = await file.read(google.MAX_DOWNLOAD + 1)
     return await _run(google.upload_file(file.filename or "upload", data,
-                                          file.content_type or "application/octet-stream", parent))
+                                          file.content_type or "application/octet-stream", parent, account))
 
 
 @router.post("/drive/action")
-async def drive_action(body: DriveActionRequest, user: str = Depends(require_admin)) -> dict:
-    return await _run(google.drive_action(**body.model_dump()))
+async def drive_action(body: DriveActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    return await _run(google.drive_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/sheets/{file_id}")
-async def sheet(file_id: str, cell_range: str | None = None,
+async def sheet(file_id: str, cell_range: str | None = None, account: str | None = None,
                 user: str = Depends(require_admin)) -> dict:
-    return await _run(google.sheet_get(file_id, cell_range))
+    return await _run(google.sheet_get(file_id, cell_range, _account(user, account)))
 
 
 @router.post("/sheets/action")
-async def sheet_action(body: SheetActionRequest, user: str = Depends(require_admin)) -> dict:
-    return await _run(google.sheet_action(**body.model_dump()))
+async def sheet_action(body: SheetActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    return await _run(google.sheet_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/forms/{file_id}")
-async def form(file_id: str, responses: bool = False, page_token: str | None = None,
+async def form(file_id: str, responses: bool = False, page_token: str | None = None, account: str | None = None,
                user: str = Depends(require_admin)) -> dict:
-    return await _run(google.form_get(file_id, responses, page_token))
+    return await _run(google.form_get(file_id, responses, page_token, _account(user, account)))
 
 
 @router.post("/forms/action")
-async def form_action(body: FormActionRequest, user: str = Depends(require_admin)) -> dict:
-    return await _run(google.form_action(**body.model_dump()))
+async def form_action(body: FormActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+    return await _run(google.form_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/calendar/calendars")
