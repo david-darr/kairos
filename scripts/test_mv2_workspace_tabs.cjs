@@ -360,13 +360,6 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(result.count, 2); assert.equal(result.done, 1); assert.equal(result.cells.length, 168);
   assert.equal(result.cells.filter(c => c === 'b').length, 1);
   assert.equal(activity.activityBins([], 'month', now).cells.every(c => c === 'empty'), true);
-  redesign = false;
-  const classicHost = el('div'); await calendar.render(classicHost);
-  assert.equal(classicHost.querySelectorAll('.cal-weekday')[0].textContent, 'Sun');
-  assert.equal(classicHost.querySelector('.cal-view-switch').children.length, 2);
-  assert.equal(classicHost.querySelectorAll('.cal-day').length, 42);
-  assert.equal(classicHost.querySelector('.cal-single-day'), undefined);
-
   // Cookbook keeps the actual model names, real endpoint and all model actions.
   redesign = true;
   responses = {
@@ -415,8 +408,8 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   // Exercise the real API helper and adapter, including both caller contracts.
   mocks['api.js'] = (await moduleAt('static/js/api.js')).namespace;
   const { workspaceEmpty } = (await moduleAt('static/js/workspaceParts.js')).namespace;
-  for (const look of [true, false]) for (const mascot of ['on', 'off']) {
-    redesign = look; context.document.documentElement.dataset.mascot = mascot;
+  for (const mascot of ['on', 'off']) {
+    context.document.documentElement.dataset.mascot = mascot;
     let actions = 0;
     for (const options of [
       { icon: '<svg></svg>', title: 'Tasks', hint: 'Nothing scheduled', mascot: 'sleeping', actionLabel: 'Schedule', onAction: () => actions++ },
@@ -426,9 +419,9 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       assert.ok(empty.classList.contains('empty-state-rich'));
       assert.equal(host.children[0].tag, 'kairos-mascot');
       assert.equal(host.children[0].getAttribute('state'), options.mascot || options.mascotState);
-      assert.equal(empty.querySelector('.empty-state-title').tag, look ? 'h2' : 'div');
+      assert.equal(empty.querySelector('.empty-state-title').tag, 'h2');
       assert.equal(empty.querySelector('.empty-state-hint').textContent, options.hint || options.text);
-      assert.equal(empty.classList.contains('rd-empty-state'), look);
+      assert.equal(empty.classList.contains('rd-empty-state'), true);
       empty.querySelector('button').onclick();
       if (options.icon) assert.ok(empty.querySelector('.empty-state-icon'));
     }

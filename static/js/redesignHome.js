@@ -6,9 +6,8 @@ import { subscribeActivity } from "./redesignShell.js";
 import { dotMatrix, pill, usageCard } from "./kairosParts.js";
 import { toSnap } from "./quotaReadings.js";
 import { openNotifications } from './mobileActions.js';
-import { getLayout, saveLayout, homeLayout, resetHomeLayout, knownHomeCards, HOME_SECTIONS } from "./layout.js";
+import { getLayout, saveLayout, homeLayout, knownHomeCards, HOME_SECTIONS } from "./layout.js";
 
-const on = () => document.documentElement.classList.contains("kairos-redesign");
 const navigate = (tab, options = {}) => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab, ...options } }));
 const isTab = (id) => id.startsWith("tab:");
 
@@ -71,19 +70,6 @@ function ensureArrangement() {
   if (untouched(layout) || automatic) applyDefault({ remember: true });
 }
 
-// Switching the preview off puts back what we applied on its behalf, but only
-// if the person hasn't changed it since.
-let wasOn = on();
-document.addEventListener("kairos:appearance", () => {
-  const now = on();
-  if (wasOn && !now) {
-    const remembered = readAuto();
-    if (remembered && remembered === snapshot(getLayout())) resetHomeLayout();
-    writeAuto(null);
-  }
-  wasOn = now;
-});
-
 // Optional row groups keep the default rows intact when sections are missing.
 // Within a partial row distribute spare columns evenly, preserving proportions.
 export function packRows(items) {
@@ -110,14 +96,13 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
   let activity = { need: [], work: [] };
   let entranceTimer = 0, entered = false;
   const phone = matchMedia('(max-width: 768px)');
-  const heroAnchor = document.createComment('Classic Home hero');
+  const heroAnchor = document.createComment('Home hero');
   hero.before(heroAnchor);
   const heroMascot = hero.querySelector('kairos-mascot');
   const banner = hero.querySelector('.dashboard-core');
   const bannerAnchor = document.createComment('Home banner');
   banner?.before(bannerAnchor);
-  const classicChrome = ['.dashboard-header', '.dashboard-next'].map(selector => hero.querySelector(selector)).filter(Boolean)
-    .map(node => { const anchor = document.createComment('Classic Home detail'); node.before(anchor); return { node, anchor }; });
+  const hiddenChrome = ['.dashboard-header', '.dashboard-next'].map(selector => hero.querySelector(selector)).filter(Boolean);
   const heading = el('header', { class: 'hm-heading' });
   // Keep the painter connected while the first week request is pending;
   // backgroundEffects disposes owners removed from the document.
@@ -231,20 +216,20 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     }
   }
   function arrange(order, hidden) {
-    if (!on() || launchSurface) { deactivate(); return false; }
+    if (launchSurface) return false;
     if (!active) {
       active = true; ensureArrangement(); ({ order, hidden } = homeLayout());
       content.classList.add('hm-home'); content.prepend(heading);
-      classicChrome.forEach(({ node }) => node.remove());
+      hiddenChrome.forEach(node => node.remove());
       customizeButton = el('button', { type: 'button', class: 'hm-customize', 'aria-label': 'Customize Home', 'aria-haspopup': 'dialog', onclick: openSheet }, [el('span', { text: 'Customize' })]);
       const customizeIcon = el('span', { class: 'hm-customize-icon', 'aria-hidden': 'true' });
       customizeIcon.innerHTML = ICONS.settings; customizeButton.append(customizeIcon);
       for (const [id, label] of [['chats', 'All chats'], ['schedule', 'Calendar'], ['system', 'Details']]) {
         const link = parts[id].querySelector('.dashboard-section-header button');
-        link.dataset.classicLabel = link.textContent; link.textContent = label;
+        link.textContent = label;
       }
       const calendarTitle = parts.schedule.querySelector('h2');
-      calendarTitle.dataset.classicTitle = calendarTitle.textContent; calendarTitle.textContent = 'Coming up';
+      calendarTitle.textContent = 'Coming up';
       controls.prepend(customizeButton); drawGreeting(); drawActivity(); drawWeek(); drawUsage();
       // Customize remains available without taking a third root-header slot.
       const phoneCustomize = el('button', { type: 'button', class: 'hm-phone-customize', text: 'Customize Home', onclick: openSheet });
@@ -282,14 +267,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     if (!active) return;
     clearTimeout(entranceTimer); grid.classList.remove('rd-stagger');
     active = false; closeSheet(false); heading.remove(); content.querySelector('.hm-phone-customize')?.remove(); customizeButton?.remove(); customizeButton = null;
-    classicChrome.forEach(({ node, anchor }) => anchor.after(node));
     bannerAnchor.after(banner); heroAnchor.after(hero); heroMascot?.removeAttribute('follow-pointer'); content.classList.remove('hm-home');
-    for (const id of ['chats', 'schedule', 'system']) {
-      const link = parts[id].querySelector('.dashboard-section-header button');
-      link.textContent = link.dataset.classicLabel; delete link.dataset.classicLabel;
-    }
-    const calendarTitle = parts.schedule.querySelector('h2');
-    calendarTitle.textContent = calendarTitle.dataset.classicTitle; delete calendarTitle.dataset.classicTitle;
     grid.classList.remove('hm-custom-order');
     for (const panel of [hero, ...Object.values(parts)]) panel.style.removeProperty('--rd-span');
     for (const node of [week, needs.panel, working.panel, models.panel]) node.remove();
@@ -391,11 +369,9 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     drawActivity(); rearrange();
   });
   const onLayout = () => { if (active) drawSheet(); };
-  const onAppearance = () => { if (on() !== active) rearrange(); };
   const onPhone = () => { if (active) rearrange(); };
   phone.addEventListener('change', onPhone);
   document.addEventListener('kairos:layout', onLayout);
-  document.addEventListener('kairos:appearance', onAppearance);
   return { arrange, update(key) {
     if (!active || disposed) return;
     if (key === 'auth') drawGreeting();
@@ -404,9 +380,8 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     if (key === 'agents') drawActivity();
     rearrange();
   }, dispose() {
-    disposed = true; stopActivity(); deactivate(); heroAnchor.remove(); bannerAnchor.remove(); classicChrome.forEach(({ anchor }) => anchor.remove());
+    disposed = true; stopActivity(); deactivate(); heroAnchor.remove(); bannerAnchor.remove();
     phone.removeEventListener('change', onPhone);
     document.removeEventListener('kairos:layout', onLayout);
-    document.removeEventListener('kairos:appearance', onAppearance);
   } };
 }

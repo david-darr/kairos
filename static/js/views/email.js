@@ -1,5 +1,5 @@
 import { api, el, toast, iconButton } from "../api.js";
-import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats, redesignOn } from '../workspaceParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, workspaceStats } from '../workspaceParts.js';
 import { ICONS } from "../icons.js";
 import { createMascot } from '../mascot.js';
 import { phoneDetails } from '../phoneRowDetails.js';
@@ -44,13 +44,11 @@ export async function render(container) {
   const triage = el("div", { id: "email-triage", class: 'rd-stagger', style: "margin-top:14px;" });
   wrap.append(header, triage, form, list);
   container.append(wrap);
-  if (redesignOn()) {
-    const accounts = el('button', { type: 'button', class: 'btn email-accounts-trigger', 'aria-label': 'Accounts', text: 'Accounts', onclick: () => {
-    if (window.matchMedia('(max-width: 768px)').matches) { phoneDetails('Email accounts', [form, list], accounts); return; }
-    form.open = !form.open; if (form.open) emailInput.focus();
-    } });
-    accounts.insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="9" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/></svg>'); header.append(accounts);
-  }
+  const accounts = el('button', { type: 'button', class: 'btn email-accounts-trigger', 'aria-label': 'Accounts', text: 'Accounts', onclick: () => {
+  if (window.matchMedia('(max-width: 768px)').matches) { phoneDetails('Email accounts', [form, list], accounts); return; }
+  form.open = !form.open; if (form.open) emailInput.focus();
+  } });
+  accounts.insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="9" r="3.5"/><path d="M5 20c1-3.5 3.8-5 7-5s6 1.5 7 5"/></svg>'); header.append(accounts);
   refreshTriage(triage);
 
   addBtn.addEventListener("click", async () => {
@@ -111,7 +109,7 @@ async function refreshTriage(host) {
     : "Runs automatically each morning at 5:50. Nothing checked yet.";
 
   const body = [];
-  if (redesignOn() && data.generated_at) body.push(workspaceStats([
+  if (data.generated_at) body.push(workspaceStats([
     { label: 'Unread scanned', value: data.scanned ?? 0 },
     { label: 'Important', value: data.items?.length || 0 },
   ]));
@@ -119,11 +117,9 @@ async function refreshTriage(host) {
     body.push(el("div", { class: "meta", style: "color:var(--danger);", text: data.error }));
   }
   if (!data.items || data.items.length === 0) {
-    body.push(redesignOn() ? emptyState({ title: data.generated_at ? 'Nothing needs your attention' : 'Your inbox, with room to think',
+    body.push(emptyState({ title: data.generated_at ? 'Nothing needs your attention' : 'Your inbox, with room to think',
       hint: data.generated_at ? 'Nothing important in the last day.' : 'Run triage to see what needs you.',
-      actionLabel: 'Refresh now', onAction: () => runBtn.click() })
-      : el("div", { class: "meta", style: "margin-top:8px;", text:
-        data.generated_at ? "Nothing important in the last day." : "No results yet — run it to see what's worth your attention." }));
+      actionLabel: 'Refresh now', onAction: () => runBtn.click() }));
   } else {
     for (const it of data.items) {
       // Class hooks and the sender's initial are for the redesign look; the
@@ -152,27 +148,25 @@ async function refreshTriage(host) {
     ]),
     ...body,
   ]);
-  if (redesignOn()) {
-    const summary = el('div', { class: 'email-summary' });
-    const heading = card.firstElementChild;
-    const stats = body.find(node => node.classList.contains('workspace-stats'));
-    if (document.documentElement.dataset.mascot !== 'off') heading.prepend(el('span', { class: 'workspace-phone-only', 'aria-hidden': 'true' }, [createMascot({ state: 'done', size: 40, decorative: true })]));
-    const needs = el('section', { class: 'email-needs-list' });
-    const title = el('h3', { class: 'workspace-phone-only', text: 'Needs you' });
-    const phone = window.matchMedia('(max-width: 768px)');
-    const place = () => {
-      if (phone.matches) {
-        summary.replaceChildren(heading, ...(stats ? [stats] : []));
-        needs.replaceChildren(...body.filter(node => node !== stats));
-        card.replaceChildren(summary, title, needs);
-      } else card.replaceChildren(heading, ...body);
-    };
-    place(); phone.addEventListener('change', place);
-    const observer = new MutationObserver(() => {
-      if (!card.isConnected) { phone.removeEventListener('change', place); observer.disconnect(); }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
+  const summary = el('div', { class: 'email-summary' });
+  const heading = card.firstElementChild;
+  const stats = body.find(node => node.classList.contains('workspace-stats'));
+  if (document.documentElement.dataset.mascot !== 'off') heading.prepend(el('span', { class: 'workspace-phone-only', 'aria-hidden': 'true' }, [createMascot({ state: 'done', size: 40, decorative: true })]));
+  const needs = el('section', { class: 'email-needs-list' });
+  const title = el('h3', { class: 'workspace-phone-only', text: 'Needs you' });
+  const phone = window.matchMedia('(max-width: 768px)');
+  const place = () => {
+    if (phone.matches) {
+      summary.replaceChildren(heading, ...(stats ? [stats] : []));
+      needs.replaceChildren(...body.filter(node => node !== stats));
+      card.replaceChildren(summary, title, needs);
+    } else card.replaceChildren(heading, ...body);
+  };
+  place(); phone.addEventListener('change', place);
+  const observer = new MutationObserver(() => {
+    if (!card.isConnected) { phone.removeEventListener('change', place); observer.disconnect(); }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
   host.appendChild(card);
 }
 

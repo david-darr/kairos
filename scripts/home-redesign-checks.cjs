@@ -76,7 +76,7 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
     })()`), 'Week matches the label, pill, inline stats, square cells, alternating tones and weekday labels');
   };
   try {
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:false,halftone:true,mascot:true}))");
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({halftone:true,mascot:true}))");
     await js("import('/static/js/layout.js').then(m => m.resetHomeLayout())");
     for (const clear of [false, true]) {
       demoState.empty = false; demoState.homeClear = clear;
@@ -142,26 +142,5 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
     await js(`import('/static/js/layout.js').then(m => m.saveLayout(${JSON.stringify(layout)}))`);
     await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(original)}))`);
     await win.loadURL(base);
-  }
-  // Exercise the same immediate switch after reload as ui-smoke's Classic block.
-  try {
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:true}))");
-    await navigate('home');
-    await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
-    assert.ok(await js("!document.documentElement.classList.contains('kairos-redesign')"), 'Startup preserves the Classic choice');
-    assert.ok(await js("document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-header')) && !document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-stats'))"), 'Classic keeps its header and introduction above the summary strip');
-    // Startup can replace Home between renderer calls. Sample readiness and
-    // duration together so the performance assertion measures that same draw.
-    await waitFor(`(() => {
-      const b = document.querySelector('.dashboard-core');
-      if (!b?.classList.contains('is-dithered') || !b.querySelector('canvas') || !Number.isFinite(Number(b.dataset.drawMs))) return false;
-      window.__classicBannerTiming = { ms: Number(b.dataset.drawMs), width: b.clientWidth, height: b.clientHeight };
-      return true;
-    })()`);
-    assert.ok(await js("!document.querySelector('.kairos-sky-image, .kairos-sky-point, .core-motion-toggle, .core-caption, .kairos-mark')"), 'Classic has no sky scene, dot or motion control');
-    const timing = await js("window.__classicBannerTiming");
-    assert.ok(timing.ms < 400, 'Classic banner draws quickly: ' + JSON.stringify(timing));
-  } finally {
-    await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(original)}))`);
   }
 };

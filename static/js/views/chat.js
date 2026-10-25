@@ -2240,7 +2240,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
 
   const selectable = ep && ['claude_cli', 'codex_cli', 'antigravity_cli', 'api'].includes(ep.kind);
   if (!selectable) {
-    if (ep && document.documentElement.classList.contains('kairos-redesign')) {
+    if (ep) {
       menu.append(el('div', { class: 'model-version-section' }, [el('div', { class: 'model-catalog-list' }, [
         el('button', { type: 'button', class: 'model-picker-item model-catalog-item active', 'aria-current': 'true', onclick: () => closeMenu(menu) }, [
           el('span', { class: 'model-catalog-name', text: ep.model || ep.name }),
@@ -2313,14 +2313,6 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
       listWrap.appendChild(row);
     }
   };
-  // A search box only earns its place on a long list.
-  if (catalog.length > 8 && !document.documentElement.classList.contains('kairos-redesign')) {
-    section.appendChild(el('div', { class: 'model-version-search' }, [el('input', {
-      id: 'chat-model-search', type: 'search', placeholder: 'Search models',
-      autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Search models',
-      oninput: e => renderList(e.target.value),
-    })]));
-  }
   renderList('');
   section.appendChild(listWrap);
 
@@ -2358,7 +2350,7 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     ...(ep.kind === 'api' ? [] : [el('button', { type: 'button', class: 'model-picker-item', text: 'Use CLI default', onclick: () => save('') })]),
     el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) })]));
   menu.append(section, setupItem());
-  if (document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches) {
+  if (!matchMedia('(max-width: 768px)').matches) {
     const catalogs = await Promise.all(endpoints.filter(other => other.id !== ep.id).map(async other => [other.id, await loadModelCatalog(other)]));
     if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
     appendEndpointCatalogs(menu, catalogs, async (endpointId, model) => {

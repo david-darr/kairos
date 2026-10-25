@@ -19,10 +19,6 @@ import { restoreWelcomeAppearance } from "./appearance.js";
 // A development copy (scripts/dev_instance.py) names itself on the sign-in
 // card too, so a password is never typed into the wrong window by mistake.
 let appName = "Kairos";
-document.addEventListener('kairos:appearance', () => {
-  for (const link of document.querySelectorAll('.welcome-back-link')) link.tabIndex = document.documentElement.classList.contains('kairos-redesign') ? 0 : -1;
-});
-
 export async function run(overlay) {
   restoreWelcomeAppearance();
   const status = await api("/api/auth/status");
@@ -53,7 +49,7 @@ function renderLocalAccessLocked(overlay) {
 }
 
 function backLink(text, onclick) {
-  return el("div", { class: "sub welcome-back-link", role: "button", tabindex: document.documentElement.classList.contains('kairos-redesign') ? "0" : "-1", onkeydown: (e) => { if (document.documentElement.classList.contains('kairos-redesign') && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onclick(); } }, style: "margin-top:10px;text-align:center;cursor:pointer;text-decoration:underline;", text, onclick });
+  return el("div", { class: "sub welcome-back-link", role: "button", tabindex: "0", onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ")) { e.preventDefault(); onclick(); } }, style: "margin-top:10px;text-align:center;cursor:pointer;text-decoration:underline;", text, onclick });
 }
 
 function card(children) {

@@ -109,16 +109,14 @@ inflight = [{ sessionId: 'old', status: 'done' }]; listener();
 assert(rows[0].querySelector('.rd-conversation-state').classes.has('is-finished'));
 const rename = el('input', { class: 'session-rename-input' }); rows[0].replaceChildren(rename);
 inflight = []; listener(); assert.equal(rows[0].childNodes[0], rename, 'live updates preserve inline rename');
-// Restore controller title before exercising appearance reversal.
+// Phone layout restores the original controller nodes.
 rows[0].replaceChildren(originals[0]);
-root.classList.remove('kairos-redesign'); document.listeners['kairos:appearance']();
+desktop.matches = false; desktop.change();
 assert.equal(panel.children[0], newChat);
-assert.deepEqual(list.children, rows, 'Classic restores original row ordering');
+assert.deepEqual(list.children, rows, 'Phone restores original row ordering');
 rows.forEach((row, i) => assert.equal(row.childNodes[0], originals[i]));
-assert.equal(container.querySelector('.rd-conversations-header'), null);
-root.classList.add('kairos-redesign'); desktop.matches = false; desktop.change();
 assert.equal(container.querySelector('.rd-conversations-header'), null, 'phone list is untouched');
 desktop.matches = true; desktop.change(); dispose();
 assert.equal(listener, null); assert.equal(panel.children[0], newChat);
 assert.equal(container.querySelector('.rd-conversations-header'), null);
-console.log('PASS: date groups, week/DST boundaries, real working state, project counts, search, rename, Classic/phone restoration and cleanup.');
+console.log('PASS: date groups, week/DST boundaries, real working state, project counts, search, rename, phone restoration and cleanup.');

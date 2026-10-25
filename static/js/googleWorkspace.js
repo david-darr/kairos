@@ -35,7 +35,7 @@ const shortDate = value => {
 // Phone rows: size for stored files, the Google kind for native ones.
 const kindLabel = file => KIND_LABEL[kindOf(file)] || `${extensionOf(file)} file`;
 const phoneMeta = file => [file.size != null ? formatBytes(file.size) : kindLabel(file), shortDate(file.modifiedTime)].filter(Boolean).join(' · ');
-const phoneDrive = () => document.documentElement.classList.contains('kairos-redesign') && matchMedia('(max-width: 768px)').matches;
+const phoneDrive = () => matchMedia('(max-width: 768px)').matches;
 // The Drive being browsed: an opaque account id from /status. Every Drive,
 // Sheets and Forms request names it; the server checks it is this user's.
 let driveAccount = null;

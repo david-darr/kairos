@@ -95,7 +95,7 @@ const SECTION_GROUPS = [
     id: "connections", label: "Connections", sections: [
       { id: "integrations", label: "Integrations", render: renderIntegrationsPanel,
         description: "Tool servers, calendars, contacts and API services Kairos can use.",
-        keywords: ["mcp", "connector", "tools", "caldav", "ical", "calendar feed", "google", "api service"] },
+        keywords: ["calendar", "email", "mcp", "connector", "tools", "caldav", "ical", "calendar feed", "google", "api service"] },
       { id: "channels", label: "Channels", render: renderChannelsPanel,
         description: "Reach Kairos and your agents from Discord, Telegram, Slack and other apps, and choose where task results and notifications go.",
         keywords: ["discord", "bot", "token", "telegram", "slack", "signal", "imessage", "email", "sms", "whatsapp", "matrix",
@@ -540,20 +540,19 @@ function visibleSections() {
     .filter((group) => !group.admin || cachedStatus.is_admin)
     .map((group) => ({ ...group, sections: group.sections.filter((section) => !section.admin || cachedStatus.is_admin) }))
     .filter((group) => group.sections.length);
-  if (!document.documentElement.classList.contains('kairos-redesign')) return groups;
   // Regroup only after applying both group and section authorization gates.
   // The original section objects retain their renderers, keywords and deep links.
   const sections = new Map(groups.flatMap(group => group.sections).map(section => [section.id, section]));
-  for (const [id, label] of [['added-models', 'Models and connections'], ['speech', 'Voice / Speech'], ['integrations', 'Calendar and email'], ['system', 'Backups and system']]) {
+  for (const [id, label] of [['added-models', 'Models and connections'], ['speech', 'Voice / Speech'], ['system', 'Backups and system']]) {
     const section = sections.get(id);
     if (section) sections.set(id, { ...section, label, keywords: [...section.keywords, section.label.toLowerCase()] });
   }
   return [
-    ['general', 'General', ['appearance', 'notifications', 'speech']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions']],
-    ['your-data', 'Your data', ['vault', 'integrations', 'file-checkpoints', 'system']],
-    ['access', 'Access', ['remote', 'account', 'users']],
-    ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'channels', 'forge', 'hooks', 'runs', 'sandbox-changes']],
+    ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations']],
+    ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
+    ['access', 'Access', ['account', 'users']],
+    ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],
   ].map(([id, label, ids]) => ({ id, label, sections: ids.map(id => sections.get(id)).filter(Boolean) }))
     .filter(group => group.sections.length);
 }

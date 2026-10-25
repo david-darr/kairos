@@ -1,5 +1,4 @@
 // Real Home UI as shipped (the redesign is the default look): cards, honest meters, detail access and navigation.
-// The old tile look is covered by classic-look-checks.cjs.
 const assert = require('node:assert/strict');
 module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay}) => {
   const ready = async () => waitFor("!!document.querySelector('[data-home-section=projects] .dashboard-row') && !!document.querySelector('[data-home-section=agents] .dashboard-agent-dot') && !!document.querySelector('[data-home-section=store] .dashboard-row') && document.querySelectorAll('.rd-usage-provider').length===2");
@@ -68,13 +67,6 @@ module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay})
   await waitFor("!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('[data-home-section=chats], [data-home-section=schedule], [data-home-section=projects], [data-home-section=agents], [data-home-section=store]')");
   assert.ok(await js("!!document.querySelector('[data-home-section=system]')"), 'Systems remains when every optional list is empty');
   delete demoState.tabs;
-  // Classic still renders empty cards: retain the short-copy check there.
-  await js("import('/static/js/appearance.js').then(m=>m.updateAppearance({classic:true}))");
-  await navigate('home'); await waitFor("document.querySelectorAll('.dashboard-empty').length>=3");
-  assert.ok(await js("[...document.querySelectorAll('.dashboard-empty')].every(n=>n.textContent.length<70)"),'Empty cards use short labels');
-  await js("import('/static/js/appearance.js').then(m=>m.updateAppearance({classic:false}))");
-  // Re-enable optional sections after Classic's automatic arrangement reset.
-  await js("import('/static/js/layout.js').then(m=>{const l=m.getLayout(); l.home=['activity',...m.HOME_SECTIONS.map(s=>s.id).filter(id=>id!=='activity')]; l.hiddenHome=[]; m.saveLayout(l);})");
   demoState.empty=false;demoState.isAdmin=false;
   await navigate('home');await delay(300);
   assert.ok(await js("![...document.querySelectorAll('[data-home-section=agents],[data-home-section=store]')].some(n=>!n.hidden)"),'Non-admin access is preserved');

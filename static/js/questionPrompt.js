@@ -12,7 +12,7 @@ document.addEventListener('kairos:permission-closed', event => dismissQuestionPr
 
 export function showQuestionPrompt(request, onAnswered, { dock = null, mount = document.body } = {}) {
   dismissQuestionPrompt();
-  const phoneSheet = document.documentElement?.classList.contains('kairos-redesign') && matchMedia('(max-width: 768px)').matches;
+  const phoneSheet = matchMedia('(max-width: 768px)').matches;
   const previous = document.activeElement;
   let sending = false, expired = false, removed = false, timer;
   const error = el('p', { role: 'alert', class: 'question-error' });

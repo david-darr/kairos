@@ -79,10 +79,6 @@ async function run() {
   assert.equal(container.querySelector('.rd-chat-idle').hidden, false);
   assert.equal(dock.parent, container.querySelector('.rd-chat-idle-layout'));
   assert.equal(menu.classList.contains('rd-menu-in'), true);
-  root.classList.remove('kairos-redesign'); document.listeners['kairos:appearance']();
-  assert.equal(row.childNodes[0], original); assert.equal(row.childNodes.length, 1); assert.equal(row.hidden, false);
-  assert.equal(container.querySelector('.rd-chat-idle').hidden, true);
-  root.classList.add('kairos-redesign'); document.listeners['kairos:appearance']();
   processing = false; streamListener(); const requestCount = requests;
   streamListener(); assert.equal(requests, requestCount, 'stream updates must not fetch session metadata');
   main.classList.remove('is-empty'); observers[0].fn(); assert.equal(container.querySelector('.rd-chat-idle').hidden, true);
@@ -91,6 +87,6 @@ async function run() {
   assert.equal(container.querySelector('.rd-chat-idle-layout'), null);
   assert.equal(container.querySelector('.rd-chat-idle'), null); assert.equal(menu.classList.contains('rd-menu-in'), false);
   assert(observers.every(observer => observer.disconnected));
-  console.log('PASS: real activity only, mascot off, empty message list, Classic restoration, stream fetch bounds, cleanup.');
+  console.log('PASS: real activity only, mascot off, empty message list, stream fetch bounds, cleanup.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

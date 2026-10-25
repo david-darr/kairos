@@ -26,41 +26,36 @@ export async function render(container) {
       addBtn,
     ]),
   ]);
-  if (redesignOn()) {
-    dueInput.setAttribute('aria-label', 'Due time');
-    const dueField = dueInput.parentElement;
-    dueField.classList.add('notes-due-field');
-    const dueToggle = el('button', { type: 'button', class: 'btn quiet workspace-phone-only notes-due-toggle', text: 'Add a due time',
-      'aria-expanded': 'false', onclick: () => {
-        const open = !form.classList.contains('notes-due-open');
-        form.classList.toggle('notes-due-open', open); dueToggle.setAttribute('aria-expanded', String(open));
-        if (open) dueInput.focus();
-      } });
-    form.querySelector('.form-grid').insertBefore(dueToggle, dueField);
-  }
+  dueInput.setAttribute('aria-label', 'Due time');
+  const dueField = dueInput.parentElement;
+  dueField.classList.add('notes-due-field');
+  const dueToggle = el('button', { type: 'button', class: 'btn quiet workspace-phone-only notes-due-toggle', text: 'Add a due time',
+    'aria-expanded': 'false', onclick: () => {
+      const open = !form.classList.contains('notes-due-open');
+      form.classList.toggle('notes-due-open', open); dueToggle.setAttribute('aria-expanded', String(open));
+      if (open) dueInput.focus();
+    } });
+  form.querySelector('.form-grid').insertBefore(dueToggle, dueField);
 
   const list = el("div", { id: "notes-list", class: 'rd-stagger', style: "margin-top:14px;" });
-  const stats = el('div', { class: 'notes-overview', hidden: !redesignOn() });
+  const stats = el('div', { class: 'notes-overview', hidden: false });
   list.overview = stats;
-  if (redesignOn()) {
-    if (window.matchMedia('(max-width: 768px)').matches) textInput.placeholder = 'Capture a thought…';
-    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New note', onclick: () => textInput.focus() });
-    create.innerHTML = ICONS.plus;
-    header.append(create);
-    const sort = el('select', { class: 'notes-sort', 'aria-label': 'Sort notes' }, [
-      el('option', { value: 'saved', text: 'Saved order' }), el('option', { value: 'due', text: 'Due time' }),
-      el('option', { value: 'title', text: 'A–Z' }),
-    ]);
-    sort.onchange = () => { list.sortOrder = sort.value; refresh(list, textInput); };
-    header.append(sort);
-  }
-  // Redesign preview only: a bar above the list with "Clear finished". It stays
-  // hidden unless the switch is on and at least one note is done (see refresh).
+  if (window.matchMedia('(max-width: 768px)').matches) textInput.placeholder = 'Capture a thought…';
+  const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New note', onclick: () => textInput.focus() });
+  create.innerHTML = ICONS.plus;
+  header.append(create);
+  const sort = el('select', { class: 'notes-sort', 'aria-label': 'Sort notes' }, [
+    el('option', { value: 'saved', text: 'Saved order' }), el('option', { value: 'due', text: 'Due time' }),
+    el('option', { value: 'title', text: 'A–Z' }),
+  ]);
+  sort.onchange = () => { list.sortOrder = sort.value; refresh(list, textInput); };
+  header.append(sort);
+  // Show the note count and offer "Clear finished" when any notes are done.
   const finishedBar = el("div", { class: "notes-finished-bar", hidden: true });
   list.finishedBar = finishedBar;
 
   header.append(finishedBar);  // right side of the page header, so it adds no row of its own
-  if (redesignOn()) {
+  {
     const heading = el('div', { class: 'notes-list-heading workspace-phone-only' }, [el('h3', { text: 'Open' })]);
     heading.append(header.querySelector('.notes-sort'));
     // On desktop the original sort remains in the header.
@@ -114,22 +109,19 @@ function shortDue(iso) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-const redesignOn = () => document.documentElement.classList.contains("kairos-redesign");
-
-// "Clear finished" (redesign preview): deletes every completed note through the
+// "Clear finished" deletes every completed note through the
 // same DELETE route the single delete uses, after the app's confirm dialog.
 function drawFinishedBar(list, focusTarget, notes) {
   const bar = list.finishedBar;
   if (!bar) return;
   const done = notes.filter((n) => n.completed);
   bar.replaceChildren();
-  bar.hidden = !redesignOn();
-  if (bar.hidden) return;
+  bar.hidden = false;
   const count = `${notes.length} note${notes.length === 1 ? "" : "s"}` + (done.length ? ` · ${done.length} finished` : "");
   bar.append(el("span", { class: "notes-finished-count", text: count }));
   if (!done.length) return;
   const clear = el("button", { type: "button", class: "btn", text: "Clear finished", 'aria-label': 'Clear finished' });
-  if (redesignOn()) clear.insertAdjacentHTML('afterbegin', ICONS.trash);
+  clear.insertAdjacentHTML('afterbegin', ICONS.trash);
   clear.addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "Clear finished notes?",
@@ -150,7 +142,7 @@ function drawFinishedBar(list, focusTarget, notes) {
 
 function dueNode(note, dueText) {
   const full = `Due ${dueText}`;
-  if (!redesignOn()) return el("div", { class: "meta", text: full });
+
   const overdue = !note.completed && new Date(note.due_date) < new Date();
   return el("div", { class: "meta" + (overdue ? " is-overdue" : ""), text: shortDue(note.due_date), title: full });
 }
@@ -159,7 +151,7 @@ async function refresh(list, focusTarget) {
   const notes = await api("/api/notes");
   if (list.sortOrder === 'due') notes.sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : Infinity) - (b.due_date ? new Date(b.due_date).getTime() : Infinity));
   if (list.sortOrder === 'title') notes.sort((a, b) => a.text.localeCompare(b.text));
-  if (list.overview) list.overview.hidden = !redesignOn();
+  if (list.overview) list.overview.hidden = false;
   const now = new Date();
   const end = new Date(now); end.setDate(end.getDate() + 7);
   list.overview?.replaceChildren(workspaceStats([
@@ -193,7 +185,7 @@ async function refresh(list, focusTarget) {
     });
 
     const title = el("div", { class: "title note-title" + (note.completed ? " is-done is-settled" : ""), text: note.text });
-    if (redesignOn()) title.title = note.text;  // compact rows truncate; the full text stays in the tooltip
+    title.title = note.text;  // compact rows truncate; the full text stays in the tooltip
     const dueText = note.due_date ? new Date(note.due_date).toLocaleString() : null;
     const delBtn = iconButton(ICONS.trash, "Delete note", async () => {
       const ok = await confirmDialog({
@@ -220,12 +212,10 @@ async function refresh(list, focusTarget) {
       ]),
     ]);
     list.appendChild(card);
-    if (redesignOn()) {
-      const actions = card.querySelector('.row-actions');
-      const open = el('button', { type: 'button', class: 'workspace-phone-only note-open', text: note.text, 'aria-label': `Note details: ${note.text}`, 'aria-haspopup': 'dialog',
-        onclick: () => phoneDetails('Note', [actions], open, note.text) });
-      title.replaceChildren(el('span', { class: 'note-desktop-text', text: note.text }), open);
-      if (!dueText) title.after(el('div', { class: 'meta workspace-phone-only', text: 'No date' }));
-    }
+    const actions = card.querySelector('.row-actions');
+    const open = el('button', { type: 'button', class: 'workspace-phone-only note-open', text: note.text, 'aria-label': `Note details: ${note.text}`, 'aria-haspopup': 'dialog',
+      onclick: () => phoneDetails('Note', [actions], open, note.text) });
+    title.replaceChildren(el('span', { class: 'note-desktop-text', text: note.text }), open);
+    if (!dueText) title.after(el('div', { class: 'meta workspace-phone-only', text: 'No date' }));
   }
 }

@@ -19,20 +19,9 @@ export const HOME_SECTIONS = [
   { id: "projects", label: "Projects" },
   { id: "activity", label: "Activity" },
   { id: "system", label: "Systems" },
+  { id: "needs", label: "Needs you" },
+  { id: "working", label: "Working now" },
 ];
-// Redesign preview only: Home's "Needs you" card (redesignHome.js). It is part
-// of the layout (and listed in Settings > Layout) only while the preview is on,
-// so with the preview off this module behaves exactly as before.
-const NEEDS = { id: "needs", label: "Needs you" };
-const WORKING = { id: "working", label: "Working now" };
-const needsOn = () => document.documentElement.classList.contains("kairos-redesign");
-function syncNeeds() {
-  for (const section of [NEEDS, WORKING]) {
-    const at = HOME_SECTIONS.indexOf(section);
-    if (needsOn() && at < 0) HOME_SECTIONS.push(section);
-    else if (!needsOn() && at >= 0) HOME_SECTIONS.splice(at, 1);
-  }
-}
 // Home is never hidden: it's the way back from anywhere.
 export const ALWAYS_SHOWN = "home";
 
@@ -41,9 +30,9 @@ const DEFAULT_GROUPS = {
   workspace: ["notes", "library", "calendar", "email", "tasks"],  // Designs live in Library (2026-10-22).
   intelligence: ["tool-store", "cookbook"],
 };
-const defaults = () => (syncNeeds(), {
+const defaults = () => ({
   groups: structuredClone(DEFAULT_GROUPS), hiddenTabs: [],
-  home: HOME_SECTIONS.map((s) => s.id), hiddenHome: needsOn() ? ["needs", "working"] : [],
+  home: HOME_SECTIONS.map((s) => s.id), hiddenHome: ["needs", "working"],
 });
 
 let layout = defaults(), storageKey = "", known = [], cards = [];
@@ -51,7 +40,6 @@ let layout = defaults(), storageKey = "", known = [], cards = [];
 const ids = (value, maxLength = 80) => Array.isArray(value) ? [...new Set(value.filter((v) => typeof v === "string" && v.length < maxLength))] : [];
 const tabCardId = (id) => id.startsWith("tab:");
 function normalize(raw = {}) {
-  syncNeeds();
   const value = defaults();
   if (raw.groups && typeof raw.groups === "object") {
     for (const { id } of SIDEBAR_GROUPS) value.groups[id] = ids(raw.groups[id]);
@@ -66,7 +54,7 @@ function normalize(raw = {}) {
   value.hiddenHome = ids(raw.hiddenHome, Infinity).filter((id) => homeIds.includes(id) || tabCardId(id));
   // A card added after this arrangement was saved starts hidden, like a new tab card.
   for (const id of ["needs", "working"]) {
-    if (needsOn() && !ids(raw.home, Infinity).includes(id) && !value.hiddenHome.includes(id)) value.hiddenHome.push(id);
+    if (!ids(raw.home, Infinity).includes(id) && !value.hiddenHome.includes(id)) value.hiddenHome.push(id);
   }
   return value;
 }
@@ -88,7 +76,7 @@ export function saveLayout(next) {
 export function resetSidebarLayout() { const d = defaults(); saveLayout({ ...layout, groups: d.groups, hiddenTabs: [] }); }
 export function resetHomeLayout() {
   const tabIds = layout.home.filter(tabCardId);
-  saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: [...(needsOn() ? ["needs", "working"] : []), ...tabIds] });
+  saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: ["needs", "working", ...tabIds] });
 }
 
 // Remember placement even when a tab is off. Only newly discovered cards
@@ -122,12 +110,3 @@ export function sidebarLayout(tabIds, { includeHidden = false } = {}) {
 }
 
 export function homeLayout() { return { order: layout.home.slice(), hidden: layout.hiddenHome.slice() }; }
-
-// The preview switch decides whether "needs" is part of the layout; re-read the
-// saved one when it flips (the in-memory copy dropped or never had it).
-document.addEventListener("kairos:appearance", () => {
-  const before = HOME_SECTIONS.includes(NEEDS);
-  syncNeeds();
-  if (before === HOME_SECTIONS.includes(NEEDS) || !storageKey) return;
-  try { layout = normalize(JSON.parse(localStorage.getItem(storageKey) || "{}")); } catch { layout = defaults(); }
-});

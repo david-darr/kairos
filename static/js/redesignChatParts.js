@@ -45,9 +45,9 @@ export function mountChatParts(container) {
     idleLayout.append(idle, dock);
   }
   const disposeConversations = mountConversations(container);
-  const enabled = () => document.documentElement.classList.contains('kairos-redesign');
+
   const sync = () => {
-    idle.hidden = !enabled() || !main.classList.contains('is-empty');
+    idle.hidden = !main.classList.contains('is-empty');
     const busy = chatStream.listInFlight().some(entry => entry.status === 'processing');
     idle.querySelector('p').textContent = busy ? 'Start something new while your other work continues.' : 'Kip is resting until you need it.';
     idle.querySelector('kairos-mascot')?.setAttribute('state', busy ? 'idle' : 'sleeping');

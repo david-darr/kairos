@@ -5,7 +5,7 @@
 // for its linked chat. The old Design tab and #/design/<id> links redirect to
 // Library > Designs (app.js).
 import { api, el, toast, openPanelDialog } from '../api.js';
-import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState } from '../workspaceParts.js';
 import { mountSharedDesignCanvas as mountDesignCanvas } from '../sharedDesignCanvas.js';
 import { mountDesignComposer } from '../designComposer.js';
 import { mountDesignModelPicker } from '../designModelPicker.js';
@@ -88,16 +88,14 @@ export async function renderDesignList(host) {
     ]);
   });
   grid.replaceChildren(...cards);
-  if (redesignOn()) {
-    const search = el('input', { type: 'search', class: 'design-search', placeholder: 'Search designs', 'aria-label': 'Search designs' });
-    search.addEventListener('input', () => {
-      const query = search.value.trim().toLocaleLowerCase();
-      const matches = cards.filter((card, i) => `${designs[i].title} ${(designs[i].board_titles || []).join(' ')}`.toLocaleLowerCase().includes(query));
-      grid.replaceChildren(...(matches.length ? matches : [emptyState({ title: 'No designs match', hint: 'Try a different title or board name.',
-        actionLabel: 'Clear search', onAction: () => { search.value = ''; search.dispatchEvent(new Event('input')); search.focus(); } })]));
-    });
-    host.querySelector('.design-home-actions').prepend(search);
-  }
+  const search = el('input', { type: 'search', class: 'design-search', placeholder: 'Search designs', 'aria-label': 'Search designs' });
+  search.addEventListener('input', () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    const matches = cards.filter((card, i) => `${designs[i].title} ${(designs[i].board_titles || []).join(' ')}`.toLocaleLowerCase().includes(query));
+    grid.replaceChildren(...(matches.length ? matches : [emptyState({ title: 'No designs match', hint: 'Try a different title or board name.',
+      actionLabel: 'Clear search', onAction: () => { search.value = ''; search.dispatchEvent(new Event('input')); search.focus(); } })]));
+  });
+  host.querySelector('.design-home-actions').prepend(search);
 }
 
 async function openDesign(container, designId, options) {
@@ -118,21 +116,19 @@ async function openDesign(container, designId, options) {
   const modelHost = el('div', { class: 'design-model-host' });
   const header = el('div', { class: 'design-page-header' }, [back, el('span', { class: 'design-spacer' }),
     el('label', { class: 'design-chat-pick' }, [el('span', { class: 'meta', text: 'Chat' }), chatPick]), modelHost, forge, more, remove]);
-  if (redesignOn()) {
-    const controls = el('div', { class: 'design-page-options' });
-    // Keep the model picker on the page when phone-only options move into a sheet.
-    controls.append(header.querySelector('.design-chat-pick'), forge, more, remove);
-    const optionsButton = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '…', 'aria-label': 'Design options', onclick: () => {
-      const dialog = openPanelDialog({ title: 'Design options', body: controls, owner: container, opener: optionsButton,
-        onClose: () => header.append(controls) });
-      dialog.panel.dataset.view = 'library';
-    } });
-    header.append(optionsButton, controls);
-  }
+  const controls = el('div', { class: 'design-page-options' });
+  // Keep the model picker on the page when phone-only options move into a sheet.
+  controls.append(header.querySelector('.design-chat-pick'), forge, more, remove);
+  const optionsButton = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '…', 'aria-label': 'Design options', onclick: () => {
+    const dialog = openPanelDialog({ title: 'Design options', body: controls, owner: container, opener: optionsButton,
+      onClose: () => header.append(controls) });
+    dialog.panel.dataset.view = 'library';
+  } });
+  header.append(optionsButton, controls);
   const canvasHost = el('div', { class: 'design-page-canvas' });
   const composerHost = el('div', { class: 'design-page-composer' });
   const identity = el('div', { class: 'design-page-identity' });
-  if (redesignOn()) header.insertBefore(identity, header.children[1]);
+  header.insertBefore(identity, header.children[1]);
   const page = el('div', { class: 'design-page rd-push-in', 'data-design-id': designId }, [header, canvasHost, composerHost]);
   container.replaceChildren(page);
   container.classList.add('library-design-open');

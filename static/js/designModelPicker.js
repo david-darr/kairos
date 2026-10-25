@@ -58,7 +58,7 @@ export function mountDesignModelPicker(host, { getSession }) {
     endpoints = choices;
     const endpoint = endpoints.find(item => item.id === choice.endpointId);
     catalog = endpoint && EDITABLE.includes(endpoint.kind) ? await api(`/api/models/${endpoint.id}/catalog`).catch(() => []) : [];
-    otherCatalogs = document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches
+    otherCatalogs = !matchMedia('(max-width: 768px)').matches
       ? await Promise.all(endpoints.filter(item => item.id !== choice.endpointId).map(async item => [item.id, await api(`/api/models/${item.id}/catalog`).catch(() => [])])) : [];
     if (ticket !== generation) return;
     paintLabel();
@@ -72,7 +72,7 @@ export function mountDesignModelPicker(host, { getSession }) {
       const endpoint = endpoints.find(item => item.id === choice.endpointId);
       catalog = endpoint && EDITABLE.includes(endpoint.kind) ? await api(`/api/models/${endpoint.id}/catalog`).catch(() => []) : [];
       otherCatalogs = [];
-      if (document.documentElement.classList.contains('kairos-redesign') && !matchMedia('(max-width: 768px)').matches) {
+      if (!matchMedia('(max-width: 768px)').matches) {
         otherCatalogs = await Promise.all(endpoints.filter(item => item.id !== choice.endpointId).map(async item => [item.id, await api(`/api/models/${item.id}/catalog`).catch(() => [])]));
       }
       paintLabel(); paintMenu();

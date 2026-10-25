@@ -15,6 +15,35 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   };
   const preview = () => js("document.querySelector('.appearance-preview canvas').toDataURL()");
   await open();
+  // Keep every visible card row congruent at the reviewed desktop and phone sizes.
+  for (const [width, height] of [[900, 800], [1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
+    win.setContentSize(width, height); await delay(250);
+    for (const mode of ['default', 'color', 'image', 'shader']) {
+      await set({ mode }); await delay(250);
+      const failures = await js(`(() => {
+        const failures = [], panel = document.querySelector('.appearance-panel');
+        if (panel.scrollWidth > panel.clientWidth + 1) failures.push('panel overflows');
+        for (const selector of ['.appearance-modes', '.appearance-chat-styles', '.appearance-halftone-grid', '.appearance-effects-grid']) {
+          const grid = panel.querySelector(selector);
+          if (!grid.getClientRects().length) continue;
+          const rows = new Map(), box = grid.getBoundingClientRect();
+          for (const card of grid.children) {
+            const rect = card.getBoundingClientRect(), top = Math.round(rect.top);
+            if (!rows.has(top)) rows.set(top, []);
+            rows.get(top).push(rect);
+          }
+          for (const row of rows.values()) {
+            if (Math.abs(row[0].left - box.left) > 2 || Math.abs(row.at(-1).right - box.right) > 2) failures.push(selector + ' does not fill row');
+            for (const rect of row) if (Math.abs(rect.width - row[0].width) > 1 || Math.abs(rect.height - row[0].height) > 1) failures.push(selector + ' has unequal cards');
+          }
+        }
+        if (panel.querySelector('#appearance-classic')) failures.push('Classic toggle remains');
+        return failures;
+      })()`);
+      assert.deepEqual(failures, [], `Appearance ${mode} at ${width}x${height}`);
+    }
+  }
+  win.setContentSize(1440, 900); await delay(250); await set({ mode: 'default' });
   assert.equal(await js("document.querySelectorAll('.appearance-mode').length"), 4);
   assert.equal(await js("document.querySelector('[data-mode=default] strong').textContent"), 'Kairos');
   assert.equal(await js("document.querySelector('.appearance-preview-copy strong').textContent"), 'Not more time. The right time.');

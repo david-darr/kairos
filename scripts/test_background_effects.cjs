@@ -20,7 +20,10 @@ class Element extends Events {
     super();
     this.tag = tag; this.width = 1; this.height = 1; this.clientWidth = 180; this.clientHeight = 100;
     this.dataset = {}; this.style = { setProperty() {}, removeProperty() {} }; this.isConnected = true; this.children = []; this.visible = true;
-    this.classList = { add() {}, remove() {}, toggle() {} };
+    const classes = new Set();
+    this.classList = { add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name),
+      toggle(name, force) { const on = force ?? !classes.has(name); if (on) classes.add(name); else classes.delete(name); return on; } };
   }
   setAttribute() {}
   checkVisibility() { return this.visible; }
@@ -162,6 +165,25 @@ class Element extends Events {
   modules.delete(appearancePath);
   const realAppearance = await load(appearancePath); await realAppearance.evaluate();
   const api = realAppearance.namespace;
+  // Both account and signed-out legacy settings migrate without losing controls.
+  saved.set('jarvis:welcome-appearance:v1', JSON.stringify({ classic: true, mode: 'color', color: '#233447', halftone: false }));
+  api.restoreWelcomeAppearance();
+  assert.ok(document.documentElement.classList.contains('kairos-redesign'));
+  assert.equal(api.getAppearance().color, '#233447');
+  assert.equal(api.getAppearance().halftone, false);
+  assert.ok(!('classic' in JSON.parse(saved.get('jarvis:welcome-appearance:v1'))));
+  saved.set('jarvis:appearance:v1:legacy', JSON.stringify({ classic: true, redesign: false, mode: 'color', color: '#233447', chatStyle: 'terminal', motion: false, mascot: false }));
+  await api.initAppearance('legacy');
+  assert.ok(document.documentElement.classList.contains('kairos-redesign'));
+  for (const value of [api.getAppearance(), JSON.parse(saved.get('jarvis:appearance:v1:legacy'))]) {
+    assert.ok(!('classic' in value) && !('redesign' in value));
+    assert.equal(value.color, '#233447'); assert.equal(value.chatStyle, 'terminal');
+    assert.equal(value.motion, false); assert.equal(value.mascot, false);
+  }
+  await api.resetAppearance();
+  assert.ok(document.documentElement.classList.contains('kairos-redesign'));
+  assert.equal(api.getAppearance().mode, 'default');
+  assert.equal(api.getAppearance().mascot, true);
   await api.initAppearance('one');
   api.updateAppearance({ backgroundEffect: 'binary', animatedPiece: 'snowfall',
     effectOptions: { ...api.getAppearance().effectOptions, binary: { density: 13, motion: false, tint: 'picture' } } });

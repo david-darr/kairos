@@ -438,6 +438,7 @@ async function buildSidebarFooter() {
   userName.textContent = displayName;
   card.append(avatar, userName);
 
+  // Profile reuses these hidden account actions and their authorization gates.
   const menu = document.createElement("div");
   menu.className = "overflow-menu rd-menu-in hidden";
   menu.style.cssText = "position:absolute;bottom:calc(100% + 6px);left:0;min-width:170px;";
@@ -490,11 +491,8 @@ async function buildSidebarFooter() {
   cardWrap.append(card, menu);
   card.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (document.documentElement.classList.contains('kairos-redesign')) {
-      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(card));
-    } else menu.classList.toggle("hidden");
+    import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(card));
   });
-  document.addEventListener("click", () => menu.classList.add("hidden"));
 
   const settingsBtn = document.createElement("button");
   settingsBtn.type = "button";
@@ -564,7 +562,6 @@ async function boot() {
 
   const settings = await api("/api/settings");
   const app = document.getElementById("app");
-
 
   if (!settings.onboarding_complete) {
     // The live feed also carries terminal pairing prompts (cliPair.js), which

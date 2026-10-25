@@ -22,7 +22,7 @@ class Node {
 }
 const document = { activeElement: null, body: new Node('body'), handlers: {}, addEventListener(name, fn) { this.handlers[name] = fn; } };
 const posts = [];
-const context = vm.createContext({ document, Date, Set, Object, encodeURIComponent, setTimeout, clearTimeout,
+const context = vm.createContext({ document, matchMedia: () => ({ matches: false }), Date, Set, Object, encodeURIComponent, setTimeout, clearTimeout,
   el: (tag, attrs, children) => new Node(tag, attrs, children), ICONS: { close: '' }, api: async (path, options) => posts.push([path, JSON.parse(options.body)]) });
 let code = fs.readFileSync('static/js/questionPrompt.js', 'utf8').replace(/^import .*$/gm, '').replaceAll('export function ', 'function ');
 vm.runInContext(code + '\nglobalThis.show = showQuestionPrompt; globalThis.dismiss = dismissQuestionPrompt;', context);

@@ -178,28 +178,21 @@ for (const selector of ['.hm-phone-customize', '.hm-customize']) {
   assert.equal(document.activeElement, opener, `Customize restores focus to ${selector} after an unfocused click`);
   assert.equal(document.body.querySelector('.hm-sheet-root'), null, 'Customize removes the sheet on Done');
 }
-on = false; assert.equal(arrange(), false);
-assert.equal(banner.parentElement, hero, 'Classic gets the original backdrop back');
-assert.equal(hero.parentElement, content, 'Classic restores hero above the grid');
-assert.equal(header.parentElement, hero); assert.equal(next.parentElement, hero, 'Classic details are restored');
-assert.ok(!hero.properties.has('--rd-span'), 'Classic hero has no redesign grid span');
-assert.ok(!mascot.attributes.has('follow-pointer'), 'Classic disables pointer following');
-assert.equal(content.querySelector('.hm-heading'), null, 'Classic has no redesign heading');
 ui.dispose(); assert.equal(listener, null, 'Activity subscription is disposed');
-console.log('PASS: Home gates, week matrix, live transitions, refresh motion, custom order, Classic and cleanup.');
+console.log('PASS: Home gates, week matrix, live transitions, refresh motion, custom order and cleanup.');
 
-// Account startup must not overwrite a Classic selection made before auth resolves.
+// Account startup must not overwrite an appearance choice made before auth resolves.
 (async () => {
   const source = fs.readFileSync('static/js/appearance.js', 'utf8');
   const startup = source.slice(source.indexOf('export async function initAppearance'), source.indexOf('// Validate, decode'))
     .replace(/export /g, '');
   const saved = new Map([
-    ['jarvis:appearance:v1:alex', JSON.stringify({ classic: false, color: '#abcdef' })],
-    ['jarvis:appearance:v1:other', JSON.stringify({ classic: false })],
+    ['jarvis:appearance:v1:alex', JSON.stringify({ motion: true, color: '#abcdef' })],
+    ['jarvis:appearance:v1:other', JSON.stringify({ motion: true })],
   ]);
   const state = {
     localStorage: { getItem: key => saved.get(key), setItem: (key, value) => saved.set(key, value) },
-    normalize: value => ({ classic: false, ...value }),
+    normalize: value => ({ motion: true, ...value }),
     ensureCanvases() {}, apply() {}, imageStore: async () => null, Blob, URL,
   };
   vm.createContext(state);
@@ -209,16 +202,16 @@ console.log('PASS: Home gates, week matrix, live transitions, refresh motion, cu
     ${startup}
     this.update = updateAppearance; this.init = initAppearance; this.welcome = restoreWelcomeAppearance;
     this.current = () => settings;`, state);
-  state.update({ classic: true });
+  state.update({ motion: false });
   state.welcome();
-  assert.equal(state.current().classic, true, 'Welcome loading preserves an explicit pending selection');
+  assert.equal(state.current().motion, false, 'Welcome loading preserves an explicit pending selection');
   assert.ok(!saved.has(''), 'Pending settings are not saved under an empty account key');
   await state.init('alex');
-  assert.equal(state.current().classic, true, 'Account loading preserves the Classic choice');
+  assert.equal(state.current().motion, false, 'Account loading preserves the motion choice');
   assert.equal(state.current().color, '#abcdef', 'Unchanged account preferences survive');
-  assert.equal(JSON.parse(saved.get('jarvis:appearance:v1:alex')).classic, true, 'The choice persists on the correct account');
+  assert.equal(JSON.parse(saved.get('jarvis:appearance:v1:alex')).motion, false, 'The choice persists on the correct account');
   await state.init('other');
-  assert.equal(state.current().classic, false, 'The pending patch is consumed and cannot cross accounts');
-  console.log('PASS: Classic selection survives startup and stays scoped to its account.');
+  assert.equal(state.current().motion, true, 'The pending patch is consumed and cannot cross accounts');
+  console.log('PASS: Motion selection survives startup and stays scoped to its account.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 

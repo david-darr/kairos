@@ -3,25 +3,26 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/views/settings.js'), 'utf8');
-let redesign = false;
-const context = { cachedStatus: { is_admin: true }, document: { documentElement: { classList: { contains: () => redesign } } } };
+const context = { cachedStatus: { is_admin: true } };
 for (const [, name] of source.matchAll(/render: (\w+)/g)) context[name] = () => {};
 vm.createContext(context);
 const definitions = source.slice(source.indexOf('const SECTION_GROUPS = ['), source.indexOf('\n];', source.indexOf('const SECTION_GROUPS = [')) + 3);
 const visible = source.slice(source.indexOf('function visibleSections()'), source.indexOf('\nfunction buildNav()'));
-vm.runInContext(definitions + '\n' + visible + '\nthis.groups = visibleSections;', context);
+vm.runInContext(definitions + '\n' + visible + '\nthis.groups = visibleSections; this.registry = SECTION_GROUPS;', context);
 const ids = groups => groups.flatMap(group => group.sections.map(section => section.id)).sort();
 for (const admin of [true, false]) {
   context.cachedStatus.is_admin = admin;
-  redesign = false;
-  const classic = context.groups();
-  redesign = true;
+  const originalGroups = context.registry.filter(group => !group.admin || admin)
+    .map(group => ({ ...group, sections: group.sections.filter(section => !section.admin || admin) }));
   const board = context.groups();
-  assert.deepEqual(ids(board), ids(classic), 'Every authorized section remains reachable exactly once');
+  assert.deepEqual(ids(board), ids(originalGroups), 'Every authorized section remains reachable exactly once');
   assert.deepEqual(Array.from(board, group => group.label), ['General', 'Intelligence', 'Your data', 'Access', 'Advanced']);
-  assert.deepEqual(Array.from(board[0].sections, section => section.id), ['appearance', 'notifications', 'speech']);
+  assert.deepEqual(Array.from(board[0].sections, section => section.id), ['appearance', 'notifications', 'speech', 'channels', 'remote']);
+  assert.ok(board.find(group => group.id === 'intelligence').sections.some(section => section.id === 'integrations' && section.label === 'Integrations' && ['calendar', 'email'].every(word => section.keywords.includes(word))));
+  assert.ok(!board.find(group => group.id === 'your-data').sections.some(section => section.id === 'integrations'));
+  assert.ok(!board.find(group => group.id === 'access').sections.some(section => section.id === 'remote'));
   for (const group of board) for (const section of group.sections) {
-    const original = classic.flatMap(group => group.sections).find(item => item.id === section.id);
+    const original = originalGroups.flatMap(group => group.sections).find(item => item.id === section.id);
     assert.equal(section.render, original.render, 'Deep links retain the original renderer');
     for (const word of original.keywords) assert.ok(section.keywords.includes(word), 'Search keywords survive regrouping');
   }

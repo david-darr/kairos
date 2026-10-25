@@ -10,7 +10,7 @@
 // Switching the preview off, or narrowing to a phone, puts everything back.
 import { fitMenu } from "./menuFit.js";
 import { mountChatParts } from './redesignChatParts.js';
-const on = () => document.documentElement.classList.contains("kairos-redesign");
+
 const ICON_LIST = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.3A8 8 0 1 1 21 12z"/><path d="M8.5 10h7M8.5 13.5h4.5"/></svg>';
 
 export function mountRedesignChat(container) {
@@ -89,7 +89,7 @@ export function mountRedesignChat(container) {
     menu.classList.add("hidden");
   }
 
-  const sync = () => (on() && desktop.matches ? apply() : revert());
+  const sync = () => (desktop.matches ? apply() : revert());
   desktop.addEventListener("change", sync);
   document.addEventListener("kairos:appearance", sync);
   sync();
