@@ -157,6 +157,10 @@ rendererChecks().catch(error => { console.error(error); process.exitCode = 1; })
 // Default/migration and top-centre placement on negative and inset work areas.
 const { overlayPreferences, NOTCH_VERSION } = require('../electron/usage-overlay-preferences');
 assert.equal(overlayPreferences().edge, 'top-centre');
+// The v2 notch rests as its collapsed pill: folding is off by default and after the move, on only when chosen since.
+assert.equal(overlayPreferences().foldOnHover, false);
+assert.equal(overlayPreferences({ edge: 'top', foldOnHover: true }).foldOnHover, false);
+assert.equal(overlayPreferences({ edge: 'top-centre', foldOnHover: true, notch: NOTCH_VERSION }).foldOnHover, true);
 // A preference saved before the top-centre notch moves to it once, centred.
 for (const edge of ['left', 'right', 'top', 'bottom']) {
   assert.deepEqual(overlayPreferences({ visible: true, edge, offset: .2, displayId: 2, foldOnHover: false }),

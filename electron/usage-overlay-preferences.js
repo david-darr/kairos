@@ -8,6 +8,7 @@ function overlayPreferences(saved = {}) {
   return { edge: current && EDGES.includes(saved?.edge) ? saved.edge : 'top-centre',
     displayId: Number.isFinite(saved?.displayId) ? saved.displayId : null,
     offset: current && Number.isFinite(saved?.offset) ? Math.min(1, Math.max(0, saved.offset)) : .5,
-    foldOnHover: saved?.foldOnHover !== false, notch: NOTCH_VERSION };
+    // The v2 notch rests as its collapsed pill (NotchCollapsed board); folding to a sliver is opt-in.
+    foldOnHover: current ? saved.foldOnHover === true : false, notch: NOTCH_VERSION };
 }
 module.exports = { overlayPreferences, NOTCH_VERSION };
