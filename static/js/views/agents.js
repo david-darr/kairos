@@ -309,11 +309,12 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   const header = el('div', { class: 'agent-header' });
   const live = el('section', { class: 'agent-live-panel glass card', 'aria-label': 'Live state' });
   const upcoming = el('section', { class: 'agent-next-panel glass card', 'aria-label': 'Next routines' });
+  const modelCard = el('section', { class: 'agent-model-panel glass card', 'aria-label': 'Model selected' });
   const activity = el('div', { class: 'agent-inline-activity', 'aria-label': 'Waiting on you' });
   // 2026-10-15: the conversation list heads the left column on a desktop; on
   // a phone the same panel becomes a sheet opened from the More menu.
   const conversations = el('div', { class: 'agent-conversations-home' });
-  const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [conversations, live, activity, upcoming]);
+  const side = el('aside', { class: 'agent-live-panels', 'aria-label': 'Live work' }, [conversations, live, activity, upcoming, modelCard]);
   if (workspace) workspace.history.append(conversations);
   const search = el('input', { type: 'search', class: 'agent-thread-search', placeholder: 'Search chats',
     'aria-label': 'Search this bot’s loaded conversation titles', title: 'Filters loaded conversation titles' });
@@ -370,7 +371,8 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
       host.hidden = which !== name;
     }
     root.dataset.agentTab = which;
-    if (workspace && which !== 'chat') { root.classList.add('is-info-open'); info.setAttribute('aria-expanded', 'true'); }
+    // The phone has no tab bar, so a place other than Chat opens its info panel; a desktop's tabs are always on screen.
+    if (workspace && which !== 'chat' && matchMedia('(max-width: 768px)').matches) { root.classList.add('is-info-open'); info.setAttribute('aria-expanded', 'true'); }
     side.hidden = which !== 'chat';
     if (which !== 'chat') closeConversations();
     const active = [chatTab, workTab, routinesTab, memoryTab].findIndex(button => button.classList.contains('active'));
@@ -523,11 +525,13 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
     header.querySelector('.agent-profile-open .agent-icon').innerHTML = ICONS.settings;
     live.replaceChildren(el('div', { class: 'title', text: 'Right now' }),
       el('span', { class: `agent-status-line agent-status-${botStatusLine(agent).state}`, text: botStatusLine(agent).text }),
-      el('p', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
       el('div', { class: 'agent-header-actions' }, [el('button', { type: 'button', class: 'btn quiet', text: agent.enabled ? 'Turn off' : 'Turn on',
         onclick: async () => { await api(`/api/agents/${agentId}`, { method: 'PATCH', body: JSON.stringify({ enabled: !agent.enabled }) }); redraw(); } }),
         ...[...stoppable.values()].map(card => el('button', { type: 'button', class: 'btn', text: 'Stop',
           onclick: async () => { try { await api(`/api/tasks/${card.id}/stop`, { method: 'POST' }); redraw(); } catch (problem) { toast(problem.message, 'error'); } } }))]));
+    modelCard.replaceChildren(el('div', { class: 'title', text: 'Model selected' }),
+      el('p', { class: 'agent-model-summary', text: agentModelSummary(agent, models, modelCatalog) }),
+      el('button', { type: 'button', class: 'btn quiet agent-model-change', text: 'Change model', onclick: () => profile.open() }));
     if (workspace) live.prepend(el('button', { type: 'button', class: 'agents-inspector-profile', 'aria-label': `Edit ${agent.name}'s profile`, onclick: () => profile.open() }, [
       avatar(agent, 112), el('strong', { text: agent.name }), el('span', { text: agent.role || 'Your agent' })]));
     workTab.textContent = agent.needs_you ? `Work (${agent.needs_you})` : 'Work';
