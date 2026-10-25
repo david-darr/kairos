@@ -3,6 +3,10 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
   const dm = () => waitFor("!!document.querySelector('.agent-chat-main .side-chat-input')");
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const fits = async () => assert.ok(await js(`['.agents-messenger','.agents-messenger-stage','.agent-chat-host','.side-chat-composer'].every(s=>{const n=document.querySelector(s);return !n || n.scrollWidth<=n.clientWidth+2})`), 'Conversation fits available width');
+  // 2026-10-25 (David): every Kairos message in a desktop chat carries Kip beside the word; the mark returns with the mascot off.
+  await navigate('chat', { sessionId: 's1' });
+  await waitFor("!!document.querySelector('.msg.assistant .chat-author')");
+  assert.ok(await js("[...document.querySelectorAll('.msg.assistant .chat-author')].every(a => { const k = a.querySelector('.rd-chat-author-kip kairos-mascot'), r = k.getBoundingClientRect(); return getComputedStyle(a.querySelector('.rd-chat-author-kip')).display !== 'none' && r.width >= 18 && r.width <= 24 && getComputedStyle(a.querySelector('.chat-author-mark')).display === 'none' && a.textContent.includes('Kairos'); })"), 'Desktop Kairos messages show Kip beside the word Kairos');
   await navigate('agents');
   assert.ok(await js("document.querySelectorAll('.agents-rail-item.agent-tile').length>=2 && document.querySelectorAll('.agents-rail-item.team-tile').length===1"), 'DM and group rows use real lists');
   assert.ok(await js("!!document.querySelector('.agents-messenger-welcome')"));
@@ -10,10 +14,24 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
   await click('[data-key="agent:a1"]'); await dm(); await delay(250);
   await js("window.__chatInput=document.querySelector('.side-chat-input');window.__chatInput.value='Keep my unsent draft';window.__chatInput.dispatchEvent(new Event('input',{bubbles:true}))");
   await capture('agents-messenger-desktop'); await fits();
-  assert.ok(await js("!document.querySelector('.agent-live-panels').getClientRects().length && !document.querySelector('.agent-tabs').getClientRects().length"),'Work panels start behind Info');
+  // 2026-10-25 (David): on a wide window the top row is the name card with the compact Chat / Work / Routines / Memory
+  // control on its right, no "..." button, and the four side cards fill the height beside the thread.
+  assert.ok(await js(`(() => { const r = s => document.querySelector(s).getBoundingClientRect(), h = r('.agent-header'), t = r('.agent-tabs'), l = r('.agent-live-panels'), c = r('.agent-chat-host');
+    return !document.querySelector('.agent-more').getClientRects().length && !document.querySelector('.agent-info-toggle').getClientRects().length && t.left >= h.right - 1 && t.top < h.bottom && t.bottom > h.top && t.height < 44
+      && l.left >= c.right - 1 && l.height > innerHeight * 0.5 && ['Right now', 'Next routines', 'Model selected'].every(n => document.querySelector('.agent-live-panels').textContent.includes(n)) && !!document.querySelector('.agent-give-job').getClientRects().length; })()`), 'Wide window: name card and tabs share a row, no More button, side cards beside the thread');
+  for (const width of [1280, 1920]) {
+    win.setContentSize(width, 800); await delay(250); await fits();
+    assert.ok(await js("(() => { const p = document.querySelector('.agents-messenger-stage').getBoundingClientRect(); return ['.agent-header', '.agent-tabs', '.agent-call-open'].every(s => { const r = document.querySelector(s).getBoundingClientRect(); return r.left >= p.left && r.right <= p.right + 1; }); })()"), `Top row stays inside the stage at ${width}px`);
+    await capture(`agents-messenger-desktop-${width}`);
+  }
+  // Narrow: the tabs drop under the name card and the side cards hide behind Info.
+  win.setContentSize(900, 800); await delay(300); await fits();
+  assert.ok(await js("(() => { const h = document.querySelector('.agent-header').getBoundingClientRect(), t = document.querySelector('.agent-tabs').getBoundingClientRect(), p = document.querySelector('.agents-messenger-stage').getBoundingClientRect(); return t.top >= h.bottom - 1 && t.left >= p.left && t.right <= p.right + 1 && !document.querySelector('.agent-live-panels').getClientRects().length && !!document.querySelector('.agent-info-toggle').getClientRects().length; })()"), 'Narrow window: tabs wrap under the name card inside the stage; side cards wait behind Info');
   await click('.agent-info-toggle');
-  assert.ok(await js("document.querySelector('.agent-live-panels').getClientRects().length>0 && document.querySelector('.agent-tabs').getClientRects().length>0"),'Info exposes live work and navigation');
+  assert.ok(await js("document.querySelector('.agent-live-panels').getClientRects().length>0 && document.querySelector('.agent-info-toggle').getAttribute('aria-expanded')==='true'"), 'Info shows the side cards');
+  await capture('agents-messenger-desktop-narrow'); await fits();
   await click('.agent-info-toggle');
+  win.setContentSize(1440, 900); await delay(250);
   await click('[aria-label="Chat actions for Archivist"]');
   await js("[...document.querySelectorAll('.agents-chat-actions button')].find(b=>b.textContent==='Pin chat').click()");
   await waitFor("document.querySelector('.agents-rail-item').dataset.key==='agent:a2'");
