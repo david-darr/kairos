@@ -1,8 +1,9 @@
 import { EFFECTS, ART_PIECES, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { kipStyleOf, DEFAULT_KIP_STYLE } from './kipStyle.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', mascot: true });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', kip: DEFAULT_KIP_STYLE, mascot: true });
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -52,9 +53,11 @@ function normalize(raw = {}) {
   if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
-  // Show Kip (Kairos Mascot build spec, 2026-10-22): on by default; off
-  // brings back the plain markers and the mark (mascot.css, data-mascot).
-  if (typeof raw.mascot === 'boolean') value.mascot = raw.mascot;
+  // Kip style (David, 2026-10-25): flat, halftone, pixel or hidden. Hidden is
+  // the old Show Kip switch off: it brings back the plain markers and the
+  // mark (mascot.css, data-mascot). `mascot` stays the derived on/off.
+  value.kip = kipStyleOf(raw);
+  value.mascot = value.kip !== 'hidden';
   // Legacy look preferences are intentionally omitted; every account uses the redesign.
   // Terminal chat style (David's ask 2026-09-25): chats look and read like a
   // terminal harness. Presentation only; see the [data-chat-style] rules.
@@ -199,6 +202,8 @@ export async function initAppearance(username) {
 }
 
 export function updateAppearance(patch) {
+  // The old on/off Show Kip still works: on keeps the chosen look, off is hidden.
+  if (typeof patch.mascot === 'boolean' && !('kip' in patch)) patch = { ...patch, kip: patch.mascot ? (settings.kip === 'hidden' ? DEFAULT_KIP_STYLE : settings.kip) : 'hidden' };
   if (!storageKey) startupPatch = { ...startupPatch, ...patch };
   settings = normalize({ ...settings, ...patch });
   storageIssue = '';
@@ -327,6 +332,7 @@ function apply() {
   root.dataset.chatStyle = settings.chatStyle;
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   root.dataset.mascot = settings.mascot ? 'on' : 'off';
+  root.dataset.kip = settings.kip;
   syncRedesign(root);
   try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {

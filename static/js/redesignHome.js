@@ -1,6 +1,9 @@
 import { el } from "./api.js";
 import { agentAvatar } from "./agentAvatar.js";
 import { createMascot } from "./mascot.js";
+import { openKipMenu, showKip } from "./kipPicker.js";
+import { getAppearance } from "./appearance.js";
+import { KIP_STYLE_NAMES } from "./kipStyle.js";
 import { ICONS } from "./icons.js";
 import { subscribeActivity } from "./redesignShell.js";
 import { dotMatrix, pill, usageCard } from "./kairosParts.js";
@@ -91,7 +94,7 @@ export function packRows(items) {
 
 // The week/hero are fixed; live sections use the saved Customize arrangement.
 export function mountRedesignHome({ container, content, hero, grid, parts, data, rearrange, launchSurface = false }) {
-  let disposed = false, active = false, sheet = null, customizeButton = null;
+  let disposed = false, active = false, sheet = null, customizeButton = null, stopPhoneKip = null;
   let activity = { need: [], work: [] };
   let entranceTimer = 0, entered = false;
   const phone = matchMedia('(max-width: 768px)');
@@ -232,7 +235,14 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
       controls.prepend(customizeButton); drawGreeting(); drawActivity(); drawWeek(); drawUsage();
       // Customize remains available without taking a third root-header slot.
       const phoneCustomize = el('button', { type: 'button', class: 'hm-phone-customize', text: 'Customize Home', onclick: openSheet });
-      content.append(phoneCustomize);
+      // Phone Home draws no Kip, so its style switch sits beside Customize.
+      const phoneKip = el('button', { type: 'button', class: 'hm-phone-kip', 'aria-haspopup': 'dialog' });
+      const kipLabel = () => { const style = getAppearance().kip; phoneKip.textContent = style === 'hidden' ? 'Show Kip' : `Kip: ${KIP_STYLE_NAMES[style]}`; };
+      phoneKip.addEventListener('click', () => { if (getAppearance().kip === 'hidden') showKip(); else openKipMenu(phoneKip); });
+      document.addEventListener('kairos:appearance', kipLabel);
+      stopPhoneKip = () => document.removeEventListener('kairos:appearance', kipLabel);
+      kipLabel();
+      content.append(phoneCustomize, phoneKip);
     }
     const cards = order.filter(id => id === 'system' || (!hidden.includes(id) && hasItems(id)));
     if (!cards.includes('system')) cards.push('system');
@@ -265,7 +275,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
   function deactivate() {
     if (!active) return;
     clearTimeout(entranceTimer); grid.classList.remove('rd-stagger');
-    active = false; closeSheet(false); heading.remove(); content.querySelector('.hm-phone-customize')?.remove(); customizeButton?.remove(); customizeButton = null;
+    active = false; closeSheet(false); heading.remove(); content.querySelector('.hm-phone-customize')?.remove(); content.querySelector('.hm-phone-kip')?.remove(); stopPhoneKip?.(); stopPhoneKip = null; customizeButton?.remove(); customizeButton = null;
     bannerAnchor.after(banner); heroAnchor.after(hero); heroMascot?.removeAttribute('follow-pointer'); content.classList.remove('hm-home');
     grid.classList.remove('hm-custom-order');
     for (const panel of [hero, ...Object.values(parts)]) panel.style.removeProperty('--rd-span');

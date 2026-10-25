@@ -30,7 +30,7 @@ export const STATE_WORDS = { idle: 'idle', thinking: 'thinking', listening: 'lis
   success: 'done', needs: 'needs you', error: 'error', sleeping: 'sleeping' };
 export const AJAR_SHAPES = ['round', 'squircle', 'tall'];
 export const AJAR_ACCESSORIES = ['none', 'laurel', 'spectacles', 'quill', 'rays', 'scarf'];
-export const AJAR_FINISHES = ['flat', 'halftone'];
+export const AJAR_FINISHES = ['flat', 'halftone', 'pixel'];
 // The six agent pastels (services/agent_service.py COLORS). Each key names its
 // theme token, --m-body-<key>; the spec stores '#' + key, upper case.
 export const AJAR_COLOR_KEYS = ['d9b260', 'b9d2e3', 'e8c39e', 'd99a92', 'b5c7a5', 'cdbfd9'];
@@ -153,6 +153,10 @@ export const POSE_CSS = `
 .ajar .aj-shadow{fill:var(--m-shadow)}
 .ajar .aj-body{fill:var(--m-body)}
 .ajar[data-finish=halftone] .aj-body{fill-opacity:.1}
+.ajar[data-finish=pixel]{shape-rendering:crispEdges}
+.ajar[data-finish=pixel] .aj-body path.aj-px-hi{fill:var(--m-eye);fill-opacity:.2}
+.ajar[data-finish=pixel] :is(.aj-eye,.aj-mouth){rx:0}
+.ajar[data-finish=pixel] :is(.aj-happy,.aj-shut,.aj-brow){stroke-linecap:butt}
 .ajar .aj-eye{fill:var(--m-eye);transform-box:fill-box;transform-origin:center}
 .ajar .aj-happy,.ajar .aj-shut{fill:none;stroke:var(--m-eye);stroke-width:5;stroke-linecap:round;opacity:0}
 .ajar .aj-brow{fill:none;stroke:var(--m-eye);stroke-width:3.5;stroke-linecap:round;transform-box:fill-box;transform-origin:center}
@@ -201,6 +205,7 @@ export const POSE_CSS = `
 .ajar[data-state=sleeping] .aj-tilt{transform:rotate(5deg)}
 .ajar[data-state=sleeping] .aj-pt{transform:translate(-2px,10px) scale(.75);opacity:.5}
 .ajar[data-state=sleeping] .aj-z text{opacity:.8}
+.ajar[data-finish=pixel] .aj-tilt{transform:none}
 `.replace(/\n/g, '');
 
 const SHAPES = {
@@ -234,20 +239,21 @@ let uid = 0;
 // The SVG for a spec in a state. `clipId` must be unique in a document;
 // `style` carries the --m-body/--m-eye variables (or, for a static image,
 // every token resolved). `tone` is a halftone body image (data URL).
-export function ajarMarkup(rawSpec, { state = 'idle', clipId = 'ajc' + (++uid), style = '', standalone = false, tone = '' } = {}) {
+export function ajarMarkup(rawSpec, { state = 'idle', clipId = 'ajc' + (++uid), style = '', standalone = false, tone = '', grid = PIXEL_GRID } = {}) {
   const spec = normalizeMascot(rawSpec?.color === 'ink' ? { ...KAIROS_SPEC, ...rawSpec } : rawSpec);
   const pose = MASCOT_STATES.includes(state) ? state : 'idle';
   const acc = accessoryMarkup(spec.acc);
-  const halftone = spec.finish === 'halftone' && tone;
+  const halftone = spec.finish === 'halftone' && tone, pixel = spec.finish === 'pixel';
   const head = standalone ? ` xmlns="http://www.w3.org/2000/svg" width="140" height="140"` : '';
-  return `<svg class="ajar"${head} viewBox="0 0 140 140" data-state="${pose}" data-shape="${spec.shape}" data-acc="${spec.acc}" data-finish="${halftone ? 'halftone' : 'flat'}" style="${style}" aria-hidden="true" focusable="false">`
+  return `<svg class="ajar"${head} viewBox="0 0 140 140" data-state="${pose}" data-shape="${spec.shape}" data-acc="${spec.acc}" data-finish="${halftone ? 'halftone' : pixel ? 'pixel' : 'flat'}" style="${style}" aria-hidden="true" focusable="false">`
     + (standalone ? `<style>${POSE_CSS}</style>` : '')
     + `<defs><clipPath id="${clipId}"><path clip-rule="evenodd" d="M-10 -10H150V150H-10Z M80 36a20 20 0 1 0 40 0a20 20 0 1 0 -40 0Z"/></clipPath></defs>`
     + '<ellipse class="aj-shadow" cx="70" cy="129" rx="36" ry="5"/>'
     + '<circle class="aj-voice" cx="70" cy="76" r="52"/>'
     + (acc.back || '')
     + '<g class="aj-hop"><g class="aj-tilt"><g class="aj-breathe">'
-    + `<g class="aj-body" clip-path="url(#${clipId})">${SHAPES[spec.shape] || SHAPES.round}${halftone ? `<image class="aj-tone" href="${tone}" x="0" y="0" width="140" height="140" preserveAspectRatio="none"/>` : ''}</g>`
+    + (pixel ? `<g class="aj-body">${pixelBody(spec.shape, grid)}</g>`
+      : `<g class="aj-body" clip-path="url(#${clipId})">${SHAPES[spec.shape] || SHAPES.round}${halftone ? `<image class="aj-tone" href="${tone}" x="0" y="0" width="140" height="140" preserveAspectRatio="none"/>` : ''}</g>`)
     + (acc.neck || '')
     + '<g class="aj-face"><g class="aj-brows"><path class="aj-brow l" d="M48 54 L61 52"/><path class="aj-brow r" d="M73 52 L86 54"/></g>'
     + '<g class="aj-eyes"><g class="aj-gaze"><rect class="aj-eye" x="49" y="62" width="12" height="26" rx="6"/><rect class="aj-eye" x="73" y="62" width="12" height="26" rx="6"/>'
@@ -270,9 +276,10 @@ const urls = new Map();
 function remember(map, key, value) { if (map.size >= 512) map.delete(map.keys().next().value); map.set(key, value); return value; }
 export function mascotUrl(rawSpec, pose = 'idle') {
   const spec = normalizeMascot(rawSpec?.color === 'ink' ? { ...KAIROS_SPEC, ...rawSpec } : rawSpec);
-  const key = `${themeVersion}|${pose}|${spec.shape}|${spec.color}|${spec.acc}`;
+  const finish = (spec.color === 'ink' ? kipFinish() : spec.finish) === 'pixel' ? 'pixel' : 'flat';
+  const key = `${themeVersion}|${pose}|${spec.shape}|${spec.color}|${spec.acc}|${finish}`;
   if (urls.has(key)) return urls.get(key);
-  const svg = ajarMarkup({ ...spec, finish: 'flat' }, { state: pose, clipId: 'ajc', style: resolvedStyle(spec), standalone: true });
+  const svg = ajarMarkup({ ...spec, finish }, { state: pose, clipId: 'ajc', style: resolvedStyle(spec), standalone: true });
   return remember(urls, key, `data:image/svg+xml,${encodeURIComponent(svg)}`);
 }
 const pngs = new Map();
@@ -317,6 +324,40 @@ export function kipStripUrl(rawSpec, state = 'walk') {
   return { url: remember(kips, key, `data:image/svg+xml,${encodeURIComponent(kipStripSvg(frames))}`), frames: frames.length };
 }
 
+// -- the pixel style ------------------------------------------------------------
+
+// Ajar's body as a crisp grid of square cells: the body shape sampled at each
+// cell centre, so the edge and the bite step like pixel art, no anti-aliasing.
+// A Bayer-dithered patch of lighter cells on the upper left gives it volume
+// (the dither of the Dithered background effect). Pure geometry, so one string
+// per shape and grid is cached forever; the colours are tokens in POSE_CSS.
+const PIXEL_GRID = 20, pixelBodies = new Map();
+// Fewer, larger cells for small faces so the grid still reads at 16px.
+export const pixelGrid = px => px && px <= 40 ? 14 : PIXEL_GRID;
+function cellRuns(cells, n, size) {
+  const rects = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    if (!cells.has(i + ',' + j)) continue;
+    let end = i; while (cells.has((end + 1) + ',' + j)) end++;
+    rects.push(`M${i * size} ${j * size}h${(end - i + 1) * size}v${size}h-${(end - i + 1) * size}z`);
+    i = end;
+  }
+  return rects.join('');
+}
+export function pixelBody(shape, n = PIXEL_GRID) {
+  const key = shape + n;
+  if (pixelBodies.has(key)) return pixelBodies.get(key);
+  const size = 140 / n, body = new Set(), light = new Set();
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const x = (i + .5) * size, y = (j + .5) * size;
+    if (insideBody(shape, x, y) > 0) continue;
+    body.add(i + ',' + j);
+    const lean = ((70 - x) + (76 - y)) / 120 - .12;
+    if (lean > 0 && Math.min(1, lean / .6) > BAYER4[(i & 3) + (j & 3) * 4]) light.add(i + ',' + j);
+  }
+  return remember(pixelBodies, key, `<path d="${cellRuns(body, n, size)}"/><path class="aj-px-hi" d="${cellRuns(light, n, size)}"/>`);
+}
+
 // -- the halftone style ------------------------------------------------------------
 
 // Ajar's body as halftone dots, the same 4 by 4 ordered dither as dither.js,
@@ -352,6 +393,8 @@ export function halftoneBody(rawSpec, px) {
 
 // -- the live element ------------------------------------------------------------
 
+// The style chosen for Kairos's own Kip (Appearance > Kip, root dataset.kip).
+export function kipFinish() { const style = hasDom ? document.documentElement.dataset.kip : ''; return AJAR_FINISHES.includes(style) ? style : 'flat'; }
 export function mascotOn() { return !hasDom || document.documentElement.dataset.mascot !== 'off'; }
 const reducedMotion = () => hasDom && matchMedia('(prefers-reduced-motion: reduce)').matches;
 // The browser already slows a hidden window's animations; this stops them.
@@ -371,7 +414,7 @@ function watch(node) {
   }, { rootMargin: '80px' });
   visibility.observe(node);
 }
-const SUCCESS_MS = 1800;
+const SUCCESS_MS = 1800, HALFTONE_MIN = 44;
 
 // One pointer listener and one animation frame for all opted-in live mascots.
 export function pointerEyeOffset(x, y, rect) {
@@ -443,7 +486,10 @@ export class KairosMascot extends ElementBase {
     const agent = this._agent || (this.getAttribute('bot') ? bots.get(this.getAttribute('bot')) : null);
     let spec = raw ? normalizeMascot(raw)
       : agent || this.getAttribute('bot') ? toAjarSpec(agent?.avatar, { id: agent?.id || this.getAttribute('bot'), color: agent?.color }) : { ...KAIROS_SPEC };
-    if (this.getAttribute('finish') === 'halftone') spec = { ...spec, finish: 'halftone' };
+    // An explicit finish wins; Kairos's own Kip follows the person's Kip style; a bot keeps its own look.
+    const asked = this.getAttribute('finish');
+    if (AJAR_FINISHES.includes(asked)) spec = { ...spec, finish: asked };
+    else if (spec.color === 'ink') spec = { ...spec, finish: kipFinish() };
     return spec;
   }
   connectedCallback() {
@@ -451,12 +497,12 @@ export class KairosMascot extends ElementBase {
     this._render();
     watch(this);
     followPointer(this, this.hasAttribute('follow-pointer'));
-    if (!this._onAppearance) { this._onAppearance = () => { if (this.spec.finish === 'halftone') { this._drawn = ''; this._render(); } }; }
+    if (!this._onAppearance) { this._onAppearance = () => { if (this.spec.finish === 'halftone') this._drawn = ''; this._render(); }; }
     document.addEventListener('kairos:appearance', this._onAppearance);
   }
   disconnectedCallback() {
     followPointer(this, false);
-    clearTimeout(this._timer); visibility?.unobserve(this);
+    clearTimeout(this._timer); clearTimeout(this._swapTimer); visibility?.unobserve(this);
     document.removeEventListener('kairos:appearance', this._onAppearance);
   }
   attributeChangedCallback(name, before, after) {
@@ -468,19 +514,26 @@ export class KairosMascot extends ElementBase {
   _size() { const size = Number(this.getAttribute('size')); return Number.isFinite(size) && size > 0 ? size : 0; }
   _render() {
     if (!this.isConnected) return;  // drawn on connect, once
-    const spec = this.spec, size = this._size();
+    let spec = this.spec;
+    const size = this._size(), px = size || this.clientWidth || 96;
     if (size) { this.style.width = size + 'px'; this.style.height = size + 'px'; }
-    const tone = spec.finish === 'halftone' && hasDom && this.isConnected ? halftoneBody(spec, size || this.clientWidth || 96) : '';
-    const signature = JSON.stringify([spec, tone && tone.length, size]);
+    // Halftone dots need room; a small Kip draws flat instead.
+    if (spec.finish === 'halftone' && px < HALFTONE_MIN) spec = { ...spec, finish: 'flat' };
+    const tone = spec.finish === 'halftone' && hasDom && this.isConnected ? halftoneBody(spec, px) : '';
+    const grid = pixelGrid(px), signature = JSON.stringify([spec, tone && tone.length, size, grid]);
     if (signature === this._drawn) { this._sync(); return; }
-    this._drawn = signature;
-    this.innerHTML = ajarMarkup(spec, { state: this.state, clipId: this._clip, style: liveStyle(spec), tone });
+    const swap = this._finish && this._finish !== spec.finish && !reducedMotion();
+    this._drawn = signature; this._finish = spec.finish;
+    this.innerHTML = ajarMarkup(spec, { state: this.state, clipId: this._clip, style: liveStyle(spec), tone, grid });
+    if (swap) { this.classList.add('kip-swap'); clearTimeout(this._swapTimer); this._swapTimer = setTimeout(() => this.classList.remove('kip-swap'), 320); }
     this._sync();
   }
   _sync() {
     const svg = this.querySelector('svg.ajar'); if (!svg) return;
     const state = this.state;
     svg.dataset.state = state;
+    // Kairos's own Kip hides with the Kip switch; a bot keeps its face (mascot.css).
+    this.toggleAttribute('data-own', this.spec.color === 'ink');
     const decorative = this.hasAttribute('decorative');
     if (decorative) { this.setAttribute('aria-hidden', 'true'); this.removeAttribute('role'); this.removeAttribute('aria-label'); }
     else {

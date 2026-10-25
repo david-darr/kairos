@@ -1,17 +1,18 @@
 // The mascot in the app (vault: "Kairos Mascot (Build Spec)", phases 2 to 4),
 // run by ui-smoke, or alone: node scripts/run-electron-test.cjs ui-smoke --mascot-only
-// Home hero, empty states, the Show the mascot switch, bot faces in every
+// Home hero and its Kip style menu, empty states, the Kip style setting, bot faces in every
 // Agents surface, the call screen, the village and the notification icon.
 // The chat marker's stream (thinking, success, idle, error) is in chat-smoke.
 const assert = require('node:assert/strict');
 module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, writes, fixtures }) => {
-  const setMascot = on => js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mascot: ${on} }))`);
+  const setMascot = on => js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ kip: '${on ? 'halftone' : 'hidden'}' }))`);
   // ui-smoke --mascot-off: the same checks from a start with the switch off.
   const startedOff = process.argv.includes('--mascot-off');
   if (startedOff) {
     await navigate('home');
     assert.equal(await js("document.documentElement.dataset.mascot"), 'off');
-    assert.equal(await js("!!document.querySelector('.dashboard-mascot') && getComputedStyle(document.querySelector('.dashboard-mascot')).display"), 'none', 'off from the start: no mascot on Home');
+    assert.equal(await js("getComputedStyle(document.querySelector('.dashboard-mascot kairos-mascot')).display"), 'none', 'off from the start: no mascot on Home');
+    assert.equal(await js("document.querySelector('.dashboard-mascot .kip-show-chip').textContent"), 'Show Kip', 'hidden: the same spot reads Show Kip');
     await capture('mascot-home-off-from-start');
     await js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: true }); return true; })");
   }
@@ -22,16 +23,46 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await waitFor("!!document.querySelector('.dashboard-mascot kairos-mascot svg.ajar')");
   // Scout waits on the person in the fixtures: needs you beats working.
   await waitFor("document.querySelector('.dashboard-mascot kairos-mascot').getAttribute('state') === 'needs'");
-  assert.equal(await js("document.querySelector('.dashboard-mascot').getAttribute('aria-label')"), 'Kip, needs you. Open Agents');
-  assert.equal(await js("document.querySelector('.dashboard-mascot').disabled"), false, 'a needs-you mascot is a way to the waiting items');
+  assert.equal(await js("document.querySelector('.dashboard-mascot').getAttribute('aria-label')"), 'Kip, needs you. Change Kip style');
   assert.equal(await js("document.querySelector('.dashboard-mascot svg.ajar').dataset.finish"), 'halftone', 'Home uses the halftone finish (Mote)');
   assert.ok(await js("(() => { const m = document.querySelector('.dashboard-mascot').getBoundingClientRect(), h = document.querySelector('.dashboard-hero').getBoundingClientRect(); return m.width >= 72 && m.left >= h.left && m.right <= h.right && m.top >= h.top && m.bottom <= h.bottom; })()"), 'the mascot sits inside the hero');
   await capture('mascot-home-desktop');
-  await setMascot(false);
-  assert.equal(await shown('.dashboard-mascot'), false, 'off hides Home\'s mascot');
+  // Clicking Kip opens the style menu: four previews, the way to Agents while he needs you.
+  const heroBox = "(() => { const m = document.querySelector('.dashboard-mascot').getBoundingClientRect(), h = document.querySelector('.dashboard-hero').getBoundingClientRect(); return m.left >= h.left && m.right <= h.right && m.top >= h.top && m.bottom <= h.bottom; })()";
+  await js("document.querySelector('.dashboard-mascot').click()");
+  await waitFor("!!document.querySelector('.kip-menu')");
+  assert.deepEqual(await js("[...document.querySelectorAll('.kip-menu [role=radio]')].map(n => n.dataset.kipStyle)"), ['flat', 'halftone', 'pixel', 'hidden']);
+  assert.equal(await js("document.querySelector('.kip-menu [aria-checked=true]').dataset.kipStyle"), 'halftone');
+  assert.equal(await js("document.activeElement.dataset.kipStyle"), 'halftone', 'the open menu focuses the current choice');
+  assert.equal(await js("document.querySelectorAll('.kip-menu .kip-choice-art svg.ajar').length"), 3, 'three drawn previews, one for hidden');
+  assert.equal(await js("document.querySelector('.kip-menu-needs').textContent"), 'Kip needs you. Open Agents');
+  await capture('mascot-home-kip-menu');
+  await js("document.querySelector('.kip-menu [data-kip-style=pixel]').click()");
+  await waitFor("document.querySelector('.dashboard-mascot svg.ajar').dataset.finish === 'pixel'");
+  assert.equal(await js("document.documentElement.dataset.kip"), 'pixel');
+  assert.equal(await js("JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('jarvis:appearance:v1:')))).kip"), 'pixel', 'saved with the other appearance choices');
+  assert.ok(await js("document.querySelectorAll('.dashboard-mascot svg.ajar .aj-body path').length === 2 && !document.querySelector('.dashboard-mascot svg.ajar .aj-body[clip-path]')"), 'the pixel body is a grid of cells, not a clipped shape');
+  await capture('mascot-home-desktop-pixel');
+  await js("document.querySelector('.kip-menu [data-kip-style=flat]').click()");
+  await waitFor("document.querySelector('.dashboard-mascot svg.ajar').dataset.finish === 'flat'");
+  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await waitFor("!document.querySelector('.kip-menu')");
+  assert.equal(await js("document.activeElement.classList.contains('dashboard-mascot')"), true, 'closing returns focus to Kip');
+  // Hidden: the spot reads Show Kip and the hero keeps its layout; Show Kip brings back the last look.
+  await js("document.querySelector('.dashboard-mascot').click()");
+  await waitFor("!!document.querySelector('.kip-menu')");
+  await js("document.querySelector('.kip-menu [data-kip-style=hidden]').click()");
+  await waitFor("document.documentElement.dataset.mascot === 'off'");
+  assert.equal(await shown('.dashboard-mascot kairos-mascot'), false, 'hidden hides Home\'s mascot');
+  assert.equal(await js("getComputedStyle(document.querySelector('.dashboard-mascot .kip-show-chip')).display !== 'none' && document.querySelector('.dashboard-mascot').getAttribute('aria-label')"), 'Show Kip');
+  assert.ok(await js(heroBox), 'the Show Kip chip stays inside the hero');
+  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   await capture('mascot-home-desktop-off');
+  await js("document.querySelector('.dashboard-mascot').click()");
+  await waitFor("document.documentElement.dataset.mascot === 'on'");
+  assert.equal(await js("document.documentElement.dataset.kip"), 'flat', 'Show Kip restores the style he had');
+  assert.equal(await shown('.dashboard-mascot kairos-mascot'), true);
   await setMascot(true);
-  assert.equal(await shown('.dashboard-mascot'), true);
 
   // -- Empty states -------------------------------------------------------------
   demoState.empty = true;
@@ -52,13 +83,16 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await js("document.querySelector('.sidebar-settings-btn').click()");
   await waitFor("!!document.querySelector('[data-section=appearance]')");
   await js("document.querySelector('[data-section=appearance]').click()");
-  await waitFor("!!document.getElementById('appearance-mascot')");
-  assert.equal(await js("document.getElementById('appearance-mascot').checked"), true, 'on (by default, or after the off run turned it back on)');
-  await js("document.getElementById('appearance-mascot').click()");
+  await waitFor("!!document.getElementById('appearance-kip')");
+  assert.equal(await js("document.querySelector('#appearance-kip [aria-checked=true]').dataset.kipStyle"), 'halftone', 'halftone by default, or after the earlier checks restored it');
+  await js("document.querySelector('#appearance-kip [data-kip-style=hidden]').click()");
   await waitFor("document.documentElement.dataset.mascot === 'off'");
-  await js("document.getElementById('appearance-mascot').click()");
-  await waitFor("document.documentElement.dataset.mascot === 'on'");
+  await js("document.querySelector('#appearance-kip [data-kip-style=pixel]').click()");
+  await waitFor("document.documentElement.dataset.mascot === 'on' && document.documentElement.dataset.kip === 'pixel'");
+  assert.equal(await js("document.querySelector('#appearance-kip [aria-checked=true]').dataset.kipStyle"), 'pixel');
   await capture('mascot-settings-switch');
+  await js("document.querySelector('#appearance-kip [data-kip-style=halftone]').click()");
+  await waitFor("document.documentElement.dataset.kip === 'halftone'");
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   await delay(300);
 
@@ -117,6 +151,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   // The bar's Agents badge is the needs-you signal on phone: untouched, no mascot in the bar.
   assert.equal(await js("document.querySelectorAll('.ms-tabbar kairos-mascot, .ms-tabbar .agent-mascot').length"), 0);
   assert.ok(await js("!!document.querySelector('.ms-tabbar-item[data-tabbar=agents] .ms-tabbar-badge')"), 'the Agents badge still shows');
+  // Phone Home draws no Kip, so its style switch sits beside Customize: a 44px target that opens the shared sheet.
+  assert.ok(await js("(() => { const b = document.querySelector('.hm-phone-kip'); return !!b && b.getBoundingClientRect().height >= 44 && b.textContent === 'Kip: Halftone'; })()"), 'phone Home offers the Kip style switch');
+  await js("document.querySelector('.hm-phone-kip').click()");
+  await waitFor("!!document.querySelector('.ms-sheet .kip-choices')");
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-sheet [role=radio]')].map(n => n.dataset.kipStyle + ':' + (n.getBoundingClientRect().height >= 44))"), ['flat:true', 'halftone:true', 'pixel:true', 'hidden:true']);
+  await js("document.querySelector('.ms-sheet [data-kip-style=pixel]').click()");
+  await waitFor("document.documentElement.dataset.kip === 'pixel'");
+  await js("document.querySelector('.ms-sheet .ms-sheet-header button').click()");
+  await waitFor("!document.querySelector('.ms-sheet')");
+  assert.equal(await js("document.querySelector('.hm-phone-kip').textContent"), 'Kip: Pixel');
+  await setMascot(true);
   await capture('mascot-phone-home');
   await navigate('agents', { agentId: 'a1' });
   await waitFor("!!document.querySelector('.agent-profile-face kairos-mascot svg') || !!document.querySelector('.side-chat-input')");

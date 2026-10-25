@@ -54,6 +54,7 @@ const context = {
   knownHomeCards: () => ['tab:crm:follow-ups', 'tab:crm:open-count'].map(id => ({ id, title: id, tab_name: 'CRM' })),
   subscribeActivity: cb => { listener = cb; cb({ need: [], work: [] }); return () => { listener = null; }; },
   createMascot: () => el('kip'), agentAvatar: () => el('bot-kip'),
+  getAppearance: () => ({ kip: 'halftone' }), openKipMenu() {}, showKip() {}, KIP_STYLE_NAMES: { halftone: 'Halftone' },
   ICONS: { calendar: '', settings: '' },
   pill: x => el('button', { textContent: x.text }),
   dotMatrix: x => el('matrix', { cells: x.cells }),

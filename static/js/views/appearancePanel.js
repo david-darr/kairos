@@ -2,6 +2,7 @@ import { el } from '../api.js';
 import { EFFECTS, ART_PIECES } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
+import { kipChoices } from '../kipPicker.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
   resetAppearance, setAppearancePreview, halftoneSource, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
 
@@ -42,11 +43,11 @@ export function renderAppearancePanel(content, _status, page) {
       el('strong', { text: title }), el('span', { text: subtitle })]);
     styleButtons.set(style, button); chatStyles.append(button);
   }
-  // Show Kip (Kairos Mascot build spec, 2026-10-22).
-  const mascot = toggle({ label: 'Show Kip', onChange: (on) => { updateAppearance({ mascot: on }); sync(); } });
-  mascot.id = 'appearance-mascot';
+  // Kip style (David, 2026-10-25): flat, halftone, pixel or hidden.
+  const kip = kipChoices();
+  kip.node.id = 'appearance-kip';
   const mascotSection = el('div', { class: 'appearance-mascot-setting' }, [
-    group({}, [row({ title: 'Show Kip', description: 'Kip, the Kairos mascot, on Home, in the chat while it works, on empty pages and in calls. Off shows the plain markers. Bots keep their faces.', control: mascot })]),
+    group({}, [row({ title: 'Kip', description: 'Kip, the Kairos mascot, on Home, in the chat while it works, on empty pages and in calls. Hidden shows the plain markers. Bots keep their faces.', below: kip.node, stack: true })]),
   ]);
   const chatStyleSection = el('section', { class: 'appearance-chat-style-setting' }, [
     el('h3', { text: 'Chat style' }), chatStyles,
@@ -311,7 +312,7 @@ export function renderAppearancePanel(content, _status, page) {
     for (const [style, button] of styleButtons) button.setAttribute('aria-pressed', String(style === value.chatStyle));
     palette.hidden = value.mode === 'default'; imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
-    mascot.checked = value.mascot;
+    kip.sync();
     effectSection.hidden = !['default', 'color'].includes(value.mode);
     for (const [effect, { input }] of effectChoices) input.checked = value.backgroundEffect === effect;
     const effectPrefs = value.effectOptions[value.backgroundEffect];

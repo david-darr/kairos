@@ -1,5 +1,6 @@
 import { api, el, modelMark, openPanelDialog } from "../api.js";
 import { createMascot, STATE_WORDS } from "../mascot.js";
+import { wireKipSwitch } from "../kipPicker.js";
 import * as chatStream from "../chatStream.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
@@ -145,20 +146,24 @@ export function render(container, tabId, options = {}) {
   const banner = el("div", { class: "dashboard-core", "aria-hidden": "true" });
   const nextTaskLabel = el("span", { class: "dashboard-next", text: "Checking schedule…" });
   // Kairos beside the greeting (Kairos Mascot build spec, 2026-10-22), in
-  // Kip in the halftone style, showing the app's aggregate state: needs you
-  // beats working beats idle (botStatus.js order). Needs you opens Agents,
-  // where the waiting items are answered; it never answers anything itself.
-  const heroMascot = createMascot({ state: "idle", finish: "halftone", decorative: true });
-  const heroMascotButton = el("button", { type: "button", class: "dashboard-mascot", disabled: true,
-    "aria-label": "Kip, idle", onclick: () => navigate("agents") }, [heroMascot]);
+  // Kip in the person's chosen style (Appearance > Kip; halftone by default),
+  // showing the app's aggregate state: needs you beats working beats idle
+  // (botStatus.js order). Clicking Kip opens the style menu (kipPicker.js); when
+  // he needs you the menu also offers Agents, where the waiting items are
+  // answered, and it never answers anything itself. Hidden, the same spot reads Show Kip.
+  const heroMascot = createMascot({ state: "idle", decorative: true });
+  const heroMascotButton = el("button", { type: "button", class: "dashboard-mascot", "aria-label": "Kip, idle" }, [heroMascot]);
+  let heroName = "Kip, idle";
+  const kipSwitch = wireKipSwitch(heroMascotButton, { name: () => heroName,
+    needs: () => heroMascotButton.dataset.state === "needs" ? () => navigate("agents") : null });
   const syncHeroMascot = () => {
     const agentList = Array.isArray(data.agents) ? data.agents : [];
     const state = (data.inbox?.count || 0) > 0 || agentList.some((a) => a.status === "needs_you" || a.needs_you > 0) ? "needs"
       : agentList.some((a) => a.status === "working") || chatStream.listInFlight().some((e) => e.status === "processing") ? "thinking" : "idle";
     if (heroMascot.getAttribute("state") !== state) heroMascot.setAttribute("state", state);
-    heroMascotButton.disabled = state !== "needs";
-    heroMascotButton.setAttribute("aria-label", state === "needs" ? "Kip, needs you. Open Agents" : `Kip, ${STATE_WORDS[state]}`);
     heroMascotButton.dataset.state = state;
+    heroName = `Kip, ${STATE_WORDS[state]}`;
+    kipSwitch.sync();
   };
   const stopHeroStream = chatStream.subscribeAll(() => syncHeroMascot());
   const content = el("div", { class: "dashboard-content" });
@@ -521,5 +526,5 @@ export function render(container, tabId, options = {}) {
   document.addEventListener("jarvis:tabs-changed", refresh);
   const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; stopHeroStream(); mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; stopHeroStream(); kipSwitch.dispose(); mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
 }

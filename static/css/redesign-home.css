@@ -326,6 +326,7 @@
 .kairos-redesign .hm-home .dashboard-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .kairos-redesign .hm-home .dashboard-mascot { position: absolute; top: 22px; right: 24px; left: auto; bottom: auto; width: 72px; height: 72px; transform: none; margin: 0; }
 .kairos-redesign .hm-home .dashboard-mascot kairos-mascot { width: 100%; height: 100%; }
+.kairos-redesign[data-mascot="off"] .hm-home .dashboard-mascot { width: auto; height: auto; }
 .kairos-redesign .hm-customize-icon { display: none; }
 .kairos-redesign .hm-working-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: var(--accent); }
 .kairos-redesign .hm-home [data-home-section="system"] { display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 14px 22px; padding: 16px 24px; }
@@ -374,7 +375,7 @@
 .kairos-redesign .hm-home :is(.rd-usage-note, .rd-usage-tokens) { overflow-wrap: anywhere; }
 
 /* HomeFull / HomeClear phone root, with its two board header actions. */
-.kairos-redesign :is(.hm-phone-settings, .hm-phone-notifications, .hm-phone-customize) { display: none; }
+.kairos-redesign :is(.hm-phone-settings, .hm-phone-notifications, .hm-phone-customize, .hm-phone-kip) { display: none; }
 @media (max-width: 768px) {
   .kairos-redesign[data-view="home"] .hm-home .hm-heading { position: relative; }
   .kairos-redesign[data-view="home"] .hm-home .hm-heading-actions > .hm-customize { display: none; }
@@ -386,6 +387,8 @@
   .kairos-redesign[data-view="home"] .hm-live-row > .rd-pill { min-height: 34px; padding: 9px 14px; font-size: 13px; }
 }
 @media (max-width: 768px) {
+  .kairos-redesign[data-view="home"] .hm-phone-kip { display: block; align-self: flex-end; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--rd-ink-dim); font: 13px var(--rd-font-ui); cursor: pointer; }
+  .kairos-redesign[data-view="home"] .hm-phone-kip:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign[data-view="home"] .hm-phone-customize { position: static; align-self: flex-end; font-size: 13px; padding: 8px 0; }
 }
 @media (max-width: 768px) {
