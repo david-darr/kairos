@@ -2,7 +2,8 @@
 // A preference saved before it (no `notch` version) moves to the top centre
 // once; an edge chosen after that keeps its placement.
 const { EDGES } = require('./usage-overlay-placement');
-const NOTCH_VERSION = 2;
+// 3: the v2 pill at rest (an interim 2 kept the old fold-to-sliver default).
+const NOTCH_VERSION = 3;
 function overlayPreferences(saved = {}) {
   const current = saved?.notch === NOTCH_VERSION;
   return { edge: current && EDGES.includes(saved?.edge) ? saved.edge : 'top-centre',
