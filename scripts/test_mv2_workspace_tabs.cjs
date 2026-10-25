@@ -396,8 +396,8 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   // Exercise the real API helper and adapter, including both caller contracts.
   mocks['api.js'] = (await moduleAt('static/js/api.js')).namespace;
   const { workspaceEmpty } = (await moduleAt('static/js/workspaceParts.js')).namespace;
-  for (const look of [true, false]) for (const mascot of ['on', 'off']) {
-    redesign = look; context.document.documentElement.dataset.mascot = mascot;
+  for (const mascot of ['on', 'off']) {
+    context.document.documentElement.dataset.mascot = mascot;
     let actions = 0;
     for (const options of [
       { icon: '<svg></svg>', title: 'Tasks', hint: 'Nothing scheduled', mascot: 'sleeping', actionLabel: 'Schedule', onAction: () => actions++ },
@@ -407,9 +407,9 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       assert.ok(empty.classList.contains('empty-state-rich'));
       assert.equal(host.children[0].tag, 'kairos-mascot');
       assert.equal(host.children[0].getAttribute('state'), options.mascot || options.mascotState);
-      assert.equal(empty.querySelector('.empty-state-title').tag, look ? 'h2' : 'div');
+      assert.equal(empty.querySelector('.empty-state-title').tag, 'h2');
       assert.equal(empty.querySelector('.empty-state-hint').textContent, options.hint || options.text);
-      assert.equal(empty.classList.contains('rd-empty-state'), look);
+      assert.equal(empty.classList.contains('rd-empty-state'), true);
       empty.querySelector('button').onclick();
       if (options.icon) assert.ok(empty.querySelector('.empty-state-icon'));
     }

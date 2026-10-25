@@ -1,13 +1,13 @@
 import { api, el, toast } from "../api.js";
 import { segmented, dotMatrix } from '../kairosParts.js';
-import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState } from '../workspaceParts.js';
 import { openModelSetup } from '../modelSetup.js';
 import { createMascot } from '../mascot.js';
 import { phoneDetails } from '../phoneRowDetails.js';
-const phoneCookbook = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+const phoneCookbook = () => window.matchMedia('(max-width: 768px)').matches;
 
 function modelRow(card, model, primary, extras, running) {
-  if (!redesignOn()) return;
+
   const row = card.firstElementChild;
   row.prepend(el('span', { class: 'workspace-phone-only cookbook-model-tile', text: model.name.charAt(0).toUpperCase(), 'aria-hidden': 'true' }));
   const actions = primary.parentElement;
@@ -26,14 +26,14 @@ function modelRow(card, model, primary, extras, running) {
 }
 
 function modelCount(section, models) {
-  if (!redesignOn()) return;
+
   const known = models.every(m => Number.isFinite(m.size));
   section.querySelector('.title').append(el('small', { class: 'workspace-phone-only cookbook-model-count',
     text: `${models.length} model${models.length === 1 ? '' : 's'}${known ? ` · ${(models.reduce((sum, m) => sum + m.size, 0) / 1e9).toFixed(1)} GB` : ''}` }));
 }
 
 function browseCatalog(section, grid) {
-  if (!redesignOn()) return;
+
   const browse = el('button', { type: 'button', class: 'workspace-phone-only phone-section-link', text: 'Browse all', onclick: () => {
     grid.classList.toggle('cookbook-show-all'); browse.textContent = grid.classList.contains('cookbook-show-all') ? 'Show less' : 'Browse all';
   } });
@@ -42,7 +42,7 @@ function browseCatalog(section, grid) {
 
 function downloadProgress(host, pct, label) {
   host.replaceChildren(document.createTextNode(label));
-  if (redesignOn() && pct != null) {
+  if ((pct != null)) {
     const dots = dotMatrix({ rows: 1, cols: 24, cells: Array.from({ length: 24 }, (_, i) => i < Math.round(pct * 24 / 100) ? 'b' : 'empty'), label: `Downloading, ${pct} percent` });
     dots.classList.add('workspace-phone-only', 'cookbook-progress');
     host.append(dots);
@@ -123,30 +123,19 @@ export async function render(container) {
       el("div", { class: "sub", text: phoneCookbook() ? 'Local models on this computer' : "Browse, download, and manage local models." }),
     ]),
   ]);
-  if (redesignOn()) {
-    const guide = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Setup guide', onclick: () => openModelSetup() });
-    guide.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 16.5v.5"/></svg>';
-    header.append(guide);
-  }
+  const guide = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Setup guide', onclick: () => openModelSetup() });
+  guide.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 16.5v.5"/></svg>';
+  header.append(guide);
 
   const tabs = el("div", { class: "segmented-tabs" });
   const body = el("div", { class: 'cookbook-body' });
 
   function renderTabs() {
     tabs.innerHTML = "";
-    if (redesignOn()) {
-      tabs.append(segmented({ label: 'Local model backend', value: activeSection,
-        options: [{ value: 'ollama', text: 'Ollama' }, { value: 'engine', text: 'Built-in Engine' }], onChange: switchSection }));
-      return;
-    }
-    for (const [id, label] of [["ollama", "Ollama"], ["engine", "Built-in Engine"]]) {
-      tabs.appendChild(el("button", {
-        type: "button",
-        class: "segmented-tab" + (activeSection === id ? " active" : ""),
-        text: label,
-        onclick: () => switchSection(id),
-      }));
-    }
+    tabs.append(segmented({ label: 'Local model backend', value: activeSection,
+      options: [{ value: 'ollama', text: 'Ollama' }, { value: 'engine', text: 'Built-in Engine' }], onChange: switchSection }));
+    return;
+
   }
 
   async function switchSection(id) {
@@ -211,23 +200,20 @@ async function refreshOllamaInstalled(installedSection, catalogSection) {
 
   const runningNames = new Set(running.map((r) => r.name));
   modelCount(installedSection, installed);
-  if (redesignOn()) {
-    const statusCard = el('section', { class: 'cookbook-status workspace-phone-only' }, [
-      el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
-        el('strong', { text: 'Ollama is running' }), el('code', { text: 'localhost:11434' })]),
-    ]);
-    for (const model of running) statusCard.append(el('div', { class: 'cookbook-running' }, [
-      document.documentElement.dataset.mascot !== 'off' ? createMascot({ state: 'working', size: 36, decorative: true }) : null,
-      el('div', {}, [el('small', { text: 'Running now' }), el('strong', { text: model.name }),
-        el('code', { text: model.size ? `${(model.size / 1e9).toFixed(1)} GB` : '' })]),
-    ]));
-    installedSection.prepend(statusCard);
-  }
+  const statusCard = el('section', { class: 'cookbook-status workspace-phone-only' }, [
+    el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
+      el('strong', { text: 'Ollama is running' }), el('code', { text: 'localhost:11434' })]),
+  ]);
+  for (const model of running) statusCard.append(el('div', { class: 'cookbook-running' }, [
+    document.documentElement.dataset.mascot !== 'off' ? createMascot({ state: 'working', size: 36, decorative: true }) : null,
+    el('div', {}, [el('small', { text: 'Running now' }), el('strong', { text: model.name }),
+      el('code', { text: model.size ? `${(model.size / 1e9).toFixed(1)} GB` : '' })]),
+  ]));
+  installedSection.prepend(statusCard);
 
   if (installed.length === 0) {
-    installedSection.appendChild(redesignOn() ? emptyState({ title: 'No models installed yet', text: 'Choose a local model from the catalog.',
-      action: { text: 'Browse catalog', onClick: () => catalogSection.scrollIntoView({ block: 'start' }) } })
-      : el("div", { class: "empty-state", text: "No models installed yet — pull one from the catalog below." }));
+    installedSection.appendChild(emptyState({ title: 'No models installed yet', text: 'Choose a local model from the catalog.',
+      action: { text: 'Browse catalog', onClick: () => catalogSection.scrollIntoView({ block: 'start' }) } }));
     return;
   }
 
@@ -354,7 +340,7 @@ async function refreshEngineStatus(statusRow, downloadedSection) {
         ]),
       ]),
     );
-    if (redesignOn()) statusRow.append(el('section', { class: 'cookbook-status workspace-phone-only' }, [
+    statusRow.append(el('section', { class: 'cookbook-status workspace-phone-only' }, [
       el('div', { class: 'cookbook-status-line' }, [el('span', { class: 'cookbook-status-dot', 'aria-hidden': 'true' }),
         el('strong', { text: 'Built-in engine is running' }), el('code', { text: st.base_url })]),
       el('div', { class: 'cookbook-running' }, [
@@ -376,9 +362,8 @@ async function refreshEngineDownloaded(downloadedSection, catalogSection, status
   modelCount(downloadedSection, downloaded);
   const st = await api("/api/cookbook/engine/status");
   if (downloaded.length === 0) {
-    downloadedSection.appendChild(redesignOn() ? emptyState({ title: 'No models downloaded yet', text: 'Choose a model to run on this computer.',
-      action: { text: 'Browse catalog', onClick: () => catalogSection?.scrollIntoView({ block: 'start' }) } })
-      : el("div", { class: "empty-state", text: "No models downloaded yet — pull one from the catalog below." }));
+    downloadedSection.appendChild(emptyState({ title: 'No models downloaded yet', text: 'Choose a model to run on this computer.',
+      action: { text: 'Browse catalog', onClick: () => catalogSection?.scrollIntoView({ block: 'start' }) } }));
     return;
   }
 

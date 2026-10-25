@@ -6,7 +6,7 @@ import { shareButton, githubStrip } from "../storePublish.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { initToolStoreMobile } from "../redesignToolStoreMobile.js";
-import { workspaceEmpty, redesignOn } from '../workspaceParts.js';
+import { workspaceEmpty } from '../workspaceParts.js';
 
 // Redesign hook: tag confirmation panels so the Tool Store sheet can style them.
 function confirmDialog(options) {
@@ -267,14 +267,14 @@ export async function render(container) {
       return;
     }
     const q = state.query;
-    if (redesignOn() && state.admin && state.kind === 'all' && !q && !state.installed) {
+    if (state.admin && state.kind === 'all' && !q && !state.installed) {
       const featured = el('section', { class: 'tool-store-feature' }, [el('small', { text: 'Featured' }),
         el('h3', { text: 'Build a custom tab' }), el('p', { text: 'Describe it, and Kairos builds it.' }),
         el('button', { type: 'button', class: 'btn', text: 'Start', 'aria-haspopup': 'dialog', onclick: openTabBuilder })]);
       results.append(featured);
     }
     // Redesign only: surface a community update above the lists.
-    const pendingUpdate = document.documentElement.classList.contains("kairos-redesign") && state.admin
+    const pendingUpdate = state.admin
       ? state.community.find(item => item.installed && item.update_available) : null;
     if (pendingUpdate) results.append(el("div", { class: "tool-store-update-banner", role: "status" }, [
       el("span", { class: "tool-store-update-dot", "aria-hidden": "true" }),
@@ -353,10 +353,9 @@ export async function render(container) {
       results.append(el("div", { class: "tool-store-notice", text: state.skillsError }));
     }
     if (!total && !state.tabsError && !(["all", "tools"].includes(state.kind) && state.catalogError) && !(["all", "skills"].includes(state.kind) && state.skillsError)) {
-      results.append(redesignOn() ? workspaceEmpty({ title: q ? 'No matches' : 'Nothing here yet', hint: 'Try another search or category.',
+      results.append(workspaceEmpty({ title: q ? 'No matches' : 'Nothing here yet', hint: 'Try another search or category.',
         actionLabel: 'Show all', onAction: () => { state.kind = 'all'; state.query = ''; state.installed = false;
-          search.value = ''; installed.querySelector('input').checked = false; draw(); } })
-        : el("div", { class: "tool-store-empty", text: q ? "No matches. Try another search." : "Nothing in this view yet." }));
+          search.value = ''; installed.querySelector('input').checked = false; draw(); } }));
     }
     mobile.sync();
   }

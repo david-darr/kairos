@@ -1,7 +1,7 @@
 import { mountSheetSurface } from './mobileSheet.js';
 import { api, el, toast, openPanelDialog } from './api.js';
 import { repeatControls } from './calendarRepeat.js';
-import { redesignOn, workspaceEmpty } from './workspaceParts.js';
+import { workspaceEmpty } from './workspaceParts.js';
 
 export function dateOnly(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -29,20 +29,19 @@ export function itemsOnDay(items, day) {
   });
 }
 
-const phoneCalendar = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+const phoneCalendar = () => window.matchMedia('(max-width: 768px)').matches;
 const defaultCalendar = calendars => calendars.find(c => c.primary && ['owner', 'writer'].includes(c.access_role));
 
 export async function googleCalendars(host, onChange) {
   const auth = await api('/api/auth/status');
   if (!auth.is_admin) {
-    if (redesignOn()) host.append(el('p', { class: 'meta', text: 'Calendar connections are managed by an admin on this Kairos.' }));
+    host.append(el('p', { class: 'meta', text: 'Calendar connections are managed by an admin on this Kairos.' }));
     return [];
   }
   const status = await api('/api/google/status');
   if (!status.connected) {
-    host.append(redesignOn() ? workspaceEmpty({ title: 'Connect your calendar', hint: 'Connect Google in Library to see your calendars here.',
-      actionLabel: 'Open Google connection', onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) })
-      : el('div', { class: 'meta', text: 'Connect Google in Library to add your calendars.' }));
+    host.append(workspaceEmpty({ title: 'Connect your calendar', hint: 'Connect Google in Library to see your calendars here.',
+      actionLabel: 'Open Google connection', onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) }));
     return [];
   }
   if (!status.calendar_connected) {
@@ -81,8 +80,8 @@ export async function googleCalendars(host, onChange) {
       el('span', { class: 'cal-sync-status', text: 'Connected' })]),
   ]) : host;
   if (account !== host) host.append(account);
-  if (!phoneCalendar()) host.append(redesignOn() ? el('div', { class: 'cal-account-heading' }, [el('strong', { text: 'Google' }),
-    el('span', { class: 'meta', text: status.email || 'Connected' })]) : el('strong', { text: 'Google calendars' }));
+  if (!phoneCalendar()) host.append(el('div', { class: 'cal-account-heading' }, [el('strong', { text: 'Google' }),
+    el('span', { class: 'meta', text: status.email || 'Connected' })]));
   for (const calendar of calendars) {
     const checkbox = el('input', { type: 'checkbox', checked: selected.has(calendar.id) });
     const label = eventColor(el('label', { class: 'cal-calendar-choice' }, phoneCalendar() ? [el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' }), el('span', { class: 'cal-calendar-name', text: calendar.name }), checkbox] : [checkbox, calendar.name]), { source: 'google', color: calendar.color });
@@ -185,60 +184,58 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
   ]);
   const backdrop = el('div', { class: 'modal-backdrop rd-scrim-in' }, [form]);
   form.addEventListener('animationend', () => form.classList.remove('rd-sheet-in'), { once: true });
-  if (redesignOn()) {
-    form.dataset.view = 'calendar';
-    backdrop.dataset.view = 'calendar';
-    form.querySelector('h3').textContent = item ? 'Edit event' : 'New event';
-    form.setAttribute('aria-label', item ? 'Edit event' : 'New event');
-    save.textContent = item ? 'Save' : 'Add';
-    title.placeholder = 'Event title'; location.placeholder = 'Add';
-    const fields = form.querySelector('.form-grid');
-    const field = input => input.parentElement;
-    field(title).classList.add('cal-title-field');
-    const timing = el('section', { class: 'cal-field-group' }, [
-      field(allDay), field(start), field(end), repeat.host, zoneField, scopeField,
-    ]);
-    const details = el('section', { class: 'cal-field-group' }, [field(target), field(location), field(description)]);
-    fields.replaceChildren(field(title), timing, details);
-    if (phoneCalendar()) {
-      const pills = [];
-      for (const [input, label] of [[start, 'Starts'], [end, 'Ends']]) {
-        const row = field(input);
-        row.querySelector('label').textContent = label;
-        const date = el('input', { type: 'date', required: true, 'aria-label': `${label} date` });
-        const time = el('input', { type: 'time', required: true, 'aria-label': `${label} time` });
-        const dateText = el('span', { 'aria-hidden': 'true' });
-        const timeText = el('span', { 'aria-hidden': 'true' });
-        const datePill = el('span', { class: 'cal-native-pill' }, [dateText, date]);
-        const timePill = el('span', { class: 'cal-native-pill' }, [timeText, time]);
-        const values = el('div', { class: 'cal-date-pills' }, [datePill, timePill]);
-        input.hidden = true; row.append(values);
-        const updateText = () => {
-          dateText.textContent = date.value ? new Date(`${date.value}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Date';
-          timeText.textContent = time.value ? new Date(`2000-01-01T${time.value}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Time';
-        };
-        const change = () => { input.value = allDay.checked ? date.value : `${date.value}T${time.value}`; updateText(); };
-        date.onchange = time.onchange = change;
-        pills.push({ input, date, time, timePill, updateText });
-      }
-      syncPills = () => {
-        for (const { input, date, time, timePill, updateText } of pills) {
-          date.value = input.value.slice(0, 10); time.value = input.value.slice(11, 16);
-          time.hidden = allDay.checked; time.disabled = allDay.checked;
-          timePill.hidden = allDay.checked; updateText();
-        }
-        endLabel.textContent = allDay.checked ? 'Ends (exclusive)' : 'Ends';
+  form.dataset.view = 'calendar';
+  backdrop.dataset.view = 'calendar';
+  form.querySelector('h3').textContent = item ? 'Edit event' : 'New event';
+  form.setAttribute('aria-label', item ? 'Edit event' : 'New event');
+  save.textContent = item ? 'Save' : 'Add';
+  title.placeholder = 'Event title'; location.placeholder = 'Add';
+  const fields = form.querySelector('.form-grid');
+  const field = input => input.parentElement;
+  field(title).classList.add('cal-title-field');
+  const timing = el('section', { class: 'cal-field-group' }, [
+    field(allDay), field(start), field(end), repeat.host, zoneField, scopeField,
+  ]);
+  const details = el('section', { class: 'cal-field-group' }, [field(target), field(location), field(description)]);
+  fields.replaceChildren(field(title), timing, details);
+  if (phoneCalendar()) {
+    const pills = [];
+    for (const [input, label] of [[start, 'Starts'], [end, 'Ends']]) {
+      const row = field(input);
+      row.querySelector('label').textContent = label;
+      const date = el('input', { type: 'date', required: true, 'aria-label': `${label} date` });
+      const time = el('input', { type: 'time', required: true, 'aria-label': `${label} time` });
+      const dateText = el('span', { 'aria-hidden': 'true' });
+      const timeText = el('span', { 'aria-hidden': 'true' });
+      const datePill = el('span', { class: 'cal-native-pill' }, [dateText, date]);
+      const timePill = el('span', { class: 'cal-native-pill' }, [timeText, time]);
+      const values = el('div', { class: 'cal-date-pills' }, [datePill, timePill]);
+      input.hidden = true; row.append(values);
+      const updateText = () => {
+        dateText.textContent = date.value ? new Date(`${date.value}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Date';
+        timeText.textContent = time.value ? new Date(`2000-01-01T${time.value}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Time';
       };
-      syncPills();
-      const swatch = el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' });
-      field(target).append(swatch, target);
-      const updateSwatch = () => {
-        swatch.style.removeProperty('--calendar-color');
-        const calendar = calendars.find(c => c.id === target.value);
-        if (calendar) eventColor(swatch, { source: 'google', color: calendar.color });
-      };
-      target.onchange = updateSwatch; updateSwatch();
+      const change = () => { input.value = allDay.checked ? date.value : `${date.value}T${time.value}`; updateText(); };
+      date.onchange = time.onchange = change;
+      pills.push({ input, date, time, timePill, updateText });
     }
+    syncPills = () => {
+      for (const { input, date, time, timePill, updateText } of pills) {
+        date.value = input.value.slice(0, 10); time.value = input.value.slice(11, 16);
+        time.hidden = allDay.checked; time.disabled = allDay.checked;
+        timePill.hidden = allDay.checked; updateText();
+      }
+      endLabel.textContent = allDay.checked ? 'Ends (exclusive)' : 'Ends';
+    };
+    syncPills();
+    const swatch = el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' });
+    field(target).append(swatch, target);
+    const updateSwatch = () => {
+      swatch.style.removeProperty('--calendar-color');
+      const calendar = calendars.find(c => c.id === target.value);
+      if (calendar) eventColor(swatch, { source: 'google', color: calendar.color });
+    };
+    target.onchange = updateSwatch; updateSwatch();
   }
   const opener = document.activeElement;
   const dispose = () => { disposeSheet(); backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
@@ -339,7 +336,7 @@ export function deleteCalendarEvent(item, refresh, owner = null) {
 
 export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
   grid.classList.add('cal-week-grid');
-  const compact = redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+  const compact = window.matchMedia('(max-width: 768px)').matches;
   const hourHeight = compact ? 28 : 42;
   const scale = hourHeight / 60;
   const header = el('div', { class: 'cal-week-header' }, [el('span', { text: 'All day' })]);
@@ -363,10 +360,8 @@ export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
     const isToday = date.toDateString() === today.toDateString();
     const dateButton = el('button', { type: 'button', class: 'btn quiet', 'aria-label': date.toDateString(),
       onclick: () => selectDay(date, dayItems) });
-    if (redesignOn()) {
-      dateButton.append(el('span', { class: 'cal-week-weekday', text: date.toLocaleDateString(undefined, { weekday: compact ? 'narrow' : 'short' }) }),
-        el('span', { class: 'cal-week-date', text: String(date.getDate()) }));
-    } else dateButton.textContent = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+    dateButton.append(el('span', { class: 'cal-week-weekday', text: date.toLocaleDateString(undefined, { weekday: compact ? 'narrow' : 'short' }) }),
+      el('span', { class: 'cal-week-date', text: String(date.getDate()) }));
     const cell = el('div', { class: 'cal-week-heading' + (isToday ? ' is-today' : '') }, [dateButton]);
     for (const item of dayItems.filter(item => item.all_day)) cell.append(eventColor(el('button', { type: 'button', class: 'cal-event-pill' + source(item), text: item.title,
       onclick: () => edit(item, date, dayItems) }), item));
@@ -384,7 +379,7 @@ export function weekGrid(grid, start, items, selectDay, edit, dayCount = 7) {
     for (const event of events) {
       const node = eventColor(el('button', { type: 'button', class: 'cal-week-event' + source(event.item), text: event.item.title, title: event.item.title,
         onclick: () => edit(event.item, date, dayItems) }), event.item);
-      if (redesignOn()) node.append(el('span', { class: 'cal-event-time', text: new Date(event.item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }));
+      node.append(el('span', { class: 'cal-event-time', text: new Date(event.item.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }));
       node.style.top = `${event.from * scale}px`; node.style.height = `${Math.max(18, (event.to - event.from) * scale)}px`;
       node.style.left = `${event.lane * 100 / lanes.length}%`; node.style.width = `${100 / lanes.length}%`;
       column.append(node);

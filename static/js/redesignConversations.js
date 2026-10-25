@@ -78,7 +78,7 @@ export function mountConversations(container) {
   const newChat = panel?.querySelector('.chat-new-btn');
   if (!panel || !list || !newChat) return () => {};
   const desktop = matchMedia('(min-width: 769px)');
-  const enabled = () => desktop.matches && document.documentElement.classList.contains('kairos-redesign');
+  const enabled = () => desktop.matches;
   const heading = el('header', { class: 'rd-conversations-header' }, [el('h2', { text: 'Conversations' })]);
   const close = el('button', { type: 'button', class: 'rd-conversations-close', text: '\u2039', 'aria-label': 'Close conversations', onclick: () => {
     container.querySelector('#chat-history-toggle')?.click(); container.querySelector('#chat-history-toggle')?.focus();

@@ -25,7 +25,7 @@ export function appendEndpointCatalogs(menu, catalogs, onPick) {
 // For embedded Forge sessions, render presentation from the controller's
 // already-fetched choices. All saves are callbacks into that controller.
 export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, effort, catalog, onConnection, onModel, onEffort }) {
-  const redesign = document.documentElement?.classList.contains('kairos-redesign');
+
   // The same structure the composer menu builds (views/chat.js), so one set of rules styles both.
   const fragment = document.createDocumentFragment();
   const connections = el('div', { class: 'model-connection-list' });
@@ -39,7 +39,7 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
   fragment.append(connections);
   const endpoint = endpoints.find(item => item.id === endpointId);
   const effective = (model ?? endpoint?.model) || '';
-  if (redesign && !catalog.length && endpoint?.kind === 'local') catalog = [{ id: effective, display_name: effective || endpoint.name, description: endpoint.name, supported_efforts: [] }];
+  if (!catalog.length && endpoint?.kind === 'local') catalog = [{ id: effective, display_name: effective || endpoint.name, description: endpoint.name, supported_efforts: [] }];
   const selected = catalog.find(item => item.id === effective || item.alias === effective);
   const section = el('div', { class: 'model-version-section' });
   const list = el('div', { class: 'model-catalog-list' });
@@ -54,7 +54,7 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
   fragment.append(section);
   if (endpoint) {
     const reset = button('Use endpoint setting', () => onModel(null), 'model-picker-item model-use-endpoint');
-    section.append(redesign ? el('details', { class: 'model-custom-details' }, [el('summary', { text: 'More options' }), reset]) : reset);
+    section.append(el('details', { class: 'model-custom-details' }, [el('summary', { text: 'More options' }), reset]));
   }
   else if (!endpoints.length) fragment.append(el('p', { text: 'Add a model in Settings.' }));
   if (selected?.supported_efforts?.length) {
@@ -63,7 +63,7 @@ export function renderMobileCatalogMenu(menu, { endpoints, endpointId, model, ef
     for (const level of [{ effort: null }, ...selected.supported_efforts]) row.append(button(level.effort || 'Default', () => onEffort(level.effort), `model-effort-btn${(effort ?? null) === level.effort ? ' active' : ''}`));
     section.append(row);
   }
-  if (redesign) fragment.append(button('Set up a model', () => go('settings', { section: 'add-models' }), 'model-picker-item model-add-item'));
+  fragment.append(button('Set up a model', () => go('settings', { section: 'add-models' }), 'model-picker-item model-add-item'));
   menu.replaceChildren(fragment); menu.dispatchEvent(new Event('kairos:model-menu-updated'));
 }
 
@@ -221,7 +221,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
   // models under their provider, so each provider gets a label, and the active connection's
   // models sit right under its row. Only CSS order moves things, so DOM and focus order stay put.
   const decorateDesktop = () => {
-    if (!document.documentElement.classList.contains('kairos-redesign') || menu.classList.contains('ms-model-menu')) return;
+    if (menu.classList.contains('ms-model-menu')) return;
     menu.classList.add('rd-model-picker');
     nameEffort();
     menu.querySelectorAll('.rd-model-group').forEach(node => node.remove());

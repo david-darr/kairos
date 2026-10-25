@@ -18,9 +18,9 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
   // the "Inbox" and "Next up" cards read. null until the first answer.
   let waiting = null, upcoming = [], topSignature = '';
   const media = matchMedia('(max-width: 768px)');
-  const redesignOn = () => document.documentElement.classList.contains('kairos-redesign');
+
   // The phone list page: the rail is the page itself until a conversation is picked.
-  const phoneList = () => media.matches && redesignOn() && !workspace.classList.contains('has-conversation');
+  const phoneList = () => media.matches && !workspace.classList.contains('has-conversation');
   const root = el('div', { class: 'agents-messenger is-messages' });
   const workspace = el('div', { class: 'agents-workspace' });
   const ecosystemHost = el('section', { class: 'agent-ecosystem', id: 'agents-ecosystem-panel', role: 'tabpanel', 'aria-labelledby': 'agents-ecosystem-tab', hidden: true });
@@ -282,7 +282,7 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
       if (disposed || version !== refreshVersion) return;
       agents = nextAgents; metadata = nextMetadata; if (nextTeams) teams = nextTeams.items || [];
       if (nextInbox) waiting = { count: (nextInbox.items?.length || 0) + (nextInbox.reviews?.length || 0),
-        questions: !(nextInbox.reviews?.length) && (nextInbox.items || []).every(item => item.kind === 'question') };
+        questions: !nextInbox.reviews?.length && (nextInbox.items || []).every(item => item.kind === 'question') };
       const tasks = Array.isArray(nextTasks) ? nextTasks : nextTasks?.items || [];
       upcoming = tasks.filter(task => task.agent_id && task.enabled !== false && task.next_run_at && new Date(task.next_run_at) > new Date())
         .sort((a, b) => String(a.next_run_at).localeCompare(String(b.next_run_at))).slice(0, 3);

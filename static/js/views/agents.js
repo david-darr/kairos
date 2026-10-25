@@ -481,7 +481,7 @@ async function agentPage(root, agentId, schedule, cleanups, tab = "chat", takeOv
   // its handlers; on a desktop it goes back to the top bar.
   const dmCard = el('section', { class: 'agent-dm-card', 'aria-label': 'About this bot' });
   const tools = el('div', { class: 'agent-topbar-tools' }, [header, ...(workspace ? [info] : []), more, moreMenu]);
-  const phoneCard = () => matchMedia('(max-width: 768px)').matches && document.documentElement.classList.contains('kairos-redesign');
+  const phoneCard = () => matchMedia('(max-width: 768px)').matches;
   const placeHeader = () => {
     if (phoneCard()) { if (header.parentNode !== dmCard) dmCard.append(header); }
     else if (header.parentNode !== tools) tools.prepend(header);

@@ -1,8 +1,8 @@
 import { collectActivity } from "./activityModel.js";
-// Redesign preview: the app shell's "need you" row.
+// The app shell's "need you" row.
 //
-// With Settings > Appearance > Redesign preview on, the floating chat pill
-// (floatingProgress.js) is hidden by redesign-shell.css and its information
+// The floating chat pill (floatingProgress.js) is hidden by
+// redesign-shell.css and its information
 // lives here instead: one compact row in the sidebar, above the nav, and a
 // flyout (a sheet on phones) listing each item with its action. The row hides
 // completely when nothing waits on the person; items that are only working
@@ -16,7 +16,7 @@ import { collectActivity } from "./activityModel.js";
 //   /api/agents           agent names, and which agents are working
 //   /api/triggers         pending approvals ("GitHub push is waiting")
 //   /api/notifications    a device whose last push failed to deliver
-// Every request here is a read. With the switch off this module does nothing.
+// Every request here is a read.
 import * as chatStream from "./chatStream.js";
 import { api } from "./api.js";
 import { openSession } from "./floatingProgress.js";
@@ -36,7 +36,6 @@ let ui = null;                      // { row, flyout, scrim, ... } while mounted
 let started = false;
 let open = false;
 let timer = null;
-let unsubscribe = null;
 let lastFocus = null;
 const activityListeners = new Set();
 // The phone player consumes the same reads and actions as the desktop row.
@@ -46,7 +45,6 @@ export function subscribeActivity(listener) {
   return () => activityListeners.delete(listener);
 }
 
-const isOn = () => root.classList.contains("kairos-redesign");
 const go = detail => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail }));
 const initial = text => (String(text || "").trim()[0] || "K").toUpperCase();
 const clip = (text, max = 90) => { const t = String(text || "").replace(/\s+/g, " ").trim(); return t.length > max ? t.slice(0, max - 1) + "…" : t; };
@@ -300,22 +298,13 @@ function start() {
   started = true;
   mount();
   if (!ui) { started = false; return; }
-  unsubscribe = chatStream.subscribeAll(onChat);
+  chatStream.subscribeAll(onChat);
   for (const { sessionId, ...entry } of chatStream.listInFlight()) if (entry.status === "processing") onChat(sessionId, entry);
   refresh();
   poll();
 }
 
-function stop() {
-  if (!started && !ui) return;
-  started = false;
-  clearTimeout(timer);
-  unsubscribe?.(); unsubscribe = null;
-  chats.clear();
-  unmount();
-}
-
-function sync() { isOn() ? start() : stop(); }
+function sync() { start(); }
 
 export function init() {
   new MutationObserver(records => {

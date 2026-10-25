@@ -1,5 +1,5 @@
 import { api, el, toast } from "../api.js";
-import { workspaceConfirm as confirmDialog, redesignOn, workspaceEmpty as emptyState } from '../workspaceParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState } from '../workspaceParts.js';
 import { segmented } from '../kairosParts.js';
 import { ICONS } from "../icons.js";
 import { createVaultExplorer } from "../vaultExplorer.js";
@@ -17,7 +17,7 @@ import { registerLeaveGuard } from "../leaveGuard.js";
 let activeSection = "documents";
 let activeVaultView = null;
 let docGuard = null;
-const phoneLibrary = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+const phoneLibrary = () => window.matchMedia('(max-width: 768px)').matches;
 
 export async function render(container, tabId, options = {}) {
   const unguard = registerLeaveGuard(async () => {
@@ -69,46 +69,30 @@ function libraryChrome(container, current) {
         : "A home for your references, drafts, and ideas worth keeping." }),
     ]),
   ]);
-  if (redesignOn()) {
-    const change = async id => {
-      if (id === current) return;
-      if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
-      if (id === 'all') await renderAll(container);
-      else if (id === 'vault') renderVault(container);
-      else if (id === 'designs') await renderDesigns(container);
-      else if (id === 'google') renderGoogle(container);
-      else await renderList(container);
-    };
-    const sections = [{ value: 'vault', text: 'Vault' }, { value: 'documents', text: 'Files' }, { value: 'designs', text: 'Designs' }];
-    const control = segmented({ label: 'Library section',
-      value: current === 'google' ? 'documents' : current,
-      options: sections, onChange: change });
-    [...control.querySelectorAll('button')].forEach((button, index) => { button.dataset.librarySection = sections[index].value; });
-    const tabs = el('div', { class: 'library-section-nav' }, [control, el('button', { type: 'button', class: 'btn library-drive-link', text: 'Google Drive',
-        'data-library-section': 'google',
-        'aria-pressed': String(current === 'google'), onclick: () => change('google') })]);
-    const chips = el('nav', { class: 'library-phone-sections workspace-phone-only', 'aria-label': 'Library sections' });
-    for (const [id, text] of [['all', 'All'], ['vault', 'Vault'], ['designs', 'Designs'], ['documents', 'Documents'], ['google', 'Drive']]) {
-      chips.append(el('button', { type: 'button', class: 'btn', text, 'data-library-section': id, 'aria-pressed': String(current === id), onclick: () => change(id) }));
-    }
-    tabs.append(chips);
-    return [header, tabs];
+  const change = async id => {
+    if (id === current) return;
+    if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
+    if (id === 'all') await renderAll(container);
+    else if (id === 'vault') renderVault(container);
+    else if (id === 'designs') await renderDesigns(container);
+    else if (id === 'google') renderGoogle(container);
+    else await renderList(container);
+  };
+  const sections = [{ value: 'vault', text: 'Vault' }, { value: 'documents', text: 'Files' }, { value: 'designs', text: 'Designs' }];
+  const control = segmented({ label: 'Library section',
+    value: current === 'google' ? 'documents' : current,
+    options: sections, onChange: change });
+  [...control.querySelectorAll('button')].forEach((button, index) => { button.dataset.librarySection = sections[index].value; });
+  const tabs = el('div', { class: 'library-section-nav' }, [control, el('button', { type: 'button', class: 'btn library-drive-link', text: 'Google Drive',
+      'data-library-section': 'google',
+      'aria-pressed': String(current === 'google'), onclick: () => change('google') })]);
+  const chips = el('nav', { class: 'library-phone-sections workspace-phone-only', 'aria-label': 'Library sections' });
+  for (const [id, text] of [['all', 'All'], ['vault', 'Vault'], ['designs', 'Designs'], ['documents', 'Documents'], ['google', 'Drive']]) {
+    chips.append(el('button', { type: 'button', class: 'btn', text, 'data-library-section': id, 'aria-pressed': String(current === id), onclick: () => change(id) }));
   }
-  const tabs = el("div", { class: "segmented-tabs library-tabs", role: "group", "aria-label": "Library section" });
-  for (const [id, label] of [["documents", "Documents & files"], ["vault", "Vault"], ["google", "Google Drive"], ["designs", "Designs"]]) {
-    const button = el("button", { type: "button", class: "segmented-tab" + (id === current ? " active" : ""),
-      text: label, 'data-library-section': id, "aria-pressed": id === current ? "true" : "false" });
-    button.addEventListener("click", async () => {
-      if (id === current) return;
-      if (activeVaultView?.canLeave && !await activeVaultView.canLeave()) return;
-      if (id === "vault") renderVault(container);
-      else if (id === "designs") await renderDesigns(container);
-      else if (id === "google") renderGoogle(container);
-      else await renderList(container);
-    });
-    tabs.append(button);
-  }
+  tabs.append(chips);
   return [header, tabs];
+
 }
 
 // The phone overview joins existing sources; unavailable sources stay absent.
@@ -189,13 +173,11 @@ async function renderDesigns(container) {
   container.replaceChildren(header, tabs, host);
   designModule = await import("./design.js");
   await designModule.renderDesignList(host);
-  if (redesignOn()) {
-    const back = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '‹', 'aria-label': 'Back to Library', onclick: () => renderAll(container) });
-    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New design', onclick: () => host.querySelector('.design-home-actions > .primary')?.click() });
-    create.innerHTML = ICONS.plus;
-    header.append(back, create);
-    header.classList.add('library-designs-header');
-  }
+  const back = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', text: '‹', 'aria-label': 'Back to Library', onclick: () => renderAll(container) });
+  const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New design', onclick: () => host.querySelector('.design-home-actions > .primary')?.click() });
+  create.innerHTML = ICONS.plus;
+  header.append(back, create);
+  header.classList.add('library-designs-header');
 }
 
 function renderGoogle(container) {
@@ -272,10 +254,8 @@ async function renderList(container) {
     el("div", { style: "margin-top:6px;" }, [importStatus]),
   ]);
   toolbar.classList.add('library-document-toolbar');
-  if (redesignOn()) {
-    const upload = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Upload a document', onclick: () => fileInput.click() });
-    upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>'; header.append(upload);
-  }
+  const upload = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Upload a document', onclick: () => fileInput.click() });
+  upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>'; header.append(upload);
 
   const grid = el("div", { id: "library-grid", class: "document-grid rd-stagger" });
   const chatFiles = el("div", { class: "library-chat-files rd-stagger" });
@@ -376,10 +356,9 @@ async function refreshChatFileGroups(host, query, section, openChats, current) {
   }
   section.count.textContent = String(shown);
   if (wanted && shown) section.node.open = true;
-  if (!shown) host.append(redesignOn() ? emptyState({ title: query ? 'No chat files match' : 'No chat files yet',
+  if (!shown) host.append(emptyState({ title: query ? 'No chat files match' : 'No chat files yet',
     hint: 'Files sent to or created in chats will appear here.', actionLabel: 'Open chats',
-    onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'chat' } })) })
-    : el("div", { class: "library-empty", text: query ? "No chat files match this search." : "Files sent to or created in chats will appear here." }));
+    onAction: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'chat' } })) }));
 }
 
 async function refreshGrid(grid, container, query, section, current) {

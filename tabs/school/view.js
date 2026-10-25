@@ -1,6 +1,6 @@
 import { api, el } from "/static/js/api.js";
 import { mountSessionChat } from "/static/js/sessionChat.js";
-import { workspaceEmpty as emptyState, redesignOn, workspaceStats } from '/static/js/workspaceParts.js';
+import { workspaceEmpty as emptyState, workspaceStats } from '/static/js/workspaceParts.js';
 
 // School: Canvas assignments grouped by course. Three states in one view
 // (no routing) — overview (upcoming-across-everything + course cards, a mix
@@ -36,11 +36,9 @@ export async function render(container) {
   ]);
 
   const body = el("div", { id: "school-body" });
-  if (redesignOn()) {
-    const sync = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Sync Canvas', onclick: () => body.querySelector('.school-sync')?.click() });
-    sync.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5M4 12a8 8 0 0 1 14-5M18 3v4h-4M6 21v-4h4"/></svg>';
-    header.append(sync);
-  }
+  const sync = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'Sync Canvas', onclick: () => body.querySelector('.school-sync')?.click() });
+  sync.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5M4 12a8 8 0 0 1 14-5M18 3v4h-4M6 21v-4h4"/></svg>';
+  header.append(sync);
   container.append(el("div", { class: "view-constrained" }, [header, body]));
   await renderBody(body);
 }
@@ -112,35 +110,32 @@ async function renderOverview(body) {
     api("/api/tab-school/courses"),
   ]);
 
-  if (redesignOn()) {
-    const all = await api('/api/tab-school/assignments?include_completed=true');
-    const now = new Date(), end = new Date(now); end.setDate(end.getDate() + 7);
-    body.prepend(workspaceStats([{ label: 'Completed', value: all.filter(a => a.completed).length },
-      { label: 'Due this week', value: upcoming.filter(a => new Date(a.due) >= now && new Date(a.due) < end).length }]));
-    const next = upcoming.find(a => !a.completed && new Date(a.due) >= now);
-    if (next) body.append(el('section', { class: 'school-next-due card' }, [el('small', { text: 'Next due' }),
-      el('h3', { text: next.title }), el('p', { class: 'meta', text: `${next.course} · ${formatDue(next.due)}` }),
-      el('button', { type: 'button', class: 'btn primary', text: 'Start with Kairos', onclick: () => openAssignment(body, next.id) })]));
-  }
-  const classesHeading = el("div", { class: "title school-classes-heading", style: "margin:18px 0 10px;font-size:15px;", text: redesignOn() && window.matchMedia('(max-width: 768px)').matches ? 'Classes' : "Courses" });
+  const all = await api('/api/tab-school/assignments?include_completed=true');
+  const now = new Date(), end = new Date(now); end.setDate(end.getDate() + 7);
+  body.prepend(workspaceStats([{ label: 'Completed', value: all.filter(a => a.completed).length },
+    { label: 'Due this week', value: upcoming.filter(a => new Date(a.due) >= now && new Date(a.due) < end).length }]));
+  const next = upcoming.find(a => !a.completed && new Date(a.due) >= now);
+  if (next) body.append(el('section', { class: 'school-next-due card' }, [el('small', { text: 'Next due' }),
+    el('h3', { text: next.title }), el('p', { class: 'meta', text: `${next.course} · ${formatDue(next.due)}` }),
+    el('button', { type: 'button', class: 'btn primary', text: 'Start with Kairos', onclick: () => openAssignment(body, next.id) })]));
+  const classesHeading = el("div", { class: "title school-classes-heading", style: "margin:18px 0 10px;font-size:15px;", text: window.matchMedia('(max-width: 768px)').matches ? 'Classes' : "Courses" });
   body.appendChild(classesHeading);
   const grid = el("div", { class: "document-grid rd-stagger" });
-  if (redesignOn()) classesHeading.append(el('button', { type: 'button', class: 'workspace-phone-only phone-section-link', text: 'See all', onclick: () => {
+  classesHeading.append(el('button', { type: 'button', class: 'workspace-phone-only phone-section-link', text: 'See all', onclick: () => {
     grid.classList.toggle('school-show-all');
     classesHeading.lastElementChild.textContent = grid.classList.contains('school-show-all') ? 'Show less' : 'See all';
   } }));
   body.appendChild(grid);
   if (courses.length === 0) {
-    grid.appendChild(redesignOn() ? emptyState({ title: 'Your classes belong here', text: 'Connect Canvas and sync your assignments.',
-      action: { text: 'Connect Canvas', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } })
-      : el("div", { class: "empty-state", text: "No courses yet — connect Canvas above and hit Sync Now." }));
+    grid.appendChild(emptyState({ title: 'Your classes belong here', text: 'Connect Canvas and sync your assignments.',
+      action: { text: 'Connect Canvas', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } }));
   }
   for (const c of courses) {
     const bits = [`${c.upcoming_count} upcoming`];
     if (c.overdue_count > 0) bits.push(`${c.overdue_count} overdue`);
     bits.push(`${c.assignment_count} total`);
-    grid.appendChild(el(redesignOn() ? 'button' : 'div', { ...(redesignOn() ? { type: 'button' } : {}), class: "glass bracket card school-course-card", style: "cursor:pointer;padding:20px 18px;", onclick: () => openCourse(body, c.name) }, [
-      redesignOn() ? el('span', { class: 'workspace-phone-only school-course-code', text: c.course_code || '', 'aria-hidden': 'true' }) : null,
+    grid.appendChild(el('button', { ...({ type: 'button' }), class: "glass bracket card school-course-card", style: "cursor:pointer;padding:20px 18px;", onclick: () => openCourse(body, c.name) }, [
+      el('span', { class: 'workspace-phone-only school-course-code', text: c.course_code || '', 'aria-hidden': 'true' }),
       el("div", { class: "title", style: "font-size:16px;", text: c.name }),
       el("div", { class: "meta", style: "margin-top:8px;font-size:12.5px;" + (c.overdue_count > 0 ? "color:var(--danger);" : ""), text: bits.join(" · ") }),
     ]));
@@ -157,9 +152,8 @@ async function renderOverview(body) {
   const upcomingList = el("div", { class: 'rd-stagger' });
   body.appendChild(upcomingList);
   if (upcoming.length === 0) {
-    upcomingList.appendChild(redesignOn() ? emptyState({ title: 'Room to catch your breath', text: 'Nothing due in the next two weeks, or nothing synced yet.',
-      action: { text: 'Canvas connection', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } })
-      : el("div", { class: "empty-state", text: "Nothing due in the next two weeks — or nothing synced yet." }));
+    upcomingList.appendChild(emptyState({ title: 'Room to catch your breath', text: 'Nothing due in the next two weeks, or nothing synced yet.',
+      action: { text: 'Canvas connection', onClick: () => { const settings = body.querySelector('details'); settings.open = true; settings.querySelector('input')?.focus(); } } }));
   } else {
     for (const a of upcoming) upcomingList.appendChild(assignmentCard(a, () => openAssignment(body, a.id)));
   }
@@ -202,9 +196,8 @@ async function renderCourseView(body) {
     list.innerHTML = "";
     const assignments = await api(`/api/tab-school/assignments?course=${encodeURIComponent(state.course)}&include_completed=${showCompletedCheckbox.checked}`);
     if (assignments.length === 0) {
-      list.appendChild(redesignOn() ? emptyState({ title: 'No assignments here yet', text: 'Sync Canvas to bring in your coursework.',
-        action: { text: 'All courses', onClick: () => { state = { view: 'overview', course: null, assignmentId: null }; renderBody(body); } } })
-        : el("div", { class: "empty-state", text: "No assignments found for this course yet." }));
+      list.appendChild(emptyState({ title: 'No assignments here yet', text: 'Sync Canvas to bring in your coursework.',
+        action: { text: 'All courses', onClick: () => { state = { view: 'overview', course: null, assignmentId: null }; renderBody(body); } } }));
       return;
     }
     for (const a of assignments) list.appendChild(assignmentCard(a, () => openAssignment(body, a.id)));

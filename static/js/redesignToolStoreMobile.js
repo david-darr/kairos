@@ -13,7 +13,7 @@ const CHEVRON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" str
 const PLUS = '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>';
 
 const markup = html => { const span = document.createElement("span"); span.innerHTML = html; return span.firstElementChild; };
-const redesignOn = () => document.documentElement.classList.contains("kairos-redesign");
+
 
 function sectionKind(heading) {
   const text = heading.textContent.toLowerCase();
@@ -63,7 +63,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
 
   const phone = window.matchMedia(PHONE);
   const placeHeader = () => {
-    if (phone.matches && redesignOn()) {
+    if (phone.matches) {
       if (header.parentElement === top) view.insertBefore(header, top);
     } else if (header.parentElement !== top) top.prepend(header);
   };
@@ -150,7 +150,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
   function sync() {
     if (!view.isConnected) { closeSheet(false); return; }
     placeHeader();
-    if (!redesignOn()) return;
+
     measurePad();
     syncChips();
     let section = null;

@@ -449,7 +449,7 @@ function createViewer(host, sessionId, opener) {
   const stripHome = panel.firstElementChild;
   const phone = matchMedia('(max-width: 768px)');
   current.syncPhoneChrome = () => {
-    const on = phone.matches && document.documentElement.classList.contains('kairos-redesign');
+    const on = phone.matches;
     const active = current.active;
     if (on && active) active.header.after(stripHome);
     else if (stripHome.parentElement !== panel) panel.prepend(stripHome);

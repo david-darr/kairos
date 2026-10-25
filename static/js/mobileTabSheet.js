@@ -88,13 +88,9 @@ export function openMoreSheet(from) {
   const name = document.querySelector('.sidebar-user-name')?.textContent || 'Account';
   // Profile: the account's initial and name; it opens Switch User and Log Out.
   const account = button('', () => {
-    if (document.documentElement.classList.contains('kairos-redesign')) {
-      closeMoreSheet();
-      import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(from));
-      return;
-    }
-    account.setAttribute('aria-expanded', String(accountActions.hidden === false ? false : true));
-    accountActions.hidden = !accountActions.hidden;
+    closeMoreSheet();
+    import('./workspaceProfile.js').then(module => module.openWorkspaceProfile(from));
+    return;
   }, 'ms-account-row ms-profile-row');
   const initial = document.createElement('span'); initial.className = 'ms-profile-initial'; initial.setAttribute('aria-hidden', 'true');
   initial.textContent = document.querySelector('.sidebar-avatar')?.textContent || name.slice(0, 1).toUpperCase() || 'K';
@@ -102,18 +98,12 @@ export function openMoreSheet(from) {
   const profileDetail = document.createElement('small'); profileDetail.className = 'ms-profile-detail'; profileDetail.textContent = 'Profile, switch user, log out';
   const copy = document.createElement('span'); copy.className = 'ms-profile-copy'; copy.append(who, profileDetail);
   account.append(initial, copy); account.setAttribute('aria-label', `${name}, account`);
-  account.setAttribute('aria-expanded', 'false');
-  const accountActions = document.createElement('div'); accountActions.hidden = true;
-  for (const source of document.querySelectorAll('#sidebar-footer .overflow-menu-item')) {
-    const action = button(source.textContent, () => { closeMoreSheet(); source.click(); }, 'ms-account-row');
-    action.disabled = source.disabled; action.title = source.title; accountActions.append(action);
-  }
   const settings = button('', () => { closeMoreSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row ms-settings-row');
   settings.innerHTML = `${ICONS.settings}<span>Settings</span>`; settings.firstElementChild?.setAttribute('aria-hidden', 'true'); settings.setAttribute('aria-label', 'Settings');
   const extras = document.createElement('details'); extras.className = 'ms-more-extras';
   const extrasLabel = document.createElement('summary'); extrasLabel.textContent = 'More options'; extras.append(extrasLabel);
   extras.append(button('Notifications', () => { closeMoreSheet(); openNotifications(from); }, 'ms-account-row'), projects);
-  footer.append(account, accountActions, settings);
+  footer.append(account, settings);
   const native = document.querySelector('.native-mobile-settings');
   if (native) footer.append(button(native.textContent, () => { closeMoreSheet(); native.click(); }, 'ms-account-row'));
   const { live, done } = activityItems();

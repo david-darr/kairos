@@ -1,15 +1,13 @@
-import { emptyState as classicEmpty, el, confirmDialog } from './api.js';
+import { emptyState as sharedEmpty, el, confirmDialog } from './api.js';
 
-export const redesignOn = () => document.documentElement.classList.contains('kairos-redesign');
-
-// Keep the existing empty-state contract and Classic markup at each call site.
+// Normalize both empty-state caller contracts onto the shared markup.
 export function workspaceEmpty(options) {
   const normalized = { ...options, hint: options.hint ?? options.text,
     mascot: options.mascot !== undefined ? options.mascot : options.mascotState,
     actionLabel: options.actionLabel ?? options.action?.text,
     onAction: options.onAction ?? options.action?.onClick };
-  const node = classicEmpty(normalized);
-  if (!redesignOn()) return node;
+  const node = sharedEmpty(normalized);
+
   node.classList.add('rd-empty-state');
   // Keep the shared mascot, fallback icon, poses and appearance-switch behavior.
   node.querySelector('.empty-state-title').replaceWith(el('h2', { class: 'empty-state-title', text: normalized.title }));
@@ -28,7 +26,7 @@ export function workspaceStats(items) {
 export function workspaceConfirm(options) {
   const pending = confirmDialog(options);
   const panel = [...document.querySelectorAll('.panel-dialog.confirm-panel')].at(-1);
-  if (panel && redesignOn()) {
+  if (panel) {
     panel.dataset.view = document.documentElement.dataset.view;
     panel.classList.add('rd-sheet-in');
     panel.parentElement.classList.add('rd-scrim-in');

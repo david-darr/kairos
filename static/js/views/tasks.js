@@ -1,5 +1,5 @@
 import { api, el, customSelect, toast, iconButton } from "../api.js";
-import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState, redesignOn } from '../workspaceParts.js';
+import { workspaceConfirm as confirmDialog, workspaceEmpty as emptyState } from '../workspaceParts.js';
 import { renderTaskActivity } from '../taskActivity.js';
 import { phoneDetails } from '../phoneRowDetails.js';
 import { ICONS } from "../icons.js";
@@ -86,14 +86,12 @@ export async function render(container) {
       addBtn,
     ])
   );
-  if (redesignOn()) {
-    const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New task', onclick: () => { form.open = true; nameInput.focus(); } });
-    create.innerHTML = ICONS.plus;
-    header.append(create);
-    buildButton.classList.add('tasks-build-button');
-  }
+  const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New task', onclick: () => { form.open = true; nameInput.focus(); } });
+  create.innerHTML = ICONS.plus;
+  header.append(create);
+  buildButton.classList.add('tasks-build-button');
   const list = el("div", { id: "tasks-list", class: 'rd-stagger', style: "margin-top:14px;" });
-  const activity = el('section', { class: 'task-activity', hidden: !redesignOn() });
+  const activity = el('section', { class: 'task-activity', hidden: false });
   list.activity = activity;
   list.builtinCard = builtinCard;
   const boardCard = el("div", { class: "glass card task-board-card" });
@@ -198,14 +196,14 @@ async function refresh(list) {
   const tasks = allTasks.filter((t) => t.schedule_kind !== "card").sort((a, b) => Number(!a.enabled) - Number(!b.enabled));
   list.innerHTML = "";
   const recordedRuns = [];
-  if (redesignOn() && !list.activity.childElementCount) list.activity.append(el('p', { class: 'meta', role: 'status', text: 'Loading recorded runs…' }));
+  if (!list.activity.childElementCount) list.activity.append(el('p', { class: 'meta', role: 'status', text: 'Loading recorded runs…' }));
   // While something runs, keep the list current so its Stop button and then
   // its result appear without a reload (roadmap phase 4).
   if (tasks.some((t) => t.run_started_at)) {
     list.pollTimer = setTimeout(() => { if (document.body.contains(list)) refresh(list); }, POLL_MS);
   }
   if (tasks.length === 0) {
-    if (redesignOn()) renderTaskActivity(list.activity, recordedRuns);
+    renderTaskActivity(list.activity, recordedRuns);
     list.appendChild(emptyState({
       icon: ICONS.tasks, mascot: "sleeping",
       title: "No scheduled tasks",
@@ -319,18 +317,16 @@ async function refresh(list) {
       runsHost,
     ]);
     list.appendChild(card);
-    if (redesignOn()) {
-      const details = el('div', { class: 'task-row-details' });
-      details.append(...card.children); card.append(details);
-      const next = task.next_run_at ? new Date(task.next_run_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'Not scheduled';
-      const row = el('button', { type: 'button', class: 'workspace-phone-only task-routine-row', 'aria-haspopup': 'dialog',
-        'aria-label': `${task.name}. Open task controls`, onclick: () => phoneDetails(task.name, [details], row) }, [
-        el('span', { class: 'task-schedule-icon', 'aria-hidden': 'true' }),
-        el('span', { class: 'task-routine-name', text: task.name }), el('span', { class: 'task-routine-next', text: next }),
-      ]);
-      row.firstElementChild.innerHTML = ICONS.calendar || ICONS.tasks;
-      card.prepend(row);
-    }
+    const details = el('div', { class: 'task-row-details' });
+    details.append(...card.children); card.append(details);
+    const next = task.next_run_at ? new Date(task.next_run_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'Not scheduled';
+    const row = el('button', { type: 'button', class: 'workspace-phone-only task-routine-row', 'aria-haspopup': 'dialog',
+      'aria-label': `${task.name}. Open task controls`, onclick: () => phoneDetails(task.name, [details], row) }, [
+      el('span', { class: 'task-schedule-icon', 'aria-hidden': 'true' }),
+      el('span', { class: 'task-routine-name', text: task.name }), el('span', { class: 'task-routine-next', text: next }),
+    ]);
+    row.firstElementChild.innerHTML = ICONS.calendar || ICONS.tasks;
+    card.prepend(row);
 
     if (task.run_started_at) {
       runsHost.append(el("div", { class: "meta", style: "margin-top:4px;color:var(--accent);",
@@ -372,5 +368,5 @@ async function refresh(list) {
       }
     }
   }
-  if (redesignOn() && list.isConnected) renderTaskActivity(list.activity, recordedRuns);
+  if (list.isConnected) renderTaskActivity(list.activity, recordedRuns);
 }
