@@ -52,7 +52,7 @@ const files = {
   '/static/js/usage-overlay.js': ['static/js/usage-overlay.js', 'text/javascript'],
   '/static/js/quotaReadings.js': ['static/js/quotaReadings.js', 'text/javascript'],
 };
-for (const name of ['notchShell', 'activityModel', 'chatStream', 'mascot', 'agentAvatar', 'dither', 'kip']) files[`/static/js/${name}.js`] = [`static/js/${name}.js`, 'text/javascript'];
+for (const name of ['notchShell', 'notchIcons', 'notchModelMarks', 'notchQuiet', 'notchSide', 'kipStyle', 'activityModel', 'chatStream', 'mascot', 'agentAvatar', 'dither', 'kip']) files[`/static/js/${name}.js`] = [`static/js/${name}.js`, 'text/javascript'];
 for (const name of ['kairos-theme', 'mascot']) files[`/static/css/${name}.css`] = [`static/css/${name}.css`, 'text/css'];
 const server = http.createServer((req, res) => {
   if (req.url === '/api/models/quotas' || req.url === '/api/models/quotas/refresh') {
@@ -69,8 +69,21 @@ const server = http.createServer((req, res) => {
   if (req.url === '/api/chat/live/snapshot') {
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ runs: liveRuns })); return;
   }
+  // What the quiet view reads: chats, notes and the calendar, as the app's own endpoints answer them.
+  const sessionList = [{ id: 'a1b2c3d4e5f6', title: 'Q4 planning', updated_at: now - 720, message_count: 6 }, { id: 'b1b2c3d4e5f6', title: 'Trip notes', updated_at: now - 86400 * 3, message_count: 2 }];
+  if (req.url === '/api/sessions') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(sessionList)); return; }
+  if (req.url === '/api/sessions/a1b2c3d4e5f6') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...sessionList[0], messages: [{ role: 'user', content: 'Plan Q4' }, { role: 'assistant', content: 'Here are three roadmap themes to compare, with the tradeoffs of each.' }] })); return;
+  }
+  if (req.url.startsWith('/api/notes')) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify([{ id: 'n1', text: 'Send invoice', completed: false, due_date: new Date().toISOString().slice(0, 10) + 'T09:00:00' }, { id: 'n2', text: 'Call the bank', completed: false, due_date: '2020-01-01T09:00:00' }])); return; }
+  if (req.url.startsWith('/api/calendar/events')) {
+    const at = minutes => new Date(Date.now() + minutes * 60000).toISOString();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify([{ id: 'e1', title: 'Design review', start: at(40), end: at(85), source: 'google', calendar_name: 'Google', completed: false }])); return;
+  }
   if (req.url === '/api/auth/status' || req.url === '/api/agents' || req.url === '/api/agents/inbox' || req.url === '/api/triggers' || req.url === '/api/notifications') {
-    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agents' ? agents : { runs: {}, username: 'local' })); return;
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agents' ? agents : { runs: {}, username: 'David' })); return;
   }
   const markMatch = /^\/static\/img\/model-marks\/([a-z0-9-]+\.svg)$/.exec(req.url);
   if (markMatch) {
@@ -86,13 +99,13 @@ const server = http.createServer((req, res) => {
 });
 const servedMarks = [];
 const interactive = [];
-let openedApp = 0;
 ipcMain.on('usage-overlay:interactive', (event, on) => {
   interactive.push(on);
   if (nativeWin && event.sender === nativeWin.webContents) nativeWin.setIgnoreMouseEvents(!on, { forward: true });
 });
-ipcMain.on('usage-overlay:open-app', () => { openedApp += 1; });
-ipcMain.handle('usage-overlay:config', () => ({ edge: 'right', foldOnHover: true }));
+const opened = [];
+ipcMain.on('usage-overlay:open-app', (event, target, detail) => { opened.push([target, detail]); });
+ipcMain.handle('usage-overlay:config', () => ({ edge: 'top-centre', foldOnHover: false, offset: 0.5 }));
 let win;
 let nativeWin;
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -103,7 +116,7 @@ async function run() {
   // Shown, but placed off every screen: the pill's clip-path transition runs on the
   // compositor, which a hidden window never advances, so a hidden window's capture
   // showed the pill frozen half-unfolded while the page itself was correct.
-  win = new BrowserWindow({ x: -5000, y: -5000, width: 360, height: 460, show: true, skipTaskbar: true, focusable: false,
+  win = new BrowserWindow({ x: -5000, y: -5000, width: 860, height: 640, show: true, skipTaskbar: true, focusable: false,
     backgroundColor: '#3a4a5c', // a dark stand-in for the desktop, so the black notch is visible in screenshots
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
       preload: path.join(root, 'electron/usage-overlay-preload.js') } });
@@ -112,106 +125,12 @@ async function run() {
   const waitFor = async (cond) => { for (let i = 0; i < 60; i++) { if (await js(cond)) return; await delay(50); } throw new Error('Timed out: ' + cond); };
   const move = (x, y) => js(`document.dispatchEvent(new MouseEvent('mousemove',{clientX:${x},clientY:${y},bubbles:true}))`);
 
-  // At rest: folded to the sliver, both rings drawn behind the clip, headline percents shown.
-  await waitFor("document.querySelectorAll('#pill .cell').length === 2");
-  assert.equal(await js("document.body.classList.contains('folded')"), true, 'starts folded');
-  assert.deepEqual(await js("[...document.querySelectorAll('.pct')].map(n => n.textContent)"), ['24%', '86%']);
+  await waitFor("document.body.dataset.edge === 'top-centre' && document.querySelectorAll('#notch-usage .n-reading').length === 2");
   await delay(600);  // capturing before the first frame has painted fails with UnknownVizError
-  fs.writeFileSync(path.join(output, 'folded.png'), (await win.webContents.capturePage()).toPNG());
-
-  // Reaching the sliver unfolds it and takes clicks; the Codex ring is past 80%, so it is red.
-  const rest = await js("(r => [r.left + r.width / 2, r.top + r.height / 2])(document.getElementById('rest').getBoundingClientRect())");
-  await move(rest[0], rest[1]);
-  await waitFor("!document.body.classList.contains('folded')");
-  assert.equal(interactive[interactive.length - 1], true, 'pointer over the notch takes clicks');
-  assert.equal(await js("getComputedStyle(document.querySelector('.cell[data-p=codex] svg.reading circle')).stroke"), 'rgb(224, 132, 111)');
-
-  // Hovering a ring opens its card, CodeNotch's layout: title, windows, reset copy, used and left.
-  const ring = await js("(r => [r.left + r.width / 2, r.top + r.height / 2])(document.querySelector('.cell[data-p=claude] .ringwrap').getBoundingClientRect())");
-  await delay(400);
-  await move(ring[0], ring[1]);
-  await waitFor("document.getElementById('card').classList.contains('show')");
-  const cardText = await js("document.getElementById('card').innerText");
-  assert.match(cardText, /Claude Usage/);
-  assert.match(cardText, /5-hour limit/);
-  assert.match(cardText, /Weekly limit/);
-  assert.match(cardText, /24% Used · 76% left/);
-  assert.match(cardText, /Resets/);
-  await delay(250);
-  fs.writeFileSync(path.join(output, 'card.png'), (await win.webContents.capturePage()).toPNG());
-
-  // Clicking a ring refreshes that provider.
-  await js(`(() => { const r = document.querySelector('.cell[data-p=claude] .ringwrap').getBoundingClientRect();
-    const o = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, bubbles: true };
-    document.getElementById('pill').dispatchEvent(new MouseEvent('mousedown', o)); document.dispatchEvent(new MouseEvent('mouseup', o)); })()`);
-  await waitFor(`${JSON.stringify(refreshes)}.length >= 0`);
-  for (let i = 0; i < 40 && !refreshes.includes('claude'); i++) await delay(50);
-  assert.deepEqual(refreshes, ['claude'], 'a ring click refreshes only its own provider');
-
-  // Moving away gives clicks back to the desktop and folds again.
-  await move(20, 20);
-  await waitFor("document.body.classList.contains('folded')");
-  assert.equal(interactive[interactive.length - 1], false, 'pointer off the notch passes clicks through');
-
-  // Native cursor IPC must wake the click-through notch without a DOM mousemove.
-  win.webContents.send('usage-overlay:pointer', { x: rest[0], y: rest[1] });
-  await waitFor("!document.body.classList.contains('folded')");
-  await delay(400);
-  win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
-  await waitFor("document.getElementById('card').classList.contains('show')");
-  // Forwarding can send mouseleave as click-through changes. Repeated native
-  // samples must repair hover even when the physical cursor has not moved.
-  await js("document.dispatchEvent(new MouseEvent('mouseleave'))");
-  win.webContents.send('usage-overlay:pointer', { x: ring[0], y: ring[1] });
-  await delay(550);
-  assert.equal(await js("document.body.classList.contains('folded')"), false, 'stationary native pointer cancels stray mouseleave');
-  // Samples faster than the grace timers must still allow the card to close
-  // and the notch to fold when the pointer stays outside.
-  for (let i = 0; i < 8; i++) {
-    win.webContents.send('usage-overlay:pointer', { x: -1, y: -1 });
-    await delay(80);
-    if (i === 4) assert.equal(await js("document.getElementById('card').classList.contains('show')"), false, 'repeated outside samples do not defer card hide');
-  }
-  await waitFor("document.body.classList.contains('folded')");
-
-  // Signed out: a dash on the ring and the sign-in note on the card.
-  claudeStatus = 'needs_sign_in';
-  await js('refreshUsageReadings()');
-  await waitFor("document.querySelector('.cell[data-p=claude] .pct').textContent === '—'");
-  await move(rest[0], rest[1]);
-  await waitFor("!document.body.classList.contains('folded')");
-  await delay(400);
-  await move(ring[0], ring[1]);
-  await waitFor("document.getElementById('card').innerText.includes('Sign in to Claude Code')");
-
-  // Real logos, not letters: Claude's mark and the OpenAI mark for Codex, loaded and in use.
-  assert.deepEqual([...new Set(servedMarks)].sort(), ['claude.svg', 'openai.svg']);
-  assert.match(await js("getComputedStyle(document.querySelector('.cell[data-p=codex] .mark')).maskImage"), /openai\.svg/);
-  assert.match(await js("document.querySelector('#card .c-head .mark').style.getPropertyValue('--mark')"), /claude\.svg/);
-
-  // Every edge: the pill against that edge and the card fully inside the window, never clipped.
-  for (const [edge, width, height] of [['left', 360, 650], ['top', 650, 650], ['bottom', 650, 650], ['right', 360, 650]]) {
-    win.setContentSize(width, height);
-    win.webContents.send('usage-overlay:config', { edge, foldOnHover: false });
-    await waitFor(`document.body.dataset.edge === '${edge}' && !document.body.classList.contains('folded')`);
-    await delay(450);
-    const ringAt = await js("(r => [r.left + r.width / 2, r.top + r.height / 2])(document.querySelector('.cell[data-p=codex] .ringwrap').getBoundingClientRect())");
-    await move(ringAt[0], ringAt[1]);
-    await waitFor("document.getElementById('card').classList.contains('show') && document.getElementById('card').innerText.includes('Codex Usage')");
-    await delay(300);
-    const geometry = await js(`(() => { const box = el => { const r = document.getElementById(el).getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
-      return { W: innerWidth, H: innerHeight, pill: box('pill'), card: box('card') }; })()`);
-    const { W, H, pill, card } = geometry;
-    const touching = { left: Math.round(pill.l) === 0, right: Math.round(pill.r) === W, top: Math.round(pill.t) === 0, bottom: Math.round(pill.b) === H }[edge];
-    assert.ok(touching, `${edge}: pill is flush against its edge ${JSON.stringify(geometry)}`);
-    assert.ok(card.l >= 0 && card.t >= 0 && card.r <= W && card.b <= H, `${edge}: card inside the window ${JSON.stringify(geometry)}`);
-    fs.writeFileSync(path.join(output, `edge-${edge}.png`), (await win.webContents.capturePage()).toPNG());
-    await move(-1, -1);
-  }
 
   // Phase-1 shell: collapsed and expanded geometry at renderer scale factors.
   for (const zoom of [1, 1.25, 1.5]) {
-    win.webContents.setZoomFactor(zoom); win.setContentSize(Math.round(860 * zoom), Math.round(440 * zoom));
+    win.webContents.setZoomFactor(zoom); win.setContentSize(Math.round(860 * zoom), Math.round(640 * zoom));
     win.webContents.send('usage-overlay:config', { edge: 'top-centre', foldOnHover: false });
     await waitFor("document.body.dataset.edge === 'top-centre'");
     await move(-1, -1); await delay(550);
@@ -223,12 +142,16 @@ async function run() {
     await collapsed();
     fs.writeFileSync(path.join(output, `notch-collapsed-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
     await move(430, 15); await delay(450);
-    // Expanded (NotchWorking): 820 DIP wide; the status row and the cards set the height.
-    { const [w, h, t, c] = await size(); assert.ok(w === 820 && h >= 150 && h <= 220 && t === 0 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'expanded ' + JSON.stringify([w, h, t, c])); }
+    await waitFor("document.getElementById('notch-shell').getAnimations().length === 0");
+    // Expanded (NotchQuiet with nothing running): 820 DIP wide; the status row and the cards set the height.
     fs.writeFileSync(path.join(output, `notch-expanded-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
-    // Every connected model is in the status row: three readings and "+2", all inside the notch.
+    { const [w, h, t, c] = await size(); assert.ok(w === 820 && h >= 200 && h <= 380 && t === 0 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'expanded ' + JSON.stringify([w, h, t, c, await js('innerWidth')])); }
+    // Every connected model is in the status row as its logo and reading, no names: three readings and "+2", all inside the notch.
     assert.deepEqual(await js("[...document.querySelectorAll('#notch-readings .n-word')].map(n => n.textContent)"),
-      ['Claude sign in', 'Codex 5h 86%', 'Antigravity 2.1K tokens today', '+2'], 'status row lists every model (Claude was signed out above)');
+      ['5h 24%', '5h 86%', '2.1K today', '+2'], 'status row lists every model by logo');
+    assert.deepEqual(await js("[...document.querySelectorAll('#notch-readings .n-word')].slice(0, 3).map(n => n.title)"), ['Claude', 'Codex', 'Antigravity'], 'the name is the tooltip');
+    assert.equal(await js("document.querySelectorAll('#notch-readings .n-word > svg').length"), 3, 'the three subscription logos are inline SVG');
+    assert.equal(await js("document.querySelector('#notch-readings .n-word > svg').getAttribute('fill')"), 'currentColor');
     assert.ok(await js("(s => [...document.querySelectorAll('#notch-readings .n-word')].every(n => { const r = n.getBoundingClientRect(); return r.width > 0 && r.left >= s.left && r.right <= s.right; }))(document.getElementById('notch-shell').getBoundingClientRect())"), 'readings stay inside the notch');
     if (zoom === 1) {
       const at = async selector => js(`(r => [r.left + r.width / 2, r.top + r.height / 2])(document.querySelector('${selector}').getBoundingClientRect())`);
@@ -241,7 +164,8 @@ async function run() {
       await move(more[0], more[1]);
       await waitFor("/^Models/.test(document.getElementById('card').innerText)");
       const all = await js("document.getElementById('card').innerText");
-      for (const line of [/Claude\s+sign in/, /Codex\s+5h 86%/, /Antigravity\s+2\.1K tokens today/, /qwen3\s+12K tokens today/, /Grok\s+no usage yet/]) assert.match(all, line);
+      for (const line of [/Claude\s+5h 24%/, /Codex\s+5h 86%/, /Antigravity\s+2\.1K tokens today/, /qwen3\s+12K tokens today/, /Grok\s+no usage yet/]) assert.match(all, line);
+      assert.ok(servedMarks.includes('qwen.svg') && servedMarks.includes('grok.svg'), 'models with other marks draw their files');
       assert.ok(await js("(r => r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight)(document.getElementById('card').getBoundingClientRect())"), 'the card stays within the window');
       await delay(250); fs.writeFileSync(path.join(output, 'notch-card-all-models.png'), (await win.webContents.capturePage()).toPNG());
       await move(430, 15);
@@ -253,15 +177,32 @@ async function run() {
   win.webContents.setZoomFactor(1);
 
   // Feed the real activity model through the stub snapshot, with no backend work.
-  win.setContentSize(860, 440);
+  win.setContentSize(860, 640);
   const shot = async name => { await delay(400); fs.writeFileSync(path.join(output, name), (await win.webContents.capturePage()).toPNG()); };
   const both = async name => { await move(-1, -1); await delay(450); await shot(`${name}-collapsed.png`); await move(430, 15); await delay(450); await shot(`${name}-expanded-light.png`);
     // A dark Appearance theme: the boards themselves.
     await js("document.body.classList.remove('notch-light')"); await shot(`${name}-expanded-dark.png`); await js("document.body.classList.add('notch-light')"); };
-  // Resting with the board's four agents: the rings, the dots and four resting chips.
+  // Resting with the board's four agents, none at work: the quiet view (NotchQuiet) and four resting agents.
   agents = BOARD_AGENTS.map(agent => ({ ...agent }));
   await delay(15500); // the notch's agent poll
   await both('notch-resting');
+  await move(430, 15); await delay(450);
+  assert.equal(await js("document.getElementById('notch-panel').dataset.layout"), 'quiet', 'nothing at work shows the quiet view');
+  const quietText = await js("document.querySelector('.nq-view').innerText");
+  for (const line of [/all quiet/i, /Good (morning|afternoon|evening), David/, /up next · in \d+ min/i, /Design review/, /Prep with Kairos/, /pick up where you left off/i,
+    /Q4 planning/, /Here are three roadmap themes/, /Continue/, /1\s+chats today/, /2\s+notes due/, /4\s+agents/, /24%/, /86%/, /New chat/, /Drop files/]) assert.match(quietText, line);
+  assert.ok(await js("[...document.querySelectorAll('.nq-view')].every(v => (r => r.left >= 0 && r.right <= innerWidth)(v.getBoundingClientRect()))"), 'the quiet view fits the window');
+  assert.equal(await js("document.querySelectorAll('.nq-usage-row').length"), 2, 'a usage row for each quota');
+  assert.equal(await js("document.querySelectorAll('.nq-usage-row')[0].querySelectorAll('.nq-dots i.on').length"), 6, '24% fills 6 of 24 dots');
+  // Every quick action reaches the app, with Prep and Continue carrying their chat.
+  for (const label of ['New chat', 'Note', 'Talk', 'Drop files']) await js(`document.querySelector('.nq-view .nq-qa[aria-label="${label}"]').click()`);
+  await js("document.querySelector('.nq-view .nq-pill:not(.nq-primary)').click()");
+  await js("document.querySelector('.nq-view .nq-primary').click()");
+  for (let i = 0; i < 40 && opened.length < 6; i++) await delay(50);
+  assert.deepEqual(opened.slice(0, 4).map(o => o[0]), ['chat', 'notes', 'talk', 'attach']);
+  assert.match(opened[4][1].draft, /Design review/, 'Prep with Kairos seeds a chat for the event');
+  assert.equal(opened[5][1].sessionId, 'a1b2c3d4e5f6', 'Continue opens the last chat');
+  opened.length = 0;
   liveRuns = { 'smoke-chat': { status: 'processing', sessionTitle: 'Drafting the Q4 summary', text: 'Working', revision: 1 } };
   await js("import('/static/js/chatStream.js').then(stream => stream.sync())");
   await waitFor("document.getElementById('notch-shell').dataset.state === 'thinking'");
@@ -272,7 +213,85 @@ async function run() {
   await waitFor("document.getElementById('notch-shell').dataset.state === 'needs'");
   assert.equal(await js("document.querySelector('#notch-signal .n-count')?.textContent"), '1', 'a count appears when something needs you');
   await both('notch-needs-you');
-  liveRuns = {}; agents = [];
+  // Two agents at work bring the chips back (NotchWorking).
+  liveRuns = {};
+  agents = BOARD_AGENTS.map((agent, i) => ({ ...agent, status: i < 2 ? 'working' : 'idle', status_detail: i ? 'writing draft' : 'asking research' }));
+  await js("import('/static/js/chatStream.js').then(stream => stream.sync())");
+  await delay(15500);
+  await waitFor("document.getElementById('notch-panel').dataset.layout === 'agents'");
+  await move(430, 15); await delay(450);
+  assert.equal(await js("document.querySelectorAll('.n-chip').length"), 4, 'four agent chips');
+  assert.ok(await js("(r => r.height >= 150 && r.height <= 240)(document.getElementById('notch-shell').getBoundingClientRect())"), 'the working layout keeps its board height');
+  await shot('notch-two-agents-working.png');
+
+  // The side-edge notch (NotchSide), on each edge: a 44 px pill flush to the edge, a 380 px panel when expanded.
+  win.setContentSize(656, 800); await delay(400);
+  const W = await js('innerWidth'), H = await js('innerHeight'), mid = H / 2; // the window's own size, whatever the OS adds
+  const box = () => js("(r => ({ l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }))(document.getElementById('notch-shell').getBoundingClientRect())");
+  const flush = (b, edge) => edge === 'left' ? Math.round(b.l) === 0 : Math.round(b.r) === W;
+  for (const edge of ['left', 'right']) {
+    win.webContents.send('usage-overlay:config', { edge, offset: 0.5, foldOnHover: false });
+    await waitFor(`document.body.dataset.edge === '${edge}' && !document.body.classList.contains('folded')`);
+    await move(-1, -1); await delay(750);
+    let b = await box();
+    assert.ok(Math.round(b.w) === 44 && flush(b, edge), `${edge}: a 44 px pill flush to the edge ${JSON.stringify(b)}`);
+    assert.ok(Math.abs((b.t + b.b) / 2 - mid) <= 2, `${edge}: centred along the edge at offset .5 ${JSON.stringify(b)}`);
+    assert.equal(await js("getComputedStyle(document.getElementById('notch-shell')).borderRadius"), edge === 'left' ? '0px 22px 22px 0px' : '22px 0px 0px 22px', 'rounded on the inner side');
+    assert.equal(await js("document.querySelectorAll('#notch-usage .nm-ring .nm-logo').length"), 2, 'the logo rings are stacked in the rail');
+    assert.ok(!/Claude|Codex|Antigravity|%/.test(await js("document.getElementById('notch-bar').innerText")), 'no names or figures in the rail');
+    assert.equal(await js("getComputedStyle(document.querySelector('#notch-cluster')).display"), 'grid', 'the agent dots show at rest');
+    await shot(`side-${edge}-resting.png`);
+    // Expanded: the board's modules, stacked, flush to the edge and inside the window.
+    await move(edge === 'left' ? 20 : W - 20, mid);
+    await waitFor("document.getElementById('notch-shell').classList.contains('expanded')");
+    await delay(450);
+    await shot(`side-${edge}-expanded.png`);
+    b = await box();
+    assert.ok(Math.round(b.w) === 380 && flush(b, edge) && b.t >= 0 && b.b <= H, `${edge}: a 380 px panel flush to the edge ${JSON.stringify(b)}`);
+    const panelText = await js("document.getElementById('notch-panel').innerText");
+    for (const line of [/up next · in \d+ min/i, /Design review/, /5h 24%/, /Scout: asking research/]) assert.match(panelText, line);
+    assert.equal(await js("getComputedStyle(document.querySelector('#notch-panel .n-chips'), '::before').content"), '"Agents"', 'the agents list is labelled');
+    assert.equal(await js("document.querySelectorAll('#notch-panel .ns-actions .nq-qa').length"), 4, 'four quick actions in a row');
+    assert.equal(await js("getComputedStyle(document.querySelector('#notch-panel .nq-view')).display"), 'none', 'the quiet view is the top notch only');
+    const anti = await js("(r => [r.left + r.width / 2, r.top + r.height / 2])(document.querySelector('#notch-readings [data-p=antigravity]').getBoundingClientRect())");
+    await move(anti[0], anti[1]);
+    await waitFor("document.getElementById('card').classList.contains('show') && /Antigravity Usage/.test(document.getElementById('card').innerText)");
+    await delay(250);
+    const card = await js("(r => ({ l: r.left, r: r.right, t: r.top, b: r.bottom }))(document.getElementById('card').getBoundingClientRect())");
+    assert.ok(card.l >= 0 && card.r <= W && card.t >= 0 && card.b <= H, `${edge}: the card stays in the window ${JSON.stringify(card)}`);
+    assert.ok(edge === 'left' ? card.l >= b.r : card.r <= b.l, `${edge}: the card opens inward of the panel`);
+    await shot(`side-${edge}-card.png`);
+    await js("document.querySelector('#notch-panel .ns-new').click()");
+    for (let i = 0; i < 40 && !opened.length; i++) await delay(50);
+    assert.equal(opened.pop()[0], 'chat', 'the side panel has its own New chat');
+    await move(edge === 'left' ? W - 16 : 5, mid);
+    await waitFor("!document.getElementById('notch-shell').classList.contains('expanded')");
+    await delay(450);
+  }
+  // The position along the edge: the ends are flush with the window's ends, and the expanded panel stays inside.
+  for (const [offset, expect] of [[0, 'top'], [1, 'bottom']]) {
+    win.webContents.send('usage-overlay:config', { edge: 'right', offset, foldOnHover: false });
+    await delay(500);
+    const b = await box();
+    assert.ok(expect === 'top' ? Math.round(b.t) === 0 : Math.round(b.b) === H, `offset ${offset}: flush with the ${expect} ${JSON.stringify(b)}`);
+    await move(W - 20, expect === 'top' ? 40 : H - 40);
+    await waitFor("document.getElementById('notch-shell').classList.contains('expanded')");
+    await delay(450);
+    const open = await box();
+    assert.ok(open.t >= 0 && open.b <= H, `offset ${offset}: the expanded panel stays inside the window ${JSON.stringify(open)}`);
+    await move(5, mid); await waitFor("!document.getElementById('notch-shell').classList.contains('expanded')");
+  }
+  // Folded (opt-in): only the small tab at the edge, which wakes the notch.
+  win.webContents.send('usage-overlay:config', { edge: 'right', offset: 0.5, foldOnHover: true });
+  await waitFor("document.body.classList.contains('folded')");
+  await delay(500);
+  {
+    const tab = await js("(r => ({ l: r.left, r: r.right, w: r.width, h: r.height, c: (r.top + r.bottom) / 2 }))(document.getElementById('rest').getBoundingClientRect())");
+    assert.ok(Math.round(tab.r) === W && Math.round(tab.w) === 10 && Math.abs(tab.c - mid) <= 2, 'the folded tab sits at the edge, level with the notch ' + JSON.stringify(tab));
+    await move(tab.l + 5, tab.c);
+    await waitFor("!document.body.classList.contains('folded')");
+  }
+  agents = [];
 
   // Nothing the page renders may come from a script-capable source.
   assert.equal(await js("document.querySelectorAll('#card script, #card img, #card iframe').length"), 0);
@@ -305,7 +324,7 @@ async function run() {
   assert.equal(await nativeWin.webContents.executeJavaScript("document.body.classList.contains('folded')"), false, 'actual native cursor wakes click-through window');
   nativeWin.hide(); nativeWin.destroy(); nativeWin = null;
   console.log('PASS: actual native transparent window bounds on all edges and native cursor wake on this display');
-  console.log('PASS: usage notch folded/unfold, card, click-through, ring refresh, signed-out state, logos, all four edges. Screenshots: ' + output);
+  console.log('PASS: usage notch folded/unfold, card, click-through, ring refresh, quiet view, side edges, logos. Screenshots: ' + output);
 }
 run().then(() => exitAfterFlush(0), (error) => { console.error(error); exitAfterFlush(1); }).finally(() => {
   if (win && !win.isDestroyed()) win.destroy();

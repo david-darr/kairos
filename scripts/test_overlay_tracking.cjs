@@ -19,19 +19,19 @@ for (const display of [primary, left, above, rightTaskbar, small]) {
     const b = boundsFor({ edge, offset }, display);
     assert.ok(b.x >= a.x && b.y >= a.y && b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height);
     assert.equal({ left: b.x - a.x, right: a.x + a.width - b.x - b.width,
-      top: b.y - a.y, bottom: a.y + a.height - b.y - b.height }[edge === 'top-centre' ? 'top' : edge], 0, `${edge} is flush on display ${display.id}`);
+      top: b.y - a.y }[edge === 'top-centre' ? 'top' : edge], 0, `${edge} is flush on display ${display.id}`);
     for (const scaleFactor of [1, 1.25, 1.5, 1.75, 2]) {
       assert.deepEqual(boundsFor({ edge, offset }, { ...display, scaleFactor }), b, 'scaleFactor never multiplies screen DIPs');
     }
   }
 }
-assert.deepEqual(boundsFor({ edge: 'right', offset: 0.5 }, primary), { x: 1560, y: 191, width: 360, height: 650 });
-assert.deepEqual(boundsFor({ edge: 'left', offset: 0.5 }, left), { x: -1667, y: -25, width: 360, height: 650 });
+assert.deepEqual(boundsFor({ edge: 'right', offset: 0.5 }, primary), { x: 1264, y: 0, width: 656, height: 1032 });
+assert.deepEqual(boundsFor({ edge: 'left', offset: 0.5 }, left), { x: -1667, y: -180, width: 656, height: 960 });
 assert.equal(chooseDisplay([primary, left], 2, 1), left);
 assert.equal(chooseDisplay([primary], 2, 1), primary, 'removed saved display falls back to primary');
 assert.equal(chooseDisplay([left], 99, 1), left, 'missing primary falls back to an attached display');
 assert.deepEqual(localPointer({ x: -1200, y: -180 }, { x: -1400, y: -280 }, 1.25), { x: 160, y: 80 });
-assert.equal(boundsDiffer({ x: -1666, y: -24, width: 361, height: 649 }, { x: -1667, y: -25, width: 360, height: 650 }), false);
+assert.equal(boundsDiffer({ x: -1666, y: -179, width: 657, height: 959 }, { x: -1667, y: -180, width: 656, height: 960 }), false);
 
 let tick, stopped = 0, visible = false, destroyed = false, cursor = { x: -1662, y: 300 }, zoom = 1, writes = 0;
 let displays = [primary, left], config = { displayId: 2, edge: 'left', offset: 0.5 };
@@ -52,13 +52,13 @@ assert.equal(sent.length, 0, 'hidden overlays do not send pointers');
 actual.x = 200;
 visible = true; win.emit('show');
 assert.deepEqual(actual, target(), 'show repairs native bounds before sampling');
-assert.deepEqual(sent.at(-1), { channel: 'usage-overlay:pointer', value: { x: 5, y: 325 } });
+assert.deepEqual(sent.at(-1), { channel: 'usage-overlay:pointer', value: { x: 5, y: 480 } });
 const count = sent.length, stableWrites = writes;
 tick();
 assert.equal(sent.length, count + 1, 'stationary cursor repairs stale renderer hover');
 assert.equal(writes, stableWrites, 'correct native geometry does not cause repeated setBounds');
 zoom = 1.25; tick();
-assert.deepEqual(sent.at(-1).value, { x: 4, y: 260 }, 'stationary native cursor accounts for a zoom change');
+assert.deepEqual(sent.at(-1).value, { x: 4, y: 384 }, 'stationary native cursor accounts for a zoom change');
 // DPI/resolution/work area can change on the selected display at runtime.
 displays = [primary, { ...left, scaleFactor: 1.25, workArea: { x: -2048, y: -100, width: 2048, height: 1104 } }];
 tracking.place();
@@ -74,9 +74,11 @@ actual.x = 200; tick();
 assert.deepEqual(actual, target(), 'delayed OS relocation after unplug is repaired');
 displays = [primary, left]; tick();
 assert.deepEqual(actual, boundsFor(config, left), 'reconnected saved monitor is selected again');
-tracking.setDragging(true); actual.y += 40; const carried = { ...actual }; tick();
+// Only the top-centre notch is carried along its edge now (the side notch is placed inside its full-height window).
+config.edge = 'top-centre'; actual = { ...target() }; tick();
+tracking.setDragging(true); actual.x += 40; const carried = { ...actual }; tick();
 assert.deepEqual(actual, carried, 'placement repair does not fight the move handle');
-config.offset = (actual.y - left.workArea.y) / (left.workArea.height - actual.height);
+config.offset = (actual.x - left.workArea.x) / (left.workArea.width - actual.width);
 tracking.setDragging(false);
 assert.deepEqual(actual, carried, 'releasing the handle keeps its new offset');
 actual.x = 200; tick(); assert.deepEqual(actual, target(), 'repair resumes after carrying');
@@ -112,17 +114,25 @@ async function rendererChecks() {
   const body = { classList: classList('folded'), dataset: {} };
   const bridge = { onPointer: fn => { nativePointer = fn; }, onConfig: fn => { configChanged = fn; },
     getConfig: () => ({ edge: 'right', foldOnHover: true }), setInteractive: on => interaction.push(on) };
-  const context = { window: { usageOverlay: bridge, addEventListener() {} },
-    document: { body, getElementById: id => elements[id], addEventListener: (name, fn) => handlers.set(name, fn) },
+  // The notch shell itself is covered by test_notch_shell.cjs; here a stand-in with its hot rectangles
+  // (the resting tab when folded, the pill otherwise) drives the page's fold, wake and click-through logic.
+  const shellStub = () => {
+    const hot = (x, y) => { const r = elements[body.classList.contains('folded') ? 'rest' : 'pill'].getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; };
+    return { hot, pointer: hot, reset() {}, setEdge() {}, readings() {}, isExpanded: () => false };
+  };
+  const context = { window: { usageOverlay: bridge, addEventListener() {}, testShell: shellStub },
+    document: { body, getElementById: id => elements[id], querySelectorAll: () => [], addEventListener: (name, fn) => handlers.set(name, fn) },
     innerWidth: 360, innerHeight: 650, PROVIDERS: [], SIGN_IN: {},
     fetch: () => new Promise(() => {}), requestAnimationFrame: fn => fn(),
     getComputedStyle: () => ({ getPropertyValue: () => '38.7' }), matchMedia: () => ({ matches: true }),
     setTimeout: (fn, ms) => { const id = ++nextId; pending.set(id, { fn, at: time + ms }); return id; },
     clearTimeout: id => pending.delete(id), setInterval() {} };
   const source = fs.readFileSync(path.join(__dirname, '../static/js/usage-overlay.js'), 'utf8')
-    .replace(/^import .* from '\.\/quotaReadings\.js';\r?\n/m, '');
+    .replace(/^import .* from '\.\/quotaReadings\.js';\r?\n/m, '')
+    .replace("await import('./notchShell.js')", '({ createNotchShell: window.testShell })');
   vm.runInNewContext(source, context, { filename: 'usage-overlay.js' });
-  await Promise.resolve(); // initial getConfig
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  await settle(); // initial getConfig, then the shell
   const advance = ms => {
     const until = time + ms;
     while (true) {
@@ -147,7 +157,7 @@ async function rendererChecks() {
   assert.equal(interaction.at(-1), false, 'outside samples restore click-through');
   nativePointer({ x: 355, y: 320 }); advance(550);
   assert.equal(body.classList.contains('folded'), false, 'hover wakes again after a completed fold timer');
-  configChanged({ edge: 'right', foldOnHover: false });
+  configChanged({ edge: 'right', foldOnHover: false }); await settle();
   for (let i = 0; i < 8; i++) { nativePointer({ x: -1, y: -1 }); advance(80); }
   assert.equal(body.classList.contains('folded'), false, 'always expanded setting still works');
   console.log('PASS: actual renderer native hover, stationary recovery, repeated samples, grace timers and click-through');
@@ -166,8 +176,13 @@ for (const edge of ['left', 'right', 'top', 'bottom']) {
   assert.deepEqual(overlayPreferences({ visible: true, edge, offset: .2, displayId: 2, foldOnHover: false }),
     { edge: 'top-centre', offset: .5, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION });
 }
-// After that, an edge the user picks keeps its placement.
-for (const edge of ['left', 'right', 'top', 'bottom']) assert.equal(overlayPreferences({ edge, notch: NOTCH_VERSION }).edge, edge);
+// After that, the side edge the user picks keeps its placement (and its offset)...
+for (const edge of ['left', 'right']) {
+  assert.equal(overlayPreferences({ edge, notch: NOTCH_VERSION }).edge, edge);
+  assert.equal(overlayPreferences({ edge, offset: .8, notch: NOTCH_VERSION }).offset, .8);
+}
+// ...while the CodeNotch top and bottom edges, which the settings no longer offer, become the top centre.
+for (const edge of ['top', 'bottom']) assert.equal(overlayPreferences({ edge, notch: NOTCH_VERSION }).edge, 'top-centre');
 assert.deepEqual(overlayPreferences({ edge: 'left', offset: .2, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION }),
   { edge: 'left', offset: .2, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION });
 for (const display of [primary, left, above, rightTaskbar, small]) {
@@ -175,6 +190,7 @@ for (const display of [primary, left, above, rightTaskbar, small]) {
   assert.equal(b.y, a.y);
   assert.ok(Math.abs(b.x + b.width / 2 - (a.x + a.width / 2)) <= .5);
   assert.equal(b.width, Math.min(860, a.width));
-  assert.equal(b.height, Math.min(440, a.height));
+  assert.equal(b.height, Math.min(640, a.height));
 }
 require('./test_notch_shell.cjs');
+require('./test_notch_quiet.cjs');

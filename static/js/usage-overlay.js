@@ -121,7 +121,7 @@ function allModelsHtml() {
 
 let hoverId = 'claude';
 function renderCard() {
-  if (notchEdge === 'top-centre' && (hoverId === 'all' || !providers().some(x => x.id === hoverId))) {
+  if (inShell() && (hoverId === 'all' || !providers().some(x => x.id === hoverId))) {
     const group = groups.find(g => g.id === hoverId);
     if (hoverId !== 'all' && !group) { hideCard(); return; }
     card.innerHTML = group ? tokensCardHtml(group) : allModelsHtml();
@@ -154,10 +154,15 @@ function edgeIsVertical() { return notchEdge === 'left' || notchEdge === 'right'
 // it is centred on the cell's height; lying flat, on its width, and pushed clear
 // of the pill with the tail spanning the 30 px gap.
 function placeCard() {
-  if (notchEdge === 'top-centre') {
-    // Under the notch, right-aligned with the hovered reading in the status row.
+  if (inShell()) {
     const shell = document.getElementById('notch-shell').getBoundingClientRect();
     const word = document.querySelector(`#notch-readings [data-p="${hoverId}"]`)?.getBoundingClientRect() || shell;
+    if (edgeIsVertical()) {
+      // Beside the side panel, level with the hovered reading.
+      const at = notchShell.cardAt(word, { width: card.offsetWidth, height: card.offsetHeight });
+      card.style.left = at.left + 'px'; card.style.top = at.top + 'px'; return;
+    }
+    // Under the notch, right-aligned with the hovered reading in the status row.
     card.style.left = Math.round(Math.max(8, Math.min(innerWidth - 254, word.right - 246))) + 'px';
     card.style.top = Math.round(shell.bottom + 8) + 'px'; return;
   }
@@ -196,12 +201,12 @@ function scheduleHide() { if (hideTimer === null) hideTimer = setTimeout(hideCar
 
 function inRect(x, y, r, pad) { return x >= r.left - pad && y >= r.top - pad && x < r.right + pad && y < r.bottom + pad; }
 function cellAt(x, y) {
-  const cells = notchEdge === 'top-centre' ? document.querySelectorAll('#notch-readings [data-p]') : pill.querySelectorAll('.cell');
-  for (const el of cells) { if (inRect(x, y, el.getBoundingClientRect(), 6)) return el.dataset.p; }
+  const cells = inShell() ? document.querySelectorAll('#notch-readings [data-p]') : pill.querySelectorAll('.cell');
+  for (const el of cells) { const r = el.getBoundingClientRect(); if (r.width && inRect(x, y, r, 6)) return el.dataset.p; }
   return null;
 }
 function pointerInHot(x, y) {
-  if (notchEdge === 'top-centre') return notchShell?.hot(x, y) || false;
+  if (inShell()) return notchShell?.hot(x, y) || false;
   const p = pill.getBoundingClientRect();
   if (inRect(x, y, p, 4)) return true;
   if (!card.classList.contains('show')) return false;
@@ -228,7 +233,7 @@ function wakeHit(x, y) {
 }
 function overNotch(x, y) {
   if (x == null) return false;
-  if (notchEdge === 'top-centre') return notchShell?.hot(x, y) || false;
+  if (inShell()) return notchShell?.hot(x, y) || false;
   if (folded) return wakeHit(x, y);
   return pointerInHot(x, y) || !!onHandle(x, y);
 }
@@ -286,8 +291,8 @@ function put(el, x, y) {
   return { x, y, reach: HANDLE_REACH };
 }
 function placeHandles() {
-  // The top-centre notch has its own Settings button and does not move along its edge.
-  if (notchEdge === 'top-centre') { orbAt = moveAt = null; orb.classList.remove('placed'); moveHandle.classList.remove('placed'); return true; }
+  // The shell notch has its own Settings button and does not move along its edge (the side notch is placed by the page).
+  if (inShell()) { orbAt = moveAt = null; orb.classList.remove('placed'); moveHandle.classList.remove('placed'); return true; }
   const r = pill.getBoundingClientRect();
   if (!r.width) return false;
   const R = parseFloat(getComputedStyle(pill).getPropertyValue('--fillet')) || 38.7;
@@ -344,7 +349,7 @@ let press = null;
 function pointerMoved(e) {
   lastPointer = { x: e.clientX, y: e.clientY };
   if (carrying) { bridge.moveTo && bridge.moveTo(); return; }
-  if (notchEdge === 'top-centre') {
+  if (inShell()) {
     const hot = notchShell?.pointer(e.clientX, e.clientY) || false;
     pointerIn = hot;
     if (hot && folded) unfold();
@@ -407,7 +412,10 @@ moveHandle.addEventListener('mousedown', e => {
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ---- Edge and settings, from the main process --------------------------------- */
-let notchEdge = 'right', notchShell = null, configRevision = 0;
+let notchEdge = 'top-centre', notchShell = null, configRevision = 0;
+// The shell notch (notchShell.js) draws the top-centre notch and the left and right side notches.
+const SHELL_EDGES = ['top-centre', 'left', 'right'];
+function inShell() { return SHELL_EDGES.includes(notchEdge); }
 async function applyConfig(config) {
   const revision = ++configRevision;
   // Changing displays/edges cancels the main process drag as well.
@@ -415,8 +423,8 @@ async function applyConfig(config) {
   moveHandle.classList.remove('armed');
   setHovered(null);
   cancelFold();
-  const edge = config && ['left', 'top', 'bottom', 'top-centre'].includes(config.edge) ? config.edge : 'right';
-  if (edge === 'top-centre' && !notchShell) {
+  const edge = SHELL_EDGES.includes(config?.edge) ? config.edge : 'top-centre';
+  if (!notchShell) {
     const { createNotchShell } = await import('./notchShell.js');
     if (revision !== configRevision) return;
     notchShell = createNotchShell({ pill, card, bridge, hideCard, renderRing });
@@ -424,6 +432,7 @@ async function applyConfig(config) {
   }
   notchEdge = edge;
   notchShell?.reset();
+  notchShell?.setEdge(edge, config?.offset);
   document.body.dataset.edge = edge;
   onHover = !(config && config.foldOnHover === false);
   if (!onHover) setFolded(false); else if (!pointerIn) setFolded(true);
