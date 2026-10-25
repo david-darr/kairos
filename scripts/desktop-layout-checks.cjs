@@ -20,6 +20,10 @@ module.exports = async function desktopLayoutChecks({ js, win, waitFor, capture,
   await navigate('notes');
   await waitFor("document.querySelectorAll('#notes-list > .card').length === 7");
   await delay(900);
+const headerActions = (header, label) => js(`(() => { const h = document.querySelector(${JSON.stringify(header)}), edge = h.parentElement.getBoundingClientRect().right;
+    const nodes = ${label}.map(q => document.querySelector(q)).filter(n => n && n.getClientRects().length).map(n => n.getBoundingClientRect());
+    const mid = nodes.map(r => (r.top + r.bottom) / 2), h0 = nodes.map(r => r.height);
+    return nodes.length === ${label}.length && Math.max(...mid) - Math.min(...mid) <= 2 && Math.max(...h0) - Math.min(...h0) <= 2 && nodes.every((r, i) => !i || r.left >= nodes[i - 1].right + 8 && r.left - nodes[i - 1].right <= 16) && Math.abs(nodes.at(-1).right - edge) <= 2; })()`);
   const overlap = () => js(`(() => {
     const cards = [...document.querySelectorAll('#notes-list > .card')].map(c => c.getBoundingClientRect());
     const hits = [];
@@ -33,6 +37,7 @@ module.exports = async function desktopLayoutChecks({ js, win, waitFor, capture,
     win.setContentSize(w, 900); await delay(400);
     assert.deepEqual(await overlap(), [], `Notes cards never overlap at ${w}px`);
     assert.ok(await contained(), `Every note's text stays inside its own card at ${w}px`);
+    assert.ok(await headerActions('#view-content .view-header', `['.notes-finished-bar .btn', '.notes-sort']`), `Notes header actions share one row at the right edge at ${w}px`);
     if (w === 1440) await capture('layout-notes-1440');
   }
   win.setContentSize(1440, 900); await delay(300);
@@ -70,13 +75,14 @@ module.exports = async function desktopLayoutChecks({ js, win, waitFor, capture,
   for (const w of [1440, 1280, 900]) {
     win.setContentSize(w, 900); await delay(300);
     await navigate('tasks'); await waitFor("!!document.querySelector('#tasks-list .card')"); await delay(900);
+    assert.ok(await headerActions('#view-content .view-header', `['.tasks-build-button', '#view-content .view-constrained > details.disclosure-panel > summary']`), `Tasks header actions share one row at the right edge at ${w}px`);
     assert.ok(await congruent('#view-content .view-constrained'), `Tasks rows fill the width and share top/bottom edges at ${w}px`);
     assert.ok(await congruent('#tasks-list'), `Scheduled routine rows fill the width at ${w}px`);
     assert.ok(await js(`(() => {
-      const order = ['.view-header', 'details.disclosure-panel', '.task-activity', '#tasks-list', '.task-board-card', '.triggers-card', '.automation-library']
+      const order = ['.view-header', '.task-activity', '#tasks-list', '.task-board-card', '.triggers-card', '.automation-library']
         .map(q => document.querySelector('#view-content .view-constrained > ' + q)).filter(Boolean).map(n => n.getBoundingClientRect());
       return order.every((r, i) => !i || r.top > order[i - 1].top + 2 || (Math.abs(r.top - order[i - 1].top) <= 2 && r.left >= order[i - 1].right - 2));
-    })()`), `Tasks read in order: title and Schedule a task, runs chart, routines, board, triggers, library at ${w}px`);
+    })()`), `Tasks read in order: title row, runs chart, routines, board, triggers, library at ${w}px`);
     await capture('layout-tasks-' + w);
   }
   win.setContentSize(1440, 900);

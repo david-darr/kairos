@@ -267,12 +267,24 @@
     max-width: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; align-items: stretch; align-content: start;
   }
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > * { grid-column: span 12; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header { grid-column: span 8; order: 0; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel {
-    grid-column: span 4; order: 1; align-self: stretch; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end;
+  /* Header actions sit together at the right edge, centred on the title: Build with Kairos, then Schedule a task.
+     The closed Schedule pill shares the header's row (its own fixed width), so both stay in one line. */
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) { --rdt-schedule-w: 150px; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header {
+    grid-column: 1 / -1; grid-row: 1; order: 0; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 12px; padding-right: calc(var(--rdt-schedule-w) + 12px);
   }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> details.disclosure-panel[open]) > :is(.view-header, details.disclosure-panel) { grid-column: span 12; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel[open] { align-items: stretch; justify-content: flex-start; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > div:first-child { flex: 1 1 0; min-width: 0; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > .btn {
+    flex: none; min-height: 40px; height: 40px; padding: 0 18px; font-size: 13px; background: transparent; color: var(--rd-ink); border: 1px solid var(--rd-line-strong);
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > .btn:hover:not(:disabled) { background: var(--rd-surface-2); }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel:not([open]) {
+    grid-column: 1 / -1; grid-row: 1; order: 1; justify-self: end; width: var(--rdt-schedule-w); align-self: stretch;
+    display: flex; flex-direction: column; justify-content: center; align-items: stretch;
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel:not([open]) > summary { justify-content: center; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> details.disclosure-panel[open]) > .view-header { padding-right: 0; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel[open] { grid-column: 1 / -1; grid-row: auto; order: 1; }
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-activity { order: 2; }
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > #tasks-list { order: 3; }
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-board-card { order: 4; }

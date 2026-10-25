@@ -140,6 +140,13 @@
     grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 24px;
   }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header { grid-column: 1 / -1; }
+  /* Header actions share one row at the right edge, centred on the title: Clear finished, then the sort. */
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header { align-items: center; gap: 12px; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-finished-bar { order: 1; margin-left: auto; align-self: center; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-finished-bar .btn { height: 40px; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-sort-home { order: 2; align-self: center; display: flex; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-sort { height: 40px; min-height: 40px; margin: 0; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header:not(:has(.notes-finished-bar:not([hidden]))) .notes-sort-home { margin-left: auto; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .notes-overview { grid-column: 1; grid-row: 2; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .glass.card { grid-column: 1; grid-row: 3; margin: 0; padding: 18px; border-radius: var(--rd-radius-card); }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list {
