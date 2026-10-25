@@ -237,8 +237,10 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       assert.equal(monthHost.querySelector('.cal-range-switch').parentElement, toolbar);
       assert.equal(toolbar.parentElement, monthHost.querySelector('.cal-left'));
       assert.equal(toolbar.parentElement.children.indexOf(toolbar) + 1, toolbar.parentElement.children.indexOf(monthHost.querySelector('.cal-grid')), 'Desktop selector immediately precedes the grid');
-      assert.equal(monthHost.querySelector('.cal-nav').parentElement, monthHost.querySelector('.view-header'));
-      assert.equal(monthHost.querySelector('.cal-nav').querySelectorAll('button').length, 3, 'Header retains Today and both period arrows');
+      assert.equal(monthHost.querySelector('.cal-nav').parentElement, toolbar, 'Desktop period controls share the selector row');
+      assert.equal(monthHost.querySelector('.view-header').parentElement, monthHost.querySelector('.cal-workspace'), 'Desktop title uses the page wrapper');
+      assert.equal(monthHost.querySelector('.view-header').querySelectorAll('button').length, 2, 'Only calendars and New event remain in the header');
+      assert.equal(monthHost.querySelector('.cal-nav').querySelectorAll('button').length, 3, 'Toolbar retains Today and both period arrows');
     }
     for (const mode of ['Day', 'Week']) {
       buttons.find(button => button.textContent === mode).click(); await flush();

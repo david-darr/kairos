@@ -95,18 +95,23 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
       const prev = document.querySelector('.cal-period-prev'), next = document.querySelector('.cal-period-next');
       const a = getComputedStyle(prev), b = getComputedStyle(next);
       return ['width', 'height', 'borderRadius', 'border', 'backgroundColor', 'padding'].every(key => a[key] === b[key]) &&
-        a.width === a.height && a.borderRadius === '50%' && !!prev.querySelector('svg') && !!next.querySelector('svg');
+        a.width === '36px' && a.width === a.height && a.borderRadius === '50%' && !!prev.querySelector('svg') && !!next.querySelector('svg');
     })()`), label + ' desktop period arrows are identical circles with SVG chevrons');
     assert.ok(await js(`(() => {
       const label = document.querySelector('.cal-month-label'), style = getComputedStyle(label);
       const toolbar = document.querySelector('.cal-grid-toolbar'), grid = document.querySelector('.cal-grid');
       const row = toolbar.getBoundingClientRect(), view = grid.getBoundingClientRect();
+      const nav = toolbar.querySelector('.cal-nav'), selector = toolbar.querySelector('.cal-range-switch');
+      const period = nav.getBoundingClientRect(), range = selector.getBoundingClientRect();
       return style.borderTopWidth === '0px' && style.boxShadow === 'none' && style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
         label.getAttribute('aria-label') === 'Today' && toolbar.nextElementSibling === grid && row.bottom <= view.top &&
         Math.abs(row.left - view.left) < 1 && Math.abs(row.right - view.right) < 1 &&
+        label.parentElement === nav && Math.abs(period.left - view.left) < 1 && Math.abs(range.right - view.right) < 1 &&
+        Math.abs((period.top + period.bottom) / 2 - (range.top + range.bottom) / 2) < 1 && period.right <= range.left &&
+        !document.querySelector('.view-header .cal-nav') &&
         !document.querySelector('.view-header .cal-range-switch') && !document.querySelector('.cal-day-panel .cal-calendars-card') &&
         !!document.querySelector('.cal-selected-agenda') && !!document.querySelector('.cal-upcoming');
-    })()`), label + ' desktop period is plain Today text and range selector sits above the grid with an agenda-only sidebar');
+    })()`), label + ' desktop Today period and range selector share a centered row above the grid with an agenda-only sidebar');
   }
 
   const weekRead = reads.length;

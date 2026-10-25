@@ -2277,6 +2277,11 @@ app.whenReady().then(async () => {
     await delay(500);
     assert.equal(await js("document.querySelector('#view-content').dataset.view"), "notes");
     assert.equal(await js("document.querySelector('.view-header h2').textContent"), "Notes");
+    const desktopNotesTitle = await js(`(() => {
+      const title = document.querySelector('.view-header h2'), view = document.querySelector('#view-content');
+      const box = title.getBoundingClientRect(), edge = view.getBoundingClientRect(), style = getComputedStyle(title);
+      return { left: box.left - edge.left, top: box.top - edge.top, fontSize: style.fontSize, lineHeight: style.lineHeight };
+    })()`);
     sessionDelay = 0;
     // 2026-10-25 (David): on desktop the page header (title, description, top buttons) sits on the page, with no
     // container behind it, in every tab and every appearance mode: nothing between it and #view-content paints.
@@ -2286,6 +2291,18 @@ app.whenReady().then(async () => {
         await navigate(tab); await delay(300);
         const boxes = await js(`(() => { const out = []; for (let n = document.querySelector('#view-content .view-header'); n && n.id !== 'view-content'; n = n.parentElement) { const s = getComputedStyle(n); if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || parseFloat(s.borderTopWidth) || parseFloat(s.borderBottomWidth) || s.boxShadow !== 'none' || (s.backdropFilter && s.backdropFilter !== 'none')) out.push(String(n.className)); } return out; })()`);
         assert.deepEqual(boxes, [], "desktop " + tab + " page header has no container in " + mode);
+        if (tab === "calendar") {
+          assert.deepEqual(await js(`(() => {
+            const title = document.querySelector('.view-header h2'), view = document.querySelector('#view-content');
+            const box = title.getBoundingClientRect(), edge = view.getBoundingClientRect(), style = getComputedStyle(title);
+            return { left: box.left - edge.left, top: box.top - edge.top, fontSize: style.fontSize, lineHeight: style.lineHeight };
+          })()`), desktopNotesTitle, "desktop Calendar title matches Notes placement, size and baseline in " + mode);
+          assert.ok(await js(`(() => {
+            const header = document.querySelector('.cal-workspace > .view-header'), style = getComputedStyle(header);
+            return style.position === 'static' && style.paddingBottom === '6px' && style.marginBottom === '4px' &&
+              !header.querySelector('.cal-nav') && !!document.querySelector('.cal-grid-toolbar .cal-nav');
+          })()`), "desktop Calendar header follows Notes spacing and keeps navigation in the toolbar");
+        }
       }
     }
     await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'default' }))");
