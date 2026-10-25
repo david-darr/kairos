@@ -365,9 +365,8 @@ app.whenReady().then(async () => {
     await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("document.querySelectorAll('.model-catalog-item').length===2");
     assert.ok(await js("[...document.querySelectorAll('.model-catalog-name')].map(n=>n.textContent).includes('Catalog Astra')"));
-    // A two-model list needs no search box (2026-10-14); filtering is
-    // checked on the ten-model API catalog below.
-    assert.equal(await js("!!document.querySelector('#chat-model-search')"), false, 'No search box on a short list');
+    // The redesigned board searches all connections, including short catalogs.
+    assert.equal(await js("document.querySelector('#model-picker-menu .rd-model-search')?.getAttribute('aria-label')"), 'Search models', 'The board has an accessible model search');
     await js("[...document.querySelectorAll('.model-catalog-item')].find(b=>b.textContent.includes('Catalog Astra')).click()");
     await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='Catalog Astra'");
     assert.equal(chats.s1.model_override, 'catalog-astra');
@@ -401,11 +400,11 @@ app.whenReady().then(async () => {
     // global scope, so a repeated top-level declaration is a redeclaration
     // error that surfaces only as "script failed to execute".
     await waitFor("document.querySelectorAll('.model-catalog-item').length===10");
-    await js("{ const s=document.querySelector('#chat-model-search'); s.value='astra'; s.dispatchEvent(new Event('input')); }");
-    await waitFor("document.querySelectorAll('.model-catalog-item').length===1");
-    assert.equal(await js("document.querySelector('.model-catalog-name').textContent"), 'GPT-6 Astra');
-    await js("{ const s=document.querySelector('#chat-model-search'); s.value=''; s.dispatchEvent(new Event('input')); }");
-    await waitFor("document.querySelectorAll('.model-catalog-item').length===10");
+    await js("{ const s=document.querySelector('#model-picker-menu .rd-model-search'); s.value='astra'; s.dispatchEvent(new Event('input')); }");
+    await waitFor("document.querySelectorAll('.model-catalog-item:not([hidden])').length===1");
+    assert.equal(await js("document.querySelector('.model-catalog-item:not([hidden]) .model-catalog-name').textContent"), 'GPT-6 Astra');
+    await js("{ const s=document.querySelector('#model-picker-menu .rd-model-search'); s.value=''; s.dispatchEvent(new Event('input')); }");
+    await waitFor("document.querySelectorAll('.model-catalog-item:not([hidden])').length===10");
     await js("[...document.querySelectorAll('.model-catalog-item')].find(b=>b.textContent.includes('GPT-6 Astra')).click()");
     await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='GPT-6 Astra'");
     assert.equal(chats.s1.model_override, 'gpt-6-astra');

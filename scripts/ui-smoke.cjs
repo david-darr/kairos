@@ -1123,11 +1123,12 @@ app.whenReady().then(async () => {
         if (tab === "home") {
           await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
           assert.ok(await js("document.querySelector('.dashboard-content').classList.contains('is-filled') && getComputedStyle(document.querySelector('.dashboard-section-body')).animationName === 'home-fill'"), label + " Home's first fill animates in");
-          await waitFor("document.querySelectorAll('.dashboard-model-usage').length > 0");
+          await waitFor("document.querySelectorAll('.rd-usage-tokens').length === 1");
           // Only the local model carries a usage label, and it is tokens
           // spent, never a "% used" figure that reads like a quota.
-          const labels = await js("[...document.querySelectorAll('.dashboard-model-usage')].map(n => n.textContent)");
-          assert.deepEqual(labels, ["842K tokens via Kairos"], label + " home model usage labels");
+          const labels = await js("[...document.querySelectorAll('.rd-usage-tokens')].map(n => n.textContent)");
+          assert.deepEqual(labels, ["None this week · 842K tokens in all"], label + " home model usage labels");
+          assert.ok(await js("(() => { const local=document.querySelector('[data-model=m3]'); return !local.querySelector('[role=meter]') && local.querySelector('.rd-usage-tokens').title.includes('Not a quota'); })()"), label + " local recorded tokens are separate from account limits");
           // Provider logos where known (core/model_marks.py); the generic icon where not.
           const marks = await js("[...document.querySelectorAll('.rd-usage-provider h3 > .model-mark')].map(n => n.getAttribute('aria-label'))");
           assert.deepEqual(marks, ["Claude", "Codex"], label + " home model logos");

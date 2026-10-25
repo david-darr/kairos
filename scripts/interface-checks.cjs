@@ -73,14 +73,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     }
     await js("document.getElementById('chat-input').value='A draft that must survive opening menus'; document.getElementById('chat-input').dispatchEvent(new Event('input', {bubbles:true}))");
     if (width <= 768) {
-      // The phone composer owns the model pill, and the picker is a full-height sheet with search and an Account card.
+      // The phone composer owns the pill; its compact sheet folds search and account into details.
       await waitFor("document.querySelector('.chat-input-bar').classList.contains('ms-composer-expanded')");
       assert.equal(await js("!!document.querySelector('.chat-input-bar #model-picker-btn') && !document.querySelector('.chat-mobile-header #model-picker-btn')"), true, 'Phone model pill lives in the composer');
       await click('#model-picker-btn');
       await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu') && !!document.querySelector('.ms-account-card')");
-      assert.equal(await js("(() => { const d=document.querySelector('.ms-sheet[open]'), r=d.getBoundingClientRect(), m=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.left === 0 && r.width === innerWidth && r.bottom === innerHeight && r.height >= innerHeight - 70 && m.width > 0 && m.left >= 0 && m.right <= innerWidth && !!d.querySelector('input[type=search]') && !!d.querySelector('.ms-provider-tabs[role=tablist] [role=tab][aria-selected=true]'); })()"), true, 'Phone model sheet is full height with search and providers');
+      await delay(350);
+      assert.equal(await js("(() => { const d=document.querySelector('.ms-sheet[open]'), r=d.getBoundingClientRect(), m=document.getElementById('model-picker-menu').getBoundingClientRect(), safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mobile-safe-top')) || 0; return !d.classList.contains('ms-sheet-full') && r.left === 0 && r.width === innerWidth && Math.abs(r.bottom - innerHeight) <= 1 && r.top >= safe && r.height > 44 && r.height <= innerHeight * .9 + 1 && m.width > 0 && m.left >= 0 && m.right <= innerWidth && !!d.querySelector('.ms-model-extras:not([open]) input[type=search]') && !!d.querySelector('.ms-provider-tabs[role=tablist] [role=tab][aria-selected=true]'); })()"), true, 'Compact phone model sheet fits below the status area with providers and folded search');
       // Choosing a connection keeps the picker open on that connection's versions, then Close returns to the chat.
-      await click('.ms-sheet .model-connection-item.active');
+      await click('.ms-sheet .ms-provider-tabs [role=tab][aria-selected=true]');
       await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu') && !document.getElementById('model-picker-menu').classList.contains('hidden')");
       await capture(`interface-${label}-model-picker`);
       await js("document.querySelector('.ms-sheet[open] .ms-sheet-header button').click()");
@@ -90,8 +91,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.querySelector('.chat-mobile-header #model-picker-btn') && !!document.querySelector('.chat-input-bar #model-picker-btn')"), true, 'Model pill lives in the composer');
       await click('#model-picker-btn');
       assert.equal(await js("(() => { const m=document.getElementById('model-picker-menu'), r=m.getBoundingClientRect(), h=document.querySelector('.chat-header-model').getBoundingClientRect(); return !m.classList.contains('hidden') && r.height>44 && r.bottom <= h.top + 1 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Model picker opens above the pill and fits');
-      await click('.model-connection-item.active');
-      assert.equal(await js("!document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Choosing a connection keeps the picker open on its versions');
+      // Desktop exposes the other connections' catalog rows directly on one board.
+      await waitFor("!!document.querySelector('.model-other-catalog-item')");
+      const pickedModel = await js("document.querySelector('.model-other-catalog-item .model-catalog-name').textContent");
+      await js("document.querySelector('.model-other-catalog-item').scrollIntoView({block:'nearest'})");
+      await click('.model-other-catalog-item');
+      await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");
+      await click('#model-picker-btn');
+      await waitFor("!!document.querySelector('.model-catalog-item.active')");
+      assert.equal(await js("document.querySelector('.model-catalog-item.active .model-catalog-name').textContent"), pickedModel, 'Choosing a model from another connection persists on the reopened board');
       await capture(`interface-${label}-model-picker`);
       await js("document.getElementById('model-picker-menu').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
       await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");
@@ -103,7 +111,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Model and reasoning')).click()");
       await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu')");
       assert.equal(await js("(() => { const r=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
-      await click('.ms-sheet[open] .ms-model-root > input');
+      await js("document.querySelector('.ms-sheet[open] .ms-model-extras > summary').scrollIntoView({block:'nearest'})");
+      await click('.ms-sheet[open] .ms-model-extras > summary');
+      await js("document.querySelector('.ms-sheet[open] .ms-model-extras input[type=search]').scrollIntoView({block:'nearest'})");
+      await click('.ms-sheet[open] .ms-model-extras input[type=search]');
+      assert.equal(await js("document.activeElement.matches('.ms-model-extras input[type=search]')"), true, 'Expanded model search takes focus');
       assert.equal(await js("!!document.querySelector('.ms-sheet[open]') && !document.getElementById('model-picker-menu').classList.contains('hidden')"), true, 'Tapping search inside the sheet keeps it open');
       assert.equal(await js("!document.getElementById('chat-sessions').classList.contains('open') && !document.getElementById('sidebar').classList.contains('open')"), true, 'Model editor is not covered by a drawer');
       await capture(`interface-${label}-model-reasoning`);

@@ -1,13 +1,15 @@
 // Real Home UI as shipped (the redesign is the default look): cards, honest meters, detail access and navigation.
 const assert = require('node:assert/strict');
 module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay}) => {
-  const ready = async () => waitFor("!!document.querySelector('[data-home-section=projects] .dashboard-row') && !!document.querySelector('[data-home-section=agents] .dashboard-agent-dot') && !!document.querySelector('[data-home-section=store] .dashboard-row') && document.querySelectorAll('.rd-usage-provider').length===2");
+  const usageReady = "document.querySelectorAll('.rd-usage-provider').length===3 && !!document.querySelector('.rd-usage-provider[data-provider=claude] [role=meter]') && !!document.querySelector('.rd-usage-provider[data-provider=codex] [role=meter]') && !!document.querySelector('.rd-usage-provider[data-model=m3]')";
+  const ready = async () => waitFor("!!document.querySelector('[data-home-section=projects] .dashboard-row') && !!document.querySelector('[data-home-section=agents] .dashboard-agent-dot') && !!document.querySelector('[data-home-section=store] .dashboard-row') && " + usageReady);
   const home = async () => { await navigate('home'); await ready(); };
   assert.ok(await js("document.documentElement.classList.contains('kairos-redesign')"), 'The redesign is the default look');
   // The fixed hero/week precede the populated default sections.
   await js("import('/static/js/layout.js').then(m=>m.resetHomeLayout())");
   await navigate('home');
-  await waitFor("document.querySelectorAll('.rd-usage-provider').length===2 && !!document.querySelector('[data-home-section=chats] .dashboard-row')");
+  await waitFor(usageReady + " && !!document.querySelector('[data-home-section=chats] .dashboard-row')");
+  assert.equal(await js("document.querySelector('.rd-usage-provider[data-model=m3]').querySelector('[role=meter]')"), null, 'Local recorded usage is not a provider quota');
   await waitFor("!!document.querySelector('[data-home-section=needs] .hm-live-row') && !!document.querySelector('[data-home-section=working] .hm-live-row')");
   assert.deepEqual(await js("[...document.querySelectorAll('.dashboard-grid > [data-home-section]')].map(n=>n.dataset.homeSection)"), ['needs','working','chats','schedule','models','system'], 'Default Home shows populated sections in desktop order');
   assert.ok(await js("!!document.querySelector('.hm-customize')"), 'Customize is offered');
@@ -17,8 +19,9 @@ module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay})
   assert.ok(await js("document.querySelectorAll('.dashboard-event-date').length>0 && document.querySelectorAll('.dashboard-system-chip').length>=4"));
   assert.ok(await js("[...document.querySelectorAll('[data-home-section=agents] .dashboard-row')].every(b=>b.querySelector('.dashboard-agent-dot[aria-label]') && b.querySelector('.dashboard-row-title').textContent)"), 'Agent rows carry their status');
   assert.equal(await js("document.querySelector('[data-provider=claude] [role=meter]').getAttribute('aria-valuenow')"),'34');
-  await waitFor("document.querySelectorAll('.dashboard-model-usage').length > 0");
-  assert.ok(await js("[...document.querySelectorAll('.dashboard-model-usage')].every(n=>n.textContent.includes('tokens via Kairos')&&!n.textContent.includes('%'))"),'Token accounting is separate from quota');
+  await waitFor("document.querySelectorAll('.rd-usage-tokens').length === 1");
+  assert.equal(await js("document.querySelector('[data-model=m3] .rd-usage-tokens').textContent"), 'None this week · 842K tokens in all');
+  assert.ok(await js("[...document.querySelectorAll('.rd-usage-tokens')].every(n=>n.title.includes('Tokens this Kairos install')&&n.title.includes('Not a quota')&&!n.textContent.includes('%'))"),'Token accounting is separate from quota');
   await js("document.querySelector('[data-home-section=chats] .dashboard-row').focus()");
   assert.ok(await js("document.activeElement.matches('button.dashboard-row') && document.activeElement.tabIndex===0"), 'Recent chats remain keyboard focusable');
   await js("document.activeElement.click()");
