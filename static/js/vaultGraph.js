@@ -17,6 +17,11 @@ const token = (name) => getComputedStyle(document.documentElement).getPropertyVa
 const PALETTE = Array.from({ length: 8 }, (_, i) => `--chart-${i + 1}`);
 const RING = 95;
 const SETTLE_TICKS = 240;
+// Once settled, the map keeps breathing: every note drifts a few pixels around
+// where it rests, so the map never looks frozen. Big maps update at half rate.
+const DRIFT_AMPLITUDE = 4;
+const DRIFT_SPEED = .0007;
+const DRIFT_FULL_RATE_NODES = 400;
 export const LINK_ALPHA = .45;
 
 function topFolder(node) { return (node.folder || "").split("/")[0] || "Vault root"; }
@@ -78,7 +83,7 @@ function focusLayout(nodes, hops) {
 
 export function createVaultGraph(container, { store = createVaultStore(), focus = null, depth = 1, select = null, onBrowse } = {}) {
   let sim = null; // { nodes, edges, byId } currently laid out
-  let raf = null, disposed = false, settledTicks = 0, autoFit = true, drag = null, pointerDown = null;
+  let raf = null, disposed = false, onScreen = true, lastFrame = 0, frameSkip = false, settledTicks = 0, autoFit = true, drag = null, pointerDown = null;
   let selectedId = null, hoveredId = null, viewportWidth = 0, viewportHeight = 0, editor = null, peek = null, panelNote = null;
   const transform = { x: 0, y: 0, scale: 1 };
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -339,15 +344,37 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
     ctx.restore();
   }
 
-  function animate() {
+  // Ambient drift: a zero-mean sine per node (own phase and speed), applied as a
+  // velocity so each note stays within DRIFT_AMPLITUDE of where it settled.
+  function drift(now) {
+    const dt = Math.min(now - lastFrame, 50);
+    const nodes = sim.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n.fixed) continue;
+      const w = DRIFT_SPEED * (1 + (i % 5) * .15), phase = i * 2.399;
+      n.x += DRIFT_AMPLITUDE * w * Math.cos(now * w + phase) * dt;
+      n.y += DRIFT_AMPLITUDE * w * Math.cos(now * w * 1.3 + phase * 1.7) * dt;
+    }
+  }
+  const ambient = () => !reducedMotion.matches && !document.hidden && onScreen && !!sim && !disposed;
+
+  function animate(now = performance.now()) {
     raf = null;
     if (!sim || disposed || document.hidden) return;
-    if (settledTicks < SETTLE_TICKS && !reducedMotion.matches) { tick(); settledTicks++; }
-    if (autoFit) fitToView();
+    const settling = settledTicks < SETTLE_TICKS && !reducedMotion.matches;
+    if (settling) { tick(); settledTicks++; }
+    else if (ambient()) {
+      const skip = sim.nodes.length > DRIFT_FULL_RATE_NODES && (frameSkip = !frameSkip);
+      if (skip) { raf = requestAnimationFrame(animate); return; }
+      drift(now);
+    }
+    lastFrame = now;
+    if (autoFit && settling) fitToView();
     draw();
-    if (drag || (settledTicks < SETTLE_TICKS && !reducedMotion.matches)) raf = requestAnimationFrame(animate);
+    if (drag || settling || ambient()) raf = requestAnimationFrame(animate);
   }
-  function redraw() { if (!disposed && sim && raf === null && !document.hidden) raf = requestAnimationFrame(animate); }
+  function redraw() { if (!disposed && sim && raf === null && !document.hidden && onScreen) { lastFrame = performance.now(); raf = requestAnimationFrame(animate); } }
 
   function resizeCanvas() {
     const rect = canvas.getBoundingClientRect();
@@ -516,6 +543,9 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
   const observer = new ResizeObserver(resizeCanvas);
   observer.observe(wrap);
   document.addEventListener("visibilitychange", redraw);
+  // Off-screen (another Library section, scrolled away) the loop stops; back in view it resumes.
+  const visibility = new IntersectionObserver((entries) => { onScreen = entries[entries.length - 1].isIntersecting; if (onScreen) redraw(); });
+  visibility.observe(wrap);
   const motionChange = () => { if (reducedMotion.matches && sim) { while (settledTicks < SETTLE_TICKS) { tick(); settledTicks++; } } redraw(); };
   reducedMotion.addEventListener("change", motionChange);
   const phoneChange = () => { if (!mobileOn()) peek?.close(); else if (panel.classList.contains("open")) { panel.classList.remove("open"); } };
@@ -540,7 +570,7 @@ export function createVaultGraph(container, { store = createVaultStore(), focus 
       disposed = true;
       if (raf) cancelAnimationFrame(raf);
       editor?.destroy(); peek?.close();
-      observer.disconnect();
+      observer.disconnect(); visibility.disconnect();
       document.removeEventListener("visibilitychange", redraw);
       reducedMotion.removeEventListener("change", motionChange);
       phone.removeEventListener("change", phoneChange);

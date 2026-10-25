@@ -12,6 +12,18 @@
 .kairos-redesign #view-content[data-view="library"] .view-header h2 { font-size: clamp(38px, 4.6vw, 52px); }
 .kairos-redesign #view-content[data-view="library"] .view-header .sub { margin-top: 6px; font-size: 14px; }
 
+/* -- Fill the window (desktop) -----------------------------------------------------
+   Like Agents: no centred column. Every section uses the full content width,
+   and the Vault (Browse, Home, Map) takes the height left under its header. */
+@media (min-width: 769px) {
+  .kairos-redesign #view-content[data-view="library"] > :is(.view-constrained.library-view, .library-vault-page) { max-width: none; margin: 0; }
+  .kairos-redesign #view-content[data-view="library"] > .library-vault-page { flex: 1; display: flex; flex-direction: column; min-height: 0; padding-bottom: 0; }
+  .kairos-redesign #view-content[data-view="library"] .library-vault-host { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .kairos-redesign #view-content[data-view="library"] .library-vault-host > :is(.library-vault-browser, .vault-graph-wrap) { flex: 1; height: auto; min-height: 480px; }
+  .kairos-redesign #view-content[data-view="library"] .library-vault-browser { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(250px, 320px); }
+  .kairos-redesign #view-content[data-view="library"] .library-vault-browser:is(.vault-at-home, .vault-rail-closed, .vault-editing) { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) 0; }
+}
+
 /* -- Segmented switches (section, Vault mode, Drive layout) --------------------- */
 .kairos-redesign #view-content[data-view="library"] .segmented-tabs {
   gap: 2px; padding: 4px; border: 0; border-radius: var(--rd-radius-pill); background: var(--rdl-tray);
