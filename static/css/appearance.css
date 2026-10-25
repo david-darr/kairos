@@ -13,10 +13,8 @@
 :root:not([data-appearance='default'])[data-appearance] .cal-day.selected { background: var(--surface-2); }
 :root:is([data-appearance='image'],[data-appearance='shader']) .msg.assistant .msg-body,
 :root:is([data-appearance='image'],[data-appearance='shader']) .chat-activity,
-:root:is([data-appearance='image'],[data-appearance='shader']) .view-header,
 :root:is([data-appearance='image'],[data-appearance='shader']) .chat-header { background: var(--bg-panel); border-radius: 12px; }
 :root:is([data-appearance='image'],[data-appearance='shader']) .msg.assistant .msg-body { padding: 18px 20px; }
-:root:is([data-appearance='image'],[data-appearance='shader']) .view-header { padding: 14px 18px; }
 .appearance-panel { max-width: 680px; margin: auto; padding-bottom: 12px; }
 .appearance-panel [hidden] { display: none !important; }
 .appearance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }

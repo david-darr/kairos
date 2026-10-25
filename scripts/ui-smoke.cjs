@@ -2292,6 +2292,18 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('#view-content').dataset.view"), "notes");
     assert.equal(await js("document.querySelector('.view-header h2').textContent"), "Notes");
     sessionDelay = 0;
+    // 2026-10-25 (David): on desktop the page header (title, description, top buttons) sits on the page, with no
+    // container behind it, in every tab and every appearance mode: nothing between it and #view-content paints.
+    for (const mode of ["default", "color", "image", "shader"]) {
+      await js("import('/static/js/appearance.js').then(m => m.updateAppearance(" + JSON.stringify({ mode }) + "))");
+      for (const tab of ["notes", "library", "calendar", "tasks", "email", "tool-store", "cookbook", "school"]) {
+        await navigate(tab); await delay(300);
+        const boxes = await js(`(() => { const out = []; for (let n = document.querySelector('#view-content .view-header'); n && n.id !== 'view-content'; n = n.parentElement) { const s = getComputedStyle(n); if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || parseFloat(s.borderTopWidth) || parseFloat(s.borderBottomWidth) || s.boxShadow !== 'none' || (s.backdropFilter && s.backdropFilter !== 'none')) out.push(String(n.className)); } return out; })()`);
+        assert.deepEqual(boxes, [], "desktop " + tab + " page header has no container in " + mode);
+      }
+    }
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'default' }))");
+    await navigate("notes");
     await navigate("chat");
     assert.ok(await js("document.querySelector('#chat-main').classList.contains('is-empty')"));
     assert.equal(await js("document.querySelector('#brand .instance-badge')"), null, "the real app shows no instance badge");
