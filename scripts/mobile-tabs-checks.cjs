@@ -350,6 +350,12 @@ async function run(ctx) {
   ok(await js("document.querySelectorAll('.drive-quick-tile').length === 8 && [...document.querySelectorAll('.drive-quick-tile')].every(t => !/^DIR/.test(t.textContent))"), 'Quick access lists recent files, not folders');
   ok(await js("document.querySelectorAll('.drive-folders .google-file-row').length === 1 && document.querySelectorAll('.drive-files .google-file-row').length === 7"), 'Folders are tiles and files are compact rows');
   ok(await js("!document.querySelector('.drive-storage-meter').hidden && !!document.querySelector('.drive-storage-bar > i')"), 'The account card shows storage use');
+  ok(ctx.reads.some(r => r.path === '/api/google/drive/files' && r.query.account === 'acct_demo'), 'Drive requests name the account being browsed');
+  await js("document.querySelector('.drive-account-copy').click()");
+  await waitFor("!!document.querySelector('dialog.ms-sheet[open] .drive-account-sheet')");
+  ok(await js("document.querySelector('.drive-account-choice[aria-pressed=true]').textContent.includes('demo@example.com') && [...document.querySelectorAll('dialog.ms-sheet[open] button')].some(b => b.textContent === 'Add another Google account')"), 'The account card opens the account switcher');
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   await js("document.querySelector('.view-header [aria-label=\"Create or upload in Drive\"]').click()");
   ok(await js("!!document.querySelector('dialog.ms-sheet[open] details.google-new-menu[open]') && document.querySelectorAll('dialog.ms-sheet[open] .google-new-actions button').length === 4"), 'Drive + opens all existing New actions in a sheet');
   await shot('library-drive');

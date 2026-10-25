@@ -1010,6 +1010,17 @@
   .kairos-redesign [data-view="library"] .drive-storage-meter[hidden] { display: none; }
   .kairos-redesign [data-view="library"] .drive-storage-bar { display: block; height: 4px; border-radius: var(--rd-radius-pill); background: var(--rd-ground); overflow: hidden; }
   .kairos-redesign [data-view="library"] .drive-storage-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+  .kairos-redesign [data-view="library"] .google-account-line > .google-account-select { display: none; }
+  .kairos-redesign [data-view="library"] button.drive-account-copy { padding: 0; border: 0; background: transparent; color: var(--rd-ink); font: inherit; text-align: left; cursor: pointer; }
+  .kairos-redesign [data-view="library"] .drive-connected-dot.drive-account-error { background: var(--danger); }
+  .kairos-redesign .drive-account-sheet { display: grid; gap: 12px; }
+  .kairos-redesign .drive-account-list { display: grid; gap: 8px; }
+  .kairos-redesign .drive-account-choice { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px; border: 1px solid var(--rd-line); border-radius: 18px; background: var(--rd-surface-solid); color: var(--rd-ink); font: inherit; text-align: left; }
+  .kairos-redesign .drive-account-choice[aria-pressed="true"] { border-color: var(--rd-line-strong); background: var(--rd-surface-2); }
+  .kairos-redesign .drive-account-choice > span:last-child { flex: 1; min-width: 0; }
+  .kairos-redesign .drive-account-choice strong { display: block; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .kairos-redesign .drive-account-choice small { display: block; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign .drive-account-sheet .drive-account-avatar { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: var(--rd-ground); }
   .kairos-redesign #view-content[data-view="email"] .email-view > :is(details.disclosure-panel, #email-accounts-list) { display: none; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center !important; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row > .btn { grid-column: 2; justify-self: start; min-height: 36px; }

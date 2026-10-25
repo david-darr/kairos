@@ -1243,8 +1243,12 @@
     if (route === "/api/projects") return list(projects);
     if (route.startsWith("/api/projects/")) return projects[0];
     if (route === "/api/notes") return list(url.searchParams.get("include_completed") === "false" ? notes.filter(n => !n.completed) : notes);
-    if (route === '/api/google/status') return { configured: true, connected: true, email: 'demo@example.com', client_id: 'demo.apps.googleusercontent.com',
-      calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null };
+    if (route === '/api/google/status') {
+      const accounts = state.googleAccounts || [{ id: 'acct_demo', email: 'demo@example.com', default: true, error: null }];
+      return { configured: true, connected: true, email: accounts.find(a => a.default)?.email, client_id: 'demo.apps.googleusercontent.com',
+        calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null,
+        accounts, default_account: accounts.find(a => a.default)?.id };
+    }
     if (route === '/api/google/calendar/calendars') return googleCalendars;
     if (route === '/api/google/calendar/events') return list(calendarInstances(googleEvents));
     const googleEventRead = route.match(/^\/api\/google\/calendar\/events\/([^/]+)$/);
