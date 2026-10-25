@@ -113,6 +113,50 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     assert.match(main, /focusable: false, show: false/, 'the notch starts non-focusable');
     assert.match(main, /setOverlayFocus\(usageOverlay, false\);\s+usageOverlay\.hide\(\);/, 'hiding the notch gives the keyboard back');
   });
+  const D = await import(pathToFileURL(path.join(root, 'static/js/notchDrop.js')).href);
+  const C = await import(pathToFileURL(path.join(root, 'static/js/notchComposer.js')).href);
+  await check('a drop splits files from folders; a folder needs its path', () => {
+    const file = { name: 'notes.md', size: 10 };
+    const item = (directory, value) => ({ kind: 'file', webkitGetAsEntry: () => ({ isDirectory: directory }), getAsFile: () => value });
+    const data = { items: [item(true, { name: 'project' }), item(false, file), { kind: 'string' }] };
+    assert.deepEqual(D.dropped(data, () => 'C:\\work\\project'), { files: [file], folders: ['C:\\work\\project'] });
+    assert.deepEqual(D.dropped(data, () => ''), { files: [file], folders: [] }, 'no path, no folder');
+  });
+  await check('over 25 MB is refused in words, before any upload', () => {
+    assert.equal(D.MAX_FILE_BYTES, 25 * 1024 * 1024);
+    const big = { name: 'big.zip', size: D.MAX_FILE_BYTES + 1 }, ok = { name: 'a.pdf', size: D.MAX_FILE_BYTES };
+    assert.deepEqual(D.splitBySize([big, ok]), { ok: [ok], refused: [big] });
+    assert.equal(D.refusalLine([big]), 'big.zip is over the 25 MB limit, so it was not added.');
+    assert.equal(D.refusalLine([big, big, big]), 'big.zip, big.zip and 1 more are over the 25 MB limit, so they were not added.');
+    assert.equal(D.refusalLine([]), '');
+  });
+  await check('Send makes one chat and starts one turn, even when retried', async () => {
+    const calls = [];
+    let lose = true;
+    const post = async (url, body) => {
+      calls.push([url, body]);
+      if (url === '/api/sessions') return { ok: true, json: async () => ({ id: 's1' }) };
+      if (url === '/api/chat/live' && lose) { lose = false; return { ok: false, status: 502, json: async () => ({ detail: 'Lost on the way back.' }) }; }
+      return { ok: true, json: async () => ({}) };
+    };
+    const draft = { text: ' Plan Friday ', files: [{ id: 'att-1', name: 'a.pdf' }], folders: [{ kind: 'folder', id: 'g1', session_id: 's1', label: 'project', path: 'C:\\work\\project' }],
+      sessionId: null, requestId: null, modelSet: false, marked: false, model: 0 };
+    await assert.rejects(C.sendDraft(draft, { post, models: [{ id: 'm1' }] }), /Lost on the way back/);
+    assert.equal(await C.sendDraft(draft, { post, models: [{ id: 'm1' }] }), 's1');
+    assert.deepEqual(calls.map(([url]) => url), ['/api/sessions', '/api/sessions/s1/model', '/api/notch/dropped', '/api/chat/live', '/api/chat/live'], 'nothing done twice but the send');
+    const [first, second] = calls.filter(([url]) => url === '/api/chat/live').map(([, body]) => body);
+    assert.equal(first.request_id, second.request_id, 'the same request id, so the server starts one turn');
+    assert.deepEqual(second, { session_id: 's1', message: 'Plan Friday', attachment_ids: ['att-1'], request_id: first.request_id,
+      references: [{ kind: 'folder', id: 'g1', session_id: 's1', label: 'project' }] }, 'a folder goes as its grant, never as a raw path');
+    await assert.rejects(C.sendDraft({ ...draft, sessionId: 's2', modelSet: false }, { post, models: [] }), /Add a model in Kairos first/);
+  });
+  await check('the composer never sends by itself and has no global hotkey', () => {
+    const composer = read('static/js/notchComposer.js'), shell = read('static/js/notchShell.js'), main = read('electron/main.js');
+    assert.ok(!/navigator\.clipboard|readText\(|clipboardData|'paste'/.test(composer + shell), 'nothing pre-filled from the clipboard');
+    assert.equal((composer.match(/(?<!function )\bsend\(\)/g) || []).length, 2, 'Send is the Enter key or the Send button, nothing else');
+    assert.ok(!/globalShortcut\.register\([^)]*(notch|composer|usage)/i.test(main), 'no global hotkey for the notch');
+    assert.match(shell, /function openComposer\(\) \{ if \(!identity\.signedIn\) return;/, 'signed-in people only');
+  });
   await check('the floating bot window is retired, with its preload, page and setting', () => {
     for (const file of ['electron/bot-window.js', 'electron/bot-window-preload.js', 'static/bot-window.html', 'static/css/bot-window.css', 'static/js/botWindow.js'])
       assert.ok(!fs.existsSync(path.join(root, file)), file + ' is gone');

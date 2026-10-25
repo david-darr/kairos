@@ -326,7 +326,8 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     # below, which is the honest answer: an agent should not hand work on
     # after reading a web page when there is nobody to ask.
     # 2026-10-16: local preview grants always belong to the person, including Auto.
-    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app", "creative_tools"}
+    # 2026-10-25: so does a folder dropped on the notch (core/notch_folders.py).
+    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app", "creative_tools", "folder_access"}
     # Auto is an explicit, per-chat admin choice. It answers broker requests
     # for this chat only, including requests from a tainted turn; it does not
     # add a standing grant or change the policy for other chats/tasks.

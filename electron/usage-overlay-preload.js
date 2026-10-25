@@ -1,7 +1,8 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 // The notch page's only reach into the main process. Nothing here returns data
-// from the system; the page gets its readings from the Kairos backend.
+// from the system except the path of a folder the person dropped on it; the
+// page gets its readings from the Kairos backend.
 contextBridge.exposeInMainWorld("usageOverlay", {
   // Whether the pointer is over the pill or card: the window takes clicks only then.
   setInteractive: (on) => ipcRenderer.send("usage-overlay:interactive", !!on),
@@ -11,6 +12,8 @@ contextBridge.exposeInMainWorld("usageOverlay", {
   openAgent: (agentId) => ipcRenderer.send("usage-overlay:open-agent", String(agentId)),
   // The keyboard, only while the notch has a field open (electron/usage-overlay-focus.js).
   setFocus: (on) => ipcRenderer.send("usage-overlay:focus", !!on),
+  // A dropped folder's path, for its broker grant (the page cannot read paths).
+  pathFor: (file) => { try { return webUtils.getPathForFile(file) || ""; } catch { return ""; } },
   hide: () => ipcRenderer.send("usage-overlay:hide"),
   // The main process reads the native cursor in DIPs; DOM screen coordinates
   // are not used for placement on mixed-DPI monitors.

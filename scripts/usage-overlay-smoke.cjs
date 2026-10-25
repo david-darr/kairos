@@ -56,15 +56,66 @@ const files = {
   '/static/js/usage-overlay.js': ['static/js/usage-overlay.js', 'text/javascript'],
   '/static/js/quotaReadings.js': ['static/js/quotaReadings.js', 'text/javascript'],
 };
-for (const name of ['notchShell', 'notchSteps', 'notchGlow', 'notchPanels', 'activityModel', 'chatStream', 'mascot', 'agentAvatar', 'dither', 'kip', 'kipStyle'])
+for (const name of ['notchShell', 'notchSteps', 'notchGlow', 'notchPanels', 'notchDrop', 'notchComposer', 'activityModel', 'chatStream', 'mascot', 'agentAvatar', 'dither', 'kip', 'kipStyle'])
   files[`/static/js/${name}.js`] = [`static/js/${name}.js`, 'text/javascript'];
 for (const name of ['kairos-theme', 'mascot']) files[`/static/css/${name}.css`] = [`static/css/${name}.css`, 'text/css'];
-const server = http.createServer((req, res) => {
+// Phase 3: what the composer and the drop zone asked the stub backend for.
+const backend = { sessions: [], models: [], dropped: [], live: [], deleted: [], uploads: [], folderAsks: [] };
+let failNextLive = false, folderStream = null;
+const readBody = req => new Promise(resolve => { const chunks = []; req.on('data', c => chunks.push(c)); req.on('end', () => resolve(Buffer.concat(chunks))); });
+const sendJson = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+async function phase3(req, res) {
+  if (req.url === '/api/sessions' && req.method === 'POST') {
+    const id = `notch-new-${backend.sessions.length + 1}`; backend.sessions.push(id); return sendJson(res, 200, { id, title: 'New Chat' });
+  }
+  const model = /^\/api\/sessions\/([\w-]+)\/model$/.exec(req.url);
+  if (model && req.method === 'POST') { backend.models.push([model[1], JSON.parse(await readBody(req)).model_endpoint_id]); return sendJson(res, 200, {}); }
+  const remove = /^\/api\/sessions\/([\w-]+)$/.exec(req.url);
+  if (remove && req.method === 'DELETE') { backend.deleted.push(remove[1]); return sendJson(res, 200, { ok: true }); }
+  if (req.url === '/api/models/choices') return sendJson(res, 200, [{ id: 'm1', name: 'Sonnet 5.5', kind: 'claude_cli' }, { id: 'm2', name: 'Codex', kind: 'codex_cli' }]);
+  if (req.url === '/api/notch/dropped' && req.method === 'POST') { backend.dropped.push(JSON.parse(await readBody(req)).session_id); return sendJson(res, 200, { status: 'marked' }); }
+  if (req.url === '/api/chat/live' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req));
+    backend.live.push(body);
+    // As chat_live.start: one turn per request id; the first answer is lost on the way back.
+    if (failNextLive) { failNextLive = false; return sendJson(res, 502, { detail: 'The message could not be sent.' }); }
+    return sendJson(res, 200, { turn_id: `turn-${body.request_id}` });
+  }
+  if (req.url === '/api/chat/attachments' && req.method === 'POST') {
+    const body = (await readBody(req)).toString('latin1');
+    const name = /filename="([^"]+)"/.exec(body)?.[1] || 'file';
+    if (name.startsWith('slow')) await delay(1800);  // long enough to see the upload panel
+    backend.uploads.push(name);
+    return sendJson(res, 200, { id: `att-${backend.uploads.length}`, filename: name, size: body.length });
+  }
+  if (req.url === '/api/notch/folder' && req.method === 'POST') {
+    const { session_id: session, path: folder } = JSON.parse(await readBody(req));
+    backend.folderAsks.push([session, folder]);
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const id = `folder-${backend.folderAsks.length}`;
+    res.write(`data: ${JSON.stringify({ permission: { id, kind: 'permission', tool: 'folder_access', target: folder, title: `Allow Kairos to read ${folder}?`,
+      description: 'A folder dropped on the notch. The chat gets its path and a list of file names, never the files themselves.', arguments: { path: folder },
+      expires_at: Date.now() / 1000 + 120, choices: [{ id: 'once', label: 'Once, for this chat', behavior: 'allow', scope: 'session' },
+        { id: 'forever', label: `Always allow reading ${folder}`, behavior: 'allow', scope: 'forever' }, { id: 'reject', label: 'Reject', behavior: 'deny', scope: 'once' }] } })}\n\n`);
+    folderStream = { id, res, session, folder };
+    return true;
+  }
+  return false;
+}
+const server = http.createServer(async (req, res) => {
+  if (req.url.startsWith('/api/') && !req.url.startsWith('/api/permissions') && await phase3(req, res) !== false) return;
   const answer = /^\/api\/permissions\/([\w-]+)\/(answer|respond)$/.exec(req.url);
   if (answer && req.method === 'POST') {
     let body = ''; req.on('data', c => { body += c; });
     req.on('end', () => {
       posts.push({ id: answer[1], route: answer[2], body: JSON.parse(body) });
+      // A folder grant's stream then says what the broker decided.
+      if (folderStream?.id === answer[1]) {
+        const choice = JSON.parse(body).choice, { res: stream, session, folder } = folderStream;
+        stream.end(`data: ${JSON.stringify(choice === 'reject' ? { status: 'rejected' }
+          : { status: 'allowed', folder: { kind: 'folder', id: `grant-${answer[1]}`, session_id: session, label: folder.split(/[\\/]/).pop(), path: folder } })}\n\n`);
+        folderStream = null;
+      }
       // As the server: one answer per request, and nothing for an expired one.
       const late = answer[1].startsWith('expired') || answeredIds.has(answer[1]);
       answeredIds.add(answer[1]);
@@ -91,7 +142,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ runs: liveRuns, cliPairs })); return;
   }
   if (req.url === '/api/auth/status' || req.url === '/api/agents' || req.url === '/api/agents/inbox' || req.url === '/api/triggers' || req.url === '/api/notifications') {
-    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agents' ? agents : { runs: {}, username: 'local' })); return;
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agents' ? agents : { runs: {}, username: 'local', is_admin: true })); return;
   }
   const markMatch = /^\/static\/img\/model-marks\/([a-z0-9-]+\.svg)$/.exec(req.url);
   if (markMatch) {
@@ -490,6 +541,92 @@ async function run() {
   await waitFor("document.querySelectorAll('#notch-usage .n-reading').length === 0 && document.querySelectorAll('#notch-readings .n-word').length === 0");
   assert.equal(await panelKind(), '', 'and no error panel');
   quotaForbidden = false;
+
+  // Phase 3: the quick composer. New opens it and only then does the window
+  // take the keyboard; Escape closes it, gives the keyboard back and keeps the draft.
+  await expandNow(); await delay(300);
+  focus.length = 0;
+  await realClick('#notch-new');
+  await waitFor("document.querySelector('#notch-takeover .n-panel')?.dataset.kind === 'composer' && !!document.querySelector('.n-compose-field')");
+  assert.deepEqual(focus, [true], 'the composer asks for the keyboard as it opens');
+  await waitFor("document.querySelector('.n-compose-model').textContent === 'Sonnet 5.5'");
+  assert.ok(await js("document.activeElement === document.querySelector('.n-compose-field')"), 'the field has focus');
+  await js("(f => { f.value = 'Book a table for four on Friday'; f.dispatchEvent(new Event('input')); })(document.querySelector('.n-compose-field'))");
+  await move(-1, -1); await delay(600);
+  assert.equal(await js("document.getElementById('notch-shell').classList.contains('expanded')"), true, 'the open composer keeps the notch open');
+  await js("document.querySelector('.n-compose-field').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await waitFor("!document.querySelector('#notch-takeover .n-panel')");
+  assert.deepEqual(focus, [true, false], 'closing gives the keyboard back to the app underneath');
+  assert.equal(backend.live.length + backend.sessions.length, 0, 'nothing was sent or created');
+  // Clicking Kip opens it again, with the draft kept.
+  await expandNow(); await delay(300);
+  await realClick('#notch-kip-large');
+  await waitFor("document.querySelector('.n-compose-field')?.value === 'Book a table for four on Friday'");
+  assert.deepEqual(focus, [true, false, true]);
+  await shot('notch-composer-expanded-light.png');
+  await js("document.body.classList.remove('notch-light')"); await shot('notch-composer-expanded-dark.png'); await js("document.body.classList.add('notch-light')");
+
+  // Drop zone: files dragged over the notch open the dashed slot.
+  const drag = (type, files) => js(`(() => { const data = new DataTransfer();
+    for (const [name, size] of ${JSON.stringify(files)}) data.items.add(new File([new Uint8Array(size)], name));
+    document.dispatchEvent(new DragEvent('${type}', { dataTransfer: data, bubbles: true, cancelable: true })); })()`);
+  await drag('dragenter', [['notes.md', 10]]);
+  await waitFor("document.querySelector('#notch-takeover .n-panel')?.dataset.kind === 'drop'");
+  assert.match(await js("document.querySelector('#notch-takeover .n-panel').innerText"), /Drop files to start a chat[\s\S]*Documents[\s\S]*Folders[\s\S]*25 MB/);
+  assert.equal(await kipState(), 'open', 'Kip opens into the box');
+  assert.equal(await js("document.querySelector('#notch-takeover kairos-mascot').getAttribute('state')"), 'open');
+  assert.equal(await js("document.getElementById('notch-takeover').dataset.glow"), 'sage');
+  await delay(400); await shot('notch-drop-expanded-light.png');
+  // One file, then five, then one over the limit, refused in words and never uploaded.
+  await drag('drop', [['notes.md', 10]]);
+  await waitFor("[...document.querySelectorAll('.n-compose-chip')].map(c => c.textContent).join() === 'notes.md'");
+  await drag('drop', [['a.pdf', 10], ['b.png', 10], ['c.js', 10], ['d.docx', 10], ['e.txt', 10]]);
+  await waitFor("document.querySelectorAll('.n-compose-chip').length === 6");
+  assert.deepEqual(backend.uploads, ['notes.md', 'a.pdf', 'b.png', 'c.js', 'd.docx', 'e.txt']);
+  await drag('drop', [['big.zip', 25 * 1024 * 1024 + 1]]);
+  await waitFor("document.querySelector('#notch-takeover .n-panel-note')?.textContent === 'big.zip is over the 25 MB limit, so it was not added.'");
+  assert.equal(backend.uploads.length, 6, 'an over-limit file is never uploaded');
+  // A slow upload shows the bar with Kip as its thumb.
+  const dropping = drag('drop', [['slow-report.pdf', 10]]);
+  await waitFor("document.querySelector('#notch-takeover .n-panel')?.dataset.kind === 'upload'");
+  assert.equal(await js("document.querySelector('.n-upload-thumb').getAttribute('state')"), 'carry', 'Kip carries the files');
+  assert.equal(await js("document.getElementById('notch-takeover').dataset.glow"), 'sage');
+  await shot('notch-upload-expanded-light.png');
+  await dropping;
+  await waitFor("document.querySelectorAll('.n-compose-chip').length === 7");
+  assert.equal(backend.live.length + backend.sessions.length, 0, 'dropping sends nothing');
+  await shot('notch-composer-files-light.png');
+
+  // Send: one new chat, its model, marked as carrying dropped files, and one
+  // turn even though the first answer was lost and Send was pressed again.
+  failNextLive = true;
+  await realClick('.n-compose-send');
+  await waitFor("document.querySelector('#notch-takeover .n-panel-note')?.textContent === 'The message could not be sent.'");
+  assert.equal(await js("document.querySelector('.n-compose-field').value"), 'Book a table for four on Friday', 'a failed send keeps the draft');
+  await realClick('.n-compose-send');
+  await waitFor("!document.querySelector('#notch-takeover .n-compose')");
+  assert.deepEqual(backend.sessions, ['notch-new-1'], 'one new chat');
+  assert.deepEqual(backend.models, [['notch-new-1', 'm1']], 'the default model, once');
+  assert.deepEqual(backend.dropped, ['notch-new-1'], 'dropped files mark the chat untrusted');
+  assert.equal(backend.live.length, 2);
+  assert.equal(backend.live[0].request_id, backend.live[1].request_id, 'the retry reuses its request id, so the server starts one turn');
+  assert.deepEqual(backend.live[1], { session_id: 'notch-new-1', message: 'Book a table for four on Friday',
+    attachment_ids: ['att-1', 'att-2', 'att-3', 'att-4', 'att-5', 'att-6', 'att-7'], references: [], request_id: backend.live[0].request_id });
+  assert.deepEqual(focus.at(-1), false, 'sending closes the composer and gives the keyboard back');
+  // The working panel then follows that turn.
+  setRun('notch-new-1', { sessionTitle: 'New Chat', status: 'processing', text: '', toolSteps: [{ phase: 'started', id: 's1', name: 'WebSearch', summary: 'tables near the office' }] });
+  await sync();
+  await waitFor("document.querySelector('.n-current').textContent === 'Searching tables near the office'");
+
+  // A folder: the broker's path-root grant, asked in the notch and answered by a click.
+  const folderOutcome = js(`import('/static/js/notchDrop.js').then(m => m.askFolder({ sessionId: 'notch-new-2', path: 'C:\\\\work\\\\project',
+    onRequest: request => { window.folderRequest = request; } }))`);
+  await waitFor("window.folderRequest?.tool === 'folder_access'");
+  assert.deepEqual(await js("window.folderRequest.choices.map(c => c.label)"), ['Once, for this chat', 'Always allow reading C:\\work\\project', 'Reject']);
+  await js("fetch('/api/permissions/' + window.folderRequest.id + '/answer', { method: 'POST', body: JSON.stringify({ choice: 'reject' }) })");
+  assert.deepEqual(await folderOutcome, { status: 'rejected' }, 'reject attaches nothing');
+  setRun('notch-new-1', { status: 'done' }); await sync();
+  console.log('PASS: phase 3 composer (keys only while open, Escape keeps the draft, one turn per send), drop of 1, 5 and an over-limit file, upload thumb, folder grant stream');
 
   // Nothing the page renders may come from a script-capable source.
   assert.equal(await js("document.querySelectorAll('#card script, #card img, #card iframe').length"), 0);

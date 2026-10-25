@@ -284,7 +284,7 @@ def resolve(session_id: str, references: list[dict] | None, is_admin: bool = Fal
         if kind == "design_comment":
             parts.append(design_comments.resolve(session_id, reference))
             continue
-        if kind not in ("file", "note", "chat", "agent", "skill", "tool", "automation", "document"):
+        if kind not in ("file", "note", "chat", "agent", "skill", "tool", "automation", "document", "folder"):
             raise ValueError("Invalid reference type")
         ref_id = reference.get("id")
         source_session = reference.get("session_id")
@@ -334,6 +334,10 @@ def resolve(session_id: str, references: list[dict] | None, is_admin: bool = Fal
                 label, content = "selected automation", _automation_content(task)
                 instruction = "Reference only. Do not run or change this automation.\n"
                 reference["label"] = task["name"]
+            elif kind == "folder":
+                # A folder dropped on the desktop notch, behind a broker grant.
+                from core import notch_folders
+                label, content = notch_folders.reference_content(reference, session_id, user)
             elif kind == "document":
                 doc = documents_service.get_document(ref_id)
                 if doc is None:

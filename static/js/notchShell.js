@@ -6,16 +6,20 @@ import { kipStyleOf } from './kipStyle.js';
 import { chatRows, taskRows } from './notchSteps.js';
 import { createGlow } from './notchGlow.js';
 import { approvalPanel, cliPanel, questionPanel, errorPanel, recoveringPanel, donePanel, createTakeover } from './notchPanels.js';
+import { watchDrags, dropPanel } from './notchDrop.js';
+import { createComposer } from './notchComposer.js';
 
 // The top-centre notch. Phase 1: the shell and status. Phase 2 (Kairos Notch
 // build spec, 4a): the step list, the panels that take over the left card,
-// rail mode and the halftone glows. It never sends work by itself, and it
-// answers a request only from a deliberate click on that request's panel.
-// Drawn to the Kairos Mobile v2 boards: NotchCollapsed, NotchWorking,
-// NotchQuestion and NotchError.
+// rail mode and the halftone glows. Phase 3: the drop zone and the quick
+// composer. It never sends work by itself, and it answers a request only
+// from a deliberate click on that request's panel. Drawn to the Kairos Mobile
+// v2 boards: NotchCollapsed, NotchWorking, NotchQuestion, NotchError,
+// NotchDrop and NotchComposer.
 const ICONS = {
   home: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
   chats: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 5h14v11h-8l-5 3v-3H5z"/></svg>',
+  new: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   settings: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
 };
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -69,7 +73,10 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
     b.addEventListener('click', e => { e.stopPropagation(); bridge.openApp?.(tab); }); return b;
   };
   const readings = build('span'); readings.id = 'notch-readings';
-  top.append(button('notch-open', 'Open Kairos', ICONS.home), button('', 'Chats', ICONS.chats, 'chat'),
+  // New opens the quick composer (phase 3).
+  const newChat = build('button', 'n-ic'); newChat.id = 'notch-new'; newChat.setAttribute('aria-label', 'New chat'); newChat.innerHTML = ICONS.new;
+  newChat.addEventListener('click', event => { event.stopPropagation(); openComposer(); });
+  top.append(button('notch-open', 'Open Kairos', ICONS.home), button('', 'Chats', ICONS.chats, 'chat'), newChat,
     button('', 'Settings', ICONS.settings, 'settings'), readings);
   const row = build('div', 'n-row');
   const now = build('div', 'n-now');
@@ -120,7 +127,7 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
       || (expanded && card.classList.contains('show') && hit(x, y, card));
   }
   // A panel being typed into keeps the notch open when the pointer leaves.
-  const sticky = () => !!takeover.panel?.sticky?.();
+  const sticky = () => !!takeover.panel?.sticky?.() || drags.dragging || composer.open;
   function pointer(x, y) {
     const inside = hot(x, y);
     if (inside) {
@@ -138,7 +145,7 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
   // live: session -> the turn as the step list and panels need it.
   // tasks: session -> its background items (bg_tasks). pairs: terminal pairings.
   const live = new Map(), tasks = new Map(), pairs = new Map(), dismissed = new Set(), cleared = new Set();
-  let recent = null, quotas = [], hostFailures = 0;
+  let recent = null, quotas = [], hostFailures = 0, identity = { admin: false, signedIn: false }, preferred = null;
   const openChat = id => bridge.openChat?.(id);
   const deps = {
     post: (url, body) => fetch(url, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -169,11 +176,31 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
     recent = { key: `done:${id}:${entry.turnId || entry.startedAt}`, title: entry.sessionTitle || 'Chat', sessionId: id, until: Date.now() + DONE_MS };
     setTimeout(renderActivity, DONE_MS + 50);
   }
+  // ---- Phase 3: the drop zone and the quick composer ----
+  const composer = createComposer({ bridge, post: deps.post, render: () => renderActivity(), isAdmin: () => identity.admin, reducedMotion,
+    // After Send, the working panel follows that turn.
+    onSent: sessionId => { preferred = sessionId; chatStream.sync().catch(() => {}); } });
+  function openComposer() { if (!identity.signedIn) return; setExpanded(true); composer.openComposer(); }
+  const drags = watchDrags({ pathFor: file => bridge.pathFor?.(file) || '',
+    onChange: dragging => { if (dragging && identity.signedIn) setExpanded(true); renderActivity(); },
+    onDrop: async ({ files, folders }) => {
+      if (!identity.signedIn) return;
+      if (files.length) await composer.addFiles(files);
+      if (folders.length) await composer.addFolders(folders);
+    } });
+  // Clicking Kip opens the composer; the shell's own click only expands.
+  for (const node of [face, bigKip]) node.addEventListener('click', event => { event.stopPropagation(); openComposer(); });
+  // Clicking another window takes the keyboard there: the composer closes and keeps its draft.
+  window.addEventListener('blur', () => { if (composer.open) composer.close(); });
+
   function wantedPanel() {
+    if (drags.dragging && identity.signedIn) return { key: 'drop', make: dropPanel };
     for (const [id, request] of pairs) {
       if (request.expires_at && request.expires_at * 1000 < Date.now()) pairs.delete(id);
       else return { key: `cli:${id}`, make: () => cliPanel(request, deps) };
     }
+    const folder = composer.folderWant();
+    if (folder) return folder;
     for (const [id, turn] of live) {
       const request = turn.permission;
       if (turn.status !== 'processing' || !request?.id) continue;
@@ -183,6 +210,8 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
         ? { key: `question:${request.id}`, make: () => questionPanel(request, context, deps) }
         : { key: `approval:${request.id}`, make: () => approvalPanel(request, context, deps) };
     }
+    const compose = composer.want();
+    if (compose) return compose;
     for (const [id, turn] of live) {
       if (turn.status !== 'failed' || turn.error === RESTARTED) continue;
       const key = `failed:${id}:${turn.turnId}`;
@@ -225,8 +254,11 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
   }
   // The step list: the focused chat's turn, else a running background task.
   function steps(focus) {
-    const turn = focus?.sessionId ? live.get(focus.sessionId) : null;
-    if (turn?.status === 'processing') return chatRows(turn.entry, tasks.get(focus.sessionId) || []);
+    // The turn just sent from the composer, while it runs; then the focus.
+    if (preferred && live.get(preferred)?.status !== 'processing' && live.has(preferred)) preferred = null;
+    const id = preferred && live.has(preferred) ? preferred : focus?.sessionId;
+    const turn = id ? live.get(id) : null;
+    if (turn?.status === 'processing') return chatRows(turn.entry, tasks.get(id) || []);
     for (const [sessionId, items] of tasks) {
       const running = items.find(item => item.status === 'running' || item.status === 'waiting');
       if (running) return { ...taskRows(running, items), sessionId };
@@ -394,7 +426,10 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing, ref
     const rgb = [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16));
     document.body.classList.toggle('notch-light', settings.mode !== 'color' || rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722 > 128);
   }
-  read('identity', '/api/auth/status', data => { appearanceKey = 'jarvis:appearance:v1:' + (data.username || 'local'); applyAppearance(); });
+  read('identity', '/api/auth/status', data => {
+    identity = { admin: !!data.is_admin, signedIn: !!data.username };
+    appearanceKey = 'jarvis:appearance:v1:' + (data.username || 'local'); applyAppearance();
+  });
   window.addEventListener('storage', event => { if (event.key === appearanceKey) applyAppearance(); });
   poll(); const timer = setInterval(poll, 15000); // Snapshot fallback while SSE reconnects; also refresh bot/inbox sources.
   window.addEventListener('pagehide', () => { clearInterval(timer); reset(); }, { once: true });

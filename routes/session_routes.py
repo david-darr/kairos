@@ -421,4 +421,7 @@ async def delete_session(session_id: str, user: str = Depends(require_user)) -> 
     await computer.stop(f"chat:{session_id}")
     await chat_service.close_session_brain(session_id)
     session_manager.delete_session(session_id)
+    # A folder allowed "once" from the notch ends with its chat.
+    from core import notch_folders
+    notch_folders.forget_session(session_id)
     return {"ok": True}

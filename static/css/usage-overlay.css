@@ -429,3 +429,42 @@ button.n-chip{border:0;font:inherit;cursor:pointer;text-align:left}
 body.notch-light #notch-shell.expanded .n-eyebrow{color:var(--k-gold-text)}
 body.notch-light #notch-shell.expanded .n-panel-reason,body.notch-light #notch-shell.expanded .n-panel-note[data-tone="bad"]{color:var(--k-danger)}
 body.notch-light #notch-shell.expanded .n-panel-note[data-tone="good"]{color:var(--k-success)}
+
+/* ---- Phase 3: the drop zone, the upload and the quick composer --------------
+   Drawn to the boards NotchDrop and NotchComposer (static/js/notchDrop.js,
+   static/js/notchComposer.js). */
+.n-drop{padding:14px}
+.n-drop-slot{flex:1;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;
+  border-radius:20px;border:1.5px dashed color-mix(in srgb,var(--n-watch) 55%,transparent)}
+.n-drop-slot kairos-mascot{width:54px;height:54px}
+.n-drop-kinds{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.n-drop-kind{padding:3px 10px;border-radius:999px;font-size:11px;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:color-mix(in srgb,var(--n-text) 72%,transparent)}
+.n-upload-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.n-upload-pct{font-size:13px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.n-upload-track{--share:0;position:relative;height:6px;margin:14px 0 12px;border-radius:999px;background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+.n-upload-fill{position:absolute;left:0;top:0;bottom:0;width:calc(var(--share) * 100%);border-radius:999px;background:var(--n-watch);transition:width 200ms ease}
+.n-upload-thumb{position:absolute;top:50%;left:calc(var(--share) * 100%);width:30px;height:30px;margin:-15px 0 0 -15px;transition:left 200ms ease}
+.n-compose{align-items:flex-start}
+.n-compose-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.n-compose-field{width:100%;min-height:48px;padding:0;border:0;background:transparent;color:var(--n-text);font:inherit;font-size:15px;line-height:1.45;resize:none;outline:none}
+.n-compose-field::placeholder{color:color-mix(in srgb,var(--n-text) 40%,transparent)}
+.n-compose-row{display:flex;align-items:center;gap:8px;min-width:0}
+.n-compose-ic,.n-compose-send{width:34px;height:34px;flex:none;padding:0;border:0;border-radius:999px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text)}
+.n-compose-mic{margin-left:auto}
+.n-compose-mic.on{background:var(--n-watch);color:var(--k-ink)}
+.n-compose-send{background:var(--n-text);color:var(--n-shell)}
+.n-compose-send:disabled{opacity:.4;cursor:default}
+.n-compose-model{flex:none;max-width:180px;height:30px;padding:0 12px;border:0;border-radius:999px;font:inherit;font-size:12px;cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text)}
+.n-compose-model:disabled{cursor:default}
+.n-compose-hint{min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:color-mix(in srgb,var(--n-text) 45%,transparent)}
+.n-compose-attached{display:flex;flex-wrap:wrap;gap:6px}
+.n-compose-attached[hidden]{display:none}
+.n-compose-chip{display:inline-flex;align-items:center;gap:4px;max-width:240px;padding:3px 4px 3px 10px;border-radius:999px;font-size:12px;
+  background:color-mix(in srgb,var(--n-ample) 18%,transparent);color:var(--n-text)}
+.n-compose-chip > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.n-compose-remove{width:20px;height:20px;flex:none;padding:0;border:0;border-radius:999px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:transparent;color:inherit}
+.n-compose-remove:hover{background:color-mix(in srgb,var(--n-text) 12%,transparent)}
+.n-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+:is(.n-compose-ic,.n-compose-send,.n-compose-model,.n-compose-remove,.n-act,.n-ic):focus-visible,.n-compose-field:focus-visible{outline:2px solid var(--n-watch);outline-offset:2px}

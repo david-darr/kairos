@@ -33,6 +33,9 @@ function advance(ms) {
 const context = { document: { body, documentElement: root, createElement: element, getElementById: id => elements.get(id), dispatchEvent() {}, addEventListener() {} }, CustomEvent: class {},
   // Phase 2's panels and glows draw in the browser (scripts/usage-overlay-smoke.cjs); here they are inert.
   createGlow: () => ({ set() {} }), createTakeover: () => ({ panel: null, show: () => null, revealed() {} }),
+  // So are phase 3's drop zone and composer.
+  watchDrags: () => ({ dragging: false }), dropPanel: () => null,
+  createComposer: () => ({ open: false, want: () => null, folderWant: () => null, openComposer() {} }),
   kipStyleOf: raw => raw?.mascot === false ? 'hidden' : 'halftone',
   window: { addEventListener(name, fn) { if (name === 'storage') storageListener = fn; } },
   localStorage: { getItem: () => JSON.stringify(stored) }, matchMedia: () => ({ matches: reduced }),
