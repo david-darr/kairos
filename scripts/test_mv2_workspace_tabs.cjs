@@ -106,6 +106,25 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(google.itemsOnDay([trip], new Date(2026, 9, 24)).length, 1);
   assert.equal(google.itemsOnDay([trip], new Date(2026, 9, 25)).length, 0);
 
+  const accounts = el('div');
+  responses = {
+    '/api/auth/status': { is_admin: true },
+    '/api/google/status': { connected: true, calendar_connected: true, email: 'owner@example.com', calendar_ids: ['work'] },
+    '/api/google/calendar/calendars': [
+      { id: 'work', name: 'Work', primary: true, access_role: 'owner', color: '#123456' },
+      { id: 'school', name: 'School', access_role: 'reader', color: '#abcdef' },
+    ],
+  };
+  const connected = await google.googleCalendars(accounts, async () => {});
+  assert.equal(connected.length, 2);
+  assert.equal(accounts.querySelectorAll('.cal-account-card').length, 1);
+  assert.equal(accounts.querySelector('.cal-sync-status').textContent, 'Connected');
+  assert.equal(accounts.querySelectorAll('.cal-calendar-swatch').length, 2);
+  assert.deepEqual(accounts.querySelectorAll('input').map(n => n.checked), [true, false]);
+  assert.ok(accounts.querySelector('.cal-default-calendar').textContent.includes('Work'));
+  const filter = accounts.querySelector('input'); filter.checked = false; await filter.onchange();
+  assert.deepEqual(JSON.parse(sent.at(-1).options.body), { calendar_ids: [] });
+  responses = {};
   let saved = false;
   google.eventDialog([], async () => { saved = true; }, null, start);
   const form = context.document.body.querySelector('.cal-event-dialog');
@@ -119,6 +138,18 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   const inputByLabel = label => descendants(form).find(n => n.getAttribute('aria-label') === label);
   for (const label of ['Event title', 'Calendar', 'Start', 'End', 'Time zone', 'Location', 'Description', 'Repeat', 'Edit recurring event'])
     assert.ok(inputByLabel(label), `Grouped editor preserves ${label}`);
+  for (const label of ['Starts date', 'Starts time', 'Ends date', 'Ends time']) assert.ok(inputByLabel(label), `Native pill preserves ${label}`);
+  const allDayToggle = form.querySelector('.cal-checkbox-label').querySelector('input');
+  allDayToggle.checked = true; allDayToggle.onchange();
+  assert.equal(inputByLabel('Starts time').disabled, true);
+  assert.equal(inputByLabel('Ends time').hidden, true);
+  assert.ok(inputByLabel('End').value > inputByLabel('Start').value, 'All-day end remains exclusive');
+  allDayToggle.checked = false; allDayToggle.onchange();
+  assert.equal(inputByLabel('Starts time').disabled, false);
+  inputByLabel('Starts time').value = '10:00'; inputByLabel('Starts time').onchange();
+  inputByLabel('Ends time').value = '11:00'; inputByLabel('Ends time').onchange();
+  assert.ok(inputByLabel('Start').value.endsWith('T10:00'));
+  assert.ok(inputByLabel('End').value.endsWith('T11:00'));
   inputByLabel('Event title').value = 'Grouped event';
   inputByLabel('Location').value = 'Library';
   inputByLabel('Description').value = 'Bring notes';
@@ -129,6 +160,8 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(payload.title, 'Grouped event'); assert.equal(payload.location, 'Library');
   assert.equal(payload.description, 'Bring notes'); assert.ok(payload.time_zone);
   assert.equal(payload.recurrence, null);
+  assert.ok(payload.start.endsWith('T10:00:00'));
+  assert.ok(payload.end.endsWith('T11:00:00'));
 
   const calendar = (await moduleAt('static/js/views/calendar.js')).namespace;
   const host = el('div'); await calendar.render(host);
@@ -238,6 +271,12 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       const panel = host.querySelector('.cal-day-panel');
       assert.equal(panel.querySelectorAll('.card').length, 2, 'Selected day and upcoming both show the active item');
       const card = host.querySelector(section).querySelector('.card');
+      if (isPhone) {
+        assert.ok(card.querySelector('.cal-agenda-text').querySelector('.title'));
+        assert.ok(card.querySelector('.cal-agenda-summary').textContent.includes(item.source_label));
+        assert.equal(card.querySelectorAll('.cal-agenda-clock').length, 0, 'Phone metadata stays inside its text column');
+        assert.ok(card.querySelector('.cal-completion-hit'), 'Completion remains independently tappable');
+      }
       let animations = 0;
       card.animate = () => { animations++; return { finished: Promise.resolve() }; };
       const checkbox = card.querySelector('input');

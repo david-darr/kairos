@@ -196,12 +196,15 @@ export async function render(container) {
     createBar._calendars = await googleCalendars(calendarList, reconnect => reconnect ? render(container) : refresh());
   } catch (error) { calendarList.append(el('div', { class: 'meta', text: `Google calendars unavailable: ${error.message}` })); }
   if (redesignOn()) {
+    const localCalendars = phoneCalendar() ? el('section', { class: 'cal-account-card cal-local-account' }, [el('h4', { text: 'On this computer' })]) : calendarList;
+    if (phoneCalendar()) calendarList.append(localCalendars);
     for (const [source, label] of [['calendar', 'Kairos'], ['note', 'Notes with due times'], ['tab', 'Workspace deadlines']]) {
       const check = el('input', { type: 'checkbox', checked: !hiddenSources.has(source) });
       check.onchange = () => { check.checked ? hiddenSources.delete(source) : hiddenSources.add(source); refresh(); };
-      calendarList.append(el('label', { class: 'cal-calendar-choice' }, [check, label]));
+      localCalendars.append(el('label', { class: `cal-calendar-choice cal-local-${source}` }, phoneCalendar() ? [el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' }), el('span', { class: 'cal-calendar-name', text: label }), check] : [check, label]));
     }
-    calendarList.append(el('button', { type: 'button', class: 'btn quiet cal-connect', text: 'Connect another calendar', onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) }));
+    if (phoneCalendar() && !calendarList.querySelector('.cal-default-calendar')) calendarList.append(el('p', { class: 'cal-default-calendar', text: 'New events go to Kairos by default.' }));
+    calendarList.append(el('button', { type: 'button', class: 'btn quiet cal-connect', text: phoneCalendar() ? 'Add a calendar account' : 'Connect another calendar', onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) }));
   }
   dayPanel._createBar = createBar;
   await refresh();
@@ -496,6 +499,17 @@ function appendAgendaCard(panel, card, item) {
     const clock = el('div', { class: 'cal-agenda-clock', text: item.all_day ? 'All day' : (viewMode === 'month' ? [item.start] : [item.start, item.end]).filter(Boolean).map(value => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })).join(' \u2013 ') });
     card.append(clock);
     card.prepend(el('span', { class: 'workspace-phone-only cal-agenda-hour', text: item.all_day ? 'All day' : new Date(item.start).toLocaleTimeString([], { hour: 'numeric' }) }));
+  }
+  if (phoneCalendar()) {
+    const title = card.querySelector('.title');
+    const actions = card.querySelector('.row-actions');
+    const completion = card.querySelector('.cal-completion-hit');
+    const source = item.calendar_name || item.source_label || (item.source === 'google' ? 'Google' : item.source === 'note' ? 'Notes' : 'Kairos');
+    const time = item.all_day ? 'All day' : [item.start, item.end].filter(Boolean).map(value => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })).join(' \u2013 ');
+    const summary = `${time} \u00b7 ${source}`;
+    const text = el('div', { class: 'cal-agenda-text' }, [title, el('div', { class: 'cal-agenda-summary', text: summary, title: summary })]);
+    card.classList.add('cal-phone-agenda');
+    card.replaceChildren(...(completion ? [completion] : []), text, ...(actions ? [actions] : []));
   }
   panel.appendChild(card);
 }
