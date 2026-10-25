@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld("usageOverlay", {
   // Whether the pointer is over the pill or card: the window takes clicks only then.
   setInteractive: (on) => ipcRenderer.send("usage-overlay:interactive", !!on),
   openApp: (target = "home") => { if (["home", "chat", "settings"].includes(target)) ipcRenderer.send("usage-overlay:open-app", target); },
+  // Open one chat or one agent in Kairos (a panel's Open chat, a chip).
+  openChat: (sessionId) => ipcRenderer.send("usage-overlay:open-chat", String(sessionId)),
+  openAgent: (agentId) => ipcRenderer.send("usage-overlay:open-agent", String(agentId)),
+  // The keyboard, only while the notch has a field open (electron/usage-overlay-focus.js).
+  setFocus: (on) => ipcRenderer.send("usage-overlay:focus", !!on),
   hide: () => ipcRenderer.send("usage-overlay:hide"),
   // The main process reads the native cursor in DIPs; DOM screen coordinates
   // are not used for placement on mixed-DPI monitors.

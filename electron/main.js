@@ -95,6 +95,7 @@ let backendReady = false;
 // whether it folds to a sliver until hovered. displayId null = the main display.
 const placement = require("./usage-overlay-placement");
 const { trackOverlay } = require("./usage-overlay-tracking");
+const { setOverlayFocus, validId } = require("./usage-overlay-focus");
 // The floating bot window (Agents 2.0, 2026-10-14); created once the app is ready.
 const { createBotWindow } = require("./bot-window");
 let botWindow = null;
@@ -171,6 +172,7 @@ async function setUsageOverlayVisible(visible) {
     overlayTracking.place();
     usageOverlay.showInactive();
   } else if (usageOverlay && !usageOverlay.isDestroyed()) {
+    setOverlayFocus(usageOverlay, false);
     usageOverlay.hide();
     overlayDrag = null;
     overlayTracking.setDragging(false);
@@ -662,6 +664,16 @@ ipcMain.on("usage-overlay:open-app", (event, target = "home") => {
   if (!fromOverlayWindow(event) || !["home", "chat", "settings"].includes(target)) return;
   showWindow();
   mainWindow?.webContents.send("usage-overlay:navigate", target);
+});
+for (const kind of ["chat", "agent"]) {
+  ipcMain.on(`usage-overlay:open-${kind}`, (event, id) => {
+    if (!fromOverlayWindow(event) || !validId(id)) return;
+    showWindow();
+    mainWindow?.webContents.send(`usage-overlay:open-${kind}`, id);
+  });
+}
+ipcMain.on("usage-overlay:focus", (event, on) => {
+  if (fromOverlayWindow(event) && typeof on === "boolean") setOverlayFocus(usageOverlay, on);
 });
 
 ipcMain.handle("google:open-sign-in", async (event, url) => {

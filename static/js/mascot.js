@@ -26,8 +26,12 @@ import { BAYER4 } from './dither.js';
 import { kipFrame, kipSvg, kipStripSvg, KIP_LOOPS, KIP_STILL, hexOf, rgbOf } from './kip.js';
 
 export const MASCOT_STATES = ['idle', 'thinking', 'listening', 'speaking', 'success', 'needs', 'error', 'sleeping'];
+// Two poses that are not bot statuses, for the desktop notch (Kairos Notch
+// build spec, 4a): `open`, the bite widened into an open lid over the drop
+// zone, and `carry`, Kip as an upload bar's thumb with the point trailing.
+export const MASCOT_POSES = [...MASCOT_STATES, 'open', 'carry'];
 export const STATE_WORDS = { idle: 'idle', thinking: 'thinking', listening: 'listening', speaking: 'speaking',
-  success: 'done', needs: 'needs you', error: 'error', sleeping: 'sleeping' };
+  success: 'done', needs: 'needs you', error: 'error', sleeping: 'sleeping', open: 'ready for files', carry: 'carrying files' };
 export const AJAR_SHAPES = ['round', 'squircle', 'tall'];
 export const AJAR_ACCESSORIES = ['none', 'laurel', 'spectacles', 'quill', 'rays', 'scarf'];
 export const AJAR_FINISHES = ['flat', 'halftone', 'pixel'];
@@ -205,6 +209,16 @@ export const POSE_CSS = `
 .ajar[data-state=sleeping] .aj-tilt{transform:rotate(5deg)}
 .ajar[data-state=sleeping] .aj-pt{transform:translate(-2px,10px) scale(.75);opacity:.5}
 .ajar[data-state=sleeping] .aj-z text{opacity:.8}
+.ajar[data-state=open] .aj-bite{d:path("M-10 -10H150V150H-10Z M73 36a27 27 0 1 0 54 0a27 27 0 1 0 -54 0Z")}
+.ajar[data-state=open] .aj-pt{transform:translate(9px,-11px)}
+.ajar[data-state=open] .aj-brows{opacity:1}
+.ajar[data-state=open] .aj-brow{transform:translateY(-5px)}
+.ajar[data-state=open] .aj-eye{transform:scaleY(1.12)}
+.ajar[data-state=open] .aj-mouth{opacity:1;transform:scale(1.3,2.6)}
+.ajar[data-state=carry] .aj-tilt{transform:rotate(7deg)}
+.ajar[data-state=carry] .aj-eyes{transform:translate(5px,0)}
+.ajar[data-state=carry] .aj-orbit{transform:rotate(-150deg)}
+.ajar[data-state=carry] .aj-pt{transform:scale(.8)}
 .ajar[data-finish=pixel] .aj-tilt{transform:none}
 `.replace(/\n/g, '');
 
@@ -241,13 +255,13 @@ let uid = 0;
 // every token resolved). `tone` is a halftone body image (data URL).
 export function ajarMarkup(rawSpec, { state = 'idle', clipId = 'ajc' + (++uid), style = '', standalone = false, tone = '', grid = PIXEL_GRID } = {}) {
   const spec = normalizeMascot(rawSpec?.color === 'ink' ? { ...KAIROS_SPEC, ...rawSpec } : rawSpec);
-  const pose = MASCOT_STATES.includes(state) ? state : 'idle';
+  const pose = MASCOT_POSES.includes(state) ? state : 'idle';
   const acc = accessoryMarkup(spec.acc);
   const halftone = spec.finish === 'halftone' && tone, pixel = spec.finish === 'pixel';
   const head = standalone ? ` xmlns="http://www.w3.org/2000/svg" width="140" height="140"` : '';
   return `<svg class="ajar"${head} viewBox="0 0 140 140" data-state="${pose}" data-shape="${spec.shape}" data-acc="${spec.acc}" data-finish="${halftone ? 'halftone' : pixel ? 'pixel' : 'flat'}" style="${style}" aria-hidden="true" focusable="false">`
     + (standalone ? `<style>${POSE_CSS}</style>` : '')
-    + `<defs><clipPath id="${clipId}"><path clip-rule="evenodd" d="M-10 -10H150V150H-10Z M80 36a20 20 0 1 0 40 0a20 20 0 1 0 -40 0Z"/></clipPath></defs>`
+    + `<defs><clipPath id="${clipId}"><path class="aj-bite" clip-rule="evenodd" d="M-10 -10H150V150H-10Z M80 36a20 20 0 1 0 40 0a20 20 0 1 0 -40 0Z"/></clipPath></defs>`
     + '<ellipse class="aj-shadow" cx="70" cy="129" rx="36" ry="5"/>'
     + '<circle class="aj-voice" cx="70" cy="76" r="52"/>'
     + (acc.back || '')
@@ -478,7 +492,7 @@ export class KairosMascot extends ElementBase {
   constructor() { super(); this._agent = null; this._timer = 0; this._clip = 'ajc-live-' + (++uid); this._drawn = ''; }
   set agent(value) { this._agent = value || null; if (value) rememberBot(value); this._render(); }
   get agent() { return this._agent; }
-  get state() { return MASCOT_STATES.includes(this.getAttribute('state')) ? this.getAttribute('state') : 'idle'; }
+  get state() { return MASCOT_POSES.includes(this.getAttribute('state')) ? this.getAttribute('state') : 'idle'; }
   set state(value) { this.setAttribute('state', value); }
   get spec() {
     let raw = null;

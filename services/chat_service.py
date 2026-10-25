@@ -12,6 +12,7 @@ them to go add one, instead of silently spending a real Claude turn.
 """
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -66,6 +67,10 @@ async def session_operation(session_id: str):
         yield
     finally:
         release_session(session_id)
+
+# Set by services/chat_live.py for the turns it runs: their tool steps go out
+# on the live feed for every chat, not only Forge's.
+LIVE_STEPS: contextvars.ContextVar[bool] = contextvars.ContextVar("chat_live_steps", default=False)
 
 NO_MODEL_MESSAGE = (
     "You haven't added a model yet. Go to Settings → Add Models to connect "
@@ -755,7 +760,10 @@ async def _stream_with_permission_prompts(session_id: str, brain, full_text: str
     context = runs.current_for(session_id)
     computer_queue = context.computer_queue if context else asyncio.Queue()
     next_computer = asyncio.ensure_future(computer_queue.get())
-    forge = bool((session_manager.get_session(session_id) or {}).get("forge"))
+    # Forge always shows its steps; any other chat only on the live feed,
+    # whose viewers include the desktop notch's step list. The plain
+    # /api/chat/stream protocol keeps its text-only bytes.
+    steps = LIVE_STEPS.get() or bool((session_manager.get_session(session_id) or {}).get("forge"))
     tool_summaries = {}
     try:
         while True:
@@ -778,7 +786,7 @@ async def _stream_with_permission_prompts(session_id: str, brain, full_text: str
                 tally.add(item)
                 if item.kind is runs.EventKind.TEXT:
                     yield item.data["text"]
-                elif forge and len(tally.timeline) > before and item.kind in (runs.EventKind.TOOL_STARTED, runs.EventKind.TOOL_FINISHED):
+                elif steps and len(tally.timeline) > before and item.kind in (runs.EventKind.TOOL_STARTED, runs.EventKind.TOOL_FINISHED):
                     # Project ONLY the kept timeline detail, never raw provider
                     # arguments/meta. This shares its clipping and any redaction.
                     step = tally.timeline[-1]

@@ -214,6 +214,7 @@ def _task_done(session_id: str, run: dict, task: asyncio.Task) -> None:
 async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: bool,
                reference_context: str, references: list[dict]) -> None:
     run["_started"] = True
+    chat_service.LIVE_STEPS.set(True)  # this task's own context only
     try:
         stream = chat_service.stream_message(session_id, run["prompt"], attachment_ids, is_admin,
                                              reference_context, references, claimed=True)

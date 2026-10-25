@@ -10,7 +10,7 @@ function element(tag = 'div') {
     replaceChildren(...nodes) { this.children = nodes; },
     setAttribute(k, v) { attrs.set(k, v); }, getAttribute: k => attrs.get(k), toggleAttribute() {},
     addEventListener: (n, fn) => events.set(n, fn), events, querySelector: () => null,
-    getAnimations: () => [], animate: (frames, options) => fades.push(options.duration),
+    getAnimations: () => [], animate: (frames, options) => { fades.push(options.duration); return { finished: Promise.resolve() }; },
     getContext: () => ({ clearRect() {}, fillRect() {} }),
     getBoundingClientRect: () => ({ left: 180, right: 540, top: 0, bottom: 34 }) };
   Object.defineProperty(node, 'id', { set(value) { elements.set(value, node); }, get() { return [...elements].find(([, value]) => value === node)?.[0]; } });
@@ -30,7 +30,9 @@ function advance(ms) {
   }
   now = end;
 }
-const context = { document: { body, documentElement: root, createElement: element, getElementById: id => elements.get(id), dispatchEvent() {} }, CustomEvent: class {},
+const context = { document: { body, documentElement: root, createElement: element, getElementById: id => elements.get(id), dispatchEvent() {}, addEventListener() {} }, CustomEvent: class {},
+  // Phase 2's panels and glows draw in the browser (scripts/usage-overlay-smoke.cjs); here they are inert.
+  createGlow: () => ({ set() {} }), createTakeover: () => ({ panel: null, show: () => null, revealed() {} }),
   kipStyleOf: raw => raw?.mascot === false ? 'hidden' : 'halftone',
   window: { addEventListener(name, fn) { if (name === 'storage') storageListener = fn; } },
   localStorage: { getItem: () => JSON.stringify(stored) }, matchMedia: () => ({ matches: reduced }),
@@ -44,8 +46,12 @@ const context = { document: { body, documentElement: root, createElement: elemen
 const source = fs.readFileSync(require.resolve('../static/js/notchShell.js'), 'utf8').replace(/^import .*;\r?\n/gm, '').replace('export function', 'function');
 // The real shared wording, in its own scope as in the browser (both modules have a toneOf).
 const readings = { Date }; vm.createContext(readings);
-vm.runInContext(fs.readFileSync(require.resolve('../static/js/quotaReadings.js'), 'utf8').replace(/^export /gm, '') + '\nthis.api = { shortReading, modelGroups, toSnap };', readings);
+vm.runInContext(fs.readFileSync(require.resolve('../static/js/quotaReadings.js'), 'utf8').replace(/^export /gm, '') + '\nthis.api = { shortReading, modelGroups, toSnap, PROVIDERS, SIGN_IN };', readings);
 Object.assign(context, readings.api);
+// The real step rules (pure), in their own scope.
+const steps = {}; vm.createContext(steps);
+vm.runInContext(fs.readFileSync(require.resolve('../static/js/notchSteps.js'), 'utf8').replace(/^export /gm, '') + '\nthis.api = { chatRows, taskRows };', steps);
+Object.assign(context, steps.api);
 vm.createContext(context); vm.runInContext(source + '\nthis.make = createNotchShell;', context);
 const controller = context.make({ pill, card, bridge: {}, renderRing() {}, hideCard() { card.classList.remove('show'); } });
 assert.equal(controller.isExpanded(), false);

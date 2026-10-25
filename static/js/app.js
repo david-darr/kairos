@@ -594,6 +594,11 @@ async function startApp() {
   window.jarvis?.usageOverlay?.onNavigate?.(tab => {
     document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...(tab === 'settings' ? { section: 'appearance' } : {}) } }));
   });
+  // The notch's Open chat and its agent chips.
+  window.jarvis?.usageOverlay?.onOpen?.(({ tab, id }) => {
+    if (tab === 'chat') floatingProgress.openSession(id);
+    else document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId: id } }));
+  });
   // Adding/removing a tab in the Tool Store rebuilds the nav so it
   // appears immediately instead of after a reload.
   document.addEventListener("jarvis:tabs-changed", async () => {

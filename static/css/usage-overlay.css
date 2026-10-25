@@ -335,10 +335,7 @@ body[data-edge="top-centre"] #notch-shell.expanded{border-radius:0 0 30px 30px;b
 .n-word{cursor:default;white-space:nowrap;max-width:210px;overflow:hidden;text-overflow:ellipsis}
 .n-word-more{flex:none;font-variant-numeric:tabular-nums}
 .n-row{display:flex;gap:10px}
-.n-now{flex:0 0 330px;min-width:0;display:flex;align-items:center;gap:16px;padding:16px;border-radius:22px;background:var(--n-tile);
-  box-shadow:inset 0 -38px 50px -30px color-mix(in srgb,var(--n-glow) 70%,transparent)}
-#notch-shell:is([data-state="idle"],[data-state="sleeping"]) .n-now{box-shadow:none}
-#notch-shell[data-state="error"] .n-now{box-shadow:inset 0 -38px 50px -30px color-mix(in srgb,var(--n-crit) 60%,transparent)}
+.n-now{flex:0 0 330px;min-width:0;display:flex;align-items:center;gap:16px;padding:16px;border-radius:22px;background:var(--n-tile)}
 .n-lines{display:flex;flex-direction:column;gap:6px;min-width:0}
 .n-lines span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .n-quiet{font-size:12px;opacity:.4}
@@ -356,7 +353,7 @@ body[data-edge="top-centre"] #notch-shell.expanded{border-radius:0 0 30px 30px;b
 
 /* Light themes: the expanded notch follows Appearance (spec 4a); collapsed it always stays dark */
 body.notch-light #notch-shell.expanded{--n-shell:var(--k-parchment);--n-tile:var(--k-surface);--n-text:var(--k-ink);--n-glow:var(--k-gold-hi)}
-body.notch-light #notch-shell.expanded .n-now{--kip-eye:var(--k-surface)}
+body.notch-light #notch-shell.expanded :is(.n-now,.n-takeover){--kip-eye:var(--k-surface)}
 body[data-edge="top-centre"].notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
 
 /* The usage card opens under the notch; the edge notch's tail and handles do not apply */
@@ -373,3 +370,62 @@ body[data-edge="top-centre"].notch-reduced #notch-shell *{animation:none!importa
 @media(prefers-reduced-motion:reduce){body[data-edge="top-centre"] #notch-shell,body[data-edge="top-centre"] #notch-shell *{transition:none}}
 
 :root{--text:var(--k-parchment);--bg-panel-solid:var(--n-body);--point:var(--k-gold-hi);--danger:var(--n-crit)}
+
+/* ---- Phase 2: work and attention -------------------------------------------
+   The step list's shimmer, the halftone glows (static/js/notchGlow.js), rail
+   mode, and the panels that take over the left card (static/js/notchPanels.js),
+   drawn to the boards NotchQuestion and NotchError. */
+:root{--n-rose:var(--k-rose);--n-lilac:var(--m-body-cdbfd9)}
+.n-glow-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;transition:opacity 300ms ease}
+.n-glow-layer.on{opacity:1}
+.n-now,.n-takeover,.n-halo{position:relative;isolation:isolate}
+.n-now > :not(.n-glow-layer),.n-takeover-host,.n-halo > kairos-mascot{position:relative;z-index:1}
+.n-halo{display:flex;flex:none;align-items:center;justify-content:center;width:40px;height:40px;margin:0 -6px}
+.n-current.n-shimmer{color:transparent;-webkit-background-clip:text;background-clip:text;
+  background-image:linear-gradient(100deg,var(--n-text) 0 38%,color-mix(in srgb,var(--n-watch) 55%,var(--n-text)) 50%,var(--n-text) 62% 100%);
+  background-size:250% 100%;animation:n-shimmer 1.2s linear infinite}
+@keyframes n-shimmer{from{background-position:100% 0}to{background-position:-150% 0}}
+@media(prefers-reduced-motion:reduce){.n-current.n-shimmer{animation:none}.n-glow-layer{transition-duration:120ms}}
+
+/* Rail mode: a panel takes the left card's place and the chips fold to the rail */
+.n-takeover{flex:1;min-width:0;border-radius:22px;background:var(--n-tile);overflow:hidden;--kip-eye:var(--n-tile)}
+.n-takeover[hidden],.n-row.n-rail-mode :is(.n-now,.n-chips){display:none}
+
+.n-panel{display:flex;align-items:center;gap:16px;min-height:132px;padding:16px 18px}
+.n-panel-kip{width:64px;height:64px;margin:-2px}
+.n-panel-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.n-eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--n-watch)}
+.n-panel-title{font-size:16px;font-weight:500;overflow-wrap:anywhere}
+.n-panel-target{font-size:12px;font-family:var(--k-font-mono,monospace);color:color-mix(in srgb,var(--n-text) 75%,transparent);overflow-wrap:anywhere}
+.n-panel-detail{font-size:12px;color:color-mix(in srgb,var(--n-text) 55%,transparent)}
+.n-panel-reason{font-size:13px;color:color-mix(in srgb,var(--n-crit) 65%,var(--n-text))}
+.n-panel-note{min-height:16px;font-size:12px;color:color-mix(in srgb,var(--n-text) 62%,transparent)}
+.n-panel-note:empty{display:none}
+.n-panel-note[data-tone="good"]{color:var(--n-ample)}
+.n-panel-note[data-tone="bad"]{color:var(--n-crit)}
+.n-panel-actions{flex:none;display:flex;flex-direction:column;align-items:stretch;gap:6px;max-width:230px}
+.n-act{height:34px;padding:0 16px;border-radius:999px;border:1px solid color-mix(in srgb,var(--n-text) 20%,transparent);background:transparent;
+  color:var(--n-text);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background-color 160ms}
+.n-act:hover:not(:disabled){background:color-mix(in srgb,var(--n-text) 8%,transparent)}
+.n-act-gold{background:var(--n-watch);border-color:var(--n-watch);color:var(--k-ink);font-weight:600}
+.n-act-gold:hover:not(:disabled){background:color-mix(in srgb,var(--n-watch) 85%,var(--n-text))}
+.n-act-quiet{color:color-mix(in srgb,var(--n-text) 75%,transparent)}
+.n-act-link{height:auto;padding:2px 6px;border:0;font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent);text-decoration:underline;text-underline-offset:3px}
+.n-act-round{width:48px;height:48px;padding:0;align-self:center;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--n-text) 6%,transparent)}
+.n-act:disabled{opacity:.45;cursor:default}
+.n-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.n-options .n-act{max-width:220px;background:color-mix(in srgb,var(--n-text) 6%,transparent)}
+.n-options .n-act[aria-pressed="true"]{background:var(--n-text);border-color:var(--n-text);color:var(--n-shell)}
+.n-options .n-opt-other{border-style:dashed}
+.n-other{height:36px;padding:0 12px;border-radius:12px;border:1px solid color-mix(in srgb,var(--n-text) 25%,transparent);background:transparent;color:var(--n-text);font:inherit;font-size:13px}
+.n-other[hidden]{display:none}
+.n-other:focus-visible{outline:2px solid var(--n-watch);outline-offset:1px}
+button.n-chip{border:0;font:inherit;cursor:pointer;text-align:left}
+#notch-shell[data-state="error"] #notch-signal .n-dot{background:var(--n-crit)}
+#notch-shell[data-state="success"] #notch-signal .n-dot{background:var(--n-ample)}
+#notch-shell:is([data-state="success"],[data-state="sleeping"])[data-panel]:not([data-panel=""]) :is(#notch-usage,#notch-cluster){display:none}
+#notch-shell:is([data-state="success"],[data-state="sleeping"])[data-panel]:not([data-panel=""]) :is(#notch-status,#notch-signal){display:flex}
+/* Light themes: gold and ember as text take their darker text tones */
+body.notch-light #notch-shell.expanded .n-eyebrow{color:var(--k-gold-text)}
+body.notch-light #notch-shell.expanded .n-panel-reason,body.notch-light #notch-shell.expanded .n-panel-note[data-tone="bad"]{color:var(--k-danger)}
+body.notch-light #notch-shell.expanded .n-panel-note[data-tone="good"]{color:var(--k-success)}

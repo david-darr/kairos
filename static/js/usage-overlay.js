@@ -36,12 +36,15 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s || 
 function markHtml(mark) { return /^[a-z0-9-]+$/.test(mark || '') ? `<span class="mark" style="--mark:url('/static/img/model-marks/${mark}.svg')"></span>` : ''; }
 let snaps = {};  // provider id -> CodeNotch-shaped snapshot
 let groups = [];  // every connected model (quotaReadings.js modelGroups)
+let statuses = [];  // the raw provider readings, for the notch's sign-in and pause panels
 
 function applyReadings(data) {
   const next = {};
   for (const p of (data && data.providers) || []) next[p.provider] = toSnap(p);
   snaps = next;
   groups = modelGroups((data && data.models) || []);
+  statuses = (data && data.providers) || [];
+  notchShell?.quota(statuses);
   renderRing();
   if (card.classList.contains('show')) renderCard();
 }
@@ -241,11 +244,12 @@ function updateInteractive() {
 
 /* ---- Refresh a ring ---------------------------------------------------------
    As in CodeNotch, a clicked ring presses in and its reading turns once while a
-   fresh reading is fetched. PRESS_MIN keeps the press visible on a fast answer. */
+   fresh reading is fetched. PRESS_MIN keeps the press visible on a fast answer.
+   Resolves whether the provider is signed in afterwards (the notch's Retry). */
 const PRESS_MIN = 380;
 const refreshing = {};
 async function refreshRing(id) {
-  if (refreshing[id]) return;
+  if (refreshing[id]) return false;
   refreshing[id] = Date.now();
   renderRing();
   turnReading(id);
@@ -260,6 +264,7 @@ async function refreshRing(id) {
   } catch { notice('Kairos is not reachable.'); }
   const wait = refreshing[id] + PRESS_MIN - Date.now();
   setTimeout(() => { delete refreshing[id]; renderRing(); }, Math.max(0, wait));
+  return !!snaps[id] && snaps[id].status !== 'needsAuth';
 }
 function turnReading(id) {
   const el = pill.querySelector(`.cell[data-p="${id}"] svg.reading`);
@@ -419,8 +424,9 @@ async function applyConfig(config) {
   if (edge === 'top-centre' && !notchShell) {
     const { createNotchShell } = await import('./notchShell.js');
     if (revision !== configRevision) return;
-    notchShell = createNotchShell({ pill, card, bridge, hideCard, renderRing });
+    notchShell = createNotchShell({ pill, card, bridge, hideCard, renderRing, refreshQuota: refreshRing });
     renderRing(); // the shell exists only now, so hand it the readings already on hand
+    notchShell.quota(statuses);
   }
   notchEdge = edge;
   notchShell?.reset();
@@ -436,7 +442,7 @@ Promise.resolve(bridge.getConfig ? bridge.getConfig() : null).then(applyConfig).
 async function refresh() {
   try {
     const response = await fetch('/api/models/quotas', { credentials: 'same-origin', cache: 'no-store' });
-    if (response.status === 401 || response.status === 403) { snaps = {}; groups = []; renderRing(); hideCard(); return; }
+    if (response.status === 401 || response.status === 403) { snaps = {}; groups = []; statuses = []; notchShell?.quota([]); renderRing(); hideCard(); return; }
     if (!response.ok) throw new Error('unavailable');
     applyReadings(await response.json());
   } catch {

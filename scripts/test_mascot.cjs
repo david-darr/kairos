@@ -28,6 +28,29 @@ const check = async (name, fn) => { await fn(); passed.push(name); };
     }
     assert.ok(M.ajarMarkup({ ...bot, state: 'nonsense' }, { state: 'nonsense' }).includes('data-state="idle"'), 'an unknown state falls back to idle');
   });
+  await check('the notch poses: open widens the bite into a lid, carry trails the point', () => {
+    assert.deepEqual(M.MASCOT_POSES, [...M.MASCOT_STATES, 'open', 'carry']);
+    assert.deepEqual(M.MASCOT_STATES.length, 8, 'the bot statuses are unchanged');
+    for (const spec of [M.KAIROS_SPEC, bot]) {
+      const all = M.MASCOT_POSES.map(state => M.ajarMarkup(spec, { state, clipId: 'c' }));
+      assert.equal(new Set(all).size, M.MASCOT_POSES.length, 'every pose is its own picture');
+      for (const pose of ['open', 'carry']) {
+        const svg = M.ajarMarkup(spec, { state: pose, style: M.liveStyle(spec) });
+        assert.ok(svg.includes(`data-state="${pose}"`), pose);
+        assert.ok(!svg.includes('<filter') && !COLOR.test(svg), pose + ' names no colour and uses no filter');
+      }
+    }
+    assert.ok(M.ajarMarkup(M.KAIROS_SPEC).includes('class="aj-bite"'), 'the bite is addressable');
+    assert.match(M.POSE_CSS, /\.ajar\[data-state=open\] \.aj-bite\{d:path\("[^"]*a27 27/, 'open widens the bite');
+    assert.match(M.POSE_CSS, /\.ajar\[data-state=carry\] \.aj-orbit\{transform:rotate\(-150deg\)\}/, 'carry trails the point behind');
+    assert.ok(!COLOR.test(M.POSE_CSS) && !/anim/.test(M.POSE_CSS), 'still poses, no colour');
+    for (const pose of ['open', 'carry']) assert.ok(M.STATE_WORDS[pose], pose + ' has words');
+    const css = fs.readFileSync(path.join(root, 'static/css/mascot.css'), 'utf8');
+    const start = css.indexOf('@media (prefers-reduced-motion: no-preference)');
+    const gate = css.slice(start, css.indexOf('\n}\n', start));
+    assert.ok(/data-state=open\] \.aj-pt \{ animation: aj-lid/.test(gate) && /data-state=carry\] \.aj-pt \{ animation: aj-trail/.test(gate),
+      'their movement is inside the motion gate');
+  });
   await check('no SVG filters and no raw colours in the mascot sources or markup', () => {
     for (const file of ['static/js/mascot.js', 'static/js/kip.js', 'static/js/kipStyle.js', 'static/js/kipPicker.js', 'static/css/mascot.css', 'static/js/agentAvatar.js']) {
       const text = fs.readFileSync(path.join(root, file), 'utf8');

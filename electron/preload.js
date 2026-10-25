@@ -77,6 +77,13 @@ contextBridge.exposeInMainWorld("jarvis", {
       ipcRenderer.on("usage-overlay:navigate", wrapped);
       return () => ipcRenderer.removeListener("usage-overlay:navigate", wrapped);
     },
+    // The notch opens one chat or one agent (electron/main.js checks the id).
+    onOpen: handler => {
+      const chat = (_event, id) => handler({ tab: "chat", id }), agent = (_event, id) => handler({ tab: "agents", id });
+      ipcRenderer.on("usage-overlay:open-chat", chat);
+      ipcRenderer.on("usage-overlay:open-agent", agent);
+      return () => { ipcRenderer.removeListener("usage-overlay:open-chat", chat); ipcRenderer.removeListener("usage-overlay:open-agent", agent); };
+    },
     state: () => ipcRenderer.invoke("usage-overlay:state"),
     setVisible: (visible) => ipcRenderer.invoke("usage-overlay:set-visible", !!visible),
     setConfig: (changes) => ipcRenderer.invoke("usage-overlay:set-config", {
