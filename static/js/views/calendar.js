@@ -282,9 +282,11 @@ async function renderGridContent(monthLabel, grid, createBar, dayPanel) {
     let legend = grid.parentElement.querySelector('.cal-legend');
     if ((mode === 'week')) {
       if (!legend) { legend = el('div', { class: 'cal-legend', 'aria-label': 'Calendar legend' }); grid.parentElement.append(legend); }
+      // One entry per name: Kairos's own events and unlabelled tab items both read "Kairos".
+      const label = item => item.calendar_name || item.source_label || (item.source === 'google' ? 'Google' : item.source === 'note' ? 'Notes' : 'Kairos');
       const sources = new Map();
-      for (const item of items) sources.set(item.calendar_id || item.source, item);
-      legend.replaceChildren(...[...sources.values()].map(item => eventColor(el('span', { class: `cal-legend-item cal-src-${item.source || 'event'}`, text: item.calendar_name || item.source_label || (item.source === 'google' ? 'Google' : item.source === 'note' ? 'Notes' : 'Kairos') }), item)));
+      for (const item of items) if (!sources.has(label(item))) sources.set(label(item), item);
+      legend.replaceChildren(...[...sources].map(([text, item]) => eventColor(el('span', { class: `cal-legend-item cal-src-${item.source || 'event'}`, text }), item)));
     }
     if (mode === 'day') grid.parentElement.querySelector('.cal-legend')?.remove();
     if (mode === 'day') await renderDayPanel(dayPanel, gridStart, itemsOnDay(items, gridStart), refresh);
