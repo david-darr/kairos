@@ -1356,12 +1356,21 @@
     };
     // Account limits for Home's "Your models" and the overlay (quotaReadings.js);
     // state.quotas lets ui-smoke try a signed-out or stale reading.
-    if (route === "/api/models/quotas") return state.quotas || { providers: [
+    if (route === "/api/models/quotas") {
+      const reading = state.quotas || { providers: [
       { provider: "claude", status: "ok", updated_at: now - 120, note: "", windows: [
         { name: "5-hour", used_percent: 34, resets_at: now + 2 * 3600 + 600 }, { name: "Weekly", used_percent: 61, resets_at: now + 4 * 86400 }] },
       { provider: "codex", status: "ok", updated_at: now - 300, note: "", windows: [
         { name: "5-hour", used_percent: 12, resets_at: now + 3 * 3600 }, { name: "Weekly", used_percent: 83, resets_at: now + 2 * 86400 }] },
-    ], recorded: [] };
+      ] };
+      return { ...reading, models: reading.models || allModels().map(endpoint => {
+        const provider = { claude_cli: 'claude', codex_cli: 'codex' }[endpoint.kind];
+        const quota = reading.providers?.find(item => item.provider === provider) || null;
+        return { ...endpoint, provider: quota?.provider || null,
+          status: quota && !['ok', 'stale', 'rate_limited', 'no_quota'].includes(quota.status) ? quota.status : 'connected', quota,
+          recorded: { today_tokens: 0, week_tokens: 0, total_tokens: endpoint.id === 'm1' ? 1200000 : endpoint.id === 'm3' ? 842000 : 0 } };
+      }) };
+    }
     if (route === "/api/documents") return list(docs);
     const filesFor = id => Object.keys(artifacts).filter(name => id === 's2' ? name === 'weekly-plan.md' : name !== 'weekly-plan.md').map(name => ({
       name, url: `/generated-files/${id === 's2' ? 'fedcba987654' : '012345abcdef'}_${name}`, origin: 'generated', exists: true, size: 2048 })).concat(id === 's2' ? [

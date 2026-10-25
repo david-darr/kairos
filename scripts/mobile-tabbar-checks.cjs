@@ -172,7 +172,7 @@ module.exports = async function tabBarChecks(c) {
       groups: [...s.querySelectorAll('.ms-tab-group')].map(g => [g.querySelector('.ms-group-label').textContent, [...g.querySelectorAll('.ms-tab-tile')].map(t => t.dataset.tab)]),
       nav: [...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab),
       mode: !!s.querySelector('.ms-mode-row .ms-mode-switch[role=radiogroup]'), modeFirst: top(s.querySelector('.ms-mode-row')) < top(s.querySelector('.ms-tab-group')),
-      profile: s.querySelector('.ms-profile-row') && { initial: s.querySelector('.ms-profile-initial').textContent, name: s.querySelector('.ms-profile-name').textContent, expanded: s.querySelector('.ms-profile-row').getAttribute('aria-expanded') },
+      profile: s.querySelector('.ms-profile-row') && { initial: s.querySelector('.ms-profile-initial').textContent, name: s.querySelector('.ms-profile-name').textContent, popup: s.querySelector('.ms-profile-row').getAttribute('aria-haspopup') },
       account: document.querySelector('.sidebar-user-name')?.textContent, avatar: document.querySelector('.sidebar-avatar')?.textContent,
       settings: !!s.querySelector('.ms-settings-row svg') && s.querySelector('.ms-settings-row').textContent.trim(),
       activity: s.querySelectorAll('.ms-sheet-activity-row').length, focus: s.contains(document.activeElement) }; })()`);
@@ -181,7 +181,7 @@ module.exports = async function tabBarChecks(c) {
   eq(more.groups.flatMap(g => g[1]), rest, 'More holds every other tab, in sidebar order: ' + JSON.stringify(more.groups));
   eq(more.groups.map(g => g[0]), ['Workspace', 'Intelligence'], 'Grouped as the workspace sheet grouped them');
   ok(more.mode && more.modeFirst, 'The Kairos / Forge switch sits at the top of More');
-  ok(more.profile && more.profile.name === more.account && more.profile.initial === more.avatar && more.profile.expanded === 'false', 'Profile shows the account initial and name: ' + JSON.stringify(more.profile));
+  ok(more.profile && more.profile.name === more.account && more.profile.initial === more.avatar && more.profile.popup === 'dialog', 'Profile shows the account initial and name and announces its dialog: ' + JSON.stringify(more.profile));
   eq(more.settings, 'Settings', 'Settings has its own row with its icon');
   ok(more.activity >= 1, 'Work in progress is listed in More');
   eq(await small('.ms-more-sheet[open] button'), [], 'More controls are 44px');

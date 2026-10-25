@@ -58,6 +58,10 @@ kairos-mascot > svg { width: 100%; height: 100%; }
   kairos-mascot .ajar[data-state=sleeping] .aj-breathe { animation: aj-breathe-slow 5s ease-in-out infinite alternate; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text { animation: aj-z 3.6s ease-in infinite; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text + text { animation-delay: 1.8s; }
+  /* The notch's two poses: the lid breathes open over the drop zone; the carried point sways behind. */
+  kairos-mascot .ajar .aj-orbit { transition: transform .3s ease; }
+  kairos-mascot .ajar[data-state=open] .aj-pt { animation: aj-lid 1.4s ease-in-out infinite alternate; }
+  kairos-mascot .ajar[data-state=carry] .aj-pt { animation: aj-trail .9s ease-in-out infinite alternate; }
 }
 /* A tilted pixel grid would break its crisp edges, so the pixel style never tilts. */
 kairos-mascot .ajar[data-finish=pixel] .aj-tilt { animation: none !important; }
@@ -87,6 +91,8 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
 @keyframes aj-needs { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.25); } }
 @keyframes aj-nudge { 0%, 70%, 100% { transform: none; } 76% { transform: translateY(-5px) rotate(-2deg); } 84% { transform: none; } 90% { transform: translateY(-3px); } }
 @keyframes aj-shake { 0%, 80%, 100% { transform: rotate(0); } 84% { transform: rotate(-3deg); } 88% { transform: rotate(3deg); } 92% { transform: rotate(-2deg); } 96% { transform: rotate(0); } }
+@keyframes aj-lid { from { transform: translate(9px, -11px); } to { transform: translate(12px, -15px); } }
+@keyframes aj-trail { from { transform: scale(.8) translateX(0); } to { transform: scale(.8) translateX(-3px); } }
 @keyframes aj-z { 0% { opacity: 0; transform: translate(0, 4px); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, -18px); } }
 
 /* -- Placements ------------------------------------------------------------ */

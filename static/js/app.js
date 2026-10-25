@@ -201,7 +201,7 @@ async function performSwitch(tabId, options = {}) {
   nextView.className = "view active";
   nextView.dataset.view = tabId;
   // Installed views share a host-level design contract regardless of their ID.
-  if (customViewUrls[tabId] && tabId !== 'school') nextView.dataset.customTab = 'true';
+  if (customViewUrls[tabId]) nextView.dataset.customTab = 'true';
   view.replaceWith(nextView);
   view = nextView;
   nextView.innerHTML = `<div class="empty-state" role="status">Loading...</div>`;

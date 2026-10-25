@@ -137,6 +137,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, setup_required: false, username: 'Alex', is_admin: true });
     if (url.pathname === '/api/models/choices') return json(models.map(m => ({ ...m, supports_images: m.kind !== 'local' })));
     if (url.pathname === '/api/projects') return json([]);
+    if (url.pathname === '/api/designs') return json([]);
+    if (url.pathname === '/api/computer') return json([]);
+    if (/^\/api\/computer\/[^/]+\/last$/.test(url.pathname)) return json(null);
     if (url.pathname === '/api/chat/files/library') return json([{ session_id: 's1', title: chats.s1.title, files: chatFileRows }]);
     if (url.pathname === '/api/chat/files') return json(url.searchParams.get('session_id') === 's1' ? chatFileRows : []);
     if (url.pathname === '/api/chat/references') return json([
@@ -258,6 +261,7 @@ app.whenReady().then(async () => {
   const js = async code => {
     let timer;
     try { return await Promise.race([win.webContents.executeJavaScript(code), new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Renderer timeout: ' + code)), 10000); })]); }
+    catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
     finally { clearTimeout(timer); }
   };
   const waitFor = async condition => { for (let i = 0; i < 100; i++) { if (await js(condition)) return; await delay(40); } throw Error('Timed out: ' + condition); };

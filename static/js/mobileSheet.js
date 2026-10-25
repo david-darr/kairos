@@ -47,6 +47,7 @@ export function attachSheetDrag(panel, close, { enabled = () => phone.matches } 
     scrim = panel.matches('dialog') ? panel : panel.parentElement || panel;
     if (settling || !enabled() || !target?.closest || target.closest(OWN_GESTURE)) return;
     const handle = target.closest(HANDLE);
+    if (!handle && target.closest('button, a[href], [role="button"]')) return;
     if (pointer && !handle && !target.closest(HEADER)) return;
     if (!handle && !atTop(target)) return;
     const selection = window.getSelection?.();
@@ -60,6 +61,7 @@ export function attachSheetDrag(panel, close, { enabled = () => phone.matches } 
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
       if (dy <= 0 || Math.abs(dx) > dy) { gesture = null; return; }
       gesture.active = true;
+      if (gesture.pointerId != null) panel.setPointerCapture?.(gesture.pointerId);
       panel.classList.remove('rd-sheet-in'); scrim.classList.remove('rd-scrim-in');
       panel.style.transition = 'none'; scrim.style.transition = 'none'; panel.style.willChange = 'transform';
       scrim.setAttribute('data-sheet-dragging', '');
@@ -116,7 +118,7 @@ export function attachSheetDrag(panel, close, { enabled = () => phone.matches } 
   panel.addEventListener('pointerdown', event => {
     if (event.pointerType === 'touch' || event.button !== 0) return;
     start(event.clientX, event.clientY, event.target, true);
-    if (gesture) panel.setPointerCapture?.(event.pointerId);
+    if (gesture) gesture.pointerId = event.pointerId;
   }, { signal });
   panel.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') move(event.clientX, event.clientY, event); }, { signal });
   panel.addEventListener('pointerup', event => { if (event.pointerType !== 'touch') end(); }, { signal });

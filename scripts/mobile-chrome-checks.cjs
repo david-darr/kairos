@@ -21,13 +21,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
-    await navigate('library');
+    await navigate('library', { section: 'documents' });
     await waitFor("!!document.querySelector('.library-document-card')");
     await js("document.querySelector('.library-document-card').click()");
     await waitFor("!!document.querySelector('.library-editor')");
     await visibleBelow('.library-editor .view-header', top, name + ' document controls clear status area');
     await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'shown'");
-    assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-tabbar').inert && [...document.querySelectorAll('.library-editor button')].some(b => b.textContent.includes('Back to Library') && b.getClientRects().length)"), true, 'The document editor keeps the tab bar and Back to Library');
+    assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-tabbar').inert && [...document.querySelectorAll('.library-editor button')].some(b => b.getAttribute('aria-label') === 'Back to Library' && b.getClientRects().length)"), true, 'The document editor keeps the tab bar and Back to Library');
     await capture(name + '-document-safe-area');
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.getElementById('chat-messages')");

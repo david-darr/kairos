@@ -25,6 +25,8 @@ function formatDue(iso) {
 }
 
 export async function render(container) {
+  // This tab supplies its own workspace styles instead of the generic skin.
+  delete container.dataset.customTab;
   container.innerHTML = "";
   state = { view: "overview", course: null, assignmentId: null };
 

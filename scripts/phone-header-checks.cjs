@@ -72,7 +72,7 @@ async function main() {
       await js(`document.documentElement.style.cssText += ';--ms-page-height:${height}px;--native-safe-top:${safeTop}px;--native-safe-bottom:34px;--ms-ios-nudge:12px'`);
       for (const tab of ['home', 'notes', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
         await navigate(tab);
-        await titleRow(`${width}×${height}: ${tab}`, safeTop + 12 + (['home', 'agents', 'forgeHome'].includes(tab) ? 6 : 18));
+        await titleRow(`${width}×${height}: ${tab}`, safeTop + 12 + (['home', 'agents'].includes(tab) ? 6 : 18));
       }
       for (const section of ['all', 'vault', 'documents', 'google', 'designs']) {
         await navigate('library', { section });

@@ -327,7 +327,7 @@ app.whenReady().then(async () => {
     // emulate it for real DOM focus/keyboard events.
     win.webContents.debugger.attach("1.3");
     await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
-    await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+    await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
     // --mascot-off runs the suite with Settings > Appearance > Show the mascot off (saved, so reloads keep it).
     const mascotOff = () => process.argv.includes('--mascot-off') ? js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })") : null;
     await mascotOff();
@@ -901,12 +901,12 @@ app.whenReady().then(async () => {
       }
       demoState.isAdmin = false;
       await js("localStorage.setItem('kairos:app-mode', 'forge')"); await win.loadURL(base);
-      await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+      await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
       assert.ok(await js("!document.querySelector('#forge-mode-switch, #nav [data-tab=forgeHome], #nav [data-tab=forgeProjects], #nav [data-tab=forgeSessions]')"), label + ' non-admin sees no Forge switch');
       await navigate('forgeHome');
       assert.equal(await js("document.getElementById('view-content').dataset.view"), 'home', label + ' non-admin cannot route to Forge');
       demoState.isAdmin = true; delete demoState.sessionFields;
-      await win.loadURL(base); await waitFor("!!document.querySelector('#forge-mode-switch') && (!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+      await win.loadURL(base); await waitFor("!!document.querySelector('#forge-mode-switch') && (!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
     }
     writes.splice(forgeWrites);
     win.setContentSize(1440, 900); await delay(350);
@@ -933,7 +933,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("[...document.querySelectorAll('#nav .nav-item')].every(b => b.getAttribute('aria-label') && b.querySelector('svg'))"), "Every icon-only tab has an accessible name and an icon");
     await capture("desktop-sidebar-collapsed");
     await win.loadURL(base);
-    await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+    await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
     await delay(350);
     nearWidth(await railWidth(), 52, "Collapsed state survives reload");
     for (const tab of ["chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "cookbook", "school"]) {
@@ -1121,7 +1121,7 @@ app.whenReady().then(async () => {
           demoState.computerTurn = false; demoState.moreComputerActions = false;
         }
         if (tab === "home") {
-          await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+          await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
           assert.ok(await js("document.querySelector('.dashboard-content').classList.contains('is-filled') && getComputedStyle(document.querySelector('.dashboard-section-body')).animationName === 'home-fill'"), label + " Home's first fill animates in");
           await waitFor("document.querySelectorAll('.dashboard-model-usage').length > 0");
           // Only the local model carries a usage label, and it is tokens
@@ -2159,7 +2159,8 @@ app.whenReady().then(async () => {
     // Home's "Your models" shows each subscription's limits as the overlay does
     // (quotaReadings.js), once per account, with signed-out and stale states.
     await navigate("home");
-    await waitFor("document.querySelectorAll('[data-home-section=models] .rd-usage-provider').length === 2");
+    await waitFor("document.querySelectorAll('[data-home-section=models] .rd-usage-provider').length === 3");
+    assert.ok(await js("(() => { const local = document.querySelector('.rd-usage-provider[data-model=m3]'); return local.textContent.includes('842K tokens in all') && !local.querySelector('[role=meter]'); })()"), 'The connected local model shows recorded tokens without a quota meter');
     assert.ok(await js("(() => { const c = document.querySelector('.rd-usage-provider[data-provider=claude]'); return c.querySelectorAll('.rd-usage-window').length === 2 && c.querySelector('[role=meter]').getAttribute('aria-valuenow') === '34' && c.textContent.includes('Resets') && [...c.querySelectorAll('.rd-usage-window')].some(h => h.title.includes('34% Used · 66% left')) && !!c.querySelector('[data-quota-tone=ample]'); })()"), "Claude's limits show on Home (matrix, compact label, full reading on hover)");
     assert.ok(await js("!!document.querySelector('.rd-usage-provider[data-provider=codex] [data-quota-tone=crit]')"), "A limit past 80% shows as critical");
     assert.ok(await js("!!document.querySelector('.rd-usage-provider[data-provider=claude] [data-quota-tone=watch]')"), "A limit between 50% and 80% shows as watch");
@@ -2178,7 +2179,7 @@ app.whenReady().then(async () => {
     await waitFor("document.getElementById('view-content').dataset.view === 'agents'");
     demoState.isAdmin = false;
     await navigate("home");
-    await waitFor("(!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('.dashboard-content .skeleton') && ![...document.querySelectorAll('.dashboard-stat-value')].some(n => n.textContent === '…'))");
+    await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
     await delay(300);
     assert.ok(await js("![...document.querySelectorAll('[data-home-section=agents],[data-home-section=store]')].some(n => !n.hidden) && document.querySelector('.dashboard-stat[data-stat=waiting]').hidden"), "Non-admins don't see Agents, Tool Store or waiting on you");
     demoState.isAdmin = true;

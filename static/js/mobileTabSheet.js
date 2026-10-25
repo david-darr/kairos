@@ -97,7 +97,7 @@ export function openMoreSheet(from) {
   const who = document.createElement('span'); who.className = 'ms-profile-name'; who.textContent = name;
   const profileDetail = document.createElement('small'); profileDetail.className = 'ms-profile-detail'; profileDetail.textContent = 'Profile, switch user, log out';
   const copy = document.createElement('span'); copy.className = 'ms-profile-copy'; copy.append(who, profileDetail);
-  account.append(initial, copy); account.setAttribute('aria-label', `${name}, account`);
+  account.append(initial, copy); account.setAttribute('aria-label', `${name}, account`); account.setAttribute('aria-haspopup', 'dialog');
   const settings = button('', () => { closeMoreSheet(); document.querySelector('.sidebar-settings-btn')?.click(); }, 'ms-account-row ms-settings-row');
   settings.innerHTML = `${ICONS.settings}<span>Settings</span>`; settings.firstElementChild?.setAttribute('aria-hidden', 'true'); settings.setAttribute('aria-label', 'Settings');
   const extras = document.createElement('details'); extras.className = 'ms-more-extras';

@@ -244,8 +244,8 @@ app.whenReady().then(async () => {
     admin = true;
     win.setContentSize(1440,1080);
     await js("import('/static/js/views/tool-store.js').then(m=>m.render(document.getElementById('fixture')))");
-    await wait("!![...document.querySelectorAll('.tool-store-card h4')].find(n=>n.textContent==='Blender')");
-    assert.equal(await js("!![...document.querySelectorAll('.tool-store-card h4')].find(n=>n.textContent==='Higgsfield')"), true);
+    await wait("!![...document.querySelectorAll('.tool-store-card .ts-desktop-name')].find(n=>n.textContent==='Blender')");
+    assert.equal(await js("!![...document.querySelectorAll('.tool-store-card .ts-desktop-name')].find(n=>n.textContent==='Higgsfield')"), true);
     await click('Tools');
     assert.equal(await js("document.querySelectorAll('[data-addon]').length"), 3, 'All optional packages belong to Tools');
     assert.equal(await js("[...document.querySelectorAll('.tool-store-heading')].some(n=>n.textContent==='Optional add-ons')"), false);
