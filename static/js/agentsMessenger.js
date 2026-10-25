@@ -6,6 +6,7 @@ import { stateForStatus } from './mascot.js';
 import { botStatusLine } from './botStatus.js';
 import { openCreateAgent } from './agentCreation.js';
 import { mountAgentEcosystem } from './agentEcosystem.js';
+import { mountPager } from './mobilePager.js';
 import { pill, emptyState } from './kairosParts.js';
 import * as chatStream from './chatStream.js';
 
@@ -30,24 +31,19 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
   const views = ['chats', 'ecosystem'].map(view => el('button', { type: 'button', role: 'tab',
     id: `agents-${view}-tab`, 'aria-controls': view === 'chats' ? 'agents-chats-panel' : ecosystemHost.id,
     'aria-selected': String(view === 'chats'), tabindex: view === 'chats' ? '0' : '-1',
-    text: view === 'chats' ? 'Chats' : 'Ecosystem', onclick: () => showView(view) }));
+    text: view === 'chats' ? 'Chats' : 'Ecosystem' }));
   root.id = 'agents-chats-panel'; root.setAttribute('role', 'tabpanel'); root.setAttribute('aria-labelledby', 'agents-chats-tab');
   const viewTabs = el('div', { class: 'agents-workspace-tabs', role: 'tablist', 'aria-label': 'Agents view' }, views);
-  viewTabs.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - views.indexOf(document.activeElement);
-    views[index]?.click(); views[index]?.focus();
-  });
+  // The tabs, a horizontal swipe and showView share one pager, so the thumb and aria state always agree.
+  let pager = null, syncing = false;
   function showView(view) {
+    if (pager && !syncing) { syncing = true; try { pager.select(view === 'chats' ? 0 : 1); } finally { syncing = false; } return; }
     closeDrawer(false);
     root.hidden = view !== 'chats'; root.inert = root.hidden;
     ecosystemHost.hidden = view !== 'ecosystem'; ecosystemHost.inert = ecosystemHost.hidden;
     phoneOpen.hidden = view !== 'chats';
     back.hidden = view !== 'chats';
     closeOptions(false);
-    views.forEach((button, index) => { const active = index === (view === 'chats' ? 0 : 1);
-      button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; });
     if (view === 'ecosystem') ecosystem.reveal();
     else ecosystem.conceal();
   }
@@ -97,6 +93,7 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
   workspace.append(el('header', { class: 'agents-workspace-bar' }, [el('h2', { text: 'Agents' }), el('div', { class: 'agents-workspace-controls' }, [back, phoneOpen, phoneActions, viewTabs])]), root, ecosystemHost);
   container.replaceChildren(workspace);
   let drawerOpener = null;
+  pager = mountPager(workspace, [root, ecosystemHost], views, 0, index => showView(index ? 'ecosystem' : 'chats'), () => !workspace.classList.contains('has-conversation'));
   function applyRail() {
     root.classList.toggle('is-rail-collapsed', collapsed);
     toggle.setAttribute('aria-expanded', String(media.matches ? root.classList.contains('is-rail-open') : !collapsed));
@@ -341,7 +338,7 @@ export async function mountAgentsMessenger(container, tabId, options, mountAgent
   });
   applyRail();
   document.addEventListener('jarvis:agents-changed', refresh);
-  const cleanup = () => { disposed = true; document.removeEventListener('pointerdown', outsideOptions, true); unsubscribeChats(); generation++; clearTimeout(poll); clearStage(); ecosystem.destroy(); media.removeEventListener('change', resize); document.removeEventListener('jarvis:agents-changed', refresh); };
+  const cleanup = () => { disposed = true; pager.dispose(); document.removeEventListener('pointerdown', outsideOptions, true); unsubscribeChats(); generation++; clearTimeout(poll); clearStage(); ecosystem.destroy(); media.removeEventListener('change', resize); document.removeEventListener('jarvis:agents-changed', refresh); };
   options.registerCleanup?.(cleanup);
   await refresh();
   if (disposed) return cleanup;
