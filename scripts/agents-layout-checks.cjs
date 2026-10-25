@@ -146,7 +146,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by button');
     await js(`${question}.querySelector('.agent-waiting-details').click(); document.querySelector('.agent-item-sheet').dispatchEvent(new KeyboardEvent('keydown', { key:'Escape',bubbles:true,cancelable:true }))`);
     ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by Escape');
-    await js(`${question}.querySelector('.agent-waiting-details').click(); (() => { const n=document.querySelector('.agent-item-portrait'); n.dispatchEvent(new PointerEvent('pointerdown',{pointerId:1,clientY:100,bubbles:true})); n.dispatchEvent(new PointerEvent('pointerup',{pointerId:1,clientY:200,bubbles:true})); })()`);
+    await js(`${question}.querySelector('.agent-waiting-details').click(); (() => { const n=document.querySelector('.agent-item-portrait'); for (const [type, y] of [['pointerdown', 100], ['pointermove', 140], ['pointermove', 500], ['pointerup', 500]]) n.dispatchEvent(new PointerEvent(type,{pointerId:1,clientY:y,bubbles:true,cancelable:true})); })()`);
+    await waitFor("!document.querySelector('.agent-item-sheet')");
     ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by downward swipe');
     let start = writes.length;
     await js(`${question}.querySelector('.btn.primary').click(); (() => { const n=${question}.querySelector('input'); n.value='Use the first option'; n.focus(); n.setSelectionRange(7,7); window.__ui3Draft=n; })()`);

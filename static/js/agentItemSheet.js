@@ -1,5 +1,6 @@
 import { el } from './api.js';
 import { agentAvatar } from './agentAvatar.js';
+import { attachSheetDrag } from './mobileSheet.js';
 
 // 2026-10-14: native modal focus containment also makes the background inert.
 // Details are snapshots; actions return to the original, draft-preserving card.
@@ -19,16 +20,7 @@ export function openAgentItemSheet({ title, description, details, agent, primary
     el('button', { type: 'button', class: 'btn quiet agent-item-secondary', text: secondary, onclick: () => { dismiss(); onSecondary?.(); } }),
   ]);
   close.onclick = dismiss;
-  let start = null;
-  sheet.addEventListener('pointerdown', event => {
-    // Only the handle/portrait starts dismissal, so scrolling details stays usable.
-    if (event.target.closest('.agent-item-grip, .agent-item-portrait')) { start = { id: event.pointerId, y: event.clientY }; if (event.isTrusted) sheet.setPointerCapture(event.pointerId); }
-  });
-  sheet.addEventListener('pointerup', event => {
-    if (start?.id === event.pointerId && event.clientY - start.y > 70) dismiss();
-    start = null;
-  });
-  sheet.addEventListener('pointercancel', () => { start = null; });
+  attachSheetDrag(sheet, dismiss);
   sheet.addEventListener('click', event => {
     const bounds = sheet.getBoundingClientRect();
     if (event.target === sheet && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dismiss();

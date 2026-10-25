@@ -1,4 +1,5 @@
 import { openNotifications } from './mobileActions.js';
+import { attachSheetDrag } from './mobileSheet.js';
 import { button, mobileOn, haptic, reduced } from './mobileShared.js';
 import { activityItems } from './mobileActivity.js';
 import { sidebarLayout } from './layout.js';
@@ -9,7 +10,7 @@ import { ICON as KAIROS_MARK } from './brand.js';
 // It holds every tab the bar does not, grouped as Settings > Layout groups
 // them, the Kairos / Forge mode switch, Forge projects, work in progress, and
 // the account and Settings. It replaced the avatar's workspace sheet.
-let sheet, opener, startY;
+let sheet, opener;
 // The tabs the bar itself shows; More lists the rest.
 const ON_BAR = new Set(['home', 'chat', 'agents', 'calendar']);
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
@@ -27,12 +28,7 @@ export function openMoreSheet(from) {
     sheet.setAttribute('aria-label', 'More');
     sheet.addEventListener('click', e => { if (e.target === sheet) closeMoreSheet(); });
     sheet.addEventListener('cancel', e => { e.preventDefault(); closeMoreSheet(); });
-    sheet.addEventListener('touchstart', e => {
-      startY = sheet.scrollTop <= 0 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
-    }, { passive: true });
-    sheet.addEventListener('touchend', e => {
-      if (startY && e.changedTouches[0].clientY - startY.y > 56 && Math.abs(e.changedTouches[0].clientX - startY.x) < 40) closeMoreSheet(); startY = null;
-    });
+    attachSheetDrag(sheet, closeMoreSheet, { enabled: mobileOn });
     sheet.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); closeMoreSheet(); return; }
       if (e.key !== 'Tab') return;
@@ -140,7 +136,7 @@ export function openMoreSheet(from) {
   const closeButton = button('', closeMoreSheet, 'ms-sheet-close'); closeButton.innerHTML = ICONS.close; closeButton.setAttribute('aria-label', 'Close');
   header.append(heading, closeButton);
   panel.append(grab, header, modeRow, groups, extras, footer); sheet.replaceChildren(panel);
-  sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); setExpanded(true);
+  sheet.classList.add('rd-sheet-in'); sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); setExpanded(true);
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });
 }

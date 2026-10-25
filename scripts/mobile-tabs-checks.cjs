@@ -848,6 +848,43 @@ async function run(ctx) {
   eq(await js("document.querySelector('meta[name=theme-color]')?.content"), '#F3EADB', 'Browser keeps theme-color');
   await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.removeProperty('--ms-ios-nudge'); s.setProperty('--native-safe-bottom', '0px'); })()");
 
+  // ---- S. Swipe down dismisses every phone sheet (2026-10-25, David) --------------------
+  await resize(390, 844); await navigate('home'); await barShown();
+  const touchDrag = async (x, y, dy, pause) => {
+    await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let i = 1; i <= 8; i++) { await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + dy * i / 8 }] }); await delay(pause); }
+    return () => cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const sheetState = () => js("(() => { const d = document.querySelector('dialog[open]'); if (!d) return null; const r = d.getBoundingClientRect(); return { top: r.top, transform: d.style.transform, drag: d.style.getPropertyValue('--sheet-drag') }; })()");
+  await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
+  const resting = await sheetState();
+  const grabAt = await rect('.ms-more-sheet .ms-sheet-heading');
+  // A short, slow pull follows the finger, then springs back and the sheet stays open.
+  const release = await touchDrag(grabAt.l + 20, grabAt.t + 4, 70, 40);
+  const pulled = await sheetState();
+  ok(Math.abs(pulled.top - resting.top - 70 * 7 / 8) < 12 || pulled.top - resting.top > 40, 'The sheet follows the finger: ' + JSON.stringify({ resting, pulled }));
+  ok(Number(pulled.drag) > 0 && Number(pulled.drag) < 0.3, 'The scrim fades with the drag: ' + pulled.drag);
+  await shot('sheet-swipe-mid-drag');
+  await release(); await delay(450);
+  const back = await sheetState();
+  ok(back && Math.abs(back.top - resting.top) < 1 && back.transform === '' && back.drag === '', 'A short pull springs back to rest: ' + JSON.stringify(back));
+  // Content scrolled away from the top does not start a dismissal.
+  await js("(() => { const d = document.querySelector('dialog.ms-more-sheet'); d.style.maxHeight = '320px'; d.scrollTop = 40; })()");
+  const scrolledAt = await rect('.ms-more-sheet .ms-tab-tile');
+  if (scrolledAt) {
+    const hold = await touchDrag(scrolledAt.l + 10, scrolledAt.t + 10, 200, 20); await hold(); await delay(450);
+    ok(await js("!!document.querySelector('dialog.ms-more-sheet[open]')"), 'Dragging scrolled content leaves the sheet open');
+  }
+  await js("(() => { const d = document.querySelector('dialog.ms-more-sheet'); d.style.maxHeight = ''; d.scrollTop = 0; })()"); await delay(100);
+  // A long pull past a quarter of the height closes it through the normal close path: focus returns to More.
+  const far = await rect('.ms-more-sheet .ms-sheet-heading');
+  const finish = await touchDrag(far.l + 20, far.t + 4, 360, 20); await finish();
+  await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')");
+  ok(await js(`document.activeElement === ${MORE}`), 'A swipe-closed sheet returns focus to its opener');
+  ok(await js("document.querySelector('dialog.ms-more-sheet').style.transform === ''"), 'The closed sheet is clean for the next open');
+  await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
+  await js("document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click()");
+  await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')"); eq(1, 1, 'The grabber click still closes after a swipe');
   await resize(390, 844);
 
   return { assertions };
