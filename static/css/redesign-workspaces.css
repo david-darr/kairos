@@ -1078,8 +1078,9 @@
   .kairos-redesign [data-view="calendar"] .cal-default-calendar { order: 1; margin: 0; text-align: center; color: var(--rd-ink-dim); font-size: 13px; }
   .kairos-redesign [data-view="calendar"].cal-calendars-dialog .cal-calendars-card > .btn { min-height: 44px; margin-top: 12px; }
 
-  /* Natural-height columns: desktop flex bases must not become phone spacers. */
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left { flex: none; }
+  /* Day hides its timeline; keep its header at natural height without
+     changing the flex sizing used by the visible Week and Month grids. */
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) .cal-left { flex: none; }
   .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="day"]) { gap: 0; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog { padding-inline: 20px; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog > .form-grid { align-items: stretch; flex-wrap: nowrap; width: 100%; min-width: 0; }
