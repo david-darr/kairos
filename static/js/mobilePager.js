@@ -2,7 +2,7 @@ import { mobileOn, reduced, haptic } from './mobileShared.js';
 
 // One continuous progress value drives both the pages and the glass thumb.
 // The system back edge remains free; the rest of the surface belongs to the pager.
-export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) {
+export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}, enabled = () => true) {
   let index = initial, gesture = null, suppress = false;
   const paint = progress => host.style.setProperty('--ms-page', progress);
   const select = next => {
@@ -25,12 +25,20 @@ export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) 
       }
     });
   });
+  // A swipe belongs to content that can still scroll sideways in that direction.
+  const scrolls = (node, dx) => {
+    for (; node && node !== host; node = node.parentElement) {
+      if (node.scrollWidth > node.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(node).overflowX) &&
+          (dx > 0 ? node.scrollLeft > 0 : node.scrollLeft + node.clientWidth < node.scrollWidth - 1)) return true;
+    }
+    return false;
+  };
   const start = e => {
     gesture = null;
-    if (!mobileOn() || e.touches.length !== 1 || document.querySelector('dialog[open], [aria-modal="true"]') ||
+    if (!mobileOn() || !enabled() || e.touches.length !== 1 || document.querySelector('dialog[open], [aria-modal="true"]') ||
         e.target.closest('input, textarea, select, a, [contenteditable], pre, canvas') ||
-        (e.target.closest('button') && !e.target.closest('.ms-history-main')) || !window.getSelection()?.isCollapsed) return;
-    const t = e.touches[0]; if (t.clientX < 16) return; gesture = { x: t.clientX, y: t.clientY, dx: 0, locked: false, at: performance.now() };
+        (e.target.closest('button') && !e.target.closest('.ms-history-main') && !e.target.closest('.agents-rail-item')) || !window.getSelection()?.isCollapsed) return;
+    const t = e.touches[0]; if (t.clientX < 16) return; gesture = { x: t.clientX, y: t.clientY, dx: 0, locked: false, at: performance.now(), target: e.target };
   };
   const move = e => {
     if (!gesture || e.touches.length !== 1) return;
@@ -38,7 +46,7 @@ export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}) 
     if (!gesture.locked) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) < 5) return;
       if (index === 1 && dx < 0) { gesture = null; return; }
-      if (Math.abs(dy) > Math.abs(dx)) { gesture = null; return; }
+      if (Math.abs(dy) > Math.abs(dx) || scrolls(gesture.target, dx)) { gesture = null; return; }
       gesture.locked = true; host.classList.add('ms-dragging');
     }
     if (e.cancelable) e.preventDefault();

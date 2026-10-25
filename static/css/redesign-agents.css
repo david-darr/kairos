@@ -449,7 +449,7 @@
 }
 
 @media (max-width: 768px) {
-  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face kairos-mascot { width: 76px !important; height: 76px !important; }
+  .kairos-redesign[data-view=agents] .agent-dm-card .agent-profile-face kairos-mascot { width: 52px !important; height: 52px !important; }
   .kairos-redesign[data-view=agents] :is(.agents-inbox-card-title, .agents-clear-title) { font-style: normal; }
   .kairos-redesign[data-view=agents] .is-messages .agent-conversation-stream { overflow-y: auto; overscroll-behavior: contain; }
   .kairos-redesign[data-view=agents] .agent-conversation-page .agent-chat-main, .kairos-redesign[data-view=agents] .agent-conversation-page .session-chat { overflow: hidden; }
