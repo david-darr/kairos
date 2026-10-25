@@ -827,37 +827,8 @@
   }
 }
 
-/* Desktop Calendar stays outside the phone-only workspace block below. */
+/* Desktop Calendar (v2 boards): one-row header, round period arrows, plain period label, range selector above the grid. */
 @media (min-width: 769px) {
-.kairos-redesign #view-content[data-view="calendar"] .cal-left { display: flex; flex-direction: column; gap: 0; }
-.kairos-redesign #view-content[data-view="calendar"] .view-header .sub { display: none; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-month-label { border: 0; background: transparent; color: var(--rd-ink); font: 500 17px var(--rd-font-ui); padding: 0; text-shadow: none; cursor: pointer; white-space: nowrap; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-month-label:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 3px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-nav { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-nav > * { order: 0; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-nav > .btn { flex: none; width: 34px; height: 34px; min-height: 34px; padding: 0; margin: 0; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 24px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-nav .cal-range-switch { margin-left: auto; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(var(--calendar-weeks, 5), minmax(92px, 1fr)); border-radius: 26px; }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-header, .cal-week-timeline) { min-width: 0; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); }
-.kairos-redesign #view-content[data-view="calendar"] .cal-week-grid { width: 100%; overflow-x: hidden; border-radius: 26px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-week-heading { min-width: 0; }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-event, .cal-event-pill):not(.overflow) { border: 0; background: var(--rdc-kairos-fill); }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-event, .cal-event-pill).cal-google-event { border: 0; background: color-mix(in srgb, var(--calendar-color) 38%, var(--rd-surface-solid)); }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-event, .cal-event-pill).cal-src-note { background: color-mix(in srgb, var(--point) 26%, var(--rd-surface-solid)); }
-.kairos-redesign #view-content[data-view="calendar"] .cal-event-time { display: block; font-size: 10px; opacity: .8; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 14px 0; font-size: 12px; color: var(--rd-ink-dim); }
-.kairos-redesign #view-content[data-view="calendar"] .cal-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-legend-item::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--calendar-color, var(--rdc-kairos-fill)); }
-.kairos-redesign #view-content[data-view="calendar"] .cal-day-panel { background: transparent; border: 0; box-shadow: none; padding: 62px 0 0; flex: 0 0 300px; }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-selected-agenda, .cal-calendars-card, .cal-upcoming) { padding: 20px 22px; border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); margin-bottom: 14px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-day-panel-title { font: 500 11px var(--rd-font-ui); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-day-count, .cal-calendars-card h3) { font: italic 600 26px var(--rd-font-title); margin: 0 0 12px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-selected-agenda .card { padding: 10px 12px; border: 0; border-radius: 14px; background: var(--rd-ground); margin-bottom: 8px; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-calendar-choice { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-connect { padding: 0; text-decoration: underline; }
-.kairos-redesign #view-content[data-view="calendar"] :is(.cal-agenda-source, .cal-agenda-clock) { display: none; }
-.kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group { border: 1px solid var(--rd-line); border-radius: 22px; overflow: hidden; min-width: 0; }
-
   .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > div { padding: 0; min-height: 0; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header h2 { font-size: 44px; margin: 0; }
