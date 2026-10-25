@@ -10,6 +10,8 @@ import { emptyState } from './kairosParts.js';
 import * as chatStream from './chatStream.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { openNotifications } from './mobileActions.js';
+import { createMascot } from './mascot.js';
+import { wireKipSwitch } from './kipPicker.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
@@ -77,6 +79,12 @@ export function mountMobileHome({ container, content, banner, options }) {
   const history = el('section', { class: 'ms-page ms-history', id: 'ms-page-1', role: 'tabpanel', 'aria-labelledby': chatsTab.id });
   const intro = emptyState({ mascotState: 'sleeping', mascotSize: 120, title: 'What should we work on?', text: 'Kip is resting until you need it.' });
   intro.classList.add('ms-intro');
+  // Tapping Kip opens the Kip style sheet; hidden, the same spot reads Show Kip (kipPicker.js).
+  const kipSlot = intro.querySelector('.rd-empty-mascot') || intro.insertBefore(el('div', { class: 'rd-empty-mascot' }), intro.firstChild);
+  if (!kipSlot.querySelector('kairos-mascot')) kipSlot.append(createMascot({ state: 'sleeping', size: 120, decorative: true }));
+  const kipButton = el('button', { type: 'button', class: 'rd-kip-switch' }, [...kipSlot.childNodes]);
+  kipSlot.removeAttribute('aria-hidden'); kipSlot.append(kipButton);
+  const kipSwitch = wireKipSwitch(kipButton, { name: () => 'Kip' });
   let introBusy;
   const syncIntro = () => {
     const busy = chatStream.listInFlight().some(entry => entry.status === 'processing');
@@ -206,7 +214,7 @@ export function mountMobileHome({ container, content, banner, options }) {
     if (key === 'sessions') activityMetadata(value, null);
   }, dispose() {
     disposeActions();
-    disposed = true; detachIntro(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
+    disposed = true; detachIntro(); kipSwitch.dispose(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
     dockSize.disconnect(); dockState.disconnect();
     window.removeEventListener('resize', settleDock);

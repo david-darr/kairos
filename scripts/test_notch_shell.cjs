@@ -30,7 +30,8 @@ function advance(ms) {
   }
   now = end;
 }
-const context = { document: { body, documentElement: root, createElement: element, getElementById: id => elements.get(id) },
+const context = { document: { body, documentElement: root, createElement: element, getElementById: id => elements.get(id), dispatchEvent() {} }, CustomEvent: class {},
+  kipStyleOf: raw => raw?.mascot === false ? 'hidden' : 'halftone',
   window: { addEventListener(name, fn) { if (name === 'storage') storageListener = fn; } },
   localStorage: { getItem: () => JSON.stringify(stored) }, matchMedia: () => ({ matches: reduced }),
   getComputedStyle: () => ({ getPropertyValue: () => 'parchment' }),

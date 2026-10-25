@@ -29,7 +29,7 @@ const check = async (name, fn) => { await fn(); passed.push(name); };
     assert.ok(M.ajarMarkup({ ...bot, state: 'nonsense' }, { state: 'nonsense' }).includes('data-state="idle"'), 'an unknown state falls back to idle');
   });
   await check('no SVG filters and no raw colours in the mascot sources or markup', () => {
-    for (const file of ['static/js/mascot.js', 'static/js/kip.js', 'static/css/mascot.css', 'static/js/agentAvatar.js']) {
+    for (const file of ['static/js/mascot.js', 'static/js/kip.js', 'static/js/kipStyle.js', 'static/js/kipPicker.js', 'static/css/mascot.css', 'static/js/agentAvatar.js']) {
       const text = fs.readFileSync(path.join(root, file), 'utf8');
       assert.ok(!/<filter|feTurbulence|feGaussianBlur/.test(text), file + ' uses no SVG filters');
       const lines = text.split('\n').filter(line => COLOR.test(line) && !/^\s*(\/\/|\/\*|\*)/.test(line));
@@ -106,6 +106,79 @@ print(json.dumps(out))`;
     }
     const lines = K.kipHalfBlocks(K.kipFrame('idle', 0, bot, pal), { color: false });
     assert.ok(lines.length <= 12 && lines.every(line => /^[ ▀▄█]*$/.test(line)));
+  });
+  // -- the pixel style --------------------------------------------------------------------
+  // The body path is runs of square cells ('M x y h w v s h-w z'); a point is inside when a run covers it.
+  const cellsOf = svg => [...svg.matchAll(/<path (?:class="aj-px-hi" )?d="([^"]*)"/g)].map(match => [...match[1].matchAll(/M([\d.]+) ([\d.]+)h([\d.]+)v([\d.]+)h-[\d.]+z/g)].map(run => run.slice(1).map(Number)));
+  const covers = (runs, x, y) => runs.some(([rx, ry, w, h]) => x >= rx && x < rx + w && y >= ry && y < ry + h);
+  await check('the pixel finish draws a crisp grid body for every shape, grid and state', () => {
+    assert.ok(M.AJAR_FINISHES.includes('pixel'));
+    for (const shape of M.AJAR_SHAPES) for (const grid of [14, 20]) {
+      const size = 140 / grid;
+      const svg = M.ajarMarkup({ ...bot, shape, finish: 'pixel' }, { state: 'idle', grid });
+      assert.ok(svg.includes('data-finish="pixel"'), 'the finish is on the svg');
+      assert.ok(!svg.includes('clip-path') && !svg.includes('<image'), 'no clipped shape, no raster');
+      const [body, light] = cellsOf(svg);
+      assert.ok(body.length > 8, shape + ' ' + grid + ' draws rows of cells');
+      for (const [x, y, w, h] of [...body, ...light]) {
+        assert.ok(Math.abs(x / size - Math.round(x / size)) < 1e-9 && Math.abs(y / size - Math.round(y / size)) < 1e-9 && Math.abs(w / size - Math.round(w / size)) < 1e-9 && Math.abs(h - size) < 1e-9, 'every run sits on the grid');
+        assert.ok(x >= 0 && y >= 0 && x + w <= 140 && y + h <= 140, 'inside the face');
+      }
+      assert.ok(covers(body, 70, 76), shape + ' ' + grid + ': the body covers the centre');
+      assert.ok(!covers(body, 100, 36), shape + ' ' + grid + ': the bite is cut out for the point');
+      assert.ok(light.length > 0 && light.every(([x, y]) => covers(body, x + size / 2, y + size / 2)), 'the light cells stay on the body');
+      assert.ok(covers(body, 55, 75) && covers(body, 79, 75), shape + ' ' + grid + ': the body sits behind both eyes');
+    }
+    const states = M.MASCOT_STATES.map(state => M.ajarMarkup({ ...bot, finish: 'pixel' }, { state }));
+    assert.equal(new Set(states).size, 8, 'every state is its own pixel Kip');
+    for (const svg of states) {
+      assert.ok(svg.includes('class="aj-eye"') && svg.includes('aj-pt') && svg.includes('aj-point') && svg.includes('aj-mouth'), 'eyes, point and mouth are still there');
+      assert.ok(!COLOR.test(svg) && !svg.includes('<filter'), 'the pixel markup names no colour and uses no filter');
+    }
+    assert.ok(M.ajarMarkup(M.KAIROS_SPEC, { finish: 'pixel' }).includes('data-finish="flat"'), 'a flat spec is unchanged');
+    assert.equal(M.pixelGrid(16), 14); assert.equal(M.pixelGrid(40), 14); assert.equal(M.pixelGrid(96), 20); assert.equal(M.pixelGrid(0), 20);
+    assert.equal(M.pixelBody('round', 20), M.pixelBody('round', 20), 'a body is built once per shape and grid');
+    const kairos = M.ajarMarkup({ ...M.KAIROS_SPEC, finish: 'pixel' }, { state: 'needs' });
+    assert.ok(kairos.includes('data-finish="pixel"') && kairos.includes('data-state="needs"'), 'Kairos itself draws in the pixel style');
+  });
+  await check('the pixel pose sheet keeps the eyes and point readable and stays crisp', () => {
+    for (const rule of ['.ajar[data-finish=pixel]{shape-rendering:crispEdges}', '.ajar[data-finish=pixel] :is(.aj-eye,.aj-mouth){rx:0}'])
+      assert.ok(M.POSE_CSS.includes(rule), rule);
+    assert.ok(!/anim/.test(M.POSE_CSS), 'still poses carry no animation');
+    const css = fs.readFileSync(path.join(root, 'static/css/mascot.css'), 'utf8');
+    assert.ok(/kairos-mascot\[still\] \* \{ animation: none !important/.test(css), 'a still pixel Kip does not move');
+    assert.ok(/@media \(prefers-reduced-motion: reduce\) \{\s*kairos-mascot, kairos-mascot \* \{ animation: none !important/.test(css), 'reduced motion stops it');
+    assert.ok(/kip-swap/.test(css.slice(0, css.indexOf('@media (prefers-reduced-motion: reduce)'))), 'the style crossfade is inside the motion gate');
+  });
+  // -- the Kip style setting ---------------------------------------------------------------
+  const S = await import(pathToFileURL(path.join(root, 'static/js/kipStyle.js')).href);
+  await check('the Kip style setting has four values and migrates the old on/off', () => {
+    assert.deepEqual(S.KIP_STYLES, ['flat', 'halftone', 'pixel', 'hidden']);
+    assert.deepEqual(M.AJAR_FINISHES, ['flat', 'halftone', 'pixel'], 'every visible style is a finish');
+    for (const style of S.KIP_STYLES) assert.equal(S.kipStyleOf({ kip: style }), style);
+    assert.equal(S.kipStyleOf({ mascot: false }), 'hidden', 'the old off is hidden');
+    assert.equal(S.kipStyleOf({ mascot: true }), S.DEFAULT_KIP_STYLE, 'the old on keeps the current look (halftone on Home)');
+    assert.equal(S.kipStyleOf({}), S.DEFAULT_KIP_STYLE); assert.equal(S.kipStyleOf(null), S.DEFAULT_KIP_STYLE);
+    assert.equal(S.kipStyleOf({ kip: 'neon', mascot: false }), 'hidden', 'an unknown style falls back to the old switch');
+    assert.equal(S.kipStyleOf({ kip: 'pixel', mascot: false }), 'pixel', 'the new setting wins over the old one');
+    for (const style of S.KIP_STYLES) assert.ok(S.KIP_STYLE_NAMES[style], style + ' has a name');
+  });
+  await check('appearance keeps the style with the other choices and derives the on/off from it', () => {
+    const text = fs.readFileSync(path.join(root, 'static/js/appearance.js'), 'utf8');
+    assert.ok(text.includes('value.kip = kipStyleOf(raw);') && text.includes("value.mascot = value.kip !== 'hidden';"), 'normalize derives mascot from the style');
+    assert.ok(text.includes('root.dataset.kip = settings.kip;') && text.includes("root.dataset.mascot = settings.mascot ? 'on' : 'off';"), 'the root carries both');
+    assert.ok(text.includes("typeof patch.mascot === 'boolean' && !('kip' in patch)"), 'the old updateAppearance({ mascot }) still works');
+    const notch = fs.readFileSync(path.join(root, 'static/js/notchShell.js'), 'utf8');
+    assert.ok(notch.includes('kipStyleOf(settings)') && !/finish: 'flat'/.test(notch), 'the notch follows the style');
+  });
+  await check('the Home switcher and the Appearance control share one picker', () => {
+    const picker = fs.readFileSync(path.join(root, 'static/js/kipPicker.js'), 'utf8');
+    assert.ok(picker.includes("role: 'radiogroup'") && picker.includes("role: 'radio'") && picker.includes('ArrowRight'), 'a keyboard-operable radio group');
+    assert.ok(picker.includes('openMobileSheet') && picker.includes("class: 'kip-menu'"), 'a sheet on phones, a popover on desktop');
+    assert.ok(picker.includes("'Show Kip'"), 'hidden reads Show Kip');
+    assert.match(fs.readFileSync(path.join(root, 'static/js/views/home.js'), 'utf8'), /wireKipSwitch\(heroMascotButton/, 'the hero Kip is the switch');
+    assert.match(fs.readFileSync(path.join(root, 'static/js/views/appearancePanel.js'), 'utf8'), /kipChoices\(\)/, 'Appearance uses the same choices');
+    assert.match(fs.readFileSync(path.join(root, 'static/js/redesignHome.js'), 'utf8'), /hm-phone-kip/, 'phone Home has its switch');
   });
   await check('the CLI assets are current', () => {
     const result = spawnSync(process.execPath, [path.join(__dirname, 'build_kip_assets.cjs'), '--check'], { cwd: root, encoding: 'utf8' });

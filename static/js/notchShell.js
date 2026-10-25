@@ -1,6 +1,7 @@
 import { collectActivity } from './activityModel.js';
 import * as chatStream from './chatStream.js';
 import { createMascot, KAIROS_SPEC } from './mascot.js';
+import { kipStyleOf } from './kipStyle.js';
 
 // Phase 1 owns only the shell and status. It never answers or sends work.
 // Drawn to the Kairos Mobile v2 boards: NotchCollapsed (resting, working,
@@ -33,7 +34,7 @@ function percent(used) { return Math.round(Math.min(Math.max(used || 0, 0), 1) *
 
 export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   const shell = build('section'); shell.id = 'notch-shell'; shell.setAttribute('aria-label', 'Kairos notch');
-  const kip = (size, id) => { const face = createMascot({ state: 'idle', size, spec: KAIROS_SPEC, finish: 'flat' }); face.id = id; return face; };
+  const kip = (size, id) => { const face = createMascot({ state: 'idle', size, spec: KAIROS_SPEC }); face.id = id; return face; };
 
   // Collapsed: Kip, then either the usage rings and agent dots (resting) or the
   // current line and its signal (working, needs you).
@@ -192,9 +193,11 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   function applyAppearance() {
     let settings = {};
     try { settings = JSON.parse(localStorage.getItem(appearanceKey) || '{}'); } catch { /* Defaults. */ }
-    const mascot = settings.mascot !== false;
+    const style = kipStyleOf(settings), mascot = style !== 'hidden';
     shell.classList.toggle('hide-kip', !mascot);
     document.documentElement.dataset.mascot = mascot ? 'on' : 'off';
+    document.documentElement.dataset.kip = style;
+    document.dispatchEvent(new CustomEvent('kairos:appearance'));
     document.body.classList.toggle('notch-reduced', settings.motion === false);
     for (const node of [face, bigKip]) node.toggleAttribute('still', settings.motion === false);
     const color = HEX.test(settings.color || '') ? settings.color : getComputedStyle(document.documentElement).getPropertyValue('--k-parchment').trim();

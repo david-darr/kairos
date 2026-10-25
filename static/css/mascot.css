@@ -37,6 +37,7 @@ kairos-mascot > svg { width: 100%; height: 100%; }
   kairos-mascot .ajar .aj-tilt { transition: transform .35s ease; }
   kairos-mascot .ajar .aj-eyes { transition: transform .3s ease; }
   kairos-mascot .ajar:is([data-state=listening], [data-state=speaking]) :is(.aj-pt, .aj-eye, .aj-mouth, .aj-voice) { transition: transform .12s ease-out, opacity .12s; }
+  kairos-mascot.kip-swap > svg { animation: kip-swap .28s ease-out; }
   kairos-mascot .ajar .aj-breathe { animation: aj-breathe 3.8s ease-in-out infinite alternate; }
   kairos-mascot .ajar[data-state=idle] .aj-eye { animation: aj-blink 4.6s infinite; }
   kairos-mascot .ajar[data-state=idle] .aj-eyes { animation: aj-glance 9s infinite; }
@@ -58,6 +59,8 @@ kairos-mascot > svg { width: 100%; height: 100%; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text { animation: aj-z 3.6s ease-in infinite; }
   kairos-mascot .ajar[data-state=sleeping] .aj-z text + text { animation-delay: 1.8s; }
 }
+/* A tilted pixel grid would break its crisp edges, so the pixel style never tilts. */
+kairos-mascot .ajar[data-finish=pixel] .aj-tilt { animation: none !important; }
 /* Reduced motion: nothing moves, including transitions an app-wide rule
    might put on the shapes (found 2026-10-22: a scrollbar-color transition). */
 @media (prefers-reduced-motion: reduce) {
@@ -67,6 +70,7 @@ kairos-mascot > svg { width: 100%; height: 100%; }
 kairos-mascot[data-offscreen] *, :root[data-page-hidden] kairos-mascot * { animation-play-state: paused !important; }
 kairos-mascot[still] * { animation: none !important; transition: none !important; }
 
+@keyframes kip-swap { from { opacity: 0; } to { opacity: 1; } }
 @keyframes aj-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.08); } }
 @keyframes aj-glance { 0%, 55%, 100% { transform: translate(0, 0); } 60%, 75% { transform: translate(4px, -1px); } 80%, 90% { transform: translate(-2px, 0); } }
 @keyframes aj-breathe { from { transform: scale(1, 1); } to { transform: scale(1.015, .985); } }
@@ -86,10 +90,10 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
 @keyframes aj-z { 0% { opacity: 0; transform: translate(0, 4px); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, -18px); } }
 
 /* -- Placements ------------------------------------------------------------ */
-/* With the switch off (Settings > Appearance > Show Kip) every
-   placement shows what it showed before: the marker, the icon, the orb. */
+/* With Kip hidden (Appearance > Kip, Home's Kip menu) every placement shows
+   what it showed before: the marker, the icon, the orb. A bot keeps its face. */
 :root[data-mascot="off"] :is(.chat-activity-marker, .empty-state-mascot, .dashboard-mascot, .agent-call-orb) kairos-mascot,
-:root[data-mascot="off"] .empty-state-mascot, :root[data-mascot="off"] .dashboard-mascot { display: none; }
+:root[data-mascot="off"] .empty-state-mascot, :root[data-mascot="off"] kairos-mascot[data-own]:not([data-preview]) { display: none; }
 
 /* Chat activity: the mascot stands in for the spinner and the glyph. */
 .chat-activity-marker kairos-mascot { display: none; }
@@ -114,6 +118,37 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
 @media (max-width: 768px) {
   .kairos-redesign .dashboard-mascot { width: 68px; height: 68px; margin: 0 0 6px -6px; }
 }
+
+/* The Kip switch (kipPicker.js): the button that holds Kip on Home. Hidden, it
+   reads Show Kip in the same spot, so the card keeps its layout. */
+.kip-switch { cursor: pointer; }
+.kip-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.rd-kip-switch { display: flex; justify-content: center; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; }
+.kip-show-chip { display: none; }
+:root[data-mascot="off"] .kip-show-chip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; box-sizing: border-box; border: 1px dashed var(--border-strong);
+  border-radius: 999px; background: var(--bg-panel-solid); color: var(--text-dim); font-family: inherit; font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; }
+:root[data-mascot="off"] .rd-empty-mascot:has(.kip-switch) { display: flex; }
+:root[data-mascot="off"][data-view=mobileLaunch] .ms-intro .rd-empty-mascot:has(.kip-switch) { height: auto; margin-bottom: 8px; }
+
+/* The Kip style choices: the same four previews in Appearance, the Home popover and the phone sheet. */
+.kip-choices { display: grid; grid-template-columns: repeat(4, 80px); gap: 8px; }
+.kip-choice { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 44px; padding: 8px 4px; box-sizing: border-box; border: 1px solid var(--border);
+  border-radius: 14px; background: transparent; color: var(--text); font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.1; cursor: pointer; }
+.kip-choice[aria-checked="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.kip-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kip-choice-art { display: grid; place-items: center; width: 56px; height: 56px; --m-stage: var(--bg-panel-solid); }
+.kip-choice-hidden { position: relative; width: 44px; height: 44px; box-sizing: border-box; border: 2px dashed var(--border-strong); border-radius: 50%; }
+.kip-choice-hidden::after { content: ''; position: absolute; left: 50%; top: 14%; width: 2px; height: 72%; border-radius: 1px; background: var(--text-faint); transform: rotate(45deg); }
+.kip-menu { position: fixed; z-index: 60; padding: 14px; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--bg-panel-solid); color: var(--text);
+  box-shadow: 0 12px 32px rgba(var(--shade-rgb), .22); max-width: calc(100vw - 16px); box-sizing: border-box; }
+.kip-menu-title { margin: 0 0 10px; font-family: inherit; font-size: 11px; font-weight: 500; line-height: 1; letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); }
+.kip-menu-needs { width: 100%; min-height: 36px; margin-top: 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--accent); font-family: inherit; font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; }
+.kip-menu-needs:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kip-menu-sheet .kip-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kip-menu-sheet .kip-choice { min-height: 44px; padding: 14px 8px; font-size: 14px; }
+.kip-menu-sheet .kip-menu-needs { min-height: 44px; }
+.appearance-mascot-setting .kip-choices { grid-template-columns: repeat(4, minmax(0, 96px)); }
+@media (max-width: 480px) { .appearance-mascot-setting .kip-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* The call: the bot's Kip replaces the orb and its voice halo. */
 .agent-call-orb kairos-mascot { display: none; }

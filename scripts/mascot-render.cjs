@@ -26,12 +26,13 @@ await initAppearance('mascot-review');
 updateAppearance(q.get('color') ? { mode: 'color', color: q.get('color'), halftone: false } : { mode: 'default', halftone: false });
 document.getElementById('title').textContent = 'Kip · ' + (q.get('name') || 'light');
 const grid = document.getElementById('grid');
-const head = document.createElement('tr'); head.innerHTML = '<th>State</th><th>16</th><th>28</th><th>72</th><th>176</th><th>Static 72</th><th>Halftone style 96</th>'; grid.append(head);
+const head = document.createElement('tr'); head.innerHTML = '<th>State</th><th>16</th><th>28</th><th>72</th><th>176</th><th>Static 72</th><th>Halftone style 96</th><th>Pixel 16</th><th>Pixel 28</th><th>Pixel 96</th><th>Pixel 176</th>'; grid.append(head);
 for (const state of M.MASCOT_STATES) {
   const tr = document.createElement('tr'); const th = document.createElement('th'); th.textContent = M.STATE_WORDS[state]; tr.append(th);
-  for (const size of [16, 28, 72, 176]) { const td = document.createElement('td'); td.append(M.createMascot({ state, size, decorative: false })); tr.append(td); }
+  for (const size of [16, 28, 72, 176]) { const td = document.createElement('td'); td.append(M.createMascot({ state, size, decorative: false, finish: 'flat' })); tr.append(td); }
   const td = document.createElement('td'); const img = document.createElement('img'); img.width = img.height = 72; img.alt = ''; img.src = M.mascotUrl(M.KAIROS_SPEC, state); td.append(img); tr.append(td);
   const tone = document.createElement('td'); tone.append(M.createMascot({ state, size: 96, finish: 'halftone' })); tr.append(tone);
+  for (const size of [16, 28, 96, 176]) { const td = document.createElement('td'); td.append(M.createMascot({ state, size, finish: 'pixel' })); tr.append(td); }
   grid.append(tr);
 }
 const PRESETS = [['Scout', '#B9D2E3', 'spectacles', 'round'], ['Quill', '#E8C39E', 'quill', 'tall'], ['Atlas', '#B5C7A5', 'laurel', 'squircle'], ['Sol', '#D9B260', 'rays', 'round'], ['Rosa', '#D99A92', 'scarf', 'tall'], ['Iris', '#CDBFD9', 'none', 'squircle']];
@@ -89,6 +90,17 @@ app.whenReady().then(async () => {
         const box = node?.querySelector('svg.ajar')?.getBoundingClientRect();
         return node && node.querySelector('svg').dataset.state === s && Math.round(box.width) === size ? null : s + '@' + size; })).filter(Boolean)`);
       assert.deepEqual(missing, []);
+    });
+    await check('the pixel style renders every state at every size, crisp and readable', async () => {
+      const bad = await js(`window.M.MASCOT_STATES.flatMap(s => [16, 28, 96, 176].map(size => {
+        const node = [...document.querySelectorAll('kairos-mascot')].find(n => n.getAttribute('state') === s && n.getAttribute('size') === String(size) && n.querySelector('svg')?.dataset.finish === 'pixel');
+        const svg = node?.querySelector('svg.ajar');
+        if (!svg) return s + '@' + size + ' missing';
+        const body = svg.querySelector('.aj-body path').getBoundingClientRect(), eye = svg.querySelector('.aj-eye').getBoundingClientRect(), point = svg.querySelector('.aj-point').getBoundingClientRect();
+        return getComputedStyle(svg).shapeRendering.toLowerCase() === 'crispedges' && body.width > size * .55 && (s === 'success' || s === 'sleeping' || eye.height >= size * .05) && point.width >= size * .05 ? null : [s + '@' + size, getComputedStyle(svg).shapeRendering, Math.round(body.width), Math.round(eye.height), Math.round(point.width)].join(' '); })).filter(Boolean)`);
+      assert.deepEqual(bad, []);
+      assert.equal(await js("document.querySelectorAll('kairos-mascot[size=\"16\"] svg[data-finish=pixel] image, kairos-mascot svg[data-finish=pixel] .aj-tone').length"), 0, 'no raster in the pixel style');
+      assert.equal(await js("(() => { const draw = size => { const n = window.M.createMascot({ state: 'idle', size }); document.body.append(n); const finish = n.querySelector('svg').dataset.finish; n.remove(); return finish; }; return draw(16) + ' ' + draw(96); })()"), 'flat halftone', 'the default halftone style draws flat below 44px');
     });
     await check('static images load for every state', async () => {
       assert.equal(await js("[...document.querySelectorAll('#grid img')].filter(i => i.naturalWidth > 0).length"), 8);

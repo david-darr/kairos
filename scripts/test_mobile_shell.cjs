@@ -57,6 +57,7 @@ class Surface {
     // chatStream.js attaches window and document listeners when it loads; this pure test needs only its two reads.
     './chatStream.js': { listInFlight: () => [], subscribeAll: () => () => {} },
     './mobileActions.js': { openNotifications() {} },
+    './kipPicker.js': { wireKipSwitch: () => ({ sync() {}, dispose() {} }) },
     './mobileHistory.js': { mountHistory() {} },
     './mobileTabSheet.js': { openMoreSheet() {}, initMoreSheet() {} },
     './mobileActivity.js': { initActivity() {}, attachActivity() {}, activityMetadata() {}, refreshActivity() {} },
