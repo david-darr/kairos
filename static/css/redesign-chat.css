@@ -210,6 +210,8 @@
   }
   .kairos-redesign[data-view=mobileLaunch] .ms-intro { min-height: 0; overflow-y: auto; gap: 14px; padding: 20px 20px 24px; }
   .kairos-redesign[data-view=mobileLaunch] .ms-launch-bottom { flex-shrink: 0; }
+  /* The board has no blur band: it painted a hard-edged rectangle behind the rounded prompt. */
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom > .ms-blur-bottom { display: none; }
   .kairos-redesign.ms-tabbar-up[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom {
     padding-bottom: var(--ms-launch-clearance, calc(12px + var(--ms-tabbar-space)));
   }
