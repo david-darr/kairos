@@ -1,6 +1,6 @@
 import { api, el, modelMark } from './api.js';
 import { createMascot } from './mascot.js';
-import { PROVIDERS, SIGN_IN, toSnap, toneOf, pctText, resetCopy, staleOf, ago, usedCopy } from './quotaReadings.js';
+import { SIGN_IN, toneOf, pctText, resetCopy, staleOf, ago, usedCopy, modelGroups, tokensCopy, TOKENS_TITLE } from './quotaReadings.js';
 
 export function segmented({ label, options, value, onChange }) {
   const track = el('div', { class: 'rd-segmented', role: 'radiogroup', 'aria-label': label });
@@ -63,15 +63,19 @@ export function emptyState({ mascotState = 'idle', mascotSize = 84, title, text,
   return node;
 }
 
-export function usageCard({ providers = [], accounting = [] }) {
+// One row group per connected model (David, 2026-10-25), from the quotas
+// response's `models`: a subscription keeps its dot-matrix windows; a model
+// without a provider quota shows the tokens Kairos counted through it.
+export function usageCard({ models = [] }) {
   const card = el('section', { class: 'rd-usage-card', 'aria-label': 'Model usage' }, [el('h2', { text: 'Model usage' })]);
-  for (const provider of PROVIDERS) {
-    const reading = providers.find(p => p.provider === provider.id);
-    const snap = toSnap(reading || { status: 'unavailable' });
-    if (!snap.windows.length && snap.status !== 'needsAuth') continue;
-    const section = el('div', { class: 'rd-usage-provider', 'data-provider': provider.id }, [el('h3', {}, [modelMark(provider.mark, provider.name), provider.name])]);
-    if (snap.status === 'needsAuth') section.append(el('p', { class: 'rd-usage-note', text: [SIGN_IN[provider.id], snap.note].filter(Boolean).join(' ') }));
-    else {
+  for (const group of modelGroups(models)) {
+    const mark = modelMark(group.mark, group.name) || el('span', { class: 'rd-dot rd-dot-dim rd-usage-glyph', 'aria-hidden': 'true' });
+    const section = el('div', { class: 'rd-usage-provider', 'data-status': group.status,
+      ...(group.provider ? { 'data-provider': group.provider } : { 'data-model': group.id.slice('model:'.length) }) },
+    [el('h3', {}, [mark, group.name, group.detail ? el('span', { class: 'rd-usage-detail', text: group.detail }) : null])]);
+    const snap = group.snap;
+    if (group.status === 'needs_sign_in') section.append(el('p', { class: 'rd-usage-note', text: [SIGN_IN[group.provider], snap?.note].filter(Boolean).join(' ') }));
+    else if (snap?.windows.length) {
       for (const window of snap.windows) {
         const label = window.id === 'session' ? '5-hour' : window.id === 'weekly' ? 'Weekly' : window.label;
         const bar = dotMatrix({ rows: 1, cols: 24,
@@ -89,12 +93,12 @@ export function usageCard({ providers = [], accounting = [] }) {
       const resets = snap.windows.map(w => `${w.id === 'session' ? '5-hour' : w.id === 'weekly' ? 'Weekly' : w.label}: ${resetCopy(w.resets_at)}`).filter(s => !s.endsWith(': '));
       if (staleOf(snap)) resets.push(snap.fetched_at ? 'Updated ' + ago(snap.fetched_at) : 'Usage may be out of date.');
       section.append(el('p', { class: 'rd-usage-note', text: resets.join(' · ') || snap.note || 'Waiting for usage.' }));
+    } else {
+      section.append(el('p', { class: 'rd-usage-tokens', title: TOKENS_TITLE, text: tokensCopy(group.recorded) }));
+      if (group.status === 'unavailable') section.append(el('p', { class: 'rd-usage-note', text: snap?.note || 'Usage could not be read right now.' }));
     }
     card.append(section);
   }
-  for (const item of accounting) card.append(el('p', { class: 'rd-usage-accounting', title: item.title }, [
-    el('span', { text: item.name + ': ' }), el('span', { class: 'dashboard-model-usage', text: item.text }),
-  ]));
   return card;
 }
 
@@ -105,7 +109,7 @@ export async function loadUsageCard(container) {
     const current = ++revision;
     try {
       const data = await loadQuotas();
-      if (current === revision) container.replaceChildren(usageCard({ providers: data.providers }));
+      if (current === revision) container.replaceChildren(usageCard({ models: data.models }));
     } catch {
       if (current === revision) container.replaceChildren(el('p', { class: 'rd-part-note', role: 'status', text: 'Could not load model usage.' }));
     }

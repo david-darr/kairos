@@ -57,22 +57,82 @@ class QuotaUsageTests(unittest.TestCase):
         self.assertNotIn("secret-token", str(result))
         self.assertEqual(result["windows"][0]["used_percent"], 20)
 
-    def test_api_and_local_are_totals_only_and_cli_account_is_deduplicated(self):
+    def test_every_connected_model_is_listed_and_cli_account_is_read_once(self):
         endpoints = [
-            {"id": "c1", "name": "Claude Opus", "kind": "claude_cli"},
-            {"id": "c2", "name": "Claude Sonnet", "kind": "claude_cli"},
-            {"id": "a1", "name": "API", "kind": "api"},
-            {"id": "l1", "name": "Local", "kind": "local"},
+            {"id": "a1", "name": "API", "kind": "api", "model": "gpt-5", "base_url": "https://api.openai.com/v1?key=sk-secret", "has_api_key": True},
+            {"id": "l1", "name": "qwen3", "kind": "local", "model": "qwen3:8b", "base_url": "http://localhost:11434/v1", "has_api_key": False},
+            {"id": "c1", "name": "Claude Opus", "kind": "claude_cli", "model": ""},
+            {"id": "c2", "name": "Claude Sonnet", "kind": "claude_cli", "model": "sonnet"},
+            {"id": "x1", "name": "Codex", "kind": "codex_cli", "model": ""},
+            {"id": "g1", "name": "Antigravity", "kind": "antigravity_cli", "model": ""},
         ]
+        readings = {
+            "claude": {"provider": "claude", "status": "ok", "windows": [{"name": "5-hour", "used_percent": 34, "resets_at": None}]},
+            "codex": {"provider": "codex", "status": "needs_sign_in", "windows": [], "stale": True, "note": quota_usage.NOTES["needs_sign_in"]},
+            "antigravity": {"provider": "antigravity", "status": "no_quota", "windows": [], "note": quota_usage.NOTES["no_quota"]},
+        }
+        totals = {"a1": {"fresh_tokens": 100, "cache_read_tokens": 900, "unsplit_tokens": 23, "total_tokens": 1023},
+                  "g1": {"fresh_tokens": 5000, "cache_read_tokens": 0, "unsplit_tokens": 0, "total_tokens": 5000}}
+        recent = {"l1": {"today_tokens": 12000, "week_tokens": 40000}, "g1": {"today_tokens": 0, "week_tokens": 5000}}
         with patch.object(quota_usage.model_endpoints, "list_endpoints", return_value=endpoints), \
-             patch.object(quota_usage.token_usage, "get_usage_summary", return_value={"a1": {"total_tokens": 123}}), \
-             patch.object(quota_usage, "_provider", return_value={"provider": "claude", "windows": []}) as provider:
+             patch.object(quota_usage.token_usage, "get_usage_summary", return_value=totals), \
+             patch.object(quota_usage.token_usage, "get_recent_usage", return_value=recent), \
+             patch.object(quota_usage, "_provider", side_effect=lambda name, reader, force=False: readings[name]) as provider:
             result = quota_usage.get_usage_overlay()
-        provider.assert_called_once()
-        self.assertEqual(result["recorded"], [
-            {"name": "API", "kind": "api", "total_tokens": 123},
-            {"name": "Local", "kind": "local", "total_tokens": None},
-        ])
+        self.assertEqual(provider.call_count, 3, "one read per account, not per endpoint")
+        self.assertEqual([p["provider"] for p in result["providers"]], ["claude", "codex"], "a ring only where a quota exists")
+        models = result["models"]
+        self.assertEqual([m["id"] for m in models], ["c1", "c2", "x1", "g1", "l1", "a1"], "subscriptions, then local, then API")
+        by_id = {m["id"]: m for m in models}
+        self.assertEqual([by_id[i]["status"] for i in ("c1", "x1", "g1", "l1", "a1")],
+                         ["connected", "needs_sign_in", "connected", "connected", "connected"])
+        self.assertEqual(by_id["c2"]["quota"]["windows"][0]["used_percent"], 34)
+        self.assertEqual([by_id[i]["mark"] for i in ("c1", "x1", "g1", "l1", "a1")], ["claude", "openai", "gemini", "qwen", "openai"])
+        self.assertIsNone(by_id["l1"]["quota"])
+        self.assertIsNone(by_id["l1"]["provider"])
+        self.assertEqual(by_id["g1"]["recorded"], {"today_tokens": 0, "week_tokens": 5000, "total_tokens": 5000})
+        self.assertEqual(by_id["l1"]["recorded"], {"today_tokens": 12000, "week_tokens": 40000, "total_tokens": 0})
+        self.assertEqual(by_id["a1"]["recorded"]["total_tokens"], 123, "cache reads stay out of the spend")
+        for model in models:
+            self.assertFalse({"base_url", "has_api_key", "api_key", "api_key_encrypted"} & set(model))
+        self.assertNotIn("sk-secret", str(result))
+
+    def test_unreadable_quota_marks_the_model_unavailable(self):
+        endpoints = [{"id": "c1", "name": "Claude", "kind": "claude_cli", "model": ""}]
+        with patch.object(quota_usage.model_endpoints, "list_endpoints", return_value=endpoints), \
+             patch.object(quota_usage.token_usage, "get_usage_summary", return_value={}), \
+             patch.object(quota_usage.token_usage, "get_recent_usage", return_value={}), \
+             patch.dict(quota_usage.READERS, {"claude": ("claude_cli", lambda: (_ for _ in ()).throw(RuntimeError("secret-token")))}):
+            model = quota_usage.get_usage_overlay()["models"][0]
+        self.assertEqual(model["status"], "unavailable")
+        self.assertEqual(model["recorded"], {"today_tokens": 0, "week_tokens": 0, "total_tokens": 0})
+        self.assertNotIn("secret-token", str(model))
+
+    def test_antigravity_without_windows_is_cached_and_still_listed(self):
+        calls = []
+        def reader():
+            calls.append(1)
+            raise quota_usage.NoQuotaReported()
+        first = quota_usage._provider("antigravity", reader)
+        self.assertEqual((first["status"], first["windows"]), ("no_quota", []))
+        quota_usage._provider("antigravity", reader)
+        self.assertEqual(len(calls), 1, "a CLI without a quota report is not re-asked every poll")
+
+    def test_daily_buckets_give_today_and_this_week(self):
+        from datetime import date
+        from core import token_usage
+        folder = Path(_fixture.name)
+        with patch.object(token_usage, "DAILY_FILE", str(folder / "daily.json")), \
+             patch.object(token_usage, "USAGE_FILE", str(folder / "totals.json")):
+            token_usage.write_json_atomic(token_usage.DAILY_FILE, {
+                "2026-10-18": {"l1": 7}, "2026-10-19": {"l1": 10}, "2026-10-21": {"l1": 5, "a1": 2}, "2026-10-22": "bad"})
+            self.assertEqual(token_usage.get_recent_usage(date(2026, 10, 21)),
+                             {"l1": {"today_tokens": 5, "week_tokens": 15}, "a1": {"today_tokens": 2, "week_tokens": 2}},
+                             "the week starts Monday, as on Home; a Sunday before it is not counted")
+            token_usage.write_json_atomic(token_usage.DAILY_FILE, {"2000-01-01": {"l1": 99}})
+            token_usage.record_usage("l1", {"input_tokens": 40, "output_tokens": 10, "cache_read_input_tokens": 100})
+            self.assertEqual(token_usage.get_recent_usage()["l1"], {"today_tokens": 50, "week_tokens": 50}, "cache reads are not counted")
+            self.assertNotIn("2000-01-01", token_usage.read_json(token_usage.DAILY_FILE, {}), "old days are pruned")
 
     def test_each_failure_says_what_kind_it_was_without_leaking_text(self):
         def refused():
@@ -118,8 +178,36 @@ class QuotaUsageTests(unittest.TestCase):
             with patch.object(middleware, "auth_enabled", return_value=True):
                 self.assertEqual(client.get("/api/models/quotas").status_code, 401)
             app.dependency_overrides[require_admin] = lambda: "admin"
-            with patch.object(quota_usage, "get_usage_overlay_async", return_value={"providers": [], "recorded": []}):
-                self.assertEqual(client.get("/api/models/quotas").json(), {"providers": [], "recorded": []})
+            with patch.object(quota_usage, "get_usage_overlay_async", return_value={"providers": [], "models": []}):
+                self.assertEqual(client.get("/api/models/quotas").json(), {"providers": [], "models": []})
+
+    def test_route_lists_every_endpoint_kind_without_secrets(self):
+        from core import model_endpoints
+        app = FastAPI()
+        app.include_router(model_routes.router)
+        app.dependency_overrides[require_admin] = lambda: "admin"
+        endpoints = [model_endpoints.create_endpoint("Grok", "https://api.x.ai/v1", "grok-4", api_key="xai-secret-key", kind="api"),
+                     model_endpoints.create_endpoint("qwen3", "http://localhost:11434/v1", "qwen3:8b", kind="local"),
+                     model_endpoints.create_endpoint("Antigravity", kind="antigravity_cli"),
+                     model_endpoints.create_endpoint("Codex", kind="codex_cli"),
+                     model_endpoints.create_endpoint("Claude", kind="claude_cli")]
+        self.addCleanup(lambda: [model_endpoints.delete_endpoint(e["id"]) for e in endpoints])
+        def signed_out():
+            raise quota_usage.SignInNeeded("token abc")
+        def no_quota():
+            raise quota_usage.NoQuotaReported()
+        readers = {"claude": ("claude_cli", lambda: [{"name": "5-hour", "used_percent": 10, "resets_at": None}]),
+                   "codex": ("codex_cli", signed_out), "antigravity": ("antigravity_cli", no_quota)}
+        with TestClient(app) as client, patch.dict(quota_usage.READERS, readers):
+            response = client.get("/api/models/quotas")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([m["kind"] for m in body["models"]], ["claude_cli", "codex_cli", "antigravity_cli", "local", "api"])
+        self.assertEqual([m["status"] for m in body["models"]], ["connected", "needs_sign_in", "connected", "connected", "connected"])
+        self.assertEqual([m["mark"] for m in body["models"]], ["claude", "openai", "gemini", "qwen", "grok"])
+        self.assertEqual([p["provider"] for p in body["providers"]], ["claude", "codex"])
+        for secret in ("xai-secret-key", "api.x.ai", "localhost:11434", "token abc", "api_key"):
+            self.assertNotIn(secret, response.text)
 
 
 class ModelMarkTests(unittest.TestCase):

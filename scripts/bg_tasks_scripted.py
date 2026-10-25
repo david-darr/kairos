@@ -98,13 +98,13 @@ def main():
 
     from core import quota_usage, model_discovery, mcp_oauth
     async def quotas(*args, **kwargs):
-        return {'providers': [], 'recorded': []}
+        return {'providers': [], 'models': []}
     async def catalog(*args, **kwargs):
         return [model_discovery._entry('scripted', 'Scripted Claude', source='scripted')]
     async def no_refresh(*args, **kwargs):
         pass
     quota_usage.get_usage_overlay_async = quotas
-    quota_usage.get_usage_overlay = lambda *args, **kwargs: {'providers': [], 'recorded': []}
+    quota_usage.get_usage_overlay = lambda *args, **kwargs: {'providers': [], 'models': []}
     model_discovery.list_for_endpoint = catalog
     mcp_oauth.refresh_due = no_refresh
 

@@ -57,8 +57,7 @@ const context = {
   ICONS: { calendar: '', settings: '' },
   pill: x => el('button', { textContent: x.text }),
   dotMatrix: x => el('matrix', { cells: x.cells }),
-  usageCard: x => el('usage', { providers: x.providers, accounting: x.accounting }),
-  toSnap: x => ({ windows: x.windows || [], status: x.status === 'needs_sign_in' ? 'needsAuth' : 'ok' }),
+  usageCard: x => el('usage', { models: x.models }),
 };
 let source = fs.readFileSync('static/js/redesignHome.js', 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/export function /g, 'function ');
 // Expose internal arrangement operations for contract checks using the real code.
@@ -81,15 +80,15 @@ assert.equal(banner.parentElement, hero, 'Original banner stays in the hero');
 assert.equal(parts.system.parentElement, grid, 'Systems is always present, even if hidden in saved layout');
 assert.equal(grid.querySelector('usage'), null, 'No usage placeholder');
 assert.equal(parts.chats.parentElement, null, 'No recent-chats placeholder');
-data.quotas = { providers: [{ provider: 'claude', status: 'unavailable' }] }; ui.update('quotas');
-assert.equal(grid.querySelector('usage'), null, 'Unavailable quotas are hidden');
-data.modelAccounting = [{ name: 'Local', text: '842K tokens via Kairos' }]; ui.update('usage');
-assert.equal(grid.querySelector('usage').accounting.length, 1, 'Token accounting remains available independently of provider quotas');
-data.modelAccounting = []; ui.update('endpoints');
-assert.equal(grid.querySelector('usage'), null, 'Removing the last accounting item hides the usage card');
-
-data.quotas.providers.push({ provider: 'codex', status: 'needs_sign_in' }); ui.update('quotas');
-assert.equal(grid.querySelector('usage').providers.length, 1, 'A sign-in requirement is an item');
+data.quotas = { providers: [], models: [] }; ui.update('quotas');
+assert.equal(grid.querySelector('usage'), null, 'No connected model, no usage card');
+data.quotas.models.push({ id: 'l1', name: 'qwen3', kind: 'local', status: 'connected', quota: null, recorded: { today_tokens: 0, week_tokens: 0, total_tokens: 0 } });
+ui.update('quotas');
+assert.equal(grid.querySelector('usage').models.length, 1, 'A local model without usage is still listed');
+data.quotas.models.unshift({ id: 'g1', name: 'Antigravity', kind: 'antigravity_cli', provider: 'antigravity', status: 'connected', quota: { provider: 'antigravity', status: 'no_quota', windows: [] } });
+data.quotas.models.unshift({ id: 'x1', name: 'Codex', kind: 'codex_cli', provider: 'codex', status: 'needs_sign_in', quota: { provider: 'codex', status: 'needs_sign_in', windows: [] } });
+ui.update('quotas');
+assert.deepEqual(grid.querySelector('usage').models.map(m => m.id), ['x1', 'g1', 'l1'], 'Signed-out and quota-less subscriptions are items, in the order the route gives');
 listener({ need: [{ title: 'Question', detail: 'Please choose', action: 'Reply', go() {}, agent: { id: 'a' } }], work: [] });
 assert.equal(hero.parentElement, grid, 'Live need preserves the same hero');
 assert.ok(grid.querySelector('bot-kip'), 'Bot rows use the bot face');

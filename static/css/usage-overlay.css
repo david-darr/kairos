@@ -135,7 +135,7 @@ body{font-family:var(--k-font-sans);color:var(--n-text)}
 }
 #card.show + #tail{display:block}
 .c-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.c-title{font-size:14px;font-weight:700}
+.c-title{font-size:14px;font-weight:700;color:var(--n-text)} /* the card's own text colour, which the light notch card redefines */
 .c-sub{font-size:11px;color:var(--n-text-faint);margin-bottom:10px}
 .win{margin-top:10px}
 .w-row{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;flex-wrap:wrap;column-gap:8px}
@@ -144,6 +144,9 @@ body{font-family:var(--k-font-sans);color:var(--n-text)}
 .w-track{height:4px;border-radius:2px;background:var(--n-track);margin:6px 0 4px;overflow:hidden}
 .w-fill{height:100%;border-radius:2px}
 .w-used{font-size:11px;color:var(--n-text-faint)}
+.t-row{margin-top:8px;flex-wrap:nowrap}
+.t-row .w-label{min-width:0;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.t-row .mark{display:inline-block;flex:none;width:12px;height:12px}
 .g-head{font-size:12px;font-weight:700;color:var(--n-text);margin-top:12px}
 .g-box{border:1px solid var(--n-line-soft);border-radius:10px;padding:0 10px 8px;margin-top:6px}
 .c-note{font-size:12px;color:var(--n-text-dim);line-height:1.5;margin-top:6px}
@@ -306,6 +309,7 @@ body[data-edge="top-centre"] #notch-shell.expanded{border-radius:0 0 30px 30px;b
 .n-reading svg{display:block;flex:none}
 .n-reading .n-track{stroke:color-mix(in srgb,var(--n-text) 15%,transparent)}
 .n-reading .n-arc{stroke:var(--arc)}
+.n-models{font-size:11px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--n-text) 55%,transparent)}
 #notch-cluster{display:grid;grid-template-columns:repeat(2,8px);gap:3px;font-size:9px;line-height:8px}
 #notch-cluster .n-more{grid-column:1 / -1;text-align:center;color:color-mix(in srgb,var(--n-text) 55%,transparent)}
 #notch-cluster:empty{display:none}
@@ -327,8 +331,9 @@ body[data-edge="top-centre"] #notch-shell.expanded{border-radius:0 0 30px 30px;b
   background:color-mix(in srgb,var(--n-text) 8%,transparent);color:var(--n-text);transition:background-color 160ms}
 .n-ic:hover,.n-ic:focus-visible{background:color-mix(in srgb,var(--n-text) 16%,transparent)}
 .n-ic svg{display:block}
-#notch-readings{margin-left:auto;display:flex;gap:14px;font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
-.n-word{cursor:default;white-space:nowrap}
+#notch-readings{margin-left:auto;min-width:0;display:flex;gap:14px;font-size:12px;color:color-mix(in srgb,var(--n-text) 60%,transparent)}
+.n-word{cursor:default;white-space:nowrap;max-width:210px;overflow:hidden;text-overflow:ellipsis}
+.n-word-more{flex:none;font-variant-numeric:tabular-nums}
 .n-row{display:flex;gap:10px}
 .n-now{flex:0 0 330px;min-width:0;display:flex;align-items:center;gap:16px;padding:16px;border-radius:22px;background:var(--n-tile);
   box-shadow:inset 0 -38px 50px -30px color-mix(in srgb,var(--n-glow) 70%,transparent)}
@@ -355,8 +360,9 @@ body.notch-light #notch-shell.expanded .n-now{--kip-eye:var(--k-surface)}
 body[data-edge="top-centre"].notch-light #card{--n-card:var(--k-surface);--n-text:var(--k-ink);--n-text-dim:var(--k-ink-dim);--n-text-faint:var(--k-ink-faint);--n-track:var(--k-surface-2);--n-line:var(--k-gold-hi);--n-line-soft:var(--k-surface-2)}
 
 /* The usage card opens under the notch; the edge notch's tail and handles do not apply */
-body[data-edge="top-centre"] #card{right:auto;bottom:auto;transform:none;margin-left:0}
-body[data-edge="top-centre"] #tail,body[data-edge="top-centre"] .handle{display:none}
+/* Above the shell, so its drop shadow does not fall across the card's title */
+body[data-edge="top-centre"] #card{right:auto;bottom:auto;transform:none;margin-left:0;z-index:1}
+body[data-edge="top-centre"] :is(#tail,#card.show + #tail),body[data-edge="top-centre"] .handle{display:none}
 /* Folded, only the small rest tab shows */
 body[data-edge="top-centre"] #rest{left:50%;right:auto;top:0;transform:translateX(-50%);width:79px;height:10px;border-radius:0 0 6px 6px;opacity:0;pointer-events:none;background:var(--n-shell);border:0}
 body.folded[data-edge="top-centre"] #rest{opacity:1}

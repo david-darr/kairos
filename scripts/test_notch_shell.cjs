@@ -41,6 +41,10 @@ const context = { document: { body, documentElement: root, createElement: elemen
   fetch: () => new Promise(() => {}), setInterval() {}, clearInterval() {},
   setTimeout: (fn, ms) => { jobs.set(++next, { fn, at: now + ms }); return next; }, clearTimeout: id => jobs.delete(id) };
 const source = fs.readFileSync(require.resolve('../static/js/notchShell.js'), 'utf8').replace(/^import .*;\r?\n/gm, '').replace('export function', 'function');
+// The real shared wording, in its own scope as in the browser (both modules have a toneOf).
+const readings = { Date }; vm.createContext(readings);
+vm.runInContext(fs.readFileSync(require.resolve('../static/js/quotaReadings.js'), 'utf8').replace(/^export /gm, '') + '\nthis.api = { shortReading, modelGroups, toSnap };', readings);
+Object.assign(context, readings.api);
 vm.createContext(context); vm.runInContext(source + '\nthis.make = createNotchShell;', context);
 const controller = context.make({ pill, card, bridge: {}, renderRing() {}, hideCard() { card.classList.remove('show'); } });
 assert.equal(controller.isExpanded(), false);
@@ -57,6 +61,33 @@ reduced = true; elements.get('notch-shell').events.get('click')();
 assert.equal(controller.isExpanded(), true); assert.equal(fades.at(-1), 120, 'reduced motion uses a 120 ms fade');
 controller.reset(); assert.equal(controller.isExpanded(), false, 'configuration reset clears expansion');
 console.log('PASS: notch hover delay, cancellation, click, repeated samples, hot regions, collapse and reduced-motion fade');
+
+// Every connected model is in the status row; past four, the last place is "+N" listing all.
+const text = node => node.textContent ?? '';
+const endpoint = (id, name, kind, extra = {}) => ({ id, name, kind, status: 'connected', quota: null, recorded: { today_tokens: 0, week_tokens: 0, total_tokens: 0 }, ...extra });
+const claudeQuota = { provider: 'claude', status: 'ok', windows: [{ name: '5-hour', used_percent: 34 }] };
+const listed = [
+  endpoint('c1', 'Claude Opus', 'claude_cli', { provider: 'claude', quota: claudeQuota }),
+  endpoint('c2', 'Claude Sonnet', 'claude_cli', { provider: 'claude', quota: claudeQuota }),
+  endpoint('x1', 'Codex', 'codex_cli', { provider: 'codex', quota: { provider: 'codex', status: 'ok', windows: [{ name: 'Weekly', used_percent: 61 }] } }),
+  endpoint('g1', 'Antigravity', 'antigravity_cli', { provider: 'antigravity', quota: { provider: 'antigravity', status: 'no_quota', windows: [] }, recorded: { today_tokens: 0, week_tokens: 3400, total_tokens: 3400 } }),
+  endpoint('l1', 'qwen3', 'local', { recorded: { today_tokens: 12000, week_tokens: 12000, total_tokens: 12000 } }),
+];
+const ringsFor = [{ id: 'claude', name: 'Claude', snap: context.toSnap(claudeQuota) }, { id: 'codex', name: 'Codex', snap: context.toSnap(listed[2].quota) }];
+controller.readings(ringsFor, context.modelGroups(listed.slice(0, 4)));
+const row = elements.get('notch-readings'), collapsed = elements.get('notch-usage');
+assert.deepEqual(row.children.map(text), ['Claude 5h 34%', 'Codex wk 61%', 'Antigravity 3.4K tokens this week'], 'one reading per account, Antigravity listed without a quota');
+assert.deepEqual(row.children.map(n => n.dataset.p), ['claude', 'codex', 'antigravity']);
+assert.equal(collapsed.children.length, 3, 'two rings and a count');
+assert.equal(text(collapsed.children[2]), '+1');
+controller.readings(ringsFor, context.modelGroups([...listed, endpoint('a1', 'Grok', 'api'), endpoint('a2', 'Mine', 'api')]));
+assert.deepEqual(row.children.map(text), ['Claude 5h 34%', 'Codex wk 61%', 'Antigravity 3.4K tokens this week', '+3'], 'the panel keeps to four places');
+assert.equal(row.children[3].dataset.p, 'all', '"+N" opens the card listing every model');
+assert.equal(text(collapsed.children[2]), '+4', 'collapsed counts the models without a ring');
+controller.readings(ringsFor, context.modelGroups([endpoint('l1', 'qwen3', 'local', { recorded: { today_tokens: 12000, week_tokens: 12000, total_tokens: 12000 } }), endpoint('a1', 'Grok', 'api')]));
+assert.deepEqual(row.children.map(text), ['qwen3 12K tokens today', 'Grok no usage yet']);
+assert.deepEqual(row.children.map(n => n.dataset.p), ['model:l1', 'model:a1']);
+console.log('PASS: notch lists every connected model, quota or recorded tokens, and caps the row with "+N"');
 
 body.classList.add('notch-offline'); assert.equal(controller.hot(200, 10), false, 'host loss leaves no hot region');
 body.classList.remove('notch-offline');

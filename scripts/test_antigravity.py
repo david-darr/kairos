@@ -143,13 +143,17 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_usage_is_separate_readonly_report_and_unknown_stays_hidden(self):
         with patch.object(cli, 'find_antigravity', return_value='fixture'), patch.object(cli, 'run_readonly', return_value=(0, '{}', '')) as read:
-            self.assertEqual(quota_usage._antigravity_windows(), [])
+            with self.assertRaises(quota_usage.NoQuotaReported):
+                quota_usage._antigravity_windows()
             self.assertEqual(read.call_args.args[:3], ('fixture', '-p', '/usage'))
             self.assertIn('--disable-slash-commands=false', read.call_args.args)
-        with patch.object(quota_usage.model_endpoints, 'list_endpoints', return_value=[{'kind': 'antigravity_cli'}]), patch.object(quota_usage.token_usage, 'get_usage_summary', return_value={}), patch.object(quota_usage, '_antigravity_windows', return_value=[]):
+        with patch.object(quota_usage.model_endpoints, 'list_endpoints', return_value=[{'id': 'g1', 'name': 'Antigravity', 'kind': 'antigravity_cli'}]), patch.object(quota_usage.token_usage, 'get_usage_summary', return_value={}), patch.object(quota_usage.token_usage, 'get_recent_usage', return_value={}), patch.object(quota_usage, '_antigravity_windows', side_effect=quota_usage.NoQuotaReported):
             quota_usage._cache.pop('antigravity', None)
             quota_usage._retry_after.pop('antigravity', None)
-            self.assertEqual(quota_usage.get_usage_overlay()['providers'], [])
+            result = quota_usage.get_usage_overlay()
+            # No ring without a measured window, but the model is still listed as connected.
+            self.assertEqual(result['providers'], [])
+            self.assertEqual([(m['id'], m['status'], m['quota']['status']) for m in result['models']], [('g1', 'connected', 'no_quota')])
 
 
 class TurnTests(unittest.IsolatedAsyncioTestCase):

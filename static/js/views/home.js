@@ -297,10 +297,6 @@ export function render(container, tabId, options = {}) {
   function drawModels() {
     if (data.endpoints === undefined) return;
     const { endpoints, usage, quotas } = data;
-    data.modelAccounting = (endpoints || []).flatMap(endpoint => {
-      const label = usageLabel(endpoint, usage?.[endpoint.id]);
-      return label ? [{ ...label, name: endpoint.name }] : [];
-    });
     models.body.replaceChildren();
     if (endpoints && !endpoints.length) models.body.append(el("div", { class: "model-setup-empty" }, [
       ...(rd() ? [el("h3", { text: "Set up a model" }), el("p", { text: "Choose how Kairos thinks. We'll help you connect it." })] : [icon('brain')]),

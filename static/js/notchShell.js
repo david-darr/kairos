@@ -1,6 +1,7 @@
 import { collectActivity } from './activityModel.js';
 import * as chatStream from './chatStream.js';
 import { createMascot, KAIROS_SPEC } from './mascot.js';
+import { shortReading } from './quotaReadings.js';
 
 // Phase 1 owns only the shell and status. It never answers or sends work.
 // Drawn to the Kairos Mobile v2 boards: NotchCollapsed (resting, working,
@@ -11,7 +12,8 @@ const ICONS = {
   settings: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
 };
 const HEX = /^#[0-9a-f]{6}$/i;
-const WINDOW_WORD = { session: '5h', weekly: 'wk' };
+// The expanded status row fits four readings in the 820 DIP panel beside its buttons.
+const MAX_WORDS = 4;
 const RING = 2 * Math.PI * 7.5;
 
 function build(tag, className, text) {
@@ -206,9 +208,12 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
   poll(); const timer = setInterval(poll, 15000); // Snapshot fallback while SSE reconnects; also refresh bot/inbox sources.
   window.addEventListener('pagehide', () => { clearInterval(timer); reset(); }, { once: true });
   applyAppearance(); renderActivity(); renderRing();
-  return { hot, pointer, reset, isExpanded: () => expanded, readings(providers) {
-    // Collapsed: a ring and "Claude 34%". Expanded: "Claude 5h 34%", which opens the usage card on hover.
-    const rings = [], words = [];
+  return { hot, pointer, reset, isExpanded: () => expanded, readings(providers, groups = []) {
+    // Collapsed: a ring and "Claude 34%" per subscription quota, then "+N" for
+    // the other connected models. Expanded: every model ("Claude 5h 34%",
+    // "qwen3 12K tokens today"), each opening its usage card on hover; past
+    // MAX_WORDS the last place is "+N", whose card lists them all.
+    const rings = [];
     for (const provider of providers) {
       const h = headline(provider.snap), signedOut = provider.snap?.status === 'needsAuth';
       const pct = h && !signedOut ? `${percent(h.used)}%` : signedOut ? 'sign in' : '…';
@@ -218,10 +223,26 @@ export function createNotchShell({ pill, card, bridge, hideCard, renderRing }) {
       ring.style.setProperty('--arc', h ? toneOf(h.used) : 'var(--n-text)');
       ring.append(build('span', '', `${provider.name} ${pct}`));
       rings.push(ring);
-      const word = build('span', 'n-word', `${provider.name}${h && WINDOW_WORD[h.id] ? ' ' + WINDOW_WORD[h.id] : ''} ${pct}`);
-      word.dataset.p = provider.id;
-      word.setAttribute('aria-label', `${provider.name} usage, ${pct}. Hover for details.`);
-      words.push(word);
+    }
+    const others = groups.filter(group => !providers.some(provider => provider.id === group.id)).length;
+    if (others) {
+      const more = build('span', 'n-models', `+${others}`);
+      more.setAttribute('aria-label', `${others} more model${others === 1 ? '' : 's'}`);
+      rings.push(more);
+    }
+    const shown = groups.length > MAX_WORDS ? groups.slice(0, MAX_WORDS - 1) : groups;
+    const words = shown.map(group => {
+      const reading = shortReading(group);
+      const word = build('span', 'n-word', `${group.name} ${reading}`);
+      word.dataset.p = group.id;
+      word.setAttribute('aria-label', `${group.name} usage, ${reading}. Hover for details.`);
+      return word;
+    });
+    if (shown.length < groups.length) {
+      const all = build('span', 'n-word n-word-more', `+${groups.length - shown.length}`);
+      all.dataset.p = 'all';
+      all.setAttribute('aria-label', `${groups.length - shown.length} more models. Hover to see all ${groups.length}.`);
+      words.push(all);
     }
     usage.replaceChildren(...rings); readings.replaceChildren(...words);
   } };
