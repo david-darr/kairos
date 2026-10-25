@@ -827,14 +827,19 @@
   }
 }
 
-/* Desktop Calendar (v2 boards): one-row header, round period arrows, plain period label, range selector above the grid. */
+/* Desktop Calendar: standard page header, with period and range controls above the grid. */
 @media (min-width: 769px) {
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header > div { padding: 0; min-height: 0; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header h2 { font-size: 44px; margin: 0; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-nav { flex: 1; margin: 0; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-calendars-trigger { font-size: 0; width: 42px; height: 42px; padding: 0; margin: 0; border-radius: 50%; justify-content: center; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-create-bar { margin: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] { flex-direction: column; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace {
+    max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start; column-gap: 24px;
+  }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace > .view-header { grid-column: 1 / -1; padding-bottom: 6px; margin-bottom: 4px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace > .view-header h2 { font-size: clamp(38px, 4.6vw, 52px); }
+  .kairos-redesign #view-content[data-view="calendar"] .view-header > div:first-child { flex: 1; }
+  .kairos-redesign #view-content[data-view="calendar"] .view-header .cal-calendars-trigger { font-size: 0; width: 42px; height: 42px; padding: 0; margin: 0; border-radius: 50%; justify-content: center; }
+  .kairos-redesign #view-content[data-view="calendar"] .view-header .cal-create-bar { margin: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-grid-toolbar .cal-nav { flex: none; margin: 0; }
 
   .kairos-redesign #view-content[data-view="calendar"] .cal-nav > :is(.cal-period-prev, .cal-period-next) {
     display: grid; place-items: center; flex: 0 0 36px; box-sizing: border-box;
@@ -849,24 +854,18 @@
     font: 500 17px var(--rd-font-ui); color: var(--rd-ink); outline: none;
   }
   .kairos-redesign #view-content[data-view="calendar"] .cal-nav > .cal-month-label:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 3px; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-grid-toolbar { display: flex; justify-content: flex-end; flex: none; margin: 0 0 12px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-grid-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; margin: 0 0 12px; }
   .kairos-redesign #view-content[data-view="calendar"] .cal-grid-toolbar .cal-range-switch { margin: 0; }
 
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) { position: relative; padding-top: 62px; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .view-header { position: absolute; inset: 0 0 auto; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) .cal-day-panel { padding-top: 54px; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="week"]) { flex-wrap: wrap; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="week"]) .cal-left { flex-basis: 100%; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="week"]) .cal-day-panel { flex-basis: 100%; padding-top: 0; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace > .cal-day-panel { padding-top: 54px; }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="week"]) .cal-workspace { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="week"]) .cal-workspace > .cal-day-panel { padding-top: 0; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog .form-grid { display: flex; flex-direction: column; }
   .kairos-redesign [data-view="calendar"].cal-event-dialog .cal-field-group { width: 100%; padding: 12px; box-sizing: border-box; }
 }
 @media (min-width: 769px) and (max-width: 1100px) {
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-nav { grid-column: 1 / -1; grid-row: 2; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-left > .view-header .cal-create-bar { grid-column: 3; grid-row: 1; }
-  .kairos-redesign #view-content[data-view="calendar"]:has([data-calendar-range="month"]) { padding-top: 112px; }
-  .kairos-redesign #view-content[data-view="calendar"] .cal-day-panel { flex-basis: 240px; }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign #view-content[data-view="calendar"] .cal-workspace > .cal-day-panel { padding-top: 0; }
 }
 
 @media (max-width: 768px) {

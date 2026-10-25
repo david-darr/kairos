@@ -120,6 +120,7 @@
   .kairos-redesign #view-content[data-view="notes"] #notes-list input[type="checkbox"] { width: 44px; height: 44px; margin: 0 -10px 0 -12px; }
   .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar { margin-left: 0; }
   .kairos-redesign #view-content[data-view="notes"] #notes-list .row-action-btn { width: 44px; height: 44px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-more { display: none; }
   .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { font-size: 11px; padding: 2px 8px; }
   /* Polish: the due pill keeps its full text; the title gives way. Clear finished meets the 44px touch size. */
   .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { flex: none; max-width: none; }
@@ -129,29 +130,55 @@
 
 /* -- Desktop: the tab fills its window ----------------------------------------
    Capture and the counts sit in a column on the left; the notes use the rest
-   of the width as a grid of their own cards and scroll inside the page, the
-   way the Agents tab does. Below ~1180px the column stacks above the list. */
+   of the width as balanced columns of their own cards (masonry), each card as
+   tall as its text, so a long note never squeezes or overlaps its neighbours.
+   A very long note is cut to a few lines with Show more. The page scrolls
+   with the notes. Below ~1180px the column stacks above the list. */
 @media (min-width: 769px) {
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained {
-    max-width: none; flex: 1; min-height: 0; display: grid; align-items: start;
-    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 24px;
+    max-width: none; flex: 1; display: grid; align-items: start;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 24px;
   }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header { grid-column: 1 / -1; }
+  /* Header actions share one row at the right edge, centred on the title: Clear finished, then the sort. */
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header { align-items: center; gap: 12px; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-finished-bar { order: 1; margin-left: auto; align-self: center; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-finished-bar .btn { height: 40px; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-sort-home { order: 2; align-self: center; display: flex; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header .notes-sort { height: 40px; min-height: 40px; margin: 0; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header:not(:has(.notes-finished-bar:not([hidden]))) .notes-sort-home { margin-left: auto; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .notes-overview { grid-column: 1; grid-row: 2; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .glass.card { grid-column: 1; grid-row: 3; margin: 0; padding: 18px; border-radius: var(--rd-radius-card); }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list {
-    grid-column: 2; grid-row: 2 / 4; align-self: stretch; min-height: 0; overflow-y: auto; padding: 2px;
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; align-content: start;
+    grid-column: 2; grid-row: 2 / 4; align-self: start; min-width: 0; padding: 2px;
+    display: block; column-width: 320px; column-gap: 10px;
   }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list:has(> .card) {
-    background: none; border: 0; box-shadow: none; border-radius: 0; overflow-y: auto;
+    background: none; border: 0; box-shadow: none; border-radius: 0; overflow: visible;
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card {
+    break-inside: avoid; margin: 0 0 10px; height: auto; min-height: 60px; padding-block: 12px; align-items: flex-start;
   }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card,
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card + .card {
     border: 1px solid var(--rd-line); border-radius: var(--rd-radius-field); background-color: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
   }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card > .card-row,
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card > .card-row > .card-row { align-items: flex-start; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card > .card-row > .card-row > div { flex-wrap: wrap; align-items: center; row-gap: 6px; }
+  /* Note text wraps, keeps its paragraphs and breaks inside a long unbroken URL; past six lines it is cut. */
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card .note-title,
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card:focus-within .note-title {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6;
+    flex: 1 1 100%; min-width: 0; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; line-height: 1.45;
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card.is-expanded .note-title {
+    display: block; -webkit-line-clamp: unset; line-clamp: unset; overflow: visible;
+  }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-more { min-height: 28px; padding: 0 12px; font-size: 12px; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .note-more[hidden] { display: none; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card:hover { border-color: var(--rd-line-strong); background-color: var(--rd-surface-2); }
-  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > :is(.empty-state, .rd-empty-state) { grid-column: 1 / -1; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > :is(.empty-state, .rd-empty-state) { column-span: all; }
   .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { flex: none; max-width: none; }
   .kairos-redesign #view-content[data-view="notes"] .form-grid { flex-direction: column; align-items: stretch; gap: 12px; }
   .kairos-redesign #view-content[data-view="notes"] .form-grid .field { flex-direction: column; align-items: stretch; gap: 6px; }
@@ -167,6 +194,5 @@
 }
 @media (min-width: 769px) and (max-width: 1180px) {
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained { display: block; flex: none; }
-  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list { overflow: visible; }
   .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .glass.card { margin: 0 0 18px; }
 }

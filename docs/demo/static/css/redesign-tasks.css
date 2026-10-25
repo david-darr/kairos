@@ -256,30 +256,61 @@
 }
 
 /* -- Desktop: the tab fills its window ------------------------------------------
-   The runs chart sits beside the routines; the work board, triggers and the
-   automation library then run the full width underneath. Routine cards flow
-   into as many columns as fit and keep every control (model, delivery, turn
-   on/off, run, share, delete) in view. Below ~1180px everything stacks. */
+   A 12-column grid like the Home tab: every row fills the width and its cards
+   share top and bottom edges. Top to bottom: the page title with the Schedule
+   a task button, the runs chart, the scheduled routines, the work board, then
+   triggers beside the automation library. Routine cards wrap and grow to fill
+   their row, so no row leaves a hole. Controls all stay in view; below ~1180px
+   the last pair stacks. */
 @media (min-width: 769px) {
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) { max-width: none; }
-  .kairos-redesign[data-view="tasks"] #tasks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-content: start; align-items: start; }
-  .kairos-redesign[data-view="tasks"] #tasks-list > .card { margin-bottom: 0; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) {
+    max-width: none; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; align-items: stretch; align-content: start;
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > * { grid-column: span 12; }
+  /* Header actions sit together at the right edge, centred on the title: Build with Kairos, then Schedule a task.
+     The closed Schedule pill shares the header's row (its own fixed width), so both stay in one line. */
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) { --rdt-schedule-w: 150px; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header {
+    grid-column: 1 / -1; grid-row: 1; order: 0; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 12px; padding-right: calc(var(--rdt-schedule-w) + 12px);
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > div:first-child { flex: 1 1 0; min-width: 0; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > .btn {
+    flex: none; min-height: 40px; height: 40px; padding: 0 18px; font-size: 13px; background: transparent; color: var(--rd-ink); border: 1px solid var(--rd-line-strong);
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header > .btn:hover:not(:disabled) { background: var(--rd-surface-2); }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel:not([open]) {
+    grid-column: 1 / -1; grid-row: 1; order: 1; justify-self: end; width: var(--rdt-schedule-w); align-self: stretch;
+    display: flex; flex-direction: column; justify-content: center; align-items: stretch;
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel:not([open]) > summary { justify-content: center; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> details.disclosure-panel[open]) > .view-header { padding-right: 0; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel[open] { grid-column: 1 / -1; grid-row: auto; order: 1; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-activity { order: 2; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > #tasks-list { order: 3; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-board-card { order: 4; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card { order: 5; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .automation-library { order: 6; }
+
+  /* The runs chart: the count on the left, the dots beside it. */
+  .kairos-redesign[data-view="tasks"] .task-activity-body { grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); align-items: center; gap: 12px 32px; }
+  .kairos-redesign[data-view="tasks"] .task-activity-body > .meta { grid-column: 1 / -1; }
+
+  /* Triggers, the board and the library are cards, so a row of them reads as one. */
+  .kairos-redesign[data-view="tasks"] :is(.task-board-card, .triggers-card, .automation-library) {
+    padding: 20px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+  }
+  .kairos-redesign[data-view="tasks"] .triggers-card .set-group { box-shadow: none; }
+
+  /* Routines wrap like a row of cards and grow to fill the last row too. */
+  .kairos-redesign[data-view="tasks"] #tasks-list { display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start; align-items: stretch; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card { flex: 1 1 380px; min-width: 0; margin-bottom: 0; }
   .kairos-redesign[data-view="tasks"] #tasks-list > :is(.tool-store-heading, .empty-state-rich, .empty-state),
-  .kairos-redesign[data-view="tasks"] #tasks-list:has(> .card)::before { grid-column: 1 / -1; }
+  .kairos-redesign[data-view="tasks"] #tasks-list:has(> .card)::before { flex: 1 1 100%; }
   .kairos-redesign[data-view="tasks"] #tasks-list > .tool-store-heading { margin: 10px 2px 0; }
   .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row { flex-wrap: wrap; justify-content: flex-start; flex: 1 1 100%; }
-  .kairos-redesign[data-view="tasks"] .automation-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  .kairos-redesign[data-view="tasks"] .automation-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 }
 @media (min-width: 1181px) {
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) {
-    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px 24px; align-items: start;
-  }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header,
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > :is(.task-board-card, .triggers-card, .automation-library) { grid-column: 1 / -1; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-activity { grid-column: 1; grid-row: 2 / 4; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel { grid-column: 2; grid-row: 2; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > #tasks-list { grid-column: 2; grid-row: 3; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-board-card { grid-row: 4; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card { grid-row: 5; }
-  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .automation-library { grid-row: 6; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card:has(+ .automation-library) { grid-column: span 5; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card + .automation-library { grid-column: span 7; }
 }
