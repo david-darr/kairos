@@ -47,10 +47,10 @@ function animation(parentElement, animationName = 'rd-rise') {
   await flush();
   assert.ok(!hidden.classList.contains('rd-stagger'), 'Cancelled entrances cannot replay when revealed');
 
-  const classic = container();
-  staggerEntrance(classic);
+  const empty = container();
+  staggerEntrance(empty);
   frames.shift()();
   await flush();
-  assert.ok(!classic.classList.contains('rd-stagger'), 'Hidden, empty, or Classic lists consume their first render too');
+  assert.ok(!empty.classList.contains('rd-stagger'), 'Hidden or empty lists consume their first render too');
   console.log('Settings motion lifecycle checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

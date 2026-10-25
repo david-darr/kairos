@@ -162,14 +162,6 @@ export function renderAppearancePanel(content, _status, page) {
   ]);
   let effectPreviewSource = '', effectPreviewStops = [];
 
-  // Classic look: the opt-out from the redesign, which is the default. Off by
-  // default, saved per user on this device like the rest, applied live (appearance.js).
-  const redesign = toggle({ label: 'Classic look', onChange: (on) => { updateAppearance({ classic: on }); sync(); } });
-  redesign.id = 'appearance-classic';
-  const redesignSection = el('div', { class: 'appearance-classic-setting' }, [
-    group({}, [row({ title: 'Classic look', description: 'Use the previous design instead of the current one. Changes only how Kairos looks.', control: redesign })]),
-  ]);
-
   const controls = new Map();
   function dial(key, title, description) {
     const output = el('output', { for: `appearance-${key}` });
@@ -178,7 +170,7 @@ export function renderAppearancePanel(content, _status, page) {
     input.addEventListener('input', () => { updateAppearance({ [key]: Number(input.value) / 100 }); sync(); });
     let drag = null;
     input.addEventListener('pointerdown', event => {
-      if (key === 'tint' && document.documentElement.classList.contains('kairos-redesign')) return;
+      if (key === 'tint') return;
       if (event.button !== 0) return;
       event.preventDefault(); input.focus(); input.setPointerCapture(event.pointerId);
       drag = { x: event.clientX, y: event.clientY, value: Number(input.value) };
@@ -293,8 +285,7 @@ export function renderAppearancePanel(content, _status, page) {
   if (page) page.actions([reset]);
   else root.append(el('div', { class: 'appearance-heading' }, [el('div', {}, [el('h2', { text: 'Appearance' }),
     el('p', { class: 'meta', text: 'A workspace that feels like yours.' })]), reset]));
-  // Keep the original controls and show/hide owners. These headings and
-  // containers only give the redesign its board layout; Classic keeps its frame.
+  // Group related controls in rows that resize together.
   const modeSection = el('section', { class: 'appearance-background-setting' }, [
     el('h3', { class: 'rd-appearance-label', text: 'Background style' }), modes,
   ]);
@@ -308,9 +299,10 @@ export function renderAppearancePanel(content, _status, page) {
   effectSection.insertBefore(effectControls, pieceRow);
   effectControls.append(pieceRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
   const characterSection = el('div', { class: 'appearance-character-setting' }, [
-    el('h3', { class: 'rd-appearance-label', text: 'Kip and classic look' }), mascotSection, redesignSection,
+    el('h3', { class: 'rd-appearance-label', text: 'Kip' }), mascotSection,
   ]);
-  root.append(previewFrame, modeSection, palette, halftoneSection, effectSection, imageOptions, shaderOptions, chatStyleSection, characterSection, overlaySection, status);
+  const styleRow = el('div', { class: 'appearance-style-row' }, [palette, chatStyleSection]);
+  root.append(previewFrame, modeSection, styleRow, halftoneSection, effectSection, imageOptions, shaderOptions, characterSection, overlaySection, status);
   for (const list of [modes, effectGrid, chatStyles, halftoneSection.querySelector('.appearance-halftone-grid')]) staggerEntrance(list);
   content.replaceChildren(root);
   function sync() {
@@ -340,7 +332,6 @@ export function renderAppearancePanel(content, _status, page) {
       effectPreviewStops = [...effectChoices].map(([effect, { thumb }]) =>
         mountBackgroundEffect(thumb, nextPreviewSource, { effect, preview: true, focusX: .7, focusY: .4 }));
     }
-    redesign.checked = value.classic;
     for (const [slot, { thumb, reset }] of Object.entries(halftoneCards)) {
       const info = value.halftoneSlots[slot];
       thumb.src = halftoneSource(slot);

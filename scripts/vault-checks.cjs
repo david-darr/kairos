@@ -310,19 +310,6 @@ async function run(ctx) {
   ok(await js("![...document.querySelectorAll('.library-vault-reader-actions .btn')].some(b => b.textContent === 'Edit')"), 'a non-admin reads but has no Edit');
   demoState.vaultReadOnly = false;
 
-  // -- The redesign switch off (classic look) ------------------------------------------------
-  if (!phone) {
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ classic: true }))");
-    await navigate('library', { section: 'vault' });
-    await waitFor("!!document.querySelector('.vault-home-grid') && !document.documentElement.classList.contains('kairos-redesign')");
-    await js("[...document.querySelectorAll('.library-vault-note')].find(b => b.querySelector('.vault-row-name')?.textContent === 'Projects').click()");
-    await waitFor("!!document.querySelector('.vault-note-body') && !!document.querySelector('.vault-rail-body')");
-    ok(await js("getComputedStyle(document.querySelector('.library-vault-browser')).display === 'grid' && getComputedStyle(document.querySelector('.vault-rail')).display !== 'none'"), 'switch off: sidebar, reader and rail still lay out');
-    eq(await overflow(), [], 'switch off: no overflow');
-    await capture(label + '-vault-classic');
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ classic: false }))");
-    await waitFor("document.documentElement.classList.contains('kairos-redesign') && !!document.querySelector('.sidebar-settings-btn')");
-  }
   demoState.vault = undefined;
   // Leave the app as the next checks expect it: Home, with the sidebar built.
   await navigate('home');

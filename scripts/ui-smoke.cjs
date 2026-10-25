@@ -428,19 +428,6 @@ app.whenReady().then(async () => {
       console.log('PASS: Home; screenshots: ' + output);
       win.destroy(); server.close(); exitAfterFlush(0); return;
     }
-    // Check the Classic hero before exercising the redesigned Home layout.
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:true}))");
-    await navigate('home');
-    assert.ok(await js("document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-header')) && !document.querySelector('.dashboard-hero').contains(document.querySelector('.dashboard-stats'))"), "Home keeps the header and introduction in one card above the summary strip");
-    // Home's banner is the Kairos figure as halftone (static/js/dither.js): still, no status dot, no motion control.
-    await waitFor("document.querySelector('.dashboard-core')?.classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
-    assert.ok(await js("!document.querySelector('.kairos-sky-image, .kairos-sky-point, .core-motion-toggle, .core-caption, .kairos-mark')"), "Home has no sky scene, dot or motion control");
-    assert.ok(await js("Number(document.querySelector('.dashboard-core').dataset.drawMs) < 400"), "Home banner draws quickly");
-    // Tab summaries use the same Home and Layout paths in both demo and app.
-    // Run early so the feature's screenshots don't depend on unrelated checks.
-    // Keep the original Needs-you expectation in the redesign. Its new hero
-    // and week row are fixed chrome, outside the customizable section order.
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:false}))");
     const tabCardWrites = writes.length;
     await js(`import('/static/js/layout.js').then(m => { const l=m.getLayout(); l.home=m.HOME_SECTIONS.map(s => s.id); l.hiddenHome=[]; m.saveLayout(l); })`);
     await js(`import('/static/js/api.js').then(m => m.api('/api/system/tab-templates/crm', {method:'POST', body:JSON.stringify({enabled:true})}))`);
@@ -515,10 +502,9 @@ app.whenReady().then(async () => {
       console.log('Screenshots: ' + output);
       win.destroy(); server.close(); exitAfterFlush(0); return;
     }
-    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({classic:false}))");
     await require('./patch-chat-forge-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
     await require('./appearance-checks.cjs')({ js, win, waitFor, capture, base, delay });
-    await require('./classic-look-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
+    await require('./appearance-migration-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await mascotOff();  // appearance checks reset Appearance to its defaults
     await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
     await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });

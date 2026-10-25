@@ -348,13 +348,6 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   assert.equal(result.count, 2); assert.equal(result.done, 1); assert.equal(result.cells.length, 168);
   assert.equal(result.cells.filter(c => c === 'b').length, 1);
   assert.equal(activity.activityBins([], 'month', now).cells.every(c => c === 'empty'), true);
-  redesign = false;
-  const classicHost = el('div'); await calendar.render(classicHost);
-  assert.equal(classicHost.querySelectorAll('.cal-weekday')[0].textContent, 'Sun');
-  assert.equal(classicHost.querySelector('.cal-view-switch').children.length, 2);
-  assert.equal(classicHost.querySelectorAll('.cal-day').length, 42);
-  assert.equal(classicHost.querySelector('.cal-single-day'), undefined);
-
   // Cookbook keeps the actual model names, real endpoint and all model actions.
   redesign = true;
   responses = {
