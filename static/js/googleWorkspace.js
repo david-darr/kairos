@@ -12,6 +12,29 @@ const MIME = {
   slides: 'application/vnd.google-apps.presentation',
 };
 const kindOf = file => Object.entries(MIME).find(([, mime]) => mime === file.mimeType)?.[0] || 'file';
+const KIND_LABEL = { folder: 'Folder', sheet: 'Google Sheet', form: 'Google Form', doc: 'Google Doc', slides: 'Google Slides' };
+const extensionOf = file => {
+  const type = kindOf(file);
+  if (type === 'folder') return 'DIR';
+  if (type !== 'file') return type.toUpperCase();
+  return file.name.split('.').length > 1 ? file.name.split('.').pop().toUpperCase() : 'FILE';
+};
+const formatBytes = value => {
+  let size = Number(value || 0), unit = 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${unit ? size.toFixed(size < 10 ? 1 : 0) : size} ${units[unit]}`;
+};
+const shortDate = value => {
+  if (!value) return '';
+  const date = new Date(value), now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+};
+// Phone rows: size for stored files, the Google kind for native ones.
+const kindLabel = file => KIND_LABEL[kindOf(file)] || `${extensionOf(file)} file`;
+const phoneMeta = file => [file.size != null ? formatBytes(file.size) : kindLabel(file), shortDate(file.modifiedTime)].filter(Boolean).join(' · ');
+const phoneDrive = () => document.documentElement.classList.contains('kairos-redesign') && matchMedia('(max-width: 768px)').matches;
 const action = (path, body) => api(`${BASE}${path}`, { method: 'POST', body: JSON.stringify(body) });
 const button = (label, onClick, cls = 'btn') => el('button', { type: 'button', class: cls, text: label,
   onclick: async event => { try { await onClick(event); } catch (error) { toast(error.message || 'Google action failed', 'error'); } },
@@ -130,10 +153,16 @@ function renderDrive(host, status, refreshAll, header) {
   // Creation prompts live in the existing details pane, outside the sheet.
   newMenu.addEventListener('click', event => { if (event.target.closest('button')) newSheet?.close(); }, true);
   rail.append(newMenu, uploadInput);
-  for (const [id, label] of sections) rail.append(button(label, () => {
-    state.section = id; state.parent = null; state.trail = []; state.query = ''; search.value = ''; load();
-  }, 'btn quiet google-section'));
+  const openSection = id => { state.section = id; state.parent = null; state.trail = []; state.query = ''; search.value = ''; load(); };
+  for (const [id, label] of sections) rail.append(button(label, () => openSection(id), 'btn quiet google-section'));
   rail.append(storage);
+  // Phone: the same sections as chips under the account card, plus a
+  // Quick access row of recently viewed files on the My Drive home.
+  const chips = el('div', { class: 'workspace-phone-only drive-section-chips', role: 'group', 'aria-label': 'Drive views' },
+    sections.map(([id, label]) => button(label, () => openSection(id), 'drive-section-chip')));
+  const quickRow = el('div', { class: 'drive-quick-row' });
+  const quick = el('section', { class: 'workspace-phone-only drive-quick', 'aria-label': 'Quick access', hidden: true }, [
+    el('h3', { class: 'drive-group-title', text: 'Quick access' }), quickRow]);
   const gridButton = button('Grid', () => setLayout('grid'));
   const listButton = button('List', () => setLayout('list'));
   function setLayout(layout) {
@@ -148,10 +177,10 @@ function renderDrive(host, status, refreshAll, header) {
     }
   }, 'btn quiet');
   main.append(el('div', { class: 'google-toolbar' }, [search, kind, gridButton, listButton, button('Refresh', () => load())]),
-    breadcrumbs, selectionBar, statusLine,
+    quick, breadcrumbs, selectionBar, statusLine,
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
   host.append(el('div', { class: 'google-account-line' }, [el('strong', { text: status.email || 'Google account' }), disconnect]),
-    el('div', { class: 'google-browser' }, [rail, main]));
+    chips, el('div', { class: 'google-browser' }, [rail, main]));
   header.querySelectorAll('.library-drive-search, .library-drive-options').forEach(node => node.remove());
   const find = button('Search Drive', () => { search.scrollIntoView({ block: 'center' }); search.focus(); }, 'btn workspace-phone-only workspace-round library-drive-search');
   find.setAttribute('aria-label', 'Search Drive'); find.innerHTML = ICONS.search;
@@ -159,9 +188,10 @@ function renderDrive(host, status, refreshAll, header) {
   const options = button('…', () => phoneDetails('Drive options', [rail, main.querySelector('.google-toolbar'), disconnect], options), 'btn workspace-phone-only workspace-round library-drive-options');
   options.setAttribute('aria-label', 'Drive options');
   host.querySelector('.google-account-line').append(options);
+  const usage = el('div', { class: 'drive-storage-meter', hidden: true });
   const account = el('div', { class: 'workspace-phone-only drive-account-copy' }, [
     el('span', { class: 'drive-account-avatar', text: (status.email || 'G').charAt(0).toUpperCase(), 'aria-hidden': 'true' }),
-    el('div', {}, [el('strong', { text: 'Google Drive' }), el('small', { text: status.email || 'Google account' })]),
+    el('div', {}, [el('strong', { text: 'Google Drive' }), el('small', { text: status.email || 'Google account' }), usage]),
     el('span', { class: 'drive-connected-dot', role: 'img', 'aria-label': 'Connected' }),
   ]);
   host.querySelector('.google-account-line').prepend(account);
@@ -169,6 +199,11 @@ function renderDrive(host, status, refreshAll, header) {
     const quota = result.storageQuota || {};
     const gb = value => `${(Number(value || 0) / 1024 ** 3).toFixed(1)} GB`;
     storage.textContent = `${gb(quota.usage)} used${quota.limit ? ` of ${gb(quota.limit)}` : ''}`;
+    // Unlimited plans report no limit, so they get the text without a bar.
+    const share = quota.limit ? Math.min(100, Number(quota.usage || 0) / Number(quota.limit) * 100) : null;
+    usage.replaceChildren(...(share == null ? [] : [el('span', { class: 'drive-storage-bar', 'aria-hidden': 'true' }, [
+      el('i', { style: `width:${share.toFixed(1)}%` })])]), el('small', { text: storage.textContent }));
+    usage.hidden = false;
   }).catch(() => { storage.textContent = 'Storage unavailable'; });
   search.dataset.pageSearch = 'true';
   search.addEventListener('input', () => { state.query = search.value.trim(); state.parent = null; state.trail = []; schedule(); });
@@ -202,9 +237,26 @@ function renderDrive(host, status, refreshAll, header) {
     breadcrumbs.replaceChildren(button(sections.find(([id]) => id === state.section)[1], () => {
       state.parent = null; state.trail = []; load();
     }, 'btn quiet'));
-    state.trail.forEach((item, index) => breadcrumbs.append(el('span', { class: 'meta', text: '›' }),
+    state.trail.forEach((item, index) => breadcrumbs.append(el('span', { class: 'meta google-crumb-sep', text: '›' }),
       button(item.name, () => { state.trail = state.trail.slice(0, index + 1); state.parent = item.id; load(); }, 'btn quiet')));
     rail.querySelectorAll('.google-section').forEach((node, index) => node.setAttribute('aria-current', String(sections[index][0] === state.section)));
+    chips.querySelectorAll('.drive-section-chip').forEach((node, index) => node.setAttribute('aria-pressed', String(sections[index][0] === state.section)));
+  }
+  const quickHome = () => state.section === 'my_drive' && !state.parent && !state.query && state.kind === 'all';
+  async function loadQuick(generation) {
+    if (!quickHome() || !phoneDrive()) { quick.hidden = true; return; }
+    try {
+      const result = await api(`${BASE}/drive/files?${new URLSearchParams({ section: 'recent', kind: 'all' })}`);
+      if (generation !== listGeneration || !host.isConnected) return;
+      const recent = (result.files || []).filter(file => kindOf(file) !== 'folder').slice(0, 10);
+      quickRow.replaceChildren(...recent.map(file => {
+        const tile = button('', () => openFile(file), 'drive-quick-tile');
+        tile.append(el('span', { class: 'drive-quick-type', text: extensionOf(file), 'aria-hidden': 'true' }),
+          el('strong', { text: file.name }), el('small', { text: shortDate(file.modifiedTime) || kindLabel(file) }));
+        return tile;
+      }));
+      quick.hidden = !recent.length;
+    } catch { quick.hidden = true; }
   }
   async function batch(operation) {
     const files = state.files.filter(file => state.selection.has(file.id));
@@ -259,6 +311,10 @@ function renderDrive(host, status, refreshAll, header) {
   }
   function drawFiles() {
     list.replaceChildren();
+    // Folders and files in their own groups: tiles and a card on a phone,
+    // `display: contents` (the one desktop grid) everywhere else.
+    const folders = el('div', { class: 'drive-group drive-folders' });
+    const files = el('div', { class: 'drive-group drive-files' });
     for (const file of state.files) {
       const type = kindOf(file);
       const checkbox = el('input', { type: 'checkbox', 'aria-label': `Select ${file.name}` });
@@ -269,9 +325,8 @@ function renderDrive(host, status, refreshAll, header) {
         } else if (matchMedia('(pointer: coarse)').matches) return openFile(file);
         else return showDetail(file);
       }, 'google-file-open');
-      const extension = type === 'folder' ? 'DIR' : type === 'file' ? (file.name.split('.').length > 1 ? file.name.split('.').pop().toUpperCase() : 'FILE') : type.toUpperCase();
       const thumbnail = el('div', { class: 'google-thumbnail' }, [el('span', { class: 'google-type', text: type.toUpperCase() }),
-        el('span', { class: 'workspace-phone-only drive-file-extension', text: extension })]);
+        el('span', { class: 'workspace-phone-only drive-file-extension', text: extensionOf(file) })]);
       if (file.thumbnailLink && type !== 'folder') {
         const img = el('img', { src: `${BASE}/drive/files/${encodeURIComponent(file.id)}/thumbnail`, alt: '', loading: 'lazy' });
         img.onerror = () => img.remove(); thumbnail.append(img);
@@ -279,14 +334,17 @@ function renderDrive(host, status, refreshAll, header) {
       const date = file.modifiedTime && new Date(file.modifiedTime).toLocaleDateString();
       open.replaceChildren(thumbnail, el('span', { class: 'google-file-copy' }, [el('strong', { text: file.name }),
         el('small', { class: 'drive-desktop-meta', text: [type, date].filter(Boolean).join(' · ') }),
-        el('small', { class: 'workspace-phone-only drive-phone-meta', text: [file.size != null ? `${(Number(file.size) / 1024).toFixed(0)} KB` : type, date].filter(Boolean).join(' · ') })]));
+        el('small', { class: 'workspace-phone-only drive-phone-meta', text: phoneMeta(file) })]));
       open.addEventListener('dblclick', () => openFile(file).catch(error => toast(error.message, 'error')));
       open.addEventListener('keydown', event => {
         if (event.key === 'Enter') { event.preventDefault(); openFile(file).catch(error => toast(error.message, 'error')); }
       });
       checkbox.addEventListener('click', event => selectFile(file, checkbox.checked, event.shiftKey));
       row.addEventListener('contextmenu', event => contextMenu(event, file));
-      row.append(checkbox, open); list.append(row);
+      row.append(checkbox, open); (type === 'folder' ? folders : files).append(row);
+    }
+    for (const [group, title] of [[folders, 'Folders'], [files, 'Files']]) {
+      if (group.childElementCount) list.append(el('h3', { class: 'workspace-phone-only drive-group-title', text: title }), group);
     }
     if (!state.files.length) list.append(el('div', { class: 'library-empty', text: 'No matching Google files.' }));
     drawSelection();
@@ -303,6 +361,7 @@ function renderDrive(host, status, refreshAll, header) {
       state.files = append ? [...state.files, ...(result.files || [])] : (result.files || []);
       state.selection.clear(); state.selectionAnchor = null; state.page = result.nextPageToken || null; more.hidden = !state.page;
       drawFiles(); drawBreadcrumbs();
+      if (!append) loadQuick(generation);
       statusLine.textContent = result.incompleteSearch ? 'Google returned a partial result. Narrow the search.' : '';
     } catch (error) { statusLine.textContent = `Could not load Drive: ${error.message}`; }
   }

@@ -344,6 +344,12 @@ async function run(ctx) {
   await libTab('Google Drive');
   await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && /Search in Drive/.test(document.querySelector('.ms-page-search input')?.placeholder || '')");
   ok(await js("!!document.querySelector('.google-new-menu summary') && !document.querySelector('.google-rail').getClientRects().length"), 'Drive retains New and sections behind header/account controls');
+  // 2026-10-25 (David): My Drive is a browsable home, not a flat list.
+  await waitFor("document.querySelectorAll('.drive-quick-tile').length > 0");
+  ok(await js("[...document.querySelectorAll('.drive-section-chip')].map(b => b.textContent + ':' + b.getAttribute('aria-pressed')).join() === 'My Drive:true,Shared with me:false,Starred:false,Recent:false,Trash:false'"), 'Drive sections are chips under the account card');
+  ok(await js("document.querySelectorAll('.drive-quick-tile').length === 8 && [...document.querySelectorAll('.drive-quick-tile')].every(t => !/^DIR/.test(t.textContent))"), 'Quick access lists recent files, not folders');
+  ok(await js("document.querySelectorAll('.drive-folders .google-file-row').length === 1 && document.querySelectorAll('.drive-files .google-file-row').length === 7"), 'Folders are tiles and files are compact rows');
+  ok(await js("!document.querySelector('.drive-storage-meter').hidden && !!document.querySelector('.drive-storage-bar > i')"), 'The account card shows storage use');
   await js("document.querySelector('.view-header [aria-label=\"Create or upload in Drive\"]').click()");
   ok(await js("!!document.querySelector('dialog.ms-sheet[open] details.google-new-menu[open]') && document.querySelectorAll('dialog.ms-sheet[open] .google-new-actions button').length === 4"), 'Drive + opens all existing New actions in a sheet');
   await shot('library-drive');
