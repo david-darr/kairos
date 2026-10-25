@@ -1420,7 +1420,7 @@ app.whenReady().then(async () => {
           const completedCard = card(completed.title);
           const showDay = start => js(`window._calendarCardScope = '.cal-selected-agenda'; if (!document.documentElement.classList.contains('kairos-redesign')) window._calendarCardScope = '.cal-day-panel'; document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
           const showUpcoming = async () => {
-            await js("window._previousCalendarTitle=document.querySelector('.cal-upcoming .cal-day-panel-title') || document.querySelector('.cal-day-panel-title'); window._calendarCardScope=document.documentElement.classList.contains('kairos-redesign') ? '.cal-upcoming' : '.cal-day-panel'; [...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+            await js("window._previousCalendarTitle=document.querySelector('.cal-upcoming .cal-day-panel-title') || document.querySelector('.cal-day-panel-title'); window._calendarCardScope=document.documentElement.classList.contains('kairos-redesign') ? '.cal-upcoming' : '.cal-day-panel'; [...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
             await waitFor("document.querySelector('.cal-day-panel')?.getAttribute('aria-busy') === 'false' && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')?.textContent==='Next 7 Days'");
           };
           await showUpcoming();
@@ -2157,7 +2157,7 @@ app.whenReady().then(async () => {
     await js("document.startViewTransition = window.__startViewTransition; true");
     const reducedCalendarWrites = writes.length;
     await navigate('calendar');
-    await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+    await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
     await waitFor("[...document.querySelectorAll('.cal-day-panel-title')].some(n=>n.textContent==='Next 7 Days') && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
     await js("{ const c=[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
     await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");

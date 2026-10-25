@@ -79,7 +79,7 @@ export async function render(container) {
     calendarStore.hidden = false; calendarStore._inDialog = true;
     const dialog = openPanelDialog({ title: redesignOn() ? 'Your calendars' : 'Google calendars', body: calendarStore, opener: calendarsBtn,
       owner: container, group: 'calendar-selection', className: 'cal-calendars-dialog',
-      onClose: () => { calendarStore._dialog = null; calendarStore._inDialog = false; calendarStore.hidden = !(redesignOn() && !phoneCalendar() && viewMode === 'month'); (calendarStore.hidden ? left : dayPanel).append(calendarStore); } });
+      onClose: () => { calendarStore._dialog = null; calendarStore._inDialog = false; calendarStore.hidden = true; left.append(calendarStore); } });
     calendarStore._dialog = dialog;
     dialog.panel.classList.add('rd-sheet-in');
     dialog.panel.dataset.view = 'calendar';
@@ -114,7 +114,14 @@ export async function render(container) {
     prevBtn.textContent = '\u2039'; nextBtn.textContent = '\u203a';
     prevBtn.classList.add('cal-period-prev'); nextBtn.classList.add('cal-period-next');
     prevBtn.setAttribute('aria-label', 'Previous period'); nextBtn.setAttribute('aria-label', 'Next period');
-    nav.append(monthLabel, prevBtn, nextBtn, viewSwitch);
+    nav.append(monthLabel, prevBtn, nextBtn);
+    if (phoneCalendar()) nav.append(viewSwitch);
+    else {
+      for (const [button, path] of [[prevBtn, 'm15 6-6 6 6 6'], [nextBtn, 'm9 6 6 6-6 6']]) {
+        button.textContent = '';
+        button.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`);
+      }
+    }
     calendarStore.append(archiveBtn);
     if (phoneCalendar()) calendarStore.append(
       el('button', { type: 'button', class: 'btn', text: 'Previous period', onclick: () => shift(-1) }),
@@ -124,12 +131,16 @@ export async function render(container) {
   const grid = el("div", { class: "cal-grid glass" });
   const phoneDays = el('div', { class: 'cal-phone-days workspace-phone-only', role: 'group', 'aria-label': 'Choose a day' });
   createBar._phoneDays = phoneDays;
-  // Phone has a title row and a range row; desktop owns all controls in one header.
+  // Phone keeps its range row; desktop places the view switch immediately above the grid.
   if (redesignOn()) {
     header.append(createBar);
     createBar.querySelector('button').setAttribute('aria-label', phoneCalendar() ? 'Add' : 'New event');
     if (phoneCalendar()) left.append(header, calendarStore, nav, phoneDays, grid);
-    else { header.append(nav, calendarsBtn, createBar); left.append(header, calendarStore, phoneDays, grid); }
+    else {
+      const gridToolbar = el('div', { class: 'cal-grid-toolbar' }, [viewSwitch]);
+      header.append(nav, calendarsBtn, createBar);
+      left.append(header, calendarStore, phoneDays, gridToolbar, grid);
+    }
   } else {
     left.append(header, createBar, calendarStore, nav, phoneDays, grid);
   }
@@ -264,7 +275,7 @@ async function renderGridContent(monthLabel, grid, createBar, dayPanel) {
   grid.classList.toggle('cal-week-grid', mode !== 'month');
   grid.classList.toggle('cal-single-day', mode === 'day');
   grid.parentElement.dataset.calendarRange = mode;
-  if (createBar._calendarStore && !createBar._calendarStore._inDialog) createBar._calendarStore.hidden = !(redesignOn() && !phoneCalendar() && mode === 'month');
+  if (createBar._calendarStore && !createBar._calendarStore._inDialog) createBar._calendarStore.hidden = true;
   if (createBar._phoneDays) {
     const monday = new Date(viewDay);
     monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
@@ -408,8 +419,6 @@ async function renderDayPanel(dayPanel, date, items, onChange) {
     target.append(el('h3', { class: 'cal-day-count', text: counts[items.length] || `${items.length} events` }));
     dayPanel.append(selected);
     if (viewMode === 'month') {
-      const store = dayPanel._createBar?._calendarStore;
-      if (store && !phoneCalendar() && !store._inDialog) { store.hidden = false; dayPanel.append(store); }
       const upcoming = el('section', { class: 'cal-upcoming' }); upcoming._createBar = dayPanel._createBar;
       dayPanel.append(upcoming);
       upcomingReady = renderUpcomingPanel(upcoming, onChange, () => upcoming.isConnected && dayPanel.querySelector('.cal-upcoming') === upcoming);
