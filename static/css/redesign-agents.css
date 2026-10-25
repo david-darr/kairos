@@ -500,3 +500,8 @@
   .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page .agent-conversation-topbar, .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { align-items: flex-start; }
   .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { height: 46px; }
 }
+
+/* -- Desktop agent conversation (David, 2026-10-25) -- the "..." button is gone; its four places are the tabs and the conversation list is the left rail. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-more, .kairos-redesign[data-view=agents] .agents-messenger .agent-more-menu { display: none; }
+}
