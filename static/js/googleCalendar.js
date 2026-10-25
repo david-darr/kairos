@@ -206,16 +206,25 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
         row.querySelector('label').textContent = label;
         const date = el('input', { type: 'date', required: true, 'aria-label': `${label} date` });
         const time = el('input', { type: 'time', required: true, 'aria-label': `${label} time` });
-        const values = el('div', { class: 'cal-date-pills' }, [date, time]);
+        const dateText = el('span', { 'aria-hidden': 'true' });
+        const timeText = el('span', { 'aria-hidden': 'true' });
+        const datePill = el('span', { class: 'cal-native-pill' }, [dateText, date]);
+        const timePill = el('span', { class: 'cal-native-pill' }, [timeText, time]);
+        const values = el('div', { class: 'cal-date-pills' }, [datePill, timePill]);
         input.hidden = true; row.append(values);
-        const change = () => { input.value = allDay.checked ? date.value : `${date.value}T${time.value}`; };
+        const updateText = () => {
+          dateText.textContent = date.value ? new Date(`${date.value}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Date';
+          timeText.textContent = time.value ? new Date(`2000-01-01T${time.value}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Time';
+        };
+        const change = () => { input.value = allDay.checked ? date.value : `${date.value}T${time.value}`; updateText(); };
         date.onchange = time.onchange = change;
-        pills.push({ input, date, time });
+        pills.push({ input, date, time, timePill, updateText });
       }
       syncPills = () => {
-        for (const { input, date, time } of pills) {
+        for (const { input, date, time, timePill, updateText } of pills) {
           date.value = input.value.slice(0, 10); time.value = input.value.slice(11, 16);
           time.hidden = allDay.checked; time.disabled = allDay.checked;
+          timePill.hidden = allDay.checked; updateText();
         }
         endLabel.textContent = allDay.checked ? 'Ends (exclusive)' : 'Ends';
       };
