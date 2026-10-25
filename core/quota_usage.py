@@ -3,7 +3,8 @@
 Claude Code's OAuth usage URL is undocumented and can change. Codex uses the
 documented app-server rate-limit request. Both represent account allowances,
 not per-model or per-endpoint usage. API/local endpoints only have JARVIS's
-recorded lifetime token totals, so they are deliberately a separate section.
+own recorded token counts, so each model entry carries those separately from
+any provider quota (David, 2026-10-25: every connected model is listed).
 """
 import asyncio
 import json
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from core import model_endpoints, token_usage
+from core import model_endpoints, model_marks, token_usage
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 REFRESH_SECONDS = 300
@@ -42,12 +43,17 @@ class RefreshThrottled(RuntimeError):
     """A forced refresh arrived sooner than FORCED_REFRESH_SECONDS."""
 
 
+class NoQuotaReported(RuntimeError):
+    """The CLI answered but reports no usage limits (older Antigravity builds)."""
+
+
 # Fixed wording only. Exceptions from HTTP and subprocesses can carry URLs or
 # account data, so none of their text ever reaches the response.
 NOTES = {
     "needs_sign_in": "Sign-in has expired or is missing. Open the CLI once to renew it.",
     "rate_limited": "The provider asked for a pause. Retrying shortly.",
     "unavailable": "Usage could not be read right now.",
+    "no_quota": "This CLI does not report usage limits.",
 }
 
 
@@ -211,6 +217,13 @@ def _provider(name, reader, force=False):
                  "updated_at": time.time(), "stale": False}
         _cache[name] = {"checked": now, "value": value}
         return value
+    except NoQuotaReported:
+        # A settled answer, not a failure: cached like a reading so the CLI is
+        # not asked again on every poll.
+        value = {"provider": name, "status": "no_quota", "note": NOTES["no_quota"], "windows": [],
+                 "updated_at": time.time(), "stale": False}
+        _cache[name] = {"checked": now, "value": value}
+        return value
     except SignInNeeded:
         # Sign-in problems are not retried on a timer: nothing changes until
         # the person signs in again, which the next ordinary poll will see.
@@ -252,7 +265,7 @@ def _antigravity_windows():
     from core.antigravity_cli import find_antigravity, run_readonly, auth_error
     executable = find_antigravity()
     if not executable:
-        return []
+        raise RuntimeError("Antigravity CLI is unavailable")
     # CLI-owned report, never a model turn. Slash reports cannot be sent to
     # the streaming conversation process.
     code, out, err = run_readonly(executable, '-p', '/usage', '--output-format', 'json',
@@ -260,34 +273,66 @@ def _antigravity_windows():
     if auth_error(err):
         raise SignInNeeded()
     if code:
-        return []
+        raise RuntimeError("Antigravity usage report failed")
     try:
-        return parse_antigravity_limits(json.loads(out))
+        windows = parse_antigravity_limits(json.loads(out))
     except ValueError:
-        return []
+        windows = []
+    if not windows:
+        raise NoQuotaReported()
+    return windows
 
 
 READERS = {"claude": ("claude_cli", lambda: _claude_windows()), "codex": ("codex_cli", lambda: _codex_windows()),
            "antigravity": ("antigravity_cli", lambda: _antigravity_windows())}
 
 
+# Subscriptions first (in READERS order), then local models, then APIs.
+KIND_ORDER = {"claude_cli": 0, "codex_cli": 1, "antigravity_cli": 2, "local": 3, "api": 4}
+# What a provider reading says about the connection itself. A quota that could
+# not be read is "unavailable"; a stale or rate-limited one proves the sign-in works.
+MODEL_STATUS = {"ok": "connected", "stale": "connected", "rate_limited": "connected", "no_quota": "connected",
+                "needs_sign_in": "needs_sign_in", "unavailable": "unavailable"}
+
+
+def _model_entry(endpoint, reading, totals, recent):
+    """One connected model: who it is, its account quota when the provider
+    reports one, and the tokens JARVIS itself recorded through it. Never the
+    endpoint's URL or key state."""
+    total = totals.get(endpoint["id"], {})
+    period = recent.get(endpoint["id"], {})
+    return {
+        "id": endpoint["id"], "name": endpoint["name"], "kind": endpoint["kind"], "model": endpoint.get("model") or "",
+        "mark": model_marks.mark_for(endpoint),
+        "provider": reading["provider"] if reading else None,
+        "status": MODEL_STATUS.get(reading["status"], "unavailable") if reading else "connected",
+        "quota": reading,
+        # Fresh tokens (new input, cache writes, output); cache reads are cheap
+        # re-reads and stay out, as on Home. Lifetime includes pre-split totals.
+        "recorded": {"today_tokens": period.get("today_tokens", 0), "week_tokens": period.get("week_tokens", 0),
+                     "total_tokens": total.get("fresh_tokens", 0) + total.get("unsplit_tokens", 0)},
+    }
+
+
 def get_usage_overlay(force_provider=None):
-    """Readings for every subscription CLI endpoint that is connected.
+    """Readings for every subscription CLI endpoint that is connected, and
+    every connected model with its quota or recorded usage.
     `force_provider` refreshes that one now (raises RefreshThrottled if it was
     read moments ago); the rest come from cache as usual."""
     endpoints = model_endpoints.list_endpoints()
     kinds = {endpoint["kind"] for endpoint in endpoints}
-    providers = []
+    readings, providers = {}, []
     for name, (kind, reader) in READERS.items():
         if kind in kinds:
             reading = _provider(name, reader, force=(name == force_provider))
+            readings[kind] = reading
+            # Only a provider with windows gets a ring; every model is in `models`.
             if name != 'antigravity' or reading.get('windows'):
                 providers.append(reading)
-    totals = token_usage.get_usage_summary()
-    recorded = [{"name": ep["name"], "kind": ep["kind"],
-                 "total_tokens": totals.get(ep["id"], {}).get("total_tokens")}
-                for ep in endpoints if ep["kind"] in ("api", "local")]
-    return {"providers": providers, "recorded": recorded}
+    totals, recent = token_usage.get_usage_summary(), token_usage.get_recent_usage()
+    models = [_model_entry(endpoint, readings.get(endpoint["kind"]), totals, recent)
+              for endpoint in sorted(endpoints, key=lambda e: KIND_ORDER.get(e["kind"], len(KIND_ORDER)))]
+    return {"providers": providers, "models": models}
 
 
 async def get_usage_overlay_async(force_provider=None):

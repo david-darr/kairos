@@ -28,10 +28,23 @@ function quota() {
       { name: '5-hour', used_percent: 24, resets_at: now + 3600 * 2 },
       { name: 'Weekly', used_percent: 61, resets_at: now + 86400 * 3 },
     ] };
-  return { providers: [claude, { provider: 'codex', status: 'ok', stale: false, note: '', updated_at: now, windows: [
+  const codex = { provider: 'codex', status: 'ok', stale: false, note: '', updated_at: now, windows: [
     { name: '5-hour', used_percent: 86, resets_at: now + 1500 },
     { name: 'Weekly', used_percent: 12, resets_at: now + 86400 * 5 },
-  ] }], recorded: [] };
+  ] };
+  const none = { today_tokens: 0, week_tokens: 0, total_tokens: 0 };
+  // Every connected model, as core/quota_usage.py lists them: subscriptions, then local, then API.
+  const models = [
+    { id: 'c1', name: 'Claude', kind: 'claude_cli', model: '', mark: 'claude', provider: 'claude', status: claudeStatus === 'ok' ? 'connected' : claudeStatus, quota: claude, recorded: none },
+    { id: 'x1', name: 'Codex', kind: 'codex_cli', model: '', mark: 'openai', provider: 'codex', status: 'connected', quota: codex, recorded: none },
+    { id: 'g1', name: 'Antigravity', kind: 'antigravity_cli', model: '', mark: 'gemini', provider: 'antigravity', status: 'connected',
+      quota: { provider: 'antigravity', status: 'no_quota', stale: false, note: 'This CLI does not report usage limits.', windows: [], updated_at: now },
+      recorded: { today_tokens: 2100, week_tokens: 8400, total_tokens: 8400 } },
+    { id: 'l1', name: 'qwen3', kind: 'local', model: 'qwen3:8b', mark: 'qwen', provider: null, status: 'connected', quota: null,
+      recorded: { today_tokens: 12000, week_tokens: 30000, total_tokens: 90000 } },
+    { id: 'a1', name: 'Grok', kind: 'api', model: 'grok-4', mark: 'grok', provider: null, status: 'connected', quota: null, recorded: none },
+  ];
+  return { providers: [claude, codex], models };
 }
 const files = {
   '/usage-overlay': ['static/usage-overlay.html', 'text/html'],
@@ -204,6 +217,8 @@ async function run() {
     await move(-1, -1); await delay(550);
     const size = () => js("(r => [Math.round(r.width), Math.round(r.height), Math.round(r.top), Math.round(r.left + r.width / 2)])(document.getElementById('notch-shell').getBoundingClientRect())");
     // Collapsed (NotchCollapsed): 40 DIP tall, as wide as its contents, centred and flush with the top.
+    // The two rings and "+3" for the models without one.
+    assert.equal(await js("document.querySelector('#notch-usage .n-models')?.textContent"), '+3');
     const collapsed = async () => { const [w, h, t, c] = await size(); assert.ok(h === 40 && t === 0 && w >= 120 && w <= 480 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'collapsed ' + JSON.stringify([w, h, t, c, await js('[innerWidth, document.getElementById("notch-usage").outerHTML.slice(0,300), document.getElementById("notch-shell").dataset.state, document.getElementById("pill").dataset.cells]')])); };
     await collapsed();
     fs.writeFileSync(path.join(output, `notch-collapsed-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
@@ -211,6 +226,26 @@ async function run() {
     // Expanded (NotchWorking): 820 DIP wide; the status row and the cards set the height.
     { const [w, h, t, c] = await size(); assert.ok(w === 820 && h >= 150 && h <= 220 && t === 0 && Math.abs(c - await js('innerWidth / 2')) <= 1, 'expanded ' + JSON.stringify([w, h, t, c])); }
     fs.writeFileSync(path.join(output, `notch-expanded-${zoom}.png`), (await win.webContents.capturePage()).toPNG());
+    // Every connected model is in the status row: three readings and "+2", all inside the notch.
+    assert.deepEqual(await js("[...document.querySelectorAll('#notch-readings .n-word')].map(n => n.textContent)"),
+      ['Claude sign in', 'Codex 5h 86%', 'Antigravity 2.1K tokens today', '+2'], 'status row lists every model (Claude was signed out above)');
+    assert.ok(await js("(s => [...document.querySelectorAll('#notch-readings .n-word')].every(n => { const r = n.getBoundingClientRect(); return r.width > 0 && r.left >= s.left && r.right <= s.right; }))(document.getElementById('notch-shell').getBoundingClientRect())"), 'readings stay inside the notch');
+    if (zoom === 1) {
+      const at = async selector => js(`(r => [r.left + r.width / 2, r.top + r.height / 2])(document.querySelector('${selector}').getBoundingClientRect())`);
+      const agy = await at('#notch-readings [data-p=antigravity]');
+      await move(agy[0], agy[1]);
+      await waitFor("document.getElementById('card').classList.contains('show') && /Antigravity Usage/.test(document.getElementById('card').innerText)");
+      assert.match(await js("document.getElementById('card').innerText"), /This week\s+8\.4K tokens/);
+      await delay(250); fs.writeFileSync(path.join(output, 'notch-card-antigravity.png'), (await win.webContents.capturePage()).toPNG());
+      const more = await at('#notch-readings [data-p=all]');
+      await move(more[0], more[1]);
+      await waitFor("/^Models/.test(document.getElementById('card').innerText)");
+      const all = await js("document.getElementById('card').innerText");
+      for (const line of [/Claude\s+sign in/, /Codex\s+5h 86%/, /Antigravity\s+2\.1K tokens today/, /qwen3\s+12K tokens today/, /Grok\s+no usage yet/]) assert.match(all, line);
+      assert.ok(await js("(r => r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight)(document.getElementById('card').getBoundingClientRect())"), 'the card stays within the window');
+      await delay(250); fs.writeFileSync(path.join(output, 'notch-card-all-models.png'), (await win.webContents.capturePage()).toPNG());
+      await move(430, 15);
+    }
     await move(-1, -1); await delay(550);
     assert.equal(interactive.at(-1), false, 'outside notch is click-through');
     await collapsed();

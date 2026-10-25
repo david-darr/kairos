@@ -10,10 +10,11 @@
    hot-rectangle reporting became one signal - is the pointer over the notch -
    which electron/main.js turns into click-through everywhere else.
 
-   Only two providers get a ring, Claude and Codex, because only a
-   subscription has a quota to draw. Readings come from core/quota_usage.py.
+   Only a subscription that reports a quota gets a ring. The top-centre notch
+   also lists every other connected model with the tokens Kairos counted
+   through it (David, 2026-10-25). Readings come from core/quota_usage.py.
 */
-import { PROVIDERS, SIGN_IN, toSnap, toneOf, pctText, usedCopy, resetCopy, ago, staleOf } from './quotaReadings.js';
+import { PROVIDERS, SIGN_IN, toSnap, toneOf, pctText, usedCopy, resetCopy, ago, staleOf, modelGroups, compactTokens, shortReading } from './quotaReadings.js';
 const bridge = window.usageOverlay || {};
 
 /* Colour ramp: CodeNotch's three steps, in the notch's Kairos tones (usage-overlay.css :root) */
@@ -31,13 +32,16 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s || 
    CodeNotch's shape. */
 // A mark is drawn as a mask in the current text colour, so it is white on the
 // pill like CodeNotch's, and no SVG markup is ever put into the page.
-function markHtml(mark) { return `<span class="mark" style="--mark:url('/static/img/model-marks/${mark}.svg')"></span>`; }
+// A model with no known logo (mark null) gets none.
+function markHtml(mark) { return /^[a-z0-9-]+$/.test(mark || '') ? `<span class="mark" style="--mark:url('/static/img/model-marks/${mark}.svg')"></span>` : ''; }
 let snaps = {};  // provider id -> CodeNotch-shaped snapshot
+let groups = [];  // every connected model (quotaReadings.js modelGroups)
 
 function applyReadings(data) {
   const next = {};
   for (const p of (data && data.providers) || []) next[p.provider] = toSnap(p);
   snaps = next;
+  groups = modelGroups((data && data.models) || []);
   renderRing();
   if (card.classList.contains('show')) renderCard();
 }
@@ -93,12 +97,36 @@ function renderRing() {
     glyph.classList.toggle('dim', !!(h && h.used >= 1));
     wrap.classList.toggle('stale', staleOf(p.snap));
   }
-  notchShell?.readings(ps);
+  notchShell?.readings(ps, groups);
   updateInteractive();
+}
+
+// A model without a provider quota: what Kairos counted through it.
+function tokensCardHtml(group) {
+  const r = group.recorded, snap = group.snap;
+  let html = `<div class="c-head">${markHtml(group.mark)}<span class="c-title">${esc(group.name + ' Usage')}</span></div>`;
+  if (group.detail) html += `<div class="c-sub">${esc(group.detail)}</div>`;
+  if (group.status === 'needs_sign_in') html += `<div class="c-note">${esc(SIGN_IN[group.provider] || '')}</div>`;
+  else if (snap?.note) html += `<div class="c-note">${esc(snap.note)}</div>`;
+  for (const [label, value] of [['Today', r.today], ['This week', r.week], ['All time', r.total]]) {
+    html += `<div class="w-row t-row"><span class="w-label">${label}</span><span class="w-reset">${esc(value ? compactTokens(value) + ' tokens' : 'None')}</span></div>`;
+  }
+  return html + '<div class="c-note">Counted by Kairos. Not a quota.</div>';
+}
+// The "+N" word: every connected model, one line each.
+function allModelsHtml() {
+  return `<div class="c-head"><span class="c-title">Models</span></div>` + groups.map(g => `<div class="w-row t-row">
+    <span class="w-label">${markHtml(g.mark)}${esc(g.name)}</span><span class="w-reset">${esc(shortReading(g))}</span></div>`).join('');
 }
 
 let hoverId = 'claude';
 function renderCard() {
+  if (notchEdge === 'top-centre' && (hoverId === 'all' || !providers().some(x => x.id === hoverId))) {
+    const group = groups.find(g => g.id === hoverId);
+    if (hoverId !== 'all' && !group) { hideCard(); return; }
+    card.innerHTML = group ? tokensCardHtml(group) : allModelsHtml();
+    placeCard(); return;
+  }
   const p = providers().find(x => x.id === hoverId) || providers()[0];
   if (!p) { hideCard(); return; }
   const snap = p.snap;
@@ -408,7 +436,7 @@ Promise.resolve(bridge.getConfig ? bridge.getConfig() : null).then(applyConfig).
 async function refresh() {
   try {
     const response = await fetch('/api/models/quotas', { credentials: 'same-origin', cache: 'no-store' });
-    if (response.status === 401 || response.status === 403) { snaps = {}; renderRing(); hideCard(); return; }
+    if (response.status === 401 || response.status === 403) { snaps = {}; groups = []; renderRing(); hideCard(); return; }
     if (!response.ok) throw new Error('unavailable');
     applyReadings(await response.json());
   } catch {

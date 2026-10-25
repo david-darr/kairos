@@ -369,9 +369,9 @@
   .kairos-redesign .hm-home [data-home-section="models"] > .dashboard-section-body { padding: 18px; }
 }
 
-/* Provider identity and diagnostic/accounting copy stay within the usage card. */
+/* Model identity, diagnostics and recorded tokens stay within the usage card. */
 .kairos-redesign .hm-home .rd-usage-provider h3 { display: flex; align-items: center; gap: 8px; }
-.kairos-redesign .hm-home :is(.rd-usage-note, .rd-usage-accounting) { overflow-wrap: anywhere; }
+.kairos-redesign .hm-home :is(.rd-usage-note, .rd-usage-tokens) { overflow-wrap: anywhere; }
 
 /* HomeFull / HomeClear phone root, with its two board header actions. */
 .kairos-redesign :is(.hm-phone-settings, .hm-phone-notifications, .hm-phone-customize) { display: none; }

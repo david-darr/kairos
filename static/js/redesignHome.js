@@ -4,7 +4,6 @@ import { createMascot } from "./mascot.js";
 import { ICONS } from "./icons.js";
 import { subscribeActivity } from "./redesignShell.js";
 import { dotMatrix, pill, usageCard } from "./kairosParts.js";
-import { toSnap } from "./quotaReadings.js";
 import { openNotifications } from './mobileActions.js';
 import { getLayout, saveLayout, homeLayout, knownHomeCards, HOME_SECTIONS } from "./layout.js";
 
@@ -192,10 +191,10 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
         ...(busiest ? [el('span', { class: 'hm-busiest', text: 'Busiest: ' + busiest })] : [])]));
   }
   function drawUsage() {
-    const providers = (data().quotas?.providers || []).filter(p => { const snap = toSnap(p); return snap.windows.length || snap.status === 'needsAuth'; });
-    const accounting = data().modelAccounting || [];
-    models.panel.hidden = !providers.length && !accounting.length;
-    models.body.replaceChildren(...(!models.panel.hidden ? [usageCard({ providers, accounting })] : []));
+    // Every connected model, with its quota or the tokens Kairos counted.
+    const list = data().quotas?.models || [];
+    models.panel.hidden = !list.length;
+    models.body.replaceChildren(...(list.length ? [usageCard({ models: list })] : []));
   }
   function hasItems(id) {
     if (id === 'needs') return activity.need.length > 0;
@@ -376,7 +375,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     if (!active || disposed) return;
     if (key === 'auth') drawGreeting();
     if (key === 'week') drawWeek();
-    if (['quotas', 'usage', 'endpoints'].includes(key)) drawUsage();
+    if (key === 'quotas') drawUsage();
     if (key === 'agents') drawActivity();
     rearrange();
   }, dispose() {

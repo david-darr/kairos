@@ -1,6 +1,7 @@
-// Account usage limits (Claude Code and Codex), read and worded once for the
-// two places that show them: the desktop usage overlay (usage-overlay.js)
-// and Home's "Your models" panel (views/home.js, David 2026-10-07). The
+// Account usage limits (Claude Code, Codex, Antigravity) and every connected
+// model's recorded tokens, read and worded once for the places that show
+// them: the desktop usage overlay and notch (usage-overlay.js, notchShell.js)
+// and Home's "Model usage" card (kairosParts.js, David 2026-10-07). The
 // readings come from core/quota_usage.py through /api/models/quotas as
 // {provider, status, windows:[{name, used_percent, resets_at (unix s)}],
 // updated_at, note}; toSnap() turns one into the shape both pages use:
@@ -31,6 +32,57 @@ export function toSnap(p) {
     note: p.note || '',
   };
 }
+
+// Every connected model, as Home's card and the notch list them (David,
+// 2026-10-25): /api/models/quotas `models` is one entry per endpoint, already
+// ordered subscriptions, local, API. Endpoints on one subscription share its
+// account quota, so they become one group; every other model is its own.
+// `snap` is the provider's reading (null for local/API), and `recorded` the
+// fresh tokens Kairos itself counted: today, this week (from Monday), all time.
+const KIND_WORD = { local: 'Local', api: 'API' };
+export function modelGroups(models = []) {
+  const groups = [];
+  for (const m of models) {
+    const provider = PROVIDERS.find(p => p.id === m.provider);
+    const id = provider ? provider.id : 'model:' + m.id;
+    let group = groups.find(g => g.id === id);
+    if (!group) {
+      group = { id, provider: provider?.id || null, name: provider?.name || m.name, mark: provider?.mark || m.mark,
+        kind: m.kind, detail: KIND_WORD[m.kind] ? [KIND_WORD[m.kind], m.model].filter(Boolean).join(' · ') : '',
+        status: m.status, snap: m.quota ? toSnap(m.quota) : null, recorded: { today: 0, week: 0, total: 0 } };
+      groups.push(group);
+    }
+    group.recorded.today += m.recorded?.today_tokens || 0;
+    group.recorded.week += m.recorded?.week_tokens || 0;
+    group.recorded.total += m.recorded?.total_tokens || 0;
+  }
+  return groups;
+}
+export function compactTokens(n) {
+  for (const [size, unit] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (n >= size) return (n / size).toFixed(1).replace(/\.0$/, '') + unit;
+  return String(n);
+}
+// What Kairos counted through a model. Days before daily counting began are
+// not guessed: an older total is named as such.
+export function tokensCopy({ today, week, total }) {
+  if (week) return `${compactTokens(week)} tokens this week · ${compactTokens(today)} today`;
+  if (total) return `None this week · ${compactTokens(total)} tokens in all`;
+  return 'No usage yet';
+}
+// A group's reading in a few words, for the notch's status row: the provider's
+// headline window, else what Kairos counted.
+const WINDOW_WORD = { session: '5h', weekly: 'wk' };
+export function shortReading(group) {
+  if (group.status === 'needs_sign_in') return 'sign in';
+  const windows = group.snap?.windows || [];
+  const head = windows.find(w => w.id === 'session') || windows[0];
+  if (head) return `${WINDOW_WORD[head.id] ? WINDOW_WORD[head.id] + ' ' : ''}${pctText(head.used)}%`;
+  const { today, week } = group.recorded;
+  if (today) return `${compactTokens(today)} tokens today`;
+  if (week) return `${compactTokens(week)} tokens this week`;
+  return group.status === 'unavailable' ? 'unavailable' : 'no usage yet';
+}
+export const TOKENS_TITLE ='Tokens this Kairos install sent and received through this model: new input, cache writes and output. Not a quota.';
 
 // CodeNotch's three steps: ample below half, watch from half, critical from 80%.
 export const toneOf = f => f >= 0.8 ? 'crit' : f >= 0.5 ? 'watch' : 'ample';

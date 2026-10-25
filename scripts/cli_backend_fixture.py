@@ -60,7 +60,7 @@ async def _scripted_quotas(force_provider=None):
     return {"providers": [{"provider": "claude", "status": "ok", "note": "", "stale": False,
                            "windows": [{"name": "5-hour", "used_percent": 35.0, "resets_at": time.time() + 3 * 3600},
                                        {"name": "weekly", "used_percent": 12.0, "resets_at": time.time() + 5 * 86400}]}],
-            "recorded": []}
+            "models": []}
 
 
 model_discovery.list_for_endpoint = _local_catalog

@@ -91,7 +91,8 @@ async def get_usage(user: str = Depends(require_admin)) -> dict:
 
 @router.get("/quotas")
 async def get_quotas(user: str = Depends(require_admin)) -> dict:
-    """Account quota windows plus separately labeled JARVIS token totals."""
+    """Account quota windows (`providers`) and every connected model with its
+    quota or JARVIS-recorded tokens (`models`); see core/quota_usage.py."""
     return await quota_usage.get_usage_overlay_async()
 
 

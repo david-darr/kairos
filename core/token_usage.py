@@ -11,12 +11,18 @@ convention as every other simple counter store in this project.
 """
 import os
 import time
+from datetime import date, timedelta
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.runs import Usage, normalize_usage
 
 USAGE_FILE = os.path.join(DATA_DIR, "token_usage.json")
+# Fresh tokens per local day, so Home and the notch can say "today" and "this
+# week" (David, 2026-10-25). Kept apart from the lifetime totals above, whose
+# format other readers rely on; only the last DAILY_KEEP_DAYS days are kept.
+DAILY_FILE = os.path.join(DATA_DIR, "token_usage_daily.json")
+DAILY_KEEP_DAYS = 14
 
 
 def _extract_total_tokens(usage: dict) -> int:
@@ -123,6 +129,38 @@ def record_usage(endpoint_id: str, usage: "Usage | dict | None") -> None:
     entry["fresh_tokens"] += max(total - cache_read, 0)
     data[endpoint_id] = entry
     write_json_atomic(USAGE_FILE, data)
+    fresh = max(total - cache_read, 0)
+    if fresh:
+        _record_day(endpoint_id, fresh)
+
+
+def _record_day(endpoint_id: str, tokens: int) -> None:
+    today = date.today()
+    cutoff = (today - timedelta(days=DAILY_KEEP_DAYS)).isoformat()
+    data = {day: totals for day, totals in read_json(DAILY_FILE, {}).items()
+            if day >= cutoff and isinstance(totals, dict)}
+    totals = data.setdefault(today.isoformat(), {})
+    totals[endpoint_id] = int(totals.get(endpoint_id) or 0) + tokens
+    write_json_atomic(DAILY_FILE, data)
+
+
+def get_recent_usage(today: date | None = None) -> dict[str, dict]:
+    """{endpoint_id: {"today_tokens", "week_tokens"}} - fresh tokens (cache
+    reads excluded, as on Home) recorded on this machine's local today and
+    since Monday, the week Home's "This week" card uses. Days before this
+    tracking began are simply absent, never estimated from lifetime totals."""
+    today = today or date.today()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    recent: dict[str, dict] = {}
+    for day, totals in read_json(DAILY_FILE, {}).items():
+        if day < monday or day > today.isoformat() or not isinstance(totals, dict):
+            continue
+        for endpoint_id, tokens in totals.items():
+            entry = recent.setdefault(endpoint_id, {"today_tokens": 0, "week_tokens": 0})
+            entry["week_tokens"] += int(tokens or 0)
+            if day == today.isoformat():
+                entry["today_tokens"] += int(tokens or 0)
+    return recent
 
 
 def get_usage_summary() -> dict[str, dict]:
