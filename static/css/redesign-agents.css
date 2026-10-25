@@ -574,3 +574,9 @@
 @media (min-width: 769px) and (prefers-reduced-motion: reduce) {
   .kairos-redesign[data-view=agents] .agents-messenger .agent-tabs::before { transition: none; }
 }
+
+/* The phone's info panel keeps showing the model as one plain line, as it did before the desktop got its own card. */
+@media (max-width: 768px) {
+  .kairos-redesign .agent-model-panel { padding: 0 16px; background: none; border: 0; box-shadow: none; }
+  .kairos-redesign .agent-model-panel :is(.title, .agent-model-change) { display: none; }
+}
