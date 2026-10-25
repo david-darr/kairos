@@ -16,6 +16,7 @@ import { api, el } from "./api.js";
 
 import { mobileOn } from './mobileShared.js';
 import { mountSheetSurface } from './mobileSheet.js';
+import { ICONS } from './icons.js';
 
 let open = null;
 document.addEventListener('kairos:permission-closed', event => {
@@ -82,7 +83,7 @@ export function showPermissionPrompt(request, onAnswered, options = {}) {
     copy.append(head.querySelector('h2'), tool);
     head.prepend(shield);
     dialog.querySelector('.permission-args').open = true;
-    const close = el('button', { type: 'button', class: 'ms-sheet-close', text: '×', 'aria-label': 'Close', onclick: () => dialog.close() });
+    const close = el('button', { type: 'button', class: 'ms-sheet-close', 'aria-label': 'Close', onclick: () => dialog.close() }); close.innerHTML = ICONS.close;
     dialog.querySelector('.permission-head').append(close);
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;

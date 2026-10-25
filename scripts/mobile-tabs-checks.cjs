@@ -885,6 +885,45 @@ async function run(ctx) {
   await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
   await js("document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click()");
   await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')"); eq(1, 1, 'The grabber click still closes after a swipe');
+  // ---- R. Every round button centres its glyph (2026-10-25, David) ---------------------
+  // Measures the drawn ink of each visible round button's icon (the SVG's content box mapped to the screen)
+  // against the button's own box; a text glyph or generated-content icon cannot be centred reliably, so it fails.
+  const roundOffenders = () => js(`(() => {
+    const visible = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && !n.closest('[hidden], [inert]');
+    const found = [];
+    for (const b of document.querySelectorAll('button, a[role=button], [role=button], summary')) {
+      if (!visible(b)) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width < 28 || r.width > 64 || Math.abs(r.width - r.height) > 3) continue;
+      const style = getComputedStyle(b), radius = parseFloat(style.borderTopLeftRadius) || 0;
+      if (radius < r.width / 2 - 2 && !style.borderTopLeftRadius.includes('%')) continue;
+      const name = (b.getAttribute('aria-label') || b.title || b.textContent.trim() || b.className).toString().slice(0, 40);
+      const svg = [...b.querySelectorAll('svg')].find(visible);
+      const generated = ['::before', '::after'].map(p => getComputedStyle(b, p).content).filter(c => c && c !== 'none' && c !== 'normal' && c !== '""' && c !== "''");
+      const text = parseFloat(style.fontSize) > 0 ? [...b.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('') : '';
+      if (!svg) {
+        if ((text.length === 1 && text.toLowerCase() !== text.toUpperCase()) || b.querySelector('img, canvas, [class*=avatar], [class*=initial]')) continue;
+        if (generated.length || (text && !/[A-Za-z]{3}/.test(text))) found.push({ name, why: 'text or generated glyph', text, generated });
+        continue;
+      }
+      let box;
+      try { const g = svg.getBBox(), m = svg.getScreenCTM(); const p = new DOMPoint(g.x + g.width / 2, g.y + g.height / 2).matrixTransform(m); box = { x: p.x, y: p.y }; }
+      catch { const q = svg.getBoundingClientRect(); box = { x: (q.left + q.right) / 2, y: (q.top + q.bottom) / 2 }; }
+      const dx = box.x - (r.left + r.right) / 2, dy = box.y - (r.top + r.bottom) / 2;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1 || text) found.push({ name, why: text ? 'stray text beside the icon' : 'icon off centre', dx: +dx.toFixed(2), dy: +dy.toFixed(2), text });
+    }
+    return found;
+  })()`);
+  const roundTabs = [['home', {}], ['chat', {}], ['agents', {}], ['calendar', {}], ['notes', {}], ['library', { section: 'documents' }], ['tasks', {}], ['tool-store', {}], ['cookbook', {}], ['email', {}], ['school', {}]];
+  for (const [tab, opts] of roundTabs) {
+    await navigate(tab, opts); await delay(700);
+    eq(await roundOffenders(), [], tab + ' round buttons centre their icons');
+    if (tab === 'notes' || tab === 'chat') await shot('round-buttons-' + tab);
+  }
+  await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
+  eq(await roundOffenders(), [], 'The More sheet round buttons centre their icons');
+  await js("document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click()"); await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')");
+
   await resize(390, 844);
 
   return { assertions };
