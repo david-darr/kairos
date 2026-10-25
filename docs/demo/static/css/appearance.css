@@ -13,10 +13,8 @@
 :root:not([data-appearance='default'])[data-appearance] .cal-day.selected { background: var(--surface-2); }
 :root:is([data-appearance='image'],[data-appearance='shader']) .msg.assistant .msg-body,
 :root:is([data-appearance='image'],[data-appearance='shader']) .chat-activity,
-:root:is([data-appearance='image'],[data-appearance='shader']) .view-header,
 :root:is([data-appearance='image'],[data-appearance='shader']) .chat-header { background: var(--bg-panel); border-radius: 12px; }
 :root:is([data-appearance='image'],[data-appearance='shader']) .msg.assistant .msg-body { padding: 18px 20px; }
-:root:is([data-appearance='image'],[data-appearance='shader']) .view-header { padding: 14px 18px; }
 .appearance-panel { max-width: 680px; margin: auto; padding-bottom: 12px; }
 .appearance-panel [hidden] { display: none !important; }
 .appearance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
@@ -97,8 +95,6 @@
 }
 @media(prefers-reduced-motion: reduce) { :is(.appearance-mode, .appearance-chat-style) { transition: none; } }
 /* Classic look switch: spacing like its siblings, and a visible keyboard focus ring. */
-.appearance-classic-setting { margin-top: 26px; }
-#appearance-classic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Background effects use the same quiet surfaces and hairlines as Settings. */
 .appearance-effect-section { margin: 26px 0; padding: 18px; min-width: 0; border: 1px solid var(--hairline-soft); border-radius: 20px; background: var(--bg-panel); }

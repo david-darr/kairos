@@ -37,6 +37,9 @@
 .kairos-redesign .rd-usage-card { background: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); padding: 24px; }
 .kairos-redesign .rd-usage-provider + .rd-usage-provider { border-top: 1px solid var(--rd-line); padding-top: 16px; margin-top: 16px; }
 .kairos-redesign .rd-usage-provider h3 { font-size: 14px; font-weight: 500; margin: 0 0 12px; }
+.kairos-redesign .rd-usage-detail { font-size: 12px; font-weight: 400; color: var(--rd-ink-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairos-redesign .rd-usage-glyph { width: 8px; height: 8px; flex: none; }
+.kairos-redesign .rd-usage-provider .rd-usage-tokens { color: var(--rd-ink); font-size: 12px; font-variant-numeric: tabular-nums; margin: 0; }
 .kairos-redesign .rd-usage-window { display: grid; grid-template-columns: 65px minmax(0, 1fr) 44px; gap: 10px; align-items: center; margin: 8px 0; }
 .kairos-redesign .rd-part-label { font-size: var(--rd-label-size); letter-spacing: var(--rd-label-tracking); color: var(--rd-ink-dim); }
 .kairos-redesign .rd-usage-percent { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }

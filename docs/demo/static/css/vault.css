@@ -182,6 +182,13 @@ button.vault-history-row:hover { background: var(--accent-dim); }
 .vault-home-card { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel-solid); min-width: 0; }
 .vault-home-card h3 { display: flex; align-items: center; justify-content: space-between; margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint); }
 .vault-home-filters { grid-column: 1 / -1; }
+/* Desktop: the Home cards pack into balanced columns (masonry), so they fill the
+   row width with no holes and one gap everywhere. Phone keeps its single column. */
+@media (min-width: 769px) {
+  .vault-home-grid { display: block; column-width: 270px; column-gap: 12px; }
+  .vault-home-grid > .vault-home-card { break-inside: avoid; margin: 0 0 12px; }
+  .vault-home-grid > .vault-home-filters { column-span: all; }
+}
 .vault-today { display: grid; gap: 10px; justify-items: start; }
 .vault-today-date { display: grid; }
 .vault-today-date strong { font-size: 20px; font-weight: 600; }

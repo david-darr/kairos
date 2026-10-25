@@ -254,3 +254,32 @@
   .kairos-redesign[data-view="tasks"] .set-switch::before { content: ""; position: absolute; inset: -9px -4px; }
   .kairos-redesign[data-view="tasks"] .task-board-card details.disclosure-panel .btn.primary { min-height: 44px !important; }
 }
+
+/* -- Desktop: the tab fills its window ------------------------------------------
+   The runs chart sits beside the routines; the work board, triggers and the
+   automation library then run the full width underneath. Routine cards flow
+   into as many columns as fit and keep every control (model, delivery, turn
+   on/off, run, share, delete) in view. Below ~1180px everything stacks. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) { max-width: none; }
+  .kairos-redesign[data-view="tasks"] #tasks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-content: start; align-items: start; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card { margin-bottom: 0; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > :is(.tool-store-heading, .empty-state-rich, .empty-state),
+  .kairos-redesign[data-view="tasks"] #tasks-list:has(> .card)::before { grid-column: 1 / -1; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .tool-store-heading { margin: 10px 2px 0; }
+  .kairos-redesign[data-view="tasks"] #tasks-list > .card .card-row > .card-row { flex-wrap: wrap; justify-content: flex-start; flex: 1 1 100%; }
+  .kairos-redesign[data-view="tasks"] .automation-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+}
+@media (min-width: 1181px) {
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) {
+    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px 24px; align-items: start;
+  }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .view-header,
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > :is(.task-board-card, .triggers-card, .automation-library) { grid-column: 1 / -1; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-activity { grid-column: 1; grid-row: 2 / 4; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > details.disclosure-panel { grid-column: 2; grid-row: 2; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > #tasks-list { grid-column: 2; grid-row: 3; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .task-board-card { grid-row: 4; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card { grid-row: 5; }
+  .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .automation-library { grid-row: 6; }
+}

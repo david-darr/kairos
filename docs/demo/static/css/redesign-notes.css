@@ -126,3 +126,47 @@
   .kairos-redesign #view-content[data-view="notes"] .notes-finished-bar .btn { height: 44px; padding: 0 18px; }
   .kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) input { height: 44px; }
 }
+
+/* -- Desktop: the tab fills its window ----------------------------------------
+   Capture and the counts sit in a column on the left; the notes use the rest
+   of the width as a grid of their own cards and scroll inside the page, the
+   way the Agents tab does. Below ~1180px the column stacks above the list. */
+@media (min-width: 769px) {
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained {
+    max-width: none; flex: 1; min-height: 0; display: grid; align-items: start;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 24px;
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .view-header { grid-column: 1 / -1; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .notes-overview { grid-column: 1; grid-row: 2; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .glass.card { grid-column: 1; grid-row: 3; margin: 0; padding: 18px; border-radius: var(--rd-radius-card); }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list {
+    grid-column: 2; grid-row: 2 / 4; align-self: stretch; min-height: 0; overflow-y: auto; padding: 2px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; align-content: start;
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list:has(> .card) {
+    background: none; border: 0; box-shadow: none; border-radius: 0; overflow-y: auto;
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card,
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card + .card {
+    border: 1px solid var(--rd-line); border-radius: var(--rd-radius-field); background-color: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
+  }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > .card:hover { border-color: var(--rd-line-strong); background-color: var(--rd-surface-2); }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list > :is(.empty-state, .rd-empty-state) { grid-column: 1 / -1; }
+  .kairos-redesign #view-content[data-view="notes"] #notes-list .meta { flex: none; max-width: none; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid { flex-direction: column; align-items: stretch; gap: 12px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field { flex-direction: column; align-items: stretch; gap: 6px; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow { flex: none; }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow > label {
+    position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal;
+  }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field-grow input {
+    border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-field); background: var(--rd-ground); padding: 0 14px;
+  }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .field:not(.field-grow) input { width: 100%; border-radius: var(--rd-radius-field); }
+  .kairos-redesign #view-content[data-view="notes"] .form-grid .btn { width: 100%; }
+}
+@media (min-width: 769px) and (max-width: 1180px) {
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained { display: block; flex: none; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > #notes-list { overflow: visible; }
+  .kairos-redesign #view-content[data-view="notes"] > .view-constrained > .glass.card { margin: 0 0 18px; }
+}

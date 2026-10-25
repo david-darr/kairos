@@ -81,7 +81,8 @@
 .kairos-redesign .agents-view .agent-inbox,
 .kairos-redesign .agent-approval-card,
 .kairos-redesign .agent-live-panel,
-.kairos-redesign .agent-next-panel {
+.kairos-redesign .agent-next-panel,
+.kairos-redesign .agent-model-panel {
   background: var(--rd-surface); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
 }
 .kairos-redesign .agent-profile-sheet { border-color: var(--rd-line); box-shadow: var(--rd-shadow); }
@@ -499,4 +500,83 @@
 @media (max-width: 768px) {
   .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page .agent-conversation-topbar, .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { align-items: flex-start; }
   .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { height: 46px; }
+}
+
+/* -- Desktop agent conversation (David, 2026-10-25) --------------------------
+   One top row: the name card on the left, a compact Chat / Work / Routines /
+   Memory control on the right (it wraps under the card, then shrinks its labels,
+   as the stage narrows). The old side cards sit beside the thread and fill its
+   height; the stage is a size container, so a narrow window tucks the cards
+   behind Info instead of squeezing the thread. The "..." button is gone: its
+   four places are the tabs, and the conversation list is the left rail. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=agents] .agents-messenger-stage { container: agent-stage / inline-size; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-page { padding: 16px 20px; gap: 14px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; min-height: 0; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-topbar-tools { display: contents; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-more, .kairos-redesign[data-view=agents] .agents-messenger .agent-more-menu { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header { order: 1; flex: 1 1 160px; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin: 0; padding: 6px 14px 6px 6px;
+    background: var(--rd-surface-solid); border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); box-shadow: var(--rd-shadow); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-profile-face { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-profile-face:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 3px; border-radius: var(--rd-radius-pill); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-profile-face .agent-avatar { grid-row: 1 / 3; grid-column: 1; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-profile-face h2 { grid-column: 2; grid-row: 1; align-self: end; max-width: none; margin: 0; font: italic 600 20px/1.05 var(--rd-font-title); color: var(--rd-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-dm-role { grid-column: 2; grid-row: 2; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.3 var(--rd-font-ui); color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-dm-pills { display: flex; flex: none; gap: 6px; margin-left: auto; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-dm-pill { padding: 3px 10px; border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); color: var(--rd-ink); font: 500 12px/1.3 var(--rd-font-ui); white-space: nowrap; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tabs { --segment: 0; order: 2; display: grid; flex: 0 1 330px; width: auto; min-width: 0; max-width: 100%; margin: 0; padding: 3px; gap: 0;
+    border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-2); box-shadow: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tabs::before { top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 4); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); border: 1px solid var(--rd-line-strong); box-sizing: border-box; box-shadow: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tab { min-height: 30px; padding: 4px 8px; border-radius: var(--rd-radius-pill); font: 500 12.5px/1.2 var(--rd-font-ui); color: var(--rd-ink-dim); overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tab.active { color: var(--rd-ink); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tab:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 1px; }
+  .kairos-redesign[data-view=agents] .agents-messenger :is(.agent-call-open, .agent-info-toggle) { min-height: 36px; min-width: 0; padding: 4px 14px; font: 500 13px var(--rd-font-ui); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-call-open { order: 3; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-info-toggle { order: 4; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: stretch; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-layout > .agent-chat-host { grid-column: 1; grid-row: 1; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels:not([hidden]) { grid-column: 2; grid-row: 1; flex-direction: column; gap: 12px; min-height: 0; max-height: none; overflow-y: auto; padding: 0; }
+  .kairos-redesign[data-view=agents] .agents-messenger .is-info-open .agent-live-panels:not([hidden]) { display: flex; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels > :is(.agent-live-panel, .agent-next-panel, .agent-model-panel) { flex: none; padding: 16px 18px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels .agent-next-panel { flex: 1 1 auto; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panel .agents-inspector-profile { display: none; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels > .agent-inline-activity { flex: none; max-height: 40dvh; overflow-y: auto; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels :is(.agent-header-actions, .agent-model-panel) .btn { min-height: 34px; padding: 4px 14px; justify-content: center; font: 500 13px var(--rd-font-ui);
+    background: var(--rd-surface-solid); color: var(--rd-ink); border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-pill); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels .agent-header-actions { margin-top: 10px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-model-panel .agent-model-summary { margin: 0 0 12px; }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels .agent-give-job { flex: none; width: 100%; min-height: 52px; padding: 12px 18px; justify-content: flex-start; text-align: left; font: 600 14px var(--rd-font-ui);
+    background: var(--rd-surface-solid); color: var(--rd-ink); border: 1px solid var(--rd-line-strong); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels .agent-give-job:is(:hover, :focus-visible) { background: var(--rd-surface-2); }
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels .agent-give-job:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  @container agent-stage (max-width: 760px) {
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-tabs { order: 5; flex: 1 1 100%; }
+  }
+  @container agent-stage (max-width: 560px) {
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-header .agent-dm-pills { display: none; }
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-tab { padding: 4px 3px; font-size: 12px; }
+  }
+  @container agent-stage (min-width: 560px) {
+    .kairos-redesign[data-view=agents] .agents-messenger .is-info-open .agent-conversation-layout { grid-template-columns: minmax(0, 1fr) 240px; }
+  }
+  @container agent-stage (min-width: 800px) {
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-conversation-layout { grid-template-columns: minmax(0, 1fr) 264px; }
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-live-panels:not([hidden]) { display: flex; }
+    .kairos-redesign[data-view=agents] .agents-messenger .agent-info-toggle { display: none; }
+  }
+  @container agent-stage (max-width: 559px) {
+    .kairos-redesign[data-view=agents] .agents-messenger .is-info-open .agent-conversation-layout { grid-template-rows: minmax(0, 40%) minmax(0, 1fr); }
+    .kairos-redesign[data-view=agents] .agents-messenger .is-info-open .agent-live-panels:not([hidden]) { grid-column: 1; grid-row: 1; }
+    .kairos-redesign[data-view=agents] .agents-messenger .is-info-open .agent-conversation-layout > .agent-chat-host { grid-row: 2; }
+  }
+}
+@media (min-width: 769px) and (prefers-reduced-motion: reduce) {
+  .kairos-redesign[data-view=agents] .agents-messenger .agent-tabs::before { transition: none; }
+}
+
+/* The phone's info panel keeps showing the model as one plain line, as it did before the desktop got its own card. */
+@media (max-width: 768px) {
+  .kairos-redesign .agent-model-panel { padding: 0 16px; background: none; border: 0; box-shadow: none; }
+  .kairos-redesign .agent-model-panel :is(.title, .agent-model-change) { display: none; }
 }
