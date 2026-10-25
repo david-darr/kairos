@@ -29,6 +29,9 @@ export function itemsOnDay(items, day) {
   });
 }
 
+const phoneCalendar = () => redesignOn() && window.matchMedia('(max-width: 768px)').matches;
+const defaultCalendar = calendars => calendars.find(c => c.primary && ['owner', 'writer'].includes(c.access_role));
+
 export async function googleCalendars(host, onChange) {
   const auth = await api('/api/auth/status');
   if (!auth.is_admin) {
@@ -71,11 +74,17 @@ export async function googleCalendars(host, onChange) {
   const calendars = await api('/api/google/calendar/calendars');
   const selected = new Set(status.calendar_ids ?? calendars.filter(c => c.selected).map(c => c.id));
   host.classList.add('rd-stagger');
-  host.append(redesignOn() ? el('div', { class: 'cal-account-heading' }, [el('strong', { text: 'Google' }),
+  const account = phoneCalendar() ? el('section', { class: 'cal-account-card' }, [
+    el('div', { class: 'cal-provider-heading' }, [el('span', { class: 'cal-provider-tile', text: 'G', 'aria-hidden': 'true' }),
+      el('div', { class: 'cal-account-name' }, [el('strong', { text: 'Google' }), el('span', { class: 'meta', text: status.email || 'Google account' })]),
+      el('span', { class: 'cal-sync-status', text: 'Connected' })]),
+  ]) : host;
+  if (account !== host) host.append(account);
+  if (!phoneCalendar()) host.append(redesignOn() ? el('div', { class: 'cal-account-heading' }, [el('strong', { text: 'Google' }),
     el('span', { class: 'meta', text: status.email || 'Connected' })]) : el('strong', { text: 'Google calendars' }));
   for (const calendar of calendars) {
     const checkbox = el('input', { type: 'checkbox', checked: selected.has(calendar.id) });
-    const label = eventColor(el('label', { class: 'cal-calendar-choice' }, [checkbox, calendar.name]), { source: 'google', color: calendar.color });
+    const label = eventColor(el('label', { class: 'cal-calendar-choice' }, phoneCalendar() ? [el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' }), el('span', { class: 'cal-calendar-name', text: calendar.name }), checkbox] : [checkbox, calendar.name]), { source: 'google', color: calendar.color });
     checkbox.addEventListener('change', async () => {
       checkbox.disabled = true;
       checkbox.checked ? selected.add(calendar.id) : selected.delete(calendar.id);
@@ -87,7 +96,12 @@ export async function googleCalendars(host, onChange) {
         checkbox.checked ? selected.add(calendar.id) : selected.delete(calendar.id);
       } finally { checkbox.disabled = false; }
     });
-    host.append(label);
+    account.append(label);
+  }
+  if (phoneCalendar()) {
+    account.append(el('button', { type: 'button', class: 'btn quiet cal-account-manage', text: 'Manage connection', onclick: () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'library', section: 'google' } })) }));
+    const destination = defaultCalendar(calendars);
+    host.append(el('p', { class: 'cal-default-calendar', text: `New events go to ${destination ? `${destination.name} \u00b7 Google` : 'Kairos'} by default.` }));
   }
   return calendars;
 }
@@ -108,7 +122,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
     ...calendars.filter(c => ['owner', 'writer'].includes(c.access_role) || c.id === item?.calendar_id)
       .map(c => el('option', { value: c.id, text: c.name })),
   ]);
-  target.value = item ? (editingGoogle ? item.calendar_id : 'kairos') : (calendars.find(c => c.primary && ['owner', 'writer'].includes(c.access_role))?.id || 'kairos');
+  target.value = item ? (editingGoogle ? item.calendar_id : 'kairos') : (defaultCalendar(calendars)?.id || 'kairos');
   const allDay = el('input', { type: 'checkbox', checked: Boolean(item?.all_day) });
   const zone = el('input', { value: item?.time_zone || browserZone, 'aria-label': 'Time zone' });
   const zoneField = el('div', { class: 'field' }, [el('label', { text: 'Time zone' }), zone]);
@@ -132,6 +146,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
     const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + 1);
     return dateOnly(date);
   };
+  let syncPills = () => {};
   const updateFields = (loadItem = true) => {
     const selectedDate = start.value.slice(0, 10) || dateOnly(day);
     zoneField.hidden = allDay.checked; zone.disabled = false;
@@ -148,6 +163,7 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
       start.value = loadItem && item && !item.all_day ? timeInput(item.start, zone.value) : `${selectedDate}T09:00`;
       end.value = loadItem && item && !item.all_day && item.end ? timeInput(item.end, zone.value) : `${selectedDate}T09:30`;
     }
+    syncPills();
   };
   allDay.onchange = () => updateFields(false);
   updateFields();
@@ -183,6 +199,45 @@ export function eventDialog(calendars, refresh, item = null, day = new Date(), o
     ]);
     const details = el('section', { class: 'cal-field-group' }, [field(target), field(location), field(description)]);
     fields.replaceChildren(field(title), timing, details);
+    if (phoneCalendar()) {
+      const pills = [];
+      for (const [input, label] of [[start, 'Starts'], [end, 'Ends']]) {
+        const row = field(input);
+        row.querySelector('label').textContent = label;
+        const date = el('input', { type: 'date', required: true, 'aria-label': `${label} date` });
+        const time = el('input', { type: 'time', required: true, 'aria-label': `${label} time` });
+        const dateText = el('span', { 'aria-hidden': 'true' });
+        const timeText = el('span', { 'aria-hidden': 'true' });
+        const datePill = el('span', { class: 'cal-native-pill' }, [dateText, date]);
+        const timePill = el('span', { class: 'cal-native-pill' }, [timeText, time]);
+        const values = el('div', { class: 'cal-date-pills' }, [datePill, timePill]);
+        input.hidden = true; row.append(values);
+        const updateText = () => {
+          dateText.textContent = date.value ? new Date(`${date.value}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Date';
+          timeText.textContent = time.value ? new Date(`2000-01-01T${time.value}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Time';
+        };
+        const change = () => { input.value = allDay.checked ? date.value : `${date.value}T${time.value}`; updateText(); };
+        date.onchange = time.onchange = change;
+        pills.push({ input, date, time, timePill, updateText });
+      }
+      syncPills = () => {
+        for (const { input, date, time, timePill, updateText } of pills) {
+          date.value = input.value.slice(0, 10); time.value = input.value.slice(11, 16);
+          time.hidden = allDay.checked; time.disabled = allDay.checked;
+          timePill.hidden = allDay.checked; updateText();
+        }
+        endLabel.textContent = allDay.checked ? 'Ends (exclusive)' : 'Ends';
+      };
+      syncPills();
+      const swatch = el('span', { class: 'cal-calendar-swatch', 'aria-hidden': 'true' });
+      field(target).append(swatch, target);
+      const updateSwatch = () => {
+        swatch.style.removeProperty('--calendar-color');
+        const calendar = calendars.find(c => c.id === target.value);
+        if (calendar) eventColor(swatch, { source: 'google', color: calendar.color });
+      };
+      target.onchange = updateSwatch; updateSwatch();
+    }
   }
   const opener = document.activeElement;
   const dispose = () => { disposeSheet(); backdrop.remove(); document.removeEventListener('keydown', onKey); observer.disconnect(); opener?.focus(); };
