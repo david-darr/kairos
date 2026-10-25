@@ -68,9 +68,9 @@ export async function renderGoogleWorkspace(container, header, tabs) {
 }
 
 // Opens Google's consent page and waits until /status shows the change.
-function signInButton(label, add, changed, done) {
+function signInButton(label, request, changed, done) {
   const control = button(label, async () => {
-    const result = await post('/oauth/start', { add });
+    const result = await post('/oauth/start', request);
     if (window.jarvis?.openGoogleSignIn) {
       if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
     } else window.open(result.url, '_blank', 'noopener');
@@ -100,7 +100,7 @@ function renderConnection(host, status, refresh) {
     toast('Google client saved', 'success');
     refresh();
   }, 'btn primary');
-  const connect = signInButton('Connect Google account', false, next => next.connected, refresh);
+  const connect = signInButton('Connect Google account', {}, next => next.connected, refresh);
   host.append(el('div', { class: 'glass card google-connect' }, [
     el('div', { class: 'title', text: status.configured ? 'Connect Google Workspace' : 'Set up Google Workspace' }),
     note,
@@ -199,16 +199,17 @@ function renderDrive(host, status, refreshAll, header) {
     }
   }, 'btn quiet');
   const known = new Set(accounts.map(item => `${item.id}:${item.error || ''}`));
-  const addAccount = (before = () => {}) => signInButton('Add another Google account', true,
-    next => (next.accounts || []).some(item => !known.has(`${item.id}:${item.error || ''}`)), () => { before(); refreshAll(); });
+  const accountsChanged = next => (next.accounts || []).some(item => !known.has(`${item.id}:${item.error || ''}`));
+  const addAccount = (before = () => {}) => signInButton('Add another Google account', { add: true }, accountsChanged, () => { before(); refreshAll(); });
   const picker = accounts.length > 1 ? el('select', { class: 'google-account-select', 'aria-label': 'Google account' },
     accounts.map(item => el('option', { value: item.id, text: label(item) + (item.error ? ' (reconnect needed)' : ''), selected: item.id === current.id }))) : null;
   picker?.addEventListener('change', () => choose(picker.value));
   const desktopAdd = addAccount(); desktopAdd.className = 'btn quiet';
+  const desktopReconnect = current.error ? signInButton('Reconnect', { add: true, account: current.id }, accountsChanged, refreshAll) : null;
   main.append(el('div', { class: 'google-toolbar' }, [search, kind, gridButton, listButton, button('Refresh', () => load())]),
     quick, breadcrumbs, selectionBar, statusLine,
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
-  host.append(el('div', { class: 'google-account-line' }, [picker || el('strong', { text: label(current) }), desktopAdd, disconnect]),
+  host.append(el('div', { class: 'google-account-line' }, [picker || el('strong', { text: label(current) }), desktopReconnect, desktopAdd, disconnect]),
     chips, el('div', { class: 'google-browser' }, [rail, main]));
   header.querySelectorAll('.library-drive-search, .library-drive-options').forEach(node => node.remove());
   const find = button('Search Drive', () => { search.scrollIntoView({ block: 'center' }); search.focus(); }, 'btn workspace-phone-only workspace-round library-drive-search');
@@ -230,12 +231,16 @@ function renderDrive(host, status, refreshAll, header) {
   host.querySelector('.google-account-line').prepend(account);
   // Close the sheet before re-rendering or opening a confirmation over it.
   function accountSheet(close) {
-    const choices = accounts.map(item => {
+    const choices = accounts.flatMap(item => {
       const row = button('', () => { close(); if (item.id !== current.id) choose(item.id); }, 'drive-account-choice');
       row.setAttribute('aria-pressed', String(item.id === current.id));
       row.append(avatar(item), el('span', {}, [el('strong', { text: label(item) }),
-        el('small', { text: item.error ? 'Sign-in expired. Add it again to reconnect.' : item.id === current.id ? 'Browsing now' : 'Switch to this Drive' })]));
-      return row;
+        el('small', { text: item.error ? 'Sign-in expired or revoked' : item.id === current.id ? 'Browsing now' : 'Switch to this Drive' })]));
+      if (!item.error) return [row];
+      // Reconnecting names the account, so the same email refreshes it in place.
+      const reconnect = signInButton(`Reconnect ${label(item)}`, { add: true, account: item.id }, accountsChanged, () => { close(); refreshAll(); });
+      reconnect.className = 'btn quiet drive-account-reconnect';
+      return [row, reconnect];
     });
     const sheetDisconnect = button(`Disconnect ${label(current)}`, () => { close(); disconnect.click(); }, 'btn quiet danger');
     return el('div', { class: 'drive-account-sheet' }, [el('div', { class: 'drive-account-list', role: 'group', 'aria-label': 'Connected Google accounts' }, choices),

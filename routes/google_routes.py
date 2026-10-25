@@ -29,6 +29,7 @@ class ClientRequest(BaseModel):
 
 class SignInRequest(BaseModel):
     add: bool = False
+    account: str | None = None  # reconnect this account
 
 
 class DriveActionRequest(BaseModel):
@@ -101,24 +102,34 @@ async def configure(body: ClientRequest, user: str = Depends(require_admin)) -> 
 
 @router.delete("/connection")
 async def disconnect(user: str = Depends(require_admin)) -> dict:
-    return google.disconnect(_account(user, None), user)
+    return google.disconnect(None, user)
 
 
 @router.delete("/accounts/{account_id}")
 async def disconnect_account(account_id: str, user: str = Depends(require_admin)) -> dict:
-    return google.disconnect(_account(user, account_id), user)
+    try:
+        return google.disconnect(account_id, user)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.post("/oauth/start")
 async def start(body: SignInRequest | None = None, user: str = Depends(require_admin)) -> dict:
     try:
-        return {"url": google.start_sign_in(local_api_base() + CALLBACK, user, bool(body and body.add))}
+        return {"url": google.start_sign_in(local_api_base() + CALLBACK, user, bool(body and body.add),
+                                            body.account if body else None)}
     except google.GoogleError as problem:
         raise HTTPException(problem.status, str(problem)) from problem
 
 
 @router.get("/oauth/callback", response_class=HTMLResponse)
 async def callback(state: str = "", code: str | None = None, error: str | None = None) -> HTMLResponse:
+    # No Kairos session check here, deliberately: Google sends the user back
+    # to this loopback address in the system browser, which has no Kairos
+    # cookie. The defence is the state: unguessable, single use, expiring in
+    # ten minutes and bound to the Kairos user who started the sign-in, plus
+    # PKCE (the code is useless without that sign-in's verifier) and a
+    # redirect that only reaches 127.0.0.1.
     try:
         account = await google.finish_sign_in(state, code, local_api_base() + CALLBACK, error)
         message, status_code = f"Connected {html.escape(account)}. Return to Kairos.", 200

@@ -7,9 +7,21 @@ ever contacted with those tokens; callers cannot provide an arbitrary URL.
 Several Google accounts can be connected (2026-10-25, David: "allow users to
 add multiple google drives"). Each lives under `accounts` with an opaque id
 and the Kairos user who connected it; the one-account file of earlier
-versions migrates in place as the installation default, usable by every
-admin as before. Calendar and the chat tools use the default account; Drive
-routes name an account, which the routes check against the signed-in user.
+versions migrates in place as a shared account (owner None), usable by
+every admin as before, and any admin may disconnect it, as before.
+
+Drive, Sheets and Forms always run against an account resolved for the
+Kairos user (`resolve_account`): the routes and the chat tools both check
+ownership, so one user's Drive is never reached from another user's chat.
+Calendar is installation-wide: one shared calendar, the `default_account`,
+used by the Calendar tab and tools for every admin, exactly as with the
+single account before. A user-owned account becomes that default only when
+its own user sets it (connecting without `add`, or the first account); when
+the default is disconnected it passes to a shared account, else to one owned
+by the user disconnecting, else Calendar is disconnected.
+
+File writes go through `_lock` (a re-entrant thread lock) so a
+read-modify-write is never interleaved with another thread's.
 """
 from __future__ import annotations
 
@@ -20,6 +32,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -59,6 +72,7 @@ MAX_DOWNLOAD = 25 * 1024 * 1024
 ACCOUNT_KEYS = ("refresh_token", "access_token", "expires_at", "email", "granted_scopes", "calendar_ids")
 _pending: dict[str, dict] = {}
 _refresh_locks: dict[str, asyncio.Lock] = {}
+_lock = threading.RLock()
 _calendar_cache: dict[tuple, tuple[float, list[dict]]] = {}
 _calendar_generation = 0
 
@@ -74,21 +88,23 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    write_json_atomic(FILE, data)
+    with _lock:
+        write_json_atomic(FILE, data)
 
 
 def _state() -> dict:
     """The saved connection, moving a one-account file into `accounts` once."""
-    data = _load()
-    if data.get("refresh_token") and not data.get("accounts"):
-        ident = "acct_" + secrets.token_urlsafe(12)
-        account = {key: data.pop(key) for key in ACCOUNT_KEYS if key in data}
-        # owner None: connected before accounts had owners, so every admin
-        # keeps the access they had to it.
-        data["accounts"] = {ident: {**account, "id": ident, "owner": None, "added_at": time.time()}}
-        data["default_account"] = ident
-        _save(data)
-    return data
+    with _lock:
+        data = _load()
+        if data.get("refresh_token") and not data.get("accounts"):
+            ident = "acct_" + secrets.token_urlsafe(12)
+            account = {key: data.pop(key) for key in ACCOUNT_KEYS if key in data}
+            # owner None: connected before accounts had owners, so every admin
+            # keeps the access they had to it.
+            data["accounts"] = {ident: {**account, "id": ident, "owner": None, "added_at": time.time()}}
+            data["default_account"] = ident
+            _save(data)
+        return data
 
 
 def _accounts(data: dict, user: str | None = None) -> list[dict]:
@@ -151,38 +167,55 @@ def configure(client_id: str, client_secret: str = "", user: str | None = None) 
     client_id = client_id.strip()
     if len(client_id) > 256 or not client_id.endswith(".apps.googleusercontent.com"):
         raise GoogleError("Enter a Google OAuth Desktop client ID")
-    data = _state()
-    if data.get("client_id") != client_id:
-        # Tokens belong to the old client, so every account goes with it.
-        invalidate_calendar()
-        data.pop("accounts", None)
-        data.pop("default_account", None)
-        data.pop("client_secret", None)
-    data["client_id"] = client_id
-    if client_secret:
-        data["client_secret"] = encrypt(client_secret.strip())
-    _save(data)
+    with _lock:
+        data = _state()
+        if data.get("client_id") != client_id:
+            # Tokens belong to the old client, so every account goes with it,
+            # and sign-ins started for the old client can no longer finish.
+            invalidate_calendar()
+            data.pop("accounts", None)
+            data.pop("default_account", None)
+            data.pop("client_secret", None)
+            _pending.clear()
+            _refresh_locks.clear()
+        data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = encrypt(client_secret.strip())
+        _save(data)
     return status(user)
 
 
 def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
-    """Forget one account's tokens (the default when none is named). The
-    others stay; if the default goes, the oldest remaining one takes over."""
-    data = _state()
-    ident = account_id or data.get("default_account") or ""
-    (data.get("accounts") or {}).pop(ident, None)
-    if data.get("default_account") == ident:
-        remaining = _accounts(data)
-        data["default_account"] = remaining[0]["id"] if remaining else None
-        invalidate_calendar()
-    _save(data)
+    """Forget one of this user's accounts (their default when none is named);
+    the others stay. Disconnecting when nothing is connected is a no-op. A
+    shared (migrated) account may be disconnected by any admin, as before."""
+    with _lock:
+        if not _accounts(_state(), user) and account_id is None:
+            return status(user)
+        ident = resolve_account(user, account_id)
+        data = _state()
+        data["accounts"].pop(ident, None)
+        _refresh_locks.pop(ident, None)
+        if data.get("default_account") == ident:
+            # Calendar passes to a shared account, else to one of the
+            # disconnecting user's own, never to another user's account.
+            remaining = _accounts(data)
+            heir = (next((item for item in remaining if item.get("owner") is None), None)
+                    or next((item for item in remaining if item.get("owner") == user), None))
+            data["default_account"] = heir["id"] if heir else None
+            invalidate_calendar()
+        _save(data)
     return status(user)
 
 
-def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False) -> str:
+def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False,
+                  account_id: str | None = None) -> str:
     """With `add` the default account stays; otherwise the account signed in
     to becomes the default (the one-account behaviour, and Calendar's
-    reconnect)."""
+    reconnect). `account_id` reconnects that account, which must be one this
+    user may use (a shared account too) and must sign in as the same email."""
+    if account_id is not None:
+        account_id = resolve_account(owner, account_id)
     client_id = _state().get("client_id")
     if not client_id:
         raise GoogleError("Set a Google OAuth Desktop client ID first")
@@ -193,7 +226,8 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
     # Single use, expiring, and bound to the Kairos user who started it: the
     # callback can only finish a sign-in begun here, for that user.
-    _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add}
+    _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
+                       "account": account_id, "client_id": client_id}
     for stale, pending in list(_pending.items()):
         if pending["expires"] < time.time():
             _pending.pop(stale, None)
@@ -224,55 +258,85 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
         if not refresh:
             raise GoogleError("Google did not return an offline access token; reconnect and approve offline access")
         access = tokens.get("access_token")
-        email = None
-        if access:
-            profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
-                                       headers={"Authorization": f"Bearer {access}"})
-            if profile.is_success:
-                email = profile.json().get("email")
-    data = _state()
+        # The email names the account in the switcher and finds it again on
+        # reconnect, so a sign-in without one is refused rather than saved.
+        profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
+                                   headers={"Authorization": f"Bearer {access}"}) if access else None
+        email = profile.json().get("email") if profile is not None and profile.is_success else None
+        if not email:
+            raise GoogleError("Could not read the Google account's email address; try signing in again", 502)
     owner = pending["owner"]
-    accounts = data.setdefault("accounts", {})
-    # Signing in to an account this user already has reconnects it in place.
-    account = next((item for item in _accounts(data, owner) if email and item.get("email") == email), None)
-    if account is None:
-        ident = "acct_" + secrets.token_urlsafe(12)
-        account = accounts[ident] = {"id": ident, "owner": owner, "added_at": time.time()}
-    account.update(refresh_token=encrypt(refresh), access_token=encrypt(access) if access else None,
-                   expires_at=time.time() + int(tokens.get("expires_in") or 3600), email=email,
-                   granted_scopes=str(tokens.get("scope") or "").split())
-    account.pop("error", None)
-    if not pending["add"] or not _default(data):
-        data["default_account"] = account["id"]
-    _save(data)
+    with _lock:
+        data = _state()
+        # Reconnect in place: the account named when the sign-in started, or
+        # one with this email that this same user owns. A shared account is
+        # only refreshed when it was named explicitly.
+        named = (data.get("accounts") or {}).get(pending["account"] or "")
+        if pending["account"] and named is None:
+            raise GoogleError("That Google account was disconnected while signing in", 409)
+        if named is not None and named.get("email") != email:
+            raise GoogleError(f"Signed in as {email}, not {named.get('email')}. Choose that account to reconnect it", 409)
+        existing = named or next((item for item in _accounts(data) if item.get("owner") == owner and item.get("email") == email), None)
+    lock = _refresh_locks.setdefault(existing["id"], asyncio.Lock()) if existing else None
+    if lock:
+        await lock.acquire()
+    try:
+        with _lock:
+            data = _state()
+            if data.get("client_id") != pending["client_id"]:
+                raise GoogleError("The Google client ID changed during sign-in; sign in again", 409)
+            accounts = data.setdefault("accounts", {})
+            if existing:
+                account = accounts.get(existing["id"])
+                if account is None:
+                    raise GoogleError("That Google account was disconnected while signing in", 409)
+            else:
+                ident = "acct_" + secrets.token_urlsafe(12)
+                account = accounts[ident] = {"id": ident, "owner": owner, "added_at": time.time()}
+            account.update(refresh_token=encrypt(refresh), access_token=encrypt(access) if access else None,
+                           expires_at=time.time() + int(tokens.get("expires_in") or 3600), email=email,
+                           granted_scopes=str(tokens.get("scope") or "").split())
+            account.pop("error", None)
+            if not pending["add"] or not _default(data):
+                data["default_account"] = account["id"]
+            _save(data)
+    finally:
+        if lock:
+            lock.release()
     invalidate_calendar()
-    return email or "Google account"
+    return email
 
 
 def _mark(ident: str, **fields) -> None:
     """Update one account from a fresh read, so a refresh finishing for
     another account at the same time is never overwritten."""
-    data = _state()
-    account = (data.get("accounts") or {}).get(ident)
-    if account is None:
-        return
-    for key, value in fields.items():
-        if value is None:
-            account.pop(key, None)
-        else:
-            account[key] = value
-    _save(data)
+    with _lock:
+        data = _state()
+        account = (data.get("accounts") or {}).get(ident)
+        if account is None:
+            return
+        for key, value in fields.items():
+            if value is None:
+                account.pop(key, None)
+            else:
+                account[key] = value
+        _save(data)
 
 
 async def _token(account_id: str | None = None, force: bool = False) -> str:
     """An access token for one account; None means the default account."""
-    ident = account_id or _state().get("default_account") or ""
+    data = _state()
+    ident = account_id or data.get("default_account") or ""
+    # A forced refresh reuses a token another request refreshed while this
+    # one waited for the lock, instead of refreshing again.
+    stale = ((data.get("accounts") or {}).get(ident) or {}).get("access_token")
     async with _refresh_locks.setdefault(ident, asyncio.Lock()):
         data = _state()
         account = (data.get("accounts") or {}).get(ident)
         if not account or not account.get("refresh_token"):
             raise GoogleError("Connect Google Workspace in Library first", 401)
-        if not force and account.get("access_token") and (account.get("expires_at") or 0) > time.time() + 90:
+        if (account.get("access_token") and (account.get("expires_at") or 0) > time.time() + 90
+                and (not force or account["access_token"] != stale)):
             return decrypt(account["access_token"])
         body = {"client_id": data["client_id"], "refresh_token": decrypt(account["refresh_token"]),
                 "grant_type": "refresh_token"}
@@ -288,8 +352,10 @@ async def _token(account_id: str | None = None, force: bool = False) -> str:
         access = tokens.get("access_token")
         if not access:
             raise GoogleError("Google did not return an access token", 502)
+        # Google may rotate the refresh token; keep the new one when it does.
         _mark(ident, access_token=encrypt(access), expires_at=time.time() + int(tokens.get("expires_in") or 3600),
-              error=None, **({"granted_scopes": tokens["scope"].split()} if "scope" in tokens else {}))
+              error=None, **({"granted_scopes": tokens["scope"].split()} if "scope" in tokens else {}),
+              **({"refresh_token": encrypt(tokens["refresh_token"])} if tokens.get("refresh_token") else {}))
         return access
 
 

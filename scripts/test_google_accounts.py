@@ -22,9 +22,10 @@ _DATA.mkdir()
 os.environ["JARVIS_DATA_DIR"] = str(_DATA)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import asyncio
 import httpx
 from fastapi import FastAPI
-from core import google_workspace as google
+from core import google_workspace as google, google_chat_tools, tool_registry
 from core.middleware import require_admin
 from core.secret_storage import decrypt, encrypt
 from routes import google_routes
@@ -44,6 +45,8 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.requests = []
         self.next_email = "second@example.com"
         self.refresh_status = 200
+        self.rotate = None
+        self.userinfo_status = 200
         def save(data):
             self.data = deepcopy(data)
         for mock in (patch.object(google, "_load", lambda: deepcopy(self.data)), patch.object(google, "_save", save),
@@ -61,11 +64,14 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
             if form["grant_type"] == ["refresh_token"]:
                 if self.refresh_status >= 400:
                     return httpx.Response(self.refresh_status, json={"error": "invalid_grant"})
-                return httpx.Response(200, json={"access_token": "fresh-" + form["refresh_token"][0], "expires_in": 3600})
+                return httpx.Response(200, json={"access_token": "fresh-" + form["refresh_token"][0], "expires_in": 3600,
+                                                 **({"refresh_token": self.rotate} if self.rotate else {})})
             email = self.next_email
             return httpx.Response(200, json={"refresh_token": "refresh-" + email, "access_token": "access-" + email,
                                              "scope": " ".join(google.SCOPES)})
         if req.url.host == "openidconnect.googleapis.com":
+            if self.userinfo_status != 200:
+                return httpx.Response(self.userinfo_status, json={})
             return httpx.Response(200, json={"email": req.headers["authorization"].removeprefix("Bearer access-")})
         if req.url.path.endswith("/files"):
             return httpx.Response(200, json={"files": [{"id": "f1", "name": req.headers["authorization"]}]})
@@ -82,14 +88,20 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         async with REAL_CLIENT(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             return await client.request(method, path, json=body)
 
-    async def add_account(self, email, user="admin", add=True):
+    async def sign_in(self, email, user="admin", add=True, account=None):
         self.next_email = email
         with patch.object(google_routes, "local_api_base", lambda: "http://127.0.0.1:8420/api"):
-            started = await self.web("/api/google/oauth/start", "POST", {"add": add}, user=user)
+            started = await self.web("/api/google/oauth/start", "POST", {"add": add, "account": account}, user=user)
+        self.assertEqual(started.status_code, 200, started.text)
         state = parse_qs(urlsplit(started.json()["url"]).query)["state"][0]
-        result = await self.web(f"/api/google/oauth/callback?state={state}&code=code")
+        return await self.web(f"/api/google/oauth/callback?state={state}&code=code")
+
+    async def add_account(self, email, user="admin", add=True, account=None):
+        result = await self.sign_in(email, user, add, account)
         self.assertEqual(result.status_code, 200, result.text)
-        return next(item["id"] for item in google._accounts(self.data) if item["email"] == email)
+        if account:
+            return account
+        return next(item["id"] for item in google._accounts(self.data) if item["email"] == email and item.get("owner") == user)
 
     def bearer(self):
         return [req.headers["authorization"] for req in self.requests if req.url.host == "www.googleapis.com"][-1]
@@ -231,6 +243,108 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         google.calendar_settings(["legacy@example.com", "team@example.com"])
         self.assertEqual(self.data["accounts"][self.data["default_account"]]["calendar_ids"], ["legacy@example.com", "team@example.com"])
         self.assertNotIn("calendar_ids", self.data["accounts"][second])
+
+    async def chat(self, owner, action="list"):
+        ctx = tool_registry.ToolContext(session_id="session", is_admin=True)
+        with patch.object(google_chat_tools, "chat_owner", lambda _ctx: owner):
+            return await google_chat_tools.execute("drive", {"action": action}, ctx)
+
+    async def test_chat_tools_use_the_chat_owners_account_never_another_users(self):
+        alice = await self.add_account("alice@example.com", user="alice", add=False)
+        self.assertEqual(self.data["default_account"], alice)
+        # Bob's chat reaches the shared migrated account, not Alice's default.
+        await self.chat("bob")
+        self.assertEqual(self.bearer(), "Bearer access-legacy")
+        await self.chat("alice")
+        self.assertEqual(self.bearer(), "Bearer access-alice@example.com")
+        legacy = next(item["id"] for item in google._accounts(self.data) if item["owner"] is None)
+        await self.web(f"/api/google/accounts/{legacy}", "DELETE", user="bob")
+        self.requests.clear()
+        self.assertIn("Connect Google Workspace", await self.chat("bob"))
+        self.assertIn("belongs to a Kairos user", await self.chat(None))
+        self.assertFalse(self.requests)
+
+    async def test_disconnecting_the_default_never_hands_calendar_to_another_users_account(self):
+        legacy = google.resolve_account("admin")
+        await self.add_account("alice@example.com", user="alice")
+        status = (await self.web(f"/api/google/accounts/{legacy}", "DELETE", user="bob")).json()
+        self.assertIsNone(self.data["default_account"])
+        self.assertFalse(status["connected"])
+        self.assertFalse(google.status()["calendar_connected"])
+
+    async def test_reconnect_by_email_only_matches_the_users_own_account(self):
+        legacy = google.resolve_account("admin")
+        self.data["accounts"][legacy]["error"] = "expired"
+        mine = await self.add_account("legacy@example.com", user="bob")
+        self.assertNotEqual(mine, legacy)
+        self.assertEqual(self.data["accounts"][mine]["owner"], "bob")
+        self.assertEqual(decrypt(self.data["accounts"][legacy]["refresh_token"]), "refresh-legacy")
+        self.assertEqual(self.data["accounts"][legacy]["error"], "expired")
+        # Named explicitly from its card, the shared account is reconnected in place.
+        self.assertEqual(await self.add_account("legacy@example.com", user="bob", account=legacy), legacy)
+        self.assertEqual(decrypt(self.data["accounts"][legacy]["refresh_token"]), "refresh-legacy@example.com")
+        self.assertNotIn("error", self.data["accounts"][legacy])
+        self.assertIsNone(self.data["accounts"][legacy]["owner"])
+        # Signing in as a different email does not overwrite it or add an account.
+        result = await self.sign_in("someone@example.com", user="bob", account=legacy)
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(self.data["accounts"][legacy]["email"], "legacy@example.com")
+        self.assertFalse(any(item["email"] == "someone@example.com" for item in self.data["accounts"].values()))
+        # Another user's account cannot be named.
+        alice = await self.add_account("alice@example.com", user="alice")
+        with patch.object(google_routes, "local_api_base", lambda: "http://127.0.0.1:8420/api"):
+            self.assertEqual((await self.web("/api/google/oauth/start", "POST", {"account": alice}, user="bob")).status_code, 404)
+
+    async def test_disconnect_is_idempotent_and_checks_ownership_itself(self):
+        alice = await self.add_account("alice@example.com", user="alice")
+        legacy = next(item["id"] for item in google._accounts(self.data) if item["owner"] is None)
+        await self.web(f"/api/google/accounts/{legacy}", "DELETE", user="carol")
+        response = await self.web("/api/google/connection", "DELETE", user="carol")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["accounts"], [])
+        self.assertIn(alice, self.data["accounts"])
+        # A direct caller cannot remove someone else's account either.
+        with self.assertRaises(google.GoogleError):
+            google.disconnect(alice, "carol")
+        self.assertIn(alice, self.data["accounts"])
+
+    async def test_a_client_change_during_sign_in_saves_nothing(self):
+        url = google.start_sign_in(REDIRECT, "admin", add=True)
+        state = parse_qs(urlsplit(url).query)["state"][0]
+        before = deepcopy(google._state()["accounts"])
+        self.data["client_id"] = "other.apps.googleusercontent.com"
+        self.next_email = "late@example.com"
+        response = await self.web(f"/api/google/oauth/callback?state={state}&code=code")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.data["accounts"], before)
+        # Changing the client through configure also cancels started sign-ins.
+        self.data["client_id"] = CLIENT
+        state = parse_qs(urlsplit(google.start_sign_in(REDIRECT, "admin")).query)["state"][0]
+        google.configure("third.apps.googleusercontent.com")
+        self.assertEqual((await self.web(f"/api/google/oauth/callback?state={state}&code=code")).status_code, 400)
+
+    async def test_rotated_refresh_token_is_saved_and_waiters_reuse_a_fresh_token(self):
+        second = await self.add_account("second@example.com")
+        self.data["accounts"][second]["expires_at"] = 0
+        self.rotate = "rotated-refresh"
+        await self.web(f"/api/google/drive/files?account={second}")
+        self.assertEqual(decrypt(self.data["accounts"][second]["refresh_token"]), "rotated-refresh")
+        self.rotate = None
+        self.requests.clear()
+        async def slow(req):  # the second caller waits on the lock while the first refreshes
+            await asyncio.sleep(0.05)
+            return self.http(req)
+        with patch.object(google.httpx, "AsyncClient", lambda **kwargs: REAL_CLIENT(transport=httpx.MockTransport(slow), **kwargs)):
+            await asyncio.gather(google._token(second, force=True), google._token(second, force=True))
+        self.assertEqual(sum(req.url.host == "oauth2.googleapis.com" for req in self.requests), 1)
+
+    async def test_sign_in_without_an_email_is_refused(self):
+        self.userinfo_status = 500
+        before = len(google._accounts(google._state()))
+        response = await self.sign_in("ghost@example.com")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("email", response.text)
+        self.assertEqual(len(google._accounts(self.data)), before)
 
     async def test_changing_the_client_forgets_every_account(self):
         await self.add_account("second@example.com")
