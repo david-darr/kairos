@@ -116,3 +116,21 @@
   .kairos-redesign .model-setup .btn, .kairos-redesign .model-setup-screen input, .kairos-redesign .model-setup-screen select { min-height: 44px !important; }
   .kairos-redesign .model-setup-words summary { min-height: 44px !important; display: flex; align-items: center; }
 }
+
+/* -- Desktop: the tab fills its window ------------------------------------------
+   Installed (or downloaded) models sit in a column beside the catalog, which
+   uses the rest of the width as a card grid. Notices and the engine status
+   line span both. Below ~1100px the two stack. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view="cookbook"] .view-constrained { max-width: none; }
+  .kairos-redesign[data-view="cookbook"] .cookbook-body:has(> .cookbook-installed) {
+    display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 8fr); gap: 0 28px; align-items: start;
+  }
+  .kairos-redesign[data-view="cookbook"] .cookbook-body > :not(.cookbook-installed):not(.cookbook-catalog) { grid-column: 1 / -1; }
+  .kairos-redesign[data-view="cookbook"] .cookbook-body > :is(.cookbook-installed, .cookbook-catalog) { margin-top: 0 !important; }
+  .kairos-redesign[data-view="cookbook"] .cookbook-catalog-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)) !important; }
+}
+@media (min-width: 769px) and (max-width: 1100px) {
+  .kairos-redesign[data-view="cookbook"] .cookbook-body:has(> .cookbook-installed) { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign[data-view="cookbook"] .cookbook-body > .cookbook-catalog { margin-top: 18px !important; }
+}

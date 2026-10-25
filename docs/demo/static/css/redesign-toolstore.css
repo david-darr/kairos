@@ -482,3 +482,15 @@
 @media (prefers-reduced-motion: reduce) {
   .kairos-redesign .ts-sheet, .kairos-redesign .ts-sheet-backdrop { transition: none; }
 }
+
+/* -- Desktop: the tab fills its window ------------------------------------------
+   No centred column: the title, the search and category row, and the manage
+   buttons span the width, and each section is a card grid that adds columns as
+   the window grows. */
+@media (min-width: 769px) {
+  .kairos-redesign .tool-store-view { max-width: none; padding: 0 0 32px; }
+  .kairos-redesign .tool-store-toolbar { align-items: center; flex-wrap: wrap; }
+  .kairos-redesign .tool-store-toolbar .tool-store-search { flex: 1 1 320px; max-width: 560px; }
+  .kairos-redesign .tool-store-summary { flex-direction: row-reverse; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .kairos-redesign .tool-store-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+}
