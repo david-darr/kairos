@@ -3,6 +3,10 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
   const dm = () => waitFor("!!document.querySelector('.agent-chat-main .side-chat-input')");
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const fits = async () => assert.ok(await js(`['.agents-messenger','.agents-messenger-stage','.agent-chat-host','.side-chat-composer'].every(s=>{const n=document.querySelector(s);return !n || n.scrollWidth<=n.clientWidth+2})`), 'Conversation fits available width');
+  // 2026-10-25 (David): every Kairos message in a desktop chat carries Kip beside the word; the mark returns with the mascot off.
+  await navigate('chat', { sessionId: 's1' });
+  await waitFor("!!document.querySelector('.msg.assistant .chat-author')");
+  assert.ok(await js("[...document.querySelectorAll('.msg.assistant .chat-author')].every(a => { const k = a.querySelector('.rd-chat-author-kip kairos-mascot'), r = k.getBoundingClientRect(); return getComputedStyle(a.querySelector('.rd-chat-author-kip')).display !== 'none' && r.width >= 18 && r.width <= 24 && getComputedStyle(a.querySelector('.chat-author-mark')).display === 'none' && a.textContent.includes('Kairos'); })"), 'Desktop Kairos messages show Kip beside the word Kairos');
   await navigate('agents');
   assert.ok(await js("document.querySelectorAll('.agents-rail-item.agent-tile').length>=2 && document.querySelectorAll('.agents-rail-item.team-tile').length===1"), 'DM and group rows use real lists');
   assert.ok(await js("!!document.querySelector('.agents-messenger-welcome')"));
