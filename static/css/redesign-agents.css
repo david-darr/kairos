@@ -182,7 +182,7 @@
   .kairos-redesign[data-view=agents] .agents-workspace-controls { display: contents; }
   .kairos-redesign[data-view=agents] .agents-workspace-controls .agents-chats-open { display: none; }
   .kairos-redesign[data-view=agents] .agents-workspace:not(.has-conversation) .agents-phone-actions {
-    position: absolute; z-index: 3; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); right: 20px;
+    position: absolute; z-index: 30; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px); right: 20px;
     display: flex; gap: 8px; height: 46px;
   }
   .kairos-redesign[data-view=agents] .agents-phone-round, .kairos-redesign[data-view=agents] .agent-call-open, .kairos-redesign[data-view=agents] .is-messages .agent-more, .kairos-redesign[data-view=agents] .agents-workspace.has-conversation .agents-conversation-back:not([hidden]) {
@@ -193,7 +193,7 @@
   .kairos-redesign[data-view=agents] :is(.agents-phone-round, .agent-call-open, .is-messages .agent-more, .agents-conversation-back):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign[data-view=agents] .agents-phone-round:active, .kairos-redesign[data-view=agents] .agent-call-open:active, .kairos-redesign[data-view=agents] .is-messages .agent-more:active { background: var(--rd-surface-2); }
 
-  /* Options menu: scales in from the button (menus and pickers, 160ms). */
+  /* Options menu: scales in from the button (menus and pickers, 160ms). The list actions sit above the Ecosystem map tools (z-index 4). */
   .kairos-redesign[data-view=agents] .agents-phone-menu:not([hidden]) {
     position: absolute; z-index: 40; top: 54px; right: 0; display: flex; flex-direction: column; min-width: 220px; padding: 6px;
     border: 1px solid var(--rd-line); border-radius: 22px; background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
