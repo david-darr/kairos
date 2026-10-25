@@ -84,13 +84,33 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await navigate('calendar');
   await waitFor("document.querySelectorAll('.cal-calendar-choice.cal-google-event').length === 2");
   const initialMonthRead = reads.length;
-  await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+  await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
   await requestAfter(reads, initialMonthRead, r => r.path === '/api/calendar/events');
   await waitFor("(() => { const g=document.querySelector('.cal-grid'); return document.querySelectorAll('.cal-day').length === (document.documentElement.classList.contains('kairos-redesign') ? Number(g.style.getPropertyValue('--calendar-weeks')) * 7 : 42); })()");
   await waitFor("!!document.querySelector('.cal-event-pill.cal-google-event')");
   await capture(label + '-calendar-month-google');
+
+  if (await js("document.documentElement.classList.contains('kairos-redesign') && matchMedia('(min-width: 769px)').matches")) {
+    assert.ok(await js(`(() => {
+      const prev = document.querySelector('.cal-period-prev'), next = document.querySelector('.cal-period-next');
+      const a = getComputedStyle(prev), b = getComputedStyle(next);
+      return ['width', 'height', 'borderRadius', 'border', 'backgroundColor', 'padding'].every(key => a[key] === b[key]) &&
+        a.width === a.height && a.borderRadius === '50%' && !!prev.querySelector('svg') && !!next.querySelector('svg');
+    })()`), label + ' desktop period arrows are identical circles with SVG chevrons');
+    assert.ok(await js(`(() => {
+      const label = document.querySelector('.cal-month-label'), style = getComputedStyle(label);
+      const toolbar = document.querySelector('.cal-grid-toolbar'), grid = document.querySelector('.cal-grid');
+      const row = toolbar.getBoundingClientRect(), view = grid.getBoundingClientRect();
+      return style.borderTopWidth === '0px' && style.boxShadow === 'none' && style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+        label.getAttribute('aria-label') === 'Today' && toolbar.nextElementSibling === grid && row.bottom <= view.top &&
+        Math.abs(row.left - view.left) < 1 && Math.abs(row.right - view.right) < 1 &&
+        !document.querySelector('.view-header .cal-range-switch') && !document.querySelector('.cal-day-panel .cal-calendars-card') &&
+        !!document.querySelector('.cal-selected-agenda') && !!document.querySelector('.cal-upcoming');
+    })()`), label + ' desktop period is plain Today text and range selector sits above the grid with an agenda-only sidebar');
+  }
+
   const weekRead = reads.length;
-  await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Week').click()");
+  await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Week').click()");
   await requestAfter(reads, weekRead, r => r.path === '/api/calendar/events');
   await waitFor("document.querySelectorAll('.cal-week-day').length === 7 && !!document.querySelector('.cal-today-line')");
   await capture(label + '-calendar-week-google');
@@ -131,7 +151,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   await requestAfter(writes, deleteWrite, w => w.path === '/api/google/calendar/action' && JSON.parse(w.body).action === 'delete' && JSON.parse(w.body).event_id === edited.event_id);
   await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Smoke edited event'))");
   const monthRead = reads.length;
-  await js("[...document.querySelectorAll('.cal-nav button')].find(b=>b.textContent==='Month').click()");
+  await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
   await requestAfter(reads, monthRead, r => r.path === '/api/calendar/events');
   await waitFor("(() => { const g=document.querySelector('.cal-grid'); return document.querySelectorAll('.cal-day').length === (document.documentElement.classList.contains('kairos-redesign') ? Number(g.style.getPropertyValue('--calendar-weeks')) * 7 : 42); })()");
   writes.splice(writeStart);

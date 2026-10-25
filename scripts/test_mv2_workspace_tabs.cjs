@@ -231,7 +231,15 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
     const monthHost = el('div'); await calendar.render(monthHost);
     assert.equal(monthHost.querySelector('.cal-create-bar').parentElement,
       monthHost.querySelector('.view-header'));
-    const buttons = monthHost.querySelector('.cal-nav').querySelectorAll('button');
+    const buttons = monthHost.querySelector('.cal-range-switch').querySelectorAll('button');
+    if (!isPhone) {
+      const toolbar = monthHost.querySelector('.cal-grid-toolbar');
+      assert.equal(monthHost.querySelector('.cal-range-switch').parentElement, toolbar);
+      assert.equal(toolbar.parentElement, monthHost.querySelector('.cal-left'));
+      assert.equal(toolbar.parentElement.children.indexOf(toolbar) + 1, toolbar.parentElement.children.indexOf(monthHost.querySelector('.cal-grid')), 'Desktop selector immediately precedes the grid');
+      assert.equal(monthHost.querySelector('.cal-nav').parentElement, monthHost.querySelector('.view-header'));
+      assert.equal(monthHost.querySelector('.cal-nav').querySelectorAll('button').length, 3, 'Header retains Today and both period arrows');
+    }
     for (const mode of ['Day', 'Week']) {
       buttons.find(button => button.textContent === mode).click(); await flush();
       assert.equal(monthHost.querySelectorAll('.cal-day').length, 0);
@@ -249,7 +257,11 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       assert.equal(monthHost.querySelectorAll('.cal-weekday')[0].textContent, isPhone ? 'M' : 'Mon');
       assert.ok(monthHost.querySelector('.cal-selected-agenda'));
       assert.ok(monthHost.querySelector('.cal-upcoming'));
-      if (!isPhone) assert.equal(monthHost.querySelector('.cal-calendars-card').parentElement, monthHost.querySelector('.cal-day-panel'));
+      if (!isPhone) {
+        const store = monthHost.querySelector('.cal-calendars-card');
+        assert.equal(store.parentElement, monthHost.querySelector('.cal-left'), 'Calendar selection stays outside the sidebar');
+        assert.equal(store.hidden, true, 'Calendar selection is available only through Your calendars');
+      }
       assert.equal(month.getAttribute('aria-pressed'), 'true');
       assert.equal(month.getAttribute('aria-checked'), 'true');
     }
