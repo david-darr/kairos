@@ -1,6 +1,6 @@
 // What a bot needs from the person, in one place (Agents 2.0, 2026-10-14).
 // This began inside the sidebar rail. David removed the rail's sections, but
-// the floating bot window and the Agents tab still need the same answer, so it
+// the Agents tab still needs the same answer, so it
 // lives here with no DOM and no imports: callers pass in what they know, and
 // scripts/test_bot_status.cjs can load it straight from disk.
 

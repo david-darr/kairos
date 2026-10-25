@@ -287,9 +287,6 @@ const botInboxWatcher = watchBotInbox({
     else Notification.requestPermission().then(result => { if (result === 'granted') notify(); });
   },
 });
-// The floating bot window asks the app to open a bot (electron/bot-window.js).
-window.jarvis?.botWindow?.onOpenAgent(agentId =>
-  document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } })));
 
 async function refreshAgentBadge() {
   clearTimeout(agentBadgeTimer);

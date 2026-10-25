@@ -96,9 +96,6 @@ let backendReady = false;
 const placement = require("./usage-overlay-placement");
 const { trackOverlay } = require("./usage-overlay-tracking");
 const { setOverlayFocus, validId } = require("./usage-overlay-focus");
-// The floating bot window (Agents 2.0, 2026-10-14); created once the app is ready.
-const { createBotWindow } = require("./bot-window");
-let botWindow = null;
 let overlayTracking = null;
 const OVERLAY_EDGES = placement.EDGES;
 const { overlayPreferences } = require("./usage-overlay-preferences");
@@ -373,8 +370,6 @@ function updateTrayMenu() {
     { type: "separator" },
     { label: "Show usage overlay", type: "checkbox", checked: usageOverlayVisible,
       enabled: process.platform === "win32", click: (item) => setUsageOverlayVisible(item.checked).catch(console.error) },
-    { label: "Show bot window", type: "checkbox", checked: !!botWindow?.isVisible(),
-      click: (item) => botWindow?.setVisible(item.checked, { backendReady }).catch(console.error) },
     { type: "separator" },
     {
       // The only way to actually stop it. Spelled out because the whole
@@ -543,7 +538,6 @@ async function createWindow() {
     updateTrayMenu();
   }
   if (usageOverlayVisible) setUsageOverlayVisible(true).catch(console.error);
-  botWindow?.restore().catch(console.error);
 }
 
 // Brain's skill import and Library's document import used to need this kind
@@ -614,9 +608,6 @@ function fromOverlayWindow(event) {
   return !!usageOverlay && !usageOverlay.isDestroyed() && event.sender === usageOverlay.webContents && event.senderFrame === usageOverlay.webContents.mainFrame;
 }
 ipcMain.handle("usage-overlay:state", (event) => fromAppWindow(event) ? overlayState() : { visible: false, supported: false });
-ipcMain.handle("bot-window:state", (event) => (fromAppWindow(event) && botWindow ? botWindow.state() : { visible: false }));
-ipcMain.handle("bot-window:set-visible", (event, visible) =>
-  (fromAppWindow(event) && botWindow ? botWindow.setVisible(!!visible, { backendReady }) : { visible: false }));
 // A desktop notification was clicked: bring the app forward (2026-10-14).
 ipcMain.on("app:show", (event) => { if (fromAppWindow(event)) showWindow(); });
 ipcMain.handle("usage-overlay:set-visible", (event, visible) => {
@@ -789,12 +780,6 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     loadOverlayPreference();
-    botWindow = createBotWindow({ app, BrowserWindow, screen, ipcMain, backendUrl: BACKEND_URL, showMain: showWindow,
-      sendToMain: (channel, ...args) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args); },
-      onChange: (state) => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("bot-window:state", state);
-        if (tray) updateTrayMenu();
-      } });
     const replaceOverlay = () => {
       overlayDrag = null;
       overlayTracking?.setDragging(false);

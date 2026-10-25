@@ -67,8 +67,9 @@ export async function renderNotificationsPanel(container) {
   } catch (error) { statusLine.textContent = error.message.replace(/^\d+: /, ''); }
 }
 
-// Desktop notifications for bots and the floating bot window (Agents 2.0,
-// 2026-10-14). Stored on this computer; they work without Remote Access.
+// Desktop notifications for bots (Agents 2.0, 2026-10-14). Stored on this
+// computer; they work without Remote Access. The floating bot window they
+// used to sit beside was retired for the desktop notch (2026-10-25).
 async function botsGroup() {
   const current = botPrefs();
   const rows = [
@@ -77,11 +78,5 @@ async function botsGroup() {
     ['results', 'Results', 'A bot sent a report, or has work ready for review.'],
   ].map(([key, title, description]) => row({ title, description, control: toggle({ label: title, checked: current[key],
     onChange: value => { Object.assign(current, saveBotPrefs({ [key]: value })); } }) }));
-  const bridge = window.jarvis?.botWindow;
-  if (bridge) {
-    const state = await bridge.state().catch(() => ({ visible: false }));
-    rows.push(row({ title: 'Floating bot window', description: 'A small window that stays on top and lists the bots that need you. Also in the tray menu.',
-      control: toggle({ label: 'Floating bot window', checked: !!state.visible, onChange: value => bridge.setVisible(value) }) }));
-  }
   return group({ title: 'Bots on this computer' }, rows);
 }

@@ -1,9 +1,8 @@
-// Desktop bot notifications (static/js/botNotifications.js) and the floating
-// bot window's lifecycle (electron/bot-window.js), tested without a browser or
-// Electron: the first is pure, the second is driven with stand-ins.
+// Desktop bot notifications (static/js/botNotifications.js), tested without a
+// browser: the watcher is pure. (The floating bot window was retired for the
+// desktop notch on 2026-10-25; scripts/test_notch_panels.cjs checks it is gone.)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 (async () => {
@@ -49,65 +48,5 @@ const path = require('node:path');
   await watch(inbox([q('i1', 'a1'), q('i13', 'a1')]));
   assert.deepEqual(shown, [], 'the master switch turns them all off');
 
-  // -- the bot window controller -------------------------------------------
-  const { createBotWindow } = require('../electron/bot-window.js');
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'kairos-botwin-'));
-  const displays = [
-    { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1040 } },
-    { id: 2, workArea: { x: 1920, y: 0, width: 1280, height: 1000 } },
-  ];
-  const handlers = {};
-  const windows = [];
-  class FakeWindow {
-    constructor(options) { this.options = options; this.bounds = { x: options.x, y: options.y, width: options.width, height: options.height };
-      this.events = {}; this.shown = false; this.webContents = { setWindowOpenHandler() {}, on() {} }; windows.push(this); }
-    setAlwaysOnTop() {} on(name, fn) { this.events[name] = fn; } async loadURL(url) { this.url = url; }
-    showInactive() { this.shown = true; } hide() { this.shown = false; } isDestroyed() { return false; }
-    getBounds() { return this.bounds; }
-  }
-  const screen = {
-    getAllDisplays: () => displays, getPrimaryDisplay: () => displays[0],
-    getDisplayMatching: b => displays.find(d => b.x >= d.workArea.x && b.x < d.workArea.x + d.workArea.width) || displays[0],
-  };
-  const opened = [];
-  const make = () => createBotWindow({
-    app: { getPath: () => userData }, BrowserWindow: FakeWindow, screen,
-    ipcMain: { on: (channel, fn) => { handlers[channel] = fn; } }, backendUrl: 'http://127.0.0.1:8430',
-    showMain: () => opened.push('show'), sendToMain: (channel, id) => opened.push(`${channel}:${id}`),
-  });
-
-  const first = make();
-  assert.equal(first.isVisible(), false, 'off by default');
-  await first.setVisible(true);
-  const win = windows.at(-1);
-  assert.equal(win.url, 'http://127.0.0.1:8430/bot-window');
-  assert.deepEqual([win.bounds.x, win.bounds.y], [1920 - 300 - 24, 1040 - 340 - 24], 'first opening: bottom-right of the main display');
-  assert.equal(win.options.alwaysOnTop, true);
-  assert.equal(win.options.webPreferences.nodeIntegration, false);
-
-  // Moved to the second display: remembered there.
-  win.bounds = { x: 2100, y: 120, width: 320, height: 360 };
-  win.events.moved();
-  await new Promise(resolve => setTimeout(resolve, 350));
-  const reopened = make();  // a fresh start reads the saved position
-  assert.equal(reopened.isVisible(), true, 'visibility survives a restart');
-  await reopened.restore();
-  assert.deepEqual(windows.at(-1).bounds, { x: 2100, y: 120, width: 320, height: 360 }, 'position remembered on its display');
-
-  // That display unplugged: back to the main display rather than off-screen.
-  displays.pop();
-  const unplugged = make();
-  await unplugged.restore();
-  assert.equal(windows.at(-1).bounds.x, 1920 - 300 - 24, 'a missing display falls back to the main one');
-
-  // Only the bot window may ask to open a bot, and only with a plausible id.
-  const sender = windows.at(-1).webContents;
-  handlers['bot-window:open-agent']({ sender: {} }, 'a1');
-  handlers['bot-window:open-agent']({ sender }, '../../etc');
-  assert.deepEqual(opened, [], 'other senders and malformed ids are ignored');
-  handlers['bot-window:open-agent']({ sender }, 'a1');
-  assert.deepEqual(opened, ['show', 'bot-window:open-agent:a1']);
-
-  fs.rmSync(userData, { recursive: true, force: true });
-  console.log('Bot notifications coalesce and respect focus and settings; the bot window remembers its place.');
+  console.log('Bot notifications coalesce and respect focus and settings.');
 })().catch(error => { console.error(error); process.exit(1); });

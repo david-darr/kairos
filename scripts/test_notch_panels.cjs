@@ -109,9 +109,15 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     for (const good of ['a1b2c3d4e5f6', 'scout_1', 'x-y']) assert.ok(validId(good), good);
     for (const bad of ['../../etc', '', 'a b', 'x'.repeat(65), 5, null, 'id?tab=settings']) assert.ok(!validId(bad), String(bad));
     const main = read('electron/main.js');
-    assert.match(main, /ipcMain\.on\("usage-overlay:focus", \(event, on\) => \{\n\s+if \(fromOverlayWindow\(event\) && typeof on === "boolean"\) setOverlayFocus\(usageOverlay, on\);/);
+    assert.match(main, /ipcMain\.on\("usage-overlay:focus", \(event, on\) => \{\s+if \(fromOverlayWindow\(event\) && typeof on === "boolean"\) setOverlayFocus\(usageOverlay, on\);/);
     assert.match(main, /focusable: false, show: false/, 'the notch starts non-focusable');
-    assert.match(main, /setOverlayFocus\(usageOverlay, false\);\n\s+usageOverlay\.hide\(\);/, 'hiding the notch gives the keyboard back');
+    assert.match(main, /setOverlayFocus\(usageOverlay, false\);\s+usageOverlay\.hide\(\);/, 'hiding the notch gives the keyboard back');
+  });
+  await check('the floating bot window is retired, with its preload, page and setting', () => {
+    for (const file of ['electron/bot-window.js', 'electron/bot-window-preload.js', 'static/bot-window.html', 'static/css/bot-window.css', 'static/js/botWindow.js'])
+      assert.ok(!fs.existsSync(path.join(root, file)), file + ' is gone');
+    for (const file of ['electron/main.js', 'electron/preload.js', 'static/js/app.js', 'static/js/views/settingsNotifications.js', 'app.py'])
+      assert.ok(!/bot-window|botWindow|createBotWindow|Floating bot window/.test(read(file)), file + ' no longer opens it');
   });
   console.log('PASS: ' + passed.join('; '));
 })().catch(error => { console.error(error.stack || error.message); console.error('Passed before failing: ' + passed.join('; ')); process.exit(1); });

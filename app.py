@@ -295,11 +295,6 @@ async def usage_overlay_page() -> FileResponse:
     return FileResponse(f"{STATIC_DIR}/usage-overlay.html")
 
 
-@app.get("/bot-window")
-async def bot_window_page() -> FileResponse:
-    return FileResponse(f"{STATIC_DIR}/bot-window.html")
-
-
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}

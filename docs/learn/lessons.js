@@ -388,7 +388,7 @@ window.LESSONS=[
       "Inspect the reply; Stop if needed"
     ],
     "tryit": "Give your research bot two unrelated sample questions.",
-    "notes": "Each bot thread has its own transcript, run cursor, model choice, approval state and Stop control. A thread belongs to the bot; it is not one shared transcript for every assignment. Bot replies arrive as a completed response, with live activity and elapsed time during the run. Ordinary chats keep streaming. The floating bot window offers a compact place to continue a bot conversation.",
+    "notes": "Each bot thread has its own transcript, run cursor, model choice, approval state and Stop control. A thread belongs to the bot; it is not one shared transcript for every assignment. Bot replies arrive as a completed response, with live activity and elapsed time during the run. Ordinary chats keep streaming.",
     "image": "bot",
     "section": "Bots",
     "kind": "chat",
