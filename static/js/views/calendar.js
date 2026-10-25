@@ -121,19 +121,19 @@ export async function render(container) {
   const grid = el("div", { class: "cal-grid glass" });
   const phoneDays = el('div', { class: 'cal-phone-days workspace-phone-only', role: 'group', 'aria-label': 'Choose a day' });
   createBar._phoneDays = phoneDays;
-  // Phone keeps its range row; desktop places the view switch immediately above the grid.
+  // Phone keeps its range row; desktop groups period and view controls above the grid.
   header.append(createBar);
   createBar.querySelector('button').setAttribute('aria-label', phoneCalendar() ? 'Add' : 'New event');
   if (phoneCalendar()) left.append(header, calendarStore, nav, phoneDays, grid);
   else {
-    const gridToolbar = el('div', { class: 'cal-grid-toolbar' }, [viewSwitch]);
-    header.append(nav, calendarsBtn, createBar);
-    left.append(header, calendarStore, phoneDays, gridToolbar, grid);
+    const gridToolbar = el('div', { class: 'cal-grid-toolbar' }, [nav, viewSwitch]);
+    left.append(calendarStore, phoneDays, gridToolbar, grid);
   }
 
   const dayPanel = el("div", { class: "glass bracket cal-day-panel rd-stagger" });
 
-  container.append(left, dayPanel);
+  if (phoneCalendar()) container.append(left, dayPanel);
+  else container.append(el('div', { class: 'view-constrained cal-workspace' }, [header, left, dayPanel]));
 
   const refresh = () => renderGrid(monthLabel, grid, createBar, dayPanel);
   createBar._refresh = refresh;
