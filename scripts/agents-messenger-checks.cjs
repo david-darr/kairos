@@ -64,14 +64,16 @@ module.exports = async ({js, waitFor, delay, navigate, win, capture, writes, dem
     win.setContentSize(width,height); await delay(250); await fits(); await capture(`agents-messenger-${name}`);
   }
   win.setContentSize(375,812); await delay(200);
-  assert.ok(await js("(()=>{const b=document.querySelector('.agents-chats-open'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()"),'Chats opener is reachable beside the Chats and Ecosystem switch');
+  // Phone conversation (AgentDM board): Back returns to the chats list, so the desktop rail opener stays hidden.
+  assert.ok(await js("(()=>{const b=document.querySelector('.agents-conversation-back'),r=b.getBoundingClientRect();return r.width>=44 && b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !document.querySelector('.agents-chats-open').getClientRects().length})()"),'Phone conversation Back is reachable and replaces the rail opener');
   await click('.agents-chats-open');
   assert.ok(await js("document.querySelector('.agents-chat-rail').getAttribute('aria-modal')==='true' && document.querySelector('.agents-messenger-stage').inert && document.querySelector('.agents-chat-rail').contains(document.activeElement)"),'Phone drawer opens with modal focus');
   await capture('agents-messenger-phone-drawer');
   await js("(()=>{const r=document.querySelector('.agents-chat-rail');const n=[...r.querySelectorAll('button,input')].filter(n=>n.getClientRects().length);n.at(-1).focus();n.at(-1).dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));window.__trapped=document.activeElement===n[0]})()");
   assert.ok(await js('window.__trapped'),'Drawer traps Tab');
   await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
-  assert.ok(await js("!document.querySelector('.agents-messenger-stage').inert && document.activeElement.matches('.agents-chats-open')"),'Escape restores focus and chat access');
+  // The rail opener is hidden in a phone conversation, so focus returns to the conversation's options button.
+  assert.ok(await js("!document.querySelector('.agents-messenger-stage').inert && document.activeElement.matches('.agent-more') && document.activeElement.getClientRects().length > 0"),'Escape restores focus and chat access');
   await click('.agents-chats-open'); await click('[data-key="agent:a2"]'); await dm();
   assert.ok(await js("!document.querySelector('.agents-messenger').classList.contains('is-rail-open')"),'Selecting DM closes phone drawer');
   await click('.agents-chats-open'); await click('[data-key="team:s1"]');
