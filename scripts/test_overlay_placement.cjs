@@ -23,29 +23,42 @@ check("every edge on every display stays inside that display's work area", () =>
 
 check("the window is flush against its edge, the taskbar never covered", () => {
   const a = main.workArea;
-  assert.equal(p.boundsFor({ edge: "right", offset: 0.5 }, main).x + p.NOTCH_W, a.x + a.width);
+  assert.equal(p.boundsFor({ edge: "right", offset: 0.5 }, main).x + p.SIDE_W, a.x + a.width);
   assert.equal(p.boundsFor({ edge: "left", offset: 0.5 }, side).x, side.workArea.x);
-  assert.equal(p.boundsFor({ edge: "top", offset: 0.5 }, main).y, a.y);
-  const bottom = p.boundsFor({ edge: "bottom", offset: 0.5 }, main);
-  assert.equal(bottom.y + bottom.height, a.y + a.height, "bottom edge sits on the taskbar, not under it");
+  assert.equal(p.boundsFor({ edge: "top-centre", offset: 0.5 }, main).y, a.y);
 });
 
-check("upright edges are CodeNotch's 360 x 650; flat edges its 650 square", () => {
-  assert.deepEqual(p.sizeFor("right"), { width: 360, height: 650 });
-  assert.deepEqual(p.sizeFor("top"), { width: 650, height: 650 });
+check("the three edges are top centre, left and right", () => {
+  assert.deepEqual(p.EDGES, ["top-centre", "left", "right"]);
 });
 
-check("the offset runs along the edge: ends and middle", () => {
+check("a side window is 656 wide (380 panel and the 246 usage card) and spans the work area's height", () => {
+  assert.deepEqual(p.sizeFor("right", main.workArea), { width: 656, height: main.workArea.height });
+  for (const display of displays) for (const edge of ["left", "right"]) for (const offset of [0, 0.5, 1]) {
+    const b = p.boundsFor({ edge, offset }, display), a = display.workArea;
+    assert.equal(b.height, a.height, `${edge} @${offset} on ${display.id}`);
+    assert.equal(b.y, a.y, "the offset places the notch inside the page, not the window");
+    assert.equal(b.width, 656);
+  }
+});
+
+check("a side window never outgrows a narrow work area", () => {
+  const narrow = { id: 3, workArea: { x: 100, y: 50, width: 500, height: 700 } };
+  assert.deepEqual(p.boundsFor({ edge: "left", offset: 0.5 }, narrow), { x: 100, y: 50, width: 500, height: 700 });
+  assert.deepEqual(p.boundsFor({ edge: "right", offset: 0.5 }, narrow), { x: 100, y: 50, width: 500, height: 700 });
+});
+
+check("the top-centre offset runs along the top: ends and middle", () => {
   const a = main.workArea;
-  assert.equal(p.boundsFor({ edge: "right", offset: 0 }, main).y, a.y);
-  assert.equal(p.boundsFor({ edge: "right", offset: 1 }, main).y, a.y + a.height - 650);
-  assert.equal(p.boundsFor({ edge: "top", offset: 0.5 }, main).x, Math.round((a.width - 650) / 2));
+  assert.equal(p.boundsFor({ edge: "top-centre", offset: 0 }, main).x, a.x);
+  assert.equal(p.boundsFor({ edge: "top-centre", offset: 1 }, main).x, a.x + a.width - 860);
+  assert.equal(p.boundsFor({ edge: "top-centre", offset: 0.5 }, main).x, Math.round((a.width - 860) / 2));
 });
 
-check("a saved offset comes back as the same place (boundsFor and offsetOf are inverses)", () => {
-  for (const display of displays) for (const edge of p.EDGES) for (const offset of [0, 0.25, 0.8, 1]) {
-    const b = p.boundsFor({ edge, offset }, display);
-    assert.ok(Math.abs(p.offsetOf(edge, b, display) - offset) < 0.002, `${edge} ${offset} on ${display.id}`);
+check("a saved top-centre offset comes back as the same place (boundsFor and offsetOf are inverses)", () => {
+  for (const display of displays) for (const offset of [0, 0.25, 0.8, 1]) {
+    const b = p.boundsFor({ edge: "top-centre", offset }, display);
+    assert.ok(Math.abs(p.offsetOf("top-centre", b, display) - offset) < 0.002, `${offset} on ${display.id}`);
   }
 });
 
@@ -60,9 +73,9 @@ check("dragging moves only along the edge and cannot leave the work area", () =>
   const up = p.dragTo("right", start, main, { start: 500, window: start.y }, { x: 9999, y: -5000 });
   assert.equal(up.x, start.x, "no sideways movement on an upright edge");
   assert.equal(up.y, main.workArea.y, "clamped at the top");
-  const flat = p.boundsFor({ edge: "bottom", offset: 0.5 }, side);
-  const right = p.dragTo("bottom", flat, side, { start: 0, window: flat.x }, { x: 99999, y: 0 });
-  assert.equal(right.y, flat.y, "no vertical movement on a flat edge");
+  const flat = p.boundsFor({ edge: "top-centre", offset: 0.5 }, side);
+  const right = p.dragTo("top-centre", flat, side, { start: 0, window: flat.x }, { x: 99999, y: 0 });
+  assert.equal(right.y, flat.y, "no vertical movement along the top");
   assert.equal(right.x + right.width, side.workArea.x + side.workArea.width, "clamped at the right end");
 });
 
@@ -75,7 +88,7 @@ check("top-centre uses a top-anchored 860 DIP shell centred in the work area", (
     const b = p.boundsFor({ edge: "top-centre", offset: .5 }, { ...display, scaleFactor });
     assert.equal(b.y, display.workArea.y);
     assert.equal(b.width, 860);
-    assert.equal(b.height, 440);
+    assert.equal(b.height, 640);
     assert.ok(Math.abs(b.x + 430 - display.workArea.x - display.workArea.width / 2) <= .5);
   }
 });

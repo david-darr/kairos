@@ -5,21 +5,23 @@
 // All sizes and coordinates are DIPs. scaleFactor is only for display labels;
 // multiplying these rectangles by it would move the notch away from the edge.
 
-const EDGES = ["right", "left", "top", "bottom", "top-centre"];
+const EDGES = ["top-centre", "left", "right"];
 
-// CodeNotch's window sizes (notch_window_size in its main.rs): upright it is
-// NOTCH_W wide and NOTCH_LONG tall, room for the 70 px pill and the 246 px
-// card beside it; lying flat on the top or bottom it is NOTCH_LONG square,
-// because the card opens below or above the pill there.
-const NOTCH_W = 360;
-const NOTCH_LONG = 650;
+// The side notch (Kairos Mobile v2 board NotchSide): the 380 DIP expanded
+// panel and, beside it on the inner side, room for the 246 DIP usage card with
+// an 8 DIP margin on each side of it.
+// The window spans the whole work-area height; the page puts the notch at the
+// chosen offset inside it (static/js/notchSide.js), so a tall expanded panel
+// never has to share the window's range with the resting pill.
+const SIDE_W = 656;
 
 function isVertical(edge) { return edge === "left" || edge === "right"; }
 
-function sizeFor(edge) {
-  // The v2 board's 820 DIP expanded notch, its shadow, and the usage card below it.
-  if (edge === "top-centre") return { width: 860, height: 440 };
-  return isVertical(edge) ? { width: NOTCH_W, height: NOTCH_LONG } : { width: NOTCH_LONG, height: NOTCH_LONG };
+// `area` is the work area; only the side notch uses its height.
+function sizeFor(edge, area) {
+  // The v2 board's 820 DIP expanded notch (the quiet view is the tallest, about 350), its shadow, and the usage card below it.
+  if (edge === "top-centre") return { width: 860, height: 640 };
+  return { width: SIDE_W, height: area ? area.height : 0 };
 }
 
 // The chosen display, or the primary one when none is chosen or it has been unplugged.
@@ -28,20 +30,20 @@ function chooseDisplay(displays, displayId, primaryId) {
 }
 
 // Flush against the edge of the display's work area (so the taskbar is never
-// covered), `offset` of the way along that edge: 0 is the top or left end, 1
-// the bottom or right end. The window never extends past the work area.
+// covered). The top-centre notch sits `offset` of the way along the top: 0 is
+// the left end, 1 the right end. The side windows span the work area's height,
+// so `offset` places the notch inside the page instead. The window never
+// extends past the work area.
 function boundsFor(config, display) {
   const area = display.workArea;
   const edge = EDGES.includes(config.edge) ? config.edge : "right";
   const offset = Number.isFinite(config.offset) ? Math.min(1, Math.max(0, config.offset)) : 0.5;
-  const size = sizeFor(edge);
+  const size = sizeFor(edge, area);
   const width = Math.min(size.width, area.width), height = Math.min(size.height, area.height);
   const along = (room) => Math.round(Math.max(0, room) * offset);
   switch (edge) {
     case "left": return { x: area.x, y: area.y + along(area.height - height), width, height };
-    case "top-centre":
-    case "top": return { x: area.x + along(area.width - width), y: area.y, width, height };
-    case "bottom": return { x: area.x + along(area.width - width), y: area.y + area.height - height, width, height };
+    case "top-centre": return { x: area.x + along(area.width - width), y: area.y, width, height };
     default: return { x: area.x + area.width - width, y: area.y + along(area.height - height), width, height };
   }
 }
@@ -67,4 +69,4 @@ function dragTo(edge, bounds, display, drag, point) {
   return { ...bounds, x: Math.round(x) };
 }
 
-module.exports = { EDGES, NOTCH_W, NOTCH_LONG, isVertical, sizeFor, chooseDisplay, boundsFor, offsetOf, dragTo };
+module.exports = { EDGES, SIDE_W, isVertical, sizeFor, chooseDisplay, boundsFor, offsetOf, dragTo };
