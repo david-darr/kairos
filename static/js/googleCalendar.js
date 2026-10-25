@@ -51,7 +51,8 @@ export async function googleCalendars(host, onChange) {
     reconnect.disabled = !onHost;
     reconnect.onclick = async () => {
       try {
-        const result = await api('/api/google/oauth/start', { method: 'POST', body: '{}' });
+        // Reconnect the account Calendar already uses, so it is refreshed in place rather than added again.
+        const result = await api('/api/google/oauth/start', { method: 'POST', body: JSON.stringify(status.calendar_account ? { account: status.calendar_account } : {}) });
         if (window.jarvis?.openGoogleSignIn) await window.jarvis.openGoogleSignIn(result.url);
         else window.open(result.url, '_blank', 'noopener');
         reconnect.disabled = true;

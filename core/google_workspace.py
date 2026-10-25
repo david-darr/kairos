@@ -159,6 +159,8 @@ def status(user: str | None = None) -> dict:
             "granted_scopes": default.get("granted_scopes") or [],
             "calendar_connected": bool(default.get("refresh_token") and CALENDAR_SCOPE in (default.get("granted_scopes") or [])),
             "calendar_ids": default.get("calendar_ids"),
+            # Calendar's Reconnect refreshes this account in place; only an account this user may use.
+            "calendar_account": default.get("id") if any(item["id"] == default.get("id") for item in usable) else None,
             "accounts": [_public(item, chosen) for item in usable],
             "default_account": chosen if usable else None}
 

@@ -106,6 +106,19 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
     def bearer(self):
         return [req.headers["authorization"] for req in self.requests if req.url.host == "www.googleapis.com"][-1]
 
+    async def test_calendar_reconnect_refreshes_its_account_in_place(self):
+        legacy = google.resolve_account("admin")
+        status = (await self.web("/api/google/status", user="bob")).json()
+        self.assertEqual(status["calendar_account"], legacy)
+        before = len(self.data["accounts"])
+        await self.add_account("legacy@example.com", user="bob", add=False, account=status["calendar_account"])
+        self.assertEqual(len(self.data["accounts"]), before)
+        self.assertEqual(self.data["default_account"], legacy)
+        self.assertIsNone(self.data["accounts"][legacy]["owner"])
+        # A user-owned Calendar account is never offered to another user to reconnect.
+        await self.add_account("alice@example.com", user="alice", add=False)
+        self.assertIsNone((await self.web("/api/google/status", user="bob")).json()["calendar_account"])
+
     async def test_existing_account_migrates_as_the_default(self):
         status = (await self.web("/api/google/status")).json()
         self.assertTrue(status["connected"])
