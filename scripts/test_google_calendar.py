@@ -377,6 +377,21 @@ class SanitizingTests(unittest.TestCase):
         self.assertIn("<strong>Text</strong>", result)
 
 
+
+class CalendarIdTests(unittest.TestCase):
+    def test_google_holiday_ids_are_accepted_and_encoded(self):
+        self.assertEqual(google._calendar_id("en.usa#holiday@group.v.calendar.google.com"),
+                         "en.usa%23holiday%40group.v.calendar.google.com")
+        for bad in ("a/b", "a..b", "", "x" * 257, None):
+            self.assertFalse(google._valid_calendar_id(bad))
+
+    def test_an_unusable_selected_calendar_does_not_hide_the_others(self):
+        listed = [{"id": "primary@example.com", "selected": True}, {"id": "bad/id", "selected": True},
+                  {"id": "off@example.com", "selected": False}]
+        with patch.object(google, "status", return_value={"calendar_connected": True}),                 patch.object(google, "_state", return_value={}), patch.object(google, "_default", return_value={}),                 patch.object(google, "calendar_list", AsyncMock(return_value=listed)),                 patch.object(google, "calendar_events", AsyncMock(return_value=[])) as events:
+            asyncio.run(google.selected_calendar_events("2026-10-25T00:00:00Z", "2026-10-26T00:00:00Z"))
+        self.assertEqual(events.await_args.args[0], ["primary@example.com"])
+
 if __name__ == "__main__":
     try:
         unittest.main()

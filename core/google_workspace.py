@@ -659,8 +659,13 @@ def _calendar_access() -> None:
         raise GoogleError("Reconnect to add Calendar", 409)
 
 
+def _valid_calendar_id(value) -> bool:
+    # Google's own calendars use "#" (holidays, birthdays: en.usa#holiday@group.v.calendar.google.com).
+    return isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z0-9_.@+#-]{1,256}", value)) and ".." not in value
+
+
 def _calendar_id(value: str) -> str:
-    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.@+-]{1,256}", value) or ".." in value:
+    if not _valid_calendar_id(value):
         raise GoogleError("Invalid Google calendar ID")
     return quote(value, safe="")
 
@@ -785,7 +790,8 @@ async def selected_calendar_events(start: str, end: str) -> list[dict]:
         return []
     ids = (_default(_state()) or {}).get("calendar_ids")
     if ids is None:
-        ids = [c["id"] for c in await calendar_list() if c["selected"]]
+        # A calendar Google lists with an ID we cannot use is skipped, not allowed to hide every other calendar.
+        ids = [c["id"] for c in await calendar_list() if c["selected"] and _valid_calendar_id(c["id"])]
     return await calendar_events(ids, start, end)
 
 
