@@ -155,11 +155,17 @@ async function rendererChecks() {
 rendererChecks().catch(error => { console.error(error); process.exitCode = 1; });
 
 // Default/migration and top-centre placement on negative and inset work areas.
-const { overlayPreferences } = require('../electron/usage-overlay-preferences');
+const { overlayPreferences, NOTCH_VERSION } = require('../electron/usage-overlay-preferences');
 assert.equal(overlayPreferences().edge, 'top-centre');
-for (const edge of ['left', 'right', 'top', 'bottom']) assert.equal(overlayPreferences({ edge }).edge, edge);
-assert.deepEqual(overlayPreferences({ edge: 'left', offset: .2, displayId: 2, foldOnHover: false }),
-  { edge: 'left', offset: .2, displayId: 2, foldOnHover: false });
+// A preference saved before the top-centre notch moves to it once, centred.
+for (const edge of ['left', 'right', 'top', 'bottom']) {
+  assert.deepEqual(overlayPreferences({ visible: true, edge, offset: .2, displayId: 2, foldOnHover: false }),
+    { edge: 'top-centre', offset: .5, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION });
+}
+// After that, an edge the user picks keeps its placement.
+for (const edge of ['left', 'right', 'top', 'bottom']) assert.equal(overlayPreferences({ edge, notch: NOTCH_VERSION }).edge, edge);
+assert.deepEqual(overlayPreferences({ edge: 'left', offset: .2, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION }),
+  { edge: 'left', offset: .2, displayId: 2, foldOnHover: false, notch: NOTCH_VERSION });
 for (const display of [primary, left, above, rightTaskbar, small]) {
   const b = boundsFor({ edge: 'top-centre', offset: .5 }, display), a = display.workArea;
   assert.equal(b.y, a.y);
