@@ -2668,7 +2668,7 @@ app.whenReady().then(async () => {
     const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
     await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
     console.log('PASS: phone shell.');
-    await require('./mobile-tabs-checks.cjs').run({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState, liveRuns, liveChunk, liveEvent, liveFinish, liveChange, calendarFixtures });
+    await require('./mobile-tabs-checks.cjs').run({ js, win, waitFor, capture, delay, navigate, reads, writes, overflow, demoState, liveRuns, liveChunk, liveEvent, liveFinish, liveChange, calendarFixtures });
     console.log('PASS: phone tabs.');
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
