@@ -846,7 +846,27 @@ app.whenReady().then(async () => {
     // Choosing a connection leaves the menu open (2026-10-14); close it so this
     // measures a menu opened at the phone size, not one placed for the desktop.
     await js("document.querySelector('#model-picker-menu').classList.add('hidden'); document.querySelector('#model-picker-btn').click()");
-    assert.ok(await js("(() => {const r=document.querySelector('#model-picker-menu').getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()"), 'Centered model menu fits short mobile viewport');
+    await waitFor("!!document.querySelector('.ms-model-sheet[open] #model-picker-menu')");
+    await js("Promise.all(document.querySelector('.ms-model-sheet[open]').getAnimations().map(a => a.finished))");
+    // Phone models live in a bottom sheet. The list may exceed its scrolling body,
+    // but the sheet must fit and every visible control must be reachable inside it.
+    assert.ok(await js(`(() => {
+      const sheet=document.querySelector('.ms-model-sheet[open]'), r=sheet.getBoundingClientRect();
+      const menu=sheet.querySelector('#model-picker-menu').getBoundingClientRect();
+      const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mobile-safe-top')) || 0;
+      return r.height>44 && r.height<=innerHeight*.9+1 && r.top>=safe && r.left>=0 && r.right<=innerWidth && r.bottom<=innerHeight
+        && menu.width>0 && menu.left>=0 && menu.right<=innerWidth;
+    })()`), 'Model sheet fits short mobile viewport below the status area');
+    assert.deepEqual(await js(`(() => {
+      const sheet=document.querySelector('.ms-model-sheet[open]'), body=sheet.querySelector('.ms-sheet-body');
+      const controls=[...sheet.querySelectorAll('#model-picker-menu button, #model-picker-menu summary, .ms-model-extras > summary')].filter(n=>n.getClientRects().length);
+      if (!controls.length) return ['No model controls'];
+      return controls.filter(n=>{
+        n.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+        const r=n.getBoundingClientRect(), b=body.getBoundingClientRect();
+        return r.top<b.top || r.bottom>b.bottom || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2));
+      }).map(n=>n.textContent.trim());
+    })()`), [], 'Every model sheet control can be scrolled into view and hit on a short phone');
     win.setContentSize(1440, 900);
     await js("document.body.click()");
     await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()");

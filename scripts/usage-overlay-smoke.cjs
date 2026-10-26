@@ -149,7 +149,13 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ...sessionList[0], messages: [{ role: 'user', content: 'Plan Q4' }, { role: 'assistant', content: 'Here are three roadmap themes to compare, with the tradeoffs of each.' }] })); return;
   }
-  if (req.url.startsWith('/api/notes')) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify([{ id: 'n1', text: 'Send invoice', completed: false, due_date: new Date().toISOString().slice(0, 10) + 'T09:00:00' }, { id: 'n2', text: 'Call the bank', completed: false, due_date: '2020-01-01T09:00:00' }])); return; }
+  if (req.url.startsWith('/api/notes')) {
+    // Local midnight stays due today even when UTC has already rolled over.
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify([{ id: 'n1', text: 'Send invoice', completed: false, due_date: today.toISOString() }, { id: 'n2', text: 'Call the bank', completed: false, due_date: yesterday.toISOString() }])); return;
+  }
   if (req.url.startsWith('/api/calendar/events')) {
     const at = minutes => new Date(Date.now() + minutes * 60000).toISOString();
     res.writeHead(200, { 'Content-Type': 'application/json' });

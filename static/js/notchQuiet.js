@@ -207,7 +207,10 @@ export function createQuietView({ bridge, bigKip, onNewChat }) {
 
     const figures = [];
     if (data.sessions) figures.push([chatsToday(data.sessions, now), 'chats today']);
-    if (data.notes) figures.push([notesDue(data.notes, now), 'notes due']);
+    if (data.notes) {
+      const due = notesDue(data.notes, now);
+      figures.push([due, due === 1 ? 'note due' : 'notes due']);
+    }
     figures.push([agents.length, agents.length === 1 ? 'agent' : 'agents']);
     counts.replaceChildren(...figures.map(([n, word]) => { const cell = h('span'); cell.append(h('b', '', String(n)), word); return cell; }));
 

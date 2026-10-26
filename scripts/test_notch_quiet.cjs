@@ -13,8 +13,9 @@ const plain = value => JSON.parse(JSON.stringify(value));
 // Just enough DOM: a node remembers its tag, attributes, text and children, and what its click does.
 const node = tag => {
   const n = { tag, children: [], attrs: {}, cls: '', style: { setProperty() {} }, events: {},
-    classList: { add: name => { n.cls += ' ' + name; } },
+    classList: { add: name => { n.cls += ' ' + name; }, toggle() {} },
     append(...more) { n.children.push(...more); }, setAttribute(k, v) { n.attrs[k] = v; },
+    replaceChildren(...more) { n.children = more; },
     addEventListener(name, fn) { n.events[name] = fn; } };
   Object.defineProperty(n, 'className', { get: () => n.cls, set: value => { n.cls = value; } });
   return n;
@@ -22,7 +23,7 @@ const node = tag => {
 const document = { createElement: node, createElementNS: (ns, tag) => node(tag) };
 const icons = load('notchIcons.js', {}, 'ICONS');
 const marks = load('notchModelMarks.js', { document }, 'logoKeyOf, initialOf, modelLogo');
-const quiet = load('notchQuiet.js', { document, ...icons, ...marks }, 'layoutFor, workingAgents, greetingFor, chatsToday, notesDue, nextEvent, sourceOf, untilCopy, rangeCopy, prepDraft, recentChat, ageCopy, snippetFrom, filledDots, usageRows, statusLine, createQuietData, quickActions, upNextTile, DOTS');
+const quiet = load('notchQuiet.js', { document, ...icons, ...marks }, 'layoutFor, workingAgents, greetingFor, chatsToday, notesDue, nextEvent, sourceOf, untilCopy, rangeCopy, prepDraft, recentChat, ageCopy, snippetFrom, filledDots, usageRows, statusLine, createQuietData, createQuietView, quickActions, upNextTile, DOTS');
 const side = load('notchSide.js', { document, ...icons, ...quiet }, 'isSideEdge, sideTop, sideCardAt');
 const { navigation, TARGETS } = require('../electron/usage-overlay-navigation');
 const { notchNavigation } = load('notchNavigate.js', {}, 'notchNavigation');
@@ -94,6 +95,13 @@ assert.equal(quiet.snippetFrom(null), '');
 const notes = [{ completed: false, due_date: '2026-10-25T09:00:00' }, { completed: false, due_date: '2026-10-20T09:00:00' },
   { completed: false, due_date: '2026-10-26T09:00:00' }, { completed: true, due_date: '2026-10-25T08:00:00' }, { completed: false }];
 assert.equal(quiet.notesDue(notes, now), 2, 'due today or already past, open notes only');
+const quietView = quiet.createQuietView({ bridge: {}, bigKip: node('div') });
+for (const count of [0, 1, 2]) {
+  quietView.update({ state: 'idle', agents: [] }, { notes: Array.from({ length: count }, () => ({ due_date: new Date(Date.now() - 86400000).toISOString() })) });
+  const figure = quietView.node.children[0].children[1].children[0];
+  assert.equal(figure.children[0].textContent, String(count));
+  assert.equal(figure.children[1], count === 1 ? 'note due' : 'notes due', 'rendered note count uses singular only for one');
+}
 const events = [
   { title: 'Done', start: new Date(at(14, 50)).toISOString(), end: new Date(at(15, 0)).toISOString(), completed: true, source: 'calendar' },
   { title: 'Over', start: new Date(at(13, 0)).toISOString(), end: new Date(at(14, 0)).toISOString(), source: 'google' },

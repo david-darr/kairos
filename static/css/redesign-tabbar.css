@@ -388,7 +388,7 @@
   .kairos-redesign .ms-profile-detail { display: block; font-weight: 400; font-size: 13px; color: var(--rd-ink-dim); }
   .kairos-redesign .ms-more-extras { margin-block: 14px; font-size: 13px; color: var(--rd-ink-dim); }
   .kairos-redesign .ms-more-extras > summary { cursor: pointer; }
-  .kairos-redesign .ms-sheet.ms-model-sheet { height: 640px; max-height: calc(100dvh - 32px); }
+  .kairos-redesign .ms-sheet.ms-model-sheet { height: 640px; max-height: min(90dvh, calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px)))); }
   .kairos-redesign .ms-sheet.ms-notifications-sheet { height: 770px; max-height: calc(100dvh - 32px); }
   .kairos-redesign .ms-sheet.ms-background-sheet { height: 620px; max-height: calc(100dvh - 32px); }
   .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) { display: flex; flex-direction: column; padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); }

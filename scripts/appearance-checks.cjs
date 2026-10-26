@@ -198,7 +198,14 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   // CDP mouse events give Chromium's own pointer id.
   await set({ distortion: 0 });
   await js("document.querySelector('[data-section=appearance]').click()");
-  const knobBox = await js("(() => { const r = document.querySelector('#appearance-distortion').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()");
+  // Selecting the section resets its scroll; Flow now follows the preview and style cards.
+  await js("document.querySelector('#appearance-distortion').scrollIntoView({block:'center', behavior:'instant'})");
+  const knobBox = await js(`(() => {
+    const input = document.querySelector('#appearance-distortion'), r = input.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+    if (document.elementFromPoint(x, y) !== input) throw new Error('Distortion dial is obscured');
+    return { x, y };
+  })()`);
   const flat = await preview();
   const drag = (type, x, y) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
     type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, pointerType: 'mouse',

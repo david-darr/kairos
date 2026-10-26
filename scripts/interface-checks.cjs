@@ -110,6 +110,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     if (width <= 768) {
       await js("[...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Model and reasoning')).click()");
       await waitFor("!!document.querySelector('.ms-sheet[open] #model-picker-menu')");
+      // The tools action opens an animated sheet; [open] precedes its arrival onscreen.
+      await js("Promise.all(document.querySelector('.ms-sheet[open]').getAnimations().map(a => a.finished))");
       assert.equal(await js("(() => { const r=document.getElementById('model-picker-menu').getBoundingClientRect(); return r.width > 0 && r.height>44 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Phone model and reasoning remain operable');
       await js("document.querySelector('.ms-sheet[open] .ms-model-extras > summary').scrollIntoView({block:'nearest'})");
       await click('.ms-sheet[open] .ms-model-extras > summary');
