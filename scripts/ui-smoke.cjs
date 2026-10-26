@@ -2182,10 +2182,11 @@ app.whenReady().then(async () => {
     const reducedCalendarWrites = writes.length;
     await navigate('calendar');
     await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
-    await waitFor("[...document.querySelectorAll('.cal-day-panel-title')].some(n=>n.textContent==='Next 7 Days') && [...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
-    await js("{ const c=[...document.querySelectorAll('.cal-day-panel .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
-    await waitFor("![...document.querySelectorAll('.cal-day-panel .card')].some(c=>c.textContent.includes('Review the course project'))");
+    await waitFor("[...document.querySelectorAll('.cal-day-panel-title')].some(n=>n.textContent==='Next 7 Days') && [...document.querySelectorAll('.cal-upcoming .card')].some(c=>c.textContent.includes('Review the course project'))");
+    await js("{ const c=[...document.querySelectorAll('.cal-upcoming .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
+    await waitFor("![...document.querySelectorAll('.cal-upcoming .card')].some(c=>c.textContent.includes('Review the course project'))");
     assert.equal(await js("window._reducedCalendarFade"), false, 'Reduced motion removes completed upcoming items without animation');
+    assert.ok(await js("[...document.querySelectorAll('.cal-selected-agenda .cal-item-completed')].some(c=>c.textContent.includes('Review the course project') && c.querySelector('input').checked)"), 'Reduced motion keeps the completed selected-day item checked');
     mutate('/api/tab-school/assignments/a1', 'PATCH', { completed: false });
     writes.splice(reducedCalendarWrites);
     // Home's "Your models" shows each subscription's limits as the overlay does
