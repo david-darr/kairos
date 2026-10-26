@@ -215,6 +215,7 @@
 
   // Binary and HTML responses are shared by the smoke server and demo shim too.
   function media(url) {
+    if (url.pathname === '/api/chat/live/events') return { type: 'text/event-stream', body: 'data: ' + JSON.stringify({ type: 'snapshot', runs: {} }) + '\n\n' };
     // A run's kept computer step images (cua upgrade 5.4): the fixture frame.
     if (/^\/api\/computer\/steps\/[^/]+\/\d+\/(before|after|marker)\.jpg$/.test(url.pathname) && state.computerImage) {
       return { type: 'image/jpeg', base64: state.computerImage };
@@ -959,6 +960,8 @@
     return undefined;
   }
   function fixture(url) {
+    if (url.pathname === '/api/chat/live/snapshot') return { type: 'snapshot', runs: {} };
+    if (/^\/api\/chat\/background\/[^/]+$/.test(url.pathname)) return { items: [], notes: [] };
     if (url.pathname === '/api/addons') return [];
     // The Design canvas: no designs in the demo (its boards are live frames from the backend).
     if (url.pathname === '/api/designs') return [];
