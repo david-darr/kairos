@@ -30,7 +30,14 @@ module.exports = async function tabBarChecks(c) {
     const clip = n => { const r = n.getBoundingClientRect(); let t = r.top, b = r.bottom;
       for (let a = n.parentElement; a && a !== document.documentElement; a = a.parentElement) { const s = getComputedStyle(a); if (s.overflowX !== 'visible' || s.overflowY !== 'visible') { const q = a.getBoundingClientRect(); t = Math.max(t, q.top); b = Math.min(b, q.bottom); } }
       return b - t > 0.5 ? b : null; };
-    const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, .dither-canvas, [inert], .ms-activity');
+    const shown = n => {
+      // Chromium retains boxes for descendants of closed disclosures. Only
+      // their summary is visible; expanded content is checked separately below.
+      for (let p = n.parentElement; p && p !== v; p = p.parentElement) {
+        if (p.matches('details:not([open])') && !p.querySelector(':scope > summary')?.contains(n)) return false;
+      }
+      return n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, .dither-canvas, [inert], .ms-activity');
+    };
     const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-search, .ms-launch-composer')));
     const bottoms = nodes.map(n => ({ b: clip(n), n: String(n.className || n.tagName).slice(0, 40) })).filter(x => x.b !== null).sort((a, b) => b.b - a.b);
     v.scrollTo?.(0, 0); for (const n of v.querySelectorAll('*')) if (n.scrollTop) n.scrollTop = 0;
@@ -124,6 +131,12 @@ module.exports = async function tabBarChecks(c) {
     ok(await pillOn(), `${tab}: the pill sits on ${want}`);
     const clear = await clearsBar();
     ok(!clear.last || clear.last.b <= clear.barTop + 0.5, `${tab}: the last content scrolls clear of the bar: ${JSON.stringify(clear)}`);
+    if (tab === 'email') {
+      await js("document.querySelector('.email-view > details.disclosure-panel').open = true");
+      const expanded = await clearsBar();
+      ok(!expanded.last || expanded.last.b <= expanded.barTop + 0.5, `email: expanded provider controls clear the bar: ${JSON.stringify(expanded)}`);
+      await js("document.querySelector('.email-view > details.disclosure-panel').open = false");
+    }
     // A dock (search and +) sits above the bar, never under it.
     ok(await js("!document.querySelector('.ms-dock')"), `${tab}: no bottom search dock`);
     const search = await rect('.ms-page-search');
