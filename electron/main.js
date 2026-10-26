@@ -101,10 +101,7 @@ const OVERLAY_EDGES = placement.EDGES;
 const { overlayPreferences } = require("./usage-overlay-preferences");
 const { navigation } = require("./usage-overlay-navigation");
 let overlayConfig = overlayPreferences();
-let overlayDrag = null;
 
-// Size and position live in electron/usage-overlay-placement.js, pure and tested.
-function overlayVertical() { return placement.isVertical(overlayConfig.edge); }
 // The chosen monitor, or the main one when it is unset or no longer plugged in.
 function overlayDisplay() {
   return placement.chooseDisplay(screen.getAllDisplays(), overlayConfig.displayId, screen.getPrimaryDisplay().id);
@@ -164,7 +161,7 @@ async function setUsageOverlayVisible(visible) {
         if (url !== `${BACKEND_URL}/usage-overlay`) event.preventDefault();
       });
       overlayTracking = trackOverlay(usageOverlay, screen, overlayBounds);
-      usageOverlay.on("closed", () => { usageOverlay = null; overlayTracking = null; overlayDrag = null; });
+      usageOverlay.on("closed", () => { usageOverlay = null; overlayTracking = null; });
       await usageOverlay.loadURL(`${BACKEND_URL}/usage-overlay`);
     }
     overlayTracking.place();
@@ -172,14 +169,12 @@ async function setUsageOverlayVisible(visible) {
   } else if (usageOverlay && !usageOverlay.isDestroyed()) {
     setOverlayFocus(usageOverlay, false);
     usageOverlay.hide();
-    overlayDrag = null;
     overlayTracking.setDragging(false);
   }
   notifyOverlayState();
   return overlayState();
 }
 function setOverlayConfig(changes) {
-  overlayDrag = null;
   if (changes && OVERLAY_EDGES.includes(changes.edge)) overlayConfig.edge = changes.edge;
   if (changes && typeof changes.foldOnHover === "boolean") overlayConfig.foldOnHover = changes.foldOnHover;
   if (changes && Number.isFinite(changes.offset)) overlayConfig.offset = Math.min(1, Math.max(0, changes.offset));
@@ -625,30 +620,6 @@ ipcMain.on("usage-overlay:interactive", (event, on) => {
   if (on) usageOverlay.setIgnoreMouseEvents(false);
   else usageOverlay.setIgnoreMouseEvents(true, { forward: true });
 });
-// The move handle slides the notch along its edge: the window follows the
-// pointer's screen y, clamped to the work area, and the place is remembered.
-// Along the edge means y on the left and right edges, x on the top and bottom.
-ipcMain.on("usage-overlay:move-start", (event) => {
-  if (!fromOverlayWindow(event)) return;
-  const b = usageOverlay.getBounds();
-  // DOM screenX/screenY can disagree across mixed-DPI monitors. Dragging uses
-  // the same Electron screen DIPs as placement and native hover tracking.
-  const point = screen.getCursorScreenPoint();
-  overlayDrag = { start: overlayVertical() ? point.y : point.x, window: overlayVertical() ? b.y : b.x };
-  overlayTracking.setDragging(true);
-});
-ipcMain.on("usage-overlay:move-to", (event) => {
-  if (!fromOverlayWindow(event) || !overlayDrag) return;
-  usageOverlay.setBounds(placement.dragTo(overlayConfig.edge, usageOverlay.getBounds(), overlayDisplay(), overlayDrag, screen.getCursorScreenPoint()));
-});
-ipcMain.on("usage-overlay:move-end", (event) => {
-  if (!fromOverlayWindow(event) || !overlayDrag) return;
-  overlayDrag = null;
-  overlayConfig.offset = placement.offsetOf(overlayConfig.edge, usageOverlay.getBounds(), overlayDisplay());
-  saveOverlayPreference();
-  overlayTracking.setDragging(false);
-  notifyOverlayState();  // the Appearance slider follows the handle
-});
 ipcMain.on("usage-overlay:hide", (event) => {
   if (fromOverlayWindow(event)) setUsageOverlayVisible(false).catch(console.error);
 });
@@ -783,7 +754,6 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     loadOverlayPreference();
     const replaceOverlay = () => {
-      overlayDrag = null;
       overlayTracking?.setDragging(false);
       notifyOverlayState();
     };

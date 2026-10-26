@@ -18,11 +18,6 @@ contextBridge.exposeInMainWorld("usageOverlay", {
   // A dropped folder's path, for its broker grant (the page cannot read paths).
   pathFor: (file) => { try { return webUtils.getPathForFile(file) || ""; } catch { return ""; } },
   hide: () => ipcRenderer.send("usage-overlay:hide"),
-  // The main process reads the native cursor in DIPs; DOM screen coordinates
-  // are not used for placement on mixed-DPI monitors.
-  moveStart: () => ipcRenderer.send("usage-overlay:move-start"),
-  moveTo: () => ipcRenderer.send("usage-overlay:move-to"),
-  moveEnd: () => ipcRenderer.send("usage-overlay:move-end"),
   getConfig: () => ipcRenderer.invoke("usage-overlay:config"),
   onConfig: (handler) => ipcRenderer.on("usage-overlay:config", (_event, config) => handler(config)),
   onPointer: (handler) => ipcRenderer.on("usage-overlay:pointer", (_event, point) => handler(point)),

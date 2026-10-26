@@ -15,8 +15,6 @@ const EDGES = ["top-centre", "left", "right"];
 // never has to share the window's range with the resting pill.
 const SIDE_W = 656;
 
-function isVertical(edge) { return edge === "left" || edge === "right"; }
-
 // `area` is the work area; only the side notch uses its height.
 function sizeFor(edge, area) {
   // The v2 board's 820 DIP expanded notch (the quiet view is the tallest, about 350), its shadow, and the usage card below it.
@@ -48,25 +46,4 @@ function boundsFor(config, display) {
   }
 }
 
-// The offset a window at `bounds` sits at along its edge: the inverse of
-// boundsFor, used when the move handle lets go.
-function offsetOf(edge, bounds, display) {
-  const area = display.workArea;
-  const value = isVertical(edge) ? (bounds.y - area.y) / Math.max(1, area.height - bounds.height)
-    : (bounds.x - area.x) / Math.max(1, area.width - bounds.width);
-  return Math.min(1, Math.max(0, value));
-}
-
-// A drag along the edge: the window follows the pointer on that edge's axis only,
-// clamped inside the work area.
-function dragTo(edge, bounds, display, drag, point) {
-  const area = display.workArea;
-  if (isVertical(edge)) {
-    const y = Math.min(area.y + area.height - bounds.height, Math.max(area.y, drag.window + (point.y - drag.start)));
-    return { ...bounds, y: Math.round(y) };
-  }
-  const x = Math.min(area.x + area.width - bounds.width, Math.max(area.x, drag.window + (point.x - drag.start)));
-  return { ...bounds, x: Math.round(x) };
-}
-
-module.exports = { EDGES, SIDE_W, isVertical, sizeFor, chooseDisplay, boundsFor, offsetOf, dragTo };
+module.exports = { EDGES, SIDE_W, sizeFor, chooseDisplay, boundsFor };
