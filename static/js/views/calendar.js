@@ -382,9 +382,6 @@ async function renderUpcomingPanel(dayPanel, onChange, isCurrent = () => dayPane
 }
 
 async function renderDayPanel(dayPanel, date, items, onChange) {
-  // The selected agenda shares the active-only list with Next 7 Days.
-  // Range responses can still include completed calendar and tab items.
-  items = items.filter(item => !item.completed);
   let upcomingReady;
   const store = dayPanel._createBar?._calendarStore;
   // Keep the live filter controls attached while rebuilding the selected day.
