@@ -51,21 +51,43 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   // Several Google accounts: pick one for Library, add more, see which can send.
   assert.deepEqual(await js("[...document.querySelectorAll('.google-account-line select option')].map(o => o.textContent)"),
     ['demo@example.com', 'coach.demo@example.com']);
-  const accountButtons = await js("[...document.querySelectorAll('.google-account-line button')].filter(b => !b.hidden).map(b => b.textContent)");
-  assert.ok(accountButtons.includes('Add another Google account') && accountButtons.includes('Disconnect'), label + ' account actions: ' + accountButtons);
-  assert.ok(!accountButtons.includes('Reconnect to send email'), label + ' sending account needs no reconnect');
+  if (phone) {
+    assert.ok(await js("[...document.querySelectorAll('dialog.ms-sheet[open] button')].some(b => b.textContent === 'Disconnect')"), 'Drive options offer Disconnect');
+    await closeDriveOptions();
+    await js("document.querySelector('.drive-account-copy').click()");
+    await waitFor("!!document.querySelector('.drive-account-sheet')");
+    assert.ok(await js("[...document.querySelectorAll('.drive-account-sheet button')].some(b=>b.textContent==='Add another Google account')"));
+    assert.ok(await js("![...document.querySelectorAll('.drive-account-reconnect')].some(b=>b.textContent==='Allow sending from demo@example.com')"), 'Sending account needs no reconnect');
+    assert.ok(await js("[...document.querySelectorAll('.drive-account-reconnect')].some(b=>b.textContent==='Allow sending from coach.demo@example.com')"));
+  } else {
+    const accountButtons = await js("[...document.querySelectorAll('.google-account-line button')].filter(b => !b.hidden).map(b => b.textContent)");
+    assert.ok(accountButtons.includes('Add another Google account') && accountButtons.includes('Disconnect'), label + ' account actions: ' + accountButtons);
+    assert.ok(!accountButtons.includes('Reconnect to send email'), label + ' sending account needs no reconnect');
+  }
   assert.ok(await js("document.querySelector('.google-account-line').textContent.includes('Can send email')"));
+  const chooseAccount = async (id, email) => {
+    if (phone) {
+      if (!await js("!!document.querySelector('.drive-account-sheet')")) await js("document.querySelector('.drive-account-copy').click()");
+      await waitFor("!!document.querySelector('.drive-account-sheet')");
+      await js(`[...document.querySelectorAll('.drive-account-choice')].find(b=>b.querySelector('strong').textContent===${JSON.stringify(email)}).click()`);
+    } else await js(`(() => { const s = document.querySelector('.google-account-line select'); s.value = ${JSON.stringify(id)}; s.dispatchEvent(new Event('change')); })()`);
+  };
   let before = reads.length;
-  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'acct_coach'; s.dispatchEvent(new Event('change')); })()");
+  await chooseAccount('acct_coach', 'coach.demo@example.com');
   await requestAfter(reads, before, r => r.path === '/api/google/drive/files' && r.query.account === 'acct_coach');
   await waitFor("document.querySelector('.google-account-line select')?.value === 'acct_coach' && document.querySelectorAll('.google-file-row').length === 8");
-  assert.ok(await js("[...document.querySelectorAll('.google-account-line button')].some(b => !b.hidden && b.textContent === 'Reconnect to send email')"));
+  if (phone) {
+    await js("document.querySelector('.drive-account-copy').click()");
+    await waitFor("!!document.querySelector('.drive-account-sheet')");
+    assert.ok(await js("[...document.querySelectorAll('.drive-account-reconnect')].some(b=>b.textContent==='Allow sending from coach.demo@example.com')"));
+  } else assert.ok(await js("[...document.querySelectorAll('.google-account-line button')].some(b => !b.hidden && b.textContent === 'Reconnect to send email')"));
   assert.deepEqual(await overflow(), [], label + ' account bar fits');
   await capture(label + '-drive-accounts');
   before = reads.length;
-  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'acct_demo'; s.dispatchEvent(new Event('change')); })()");
+  await chooseAccount('acct_demo', 'demo@example.com');
   await requestAfter(reads, before, r => r.path === '/api/google/drive/files' && r.query.account === 'acct_demo');
   await waitFor("document.querySelector('.google-account-line select')?.value === 'acct_demo' && document.querySelectorAll('.google-file-row').length === 8");
+  await driveOptions();
   assert.ok(await js("document.querySelector('.google-storage').textContent.includes('2.0 GB')"));
   assert.deepEqual(await overflow(), [], label + ' Drive grid fits');
   await capture(label + '-drive-grid');
