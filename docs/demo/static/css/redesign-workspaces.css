@@ -1069,7 +1069,7 @@
   .kairos-redesign .drive-account-choice strong { display: block; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
   .kairos-redesign .drive-account-choice small { display: block; font-size: 12px; color: var(--rd-ink-dim); }
   .kairos-redesign .drive-account-sheet .drive-account-avatar { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: var(--rd-ground); }
-  .kairos-redesign #view-content[data-view="email"] .email-view > :is(details.disclosure-panel, #email-accounts-list) { display: none; }
+  .kairos-redesign #view-content[data-view="email"] .email-view > #email-accounts-list { display: none; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center !important; }
   .kairos-redesign #view-content[data-view="email"] .email-summary > .card-row > .btn { grid-column: 2; justify-self: start; min-height: 36px; }
   .kairos-redesign #view-content[data-view="email"] .email-summary .title { font: 500 15px var(--rd-font-ui); }
