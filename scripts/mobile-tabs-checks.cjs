@@ -239,7 +239,11 @@ async function run(ctx) {
   eq((await pressed()).Week, 'true', 'Header Week follows the original control');
   eq((await pressed()).Month, 'false', 'Header Month clears');
   eq(await docks(), 0, 'Switching to Week keeps the bottom dock absent');
-  ok(await js("document.querySelectorAll('.cal-week-day').length === 7 && document.querySelector('.cal-week-header').scrollWidth <= document.querySelector('.cal-grid').clientWidth && !!document.querySelector('.cal-legend')"), 'Week shows all seven days without horizontal scrolling and keeps its legend');
+  // aria-pressed changes before the events request and grid render complete.
+  await waitFor("document.querySelector('.cal-left').dataset.calendarRange === 'week' && !!document.querySelector('.cal-legend')");
+  eq(await js("document.querySelectorAll('.cal-week-day').length"), 7, 'Week shows all seven days');
+  ok(await js("document.querySelector('.cal-week-header').scrollWidth <= document.querySelector('.cal-grid').clientWidth"), 'Week has no horizontal scrolling');
+  ok(await js("!!document.querySelector('.cal-legend')"), 'Week keeps its legend');
   await shot('calendar-week');
   await calendarButton('Month');
   await waitFor("[...document.querySelectorAll('.cal-view-switch button')].find(b => b.textContent === 'Month').getAttribute('aria-pressed') === 'true'");

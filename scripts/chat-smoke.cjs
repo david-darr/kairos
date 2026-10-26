@@ -860,14 +860,29 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js(`(() => {
       const sheet=document.querySelector('.ms-model-sheet[open]'), body=sheet.querySelector('.ms-sheet-body');
       const header=sheet.querySelector('.ms-sheet-header'), headerTop=header.getBoundingClientRect().top;
-      const controls=[...sheet.querySelectorAll('#model-picker-menu button, #model-picker-menu summary, .ms-model-extras > summary')].filter(n=>n.getClientRects().length);
-      if (!controls.length) return ['No model controls'];
-      return controls.filter(n=>{
-        n.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
-        const r=n.getBoundingClientRect(), b=body.getBoundingClientRect();
-        return r.top<b.top || r.bottom>b.bottom || Math.abs(header.getBoundingClientRect().top-headerTop)>1
-          || sheet.scrollTop!==0 || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2));
-      }).map(n=>n.textContent.trim());
+      const failures=[];
+      for (const expanded of [false, true]) {
+        if (expanded) for (const details of body.querySelectorAll('details')) {
+          if (!details.open) details.querySelector(':scope > summary').click();
+        }
+        const controls=[...body.querySelectorAll('button, summary, input[type=search]')].filter(n=>{
+          // Closed details can retain layout boxes in Chromium. Their descendants
+          // become targets only after the summary is opened, checked on pass two.
+          for (let p=n.parentElement; p && p!==body; p=p.parentElement) {
+            if (p.matches('details:not([open])') && n!==p.querySelector(':scope > summary')) return false;
+          }
+          return n.getClientRects().length && getComputedStyle(n).visibility!=='hidden';
+        });
+        if (!controls.length) failures.push('No model controls');
+        for (const n of controls) {
+          n.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+          const r=n.getBoundingClientRect(), b=body.getBoundingClientRect();
+          if (r.top<b.top || r.bottom>b.bottom || Math.abs(header.getBoundingClientRect().top-headerTop)>1
+            || sheet.scrollTop!==0 || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2)))
+            failures.push({control:n.textContent.trim() || n.getAttribute('aria-label'), expanded, rect:r.toJSON(), body:b.toJSON(), hit:document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.outerHTML});
+        }
+      }
+      return failures;
     })()`), [], 'Every model sheet control can be scrolled into view and hit on a short phone');
     win.setContentSize(1440, 900);
     await js("document.body.click()");

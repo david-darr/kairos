@@ -382,7 +382,8 @@
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-row:is(:hover, :focus-within) .ms-row-more { opacity: 1; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-actions-open .ms-history-main { transform: translateX(-136px); }
 
-  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .chat-mobile-header { gap: 12px; padding: calc(8px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 14px; background: color-mix(in srgb, var(--rd-ground) 92%, transparent); }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .chat-mobile-header { flex-wrap: nowrap; gap: 12px; padding: calc(8px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))) 20px 14px; background: color-mix(in srgb, var(--rd-ground) 92%, transparent); }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .ms-chat-heading small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .ms-chat-heading { text-align: center; }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .ms-chat-heading strong { font: italic 600 24px/1.1 var(--rd-font-title); }
   .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation :is(.ms-chat-back, .chat-phone-tools > button) { display: grid; place-items: center; width: 46px; min-width: 46px; height: 46px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); }

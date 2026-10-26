@@ -987,11 +987,25 @@ app.whenReady().then(async () => {
           await js("Promise.all(document.querySelector('#view-content .library-view, #view-content .library-vault-page').getAnimations().map(a => a.finished))");
           assert.ok(await js(`(() => {
             const host=document.getElementById('view-content'), h=host.getBoundingClientRect(), s=getComputedStyle(host);
-            const r=host.querySelector('.library-view, .library-vault-page').getBoundingClientRect();
+            const page=host.querySelector('.library-view, .library-vault-page'), r=page.getBoundingClientRect();
             const left=h.left+host.clientLeft+parseFloat(s.paddingLeft);
             const right=h.left+host.clientLeft+host.clientWidth-parseFloat(s.paddingRight);
-            return Math.abs(r.left-left)<=1 && Math.abs(r.right-right)<=1 && host.scrollWidth<=host.clientWidth+1;
+            return Math.abs(r.left-left)<=1 && Math.abs(r.right-right)<=1 &&
+              page.scrollWidth<=page.clientWidth+1 && host.scrollWidth<=host.clientWidth+1 && document.documentElement.scrollWidth<=innerWidth+1;
           })()`), `Library ${section} fills the content area without overflow at ${width}px`);
+        }
+        for (const tab of ["tasks", "notes", "email", "cookbook", "tool-store"]) {
+          await navigate(tab);
+          await waitFor("!!document.querySelector('#view-content .view-constrained')");
+          await js("Promise.all(document.querySelector('#view-content .view-constrained').getAnimations().map(a => a.finished))");
+          assert.ok(await js(`(() => {
+            const host=document.getElementById('view-content'), h=host.getBoundingClientRect(), s=getComputedStyle(host);
+            const page=host.querySelector('.view-constrained'), r=page.getBoundingClientRect();
+            const left=h.left+host.clientLeft+parseFloat(s.paddingLeft);
+            const right=h.left+host.clientLeft+host.clientWidth-parseFloat(s.paddingRight);
+            return Math.abs(r.left-left)<=1 && Math.abs(r.right-right)<=1 &&
+              page.scrollWidth<=page.clientWidth+1 && host.scrollWidth<=host.clientWidth+1 && document.documentElement.scrollWidth<=innerWidth+1;
+          })()`), `${tab} fills the content area without overflow at ${width}px`);
         }
       }
       await navigate("library", { section: "documents" });
@@ -1001,11 +1015,6 @@ app.whenReady().then(async () => {
       await waitFor("document.querySelector('#view-content .library-editor').getAnimations().length === 0");
       assert.equal(await js("document.querySelector('#view-content .library-editor').getBoundingClientRect().width"), 1440, "Library document editor is 1440px wide");
       await navigate("library", { section: "documents" });
-      for (const tab of ["tasks", "notes", "email", "cookbook", "tool-store"]) {
-        await navigate(tab);
-        await waitFor("!!document.querySelector('#view-content .view-constrained')");
-        assert.equal(await js("document.querySelector('#view-content .view-constrained').getBoundingClientRect().width"), { tasks: 1140, cookbook: 1000, email: 1060, "tool-store": 1120 }[tab] || 1200, tab + " keeps its page width (the redesign narrows Tasks, Cookbook, Email and Tool Store on purpose)");
-      }
       // 2026-10-20: Agents is the messenger (David approved), which fills the
       // content area on a wide window instead of sitting in a 1200px column.
       await navigate("agents");

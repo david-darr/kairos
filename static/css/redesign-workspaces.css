@@ -892,7 +892,9 @@
 .kairos-redesign #view-content[data-view="calendar"] .cal-month-label:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 3px; }
 .kairos-redesign #view-content[data-view="calendar"] .cal-nav { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; }
 .kairos-redesign #view-content[data-view="calendar"] .cal-nav > * { order: 0; }
-.kairos-redesign #view-content[data-view="calendar"] .cal-nav > .btn { flex: none; width: 34px; height: 34px; min-height: 34px; padding: 0; margin: 0; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 24px; }
+@media (max-width: 768px) {
+  .kairos-redesign #view-content[data-view="calendar"] .cal-nav > .btn { flex: none; width: 34px; height: 34px; min-height: 34px; padding: 0; margin: 0; border: 1px solid var(--rd-line); border-radius: 50%; background: var(--rd-surface-solid); color: var(--rd-ink); font-size: 24px; }
+}
 .kairos-redesign #view-content[data-view="calendar"] .cal-nav .cal-range-switch { margin-left: auto; }
 .kairos-redesign #view-content[data-view="calendar"] .cal-grid:not(.cal-week-grid) { grid-template-rows: auto repeat(var(--calendar-weeks, 5), minmax(92px, 1fr)); border-radius: 26px; }
 .kairos-redesign #view-content[data-view="calendar"] :is(.cal-week-header, .cal-week-timeline) { min-width: 0; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); }
