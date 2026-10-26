@@ -596,14 +596,14 @@ class DerivedTests(unittest.TestCase):
 class FrontendContractTests(unittest.TestCase):
     def test_defined_tokens_text_rendering_and_touch_targets(self):
         root = Path(__file__).resolve().parents[1]
-        css = (root / 'static/css/background-tasks.css').read_text()
+        css = (root / 'static/css/background-tasks.css').read_text(encoding='utf-8')
         existing = '\n'.join(path.read_text(encoding='utf-8') for path in (root / 'static/css').glob('*.css') if path.name != 'background-tasks.css')
         declared = set(re.findall(r'(--[\w-]+)\s*:', existing))
         self.assertTrue(set(re.findall(r'var\((--[\w-]+)', css)) <= declared)
         self.assertNotRegex(css, r'#[0-9a-fA-F]{3,8}\b|rgba?\(')
         self.assertIn('min-height: 44px', css)
         self.assertIn('prefers-reduced-motion: no-preference', css)
-        js = (root / 'static/js/backgroundTasks.js').read_text()
+        js = (root / 'static/js/backgroundTasks.js').read_text(encoding='utf-8')
         self.assertNotIn('innerHTML', js)
         self.assertNotIn('renderMessageBody', js)
         self.assertNotIn(chr(0x2014), js + css)
