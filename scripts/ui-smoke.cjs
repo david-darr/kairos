@@ -1305,7 +1305,7 @@ app.whenReady().then(async () => {
             ['Add MCP server', `!!document.querySelector('.modal-panel input[aria-label="MCP server URL"]')`],
             ['Manage skills', `!!document.querySelector('.modal-panel #skills-list .card')`],
           ]) await popupDismissals(headerButton(text), ready, label + ' ' + text);
-          const viewSkill = `[...document.querySelectorAll('.tool-store-card')].find(c=>c.querySelector('h4')?.textContent==='build-custom-tab').querySelector('button')`;
+          const viewSkill = `[...document.querySelectorAll('.tool-store-card')].find(c=>(c.querySelector('h4 .ts-desktop-name') || c.querySelector('h4'))?.textContent==='build-custom-tab').querySelector('.tool-store-card-foot button')`;
           await popupDismissals(viewSkill, "!!document.querySelector('.modal-panel .tool-store-skill-body')", label + ' View skill');
           await openPopup(viewSkill, "!!document.querySelector('.modal-panel .tool-store-skill-body')", label + ' View skill');
           assert.ok(await js("document.querySelector('.modal-panel .tool-store-skill-body').textContent.includes('Procedure')"), label + ' skill body is readable');
@@ -1384,7 +1384,7 @@ app.whenReady().then(async () => {
           const tabStoreWrites = writes.length;
           await js("[...document.querySelectorAll('.tool-store-filters button')].find(b=>b.textContent==='Tabs').click()");
           await waitFor("document.querySelectorAll('[data-tab-kind=prebuilt]').length === 2");
-          assert.deepEqual(await js("[...document.querySelectorAll('[data-tab-kind=prebuilt] h4')].map(n=>n.textContent).sort()"), ["CRM", "School"], label + " prebuilt tabs in store");
+          assert.deepEqual(await js("[...document.querySelectorAll('[data-tab-kind=prebuilt] h4')].map(n=>(n.querySelector('.ts-desktop-name') || n).textContent).sort()"), ["CRM", "School"], label + " prebuilt tabs in store");
           assert.ok(await js("document.querySelector('[data-tab-slug=project_tracker]').textContent.includes('Needs approval') && [...document.querySelectorAll('[data-tab-slug=project_tracker] button')].some(b=>b.textContent==='Approve')"), label + " admin sees pending source approval");
           assert.ok(await js("!document.querySelector('.sidebar-devmode-btn, .nav-item[data-tab=new-tab]') && !document.documentElement.classList.contains('dev-mode')"), label + " retired Developer Mode and New Tab entry are gone");
           await js("[...document.querySelectorAll('[data-tab-slug=crm] button')].find(b=>b.textContent==='Add').click()");
@@ -1512,6 +1512,7 @@ app.whenReady().then(async () => {
           writes.splice(calendarWrites);
           await require('./google-workspace-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
           await require('./lifecycle-calendar-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
+          console.log('PASS: ' + label + ' Calendar completion and lifecycle checks');
         }
         if (tab === "tasks" && !demoState.empty) {
           // The work board (Hermes track 2026-09-23): cards sit in their
@@ -1574,6 +1575,7 @@ app.whenReady().then(async () => {
       // reader and rail, Home, search, pins, History, the editor and its
       // 409, today's note, Ask Kairos and the Map, in scripts/vault-checks.cjs.
       await require('./vault-checks.cjs').run({ js, win, waitFor, delay, navigate, capture, overflow, writes, demoState, label });
+      console.log('PASS: ' + label + ' Vault checks');
       await navigate("home");
       await js("document.querySelector('.sidebar-settings-btn').click()");
       if (label === "mobile") {
@@ -2669,6 +2671,7 @@ app.whenReady().then(async () => {
     console.log('PASS: phone tabs.');
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
+    console.log('PASS: Agents appearance checks');
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
