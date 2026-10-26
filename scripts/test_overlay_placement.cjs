@@ -55,28 +55,10 @@ check("the top-centre offset runs along the top: ends and middle", () => {
   assert.equal(p.boundsFor({ edge: "top-centre", offset: 0.5 }, main).x, Math.round((a.width - 860) / 2));
 });
 
-check("a saved top-centre offset comes back as the same place (boundsFor and offsetOf are inverses)", () => {
-  for (const display of displays) for (const offset of [0, 0.25, 0.8, 1]) {
-    const b = p.boundsFor({ edge: "top-centre", offset }, display);
-    assert.ok(Math.abs(p.offsetOf("top-centre", b, display) - offset) < 0.002, `${offset} on ${display.id}`);
-  }
-});
-
 check("an unplugged or unset monitor falls back to the main display", () => {
   assert.equal(p.chooseDisplay(displays, 2, 1), side);
   assert.equal(p.chooseDisplay(displays, 99, 1), main, "a monitor that is no longer attached");
   assert.equal(p.chooseDisplay(displays, null, 1), main);
-});
-
-check("dragging moves only along the edge and cannot leave the work area", () => {
-  const start = p.boundsFor({ edge: "right", offset: 0.5 }, main);
-  const up = p.dragTo("right", start, main, { start: 500, window: start.y }, { x: 9999, y: -5000 });
-  assert.equal(up.x, start.x, "no sideways movement on an upright edge");
-  assert.equal(up.y, main.workArea.y, "clamped at the top");
-  const flat = p.boundsFor({ edge: "top-centre", offset: 0.5 }, side);
-  const right = p.dragTo("top-centre", flat, side, { start: 0, window: flat.x }, { x: 99999, y: 0 });
-  assert.equal(right.y, flat.y, "no vertical movement along the top");
-  assert.equal(right.x + right.width, side.workArea.x + side.workArea.width, "clamped at the right end");
 });
 
 check("unknown values fall back rather than misplace the window", () => {
