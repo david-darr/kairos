@@ -12,6 +12,7 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   };
   const assert = require('node:assert/strict');
   const writeStart = writes.length;
+
   const phone = label === 'mobile';
   const driveOptions = async () => {
     if (!phone) return;
@@ -21,6 +22,24 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
   const closeDriveOptions = async () => {
     if (phone) await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
   };
+
+  // Email tab: every sending address, and where to add more (2026-10-23).
+  await navigate('email');
+  await waitFor("document.querySelectorAll('.email-sending-row').length === 3");
+  assert.deepEqual(await js("[...document.querySelectorAll('.email-sending-row .title')].map(n => n.textContent)"),
+    ['demo@example.com', 'coach.demo@example.com', 'office@example.org']);
+  assert.deepEqual(await js("[...document.querySelectorAll('.email-sending-row')].map(r => !!r.querySelector('button'))"), [false, true, false],
+    label + ' only the Google account without send permission offers Allow sending');
+  assert.ok(await js("[...document.querySelectorAll('.email-sending-card button')].some(b => b.textContent === 'Add Google account')"));
+  await js("[...document.querySelectorAll('.email-sending-card button')].find(b => b.textContent === 'Add another provider').click()");
+  await waitFor("document.querySelector('.email-view details.disclosure-panel')?.open === true");
+  assert.deepEqual(await overflow(), [], label + ' Email sending accounts fit');
+  // Every Email section spans the view: a stale grid placement squeezes the page without overflowing.
+  const narrow = await js("(() => { const view = document.querySelector('.email-view').clientWidth; return ['#email-triage', '#email-sending', '.email-view > details.disclosure-panel'].filter(s => document.querySelector(s).getBoundingClientRect().width < view * (innerWidth > 900 ? 0.25 : 0.9)); })()");
+  assert.deepEqual(narrow, [], label + ' Email sections are full width');
+  await capture(label + '-email-sending-accounts');
+  await js("document.querySelector('.email-view details.disclosure-panel').open = false");
+
   await navigate('library', { section: 'google' });
   await waitFor("document.querySelectorAll('.google-file-row').length === 8");
   if (phone) {
@@ -29,6 +48,24 @@ module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, write
     await driveOptions();
   } else await waitFor("document.querySelector('.google-thumbnail img')?.naturalWidth > 0");
   assert.equal(await js("document.querySelectorAll('.google-rail .google-section').length"), 5);
+  // Several Google accounts: pick one for Library, add more, see which can send.
+  assert.deepEqual(await js("[...document.querySelectorAll('.google-account-line select option')].map(o => o.textContent)"),
+    ['demo@example.com', 'coach.demo@example.com']);
+  const accountButtons = await js("[...document.querySelectorAll('.google-account-line button')].filter(b => !b.hidden).map(b => b.textContent)");
+  assert.ok(accountButtons.includes('Add another Google account') && accountButtons.includes('Disconnect'), label + ' account actions: ' + accountButtons);
+  assert.ok(!accountButtons.includes('Reconnect to send email'), label + ' sending account needs no reconnect');
+  assert.ok(await js("document.querySelector('.google-account-line').textContent.includes('Can send email')"));
+  let before = reads.length;
+  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'acct_coach'; s.dispatchEvent(new Event('change')); })()");
+  await requestAfter(reads, before, r => r.path === '/api/google/drive/files' && r.query.account === 'acct_coach');
+  await waitFor("document.querySelector('.google-account-line select')?.value === 'acct_coach' && document.querySelectorAll('.google-file-row').length === 8");
+  assert.ok(await js("[...document.querySelectorAll('.google-account-line button')].some(b => !b.hidden && b.textContent === 'Reconnect to send email')"));
+  assert.deepEqual(await overflow(), [], label + ' account bar fits');
+  await capture(label + '-drive-accounts');
+  before = reads.length;
+  await js("(() => { const s = document.querySelector('.google-account-line select'); s.value = 'acct_demo'; s.dispatchEvent(new Event('change')); })()");
+  await requestAfter(reads, before, r => r.path === '/api/google/drive/files' && r.query.account === 'acct_demo');
+  await waitFor("document.querySelector('.google-account-line select')?.value === 'acct_demo' && document.querySelectorAll('.google-file-row').length === 8");
   assert.ok(await js("document.querySelector('.google-storage').textContent.includes('2.0 GB')"));
   assert.deepEqual(await overflow(), [], label + ' Drive grid fits');
   await capture(label + '-drive-grid');

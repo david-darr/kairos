@@ -1,27 +1,13 @@
-"""Google Workspace account connection and bounded Drive, Sheets, Forms API client.
+"""Owner-scoped Google Workspace connections for Drive, Calendar and Gmail.
 
-Each installation supplies its own Desktop OAuth client ID. Tokens stay in the
-existing encrypted secret store. Only the fixed Google API hosts below are
-ever contacted with those tokens; callers cannot provide an arbitrary URL.
+Accounts have opaque IDs, encrypted tokens and an owner. Historical accounts
+without owners remain shared among admins, preserving pre-migration access.
+Both the old single-account file and dev's hash-keyed accounts normalize into
+this shape without reauthorization. Library and Calendar selections can differ.
 
-Several Google accounts can be connected (2026-10-25, David: "allow users to
-add multiple google drives"). Each lives under `accounts` with an opaque id
-and the Kairos user who connected it; the one-account file of earlier
-versions migrates in place as a shared account (owner None), usable by
-every admin as before, and any admin may disconnect it, as before.
-
-Drive, Sheets and Forms always run against an account resolved for the
-Kairos user (`resolve_account`): the routes and the chat tools both check
-ownership, so one user's Drive is never reached from another user's chat.
-Calendar is installation-wide: one shared calendar, the `default_account`,
-used by the Calendar tab and tools for every admin, exactly as with the
-single account before. A user-owned account becomes that default only when
-its own user sets it (connecting without `add`, or the first account); when
-the default is disconnected it passes to a shared account, else to one owned
-by the user disconnecting, else Calendar is disconnected.
-
-File writes go through `_lock` (a re-entrant thread lock) so a
-read-modify-write is never interleaved with another thread's.
+Routes and chat tools must resolve IDs using the actual user before using an
+account. Ownerless calls may use shared accounts only. File mutations use a
+reentrant lock; token refreshes use independent per-account async locks.
 """
 from __future__ import annotations
 
@@ -34,6 +20,9 @@ import re
 import secrets
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from email.message import EmailMessage
 from copy import deepcopy
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -57,7 +46,9 @@ HOSTS = {
     "forms": "https://forms.googleapis.com/v1",
     "thumbnail": "https://lh3.googleusercontent.com",
     "calendar": "https://www.googleapis.com/calendar/v3",
+    "gmail": "https://gmail.googleapis.com/gmail/v1",
 }
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
 SCOPES = (
     "openid", "email",
@@ -65,11 +56,12 @@ SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/forms.body",
     "https://www.googleapis.com/auth/forms.responses.readonly",
-    CALENDAR_SCOPE,
+    CALENDAR_SCOPE, GMAIL_SEND_SCOPE,
 )
 FILE_FIELDS = "nextPageToken,incompleteSearch,files(id,name,mimeType,size,parents,modifiedTime,webViewLink,description,starred,trashed,driveId,capabilities,owners,shared,thumbnailLink)"
 MAX_DOWNLOAD = 25 * 1024 * 1024
 ACCOUNT_KEYS = ("refresh_token", "access_token", "expires_at", "email", "granted_scopes", "calendar_ids")
+_account: ContextVar[str | None] = ContextVar("google_account", default=None)
 _pending: dict[str, dict] = {}
 _refresh_locks: dict[str, asyncio.Lock] = {}
 _lock = threading.RLock()
@@ -104,6 +96,28 @@ def _state() -> dict:
             data["accounts"] = {ident: {**account, "id": ident, "owner": None, "added_at": time.time()}}
             data["default_account"] = ident
             _save(data)
+        # dev stored accounts keyed by an email hash, without identity/owner.
+        # Preserve every token and calendar selection, but normalize them once.
+        accounts = data.get("accounts") or {}
+        changed = False
+        remap = {}
+        for old, record in list(accounts.items()):
+            if "id" not in record:
+                ident = "acct_" + secrets.token_urlsafe(12)
+                remap[old] = ident
+                accounts[ident] = {**record, "id": ident, "owner": record.get("owner"),
+                                   "added_at": record.get("added_at") or time.time()}
+                del accounts[old]
+                changed = True
+        for key in ("active_account", "calendar_account"):
+            if data.get(key) in remap:
+                data[key] = remap[data[key]]
+        if "default_account" not in data and accounts:
+            data["default_account"] = data.get("calendar_account") or data.get("active_account") or next(iter(accounts))
+            changed = True
+        if changed:
+            data["accounts"] = accounts
+            _save(data)
         return data
 
 
@@ -121,21 +135,65 @@ def resolve_account(user: str, account_id: str | None = None) -> str:
     """The account a Drive request uses: the one named, if this user may use
     it, else their default. Unknown and foreign ids get the same refusal."""
     data = _state()
-    usable = _accounts(data, user)
+    usable = [a for a in _accounts(data) if a.get("owner") in (None, user)]
     if account_id:
-        match = next((item for item in usable if item["id"] == account_id), None)
+        match = next((item for item in usable if (item["id"] == account_id or (item.get("email") or "").lower() == str(account_id).strip().lower())), None)
         if match is None:
             raise GoogleError("Unknown Google account", 404)
         return match["id"]
     if not usable:
         raise GoogleError("Connect Google Workspace in Library first", 401)
-    return next((item["id"] for item in usable if item["id"] == data.get("default_account")), usable[0]["id"])
+    chosen = (data.get("library_defaults") or {}).get(user) or data.get("active_account") or data.get("default_account")
+    return next((item["id"] for item in usable if item["id"] == chosen), usable[0]["id"])
 
+
+
+def resolve_calendar_account(user: str, account_id: str | None = None) -> str:
+    data = _state()
+    chosen = account_id or (data.get("calendar_defaults") or {}).get(user) or data.get("calendar_account") or data.get("default_account")
+    if not chosen:
+        raise GoogleError("Reconnect to add Calendar", 409)
+    return resolve_account(user, chosen)
+
+
+@contextmanager
+def use_account(account: str | None, user: str | None = None):
+    # Boundary callers supply the actual session/chat owner. None may only
+    # use historical shared accounts, never a user-owned account.
+    ident = resolve_account(user, account)
+    token = _account.set(ident)
+    try:
+        yield
+    finally:
+        _account.reset(token)
+
+
+def _calendar_account() -> dict:
+    data = _state()
+    ident = _account.get() or data.get("calendar_account") or data.get("default_account")
+    record = (data.get("accounts") or {}).get(ident) or {}
+    # An ownerless/background caller never inherits a private Calendar.
+    return record if _account.get() or record.get("owner") is None else {}
+
+
+def set_default(account: str, purpose: str = "library", user: str | None = None) -> dict:
+    if purpose not in ("library", "calendar"):
+        raise GoogleError("Unknown Google account purpose")
+    with _lock:
+        ident = resolve_account(user, account)
+        data = _state()
+        data.setdefault("calendar_defaults" if purpose == "calendar" else "library_defaults", {})[user] = ident
+        _save(data)
+    if purpose == "calendar":
+        invalidate_calendar()
+    return status(user)
 
 def _public(item: dict, chosen: str | None) -> dict:
     # Never a token: only what the account switcher shows.
     return {"id": item["id"], "email": item.get("email"), "default": item["id"] == chosen,
-            "error": item.get("error")}
+            "error": item.get("error"),
+            "can_send_email": GMAIL_SEND_SCOPE in (item.get("granted_scopes") or []),
+            "calendar_connected": CALENDAR_SCOPE in (item.get("granted_scopes") or [])}
 
 
 def _id(value: str) -> str:
@@ -149,9 +207,14 @@ def status(user: str | None = None) -> dict:
     `accounts`, `email` and `default_account` are the Drives this user can
     browse and the one their Drive opens on."""
     data = _state()
-    default = _default(data) or {}
-    usable = _accounts(data, user)
-    chosen = resolve_account(user, None) if user is not None and usable else default.get("id")
+    default = _calendar_account()
+    if user is not None:
+        try:
+            default = (data.get("accounts") or {})[resolve_calendar_account(user)]
+        except GoogleError:
+            default = {}
+    usable = [a for a in _accounts(data) if a.get("owner") in (None, user)]
+    chosen = resolve_account(user, None) if usable else None
     return {"configured": bool(data.get("client_id")),
             "connected": bool(usable),
             "email": next((item.get("email") for item in usable if item["id"] == chosen), None),
@@ -162,7 +225,7 @@ def status(user: str | None = None) -> dict:
             # Calendar's Reconnect refreshes this account in place; only an account this user may use.
             "calendar_account": default.get("id") if any(item["id"] == default.get("id") for item in usable) else None,
             "accounts": [_public(item, chosen) for item in usable],
-            "default_account": chosen if usable else None}
+            "default_account": chosen if usable else None, "active_account": chosen if usable else None}
 
 
 def configure(client_id: str, client_secret: str = "", user: str | None = None) -> dict:
@@ -276,9 +339,9 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
         named = (data.get("accounts") or {}).get(pending["account"] or "")
         if pending["account"] and named is None:
             raise GoogleError("That Google account was disconnected while signing in", 409)
-        if named is not None and named.get("email") != email:
+        if named is not None and (named.get("email") or "").lower() != email.lower():
             raise GoogleError(f"Signed in as {email}, not {named.get('email')}. Choose that account to reconnect it", 409)
-        existing = named or next((item for item in _accounts(data) if item.get("owner") == owner and item.get("email") == email), None)
+        existing = named or next((item for item in _accounts(data) if item.get("owner") == owner and (item.get("email") or "").lower() == email.lower()), None)
     lock = _refresh_locks.setdefault(existing["id"], asyncio.Lock()) if existing else None
     if lock:
         await lock.acquire()
@@ -328,7 +391,7 @@ def _mark(ident: str, **fields) -> None:
 async def _token(account_id: str | None = None, force: bool = False) -> str:
     """An access token for one account; None means the default account."""
     data = _state()
-    ident = account_id or data.get("default_account") or ""
+    ident = account_id or _account.get() or resolve_account(None)
     # A forced refresh reuses a token another request refreshed while this
     # one waited for the lock, instead of refreshing again.
     stale = ((data.get("accounts") or {}).get(ident) or {}).get("access_token")
@@ -371,6 +434,7 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
             or re.search(r"%[0-9a-fA-F]{2}", decoded)
             or "\\" in decoded or any(ord(c) < 32 for c in decoded)):
         raise GoogleError("Invalid Google API request")
+    account = account or _account.get() or (_calendar_account().get("id") if api == "calendar" else None)
     url = HOSTS[api] + path
     for retry in range(2):
         token = await _token(account, force=bool(retry))
@@ -655,7 +719,8 @@ def invalidate_calendar() -> None:
 
 
 def _calendar_access() -> None:
-    if not status()["calendar_connected"]:
+    account = _calendar_account()
+    if not account.get("refresh_token") or CALENDAR_SCOPE not in (account.get("granted_scopes") or []):
         raise GoogleError("Reconnect to add Calendar", 409)
 
 
@@ -675,7 +740,7 @@ def calendar_settings(calendar_ids: list[str]) -> dict:
     for ident in calendar_ids:
         _calendar_id(ident)
     chosen = list(dict.fromkeys(calendar_ids))
-    _mark(_state()["default_account"], calendar_ids=chosen)
+    _mark(_calendar_account()["id"], calendar_ids=chosen)
     invalidate_calendar()
     return {"calendar_ids": chosen}
 
@@ -748,7 +813,7 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
     ids = tuple(sorted(set(calendar_ids)))
     for ident in ids:
         _calendar_id(ident)
-    key = (ids, start, end)
+    key = (_calendar_account().get("id"), ids, start, end)
     cached = _calendar_cache.get(key)
     if cached and time.monotonic() - cached[0] < 60:
         return deepcopy(cached[1])
@@ -788,7 +853,7 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
 async def selected_calendar_events(start: str, end: str) -> list[dict]:
     if not status()["calendar_connected"]:
         return []
-    ids = (_default(_state()) or {}).get("calendar_ids")
+    ids = _calendar_account().get("calendar_ids")
     if ids is None:
         # A calendar Google lists with an ID we cannot use is skipped, not allowed to hide every other calendar.
         ids = [c["id"] for c in await calendar_list() if c["selected"] and _valid_calendar_id(c["id"])]
@@ -857,3 +922,26 @@ async def calendar_action(action: str, *, calendar_id: str = "primary", event_id
     result = await request("calendar", method, path, body=body, params=params)
     invalidate_calendar()
     return result if isinstance(result, dict) else {"deleted": True}
+
+
+async def send_gmail(account: str, to: list[str], subject: str, body: str,
+                     cc: list[str] | None = None, in_reply_to: str | None = None, user: str | None = None) -> dict:
+    """Send one plain-text message as the given connected Google account."""
+    data = _state()
+    ident = resolve_account(user, account)
+    record = data["accounts"][ident]
+    if GMAIL_SEND_SCOPE not in (record.get("granted_scopes") or []):
+        raise GoogleError(f"Reconnect {record.get('email') or 'this account'} in Library to allow sending email", 409)
+    message = EmailMessage()
+    message["From"] = record.get("email") or ""
+    message["To"] = ", ".join(to)
+    if cc:
+        message["Cc"] = ", ".join(cc)
+    message["Subject"] = subject
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+        message["References"] = in_reply_to
+    message.set_content(body)
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    result = await request("gmail", "POST", "/users/me/messages/send", body={"raw": raw}, account=ident)
+    return {"id": result.get("id"), "thread_id": result.get("threadId"), "from": record.get("email")}

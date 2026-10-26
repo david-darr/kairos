@@ -47,7 +47,9 @@ async def list_events(start: str = Query(...), end: str = Query(...), user: str 
     events += await tab_hooks.calendar_items(user, start, end)
     if auth_manager.is_admin(user):
         try:
-            events += await google.selected_calendar_events(start, end)
+            if google.status(user)["calendar_connected"]:
+                with google.use_account(google.resolve_calendar_account(user), user):
+                    events += await google.selected_calendar_events(start, end)
         except google.GoogleError as problem:
             logging.getLogger(__name__).warning("Google Calendar range unavailable: %s", problem)
     return events

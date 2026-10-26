@@ -595,6 +595,7 @@
       state.communityInstalls ||= {}; state.communityInstalls[route.split('/').at(-1)] = { installed: false, update_available: false };
       return { ok: true };
     }
+    if (route === '/api/google/accounts/default' && method === 'POST') { state.googleActiveAccount = body.account; return { ok: true }; }
     if (route === '/api/google/calendar/settings' && method === 'PATCH') { state.googleCalendarIds = body.calendar_ids; return body; }
     if (route === '/api/google/oauth/start') { state.googleCalendarMissing = false; return { url: 'https://accounts.google.com/o/oauth2/v2/auth' }; }
     if (route === '/api/google/calendar/action') {
@@ -1244,10 +1245,14 @@
     if (route.startsWith("/api/projects/")) return projects[0];
     if (route === "/api/notes") return list(url.searchParams.get("include_completed") === "false" ? notes.filter(n => !n.completed) : notes);
     if (route === '/api/google/status') {
-      const accounts = state.googleAccounts || [{ id: 'acct_demo', email: 'demo@example.com', default: true, error: null }];
+      const active = state.googleActiveAccount || 'acct_demo';
+      const accounts = state.googleAccounts || [
+        { id: 'acct_demo', email: 'demo@example.com', default: active === 'acct_demo', error: null, can_send_email: true },
+        { id: 'acct_coach', email: 'coach.demo@example.com', default: active === 'acct_coach', error: null, can_send_email: false },
+      ];
       return { configured: true, connected: true, email: accounts.find(a => a.default)?.email, client_id: 'demo.apps.googleusercontent.com',
         calendar_connected: !state.googleCalendarMissing, granted_scopes: state.googleCalendarMissing ? [] : ['https://www.googleapis.com/auth/calendar'], calendar_ids: state.googleCalendarIds ?? null,
-        accounts, default_account: accounts.find(a => a.default)?.id };
+        accounts, default_account: accounts.find(a => a.default)?.id, active_account: active, calendar_account: 'acct_demo' };
     }
     if (route === '/api/google/calendar/calendars') return googleCalendars;
     if (route === '/api/google/calendar/events') return list(calendarInstances(googleEvents));
@@ -1414,6 +1419,11 @@
     if (route.startsWith("/api/vault/") || route.startsWith("/api/file-checkpoints/vault-")) { const answer = vaultRoute(route, url); if (answer !== undefined) return answer; }
     if (route === "/api/email/triage") return { generated_at: now, scanned: 12, items: state.empty ? [] : [{ subject: "Project check-in this afternoon", from: "team@example.test", reason: "An upcoming meeting needs your review." }] };
     if (route === "/api/email/accounts") return [];
+    if (route === "/api/email/sending-accounts") return { google_configured: true, accounts: [
+      { email: "demo@example.com", via: "Google", id: "acct_demo", can_send: true, note: "" },
+      { email: "coach.demo@example.com", via: "Google", id: "acct_coach", can_send: false, note: "reconnect it in Library to allow sending" },
+      { email: "office@example.org", via: "Email tab", id: "smtp1", can_send: true, note: "" },
+    ] };
     if (route === "/api/channels") return [];
     // Settings > Hooks (2026-10-05): a command that blocked a tool, and a
     // signed post that is switched off.

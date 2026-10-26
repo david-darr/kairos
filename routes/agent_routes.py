@@ -277,7 +277,7 @@ async def start_chat(agent_id: str, user: str = Depends(require_admin)) -> dict:
     endpoint_id = agent_service.chat_endpoint(agent)
     if endpoint_id is None:
         raise HTTPException(status_code=400, detail="add a Claude connection in Settings, or pick this agent's model")
-    session = session_manager.create_session(f"Chat with {agent['name']}")
+    session = session_manager.create_session(f"Chat with {agent['name']}", owner_user=user)
     session_manager.set_model_endpoint(session["id"], endpoint_id)
     # Agents always run in Auto, chats with them included.
     return agent_service.make_agent_chat(session["id"], agent)

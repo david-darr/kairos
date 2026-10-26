@@ -118,6 +118,7 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(google.CALENDAR_SCOPE, self.data["accounts"][self.data["default_account"]]["granted_scopes"])
         result = await self.web("/api/google/status")
         self.assertTrue(result.json()["calendar_connected"])
+        self.assertIn(google.CALENDAR_SCOPE, result.json()["granted_scopes"])
         self.assertNotIn("refresh_token", result.json())
 
     async def test_missing_scope_and_legacy_account_offer_reconnect(self):

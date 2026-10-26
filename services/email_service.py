@@ -146,7 +146,7 @@ class EmailService:
         return messages
 
     def send_message(self, account_id: str, to: str, subject: str, body: str,
-                     in_reply_to: str | None = None) -> None:
+                     in_reply_to: str | None = None, cc: str | None = None) -> None:
         account = self.get_account(account_id, decrypted=True)
         if account is None:
             raise KeyError(f"no such account: {account_id}")
@@ -156,6 +156,8 @@ class EmailService:
         msg["From"] = account["email"]
         msg["To"] = to
         msg["Subject"] = subject
+        if cc:
+            msg["Cc"] = cc
         if in_reply_to:
             # Threads the reply under the original in the recipient's client.
             msg["In-Reply-To"] = in_reply_to
@@ -169,7 +171,8 @@ class EmailService:
                 smtp.starttls()
         try:
             smtp.login(account["email"], password)
-            smtp.sendmail(account["email"], [to], msg.as_string())
+            recipients = [a.strip() for a in f"{to},{cc or ''}".split(",") if a.strip()]
+            smtp.sendmail(account["email"], recipients, msg.as_string())
         finally:
             smtp.quit()
 

@@ -337,6 +337,16 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['design canvas'], errors }, null, 2));
       console.log('PASS: design canvas.'); console.log('Screenshots: ' + output); return;
     }
+    if (process.argv.includes('--google-only')) {  // Library's Google Drive and accounts alone (google-workspace-checks.cjs).
+      for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
+        win.setContentSize(width, height);
+        await delay(100);
+        await require('./google-workspace-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
+      }
+      assert.deepEqual(errors, [], 'Google Workspace renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['google workspace'], errors }, null, 2));
+      console.log('PASS: Google Workspace desktop and mobile.'); console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
       assert.deepEqual(errors, [], 'Agents call renderer errors');

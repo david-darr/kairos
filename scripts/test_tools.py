@@ -47,10 +47,12 @@ CLI_PATH = Path(__file__).resolve().parents[1] / "mcp_servers" / "hive_mind_cli.
 # listed them by hand, plus the explicitly reviewed additions below.
 CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     "search_sessions list_skills search_skills read_skill list_notes list_tasks list_upcoming_events list_specs "
-    "list_tab_tasks read_tab_task "
+    "list_tab_tasks read_tab_task complete_tab_task "
     "read_spec list_documents read_document list_contacts list_task_runs create_note update_note delete_note "
     "create_task update_task delete_task create_event update_event delete_event save_generated_image run_code "
     "browse save_generated_file google_drive google_sheets google_forms google_calendar agent_remember agent_ask "
+    # Reviewed 2026-10-23: send_email asks through the broker itself, like google_*.
+    "list_email_accounts send_email "
     # Helpers (roadmap phase 5, 2026-10-06): delegate and collect.
     "delegate helper_results computer "
     # Agent mentions (2026-10-08): hand work to a named agent from a chat.
@@ -198,7 +200,7 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
     the bridge and run exactly as before (2026-10-06, vault note "Local
     Model Fit (Build Spec)")."""
     CORE = {"ask_user", "search_sessions", "search_vault", "read_vault_file", "list_notes", "create_note", "update_note",
-            "list_tasks", "list_tab_tasks", "read_tab_task", "list_upcoming_events", "search_skills", "read_skill", "ui_design"}
+            "list_tasks", "list_tab_tasks", "read_tab_task", "complete_tab_task", "list_upcoming_events", "search_skills", "read_skill", "ui_design"}
     BRIDGE = {"kairos_tool_search", "kairos_tool_describe", "kairos_tool_call"}
 
     def brain(self, window, **kw):

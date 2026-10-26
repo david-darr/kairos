@@ -25,20 +25,20 @@ async def execute(area: str, args: dict, ctx: ToolContext) -> str:
                                        "forms": google_form_actions, "calendar": google_calendar_actions}.get(area, frozenset())
     if action not in allowed:
         return "Unknown Google Workspace action."
-    # Drive, Sheets and Forms use the chat owner's own default account, never
-    # the installation default (another user's account). Calendar is shared.
-    account = None
-    if area in ("drive", "sheets", "forms"):
-        owner = chat_owner(ctx)
-        if not owner:
-            return "Google Drive is available only in a chat that belongs to a Kairos user."
-        try:
-            account = google.resolve_account(owner)
-        except google.GoogleError as problem:
-            return str(problem)
+    owner = chat_owner(ctx)
+    if not owner:
+        return "Google Workspace is available only in a chat that belongs to a Kairos user."
+    wanted = args.get("account")
+    if wanted is not None and (not isinstance(wanted, str) or len(wanted) > 320):
+        return "Enter a connected Google account address, or omit account."
+    try:
+        account = (google.resolve_calendar_account(owner, wanted) if area == "calendar"
+                   else google.resolve_account(owner, wanted))
+    except google.GoogleError as problem:
+        return str(problem)
     if action not in READS.get(area, set()):
         decision = await permissions.decide(
-            surface=f"chat:{ctx.session_id}" if ctx.session_id else "none",
+            surface=ctx.permission_surface,
             tool=f"google_{area}_{action}", arguments=args,
             title=f"Google {area.title()}: {action}",
             description="This changes the connected Google account.", is_admin=True,
@@ -46,6 +46,14 @@ async def execute(area: str, args: dict, ctx: ToolContext) -> str:
         )
         if decision.behavior != "allow":
             return f"Not run: {decision.reason or 'not approved'}"
+    try:
+        with google.use_account(account, owner):
+            return await _run(area, action, args, ctx, account)
+    except google.GoogleError as problem:
+        return f"Not run: {problem}"
+
+
+async def _run(area: str, action: str, args: dict, ctx: ToolContext, account: str) -> str:
     if area == "drive":
         if action == "list":
             result = await google.list_files(query=args.get("query", ""), parent=args.get("parent"),

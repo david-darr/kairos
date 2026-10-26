@@ -48,6 +48,26 @@ const button = (label, onClick, cls = 'btn') => el('button', { type: 'button', c
   onclick: async event => { try { await onClick(event); } catch (error) { toast(error.message || 'Google action failed', 'error'); } },
 });
 
+// Opens Google sign-in, then polls status until done(status) says it finished.
+export async function signIn(control, idleLabel, done, request = { add: true }) {
+  const result = await post('/oauth/start', request);
+  if (window.jarvis?.openGoogleSignIn) {
+    if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
+  } else window.open(result.url, '_blank', 'noopener');
+  control.disabled = true;
+  control.textContent = 'Waiting for Google…';
+  const started = Date.now();
+  const poll = async () => {
+    if (!control.isConnected || Date.now() - started > 10 * 60 * 1000) { control.disabled = false; control.textContent = idleLabel; return; }
+    try { if (await done(await api(`${BASE}/status`))) return; } catch { /* retry */ }
+    setTimeout(poll, 1800);
+  };
+  poll();
+}
+
+export const onSignInHost = () => Boolean(window.jarvis?.openGoogleSignIn)
+  || ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
+
 export async function renderGoogleWorkspace(container, header, tabs) {
   container.replaceChildren();
   const body = el('div', { class: 'google-workspace' });
@@ -69,21 +89,10 @@ export async function renderGoogleWorkspace(container, header, tabs) {
 
 // Opens Google's consent page and waits until /status shows the change.
 function signInButton(label, request, changed, done) {
-  const control = button(label, async () => {
-    const result = await post('/oauth/start', request);
-    if (window.jarvis?.openGoogleSignIn) {
-      if (!await window.jarvis.openGoogleSignIn(result.url)) throw new Error('Could not open Google sign-in');
-    } else window.open(result.url, '_blank', 'noopener');
-    control.disabled = true;
-    control.textContent = 'Waiting for Google…';
-    const started = Date.now();
-    const poll = async () => {
-      if (!control.isConnected || Date.now() - started > 10 * 60 * 1000) { control.disabled = false; control.textContent = label; return; }
-      try { if (changed(await api(`${BASE}/status`))) { done(); return; } } catch { /* retry */ }
-      setTimeout(poll, 1800);
-    };
-    poll();
-  }, 'btn primary');
+  const control = button(label, () => signIn(control, label, next => {
+    if (!changed(next)) return false;
+    done(); return true;
+  }, request), 'btn primary');
   control.disabled = !onHost();
   return control;
 }
@@ -94,7 +103,7 @@ function renderConnection(host, status, refresh) {
     placeholder: 'Google OAuth Desktop client ID', 'aria-label': 'Google OAuth Desktop client ID' });
   const secret = el('input', { type: 'password', placeholder: 'Client secret, if provided',
     'aria-label': 'Google OAuth client secret' });
-  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, and Calendar APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
+  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, Calendar, and Gmail APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
   const save = button('Save client ID', async () => {
     await post('/client', { client_id: client.value.trim(), client_secret: secret.value });
     toast('Google client saved', 'success');
@@ -199,17 +208,20 @@ function renderDrive(host, status, refreshAll, header) {
     }
   }, 'btn quiet');
   const known = new Set(accounts.map(item => `${item.id}:${item.error || ''}`));
-  const accountsChanged = next => (next.accounts || []).some(item => !known.has(`${item.id}:${item.error || ''}`));
+  const accountsChanged = next => (next.accounts || []).some(item => !known.has(`${item.id}:${item.error || ''}`) || (item.can_send_email && !accounts.find(old => old.id === item.id)?.can_send_email));
   const addAccount = (before = () => {}) => signInButton('Add another Google account', { add: true }, accountsChanged, () => { before(); refreshAll(); });
   const picker = accounts.length > 1 ? el('select', { class: 'google-account-select', 'aria-label': 'Google account' },
     accounts.map(item => el('option', { value: item.id, text: label(item) + (item.error ? ' (reconnect needed)' : ''), selected: item.id === current.id }))) : null;
   picker?.addEventListener('change', () => choose(picker.value));
   const desktopAdd = addAccount(); desktopAdd.className = 'btn quiet';
+  const enableSending = signInButton('Reconnect to send email', { add: true, account: current.id },
+    next => Boolean((next.accounts || []).find(a => a.id === current.id)?.can_send_email), refreshAll);
+  enableSending.className = 'btn quiet'; enableSending.hidden = Boolean(current.can_send_email);
   const desktopReconnect = current.error ? signInButton('Reconnect', { add: true, account: current.id }, accountsChanged, refreshAll) : null;
   main.append(el('div', { class: 'google-toolbar' }, [search, kind, gridButton, listButton, button('Refresh', () => load())]),
     quick, breadcrumbs, selectionBar, statusLine,
     el('div', { class: 'google-content' }, [el('div', { class: 'google-files' }, [list, more]), detail]));
-  host.append(el('div', { class: 'google-account-line' }, [picker || el('strong', { text: label(current) }), desktopReconnect, desktopAdd, disconnect]),
+  host.append(el('div', { class: 'google-account-line' }, [picker || el('strong', { text: label(current) }), el('span', { class: 'meta', text: current.can_send_email ? 'Can send email' : 'Cannot send email yet' }), enableSending, desktopReconnect, desktopAdd, disconnect]),
     chips, el('div', { class: 'google-browser' }, [rail, main]));
   header.querySelectorAll('.library-drive-search, .library-drive-options').forEach(node => node.remove());
   const find = button('Search Drive', () => { search.scrollIntoView({ block: 'center' }); search.focus(); }, 'btn workspace-phone-only workspace-round library-drive-search');
@@ -236,9 +248,9 @@ function renderDrive(host, status, refreshAll, header) {
       row.setAttribute('aria-pressed', String(item.id === current.id));
       row.append(avatar(item), el('span', {}, [el('strong', { text: label(item) }),
         el('small', { text: item.error ? 'Sign-in expired or revoked' : item.id === current.id ? 'Browsing now' : 'Switch to this Drive' })]));
-      if (!item.error) return [row];
+      if (!item.error && item.can_send_email) return [row];
       // Reconnecting names the account, so the same email refreshes it in place.
-      const reconnect = signInButton(`Reconnect ${label(item)}`, { add: true, account: item.id }, accountsChanged, () => { close(); refreshAll(); });
+      const reconnect = signInButton(`${item.error ? 'Reconnect' : 'Allow sending from'} ${label(item)}`, { add: true, account: item.id }, accountsChanged, () => { close(); refreshAll(); });
       reconnect.className = 'btn quiet drive-account-reconnect';
       return [row, reconnect];
     });

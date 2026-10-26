@@ -3,7 +3,7 @@
 Drive, Sheets and Forms routes take an optional `account` query parameter:
 an opaque id from /status, checked against the signed-in user's own
 connected accounts before any token is used. Without it, the user's default
-account is used. Calendar keeps using the installation default account."""
+account is used. Calendar resolves its separate selection for the same user."""
 from __future__ import annotations
 
 import html
@@ -61,6 +61,11 @@ class FormActionRequest(BaseModel):
     published: bool | None = None
 
 
+class DefaultAccountRequest(BaseModel):
+    account: str
+    purpose: Literal["library", "calendar"] = "library"
+
+
 class CalendarSettingsRequest(BaseModel):
     calendar_ids: list[str]
 
@@ -109,6 +114,23 @@ async def disconnect(user: str = Depends(require_admin)) -> dict:
 async def disconnect_account(account_id: str, user: str = Depends(require_admin)) -> dict:
     try:
         return google.disconnect(account_id, user)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
+
+
+@router.post("/accounts/default")
+async def default_account(body: DefaultAccountRequest, user: str = Depends(require_admin)) -> dict:
+    try:
+        return google.set_default(body.account, body.purpose, user)
+    except google.GoogleError as problem:
+        raise HTTPException(problem.status, str(problem)) from problem
+
+
+async def _calendar_scope(account: str | None = None, user: str = Depends(require_admin)):
+    try:
+        ident = google.resolve_calendar_account(user, account)
+        with google.use_account(ident, user):
+            yield
     except google.GoogleError as problem:
         raise HTTPException(problem.status, str(problem)) from problem
 
@@ -230,12 +252,12 @@ async def form_action(body: FormActionRequest, account: str | None = None, user:
 
 
 @router.get("/calendar/calendars")
-async def calendars(user: str = Depends(require_admin)) -> list[dict]:
+async def calendars(user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> list[dict]:
     return await _run(google.calendar_list())
 
 
 @router.patch("/calendar/settings")
-async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(require_admin)) -> dict:
+async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
     try:
         return google.calendar_settings(body.calendar_ids)
     except google.GoogleError as problem:
@@ -243,15 +265,15 @@ async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(r
 
 
 @router.get("/calendar/events")
-async def calendar_events(start: str, end: str, calendar_ids: str = "primary", user: str = Depends(require_admin)) -> list[dict]:
+async def calendar_events(start: str, end: str, calendar_ids: str = "primary", user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> list[dict]:
     return await _run(google.calendar_events([ident for ident in calendar_ids.split(",") if ident], start, end))
 
 
 @router.post("/calendar/action")
-async def calendar_action(body: CalendarActionRequest, user: str = Depends(require_admin)) -> dict:
+async def calendar_action(body: CalendarActionRequest, user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
     return await _run(google.calendar_action(**body.model_dump()))
 
 
 @router.get("/calendar/events/{event_id}")
-async def calendar_event(event_id: str, calendar_id: str = "primary", user: str = Depends(require_admin)) -> dict:
+async def calendar_event(event_id: str, calendar_id: str = "primary", user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
     return await _run(google.calendar_event(calendar_id, event_id))

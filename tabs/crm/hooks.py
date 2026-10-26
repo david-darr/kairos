@@ -54,6 +54,19 @@ def task_context(user, task_id):
     return f"Kairos CRM task ID: {task['id']}\n" + _facts(task) + "\n\n" + _sources(user, task)
 
 
+def complete_task(user, task_id, receipt):
+    try:
+        task = crm_service.task(user, task_id)
+        outcome = crm_service.agent_complete(user, task_id, receipt)
+    except KeyError:
+        return None
+    if outcome == "done":
+        return f"Marked CRM task done: {task['title']} (ID {task_id}). It keeps your summary and a Reopen option."
+    if outcome == "already_done":
+        return f"CRM task was already done: {task['title']} (ID {task_id})."
+    return f"CRM task not changed: {task['title']} is {outcome}. Only open tasks can be marked done."
+
+
 def home_cards(user):
     zone = ZoneInfo(crm_service.settings(user)["timezone"])
     now = datetime.now(zone)
