@@ -296,7 +296,7 @@
   .kairos-redesign .ms-sheet.ms-model-sheet .ms-model-menu { margin-top: 0; }
   .kairos-redesign .ms-sheet.ms-model-sheet .model-version-section,
   .kairos-redesign .ms-sheet.ms-model-sheet .model-catalog-list { flex: 0 0 auto; min-height: 0; height: auto; }
-  .kairos-redesign .ms-sheet.ms-model-sheet .ms-model-menu .model-effort-row { display: grid; }
+  .kairos-redesign .ms-sheet.ms-model-sheet .ms-model-menu .model-effort-row { display: flex; }
   .kairos-redesign .ms-sheet.ms-model-sheet .model-effort-btn { min-height: 44px; }
   .kairos-redesign .ms-sheet.ms-model-sheet .model-connection-item { min-height: 44px; }
   .kairos-redesign .ms-sheet.ms-model-sheet .model-catalog-item { flex: none; }

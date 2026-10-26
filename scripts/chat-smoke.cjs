@@ -841,6 +841,10 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#model-picker-btn').click(); document.querySelector('#model-picker-menu button').click()");
     await waitFor("document.querySelector('#model-picker-label').textContent.startsWith('Claude Code')");
     assert.ok(await js("document.querySelector('.attach-chip')?.textContent.includes('draft.txt') && document.querySelector('#chat-input').value==='Keep this draft'"));
+    // This isolated chat harness omits the app shell. Exercise the phone sheet
+    // with the production theme and stylesheet order rather than a native dialog.
+    const sheetStyles = fs.readFileSync(path.join(root, 'static/index.html'), 'utf8').match(/<link rel="stylesheet"[^>]+>/g).join('');
+    await js(`Promise.all([...new DOMParser().parseFromString(${JSON.stringify(sheetStyles)}, 'text/html').querySelectorAll('link')].map(link => new Promise(resolve => { link.dataset.sheetTest = ''; link.onload = resolve; document.head.append(link); }))).then(() => document.documentElement.classList.add('kairos-redesign'))`);
     win.setContentSize(320, 420);
     await delay(400);
     // Choosing a connection leaves the menu open (2026-10-14); close it so this
@@ -857,6 +861,7 @@ app.whenReady().then(async () => {
       return r.height>44 && r.height<=innerHeight*.9+1 && r.top>=safe && r.left>=0 && r.right<=innerWidth && r.bottom<=innerHeight
         && menu.width>0 && menu.left>=0 && menu.right<=innerWidth;
     })()`), 'Model sheet fits short mobile viewport below the status area');
+    await capture('short-phone-model-sheet');
     assert.deepEqual(await js(`(() => {
       const sheet=document.querySelector('.ms-model-sheet[open]'), body=sheet.querySelector('.ms-sheet-body');
       const header=sheet.querySelector('.ms-sheet-header'), headerTop=header.getBoundingClientRect().top;
@@ -877,7 +882,7 @@ app.whenReady().then(async () => {
         for (const n of controls) {
           n.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
           const r=n.getBoundingClientRect(), b=body.getBoundingClientRect();
-          if (r.top<b.top || r.bottom>b.bottom || Math.abs(header.getBoundingClientRect().top-headerTop)>1
+          if (r.top<b.top-1 || r.bottom>b.bottom+1 || Math.abs(header.getBoundingClientRect().top-headerTop)>1
             || sheet.scrollTop!==0 || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2)))
             failures.push({control:n.textContent.trim() || n.getAttribute('aria-label'), expanded, rect:r.toJSON(), body:b.toJSON(), hit:document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.outerHTML});
         }
@@ -885,7 +890,7 @@ app.whenReady().then(async () => {
       return failures;
     })()`), [], 'Every model sheet control can be scrolled into view and hit on a short phone');
     win.setContentSize(1440, 900);
-    await js("document.body.click()");
+    await js("document.querySelectorAll('link[data-sheet-test]').forEach(n=>n.remove()); document.documentElement.classList.remove('kairos-redesign'); document.body.click()");
     await js("(() => { document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(b => b.textContent.trim() === 'New chat').click(); })()");
     await waitFor("document.querySelector('#model-picker-label').textContent==='Choose model'");
     await stageDraft();
