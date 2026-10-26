@@ -113,6 +113,7 @@ async function loadAccount(card) {
 export function mountMobileModelSheet({ trigger, menu, permission }) {
   const menuRole = menu.getAttribute('role'), originalControls = trigger.getAttribute('aria-controls');
   const originallyHidden = menu.hidden;
+  const originallyUnified = menu.classList.contains('model-picker-unified');
   trigger.setAttribute('aria-haspopup', 'dialog');
   let sheet = null, home = null, optionsPage = null, permissionHome = null, permissionNode = null;
   let search, account, root, optionsButton, empty;
@@ -282,6 +283,8 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     menu.querySelectorAll('.rd-model-search-row:not(.model-version-search), .rd-model-group, .model-manage-item').forEach(node => node.remove());
     menu.classList.remove('rd-model-picker'); menu.querySelectorAll('[style*="order"]').forEach(node => node.style.removeProperty('order'));
     const extras = el('details', { class: 'ms-model-extras' }, [el('summary', { text: 'Search and account' }), search, optionsButton, account]);
+    // The sheet body owns scrolling; do not inherit the desktop board's nested flex clamps.
+    menu.classList.remove('model-picker-unified');
     root.append(menu, empty, extras); menu.hidden = false; menu.classList.remove('hidden'); menu.classList.add('ms-model-menu');
     menu.removeAttribute('role');
     trigger.setAttribute('aria-expanded', 'true');
@@ -296,6 +299,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
       }
       if (home?.isConnected) home.after(menu); home?.remove(); home = null;
       menu.classList.add('hidden'); menu.classList.remove('ms-model-menu'); trigger.setAttribute('aria-expanded', 'false'); sheet = null;
+      menu.classList.toggle('model-picker-unified', originallyUnified);
       menu.hidden = originallyHidden;
       if (menuRole) menu.setAttribute('role', menuRole);
       if (originalControls) trigger.setAttribute('aria-controls', originalControls); else trigger.removeAttribute('aria-controls');

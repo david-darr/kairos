@@ -977,12 +977,22 @@ app.whenReady().then(async () => {
     // Page widths on a wide desktop.
     const previousSize = win.getContentSize();
     try {
-      win.setContentSize(1920, 1080);
-      await delay(100);
-      for (const section of ["documents", "vault", "google"]) {
-        await navigate("library", { section });
-        await waitFor("!!document.querySelector('#view-content .library-view, #view-content .library-vault-page')");
-        assert.equal(await js("document.querySelector('#view-content .library-view, #view-content .library-vault-page').getBoundingClientRect().width"), 1440, "Library " + section + " is 1440px wide");
+      // Desktop Library fills the padded content area (David, 2026-10-25).
+      for (const width of [1440, 1920]) {
+        win.setContentSize(width, 1080);
+        await delay(100);
+        for (const section of ["documents", "vault", "google"]) {
+          await navigate("library", { section });
+          await waitFor("!!document.querySelector('#view-content .library-view, #view-content .library-vault-page')");
+          await js("Promise.all(document.querySelector('#view-content .library-view, #view-content .library-vault-page').getAnimations().map(a => a.finished))");
+          assert.ok(await js(`(() => {
+            const host=document.getElementById('view-content'), h=host.getBoundingClientRect(), s=getComputedStyle(host);
+            const r=host.querySelector('.library-view, .library-vault-page').getBoundingClientRect();
+            const left=h.left+host.clientLeft+parseFloat(s.paddingLeft);
+            const right=h.left+host.clientLeft+host.clientWidth-parseFloat(s.paddingRight);
+            return Math.abs(r.left-left)<=1 && Math.abs(r.right-right)<=1 && host.scrollWidth<=host.clientWidth+1;
+          })()`), `Library ${section} fills the content area without overflow at ${width}px`);
+        }
       }
       await navigate("library", { section: "documents" });
       await waitFor("!!document.querySelector('.library-document-card')");

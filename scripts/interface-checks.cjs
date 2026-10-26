@@ -139,6 +139,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-composer-options`);
     await js("document.getElementById('chat-messages').click(); document.getElementById('chat-history-toggle').click()");
     if (width <= 768) {
+      // Opening the drawer schedules tab-bar visibility through MutationObserver + rAF.
+      await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
       assert.equal(await js("document.querySelector('.ms-tabbar').dataset.state === 'hidden' && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
     }
     await capture(`interface-${label}-history`);
@@ -149,8 +151,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     assert.deepEqual(await overflow(), [], `${label} Settings fits`);
     if (width <= 768) {
       assert.equal(await js("(() => {const r=document.querySelector('.settings-titlebar').getBoundingClientRect(), a=document.querySelector('.settings-titlebar .title').getBoundingClientRect();return r.top<=1 && r.height<=a.bottom + 72 && r.top <= a.top;})()"), true, 'Settings owns one compact header without inherited page padding');
-      // Phone Settings is an inset-grouped list: 22px bordered groups, rows of at least 52px, all inside the search field's width.
-      assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return r.left>=s.left-1 && r.right<=s.right+1 && p.borderTopWidth==='1px' && parseFloat(p.borderTopLeftRadius)===22 && r.height>=52;});})()`), true, 'Settings rows sit in inset groups within the search width');
+      // The final phone board rules use 24px bordered groups and rows of at least 56px.
+      assert.equal(await js(`(() => {const s=document.querySelector('.settings-search').getBoundingClientRect();return [...document.querySelectorAll('.settings-nav-item')].filter(n=>!n.hidden).every(n=>{const r=n.getBoundingClientRect(), p=getComputedStyle(n.parentElement);return r.left>=s.left-1 && r.right<=s.right+1 && p.borderTopWidth==='1px' && parseFloat(p.borderTopLeftRadius)===24 && r.height>=56;});})()`), true, 'Settings rows sit in inset groups within the search width');
       await js("document.querySelector('.settings-nav-item[data-section=notifications]').click()");
       await waitFor("document.querySelector('#view-content.settings-mobile-page')?.dataset.mobileView === 'page'");
       await capture(`interface-${label}-notifications`);

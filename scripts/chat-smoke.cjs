@@ -859,12 +859,14 @@ app.whenReady().then(async () => {
     })()`), 'Model sheet fits short mobile viewport below the status area');
     assert.deepEqual(await js(`(() => {
       const sheet=document.querySelector('.ms-model-sheet[open]'), body=sheet.querySelector('.ms-sheet-body');
+      const header=sheet.querySelector('.ms-sheet-header'), headerTop=header.getBoundingClientRect().top;
       const controls=[...sheet.querySelectorAll('#model-picker-menu button, #model-picker-menu summary, .ms-model-extras > summary')].filter(n=>n.getClientRects().length);
       if (!controls.length) return ['No model controls'];
       return controls.filter(n=>{
         n.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
         const r=n.getBoundingClientRect(), b=body.getBoundingClientRect();
-        return r.top<b.top || r.bottom>b.bottom || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2));
+        return r.top<b.top || r.bottom>b.bottom || Math.abs(header.getBoundingClientRect().top-headerTop)>1
+          || sheet.scrollTop!==0 || !n.contains(document.elementFromPoint(r.left+r.width/2, r.top+r.height/2));
       }).map(n=>n.textContent.trim());
     })()`), [], 'Every model sheet control can be scrolled into view and hit on a short phone');
     win.setContentSize(1440, 900);

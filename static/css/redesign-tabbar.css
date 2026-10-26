@@ -389,6 +389,11 @@
   .kairos-redesign .ms-more-extras { margin-block: 14px; font-size: 13px; color: var(--rd-ink-dim); }
   .kairos-redesign .ms-more-extras > summary { cursor: pointer; }
   .kairos-redesign .ms-sheet.ms-model-sheet { height: 640px; max-height: min(90dvh, calc(var(--ms-sheet-height, 100dvh) - var(--mobile-safe-top, env(safe-area-inset-top, 0px)))); }
+  /* Only the body scrolls: the title, Close and grabber stay in place. */
+  .kairos-redesign .ms-sheet.ms-model-sheet { overflow: hidden; }
+  .kairos-redesign .ms-model-sheet > .ms-sheet-header { flex: none; }
+  .kairos-redesign .ms-model-sheet > .ms-sheet-body { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .kairos-redesign .ms-model-sheet .ms-model-root > * { flex: none; }
   .kairos-redesign .ms-sheet.ms-notifications-sheet { height: 770px; max-height: calc(100dvh - 32px); }
   .kairos-redesign .ms-sheet.ms-background-sheet { height: 620px; max-height: calc(100dvh - 32px); }
   .kairos-redesign .ms-sheet:is(.ms-model-sheet, .ms-notifications-sheet, .ms-background-sheet) { display: flex; flex-direction: column; padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); }
