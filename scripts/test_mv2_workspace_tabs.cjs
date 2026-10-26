@@ -270,7 +270,7 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
   }
   host.querySelector('.cal-month-label').click(); await flush();
   // Reproduce the smoke completion flow: Month contains two copies of today's
-  // task, and ticking either must clear both after the PATCH and range refresh.
+  // task. Completion removes its upcoming copy and preserves the checked day copy.
   const matchMedia = context.window.matchMedia;
   for (const isPhone of [true, false]) for (const reduced of [true, false]) {
     phone = isPhone;
@@ -304,15 +304,19 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
       checkbox.checked = true;
       await checkbox.onchange();
       assert.equal(item.completed, true);
-      assert.equal(panel.querySelectorAll('.card').length, 0, `${source} completion clears both ${section} copies`);
-      assert.equal(host.querySelector('.cal-day-count').textContent, 'No events');
+      assert.equal(panel.querySelectorAll('.card').length, 1, `${source} completion retains only its selected-day copy after ticking ${section}`);
+      const completedCard = host.querySelector('.cal-selected-agenda').querySelector('.card');
+      assert.ok(completedCard.classList.contains('cal-item-completed'));
+      assert.equal(completedCard.querySelector('input').checked, true);
+      assert.equal(host.querySelector('.cal-upcoming').querySelectorAll('.card').length, 0);
+      assert.equal(host.querySelector('.cal-day-count').textContent, 'One event');
       assert.equal(panel.getAttribute('aria-busy'), 'false');
       assert.equal(animations, section === '.cal-upcoming' && !reduced ? 1 : 0, 'Completion respects reduced motion');
     }
   }
   context.window.matchMedia = matchMedia;
-  // Next 7 Days is a second request after the month grid. Neither it nor
-  // the selected-day agenda should retain completed cards.
+  // Next 7 Days is a second request after the month grid. The selected day
+  // retains completed cards while the upcoming list excludes them.
   for (const isPhone of [true, false]) {
     phone = isPhone;
     const completed = { id: 'done', source: 'calendar', title: 'Finished', completed: true,
@@ -328,8 +332,9 @@ const flush = async () => { await new Promise(resolve => setImmediate(resolve));
     const rendering = calendar.render(host); await flush();
     const panel = host.querySelector('.cal-day-panel');
     assert.equal(panel.getAttribute('aria-busy'), 'true', 'Month waits for its separate upcoming request');
-    assert.equal(host.querySelector('.cal-selected-agenda').querySelectorAll('.card').length, 0);
-    assert.equal(host.querySelector('.cal-day-count').textContent, 'No events');
+    assert.equal(host.querySelector('.cal-selected-agenda').querySelectorAll('.card').length, 1);
+    assert.equal(host.querySelector('.cal-selected-agenda').querySelector('input').checked, true);
+    assert.equal(host.querySelector('.cal-day-count').textContent, 'One event');
     assert.equal(pending.length, 1);
     pending.shift()([completed]); await rendering;
     assert.equal(panel.getAttribute('aria-busy'), 'false');
