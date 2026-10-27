@@ -6,6 +6,7 @@ const path = require('node:path');
 const source = name => fs.readFileSync(path.join(__dirname, '../static/js', name), 'utf8');
 const moduleURL = text => 'data:text/javascript;base64,' + Buffer.from(text).toString('base64');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function main() {
   const apiURL = moduleURL(`
@@ -39,6 +40,8 @@ async function main() {
     }
     assert.equal(url, '/api/chat/live');
     const request = JSON.parse(options.body);
+    assert.match(request.request_id, requestIdPattern, 'Every submission has a UUID request ID');
+    assert.ok(!requests.some(previous => previous.request_id === request.request_id), 'New submissions have distinct request IDs');
     requests.push(request);
     const run = runs[request.session_id] = { turnId: `test-${requests.length}`, sessionTitle: 'Origin',
       prompt: request.message, text: '', startedAt: Date.now() / 1000, status: 'processing',
@@ -70,7 +73,7 @@ async function main() {
   first.tab.foreignBar.children[1].children[0].children[0].click(); assert.equal(edited, item);
   first.send.click();
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0], { session_id: 'origin', message: 'Please apply these review comments.', attachment_ids: [], references: [item] });
+  assert.deepEqual(requests[0], { session_id: 'origin', message: 'Please apply these review comments.', attachment_ids: [], references: [item], request_id: requests[0].request_id });
   assert.equal(first.tab.foreign.comments.length, 0);
   assert.equal(first.status.textContent, 'Working…');
   await emit(0, { permission: { id: 'p1' } });
@@ -80,7 +83,9 @@ async function main() {
   await emit(0, { error: 'fixture failed' }, true);
   assert.equal(first.status.textContent, 'Failed: fixture failed');
   assert.deepEqual(first.tab.foreign.comments, [item]); assert.equal(first.send.textContent, 'Retry');
-  first.send.click(); assert.equal(requests.length, 2); assert.deepEqual(requests[1].references, [item]);
+  first.send.click(); assert.equal(requests.length, 2);
+  assert.notEqual(requests[1].request_id, requests[0].request_id, 'An explicit user retry is a new submission');
+  assert.deepEqual(requests[1], { ...requests[0], request_id: requests[1].request_id });
   await emit(1, { done: true }, true); assert.equal(first.status.textContent, 'Done');
 
   // Busy submission waits, permits cancellation, and never changes origin.
@@ -113,6 +118,35 @@ async function main() {
   discarded.controls.resume(); discarded.controls.dispose(); await tick();
   assert.equal(requests.length, 7, 'Disposal cancels pending automatic sends');
   for (const current of [first, second, restored]) current.controls.dispose();
+  // A lost acceptance response retries the identical transport request. The
+  // fake server returns the original acceptance, matching backend deduplication.
+  const acceptedFetch = global.fetch, transportAttempts = [];
+  let acceptance;
+  global.fetch = async (url, options) => {
+    if (url !== '/api/chat/live') return acceptedFetch(url, options);
+    transportAttempts.push(JSON.parse(options.body));
+    if (transportAttempts.length === 1) {
+      acceptance = await acceptedFetch(url, options);
+      throw new Error('Lost acceptance response');
+    }
+    return acceptance;
+  };
+  const transport = make('transport-origin'); transport.controls.resume();
+  try {
+    const transportItem = comment('Retry transport only');
+    transport.tab.addForeignComment(transportItem); transport.send.click();
+    await stream.getInFlight('transport-origin').startPromise;
+    assert.equal(transportAttempts.length, 2, 'One transport retry after lost acceptance');
+    assert.deepEqual(transportAttempts[1], transportAttempts[0], 'Transport retries preserve the ID and entire body');
+    assert.deepEqual(transportAttempts[0], { session_id: 'transport-origin', message: 'Please apply these review comments.',
+      attachment_ids: [], references: [transportItem], request_id: transportAttempts[0].request_id });
+    assert.equal(requests.length, 8, 'Deduplicated acceptance starts only one new run');
+    assert.equal(transport.status.textContent, 'Working…');
+    await emit(7, { done: true }); assert.equal(transport.status.textContent, 'Done');
+  } finally {
+    global.fetch = acceptedFetch;
+    transport.controls.dispose();
+  }
   assert.ok(saved > 0 && refreshed > 0);
   console.log('PASS: foreign draft ownership, request metadata, approval updates, failure/retry, busy cancellation, multi-tab queue races and validated restart.');
 }

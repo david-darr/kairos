@@ -147,7 +147,8 @@ class AuditTests(unittest.TestCase):
             outcomes = iter(["done", "Not run: no", "boom"])
             ctx = tool_registry.ToolContext(session_id="chat-7", is_admin=True, agent_id="aaaaaaaaaa")
             surface = next(iter(spec.surfaces))
-            with patch.dict(tool_registry._REGISTRY, {spec.name: dataclasses.replace(spec, handler=handler)}):
+            with patch.dict(tool_registry._REGISTRY, {spec.name: dataclasses.replace(spec, handler=handler)}), \
+                 patch("core.addons.tool_available", return_value=True):
                 before = len(permissions.audit())
                 for _ in range(3):
                     asyncio.run(tool_registry.call(spec.name, {"path": "a.txt", "title": "t"}, ctx, surface))
@@ -157,6 +158,24 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual((entry["tool"], entry["effect"]), (spec.name, spec.effect))
                 self.assertIn("chat:chat-7", entry["by"], "who")
                 self.assertIn("content", entry, "what it touched")
+
+    def test_unavailable_addon_never_calls_handler_or_records_execution(self):
+        spec = tool_registry._REGISTRY["roblox_studio"]
+        calls = []
+
+        async def handler(args, ctx):
+            calls.append((args, ctx))
+            return "done"
+
+        ctx = tool_registry.ToolContext(session_id="chat-7", is_admin=True, agent_id="aaaaaaaaaa")
+        before = list(permissions.audit())
+        with patch.dict(tool_registry._REGISTRY, {spec.name: dataclasses.replace(spec, handler=handler)}), \
+             patch("core.addons.tool_available", return_value=False) as available:
+            result = asyncio.run(tool_registry.call(spec.name, {"path": "a.txt", "title": "t"}, ctx, next(iter(spec.surfaces))))
+        self.assertEqual(result, "Not run: Install and enable this add-on in Tool Store first.")
+        available.assert_called_once_with(spec.name)
+        self.assertEqual(calls, [])
+        self.assertEqual(permissions.audit(), before)
 
 
 def tearDownModule():

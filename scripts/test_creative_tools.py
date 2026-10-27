@@ -315,11 +315,12 @@ class Routes(Isolated, unittest.TestCase):
 
     def test_other_admin_cannot_approve_private_account_request(self):
         from routes import permission_routes
-        request = NS(tool="creative_tools", arguments={"account_owner": "alice"})
-        with patch.object(permissions, 'pending_request', return_value=request), patch.object(permissions, 'answer') as answer:
-            from fastapi import HTTPException
+        pending = NS(tool="creative_tools", arguments={"account_owner": "alice"}, surface=f"chat:{self.sid}")
+        with patch.object(permissions, 'pending_request', return_value=pending), patch.object(permissions, 'answer') as answer:
+            from fastapi import HTTPException, Request
+            request = Request({"type": "http", "method": "POST", "path": "/api/permissions/request/answer", "headers": []})
             with self.assertRaises(HTTPException) as failure:
-                asyncio.run(permission_routes.answer('request', permission_routes.Answer(choice='once'), user='bob'))
+                asyncio.run(permission_routes.answer('request', permission_routes.Answer(choice='once'), request, user='bob'))
             self.assertEqual(failure.exception.status_code, 403); answer.assert_not_called()
 
 
