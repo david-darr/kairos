@@ -1,7 +1,7 @@
 """Real Swarm router/service with isolated auth and temporary SQLite data."""
 import asyncio
 import ast
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, ExitStack
 import copy
 import json
 import os
@@ -13,7 +13,9 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-environment = tempfile.TemporaryDirectory(prefix="jarvis-swarm-api-")
+from scripts.test_data_support import TestDataDirectory
+
+environment = TestDataDirectory(prefix="jarvis-swarm-api-")
 os.environ["JARVIS_DATA_DIR"] = environment.name
 
 import httpx
@@ -806,28 +808,61 @@ class AppWiringTests(unittest.IsolatedAsyncioTestCase):
         application = FastAPI()
         # New live services stay isolated too (2026-10-15). Exercise both a
         # serving failure and a startup failure after Swarm has opened.
-        from core import mobile_activity, computer
-        from services import bot_push, chat_live
-        with patch.object(mobile_activity, "recover"), patch.object(bot_push, "start"), \
-             patch.object(computer.manager, "close_all", new_callable=AsyncMock), \
-             patch.object(chat_live, "shutdown", new_callable=AsyncMock):
-            with self.assertRaisesRegex(RuntimeError, "fixture failure"):
-                async with scope["lifespan"](application):
-                    raise RuntimeError("fixture failure")
-            swarm.shutdown.assert_awaited_once_with(application)
-            for collaborator in scope.values():
-                if isinstance(collaborator, Mock):
-                    collaborator.reset_mock()
-            scope["mobile_notifications"].start.side_effect = RuntimeError("startup failure")
-            with self.assertRaisesRegex(RuntimeError, "startup failure"):
-                async with scope["lifespan"](application):
-                    self.fail("startup should fail before serving")
-        swarm.startup.assert_awaited_once_with(application)
-        swarm.shutdown.assert_awaited_once_with(application)
-        scope["chat_service"].shutdown.assert_awaited_once()
-        scope["connector_hub"].stop_all.assert_awaited_once()
-        scope["tab_hooks"].reconcile.assert_awaited_once()
-        scope["tab_hooks"].stop_all.assert_awaited_once()
+        from core import addons, mobile_activity, computer, speech_acceleration, tool_access
+        from services import agent_calls, background_tasks, bot_push, chat_live
+        from services.forge_apps import forge_apps
+        from services.forge_terminals import forge_terminals
+        with ExitStack() as patches:
+            isolated = {}
+            for name, obj, method, asynchronous in (
+                ("screen_sweep", tool_access, "sweep_screens", False),
+                ("addon_migration", addons, "migrate", False),
+                ("mobile_recovery", mobile_activity, "recover", False),
+                ("bot_push", bot_push, "start", False),
+                ("call_recovery", agent_calls, "recover", True),
+                ("call_shutdown", agent_calls, "shutdown", True),
+                ("background_start", background_tasks, "start", False),
+                ("background_stop", background_tasks, "stop", True),
+                ("computer_close", computer.manager, "close_all", True),
+                ("live_shutdown", chat_live, "shutdown", True),
+                ("forge_apps_shutdown", forge_apps, "shutdown", False),
+                ("forge_terminals_shutdown", forge_terminals, "shutdown", False),
+                ("speech_stop", speech_acceleration, "stop", False),
+            ):
+                isolated[name] = patches.enter_context(
+                    patch.object(obj, method, new_callable=AsyncMock if asynchronous else Mock))
+            patches.enter_context(patch.object(addons, "enabled", return_value=False))
+            for startup_failure in (False, True):
+                with self.subTest(startup_failure=startup_failure):
+                    for collaborator in [*scope.values(), *isolated.values()]:
+                        if isinstance(collaborator, Mock):
+                            collaborator.reset_mock(side_effect=True)
+                    failure = RuntimeError("startup failure" if startup_failure else "fixture failure")
+                    if startup_failure:
+                        scope["mobile_notifications"].start.side_effect = failure
+                    with self.assertRaises(RuntimeError) as caught:
+                        async with scope["lifespan"](application):
+                            if startup_failure:
+                                self.fail("startup should fail before serving")
+                            raise failure
+                    self.assertIs(caught.exception, failure, "cleanup must preserve the original error")
+                    swarm.startup.assert_awaited_once_with(application)
+                    swarm.shutdown.assert_awaited_once_with(application)
+                    self.assertEqual(isolated["call_recovery"].await_count, 0 if startup_failure else 1)
+                    for name in ("call_shutdown", "background_stop", "computer_close", "live_shutdown"):
+                        isolated[name].assert_awaited_once()
+                    for name in ("forge_apps_shutdown", "forge_terminals_shutdown", "speech_stop"):
+                        isolated[name].assert_called_once()
+                    scope["stop_store_watch"].assert_awaited_once()
+                    scope["remote_access"].stop.assert_awaited_once()
+                    scope["task_scheduler"].stop.assert_called_once()
+                    scope["discord_channel"].stop.assert_awaited_once()
+                    scope["connector_hub"].stop_all.assert_awaited_once()
+                    scope["tab_hooks"].reconcile.assert_awaited_once()
+                    scope["tab_hooks"].stop_all.assert_awaited_once()
+                    scope["mobile_notifications"].shutdown.assert_awaited_once()
+                    scope["chat_service"].shutdown.assert_awaited_once()
+                    scope["llamacpp_engine"].stop.assert_called_once()
 
 
 if __name__ == "__main__":
@@ -835,3 +870,5 @@ if __name__ == "__main__":
         unittest.main(verbosity=2)
     finally:
         environment.cleanup()
+        if Path(environment.name).exists():
+            raise RuntimeError(f"Test data cleanup failed: {environment.name}")

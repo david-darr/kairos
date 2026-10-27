@@ -116,6 +116,8 @@ logging.getLogger("asyncio").addFilter(_ProactorResetNoiseFilter())
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from services import agent_calls
+
     # Replaces the deprecated @app.on_event("startup"/"shutdown") pair —
     # FastAPI's own docs mark those deprecated in favor of this single
     # context manager; identical behavior, one modern mechanism.
@@ -171,7 +173,6 @@ async def lifespan(_app: FastAPI):
         mobile_notifications.start()
         from services import bot_push
         bot_push.start()
-        from services import agent_calls
         await agent_calls.recover()
         yield
     finally:
