@@ -32,7 +32,7 @@ os.environ["JARVIS_DATA_DIR"] = environment.name
 from fastapi import HTTPException
 
 from core.swarm.models import NotFound
-from core.swarm.tools import _LEAD, _MEMORY
+from core.swarm.tools import ToolRejected, ToolService
 from routes import swarm_routes
 from services import agent_service as agent_module
 from services import swarm_service as swarm_module
@@ -40,7 +40,9 @@ from services.agent_service import agent_service
 from services.swarm_service import SwarmService
 
 LIMIT = {"ceiling": 20000, "pause_percent": 80, "checkpoint_reserve": 0}
-SWARM_TOOLS = set(_LEAD) | set(_MEMORY) | {"finish_shift"}
+SPECIALIST_TOOLS = {"get_assigned_work", "send_message", "record_finding", "report_blocker",
+                    "submit_result", "propose_task", "ui_design", "read_memory"}
+LEAD_TOOLS = SPECIALIST_TOOLS | {"assign_plan", "review_work", "finish_mission"}
 
 
 def member(name="", role="", agent_id=None):
@@ -84,6 +86,29 @@ def reply(calls):
 
 def waiting_id(transcript):
     return transcript.split("use review_work with these ids):")[1].split("- ")[1].split(" ")[0]
+
+
+class WorkerToolBoundaryTests(unittest.TestCase):
+    def test_roles_keep_their_restricted_tools(self):
+        for lead in (False, True):
+            worker = ToolService(None, is_lead=lead, jarvis_agent_id="linked-agent")
+            expected = LEAD_TOOLS if lead else SPECIALIST_TOOLS
+            self.assertEqual(set(worker.definitions), expected)
+            for forbidden in ("run_shell", "read_file", "write_file", "read_vault_file", "read_skill",
+                              "search_memory", "agent_remember", "agent_create", "finish_shift"):
+                with self.subTest(lead=lead, forbidden=forbidden), self.assertRaises(ToolRejected):
+                    worker.call(forbidden, {})
+            if not lead:
+                for forbidden in ("assign_plan", "review_work", "finish_mission"):
+                    with self.subTest(forbidden=forbidden), self.assertRaises(ToolRejected):
+                        worker.call(forbidden, {})
+            with self.assertRaises(ToolRejected):
+                worker.call("read_memory", {"ref": "private-source"})
+            unlinked = ToolService(None, is_lead=lead)
+            with self.assertRaises(ToolRejected):
+                unlinked.call("read_memory", {"topic": "private-topic"})
+            scheduled = ToolService(None, is_lead=lead, scheduled=True, jarvis_agent_id="linked-agent")
+            self.assertEqual(set(scheduled.definitions), expected | ({"finish_shift"} if lead else set()))
 
 
 class TeamTests(unittest.IsolatedAsyncioTestCase):
@@ -222,7 +247,8 @@ class TeamTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("agent_remember", prompt, "it is not told about tools it does not have")
         for request in Scripted.requests:
             offered = {tool["function"]["name"] for tool in request.get("tools") or []}
-            self.assertTrue(offered <= SWARM_TOOLS, offered - SWARM_TOOLS)
+            is_lead = "the lead of" in request["messages"][0]["content"]
+            self.assertEqual(offered, LEAD_TOOLS if is_lead else SPECIALIST_TOOLS)
         unlinked = await self.service.create("alice", payload(member("Lee", "Lead"), [member("Sam", "Writer")]), "plain")
         self.assertIsNone(self.service._identity(self.team(unlinked["id"])["Sam"]))
 

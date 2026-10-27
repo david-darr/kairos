@@ -15,6 +15,8 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'data', 'swarm-review', 'run-' + Date.now());
 const systems = [], streams = new Set(), errors = [], writes = [];
+const liveChatStreams = new Set();
+const liveChatSnapshot = () => ({ type: 'snapshot', runs: {} });
 let nextId = 1, unavailable = false, snapshotDelay = 0, snapshotCalls = 0, streamOpens = 0;
 const availability = { available: true, execution_available: false, blockers: [],
   detail: 'Agent execution is not connected yet. You can save systems, teams and ideas.' };
@@ -97,9 +99,17 @@ function seedWork(company) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://fixture');
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:");
   const json = (value, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
   if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/swarm')) {
+    if (url.pathname === '/api/chat/live/snapshot') return json(liveChatSnapshot());
+    if (url.pathname === '/api/chat/live/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no' });
+      liveChatStreams.add(res);
+      res.on('close', () => liveChatStreams.delete(res));
+      res.write(`data: ${JSON.stringify(liveChatSnapshot())}\n\n`);
+      return;
+    }
     if (url.pathname === '/api/auth/status') return json({ auth_enabled: false, username: 'local', is_admin: true });
     if (url.pathname === '/api/settings') return json({ onboarding_complete: true });
     if (url.pathname === '/api/system/custom-tabs') return json([{ id: 'agents', label: 'Custom collision', view_url: '/must-not-load.js' }]);
@@ -236,7 +246,13 @@ app.whenReady().then(async () => {
     }
     await wait(60);
   };
-  const click = text => js(`{ const button=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}); button?.focus(); button?.click(); }`);
+  const click = text => js(`{
+    const button=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)});
+    if (!button) throw new Error('Missing button: ' + ${JSON.stringify(text)});
+    if (button.matches(':disabled') || button.closest('[inert]') || !button.getClientRects().length || getComputedStyle(button).visibility !== 'visible')
+      throw new Error('Button is hidden or disabled: ' + ${JSON.stringify(text)});
+    button.focus(); button.click();
+  }`);
   const capture = async name => { await wait(150); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
   const fits = async () => assert.ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), 'No horizontal page overflow');
   try {
@@ -506,6 +522,8 @@ app.whenReady().then(async () => {
     await until("document.querySelector('.swarm-header h1')?.textContent==='Updated studio'");
     assert.ok(await js("[...document.querySelectorAll('.swarm-header button')].some(b => b.textContent === '← All agents')"), 'A team page leads back to Agents');
     await fits(); await capture('full-app-desktop');
+    await click('Info');
+    await until("document.querySelector('.swarm-header > .swarm-actions')?.getClientRects().length > 0");
     await click('Map'); await until("document.querySelectorAll('.swarm-node').length===5");
     await fits(); await capture('full-app-map');
     await click('Board'); await until("!!document.querySelector('.swarm-board')");
@@ -519,6 +537,8 @@ app.whenReady().then(async () => {
     await until("!!document.querySelector('.team-tile')");
     await js("document.querySelector('.team-tile').click()");
     await until("document.querySelector('.swarm-header h1')?.textContent==='Updated studio'");
+    await click('Info');
+    await until("document.querySelector('.swarm-header > .swarm-actions')?.getClientRects().length > 0");
     await click('Archive'); await until("!!document.querySelector('dialog[open]')");
     await js("document.querySelector('dialog .btn.danger').click()");
     await until("document.querySelector('.swarm-state')?.textContent==='archived'");
@@ -563,6 +583,7 @@ app.whenReady().then(async () => {
     console.error(error.stack); process.exitCode = 1;
   } finally {
     for (const stream of streams) stream.res.end();
+    for (const stream of liveChatStreams) stream.end();
     win.destroy(); server.close(); exitAfterFlush(process.exitCode);
   }
 }).catch(error => { console.error(error.stack); exitAfterFlush(1); });

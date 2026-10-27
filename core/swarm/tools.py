@@ -297,10 +297,32 @@ class ToolService:
     def _ui_design(self, arguments):
         from core import memory_tools, ui_design
         if arguments.get('action') == 'guide':
+            from services import skill_curator, skills_service
+
             reference = arguments.get('reference')
-            if reference not in {None, 'references/quick-reference.md', 'references/pro-rules.md'}:
+            if reference is not None and (not isinstance(reference, str) or reference not in {
+                    'references/quick-reference.md', 'references/pro-rules.md'}):
                 raise ToolRejected('Choose a built-in UI/UX reference')
-            return memory_tools.read_skill('ui-ux-pro-max', reference)
+            if not skill_curator.model_visible('ui-ux-pro-max'):
+                raise ToolRejected('UI/UX skill is unavailable or disabled in Tool Store')
+            # Teams may read this public guide, never the editable user copy.
+            # Keep the ordinary skill's availability/curation gate above.
+            target = ui_design.ROOT / (reference or 'SKILL.md')
+            try:
+                if (any(skills_service._linked(part) for part in (target, *target.parents))
+                        or not target.resolve().is_relative_to(ui_design.ROOT.resolve())
+                        or not target.is_file()):
+                    raise ToolRejected('The bundled UI/UX guide is missing or contains links')
+                with target.open('rb') as source:
+                    raw = source.read(400001)
+                if len(raw) > 400000:
+                    raise ToolRejected('The bundled UI/UX guide exceeds the text limit')
+                text = raw.decode('utf-8')
+            except (OSError, UnicodeError) as exc:
+                raise ToolRejected('The bundled UI/UX guide is unavailable') from exc
+            if len(text) > memory_tools.SKILL_HARD_LIMIT_CHARS:
+                raise ToolRejected('The bundled UI/UX guide exceeds the text limit')
+            return text
         return ui_design.search_sync(arguments.get('query'), action=arguments.get('action'),
             domain=arguments.get('domain') or '', stack=arguments.get('stack') or '')
 
