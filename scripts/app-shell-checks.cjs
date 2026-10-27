@@ -4,7 +4,7 @@
 // end (launch links), then returns to Home at 1440x900.
 const assert = require('node:assert/strict');
 
-module.exports = async ({ js, win, waitFor, delay, navigate, capture, base }) => {
+module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demoState, fixtures }) => {
   const press = async (key, code, vk, modifiers = 0) => {
     for (const type of ['keyDown', 'keyUp']) {
       await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: vk, modifiers });
@@ -154,12 +154,16 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base }) =>
   await js("document.querySelector('.settings-window button[title=Close]').click()");
   console.log('PASS: Profile identity, role, counts and every settings link');
 
-  // -- launch links ----------------------------------------------------------
+  await require('./app-shell-gap-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, fixtures, press });
   for (const [query, check] of [
     ['?view=calendar', "document.querySelector('#nav .nav-item[data-tab=calendar]')?.classList.contains('active')"],
     ['?view=notes', "document.querySelector('#nav .nav-item[data-tab=notes]')?.classList.contains('active')"],
     ['?newchat=1', "document.querySelector('#nav .nav-item[data-tab=chat]')?.classList.contains('active')"],
     ['?view=not-a-tab', "document.querySelector('#nav .nav-item[data-tab=home]')?.classList.contains('active')"],
+    // Notification links: a bot opens that bot, a chat opens that chat, anything malformed falls back to Home.
+    ['?agent=a1', "document.querySelector('#nav .nav-item[data-tab=agents]')?.classList.contains('active') && !!document.querySelector('.agent-memory')"],
+    ['?chat=abcdef123456', "!!document.querySelector('#chat-messages[data-session-id=\"abcdef123456\"]')"],
+    ['?chat=not-a-chat-id', "document.querySelector('#nav .nav-item[data-tab=home]')?.classList.contains('active')"],
   ]) {
     await win.loadURL(base + '/' + query);
     await waitFor(check, 15000);

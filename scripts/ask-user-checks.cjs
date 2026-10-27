@@ -140,6 +140,23 @@ app.whenReady().then(async () => {
     await capture('phone');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     assert.equal(await js('getComputedStyle(document.querySelector(".question-pulse")).animationName'),'none');
+    // A01 (2026-10-27): a drag that starts in the text field stays the field's own,
+    // and swiping the sheet away skips the question without ever sending the typed text.
+    const swipe = selector => js(`(async () => { const target = document.querySelector(${JSON.stringify(selector)}); const r = target.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + 5;
+      const mk = cy => new Touch({ identifier: 9, target, clientX: x, clientY: cy });
+      const fire = (type, cy, end) => target.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: end ? [] : [mk(cy)], changedTouches: [mk(cy)] }));
+      fire('touchstart', y); for (let i = 1; i <= 6; i++) { fire('touchmove', y + 300 * i / 6); await new Promise(r => setTimeout(r, 16)); } fire('touchend', y + 300, true); return true; })()`);
+    const before = posts.length;
+    await js(`(() => { const t = document.querySelector('.question-card input[type=text]'); t.value = 'Typed but never sent'; t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await swipe('.question-card input[type=text]');
+    await delay(600);
+    assert.equal(await js('!!document.querySelector(".chat-question-host dialog[open]")'), true, 'a drag that starts in the text field does not dismiss the sheet');
+    assert.equal(posts.length, before, 'a drag in the text field sends nothing');
+    await swipe('.question-head');
+    await waitFor('!document.querySelector(".chat-question-host dialog[open]")');
+    for (let i = 0; i < 40 && posts.length === before; i++) await delay(50);
+    assert.deepEqual(posts.slice(before), [{path:'/api/permissions/question-check/respond',data:{skip:true}}], 'swiping the sheet away skips the question and never sends the typed text');
+    posts.splice(before);
 
     // An already-open chat must attach remote turns without a reload.
     // Each mount starts idle so a leftover per-turn listener cannot hide the bug.
