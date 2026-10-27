@@ -33,7 +33,7 @@ export function createChatActivity() {
     const state = entry.status === 'failed' ? 'failed' : entry.status === 'stopped' ? 'stopped' : entry.status === 'done' ? 'done' : entry.text ? 'responding' : entry.connected ? 'waiting' : 'sending';
     if (state === previous) return;
     previous = state; node.dataset.state = state;
-    label.textContent = { sending: 'Sending request', waiting: 'Waiting for response', responding: 'Receiving response', done: 'Response complete', failed: 'Response interrupted' }[state];
+    label.textContent = { sending: 'Sending request', waiting: 'Waiting for response', responding: 'Receiving response', done: 'Response complete', failed: 'Response interrupted', stopped: 'Stopped' }[state];
     glyph.textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : state === 'stopped' ? '■' : '';
     mascot.setAttribute('state', MASCOT_STATE[state]);
     const complete = [!!entry.connected, !!entry.text, state === 'done'];

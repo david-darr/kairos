@@ -356,7 +356,22 @@ export function render(container, tabId, options = {}) {
     store.panel.hidden = false;
   }
 
+  // A redraw replaces the rows; keep keyboard focus on the equivalent element (same card, class, text or position).
   function draw(key, start) {
+    const active = document.activeElement;
+    const was = active && container.contains(active) && active.classList[0] ? active : null;
+    const select = "." + CSS.escape(was?.classList[0] || "x");
+    const sectionId = was?.closest("[data-home-section]")?.dataset.homeSection;
+    const within = () => (sectionId && [...container.querySelectorAll("[data-home-section]")].find((n) => n.dataset.homeSection === sectionId)) || container;
+    const at = was ? [...within().querySelectorAll(select)].indexOf(was) : -1;
+    const text = was?.textContent;
+    drawNow(key, start);
+    if (!was || was.isConnected) return;
+    const same = [...within().querySelectorAll(select)];
+    (same.find((n) => n.textContent === text) || same[at])?.focus();
+  }
+
+  function drawNow(key, start) {
     const value = data[key];
     if (key === "tabCards") {
       // A failed optional endpoint cannot disturb Home's built-in sections.

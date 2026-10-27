@@ -141,6 +141,7 @@
 /* Tab cards */
 .kairos-redesign .dashboard-tab-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--rd-radius-pill); background: var(--accent-dim); color: var(--rd-ink); }
 .kairos-redesign .dashboard-tab-figure .dashboard-stat-value { font-size: 30px; font-weight: 500; }
+.kairos-redesign .dashboard-tab-figure, .kairos-redesign .dashboard-tab-figure .dashboard-stat-value, .kairos-redesign .dashboard-tab-figure .dashboard-stat-label, .kairos-redesign .dashboard-section .dashboard-quota-note { min-width: 0; overflow-wrap: anywhere; }
 .kairos-redesign .dashboard-quota-fill.tone-ample { background: var(--accent); }
 
 /* -- Needs you ---------------------------------------------------------------------- */

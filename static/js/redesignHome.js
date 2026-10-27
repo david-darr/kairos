@@ -130,7 +130,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
   };
   const needs = makeSection('Needs you', 'needs', 'See all', () => navigate('agents'));
   const working = makeSection('Working now', 'working', 'All tasks', () => navigate('tasks'));
-  const models = makeSection('Model usage', 'models', 'Models', () => navigate('settings', { section: 'models' }));
+  const models = makeSection('Model usage', 'models', 'Models', () => navigate('settings', { section: 'added-models' }));
   let glance = null;
   const cardFor = id => {
     if (id === 'needs') return needs.panel;

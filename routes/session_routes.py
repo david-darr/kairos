@@ -1,6 +1,6 @@
 """Session CRUD — the sidebar list, create/rename/delete surface."""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from functools import wraps
 from typing import Literal, Optional
 
@@ -74,7 +74,7 @@ class RewindRequest(BaseModel):
 
 
 class ForkRequest(BaseModel):
-    through_index: int  # include this message in the new chat
+    through_index: StrictInt  # include this message in the new chat
 
 
 class SetIntegrationsRequest(BaseModel):

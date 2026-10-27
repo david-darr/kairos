@@ -1761,7 +1761,7 @@ async function openIntegrationsModal() {
   ]);
   modal.body.append(creativeSelectionButton(() => ({ sessionId: activeSessionId }), modal.body));
   const mcpIntegrations = allIntegrations.filter((i) => i.kind === "mcp_server");
-  const enabledIds = session ? session.enabled_integration_ids : null; // null = ordinary servers, not REA
+  const enabledIds = session ? (session.enabled_integration_ids ?? null) : null; // null = ordinary servers, not REA
 
   if (mcpIntegrations.length === 0) {
     modal.body.appendChild(el("div", { class: "workspace-empty", text: "No MCP Tool Server integrations added yet — add one in Settings > Integrations." }));
@@ -1983,8 +1983,8 @@ async function setOpenMic(active, button) {
     });
     button.classList.add('active');
     document.getElementById('chat-main')?.classList.add('open-mic');
-    await openMic.start();
-    return;
+    // A denied or missing microphone makes start() report false: fall through to the normal end path.
+    if (await openMic.start()) return;
   }
 
   const controller = openMic;

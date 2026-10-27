@@ -111,7 +111,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     }
     if (!capturing) return;
     if (now - lastLoudAt < SILENCE_MS) return;
-    if (now - speechStartedAt < MIN_UTTERANCE_MS) {
+    if (lastLoudAt - speechStartedAt < MIN_UTTERANCE_MS) {
       // Too short to be speech - a door, a cough, a keyboard. Drop it rather
       // than only clearing the flag: the recorder is running by now, and
       // leaving it to run would glue the noise onto the front of whatever is
@@ -215,8 +215,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   }
 
   async function listen() {
-    if (!(await openMicrophone())) return;
+    if (!(await openMicrophone())) return false;
     setState('listening');
+    return true;
   }
 
   // One timer for the session, not one per turn. The original registered a
@@ -253,7 +254,8 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
         // replies on screen, which is better than refusing outright.
         fail('This browser cannot speak replies aloud. Open Mic will still listen and reply in text.');
       }
-      await listen();
+      // False when the microphone could not be opened (the caller then ends the session).
+      return listen();
     },
 
     // Called by the turn driver as the reply streams, so the speaker can start
