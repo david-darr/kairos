@@ -347,6 +347,12 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['google workspace'], errors }, null, 2));
       console.log('PASS: Google Workspace desktop and mobile.'); console.log('Screenshots: ' + output); return;
     }
+    if (process.argv.includes('--g3-only')) {  // Part 2 A07: phone/appearance modules plus the village benchmark (g3-checks.cjs).
+      const bench = await require('./g3-checks.cjs')({ js, waitFor, delay, navigate, win, capture, reads, demoState, inbox: calendarFixtures.agentInbox });
+      assert.deepEqual(errors, [], 'g3 renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents phone', 'agents appearance', 'village benchmark'], bench, errors }, null, 2));
+      console.log('PASS: g3 Agents phone audit, appearance, village benchmark.'); console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
       assert.deepEqual(errors, [], 'Agents call renderer errors');
@@ -415,6 +421,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['app shell'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--g1-only')) {  // Part 2 group g1: Kip, appearance and Home (scripts/g1-checks.cjs).
+      await require('./g1-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, base, fixtures: calendarFixtures });
+      assert.deepEqual(errors, [], 'g1 renderer errors');
+      console.log('PASS: g1 Kip, appearance and Home checks.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['g1'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--mobile-only')) {
       await require('./mobile-ui-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow });
       assert.deepEqual(errors, []);
@@ -429,6 +442,28 @@ app.whenReady().then(async () => {
       console.log('PASS: phone launch surface, New/Chats pager, history gestures, tab sheet, player and deck, morphing composer, dictation row, reduced motion, sizes and breakpoints.');
       console.log('Screenshots: ' + output);
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['phone shell'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--g2-only')) {  // Chat + menu, attachments, screen capture, dictation and Open Mic (g2-chat-checks.cjs).
+      await require('./g2-chat-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, demoState, base, reads });
+      const voiceBugs = await require('./g2-voice-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });  // known Open Mic defects, asserted below
+      await require('./g2-panes-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
+      // The artifact pane/viewer/review modules only run inside the 16-minute default run; run them here too.
+      await require('./artifact-pane-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate });
+      await require('./artifact-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate });
+      await require('./artifact-review-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
+      await require('./artifact-continuity-checks.cjs')({ js, win, waitFor, capture, base, delay, navigate, writes, demoState, reads,
+        liveControls: { emit(id, packet) {
+          if (packet.chunk) liveChunk(id, packet.chunk);
+          if (packet.permission) liveChange(id, { permission: packet.permission });
+          if (packet.error) liveChange(id, { status: 'failed', error: packet.error, permission: null });
+          if (packet.done) liveFinish(id);
+        } } });
+      assert.deepEqual(voiceBugs, [], 'Known Open Mic defects (see the g2 report)');
+      assert.deepEqual(errors, [], 'No chat renderer errors');
+      console.log('PASS: chat + actions, attachments, screen capture, artifact panes/viewer/review, dictation, Open Mic and spoken replies (g2).');
+      console.log('Screenshots: ' + output);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['g2 chat'], errors }, null, 2));
       return;
     }
     await require('./chat-reference-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });
