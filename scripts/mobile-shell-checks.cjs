@@ -243,7 +243,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Backdrop taps close the sheet');
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
-  await swipe('.ms-sheet-heading', 200, 300, 0, 110); await delay(350);
+  // The sheet closes when its slide-out ends (320ms, 360ms fallback); a fixed 350ms pause raced that under load.
+  await swipe('.ms-sheet-heading', 200, 300, 0, 110);
+  await waitFor("!document.querySelector('.ms-tab-sheet[open]')", 1500).catch(() => {});
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'A downward swipe closes the sheet');
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
   await waitFor("document.querySelector('.ms-tab-sheet[open]')");

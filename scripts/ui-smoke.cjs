@@ -1240,7 +1240,8 @@ app.whenReady().then(async () => {
           assert.equal(await js("document.querySelector('.agent-tab.active').textContent"), "Chat", label + " opens on Chat");
           assert.ok(await js("!!document.querySelector('.agent-profile-face .agent-dot-avatar') && !!document.querySelector('.agent-profile-face h2') && !!document.querySelector('.agent-info-toggle')"), label + ' top bar has the bot face (opens its profile) and Info');
           assert.equal(await js("[...document.querySelectorAll('.agent-tab')][1].textContent"), "Work (2)", label + " work tab counts what waits");
-          await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0");
+          // Messages paint before the chat mount finishes; the list marks the open chat only after it.
+          await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0 && document.querySelector('.agent-chat-item.active')?.dataset.session === 'as1' && document.querySelector('.agent-chat-item.active')?.getAttribute('aria-current') === 'true'");
           assert.ok(await js("document.querySelector('.agent-chat-item.active')?.textContent.includes('Chat with Scout')"), label + " last chat open");
           assert.ok(await js("!!document.querySelector('.agent-chat-main .side-chat-input')"), label + " composer");
           assert.ok(await js("document.querySelector('.agent-work-host').hidden"), label + " work hidden on chat tab");
