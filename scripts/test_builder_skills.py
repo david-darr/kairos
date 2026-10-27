@@ -48,19 +48,31 @@ class BundledTests(unittest.TestCase):
     def test_brief_messages_and_shared_handoff(self):
         script = r'''
 import assert from 'node:assert/strict';
-import {builderMessage, builderBriefMessage, startBuilderChat} from './static/js/builderBrief.js';
-const calls = [], stored = [], clicks = [];
+const calls = [], stored = [], clicks = [], navigations = [];
+let phone = false;
+globalThis.matchMedia = () => ({matches: phone, addEventListener() {}, removeEventListener() {}});
+globalThis.window = {matchMedia: globalThis.matchMedia};
 globalThis.fetch = async (path, options) => {
   calls.push({path, body: JSON.parse(options.body)});
   return {ok: true, headers: {get: () => 'application/json'}, json: async () => ({id: 'builder-session'})};
 };
 globalThis.sessionStorage = {setItem: (key, value) => stored.push({key, value: JSON.parse(value)})};
-globalThis.document = {querySelector: selector => ({click: () => clicks.push(selector)})};
+globalThis.document = {
+  querySelector: selector => ({click: () => clicks.push(selector)}),
+  addEventListener() {},
+  dispatchEvent: event => { navigations.push({type: event.type, detail: event.detail}); return true; },
+};
+const {builderMessage, builderBriefMessage, startBuilderChat} = await import('./static/js/builderBrief.js');
 for (const [kind, skill] of [['skill','build-skill'], ['mcp','build-mcp-server'], ['automation','build-automation']]) {
   const message = builderBriefMessage(kind, ['Input: example', 'Output: report']);
   assert.ok(message.startsWith(`First call read_skill with slug "${skill}"`));
   assert.ok(message.includes('Input: example'));
+  const before = calls.length;
   await startBuilderChat(message, 'chosen-model');
+  assert.deepEqual(calls.slice(before), [
+    {path:'/api/sessions', body:{}},
+    {path:'/api/sessions/builder-session/model', body:{model_endpoint_id:'chosen-model'}},
+  ]);
   assert.deepEqual(calls.at(-1), {path:'/api/sessions/builder-session/model', body:{model_endpoint_id:'chosen-model'}});
   assert.equal(stored.at(-1).key, 'jarvis:pendingChatHandoff');
   assert.equal(stored.at(-1).value.sessionId, 'builder-session');
@@ -68,6 +80,21 @@ for (const [kind, skill] of [['skill','build-skill'], ['mcp','build-mcp-server']
 }
 assert.ok(builderMessage('build-custom-tab', 'Build Tracker', ['What: track work']).startsWith('First call read_skill with slug "build-custom-tab"'));
 assert.equal(clicks.length, 3);
+assert.deepEqual(clicks, Array(3).fill('.nav-item[data-tab="chat"]'));
+assert.deepEqual(navigations, []);
+phone = true;
+for (const kind of ['skill', 'mcp', 'automation']) {
+  const message = builderBriefMessage(kind, ['Input: phone example', 'Output: phone report']);
+  const before = calls.length;
+  await startBuilderChat(message, 'phone-model');
+  assert.deepEqual(calls.slice(before), [
+    {path:'/api/sessions', body:{}},
+    {path:'/api/sessions/builder-session/model', body:{model_endpoint_id:'phone-model'}},
+  ]);
+  assert.deepEqual(stored.at(-1), {key:'jarvis:pendingChatHandoff', value:{sessionId:'builder-session', message}});
+}
+assert.equal(clicks.length, 3, 'Phone handoffs do not open the desktop route');
+assert.deepEqual(navigations, Array.from({length:3}, () => ({type:'jarvis:navigate', detail:{tab:'chat', mobileConversation:true}})));
 console.log('Builder brief handoffs passed');
 '''
         result = subprocess.run(["node", "--input-type=module", "-"], input=script, text=True,
@@ -108,6 +135,11 @@ console.log('Builder brief handoffs passed');
                     continue
                 with self.subTest(commit=commit):
                     self.assertIn(hashlib.sha256(old.encode()).hexdigest(), skills_service._LEGACY_SEED_HASHES["build-custom-tab"])
+                    edited_old = old + "\nMy historical edit\n"
+                    target.write_text(edited_old, encoding="utf-8")
+                    saved["seeded_skill_hashes"] = {}
+                    skills_service.seed_default_skills()
+                    self.assertEqual(target.read_text(encoding="utf-8"), edited_old)
                     target.write_text(old, encoding="utf-8")
                     saved["seeded_skill_hashes"] = {}
                     skills_service.seed_default_skills()
@@ -118,6 +150,11 @@ console.log('Builder brief handoffs passed');
             saved["seeded_skill_hashes"] = {}
             skills_service.seed_default_skills()
             self.assertEqual(target.read_text(encoding="utf-8"), current)
+            target.unlink()
+            saved["seeded_skill_hashes"] = {}
+            skills_service.seed_default_skills()
+            self.assertFalse(target.exists(), "A deleted seeded skill must not be resurrected")
+            self.assertIn("build-custom-tab", saved["seeded_skills"])
 
     def test_pinned_facts(self):
         texts = {slug: (ROOT / "skill_templates" / slug / "SKILL.md").read_text(encoding="utf-8") for slug in BUILDERS}

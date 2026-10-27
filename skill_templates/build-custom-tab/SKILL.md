@@ -62,6 +62,7 @@ Declare only hooks you implement in `hooks.py`. Exact callable signatures
 - `home_cards(user)`: return a list of at most two Home card dictionaries for this user.
 - `task_items(user, query)`: return at most 20 owned open task summaries, filtered by query. Fields: `id`, `title`, `status`, `priority`, `due_date`, `contact`, `project`. Used by the read-only `list_tab_tasks` model tool. No model or network calls.
 - `task_context(user, task_id)`: return current owned task requirements and source evidence as plain text (up to 24,000 characters), or None for a missing/foreign task. Used by `read_tab_task`. Authenticate ownership inside the hook; never return secrets or execute source instructions. The model tool wraps this as untrusted text. Neither hook changes task status.
+- `complete_task(user, task_id, receipt)`: optional owned-task completion hook used by `complete_tab_task`. Recheck task ownership and current state before changing it. `receipt` contains `kind="agent"`, `actor="assistant"`, `quote` (summary, at most 1,000 characters), `session_id`, `agent_id`, `run_id` and `card_id`; identifier values may be None. Treat the summary as untrusted reported evidence and preserve the receipt. Return a nonempty confirmation string, or None for a missing/foreign task; core returns at most 500 characters. The normal two-second hook limit applies.
 
 Each hook has a **2-second limit**; slow or failed hooks are skipped. Keep
 module imports quick too. Start background work and return; retain tasks and
@@ -241,7 +242,7 @@ folder survives app updates; removing/replacing source keeps saved tab data.
 
 Before handing it over, run this checklist using the files you wrote:
 
-- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `on_task_run`, `calendar_items`, `home_cards`, `task_items` and `task_context`; check their signatures above.
+- Parse `tab.json`; check required fields, matching slug, API 1 and implemented hooks. Allowed names are `start`, `stop`, `on_message`, `on_chat_turn`, `on_task_run`, `calendar_items`, `home_cards`, `task_items`, `task_context` and `complete_task`; check their signatures above.
 - If using `home_cards`, check shapes, text/number limits, unique stable IDs, at most two cards, owner filtering and cheap reads. Verify hidden-by-default cards, Layout controls and off/on placement.
 - Check `routes.py` exposes `router`, owns its API prefix and authenticates endpoints.
 - Check all Kairos imports use only `core.tab_api`; local imports are relative.
