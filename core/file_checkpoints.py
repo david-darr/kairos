@@ -26,6 +26,7 @@ STORE = Path(DATA_DIR) / "file_checkpoints"
 MAX_FILE = 50 * 1024 * 1024
 MAX_TOTAL = 300 * 1024 * 1024
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist"}
+GIT_TIMEOUT = 20
 
 
 class Conflict(Exception):
@@ -69,15 +70,38 @@ def _read_object(repo: Path, oid: str) -> tuple[str, bytes]:
     return kind.decode(), body
 
 
+def _kill_tree(process) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                       capture_output=True, timeout=5, check=False)
+    else:
+        process.kill()
+
+
 def _git_paths(root: Path) -> list[str] | None:
     if not (root / ".git").exists():
         return None
+    # Git must not inherit the app's stdin: a pending read on it held Git for Windows'
+    # real git.exe before main() for a minute. On timeout the whole tree goes, since
+    # killing only the git.exe launcher left the real one holding the output pipes.
     try:
-        result = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-                                cwd=root, capture_output=True, timeout=20, check=True)
-        return [os.fsdecode(p) for p in result.stdout.split(b"\0") if p]
-    except (OSError, subprocess.SubprocessError):
+        process = subprocess.Popen(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                                   cwd=root, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
         return None
+    try:
+        stdout, _ = process.communicate(timeout=GIT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return None
+    if process.returncode:
+        return None
+    return [os.fsdecode(p) for p in stdout.split(b"\0") if p]
 
 
 def _files(root: Path):

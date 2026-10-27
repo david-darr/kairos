@@ -120,6 +120,35 @@ class FileCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vault["changes"], [])
         self.assertEqual(vault["skipped"], ["large.bin"])
 
+    def test_git_listing_does_not_inherit_stdin(self):
+        subprocess.run(["git", "init", "-q", str(self.work)], check=True)
+        (self.work / "tracked.md").write_text("x")
+        seen = []
+        real_popen = subprocess.Popen
+        def recording(*args, **kwargs):
+            seen.append(kwargs.get("stdin"))
+            return real_popen(*args, **kwargs)
+        with patch.object(cp.subprocess, "Popen", side_effect=recording):
+            listed = cp._git_paths(self.work)
+        self.assertEqual(listed, ["tracked.md"])
+        self.assertEqual(seen, [subprocess.DEVNULL])
+
+    def test_git_timeout_kills_the_whole_tree_and_falls_back_to_the_walk(self):
+        # Stand-in for Git for Windows: a launcher whose child keeps the output pipes open.
+        (self.repo / "kept.md").write_text("x")
+        hang = [sys.executable, "-c",
+                "import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], "
+                "stdout=sys.stdout, stderr=sys.stderr); time.sleep(60)"]
+        real_popen = subprocess.Popen
+        def launcher(args, **kwargs):
+            return real_popen(hang if args[0] == "git" else args, **kwargs)
+        started = asyncio.get_event_loop().time()
+        with patch.object(cp, "GIT_TIMEOUT", 1), patch.object(cp.subprocess, "Popen", side_effect=launcher):
+            self.assertIsNone(cp._git_paths(self.repo))
+            files = list(cp._files(self.repo))
+        self.assertLess(asyncio.get_event_loop().time() - started, 20)
+        self.assertIn("kept.md", files)
+
 
 if __name__ == "__main__":
     unittest.main()
