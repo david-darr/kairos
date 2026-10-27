@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "0922ccd84b2ffef9e45af4acbdabd719198ab11797f543ee988fe57c32871d66",
+  "app.js": "3f72e890c80325bcd86d08835a4fd80088ff65a22d0fd0eb0b171a6093dfac9e",
   "fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
   "index.html": "f33aff804892ecd288e84e56a6919b34f3dac15c4d2ee5b73e9c128ecba4d2a4",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -391,7 +391,7 @@
   "static/js/agentProfile.js": "1aad3e68e4cb0a4c53f3996569bd03df1ab6c82fc9e3ee3366095b156875acc4",
   "static/js/agentsMessenger.js": "38b24c0e6a33bc166572f4bfbfb1208fe86dcc05029a765d5cdc2d3e2e887d70",
   "static/js/api.js": "ace7fdadd4cff05990e4c9a5adf4f3222d01acc3cc04e299609c2f672e101953",
-  "static/js/app.js": "ac3ae6ffab1f4bccacd73341b7a18cb8ca4c3d14134b5d9f64410e67a72ac77b",
+  "static/js/app.js": "6f9cb5ae929a6bb78c46f4aa4838c295cda4c319894a9b02ec7ac7b995261281",
   "static/js/appearance.js": "d3323ebb03b50e1706f1b704e7bc4babc46bf300a0cdd2ef8cdae913cde5a738",
   "static/js/artifactForeignReview.js": "ab903c90601c4397ba5dcd03993ddd239e3732f265f4630d14ea67f3898d1c80",
   "static/js/artifactReview.js": "f5a77ba3c44da219fc4e0b4bf08baafcdd7a77ab622109fdf0463a00e48feac8",

@@ -678,7 +678,8 @@ async function startApp() {
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');
     await switchTab(['chat', 'home', 'library', 'notes', 'tasks', 'calendar'].includes(target)
       ? target : appMode === 'forge' ? 'forgeHome' : 'home', { mobileNew: launch.get('newchat') === '1' });
-    if (launch.has('newchat') || launch.has('view')) history.replaceState(null, '', '/');
+    // A chat or bot link that could not open falls back here; drop it too, or every reload retries it.
+    if (['newchat', 'view', 'chat', 'agent'].some(key => launch.has(key))) history.replaceState(null, '', '/');
   }
 }
 
