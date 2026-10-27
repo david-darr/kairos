@@ -408,6 +408,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['shared interface'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--app-shell-only')) {
+      await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base });
+      assert.deepEqual(errors, []);
+      console.log('PASS: app shell palette, nested Escape, short screens, Profile and launch links.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['app shell'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--mobile-only')) {
       await require('./mobile-ui-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow });
       assert.deepEqual(errors, []);
@@ -2674,6 +2681,7 @@ app.whenReady().then(async () => {
     await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
     console.log('PASS: Agents appearance checks');
+    await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base });
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);
