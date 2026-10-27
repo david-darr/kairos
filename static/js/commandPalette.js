@@ -16,17 +16,22 @@ let listHost = null;
 let commands = [];
 let filtered = [];
 let activeIndex = 0;
+let previousFocus = null;
 
 export function init({ nav, customTabs, switchTab, openSettings }) {
   deps = { nav, customTabs, switchTab, openSettings };
+  // Capture phase, so the palette answers Escape before a dialog underneath
+  // it does, and stopping the event leaves that dialog open.
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();
       isOpen() ? close() : open();
     } else if (e.key === "Escape" && isOpen()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
       close();
     }
-  });
+  }, true);
 }
 
 function isOpen() {
@@ -35,6 +40,7 @@ function isOpen() {
 
 async function open() {
   if (!backdrop) build();
+  previousFocus = document.activeElement;
   commands = await buildCommands();
   input.value = "";
   applyFilter("");
@@ -43,7 +49,10 @@ async function open() {
 }
 
 function close() {
-  if (backdrop) backdrop.classList.add("hidden");
+  if (!isOpen()) return;
+  backdrop.classList.add("hidden");
+  if (previousFocus?.isConnected) previousFocus.focus();
+  previousFocus = null;
 }
 
 function build() {

@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "a2becc8f0b962e77c85a63f2dd1b1f41cb08419bdad5bc706f2b9f9e5cf92145",
+  "app.js": "0922ccd84b2ffef9e45af4acbdabd719198ab11797f543ee988fe57c32871d66",
   "fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
   "index.html": "f33aff804892ecd288e84e56a6919b34f3dac15c4d2ee5b73e9c128ecba4d2a4",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -428,7 +428,7 @@
   "static/js/chatTimeline.js": "816b66ac1b86abaa77321af98d122bdc839874ca0aa1243717b0e226ace0ad68",
   "static/js/chatWindowRoute.js": "7984ba67458719aae55bc7b9fdb609f1693ce99be733a2567b37de01ac3d0edf",
   "static/js/cliPair.js": "2baede5f091f64a1f73f10a18046ac67c4df777db5d21da3965a0e3f861cb832",
-  "static/js/commandPalette.js": "8de2dcf5488478453020fc379e5cc34cda6b14eae949eed64e0eac5b27750c87",
+  "static/js/commandPalette.js": "06a54248f7a41065dc7c0b1d035244a1bf074875f55063af44b3083452749e69",
   "static/js/composerKeyboard.js": "c7162d371eb386bbe3e657b61bca8883ed9a1ce9d384f8d65578bf73aa9665f1",
   "static/js/computerPanel.js": "eef56e91f00cfb81a89dd864c18b3d1f12c4daf5931fd4fe3365399399a83a1b",
   "static/js/computerSteps.js": "ad4b4d92515c28ae5d66844af110282ac30f1784d467cbb01faf191ec3558810",
