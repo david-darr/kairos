@@ -10,6 +10,8 @@
     font: inherit; color: inherit; box-sizing: border-box; min-height: 44px; min-width: 44px;
   }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) .rd-pill { min-height: 44px; min-width: 44px; }
+  /* The inherit above would paint Send's arrow in ink on its ink circle. */
+  .kairos-redesign .forge-composer.ms-composer .forge-composer-send { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) button { cursor: pointer; }
   .kairos-redesign :is(.ms-shell, .ms-activity, .ms-tab-sheet) :focus-visible,
   .kairos-redesign .ms-conversation .ms-chat-back:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
