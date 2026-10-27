@@ -199,6 +199,7 @@ class AuthManager:
             raise KeyError(f"no such user: {username}")
         user["totp_secret"] = None
         user["totp_enabled"] = False
+        user.pop("totp_pending_secret", None)
         write_json_atomic(AUTH_FILE, self._users)
 
     # -- TOTP (optional 2FA) -------------------------------------------
@@ -208,19 +209,26 @@ class AuthManager:
         return bool(user and user.get("totp_enabled"))
 
     def start_totp_enrollment(self, username: str) -> str:
-        """Generates a new secret (not yet active) and returns its otpauth:// URI."""
+        """Generates a new secret (not yet active) and returns its otpauth:// URI.
+
+        Held apart from the active secret until confirmed: starting a new
+        enrollment while 2FA is on must not break the authenticator in use."""
         secret = pyotp.random_base32()
-        self._users["users"][username]["totp_secret"] = secret
+        self._users["users"][username]["totp_pending_secret"] = secret
         write_json_atomic(AUTH_FILE, self._users)
         return pyotp.totp.TOTP(secret).provisioning_uri(name=username, issuer_name="Kairos")
 
     def confirm_totp_enrollment(self, username: str, code: str) -> bool:
         user = self._users["users"].get(username)
-        if not user or not user.get("totp_secret"):
+        if not user:
             return False
-        if not pyotp.totp.TOTP(user["totp_secret"]).verify(code):
+        # Enrollments started before pending secrets existed kept theirs in totp_secret.
+        pending = user.get("totp_pending_secret") or (None if user.get("totp_enabled") else user.get("totp_secret"))
+        if not pending or not pyotp.totp.TOTP(pending).verify(code):
             return False
+        user["totp_secret"] = pending
         user["totp_enabled"] = True
+        user.pop("totp_pending_secret", None)
         write_json_atomic(AUTH_FILE, self._users)
         return True
 
