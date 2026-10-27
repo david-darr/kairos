@@ -26,7 +26,14 @@ class Answer(BaseModel):
 
 @router.get("")
 async def list_permissions(user: str = Depends(require_user)) -> dict:
-    return {"rules": permissions.list_rules(), "audit": permissions.audit()[-50:]}
+    from core.auth import auth_manager
+    rules, audit = permissions.list_rules(), permissions.audit()
+    # The audit says who ran which command, path or URL: a member sees only
+    # their own grants and entries, an admin the whole install.
+    if not auth_manager.is_admin(user):
+        rules = [rule for rule in rules if rule.get("granted_by") == user]
+        audit = [entry for entry in audit if entry.get("by") == user]
+    return {"rules": rules, "audit": audit[-50:]}
 
 
 @router.post("/{request_id}/answer")
