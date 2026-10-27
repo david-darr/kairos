@@ -7,6 +7,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       if (!n) return false; const r=n.getBoundingClientRect();
       return r.width>0 && r.height>0 && r.top>=${top}-.5 && r.bottom<=innerHeight;})()`), true, label);
   };
+  const forgeControl = async (selector, top, side, label) => {
+    await visibleBelow(selector, top, label);
+    assert.equal(await js(`(() => {const n=document.querySelector(${JSON.stringify(selector)}), r=n.getBoundingClientRect();
+      return !n.closest('[hidden],[inert]') && getComputedStyle(n).visibility==='visible' &&
+        r.left>=${side}-.5 && r.right<=innerWidth-${side}+.5;})()`), true, label + ' also clears side insets');
+  };
   for (const [name, width, height, top, bottom, side] of [
     ['island-phone', 390, 844, 59, 34, 0], ['small-phone', 320, 568, 20, 16, 0],
     ['landscape', 667, 375, 0, 21, 44],
@@ -53,12 +59,34 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await visibleBelow('.panel-dialog .modal-close-btn', top + 12, name + ' dialog close is reachable');
     await js('window.__closeInsetDialog.close()');
     await js("import('/static/js/app.js').then(m=>m.switchMode('forge'))");
-    await waitFor("!!document.querySelector('.forge-home')");
-    await visibleBelow('.forge-hero', top, name + ' Forge home clears status area');
+    await waitFor("(() => {const b=document.querySelector('.mf-dashboard [aria-label=\"New session\"]'); return b && !b.disabled && !b.closest('[hidden],[inert]') && b.getBoundingClientRect().width>0;})()");
+    for (const selector of ['.mf-dashboard .ms-header-row', '.mf-dashboard .mf-dashboard-title', '.mf-dashboard .mf-project-trigger', '.mf-dashboard [aria-label="New session"]']) {
+      await forgeControl(selector, top, side, name + ' Forge overview controls clear status area');
+    }
+    assert.deepEqual(await overflow(), [], name + ' Forge overview fits');
+    await capture(name + '-forge-overview-safe-area');
+    await js("document.querySelector('.mf-dashboard [aria-label=\"New session\"]').click()");
+    await waitFor("(() => {const c=document.querySelector('.mf-project[data-forge-page=\"0\"] #mf-new .forge-composer'); return c && !c.closest('[hidden],[inert]') && c.getBoundingClientRect().width>0;})()");
+    // Landscape intentionally moves New/Sessions navigation to the tab bar.
+    const newNavigation = height <= 480 ? '.ms-tabbar[data-mode="forge"] [data-tabbar="new"]' : '.mf-project .ms-switch';
+    assert.equal(await js("getComputedStyle(document.querySelector('.mf-project .ms-switch')).display === 'none'"), height <= 480, name + ' top New/Sessions switch visibility follows the short-screen layout');
+    await waitFor(`(() => {const n=document.querySelector(${JSON.stringify(newNavigation)}); return n && !n.closest('[hidden],[inert]') && n.getBoundingClientRect().width>0;})()`);
+    for (const selector of ['.mf-project .ms-header-row', newNavigation, '.mf-project [aria-label="Back to Forge Home"]', '#mf-new .forge-composer']) {
+      await forgeControl(selector, top, side, name + ' Forge New controls clear status area: ' + selector);
+    }
+    assert.equal(await js("document.querySelector('#mf-tab-0').getAttribute('aria-selected')"), 'true', name + ' New page is selected');
+    assert.equal(await js(`document.querySelector('#mf-new .forge-composer').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' Forge New composer clears home indicator inset');
+    await waitFor("(() => {const b=document.querySelector('.ms-tabbar[data-mode=\"forge\"][data-state=\"shown\"] [data-tabbar=\"new\"]'); return b && !b.closest('[hidden],[inert]') && b.getBoundingClientRect().width>0;})()");
+    assert.equal(await js(`document.querySelector('.ms-tabbar [data-tabbar="new"]').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' tab-bar New clears home indicator inset');
+    assert.equal(await js("document.querySelector('#mf-new .forge-composer').getBoundingClientRect().bottom <= document.querySelector('.ms-tabbar').getBoundingClientRect().top"), true, name + ' Forge New composer does not overlap the visible tab bar');
+    assert.deepEqual(await overflow(), [], name + ' Forge New fits');
+    await capture(name + '-forge-new-safe-area');
     await navigate('forgeShell', { projectId: 'fp1', sessionId: 'fs1' });
-    await waitFor("!!document.querySelector('.forge-session-header')");
+    await waitFor("(() => {const h=document.querySelector('.mf-session-header'); return h && !h.closest('[hidden],[inert]') && h.getBoundingClientRect().height>0 && h.querySelector('.mf-session-heading strong')?.textContent;})()");
     await delay(350);
-    await visibleBelow('.forge-session-header', top + 68, name + ' Forge session clears menu and status area');
+    for (const selector of ['.mf-session-header .mf-session-heading', '.mf-session-header [aria-label="Back"]', '.mf-session-header .mf-changes', '.mf-session-header [aria-label="Session actions"]']) {
+      await forgeControl(selector, top, side, name + ' Forge session controls clear status area');
+    }
     assert.deepEqual(await overflow(), [], name + ' Forge fits');
     await capture(name + '-forge-safe-area');
     await js("import('/static/js/app.js').then(m=>m.switchMode('kairos'))");
