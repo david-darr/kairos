@@ -82,7 +82,12 @@ def fingerprint(folder: str, *, user: bool = True) -> tuple[str, list[str]]:
 
 
 def metadata(folder: str) -> dict:
-    with open(os.path.join(folder, "tab.json"), encoding="utf-8") as handle:
+    manifest = os.path.join(folder, "tab.json")
+    if is_link(os.path.dirname(folder)) or is_link(folder) or is_link(manifest):
+        raise ValueError("tab metadata cannot use symlinks or junctions")
+    if not os.path.isdir(folder) or not os.path.isfile(manifest):
+        raise ValueError("tab.json must be a regular file in a tab folder")
+    with open(manifest, encoding="utf-8") as handle:
         value = json.load(handle)
     if not isinstance(value, dict):
         raise ValueError("tab.json must be an object")
@@ -128,6 +133,11 @@ def inspect_folder(folder: str, *, user: bool, api_version: int) -> dict:
                  enabled=None, status=None, reason=None, fingerprint=None, files=[], _path=folder,
                  _metadata={})
     try:
+        # Unrelated projects and invalid manifests must not trigger a recursive
+        # source walk. This is only a preflight: authoritative metadata is read
+        # again between the two hashes, so a concurrent edit cannot pair stale
+        # metadata with a newer approval fingerprint.
+        metadata(folder)
         snapshot, files = fingerprint(folder, user=user)
         meta = metadata(folder)
         # The metadata and the approval hash must describe the same bytes.

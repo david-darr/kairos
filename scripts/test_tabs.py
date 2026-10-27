@@ -331,6 +331,159 @@ class TabTests(unittest.TestCase):
         (folder / "tab.json").write_text("{broken", encoding="utf-8")
         self.assertEqual(self.status("broken")["status"], "invalid")
 
+    def test_preflight_missing_manifest_never_traverses_an_unrelated_project(self):
+        for user in (True, False):
+            with self.subTest(user=user):
+                folder = (self.users if user else self.prebuilt) / "unrelated_project"
+                cache = folder / "android" / "app" / "build" / "__pycache__"
+                cache.mkdir(parents=True)
+                payload = cache / "keep.pyc"
+                payload.write_bytes(b"unrelated project cache")
+                with patch.object(tab_folders, "fingerprint", side_effect=AssertionError("fingerprinted unrelated project")) as fingerprint, \
+                     patch.object(os, "walk", side_effect=AssertionError("walked unrelated project")) as walk, \
+                     patch.object(shutil, "rmtree", side_effect=AssertionError("deleted unrelated project cache")) as remove:
+                    entries = tab_folders.scan(str(folder.parent), user=user, api_version=1)
+                entry = next(item for item in entries if item["slug"] == folder.name)
+                self.assertEqual(entry["status"], "invalid")
+                self.assertIsNone(entry["fingerprint"])
+                self.assertEqual(entry["files"], [])
+                fingerprint.assert_not_called(); walk.assert_not_called(); remove.assert_not_called()
+                self.assertEqual(payload.read_bytes(), b"unrelated project cache")
+
+    def test_preflight_invalid_metadata_never_fingerprints_or_removes_caches(self):
+        cases = [("malformed", b"{broken"), ("encoding", b"\xff"), ("array", b"[]"),
+                 ("missing_fields", b"{}"), ("directory", None)]
+        changes = [("slug", "Wrong-Slug"), ("slug", "other"), ("name", ""),
+                   ("version", 1), ("description", []), ("api", True),
+                   ("hooks", [1]), ("icon_svg", {})]
+        for user in (True, False):
+            for index, (label, content) in enumerate(cases + [(key, value) for key, value in changes]):
+                with self.subTest(user=user, case=label, index=index):
+                    folder = self.folder(f"invalid_{index}", user=user)
+                    manifest = folder / "tab.json"
+                    if index >= len(cases):
+                        value = json.loads(manifest.read_text(encoding="utf-8"))
+                        value[label] = content
+                        manifest.write_text(json.dumps(value), encoding="utf-8")
+                    elif label == "directory":
+                        manifest.unlink(); manifest.mkdir()
+                    else:
+                        manifest.write_bytes(content)
+                    cache = folder / "__pycache__"
+                    cache.mkdir(); (cache / "keep.pyc").write_bytes(b"keep")
+                    with patch.object(tab_folders, "fingerprint", side_effect=AssertionError("fingerprinted invalid metadata")) as fingerprint, \
+                         patch.object(os, "walk", side_effect=AssertionError("walked invalid metadata")) as walk, \
+                         patch.object(shutil, "rmtree", side_effect=AssertionError("deleted cache")) as remove:
+                        entry = tab_folders.inspect_folder(str(folder), user=user, api_version=1)
+                    self.assertEqual(entry["status"], "invalid")
+                    self.assertTrue(entry["reason"])
+                    self.assertEqual(entry["_metadata"], {})
+                    fingerprint.assert_not_called(); walk.assert_not_called(); remove.assert_not_called()
+                    self.assertEqual((cache / "keep.pyc").read_bytes(), b"keep")
+
+    def test_preflight_links_and_junctions_are_rejected_before_manifest_open(self):
+        folder = self.folder()
+        for mechanism in ("islink", "isjunction"):
+            for target in (folder.parent, folder, folder / "tab.json"):
+                with self.subTest(mechanism=mechanism, target=target.name), \
+                     patch.object(os.path, mechanism, side_effect=lambda path, target=target: Path(path) == target, create=True), \
+                     patch("builtins.open", side_effect=AssertionError("opened linked manifest")) as opened, \
+                     patch.object(tab_folders, "fingerprint", side_effect=AssertionError("fingerprinted linked root")) as fingerprint:
+                    with self.assertRaisesRegex(ValueError, "symlinks or junctions"):
+                        tab_folders.metadata(str(folder))
+                    for user in (True, False):
+                        entry = tab_folders.inspect_folder(str(folder), user=user, api_version=1)
+                        self.assertEqual(entry["status"], "invalid")
+                    opened.assert_not_called(); fingerprint.assert_not_called()
+
+    def test_preflight_valid_metadata_is_reread_between_complete_fingerprints(self):
+        for user in (True, False):
+            folder = self.folder(user=user)
+            order = []
+            original_metadata, original_fingerprint = tab_folders.metadata, tab_folders.fingerprint
+            def read_metadata(*args, **kwargs):
+                order.append("metadata")
+                return original_metadata(*args, **kwargs)
+            def fingerprint(*args, **kwargs):
+                order.append("fingerprint")
+                return original_fingerprint(*args, **kwargs)
+            with patch.object(tab_folders, "metadata", side_effect=read_metadata), \
+                 patch.object(tab_folders, "fingerprint", side_effect=fingerprint):
+                entry = tab_folders.inspect_folder(str(folder), user=user, api_version=1)
+            self.assertIsNone(entry["status"])
+            self.assertEqual(order, ["metadata", "fingerprint", "metadata", "fingerprint"])
+            self.assertEqual(entry["_metadata"], original_metadata(str(folder)))
+            self.assertEqual(entry["_snapshot"], original_fingerprint(str(folder), user=user)[0])
+            self.assertEqual(entry["fingerprint"], entry["_snapshot"] if user else None)
+            self.assertIn("routes.py", entry["files"])
+
+    def test_preflight_metadata_change_before_first_hash_cannot_leave_stale_metadata(self):
+        for user in (True, False):
+            for valid in (True, False):
+                with self.subTest(user=user, replacement_valid=valid):
+                    folder = self.folder("changed" if valid else "broken", user=user)
+                    manifest = folder / "tab.json"
+                    original = tab_folders.metadata
+                    calls = 0
+                    def change_after_preflight(*args, **kwargs):
+                        nonlocal calls
+                        value = original(*args, **kwargs)
+                        calls += 1
+                        if calls == 1:
+                            manifest.write_text(json.dumps({**value, "name": "Replacement metadata"}) if valid else "{broken", encoding="utf-8")
+                        return value
+                    with patch.object(tab_folders, "metadata", side_effect=change_after_preflight):
+                        entry = tab_folders.inspect_folder(str(folder), user=user, api_version=1)
+                    if valid:
+                        self.assertIsNone(entry["status"])
+                        self.assertEqual(entry["name"], "Replacement metadata")
+                        self.assertEqual(entry["_metadata"]["name"], "Replacement metadata")
+                        self.assertEqual(entry["_snapshot"], tab_folders.fingerprint(str(folder), user=user)[0])
+                    else:
+                        self.assertEqual(entry["status"], "invalid")
+                        self.assertEqual(entry["_metadata"], {})
+
+    def test_preflight_metadata_change_after_first_hash_is_still_rejected(self):
+        folder = self.folder()
+        original = tab_folders.fingerprint
+        calls = 0
+        def change_after_hash(*args, **kwargs):
+            nonlocal calls
+            result = original(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                manifest = folder / "tab.json"
+                value = json.loads(manifest.read_text(encoding="utf-8"))
+                manifest.write_text(json.dumps({**value, "name": "Changed after snapshot"}), encoding="utf-8")
+            return result
+        with patch.object(tab_folders, "fingerprint", side_effect=change_after_hash):
+            entry = tab_folders.inspect_folder(str(folder), user=True, api_version=1)
+        self.assertEqual(entry["status"], "invalid")
+        self.assertIn("source changed", entry["reason"])
+        self.assertEqual(entry["_metadata"], {})
+        self.assertEqual(calls, 2)
+
+    def test_preflight_source_change_after_authoritative_metadata_is_rejected(self):
+        folder = self.folder()
+        original = tab_folders.metadata
+        calls = 0
+        def change_after_read(*args, **kwargs):
+            nonlocal calls
+            result = original(*args, **kwargs)
+            calls += 1
+            if calls == 2:
+                source = folder / "service.py"
+                before = source.stat()
+                source.write_text("answer = 17\n", encoding="utf-8")
+                os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+                self.assertEqual(source.stat().st_size, before.st_size)
+            return result
+        with patch.object(tab_folders, "metadata", side_effect=change_after_read):
+            entry = tab_folders.inspect_folder(str(folder), user=True, api_version=1)
+        self.assertEqual(entry["status"], "invalid")
+        self.assertIn("source changed", entry["reason"])
+        self.assertEqual(entry["_metadata"], {})
+
     def test_unknown_metadata_is_ignored_and_missing_routes_is_invalid(self):
         folder = self.folder(extra={"future": True})
         self.approve("alpha")
