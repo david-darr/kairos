@@ -2230,7 +2230,9 @@ app.whenReady().then(async () => {
     await capture("desktop-model-menu");
     if (await js("document.documentElement.classList.contains('kairos-redesign')")) {
       assert.ok(await js("!!document.querySelector('#model-picker-menu .rd-model-search-row input') && !!document.querySelector('#model-picker-menu .rd-model-group')"), 'Desktop model picker has search and endpoint groups');
-      assert.equal(await js("document.querySelector('#model-picker-menu .model-manage-item').textContent"), 'Manage models in Settings');
+      assert.equal(await js("document.querySelector('#model-picker-menu .model-manage-item').textContent"), 'Manage models');
+      // The card (David, 2026-10-28): connections beside one connection's models, at most 540 by 440.
+      assert.ok(await js("(() => { const m = document.querySelector('#model-picker-menu'), r = m.getBoundingClientRect(), rail = m.querySelector('.rd-mp-rail').getBoundingClientRect(), pane = m.querySelector('.rd-mp-pane').getBoundingClientRect(); return r.width <= 541 && r.height <= 441 && rail.right <= pane.left + 1 && Math.abs(rail.top - pane.top) < 2 && !!m.querySelector('.rd-mp-rail .model-connection-item.active'); })()"), 'Desktop model picker is a two-column card');
       assert.ok(await js("[...document.querySelectorAll('#model-picker-menu .model-effort-row')].every(row => getComputedStyle(row).display !== 'none' && row.querySelector('.rd-effort-seg'))"), 'Published effort options stay visible in a segmented row');
     }
     const menuFits = await js("(() => {const r=document.querySelector('#model-picker-menu').getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()");

@@ -299,8 +299,9 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await waitFor("/Claude/.test(document.querySelector('.design-model-btn')?.textContent || '')");
   await js("document.querySelector('.design-model-btn').click()");
   await waitFor("!document.querySelector('.design-model-menu').hidden && document.querySelectorAll('.design-model-menu .model-connection-item').length >= 2");
-  // The desktop board lists each connection's models directly; its old
-  // connection-only row is hidden when a catalog is available.
+  // The desktop card shows the chat's own connection; another connection's models come up in search.
+  await waitFor("!!document.querySelector('.design-model-menu .model-other-catalog-list[data-endpoint-id=\"m2\"] .model-other-catalog-item')");
+  await js("{ const s = document.querySelector('.design-model-menu .rd-model-search'); s.value = 'Workspace Fast'; s.dispatchEvent(new Event('input')); }");
   await waitFor("!!document.querySelector('.design-model-menu .model-other-catalog-list[data-endpoint-id=\"m2\"] .model-other-catalog-item')?.offsetParent");
   await js("[...document.querySelectorAll('.design-model-menu .model-other-catalog-list[data-endpoint-id=\"m2\"] .model-other-catalog-item')].find(b => b.textContent.includes('Workspace Fast')).click()");
   await waitFor("/^Codex/.test(document.querySelector('.design-model-btn').textContent) && !!document.querySelector('.design-model-menu .model-catalog-item')");

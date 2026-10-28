@@ -19,13 +19,22 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
     win.setContentSize(width, height); await delay(100);
     // A phone's Forge Home is the overview; the composer lives on the New page.
     if (width === 390 && height === 844) { await navigate('forgeHome', { mobilePage: 0 }); await pickBranch(); await delay(300); }
-    for (const label of ['Project', 'Where it runs', 'Branch', 'Mode', 'Agent', 'Model for new session']) {
+    // On a desktop window the agent and its model are one card (David, 2026-10-28), checked below.
+    for (const label of ['Project', 'Where it runs', 'Branch', 'Mode', ...(width <= 768 ? ['Agent', 'Model for new session'] : [])]) {
       await js(`document.querySelector('.forge-composer [aria-label=${JSON.stringify(label)}]').click()`);
       await delay(140);
       assert.ok(await js("(() => { const m = document.querySelector('.custom-select-menu')?.getBoundingClientRect(), c = document.querySelector('.forge-composer').getBoundingClientRect(); const phone = innerWidth <= 768; return m && (phone ? m.bottom <= c.top + 2 && m.top >= 0 : m.top >= c.bottom && m.bottom <= innerHeight - 11) && m.left >= 0 && m.right <= innerWidth + 1; })()"), `${label} opens ${width <= 768 ? 'above the bottom phone' : 'below the'} Forge composer within ${width}x${height}`);
       assert.ok(await js("parseFloat(document.querySelector('.custom-select-menu').style.maxHeight) >= 100"), `${label} retains useful list space in ${width}x${height}`);
       if (label === 'Agent') await capture(`patch-forge-picker-${width}`);
       await closeMenus();
+    }
+    if (width > 768) {
+      await js("document.querySelector('.forge-composer .ms-embedded-model-trigger').click()");
+      await delay(160);
+      assert.ok(await js("(() => { const m = document.querySelector('.rd-card-floating')?.getBoundingClientRect(), c = document.querySelector('.forge-composer').getBoundingClientRect(); return m && m.width <= 541 && m.height <= 441 && m.left >= 0 && m.right <= innerWidth + 1 && m.top >= 0 && m.bottom <= innerHeight + 1 && (m.top >= c.bottom - 1 || m.bottom <= c.top + 1); })()"), `Model card fits beside the Forge composer within ${width}x${height}`);
+      await capture(`patch-forge-picker-${width}`);
+      await js("document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
+      assert.ok(await js("!document.querySelector('.rd-card-floating')"), 'Clicking away closes the model card');
     }
   }
   win.setContentSize(1440, 900);

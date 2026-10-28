@@ -2,6 +2,7 @@ import { api, el } from './api.js';
 import { mobileOn, button, go } from './mobileShared.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { toSnap, staleOf, pctText, resetCopy, SIGN_IN } from './quotaReadings.js';
+import { fitMenu } from './menuFit.js';
 
 export const quotaTone = percent => percent >= 90 ? 'danger' : percent >= 80 ? 'warning' : 'normal';
 // Never let the shared overlay's numeric conversion turn an unknown into 0%.
@@ -217,60 +218,128 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
       if (fallback && details && !details.querySelector('.rd-effort-reset')) details.append(button('Use provider effort default', () => fallback.click(), 'model-picker-item rd-effort-reset'));
     }
   };
-  // Enhance the existing composer menu without changing its controller or data.
-  // Catalogs remain loaded by the selected connection, never guessed here. The board lists
-  // models under their provider, so each provider gets a label, and the active connection's
-  // models sit right under its row. Only CSS order moves things, so DOM and focus order stay put.
+  // The desktop card (David, 2026-10-28: the old board was "too wide and tall and unorganized"):
+  // one compact card that never leaves the window. Search along the top; the connections in a narrow
+  // column on the left; one connection's models on the right, the only part that scrolls besides
+  // that column; Effort and the links in a bar along the bottom. The controller still builds every
+  // row and runs every save. This only moves its nodes into those places and shows one
+  // connection's models at a time; the mobile sheet puts them back (undecorateDesktop).
+  const searchIcon = () => { const mark = el('span', { class: 'rd-model-search-icon', 'aria-hidden': 'true' }); mark.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>'; return mark; };
+  // Plain class and child lookups (no :scope or :is), the same in every engine the tests run in.
+  const child = (parent, name) => [...parent.children].find(node => node.classList?.contains(name)) || null;
+  const children = (parent, name) => [...parent.children].filter(node => node.classList?.contains(name));
+  const part = (name, parent = menu) => { let node = child(parent, name); if (!node) { node = el('div', { class: name }); parent.append(node); } return node; };
+  const activeId = () => menu.querySelector('.model-connection-item.active')?.dataset.endpointId || '';
+  const paneItems = () => [...(menu.querySelector('.rd-mp-pane')?.querySelectorAll('.model-catalog-item, .model-other-catalog-item') || [])];
+  // The right column shows the chat's own connection: choosing another connection switches the
+  // chat to it (the controller's own click), and its models then fill the column. Other
+  // connections' models show only while searching.
+  const showView = () => {
+    const pane = menu.querySelector('.rd-mp-pane');
+    if (!pane) return;
+    // A class, not [hidden], so searching can show every connection's list at once.
+    for (const list of children(pane, 'model-other-catalog-list')) list.classList.add('rd-mp-off');
+    const name = menu.querySelector('.model-connection-item.active')?.dataset.endpointName;
+    const title = child(pane, 'rd-mp-title');
+    if (title) title.textContent = name ? `${name} models` : 'Models';
+    for (const item of menu.querySelectorAll('.model-connection-item')) item.setAttribute('aria-selected', String(item.classList.contains('active')));
+  };
+  const filterDesktop = () => {
+    const input = menu.querySelector('.rd-model-search');
+    const query = (input?.value || '').trim().toLowerCase();
+    menu.classList.toggle('rd-mp-searching', !!query);
+    let any = false;
+    for (const item of paneItems()) {
+      item.hidden = !!query && !`${item.dataset.endpointName || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
+      any ||= !item.hidden;
+    }
+    for (const group of menu.querySelectorAll('.rd-model-group')) group.hidden = ![...(group.nextElementSibling?.querySelectorAll('button') || [])].some(item => !item.hidden);
+    const empty = menu.querySelector('.rd-mp-empty');
+    if (empty) empty.hidden = !query || any;
+    if (!query) showView();
+  };
   const decorateDesktop = () => {
     if (menu.classList.contains('ms-model-menu')) return;
     menu.classList.add('rd-model-picker');
     nameEffort();
-    menu.querySelectorAll('.rd-model-group').forEach(node => node.remove());
-    const icon = () => { const mark = el('span', { class: 'rd-model-search-icon', 'aria-hidden': 'true' }); mark.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>'; return mark; };
-    let row = menu.querySelector('.model-version-search');
-    if (row) { if (!row.querySelector('.rd-model-search-icon')) row.prepend(icon()); row.classList.add('rd-model-search-row'); }
-    else {
-      row = menu.querySelector('.rd-model-search-row');
-      if (!row) {
-        const input = el('input', { type: 'search', class: 'rd-model-search', placeholder: 'Search models', 'aria-label': 'Search models' });
-        input.addEventListener('input', () => {
-          const query = input.value.trim().toLowerCase();
-          for (const item of menu.querySelectorAll('.model-connection-item, .model-catalog-item, .model-other-catalog-item')) item.hidden = !`${item.dataset.provider || ''} ${item.dataset.endpointName || ''} ${item.dataset.modelSearch || item.textContent}`.toLowerCase().includes(query);
-          for (const group of menu.querySelectorAll('.rd-model-group')) group.hidden = ![...group._rows].some(item => !item.hidden);
-        });
-        row = el('label', { class: 'rd-model-search-row' }, [icon(), input]); menu.prepend(row);
-      }
+    let row = child(menu, 'rd-model-search-row');
+    if (!row) {
+      const input = el('input', { type: 'search', class: 'rd-model-search', placeholder: 'Search every model', 'aria-label': 'Search models', autocomplete: 'off' });
+      input.addEventListener('input', filterDesktop);
+      row = el('label', { class: 'rd-model-search-row' }, [searchIcon(), input]);
     }
-    row.style.order = '-1';
-    let step = 0;
-    const catalog = menu.querySelector('.model-catalog-list');
-    for (const item of menu.querySelectorAll('.model-connection-item')) {
-      const title = item.querySelector('.model-connection-name');
-      if (item.dataset.desktopLabel) { if (title) title.textContent = item.dataset.desktopLabel; else item.textContent = item.dataset.desktopLabel; }
-      const name = item.dataset.endpointName || title?.textContent || item.textContent;
-      step += 10;
-      const group = el('div', { class: 'rd-model-group', text: name });
-      group.style.order = String(step); item.before(group);
-      item.style.order = String(step + 1);
-      const models = item.classList.contains('active') ? catalog : [...menu.querySelectorAll('.model-other-catalog-list')].find(list => list.dataset.endpointId === item.dataset.endpointId);
-      item.classList.toggle('rd-connection-has-catalog', !!models?.querySelector('button'));
-      if (models) {
-        models.style.order = String(step + 2);
-        models.querySelectorAll('button').forEach(row => { row.dataset.endpointName = name; });
-      }
-      group._rows = models?.querySelector('button') ? models.querySelectorAll('button') : [item];
+    const body = part('rd-mp-body'), rail = part('rd-mp-rail', body), pane = part('rd-mp-pane', body), foot = part('rd-mp-foot');
+    rail.setAttribute('role', 'tablist'); rail.setAttribute('aria-label', 'Connection');
+    menu.prepend(row); row.after(body); body.after(foot);
+    const connections = menu.querySelector('.model-connection-list');
+    if (connections && connections.parentElement !== rail) rail.append(connections);
+    if (!child(pane, 'rd-mp-title')) pane.append(el('div', { class: 'rd-mp-title' }));
+    const section = menu.querySelector('.model-version-section');
+    if (section && section.parentElement !== pane) pane.append(section);
+    for (const list of children(menu, 'model-other-catalog-list')) pane.append(list);
+    if (!child(pane, 'rd-mp-empty')) pane.append(el('p', { class: 'rd-mp-empty', text: 'No models match that search.', hidden: true, role: 'status' }));
+    // Each list carries its connection's name above it, shown while searching every model.
+    pane.querySelectorAll('.rd-model-group').forEach(node => node.remove());
+    const named = id => [...menu.querySelectorAll('.model-connection-item')].find(item => item.dataset.endpointId === id)?.dataset.endpointName || '';
+    const ownList = section?.querySelector('.model-catalog-list');
+    for (const list of [ownList, ...children(pane, 'model-other-catalog-list')].filter(Boolean)) {
+      const name = list === ownList ? named(activeId()) : named(list.dataset.endpointId);
+      list.before(el('div', { class: 'rd-model-group', text: name }));
+      list.querySelectorAll('button').forEach(item => {
+        item.dataset.endpointName = name;
+        // One line each; the description is the tooltip.
+        const desc = item.querySelector('.model-catalog-desc')?.textContent;
+        if (desc) item.title = desc;
+      });
     }
-    // The effort buttons share one track, with the label beside it.
-    for (const levels of menu.querySelectorAll('.model-effort-row')) {
+    // The bottom bar: Effort for the chat's model, then the custom ID and the way to Settings.
+    for (const node of menu.querySelectorAll('.model-effort-row, .model-custom-details, .model-add-item')) foot.append(node);
+    for (const levels of foot.querySelectorAll('.model-effort-row')) {
       if (levels.querySelector('.rd-effort-seg')) continue;
       const seg = el('div', { class: 'rd-effort-seg' }); seg.append(...levels.querySelectorAll('.model-effort-btn')); levels.append(seg);
     }
-    for (const node of menu.querySelectorAll('.model-effort-row, .model-custom-details, .model-use-endpoint')) node.style.order = '900';
-    for (const node of menu.querySelectorAll('.model-add-item')) node.style.order = '1000';
-    if (!menu.querySelector('.model-manage-item')) menu.append(button('Manage models in Settings', async () => {
+    const summary = foot.querySelector('.model-custom-details')?.querySelector('summary');
+    if (summary) summary.textContent = 'Custom ID and defaults';
+    // Set up a model stays only while nothing is connected; Manage models covers it otherwise.
+    const connected = !!menu.querySelector('.model-connection-item');
+    for (const node of foot.querySelectorAll('.model-add-item')) node.hidden = connected;
+    if (!foot.querySelector('.model-manage-item')) foot.append(button('Manage models', async () => {
       menu.classList.add('hidden');
       go('settings', { section: 'added-models' });
     }, 'model-picker-item model-manage-item'));
+    foot.append(foot.querySelector('.model-manage-item'));
+    for (const item of rail.querySelectorAll('.model-connection-item')) {
+      item.setAttribute('role', 'tab');
+      if (item.dataset.desktopLabel) { const name = item.querySelector('.model-connection-name'); if (name) name.textContent = item.dataset.desktopLabel; else item.textContent = item.dataset.desktopLabel; }
+    }
+    filterDesktop();
+  };
+  // Left and right move between the two columns; up and down stay the controller's.
+  menu.addEventListener('keydown', event => {
+    if (!menu.classList.contains('rd-model-picker') || !['ArrowLeft', 'ArrowRight'].includes(event.key) || event.target.matches?.('input')) return;
+    const inRail = !!event.target.closest?.('.rd-mp-rail'), inPane = !!event.target.closest?.('.rd-mp-pane');
+    const visible = nodes => [...nodes].filter(node => !node.hidden && node.getClientRects().length);
+    if (event.key === 'ArrowRight' && inRail) {
+      const items = visible(paneItems());
+      (items.find(item => item.classList.contains('active')) || items[0])?.focus(); event.preventDefault();
+    } else if (event.key === 'ArrowLeft' && inPane) {
+      (menu.querySelector('.model-connection-item.active') || menu.querySelector('.model-connection-item'))?.focus(); event.preventDefault();
+    }
+  });
+  // The mobile sheet takes the controller's own structure, so the card's places are emptied back
+  // into the menu in the controller's order.
+  const undecorateDesktop = () => {
+    const section = menu.querySelector('.model-version-section');
+    const foot = child(menu, 'rd-mp-foot');
+    if (foot) for (const node of [...children(foot, 'model-custom-details'), ...children(foot, 'model-effort-row')]) section?.append(node);
+    const connections = menu.querySelector('.model-connection-list'), others = [...menu.querySelectorAll('.model-other-catalog-list')];
+    const adds = [...menu.querySelectorAll('.model-add-item')];
+    if (connections) menu.append(connections);
+    if (section) menu.append(section);
+    adds.forEach(node => { node.hidden = false; menu.append(node); });
+    others.forEach(node => { node.classList.remove('rd-mp-off'); menu.append(node); });
+    menu.querySelectorAll('.rd-mp-body, .rd-mp-foot, .rd-model-search-row, .rd-model-group, .model-manage-item').forEach(node => node.remove());
+    menu.classList.remove('rd-model-picker', 'rd-mp-searching');
   };
   const open = () => {
     if (!mobileOn() || trigger.disabled) return false;
@@ -280,8 +349,7 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
     optionsButton = button('Options', options); account = el('details', { class: 'ms-account-card' });
     empty = el('p', { text: 'No models match that search.', hidden: true, role: 'status' });
     home = document.createComment('Model menu home'); menu.before(home);
-    menu.querySelectorAll('.rd-model-search-row:not(.model-version-search), .rd-model-group, .model-manage-item').forEach(node => node.remove());
-    menu.classList.remove('rd-model-picker'); menu.querySelectorAll('[style*="order"]').forEach(node => node.style.removeProperty('order'));
+    undecorateDesktop();
     const extras = el('details', { class: 'ms-model-extras' }, [el('summary', { text: 'Search and account' }), search, optionsButton, account]);
     // The sheet body owns scrolling; do not inherit the desktop board's nested flex clamps.
     menu.classList.remove('model-picker-unified');
@@ -322,4 +390,44 @@ export function mountMobileModelSheet({ trigger, menu, permission }) {
   observer.observe(menu, { attributes: true, attributeFilter: ['class'] });
   menu.addEventListener('kairos:model-menu-updated', decorate);
   return { open, close() { sheet?.close(); }, dispose() { sheet?.close(); observer.disconnect(); menu.removeEventListener('kairos:model-menu-updated', decorate); trigger.removeEventListener('click', click, true); trigger.removeEventListener('keydown', key, true); } };
+}
+
+// On a desktop window the embedded composers (Forge's new session and its session chats) open the
+// same card as a chat's picker from their one model pill, in place of their two dropdowns, which
+// stay in the page as the values the card's choices set. The card floats in the page body while
+// open, so a translucent composer (its backdrop filter) cannot misplace it.
+export function mountDesktopModelCard({ trigger, menu, replaces, clear = null }) {
+  replaces.classList.add('rd-card-replaced');
+  let home = null;
+  const isOpen = () => !menu.classList.contains('hidden') && !!home;
+  const close = (focus = false) => {
+    if (!home) return;
+    menu.classList.add('hidden'); menu.classList.remove('rd-card-floating'); trigger.setAttribute('aria-expanded', 'false');
+    if (home.isConnected) home.after(menu); home.remove(); home = null;
+    if (focus) trigger.focus();
+  };
+  const show = (focusList = false) => {
+    if (mobileOn() || trigger.disabled || isOpen()) return;
+    home = document.createComment('Model card home'); menu.before(home); document.body.append(menu);
+    menu.classList.add('rd-card-floating'); menu.classList.remove('hidden'); trigger.setAttribute('aria-expanded', 'true');
+    fitMenu(menu, trigger, { prefer: 'below', fixed: true, cap: 440, clear: clear?.() || null });
+    if (focusList) {
+      const items = [...menu.querySelectorAll('.model-catalog-item, .model-connection-item')].filter(item => item.getClientRects().length);
+      (items.find(item => item.classList.contains('active')) || items[0])?.focus();
+    }
+  };
+  const click = event => { if (mobileOn()) return; event.stopPropagation(); if (isOpen()) close(); else show(); };
+  const key = event => { if (!mobileOn() && event.key === 'ArrowDown' && !isOpen()) { event.preventDefault(); show(true); } };
+  const outside = event => { if (isOpen() && !menu.contains(event.target) && !trigger.contains(event.target)) close(); };
+  const escape = event => { if (event.key === 'Escape' && isOpen()) { event.preventDefault(); event.stopPropagation(); close(true); } };
+  // Choosing a model closes the card; choosing a connection or an effort keeps it open.
+  const picked = event => { if (isOpen() && event.target.closest?.('.model-catalog-item, .model-other-catalog-item')) setTimeout(() => close(true), 0); };
+  trigger.addEventListener('click', click); trigger.addEventListener('keydown', key);
+  document.addEventListener('pointerdown', outside, true); menu.addEventListener('keydown', escape); menu.addEventListener('click', picked);
+  return () => {
+    close();
+    trigger.removeEventListener('click', click); trigger.removeEventListener('keydown', key);
+    document.removeEventListener('pointerdown', outside, true); menu.removeEventListener('keydown', escape); menu.removeEventListener('click', picked);
+    replaces.classList.remove('rd-card-replaced');
+  };
 }

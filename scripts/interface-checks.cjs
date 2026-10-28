@@ -91,9 +91,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.querySelector('.chat-mobile-header #model-picker-btn') && !!document.querySelector('.chat-input-bar #model-picker-btn')"), true, 'Model pill lives in the composer');
       await click('#model-picker-btn');
       assert.equal(await js("(() => { const m=document.getElementById('model-picker-menu'), r=m.getBoundingClientRect(), h=document.querySelector('.chat-header-model').getBoundingClientRect(); return !m.classList.contains('hidden') && r.height>44 && r.bottom <= h.top + 1 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Model picker opens above the pill and fits');
-      // Desktop exposes the other connections' catalog rows directly on one board.
+      // The desktop card shows the chat's own connection; search reaches every other connection's models.
       await waitFor("!!document.querySelector('.model-other-catalog-item')");
       const pickedModel = await js("document.querySelector('.model-other-catalog-item .model-catalog-name').textContent");
+      await js("{ const s = document.querySelector('#model-picker-menu .rd-model-search'); s.value = document.querySelector('.model-other-catalog-item').dataset.modelSearch.split(' ')[0]; s.dispatchEvent(new Event('input')); }");
+      await waitFor("!!document.querySelector('.model-other-catalog-item')?.offsetParent");
       await js("document.querySelector('.model-other-catalog-item').scrollIntoView({block:'nearest'})");
       await click('.model-other-catalog-item');
       await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");

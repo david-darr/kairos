@@ -1,6 +1,5 @@
 import { keepReadingPosition } from './chatScrollAnchor.js';
-import { mountMobileModelSheet, renderMobileCatalogMenu } from './mobileModelSheet.js';
-import { mobileOn, phone } from './mobileShared.js';
+import { mountMobileModelSheet, renderMobileCatalogMenu, mountDesktopModelCard } from './mobileModelSheet.js';
 // One embedded conversation (2026-10-08): the Agents tab's chat pane and a
 // tab's own chat (CRM task chats, School course chats) share this. It streams
 // through the same chatStream.js registry as every other chat, so a reply
@@ -384,8 +383,9 @@ export async function mountSessionChat(host, options = {}) {
       phoneTrigger = el('button', { type: 'button', class: 'ms-embedded-model-trigger model-picker-btn', text: 'Choose model' });
       phoneMenu = el('div', { class: 'model-picker-menu hidden' }); tools.prepend(phoneTrigger, phoneMenu);
       const picker = mountMobileModelSheet({ trigger: phoneTrigger, menu: phoneMenu, permission: options.modeControl });
-      const gate = () => { phoneTrigger.hidden = !mobileOn(); }; gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
-      disposePhoneModels = () => { picker.dispose(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); };
+      // The same pill opens the desktop card (David, 2026-10-28) in place of the two dropdowns.
+      const card = mountDesktopModelCard({ trigger: phoneTrigger, menu: phoneMenu, replaces: controls, clear: () => tools.closest('form, .chat-input-bar') });
+      disposePhoneModels = () => { picker.dispose(); card(); };
       const syncTrigger = new MutationObserver(() => { phoneTrigger.disabled = connection.disabled; });
       syncTrigger.observe(connection.querySelector('button'), { attributes: true, attributeFilter: ['disabled'] });
       const dispose = disposePhoneModels; disposePhoneModels = () => { syncTrigger.disconnect(); dispose(); };

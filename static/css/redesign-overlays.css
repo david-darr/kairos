@@ -220,41 +220,70 @@
   .kairos-redesign .permission-args summary { display: flex; align-items: center; min-height: 44px; }
 }
 
-/* Composer model picker, the desktop board: a search pill, each provider as a label over its rows,
-   the active connection's models under its row, then Effort and the link to set up models. The
-   controller (views/chat.js) still builds and refreshes every row; only CSS order moves them. */
+/* Composer model picker, the desktop card (David, 2026-10-28): search along the top, the
+   connections in a narrow column, one connection's models beside it (one line each, the
+   description as a tooltip), and Effort with the links in a bar along the bottom. At most 540 by
+   440 and never past the window (menuFit.js clamps it); only the two columns scroll. The
+   controller (views/chat.js) still builds every row; mobileModelSheet.js places them. */
 @media (min-width: 769px) {
-  .kairos-redesign .model-picker-menu.rd-model-picker { width: 400px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 10px; gap: 2px; border: 1px solid var(--rd-line); border-radius: 24px; background: var(--rd-surface-solid); box-shadow: 0 18px 50px rgba(var(--shade-rgb), .18); transform-origin: bottom right; animation: rd-menu var(--rd-dur-menu) var(--rd-ease) backwards; }
-  .kairos-redesign .rd-model-picker > :is(.model-connection-list, .model-version-section) { display: contents; }
+  .kairos-redesign .model-picker-menu.rd-model-picker { display: flex; flex-direction: column; width: 540px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 8px; gap: 6px; overflow: hidden; border: 1px solid var(--rd-line); border-radius: 20px; background: var(--rd-surface-solid); box-shadow: 0 18px 50px rgba(var(--shade-rgb), .18); transform-origin: bottom right; animation: rd-menu var(--rd-dur-menu) var(--rd-ease) backwards; }
+  .kairos-redesign .model-picker-menu.rd-model-picker.hidden, .kairos-redesign .model-picker-menu.rd-model-picker[hidden] { display: none; }
+  .kairos-redesign .rd-model-picker > * { flex: 0 0 auto; }
   .kairos-redesign .rd-model-picker .model-picker-heading { display: none; }
-  .kairos-redesign .rd-model-picker :is(.model-connection-item, .model-catalog-list, .model-effort-row, .model-custom-details, .rd-model-group, .rd-model-search-row, .model-add-item, .model-use-endpoint) { flex-shrink: 0; }
-  .kairos-redesign .rd-model-picker .rd-model-search-row { display: flex; align-items: center; gap: 8px; height: 38px; margin: 2px 2px 4px; padding: 0 12px; box-sizing: border-box; border-radius: 999px; background: var(--rd-ground); color: var(--rd-ink-dim); position: static; }
+  .kairos-redesign .rd-model-picker .rd-model-search-row { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; box-sizing: border-box; border-radius: 999px; background: var(--rd-ground); color: var(--rd-ink-dim); position: static; }
   .kairos-redesign .rd-model-picker .rd-model-search-row:focus-within { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
   .kairos-redesign .rd-model-picker .rd-model-search-icon { display: grid; flex: none; }
   .kairos-redesign .rd-model-picker .rd-model-search-row input:not(#_) { flex: 1; min-width: 0; width: auto; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--rd-ink); font: 13px var(--rd-font-ui); outline: none; box-shadow: none; }
-  .kairos-redesign .rd-model-picker .rd-model-group { padding: 10px 12px 4px; font: 500 10px var(--rd-font-ui); letter-spacing: .18em; text-transform: uppercase; color: var(--rd-ink-dim); }
-  .kairos-redesign .rd-model-picker .model-picker-item:not(#_) { min-height: 0; padding: 9px 12px; border-radius: 14px; gap: 12px; }
-  .kairos-redesign .rd-model-picker .model-picker-item.active:not(#_) { background: var(--rd-ground); box-shadow: inset 0 0 0 1px var(--rd-line-strong); }
-  .kairos-redesign .rd-model-picker .model-picker-item.active:hover:not(#_) { background: var(--rd-ground); }
-  .kairos-redesign .rd-model-picker .model-connection-item .model-mark { display: none; }
-  .kairos-redesign .rd-model-picker .model-connection-item::before, .kairos-redesign .rd-model-picker .model-catalog-item::before { content: ''; flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--rd-line-strong); }
-  .kairos-redesign .rd-model-picker .model-connection-item.active:not(#_) { background: none; box-shadow: none; padding-right: 12px; }
-  .kairos-redesign .rd-model-picker .model-connection-item.active::after { content: none; }
-  .kairos-redesign .rd-model-picker :is(.model-connection-item.active, .model-catalog-item.active)::before { background: var(--rd-ink); }
-  .kairos-redesign .rd-model-picker .model-connection-name { font-size: 14px; font-weight: 500; }
-  .kairos-redesign .rd-model-picker .model-connection-sub { font-size: 12px; color: var(--rd-ink-dim); }
-  .kairos-redesign .model-picker-menu.rd-model-picker .model-catalog-list { flex: 0 0 auto; min-height: 0; overflow: visible; display: flex; flex-direction: column; gap: 2px; padding: 0 0 0 14px; }
-  .kairos-redesign .rd-model-picker .model-catalog-item:not(#_) { display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 0 12px; text-align: left; align-items: center; }
-  .kairos-redesign .rd-model-picker .model-catalog-item::before { grid-row: 1 / 3; align-self: center; }
-  .kairos-redesign .rd-model-picker .model-catalog-name { grid-column: 2; font-size: 14px; font-weight: 500; }
-  .kairos-redesign .rd-model-picker .model-catalog-desc { grid-column: 2; font-size: 12px; color: var(--rd-ink-dim); }
-  .kairos-redesign .rd-model-picker .model-effort-row { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; margin-top: 6px; padding: 10px 12px 4px; border-top: 1px solid var(--rd-line); }
-  .kairos-redesign .rd-model-picker .model-effort-label { flex: none; margin: 0; font-size: 13px; color: var(--rd-ink); }
+  .kairos-redesign .rd-model-picker > .rd-mp-body { flex: 1 1 auto; display: grid; grid-template-columns: minmax(118px, 30%) minmax(0, 1fr); gap: 6px; min-height: 120px; }
+  .kairos-redesign .rd-mp-body > :is(.rd-mp-rail, .rd-mp-pane) { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 1px; }
+  .kairos-redesign .rd-mp-rail { padding-right: 6px; border-right: 1px solid var(--rd-line); }
+  .kairos-redesign .rd-mp-rail .model-connection-list { display: flex; flex-direction: column; gap: 1px; }
+  .kairos-redesign .rd-model-picker .model-picker-item:not(#_) { min-height: 0; padding: 7px 10px; border-radius: 10px; gap: 8px; font-size: 13px; }
+  .kairos-redesign .rd-model-picker .model-picker-item.active:not(#_) { background: none; box-shadow: none; }
+  .kairos-redesign .rd-mp-rail .model-connection-item:not(#_) { display: flex; align-items: center; text-align: left; }
+  .kairos-redesign .rd-mp-rail .model-connection-item.active:not(#_) { background: var(--rd-ground); box-shadow: inset 0 0 0 1px var(--rd-line-strong); }
+  .kairos-redesign .rd-mp-rail .model-connection-item .model-mark { display: inline-grid; flex: none; width: 15px; height: 15px; }
+  /* A connection without a logo keeps its name in line with the others. */
+  .kairos-redesign .rd-mp-rail .model-connection-item:not(:has(.model-mark))::before { content: ''; flex: none; width: 15px; height: 15px; }
+  .kairos-redesign .rd-mp-rail .model-connection-item::after { content: none; }
+  .kairos-redesign .rd-mp-rail .model-connection-text { display: grid; min-width: 0; }
+  .kairos-redesign .rd-mp-rail .model-connection-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .rd-mp-rail .model-connection-sub { display: none; }
+  .kairos-redesign .rd-mp-title { padding: 4px 10px 6px; font: 500 10px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign .rd-model-picker .rd-model-group { display: none; padding: 8px 10px 3px; font: 500 10px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign .rd-mp-pane .model-version-section { display: contents; }
+  .kairos-redesign .model-picker-menu.rd-model-picker :is(.model-catalog-list, .model-other-catalog-list) { display: flex; flex: none; min-height: 0; overflow: visible; flex-direction: column; gap: 1px; padding: 0; }
+  .kairos-redesign .model-picker-menu.rd-model-picker .rd-mp-pane > .rd-mp-off { display: none; }
+  .kairos-redesign .rd-model-picker :is(.model-catalog-item, .model-other-catalog-item):not(#_) { display: grid; grid-template-columns: minmax(0, 1fr) 14px; align-items: center; gap: 8px; text-align: left; }
+  .kairos-redesign .rd-model-picker :is(.model-catalog-item, .model-other-catalog-item)[hidden] { display: none; }
+  .kairos-redesign .rd-model-picker :is(.model-catalog-item, .model-other-catalog-item)::before { content: none; }
+  .kairos-redesign .rd-model-picker .model-catalog-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kairos-redesign .rd-model-picker .model-catalog-desc { display: none; }
+  .kairos-redesign .rd-model-picker .model-catalog-item.active:not(#_) { background: var(--rd-ground); }
+  /* A tick on the model this chat uses. */
+  .kairos-redesign .rd-model-picker .model-catalog-item.active::after { content: ''; position: static; grid-column: 2; width: 10px; height: 6px; margin: 0 0 3px 2px; border: solid var(--rd-ink); border-width: 0 0 2px 2px; border-radius: 0; background: none; transform: rotate(-45deg); }
+  .kairos-redesign .rd-mp-empty { padding: 10px; margin: 0; font-size: 13px; color: var(--rd-ink-dim); }
+  /* Searching shows every connection's matches, each under its name, across both columns. */
+  .kairos-redesign .rd-mp-searching > .rd-mp-body { grid-template-columns: minmax(0, 1fr); }
+  .kairos-redesign .rd-mp-searching .rd-mp-rail, .kairos-redesign .rd-mp-searching .rd-mp-title { display: none; }
+  .kairos-redesign .model-picker-menu.rd-model-picker.rd-mp-searching .rd-mp-pane > .model-other-catalog-list.rd-mp-off { display: flex; }
+  .kairos-redesign .rd-mp-searching .rd-model-group:not([hidden]) { display: block; }
+  .kairos-redesign .rd-mp-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 4px 0; border-top: 1px solid var(--rd-line); }
+  .kairos-redesign .rd-mp-foot:empty { display: none; }
+  .kairos-redesign .rd-mp-foot .model-effort-row { display: flex; align-items: center; gap: 10px; flex: 1 1 100%; margin: 0; padding: 0 6px; border: 0; }
+  .kairos-redesign .rd-model-picker .model-effort-label { flex: none; margin: 0; font-size: 12px; color: var(--rd-ink-dim); }
   .kairos-redesign .rd-model-picker .rd-effort-seg { display: flex; flex: 1; padding: 3px; border-radius: 999px; background: var(--rd-surface-2); }
-  .kairos-redesign .rd-model-picker .model-effort-btn { flex: 1; height: 30px; min-height: 30px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 12px; text-transform: capitalize; }
+  .kairos-redesign .rd-model-picker .model-effort-btn { flex: 1; height: 26px; min-height: 26px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 12px; text-transform: capitalize; }
   .kairos-redesign .rd-model-picker .model-effort-btn.active { background: var(--rd-surface-solid); color: var(--rd-ink); font-weight: 500; box-shadow: 0 1px 3px rgba(var(--shade-rgb), .1); }
-  .kairos-redesign .rd-model-picker .model-custom-details { margin: 0; padding: 4px 12px; font-size: 13px; color: var(--rd-ink-dim); }
-  .kairos-redesign .rd-model-picker :is(.model-add-item, .model-use-endpoint):not(#_) { padding: 8px 12px 6px; color: var(--accent); font-size: 13px; background: none; box-shadow: none; }
+  .kairos-redesign .rd-mp-foot .model-custom-details { flex: 1 1 auto; margin: 0; padding: 0; font-size: 12px; color: var(--rd-ink-dim); }
+  .kairos-redesign .rd-mp-foot .model-custom-details > summary { display: inline-block; padding: 6px; cursor: pointer; color: var(--rd-ink-dim); font-size: 12px; }
+  .kairos-redesign .rd-mp-foot .model-custom-details > summary::-webkit-details-marker { display: none; }
+  .kairos-redesign .rd-mp-foot .model-custom-details > summary { list-style: none; }
+  .kairos-redesign .rd-mp-foot .model-custom-details[open] { flex-basis: 100%; }
+  .kairos-redesign .rd-mp-foot .model-custom-details .model-version-form { display: grid; gap: 6px; padding: 4px 6px 6px; }
+  .kairos-redesign .rd-mp-foot :is(.model-add-item, .model-manage-item, .model-use-endpoint):not(#_) { display: inline-flex; width: auto; padding: 6px; color: var(--accent); font-size: 12px; background: none; box-shadow: none; }
+  .kairos-redesign .rd-mp-foot :is(.model-add-item, .model-manage-item)[hidden] { display: none; }
+  .kairos-redesign .rd-mp-foot .model-manage-item { margin-left: auto; color: var(--rd-ink-dim); }
 }
 @media (max-width: 768px) {
   .kairos-redesign .question-dialog { height: 610px; }
@@ -302,16 +331,13 @@
   .kairos-redesign .ms-sheet.ms-model-sheet .model-catalog-item { flex: none; }
 }
 @media (min-width: 769px) {
-  .kairos-redesign .rd-model-picker .rd-connection-has-catalog { display: none; }
-  .kairos-redesign .rd-model-picker .model-other-catalog-list { display: flex; flex: none; flex-direction: column; gap: 2px; }
-  .kairos-redesign .model-picker-menu.rd-model-picker .model-catalog-list { padding: 0; }
-  .kairos-redesign .rd-model-picker .model-other-catalog-item:not(#_) { display: grid; grid-template-columns: 9px minmax(0, 1fr) 16px; gap: 0 12px; align-items: center; }
-  .kairos-redesign .rd-model-picker .model-other-catalog-item::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--rd-line-strong); grid-row: 1 / 3; }
-  .kairos-redesign .rd-model-picker .model-catalog-item:not(#_) { grid-template-columns: 9px minmax(0, 1fr) 16px; }
-  .kairos-redesign .rd-model-picker .model-catalog-item.active::after { content: ''; position: static; grid-column: 3; grid-row: 1 / 3; margin: 0; background: var(--rd-ink); }
-  .kairos-redesign .rd-model-picker .model-catalog-desc { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-  .kairos-redesign .rd-model-picker .model-manage-item { display: block; order: 1100; padding: 8px 12px 6px; font-size: 13px; color: var(--rd-ink-dim); }
   .kairos-redesign .design-model-menu.rd-model-picker:not([hidden]) { display: flex; flex-direction: column; }
+  /* Forge's composers: one model pill opens the card; their Agent and model dropdowns stay hidden. */
+  .kairos-redesign .rd-card-replaced { display: none; }
+  .kairos-redesign .model-picker-menu.rd-card-floating { z-index: 1000; }
+  .kairos-redesign .ms-embedded-model-trigger { display: inline-flex; align-items: center; gap: 8px; max-width: 260px; min-height: 34px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--rd-line-strong); background: transparent; color: var(--rd-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The same chevron as the composer's other pickers. */
+  .kairos-redesign .ms-embedded-model-trigger::after { content: ''; flex: none; width: 5px; height: 5px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 }
 @media (max-width: 768px) {
   .kairos-redesign .ms-model-sheet .ms-model-menu > .model-connection-list { display: none; }

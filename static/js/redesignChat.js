@@ -37,7 +37,8 @@ export function mountRedesignChat(container) {
   // filter cannot become the fixed-position container.
   const place = () => {
     if (!applied || menu.classList.contains("hidden")) return;
-    fitMenu(menu, pill, { prefer: "above", fixed: false, clear: pill.closest(".chat-input-bar") });
+    menu.style.left = "0"; menu.style.right = "auto";
+    fitMenu(menu, pill, { prefer: "above", fixed: false, cap: 440, keepSide: true, clear: pill.closest(".chat-input-bar") });
   };
 
   const syncCount = () => {
