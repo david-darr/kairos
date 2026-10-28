@@ -71,6 +71,9 @@
       delete forgeReviews[id]; const review = forgeReview(id);
       review.checkpoints[0].created = startedAt + .01; review.checkpoints[0].finished = startedAt + .24;
       review.checkpoints[0].id = 'fc-' + runId;
+      // The real store keeps earlier checkpoints readable after a newer turn; a review listed just
+      // before this run may still ask for its checkpoint.
+      (state.forgeCheckpointHistory ||= []).push(review.checkpoints[0]);
     }
     return packets;
   }
@@ -1171,7 +1174,7 @@
       audit: [{ at: now - 60, decision: "allow", tool: "WebFetch", content: "docs.python.org", by: "Alex" }] };
     if (route === "/api/file-checkpoints") return [];
     if (/^\/api\/file-checkpoints\/[^/]+$/.test(route)) {
-      const checkpoint = Object.values(forgeReviews).flatMap(review => review.checkpoints).find(c => c.id === route.split('/').pop());
+      const checkpoint = [...Object.values(forgeReviews).flatMap(review => review.checkpoints), ...(state.forgeCheckpointHistory || [])].find(c => c.id === route.split('/').pop());
       if (checkpoint) return { ...checkpoint, roots: checkpoint.roots.map(root => ({ ...root, changes: root.changes.map(change => ({ ...change,
         restore_state: change.restored_at ? 'restored' : 'available',
         added: 2, removed: 2,

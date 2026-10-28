@@ -1,7 +1,7 @@
 {
  "built": {
   "app.js": "7df6110b772023d287cdc2903cd89172e43d1bd6af9f1afd78c5dce136686296",
-  "fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
+  "fixtures.js": "e46c1bdad4aac46ef854961381b5c80fbd166f98a52327d4f5095f259869f2bc",
   "index.html": "f33aff804892ecd288e84e56a6919b34f3dac15c4d2ee5b73e9c128ecba4d2a4",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -300,7 +300,7 @@
   "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5"
  },
  "sources": {
-  "demo/fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
+  "demo/fixtures.js": "e46c1bdad4aac46ef854961381b5c80fbd166f98a52327d4f5095f259869f2bc",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "c355584e7d5dc6c1bb6abd5502ab7e98c8ddc7dc7e137ac905aa5a66fef0807b",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
