@@ -34,7 +34,8 @@ SPECS_DIR = os.path.join(BASE_DIR, "specs")
 MAX_LIST_ITEMS = 20  # same token-efficiency posture as everything else here
 
 
-def search_sessions(query: str, exclude_session_id: Optional[str] = None, max_results: int = 5) -> list[dict]:
+def search_sessions(query: str, exclude_session_id: Optional[str] = None, max_results: int = 5,
+                    owner_user: Optional[str] = None) -> list[dict]:
     """Full-text search across every chat session's message content — the
     "cross-session awareness" half. Returns short snippets, not full
     messages, and at most one hit per session so a handful of results means
@@ -58,7 +59,7 @@ def search_sessions(query: str, exclude_session_id: Optional[str] = None, max_re
       to cap.
     """
     return store.search_messages(query, exclude_session_id=exclude_session_id,
-                                 max_results=max_results)
+                                 max_results=max_results, owner_user=owner_user)
 
 
 def search_this_chat_archive(session_id: Optional[str], query: str, max_results: int = 5) -> list[dict]:

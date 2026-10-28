@@ -139,9 +139,10 @@ def list_for_session(session_id: str) -> list[dict]:
     return sorted(result, key=lambda item: item.get("created_at") or 0, reverse=True)
 
 
-def list_library() -> list[dict]:
+def list_library(owner_user: str | None = None) -> list[dict]:
+    """Files grouped by chat; owner_user limits it to that member's chats (None: all)."""
     groups = []
-    for header in session_manager.list_sessions():
+    for header in (session_manager.list_sessions() if owner_user is None else session_manager.list_sessions(owner_user=owner_user)):
         files = list_for_session(header["id"])
         if files:
             groups.append({"session_id": header["id"], "title": header.get("title") or "Untitled chat",

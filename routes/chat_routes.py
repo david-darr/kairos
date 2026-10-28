@@ -19,6 +19,11 @@ from services import chat_summary
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
+def _own_chat(session_id: str, user: str) -> None:
+    """404 unless the chat is the caller's (admins and the single local user: any)."""
+    chat_live.require_session(session_id, user)
+
+
 @router.get("/status")
 async def chat_status(session_id: str, user: str = Depends(require_user)) -> dict:
     if chat_service.session_manager.get_session(session_id) is None:
@@ -28,12 +33,13 @@ async def chat_status(session_id: str, user: str = Depends(require_user)) -> dic
 
 @router.get("/files")
 async def list_chat_files(session_id: str, user: str = Depends(require_user)) -> list[dict]:
+    _own_chat(session_id, user)
     return chat_files.list_for_session(session_id)
 
 
 @router.get("/files/library")
 async def list_chat_files_library(user: str = Depends(require_user)) -> list[dict]:
-    return chat_files.list_library()
+    return chat_files.list_library(None if auth_manager.is_admin(user) else user)
 
 
 @router.get("/references")
@@ -49,11 +55,13 @@ class PublishFileRequest(BaseModel):
 
 @router.post("/artifacts")
 async def publish_artifact(body: PublishFileRequest, user: str = Depends(require_user)) -> dict:
+    _own_chat(body.session_id, user)
     return chat_artifacts.publish(body.session_id, body.path)
 
 
 @router.get("/artifacts")
 async def artifact_metadata(session_id: str, url: str, user: str = Depends(require_user)) -> dict:
+    _own_chat(session_id, user)
     _, metadata = chat_artifacts.resolve(session_id, url)
     return metadata
 
@@ -68,6 +76,7 @@ async def artifact_office(session_id: str, url: str, user: str = Depends(require
     this session actually references it. Extraction is local and read-only;
     see core/office_preview.py for the macro/formula/zip-bomb boundaries.
     """
+    _own_chat(session_id, user)
     path, metadata = chat_artifacts.resolve(session_id, url)
     if metadata["kind"] != "office":
         raise HTTPException(400, "This file has no structured preview")
@@ -81,6 +90,7 @@ async def artifact_office(session_id: str, url: str, user: str = Depends(require
 
 @router.get("/artifacts/content")
 async def artifact_content(session_id: str, url: str, download: bool = False, user: str = Depends(require_user)):
+    _own_chat(session_id, user)
     path, metadata = chat_artifacts.resolve(session_id, url)
     mime = chat_artifacts.IMAGE_MIMES.get(path.suffix.lower(), "application/pdf" if metadata["kind"] == "pdf" else "text/plain")
     # An Office file served inline would be handed to whatever the browser
@@ -272,6 +282,7 @@ async def upload_attachment(file: UploadFile, user: str = Depends(require_user))
 
 @router.get("/images/{session_id}/{attachment_id}")
 async def chat_image(session_id: str, attachment_id: str, user: str = Depends(require_user)):
+    _own_chat(session_id, user)
     session = chat_service.session_manager.get_session(session_id)
     if not session or not any(attachment_id in message.get("image_attachment_ids", [])
                               for message in session.get("messages", [])):

@@ -25,6 +25,12 @@ def idle_session(fn):
     return wrapped
 
 
+def _require_owned(session_id: str, user: str) -> None:
+    """404 unless the chat is the caller's (admins and the single local user: any)."""
+    from services.chat_live import require_session
+    require_session(session_id, user)
+
+
 class CreateSessionRequest(BaseModel):
     title: str = "New Chat"
     # The folder a Kairos CLI terminal was started in, so `kairos -c` can
@@ -101,7 +107,9 @@ def _for_client(session: dict) -> dict:
 @router.get("")
 async def list_sessions(agent_id: Optional[str] = None, user: str = Depends(require_user)) -> list[dict]:
     # Chats with agents live in the Agents tab (?agent_id= lists one agent's).
-    return session_manager.list_sessions(agent_id=agent_id)
+    # A member sees only their own chats; an admin (and the single local user) sees all.
+    return session_manager.list_sessions(agent_id=agent_id,
+                                         owner_user=None if auth_manager.is_admin(user) else user)
 
 
 @router.post("")
@@ -129,6 +137,7 @@ async def get_session(session_id: str, user: str = Depends(require_user)) -> dic
 
 @router.patch("/{session_id}")
 async def rename_session(session_id: str, body: RenameSessionRequest, user: str = Depends(require_user)) -> dict:
+    _require_owned(session_id, user)
     try:
         session_manager.rename_session(session_id, body.title)
     except KeyError:
@@ -138,6 +147,7 @@ async def rename_session(session_id: str, body: RenameSessionRequest, user: str 
 
 @router.post("/{session_id}/star")
 async def star_session(session_id: str, body: StarSessionRequest, user: str = Depends(require_user)) -> dict:
+    _require_owned(session_id, user)
     try:
         return _for_client(session_manager.set_starred(session_id, body.starred))
     except KeyError:
@@ -147,6 +157,7 @@ async def star_session(session_id: str, body: StarSessionRequest, user: str = De
 @router.post("/{session_id}/model")
 async def set_session_model(session_id: str, body: SetModelRequest, user: str = Depends(require_user)) -> dict:
     """Select a provider and a session-local model variant."""
+    _require_owned(session_id, user)
     endpoint = model_endpoints.get_endpoint(body.model_endpoint_id) if body.model_endpoint_id else None
     if body.model_endpoint_id and endpoint is None:
         raise HTTPException(400, "model endpoint not found")
@@ -276,9 +287,8 @@ async def get_session_context(session_id: str, user: str = Depends(require_user)
     absent on its own when the occupancy is known but the model's capacity
     isn't; the client shows the raw token count in that case.
     """
-    session = session_manager.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    from services.chat_live import require_session
+    session = require_session(session_id, user)
     state = session.get("context_state")
     if not state:
         return {"available": False}

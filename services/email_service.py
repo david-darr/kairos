@@ -53,6 +53,7 @@ class EmailService:
         imap_host: str, imap_port: int,
         smtp_host: str, smtp_port: int,
         smtp_security: str = "ssl",
+        owner: Optional[str] = None,
     ) -> dict:
         account_id = uuid.uuid4().hex[:12]
         account = {
@@ -65,6 +66,7 @@ class EmailService:
             "smtp_port": smtp_port,
             "smtp_security": smtp_security,  # "ssl" | "starttls" | "none"
             "created_at": time.time(),
+            "owner": owner,  # the Email tab shows an account only to its owner and admins
         }
         self._accounts[account_id] = account
         self._save()
