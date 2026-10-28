@@ -8,6 +8,7 @@ import { mountBackgroundEffect } from "../backgroundEffects.js";
 import { halftonePalette, halftoneSource, halftoneFocus, halftoneVersion } from "../appearance.js";
 import { homeLayout, setHomeCards, knownHomeCards, knownTabs } from "../layout.js";
 import { mountRedesignHome } from "../redesignHome.js";
+import { isForgeChat, forgeTag } from "../sidebarNav.js";
 import { loadQuotas } from '../kairosParts.js';
 import { mountMobileHome } from '../mobileShell.js';
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
@@ -422,7 +423,10 @@ export function render(container, tabId, options = {}) {
       chats.body.replaceChildren();
       if (!value?.length) empty(chats.body, "Start a conversation", value === null, "Your next conversation starts here.");
       else [...value].sort((a, b) => b.updated_at - a.updated_at).slice(0, 4).forEach((s) => {
-        const item = row(s.title || 'Untitled conversation', relativeTime(s.updated_at), () => navigate('chat', {sessionId:s.id}));
+        // A Forge chat says so and opens in Forge (desktop redesign).
+        const forge = isForgeChat(s);
+        const item = row(s.title || 'Untitled conversation', relativeTime(s.updated_at), () => navigate(forge ? 'forgeSession' : 'chat', {sessionId:s.id}));
+        if (forge) { item.classList.add('is-forge'); item.querySelector('.dashboard-row-title').after(forgeTag()); }
 
         chats.body.append(item);
       });

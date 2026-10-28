@@ -64,6 +64,17 @@ module.exports = async ({ js, win, waitFor, delay, navigate, writes, reads, demo
   await js("document.querySelector('[data-session-id=fs1]').click()");
   await waitFor("document.getElementById('view-content').dataset.view === 'forgeShell' && !!document.querySelector('.forge-pane .forge-transcript-input') && !!document.querySelector('.forge-work, .forge-turn-review, .forge-transcript .forge-turn')");
   metrics.openSessionMs = Date.now() - t1;
+  // Desktop redesign: Forge's prompt matches Kairos chat's: the prompt text, the model logo first
+  // in the model pill, and the permission pill (Supervised / Full access, no "Mode" label).
+  assert.equal(await js("document.querySelector('.forge-pane .forge-transcript-input').placeholder"), 'Ask, build, or describe a change…');
+  await waitFor("!!document.querySelector('.forge-pane .session-chat-models')?.firstElementChild?.classList.contains('session-chat-model-mark') && !!document.querySelector('.forge-pane .session-chat-permission-pill')");
+  assert.equal(await js("document.querySelector('.forge-pane .session-chat-permission-pill .custom-select-label')?.textContent"), 'Supervised');
+  assert.equal(await js("!!document.querySelector('.forge-pane .session-chat-permission-pill .meta')"), false, 'the pill has no Mode label');
+  await js("document.querySelector('.forge-pane .session-chat-permission-pill .custom-select-btn').click()");
+  await waitFor("!!document.querySelector('.custom-select-menu .custom-select-item')");
+  assert.deepEqual(await js("[...document.querySelectorAll('.custom-select-menu .custom-select-item')].map(o => o.textContent)"), ['Supervised', 'Full access']);
+  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await waitFor("!document.querySelector('.custom-select-menu')");
   await delay(1500);
   metrics.openSessionReads = tally(openAt);
   waste('Open one session', metrics.openSessionReads, 1);

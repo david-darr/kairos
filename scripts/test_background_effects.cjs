@@ -192,6 +192,13 @@ class Element extends Events {
   await api.initAppearance('two'); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   await api.initAppearance('one'); assert.equal(api.getAppearance().effectOptions.binary.motion, false);
   assert.equal(api.getAppearance().animatedPiece, 'snowfall');
+  // Desktop redesign: the animated art's Look and Chat messages persist, and bad values fall back.
+  api.updateAppearance({ animatedLook: 'pixels', chatMessages: 'cards' });
+  assert.equal(api.getAppearance().animatedLook, 'pixels'); assert.equal(api.getAppearance().chatMessages, 'cards');
+  assert.equal(document.documentElement.dataset.chatMessages, 'cards');
+  api.updateAppearance({ animatedLook: 'sparkles', chatMessages: 'bubbles' });
+  assert.equal(api.getAppearance().animatedLook, 'ascii', 'an unknown look falls back to ASCII');
+  assert.equal(api.getAppearance().chatMessages, 'plain', 'an unknown message style falls back to Plain');
   await api.resetAppearance(); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   assert.equal(api.getAppearance().effectOptions.binary.density, 9);
   saved.set('jarvis:appearance:v1:broken', 'null'); await api.initAppearance('broken');

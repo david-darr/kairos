@@ -35,6 +35,7 @@ import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileModelSheet, appendEndpointCatalogs } from '../mobileModelSheet.js';
 import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
 import { createMascot } from '../mascot.js';
+import { openChatHistory, closeChatHistory } from '../chatHistoryPopout.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -359,8 +360,20 @@ function syncPermissionMode(mode = 'base') {
   select.value = mode === 'auto' ? 'auto' : 'base';
   select.dataset.saved = select.value;
   select.closest('.chat-permission-control').dataset.mode = select.value;
+  syncPermissionPill(select.value);
   const notice = document.getElementById('chat-permission-notice');
   if (notice) notice.hidden = select.value !== 'auto';
+}
+// The prompt's permission pill (desktop redesign): the same two modes, named
+// for what they do. The select above stays the saved value and the route.
+const PERMISSION_NAMES = { base: 'Supervised', auto: 'Full access' };
+function syncPermissionPill(mode) {
+  const pill = document.getElementById('chat-permission-pill');
+  if (!pill) return;
+  pill.dataset.mode = mode;
+  pill.querySelector('.chat-permission-pill-name').textContent = PERMISSION_NAMES[mode] || PERMISSION_NAMES.base;
+  pill.setAttribute('aria-label', `Permissions: ${PERMISSION_NAMES[mode] || PERMISSION_NAMES.base}`);
+  for (const item of document.querySelectorAll('#chat-permission-menu [data-mode]')) item.setAttribute('aria-checked', String(item.dataset.mode === mode));
 }
 let activeProjectFilter = null; // David's ask 2026-09-12 — null = "All Chats"
 let stagedAttachments = []; // [{id, filename}]
@@ -586,6 +599,16 @@ function renderWelcome(messages) {
   messages.replaceChildren();
   delete messages.dataset.sessionId;
   syncChatLayout(messages, 'New chat');
+  paintPromptProject(activeProjectFilter);
+}
+
+// The prompt card's project tab: the open chat's project, or for a new chat the one it will join.
+async function paintPromptProject(projectId) {
+  const name = document.querySelector('.chat-prompt-project-name');
+  if (!name) return;
+  if (!projectId) { name.textContent = 'No project'; return; }
+  const projects = await apiRecent('/api/projects').catch(() => []);
+  if (name.isConnected) name.textContent = projects.find(project => project.id === projectId)?.name || 'Project';
 }
 
 export async function render(container, tabId, options = {}) {
@@ -665,14 +688,15 @@ export async function render(container, tabId, options = {}) {
   // too many (David). The buttons below are appended in their old order.
   const mobileHeader = el("div", { class: "chat-mobile-header" }, [openSessionsBtn]);
   const desktopChat = matchMedia('(min-width: 769px)');
-  let historyCollapsed = true;
-  try { historyCollapsed = localStorage.getItem('jarvis:chat-history-collapsed') !== 'false'; } catch { /* Storage is optional. */ }
+  // Desktop history is the popout (chatHistoryPopout.js), so the in-chat
+  // panel stays collapsed there; phones keep their drawer.
+  let historyCollapsed = true, popoutOpen = false;
   function syncHistory() {
     container.classList.toggle('chat-history-collapsed', historyCollapsed);
-    const visible = desktopChat.matches ? !historyCollapsed : sessionsPanel.classList.contains('open');
+    const visible = desktopChat.matches ? popoutOpen : sessionsPanel.classList.contains('open');
     document.documentElement.classList.toggle('chat-history-open', !desktopChat.matches && visible);
-    sessionsPanel.inert = !visible;
-    sessionsPanel.setAttribute('aria-hidden', String(!visible));
+    sessionsPanel.inert = desktopChat.matches || !visible;
+    sessionsPanel.setAttribute('aria-hidden', String(desktopChat.matches || !visible));
     openSessionsBtn.setAttribute('aria-expanded', String(visible));
     openSessionsBtn.setAttribute('aria-label', visible ? 'Hide chat history' : 'Show chat history');
     openSessionsBtn.title = visible ? 'Hide chat history' : 'Show chat history';
@@ -692,112 +716,11 @@ export async function render(container, tabId, options = {}) {
     syncHistory();
     newBtn.focus({ preventScroll: true });
   }
-  // The conversation pill and the conversations panel separate like liquid
-  // (David, 2026-10-14: "morph with it in a kind of liquid animation as they
-  // separate"). Opening, the panel swells out of the pill and the pill then
-  // slides to where it now sits, pulling a neck of surface that thins and
-  // snaps; closing, the pill slides back, merges, and the panel drains into
-  // it. Both shapes sit in one layer under an SVG "goo" filter (blur, then a
-  // hard alpha threshold), which is what turns two nearby boxes into one fluid
-  // outline. The pill carries its title the whole way, so it never vanishes
-  // and fades back in. The layer covers only the area the morph uses, so the
-  // filter stays cheap. Desktop only; reduced motion skips it.
-  let historyMorph = null;
-  function ensureGooFilter() {
-    if (document.getElementById('kairos-goo')) return;
-    const svgNS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
-    svg.style.position = 'absolute';
-    svg.innerHTML = '<filter id="kairos-goo" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">'
-      + '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur"/>'
-      + '<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9" result="goo"/>'
-      + '<feComposite in="SourceGraphic" in2="goo" operator="atop" result="shape"/>'
-      + '<feDropShadow in="goo" dx="0" dy="6" stdDeviation="9" style="flood-color: rgb(var(--shade-rgb))" flood-opacity="0.12" result="shadow"/>'
-      + '<feMerge><feMergeNode in="shadow"/><feMergeNode in="goo"/></feMerge></filter>';
-    document.body.append(svg);
-  }
-  function measureHistory(collapsed) {
-    const transition = sessionsPanel.style.transition;
-    const was = container.classList.contains('chat-history-collapsed');
-    sessionsPanel.style.transition = 'none';
-    container.classList.toggle('chat-history-collapsed', collapsed);
-    const rects = { pill: openSessionsBtn.getBoundingClientRect(), panel: sessionsPanel.getBoundingClientRect() };
-    container.classList.toggle('chat-history-collapsed', was);
-    void sessionsPanel.offsetWidth;
-    sessionsPanel.style.transition = transition;
-    return rects;
-  }
-  function morphHistory(apply) {
-    if (!desktopChat.matches || !sessionsPanel.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
-    historyMorph?.finish();
-    const opening = historyCollapsed;
-    const closedState = measureHistory(true);
-    const openState = measureHistory(false);
-    apply();
-    const shut = closedState.pill, out = openState.pill, panel = openState.panel;
-    if (!shut.width || !out.width || !panel.width) return;
-    ensureGooFilter();
-    // The layer covers the union of every box the morph passes through.
-    const pad = 40;
-    const left = Math.min(shut.left, out.left, panel.left) - pad, top = Math.min(shut.top, out.top, panel.top) - pad;
-    const right = Math.max(shut.right, out.right, panel.right) + pad, bottom = Math.max(shut.bottom, out.bottom, panel.bottom) + pad;
-    const layer = el('div', { class: 'chat-history-goo', 'aria-hidden': 'true' });
-    Object.assign(layer.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px` });
-    const panelBlob = el('div', { class: 'chat-history-goo-blob' });
-    const pillBlob = el('div', { class: 'chat-history-goo-blob' });
-    layer.append(panelBlob, pillBlob);
-    // The title rides above the filter so its text stays crisp. The copy keeps
-    // the pill's markup but none of its identity: no ids, no focus, no events.
-    const title = openSessionsBtn.cloneNode(true);
-    title.removeAttribute('id');
-    title.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
-    title.removeAttribute('aria-controls');
-    title.className = 'chat-history-goo-title';
-    title.tabIndex = -1;
-    const wrap = el('div', { class: 'chat-history-goo-wrap', 'aria-hidden': 'true' }, [layer, title]);
-    wrap.inert = true;
-    document.body.append(wrap);
-    // A fully rounded pill reports a huge radius; animating that towards the
-    // panel's square corners keeps the shape an oval blob. Use the radius
-    // that is actually visible: half the pill's height.
-    const radius = `${Math.min(parseFloat(getComputedStyle(openSessionsBtn).borderTopLeftRadius) || 0, shut.height / 2)}px`;
-    const at = (r, rr, offset) => ({ left: `${r.left - left}px`, top: `${r.top - top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: rr, ...(offset === undefined ? {} : { offset }) });
-    const titleAt = (r, offset) => ({ left: `${r.left}px`, top: `${r.top}px`, ...(offset === undefined ? {} : { offset }) });
-    const timing = { duration: 640, easing: 'cubic-bezier(.45, 0, .2, 1)' };
-    let panelFrames, pillFrames, titleFrames;
-    if (opening) {
-      // The panel swells out of the pill; the pill holds on, then slides off.
-      panelFrames = [at(shut, radius), at(panel, '0px', 0.58), at(panel, '0px')];
-      pillFrames = [at(shut, radius), at(shut, radius, 0.32), at(out, radius, 0.86), at(out, radius)];
-      titleFrames = [titleAt(shut), titleAt(shut, 0.32), titleAt(out, 0.86), titleAt(out)];
-    } else {
-      // The pill slides back and merges; then the panel drains into it.
-      panelFrames = [at(panel, '0px'), at(panel, '0px', 0.38), at(shut, radius)];
-      pillFrames = [at(out, radius), at(shut, radius, 0.46), at(shut, radius)];
-      titleFrames = [titleAt(out), titleAt(shut, 0.46), titleAt(shut)];
-    }
-    const morph = panelBlob.animate(panelFrames, timing);
-    pillBlob.animate(pillFrames, timing);
-    title.animate(titleFrames, timing);
-    // Hand back to the real pill and panel at the end, at the same spot.
-    wrap.animate([{ opacity: 1 }, { opacity: 1, offset: 0.9 }, { opacity: 0 }], timing);
-    openSessionsBtn.animate([{ opacity: 0 }, { opacity: 0, offset: 0.88 }, { opacity: 1 }], timing);
-    if (opening) sessionsPanel.animate([{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], timing);
-    // Closing: the list goes first, or its rows show past the panel's edge
-    // while its width collapses underneath.
-    else sessionsPanel.animate([{ opacity: 1 }, { opacity: 0, offset: 0.2 }, { opacity: 0 }], timing);
-    historyMorph = morph;
-    morph.finished.catch(() => {}).finally(() => { wrap.remove(); if (historyMorph === morph) historyMorph = null; });
-  }
+  const onHistoryPopout = event => { popoutOpen = !!event.detail?.open; syncHistory(); };
+  document.addEventListener('kairos:chat-history', onHistoryPopout);
   openSessionsBtn.addEventListener('click', () => {
     if (desktopChat.matches) {
-      morphHistory(() => {
-        historyCollapsed = !historyCollapsed;
-        try { localStorage.setItem('jarvis:chat-history-collapsed', String(historyCollapsed)); } catch { /* Storage is optional. */ }
-        syncHistory();
-      });
+      openChatHistory({ switchTab: (tab, opts) => import('../app.js').then(app => app.switchTab(tab, opts)), opener: openSessionsBtn });
     } else {
       if (sessionsPanel.classList.contains('open')) closeSessionsDrawer(true);
       else openSessionsDrawer();
@@ -847,7 +770,7 @@ export async function render(container, tabId, options = {}) {
   const attachStrip = el("div", { id: "attach-strip", class: "attach-strip" });
 
   // -- composer: top row (textarea + model picker) --------------------
-  const input = el("textarea", { id: "chat-input", rows: "1", placeholder: "Where should we start?", "aria-label": "Message Kairos" });
+  const input = el("textarea", { id: "chat-input", rows: "1", placeholder: "Ask, build, or describe a change…", "aria-label": "Message Kairos" });
   // One model control (David, 2026-10-14: "a little off visually and UX"). It
   // used to be two buttons stacked in one pill, connection above and version
   // below, each opening its own menu, with nothing telling them apart. Now one
@@ -1048,8 +971,31 @@ export async function render(container, tabId, options = {}) {
   const permissionControl = el('label', { class: 'chat-permission-control', 'data-mode': 'base' }, [
     el('span', { text: 'Mode' }), permissionMode,
   ]);
+  // Desktop: a pill in the prompt with its own menu, driving the select above.
+  const permissionPill = el('button', { type: 'button', id: 'chat-permission-pill', class: 'chat-permission-pill', 'data-mode': 'base',
+    'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'chat-permission-menu', 'aria-label': 'Permissions: Supervised' }, [
+    el('span', { class: 'chat-permission-pill-name', text: PERMISSION_NAMES.base })]);
+  permissionPill.insertAdjacentHTML('afterbegin', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/></svg>');
+  permissionPill.insertAdjacentHTML('beforeend', ICON_CHEVRON);
+  const permissionMenu = el('div', { id: 'chat-permission-menu', class: 'overflow-menu chat-permission-menu hidden', role: 'menu', 'aria-label': 'Permissions' });
+  for (const [mode, detail] of [['base', 'Uses your current permissions and asks when a tool needs one.'],
+    ['auto', 'Approves chat tool requests. Codex and Antigravity also leave their workspace sandbox. Admin only.']]) {
+    permissionMenu.append(el('button', { type: 'button', role: 'menuitemradio', class: 'overflow-menu-item chat-permission-choice', 'data-mode': mode,
+      'aria-checked': String(mode === 'base'), disabled: mode === 'auto',
+      onclick: () => {
+        closeMenu(permissionMenu); permissionPill.focus();
+        if (permissionMode.disabled) return;  // a save is still in flight
+        // The pill is disabled while it saves, which drops focus; it comes back when the save ends.
+        if (permissionMode.value !== mode) { refocusPill = true; permissionMode.value = mode; permissionMode.dispatchEvent(new Event('change')); }
+      } }, [el('strong', { text: PERMISSION_NAMES[mode] }), el('small', { text: detail })]));
+  }
+  permissionPill.addEventListener('click', event => { event.stopPropagation(); toggleMenu(permissionMenu); });
+  permissionMenu.addEventListener('click', event => event.stopPropagation());
+  const permissionWrap = el('div', { class: 'overflow-wrapper chat-permission-wrap' }, [permissionPill, permissionMenu]);
+  let refocusPill = false;
   apiRecent('/api/auth/status').then(status => {
     autoModeOption.disabled = !status.is_admin;
+    permissionMenu.querySelector('[data-mode="auto"]').disabled = !status.is_admin;
     slashAdmin = !!status.is_admin;
     if (input.isConnected) slashSuggestions.update();
   }).catch(() => {});
@@ -1057,7 +1003,7 @@ export async function render(container, tabId, options = {}) {
     const requested = permissionMode.value;
     const previous = permissionMode.dataset.saved || 'base';
     let target = activeSessionId;
-    permissionMode.disabled = true;
+    permissionMode.disabled = true; permissionPill.disabled = true;
     try {
       if (!target) target = (await createSession({ preserveAttachments: true })).id;
       const result = await api(`/api/sessions/${target}/permission-mode`, { method: 'POST',
@@ -1065,7 +1011,11 @@ export async function render(container, tabId, options = {}) {
       if (activeSessionId === target) syncPermissionMode(result.mode);
     } catch {
       if (!target || activeSessionId === target) syncPermissionMode(previous);
-    } finally { permissionMode.disabled = false; }
+    } finally {
+      permissionMode.disabled = false; permissionPill.disabled = false;
+      if (refocusPill && (!document.activeElement || document.activeElement === document.body)) permissionPill.focus();
+      refocusPill = false;
+    }
   });
   // Context meter (David's ask 2026-09-15) — how full THIS chat's context
   // currently is, which is a different question from the Home tab's
@@ -1102,6 +1052,15 @@ export async function render(container, tabId, options = {}) {
   composerOptions.append(phoneDictation);
   openMicBtn.append(el('span', { text: 'Open Mic' }));
   const composerDivider = el('div', { class: 'overflow-menu-divider' });
+  // Desktop's + menu (desktop redesign): grouped, with dictation in it because
+  // the desktop prompt has no mic button of its own.
+  const menuHeading = text => el('div', { class: 'overflow-menu-heading', text });
+  const addHeading = menuHeading('Add'), tabsHeading = menuHeading('From your tabs'), useHeading = menuHeading('Let Kairos use');
+  const agentItem = menuItem(ICONS.agents || ICON_PROMPT, 'Mention an agent', () => { closeMenu(overflowMenu); chatReferences?.openPicker({ kind: 'agent' }); });
+  const noteItem = menuItem(ICONS.notes || ICON_DOC, 'Vault note', () => { closeMenu(overflowMenu); chatReferences?.openPicker({ kind: 'note' }); });
+  const desktopDictation = menuItem(ICON_MIC, 'Dictate', () => { closeMenu(overflowMenu); micBtn.click(); });
+  desktopDictation.hidden = micBtn.hidden;
+  const toolsDivider = el('div', { class: 'overflow-menu-divider' });
   inputLeft.replaceChildren(overflowWrap, workspacePill);
   mobileHeader.insertBefore(contextPill, mobileHeader.querySelector('.chat-phone-tools'));
   const inputRight = el("div", { class: "chat-input-right" }, [micBtn, sendBtn]);
@@ -1109,11 +1068,11 @@ export async function render(container, tabId, options = {}) {
 
   const composer = el("div", { class: "glass chat-input-bar border-beam" }, [inputTop, inputBottom]);
   const menuStateObserver = new MutationObserver(() => {
-    for (const [button, menu] of [[modelBtn, modelMenu], [overflowBtn, overflowMenu]]) {
+    for (const [button, menu] of [[modelBtn, modelMenu], [overflowBtn, overflowMenu], [permissionPill, permissionMenu]]) {
       button.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
     }
   });
-  for (const menu of [modelMenu, overflowMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
+  for (const menu of [modelMenu, overflowMenu, permissionMenu]) menuStateObserver.observe(menu, { attributes: true, attributeFilter: ['class'] });
   const disposeVoiceRow = mountMobileVoiceRow(composer, micBtn, openMicBtn);
   const mobileModelSheet = mountMobileModelSheet({ trigger: modelBtn, menu: modelMenu, permission: composerOptions });
   const disposeMobileComposer = mountMobileComposer({ composer, input, attachmentHost: attachStrip,
@@ -1141,17 +1100,40 @@ export async function render(container, tabId, options = {}) {
   const inputHelp = el('details', { class: 'composer-input-help' }, [el('summary', { text: 'Input help' }), composerHint]);
   const dock = el('div', { class: 'chat-composer-dock' }, [bgHost, questionHost, queueHost, attachStrip, composer]);
   const phoneComposer = matchMedia('(max-width: 768px)');
+  const projectChip = el('span', { class: 'chat-prompt-chip chat-prompt-project', title: 'Project' }, [el('span', { class: 'chat-prompt-project-name', text: 'No project' })]);
+  projectChip.insertAdjacentHTML('afterbegin', ICON_FOLDER);
+  const placeChip = el('span', { class: 'chat-prompt-chip chat-prompt-place', title: 'Runs on this device' }, [el('span', { text: 'Local' })]);
+  placeChip.insertAdjacentHTML('afterbegin', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 7 5 5-5 5"/><path d="M13 17h6"/></svg>');
+  const promptContext = el('div', { class: 'chat-prompt-context', 'aria-label': 'Where this chat runs' }, [projectChip, placeChip]);
+  const promptFoot = el('div', { class: 'chat-prompt-foot' });
   const syncComposerMenu = () => {
     // Re-parent the same controls so state and handlers survive live resizing.
     // Desktop keeps David's flat + menu order from 1aaf1a8; only phones group tools.
     if (phoneComposer.matches) {
+      permissionWrap.remove(); permissionControl.hidden = false;
+      composerOptions.replaceChildren(permissionControl, openMicBtn, phoneDictation, permissionNotice);
+      // Phones keep the workspace in the composer and the meter in the header.
+      promptContext.remove(); promptFoot.remove();
+      inputLeft.append(workspacePill);
+      mobileHeader.insertBefore(contextPill, mobileHeader.querySelector('.chat-phone-tools'));
       inputHelp.append(composerHint);
       extraTools.append(captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, compactBtn, computerWatch, inputHelp);
       overflowMenu.replaceChildren(attachItem, cameraItem, skillItem, composerDivider, composerOptions, extraTools);
     } else {
-      overflowMenu.replaceChildren(attachItem, captureItem, docItem, workspaceItem, browseItem, computerBtn, integrationsItem, skillItem, compactBtn, composerDivider, composerOptions);
-      inputLeft.insertBefore(computerWatch, workspacePill);
-      dock.append(composerHint);
+      overflowMenu.replaceChildren(addHeading, attachItem, captureItem, agentItem, skillItem,
+        tabsHeading, noteItem, docItem, useHeading, browseItem, computerBtn,
+        composerDivider, workspaceItem, integrationsItem, designItem, compactBtn, toolsDivider, desktopDictation, openMicBtn);
+      // The select stays the saved value; the pill is what shows.
+      composerOptions.replaceChildren(permissionControl); permissionControl.hidden = true;
+      permissionWrap.append(composerOptions); permissionMenu.append(permissionNotice);
+      inputLeft.insertBefore(permissionWrap, workspacePill);
+      inputLeft.append(computerWatch);
+      // Desktop prompt card (desktop redesign, 2026-10-28): where the chat runs sits on a tab above
+      // the card, and the hint and the context meter sit under it.
+      promptContext.append(workspacePill);
+      dock.insertBefore(promptContext, composer);
+      promptFoot.replaceChildren(composerHint, contextPill);
+      dock.append(promptFoot);
     }
   };
   syncComposerMenu();
@@ -1263,7 +1245,7 @@ export async function render(container, tabId, options = {}) {
   const dismissMenus = (event) => {
     // Selecting a mode, starting Open Mic, searching models or expanding a
     // disclosure must keep its menu open. Only outside clicks dismiss it.
-    for (const menu of [overflowMenu, modelMenu, projectPickerMenu, phoneToolsMenu]) {
+    for (const menu of [overflowMenu, modelMenu, projectPickerMenu, phoneToolsMenu, permissionMenu]) {
       if (!event?.target || !menu.contains(event.target)) closeMenu(menu);
     }
   };
@@ -1345,6 +1327,7 @@ export async function render(container, tabId, options = {}) {
     desktopChat.removeEventListener('change', syncComposerHint);
     phoneComposer.removeEventListener('change', syncComposerMenu);
     document.removeEventListener('kairos:mobile-drawer-opening', onDrawerOpening);
+    document.removeEventListener('kairos:chat-history', onHistoryPopout);
     releaseDrawer();
     document.documentElement.classList.remove('chat-history-open');
     toolsObserver.disconnect();
@@ -1462,7 +1445,8 @@ function toggleMenu(menu, headerAnchor = null) {
     fitMenu(menu, headerAnchor.closest('.chat-header-model') || headerAnchor, { prefer: 'below', fixed: true, gap: 8 });
     return;
   }
-  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: 320, keepSide: true });
+  // Composer menus open clear of the whole prompt card, never over the text being typed.
+  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: 320, keepSide: true, clear: matchMedia('(min-width: 769px)').matches ? menu.closest('.chat-input-bar') : null });
 }
 function closeMenu(menu) { menu.classList.add("hidden"); }
 
@@ -2490,6 +2474,12 @@ function closeProjectModal() {
   if (projectModal) projectModal.backdrop.classList.add("hidden");
 }
 
+// The history popout's Projects (chatHistoryPopout.js): "Files and
+// instructions" and "+ New project" open this same panel. null creates one.
+export async function openProjectSettings(id) {
+  openProjectModal(id ? await api(`/api/projects/${id}`) : null);
+}
+
 // project === null means "create" — everything else here handles both
 // modes with the same panel rather than a separate creation form.
 async function openProjectModal(project) {
@@ -2856,6 +2846,7 @@ async function openSession(sessionId, sessionsList, messages) {
   }
   syncChatLayout(messages, session.title);
   messages.closest('#chat-main').dataset.projectId = session.project_id || '';
+  paintPromptProject(session.project_id || null);
   messages.scrollTop = messages.scrollHeight;
   await refreshModelPicker(session.model_endpoint_id, session.model_override ?? null, session.model_effort ?? null);
   if (!messages.isConnected || activeSessionId !== sessionId) return;

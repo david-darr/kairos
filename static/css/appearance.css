@@ -133,3 +133,43 @@
   .appearance-effect-section { padding: 12px; }
   .appearance-effect-control > span { min-width: 100%; }
 }
+
+/* Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting wallpaper of
+   three blooms with a dither grain (appearance.js #app-glass), behind a translucent window:
+   the background, sidebar, panes, prompt and popovers let it through. --glass-alpha is how
+   solid the surfaces are; the colours come from the wallpaper's own derived tokens. */
+.app-glass { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--bg); }
+.app-glass-bloom { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(60px); opacity: .75; animation: app-glass-drift 38s ease-in-out infinite alternate; }
+.app-glass-bloom:nth-child(1) { left: -18vmax; top: -22vmax; background: radial-gradient(circle, var(--glass-bloom-1), transparent 68%); }
+.app-glass-bloom:nth-child(2) { right: -24vmax; top: 8vmax; background: radial-gradient(circle, var(--glass-bloom-2), transparent 66%); animation-duration: 46s; animation-delay: -12s; }
+.app-glass-bloom:nth-child(3) { left: 18vmax; bottom: -34vmax; background: radial-gradient(circle, var(--glass-bloom-3), transparent 64%); opacity: .55; animation-duration: 54s; animation-delay: -24s; }
+.app-glass-grain { position: absolute; inset: 0; background-image: var(--glass-grain); background-size: 8px 8px; image-rendering: pixelated; opacity: var(--glass-dither); mix-blend-mode: overlay; }
+@keyframes app-glass-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(8vmax, 6vmax) scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .app-glass-bloom { animation: none; } }
+:root[data-appearance='glass'] body, :root[data-appearance='glass'] :is(#app, #content, #view-content, .chat-layout, #chat-main) { background: transparent; }
+:root[data-appearance='glass'] :is(.kairos-redesign-backdrop, .chat-backdrop) { display: none; }
+:root:not([data-appearance='default'])[data-appearance='glass'] :is(#sidebar, .chat-input-bar, .chat-stacked-pane, .artifact-panel, .rd-history, .rd-all-tabs, .rd-flyout,
+  .overflow-menu, .model-picker-menu, .settings-window, .forge-shell-sidebar, .forge-tab-strip, .forge-composer) {
+  background: color-mix(in srgb, var(--bg-panel-solid) calc(var(--glass-alpha) * 100%), transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35);
+}
+:root:not([data-appearance='default'])[data-appearance='glass'] #sidebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--glass-alpha) * 100%), transparent); }
+:root[data-appearance='glass'] :is(.chat-input-bar, .chat-stacked-pane, .rd-history, .rd-all-tabs) { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.art-glass { background: radial-gradient(circle at 25% 30%, var(--k-powder), transparent 55%), radial-gradient(circle at 80% 70%, var(--k-gold-hi), transparent 50%), var(--k-ink-dim); }
+.appearance-glass-options .appearance-glass-papers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.appearance-glass-paper { display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.appearance-glass-paper[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.appearance-glass-swatch { display: block; height: 34px; border: 1px solid var(--border); }
+.appearance-glass-control { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
+.appearance-art-looks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.appearance-art-look { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.appearance-art-look[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.appearance-art-look-thumb { display: block; position: relative; height: 54px; overflow: hidden; background: var(--bg); }
+.appearance-art-look-thumb canvas { width: 100%; height: 100%; display: block; }
+/* Five background styles since Liquid glass: one row of five where there is room, otherwise two
+   columns with the last card spanning its row, so no card sits alone beside a gap. */
+.kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container appearance (max-width: 769px) {
+  .kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kairos-redesign .appearance-panel .appearance-modes > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}

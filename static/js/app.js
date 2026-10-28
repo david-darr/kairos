@@ -11,7 +11,8 @@ import { parseChatWindow } from './chatWindowRoute.js';
 import { setPaneUser } from './chatPaneStack.js';
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
-import { initLayout, setKnownTabs, sidebarLayout } from "./layout.js";
+import { initLayout, setKnownTabs, sidebarLayout, pinnedTabs } from "./layout.js";
+import { renderDesktopNav, clearDesktopNav } from "./sidebarNav.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { mountMobileChrome } from './mobileChrome.js';
 import { mountPageSearch } from './mobilePageSearch.js';
@@ -297,15 +298,20 @@ async function refreshAgentBadge() {
   if (document.hidden && !botNotifyPrefs().enabled) return;
   const inbox = await api("/api/agents/inbox").catch(() => null);
   if (inbox) botInboxWatcher(inbox).catch(() => {});
-  const item = document.querySelector('#nav .nav-item[data-tab="agents"]');
-  if (!item || !inbox) return;
-  let badge = item.querySelector(".nav-badge");
-  if (!inbox.count) { badge?.remove(); item.setAttribute("aria-label", "Agents"); return; }
-  if (!badge) item.append(badge = Object.assign(document.createElement("span"), { className: "nav-badge" }));
-  badge.textContent = inbox.count > 99 ? "99+" : String(inbox.count);
-  item.setAttribute("aria-label", `Agents, ${inbox.count} waiting on you`);
+  if (!inbox) return;
+  // The sidebar's Agents button, and on desktop its pin and its All tabs row.
+  for (const item of document.querySelectorAll('#nav .nav-item[data-tab="agents"], #rd-all-tabs .nav-item[data-tab="agents"]')) {
+    let badge = item.querySelector(".nav-badge");
+    if (!inbox.count) { badge?.remove(); item.setAttribute("aria-label", "Agents"); continue; }
+    if (!badge) item.append(badge = Object.assign(document.createElement("span"), { className: "nav-badge" }));
+    badge.textContent = inbox.count > 99 ? "99+" : String(inbox.count);
+    item.setAttribute("aria-label", `Agents, ${inbox.count} waiting on you`);
+  }
 }
 document.addEventListener("jarvis:agents-changed", refreshAgentBadge);
+
+const desktopSidebar = matchMedia("(min-width: 769px)");
+desktopSidebar.addEventListener("change", () => { if (document.getElementById("nav")?.childElementCount) buildSidebar(); });
 
 async function buildSidebar() {
   const identity = await api('/api/auth/status').catch(() => null);
@@ -376,7 +382,15 @@ async function buildSidebar() {
   // Groups, order and hidden tabs: Settings > Layout (layout.js).
   const groups = appMode === 'forge' ? [{ ids: FORGE_NAV.map(item => item.id) }] : sidebarLayout([...items.keys()]);
   if (appMode === 'forge') for (const item of FORGE_NAV) items.set(item.id, { ...item, svg: ICONS[item.icon] });
-  for (const group of groups) {
+  // Desktop Kairos: the redesigned sidebar and rail (sidebarNav.js).
+  let desktopNav = null;
+  if (appMode !== 'forge' && desktopSidebar.matches) {
+    desktopNav = renderDesktopNav({ nav, items, groups, pinned: pinnedTabs([...items.keys()]), switchTab,
+      openSearch: () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })),
+      openHistory: () => import('./chatHistoryPopout.js').then(module => module.openChatHistory({ switchTab })),
+      editPins: () => openSettings({ section: 'layout' }) });
+  } else clearDesktopNav();
+  for (const group of desktopNav ? [] : groups) {
     if (!group.ids.length) continue;
     if (group.label || group.id === 'main') {
       const label = document.createElement("div");
@@ -401,11 +415,12 @@ async function buildSidebar() {
   if (appMode === 'forge') forgeRailCleanup = mountForgeRail(nav);
   refreshAgentBadge();
 
-  nav.querySelectorAll(".nav-item").forEach((item) => {
+  document.querySelectorAll("#sidebar .nav-item[data-tab], #rd-all-tabs .nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab));
     if (item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab)) item.setAttribute("aria-current", "page");
   });
   await buildSidebarFooter();
+  if (desktopNav) document.getElementById("sidebar-footer").prepend(desktopNav.allButton);
   return customTabs.filter((item) => !NAV.some((builtIn) => builtIn.id === item.id));
 }
 

@@ -1,7 +1,7 @@
 // One owner per decorative surface. The original dither painter is unchanged.
 import { drawDither, loadDitherImage } from './dither.js';
 import { getAppearance, halftonePalette } from './appearance.js';
-import { ART_PIECES } from './backgroundEffectPreferences.js';
+import { ART_PIECES, ART_LOOKS } from './backgroundEffectPreferences.js';
 import { paint, GlyphAtlas } from '../vendor/ascii-magic/runtime/canvas.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -28,7 +28,7 @@ function unsubscribe(owner) {
 }
 export function backgroundEffectKey() {
   const a = getAppearance();
-  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.animatedPiece, a.mode, a.halftone]);
+  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.animatedPiece, a.animatedLook, a.mode, a.halftone]);
 }
 const clamp = x => Math.max(0, Math.min(1, x));
 function canvas(w, h) {
@@ -110,10 +110,12 @@ function picturePainter(target, img, W, H, opts, effect, prefs, colors) {
     ctx.globalAlpha = 1;
   };
 }
-function artPainter(target, W, H, prefs, mod, colors, preview) {
+function artPainter(target, W, H, prefs, mod, colors, preview, look = 'ascii') {
   const draw = mod.default(), atlas = new GlyphAtlas(), ctx = target.getContext('2d');
   target.width = W; target.height = H;
-  const { cols, rows } = mod.meta, aspect = 1.66, dpr = Math.min(2, window.devicePixelRatio || 1);
+  // ASCII draws tall glyph cells; the dithered, dot and pixel looks draw square ones.
+  const mode = (ART_LOOKS.find(([id]) => id === look) || ART_LOOKS[0])[2];
+  const { cols, rows } = mod.meta, aspect = mode === 'text' ? 1.66 : 1, dpr = Math.min(2, window.devicePixelRatio || 1);
   // One composition at a normal glyph size (the density, like ASCII), centred,
   // never tiled. A large backdrop may grow it up to 1.5x; the edges fade out.
   let cw;
@@ -129,7 +131,7 @@ function artPainter(target, W, H, prefs, mod, colors, preview) {
   return t => {
     tc.globalCompositeOperation = 'source-over'; tc.globalAlpha = 1; tc.clearRect(0, 0, tw, th);
     paint(tc, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
-      { cw, ch, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
+      { cw, ch, ink: colors.ink, mode, atlas, dpr: 1 });
     if (!preview) {
       // Soft elliptical edge: opaque in the middle, gone before the borders.
       tc.save(); tc.globalCompositeOperation = 'destination-in';
@@ -196,7 +198,7 @@ export function mountBackgroundEffect(el, src, opts = {}) {
         const id = ART_PIECES.some(([key]) => key === a.animatedPiece) ? a.animatedPiece : ART_PIECES[0][0];
         const mod = await import(`../vendor/ascii-magic/pieces/${id}.js`);
         if (disposed || token !== revision || !visible()) { dirty = true; return; }
-        next = artPainter(target, W, H, prefs, mod, colors, opts.preview);
+        next = artPainter(target, W, H, prefs, mod, colors, opts.preview, opts.look || a.animatedLook);
       }
       else {
         const img = await loadDitherImage(src, opts.version || 0);

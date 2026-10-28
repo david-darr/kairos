@@ -1,10 +1,10 @@
 import { el } from '../api.js';
-import { EFFECTS, ART_PIECES } from '../backgroundEffectPreferences.js';
+import { EFFECTS, ART_PIECES, ART_LOOKS } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
 import { kipChoices } from '../kipPicker.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
-  resetAppearance, setAppearancePreview, halftoneSource, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
+  resetAppearance, setAppearancePreview, halftoneSource, GLASS_WALLPAPERS, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
 
 // The three halftone slots (Build spec, 2026-10-08): Home's banner and the
 // chat's two scenes. Each is optional - an empty slot keeps the Kairos picture.
@@ -26,7 +26,7 @@ export function renderAppearancePanel(content, _status, page) {
   ]);
   const modeButtons = new Map();
   const modes = el('div', { class: 'appearance-modes', role: 'group', 'aria-label': 'Background style' });
-  for (const [mode, title, subtitle] of [['default', 'Kairos', 'Parchment & bistre'], ['color', 'Color', 'A clean canvas'], ['image', 'Image', 'Your perspective'], ['shader', 'Flow', 'Color in motion']]) {
+  for (const [mode, title, subtitle] of [['default', 'Kairos', 'Parchment & bistre'], ['color', 'Color', 'A clean canvas'], ['image', 'Image', 'Your perspective'], ['shader', 'Flow', 'Color in motion'], ['glass', 'Liquid glass', 'A see-through window']]) {
     const button = el('button', { type: 'button', class: 'appearance-mode', 'data-mode': mode, onclick: () => {
       updateAppearance({ mode }); sync();
     } }, [el('span', { class: `appearance-mode-art art-${mode}`, 'aria-hidden': 'true' }), el('strong', { text: title }), el('span', { text: subtitle })]);
@@ -49,7 +49,19 @@ export function renderAppearancePanel(content, _status, page) {
   const mascotSection = el('div', { class: 'appearance-mascot-setting' }, [
     group({}, [row({ title: 'Kip', description: 'Kip, the Kairos mascot, on Home, in the chat while it works, on empty pages and in calls. Hidden shows the plain markers. Bots keep their faces.', below: kip.node, stack: true })]),
   ]);
+  // Chat messages (desktop redesign): plain text on the backdrop, or cards.
+  const messageButtons = new Map();
+  const chatMessages = el('div', { class: 'appearance-chat-styles appearance-chat-messages', role: 'group', 'aria-label': 'Chat messages' });
+  for (const [value, title, subtitle] of [['plain', 'Plain', 'Text on the backdrop'], ['cards', 'Cards', 'Each message in a card']]) {
+    const button = el('button', { type: 'button', class: 'appearance-chat-style', 'data-chat-messages': value, onclick: () => {
+      updateAppearance({ chatMessages: value }); sync();
+    } }, [el('span', { class: `appearance-chat-art art-${value}`, 'aria-hidden': 'true', text: value === 'plain' ? '| Aa' : '[ Aa ]' }),
+      el('strong', { text: title }), el('span', { text: subtitle })]);
+    messageButtons.set(value, button); chatMessages.append(button);
+  }
   const chatStyleSection = el('section', { class: 'appearance-chat-style-setting' }, [
+    el('h3', { text: 'Chat messages' }), chatMessages,
+    el('p', { class: 'meta', text: 'How messages sit in a desktop chat.' }),
     el('h3', { text: 'Chat style' }), chatStyles,
     el('p', { class: 'meta', text: 'Terminal changes how chats look, not what Kairos can do. Type /terminal in a chat to switch.' }),
   ]);
@@ -137,6 +149,17 @@ export function renderAppearancePanel(content, _status, page) {
   const piece = el('select', { id: 'appearance-art-piece' }, ART_PIECES.map(([value, text]) => el('option', { value, text })));
   piece.addEventListener('change', () => { updateAppearance({ animatedPiece: piece.value }); sync(); });
   const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Animated piece' }), piece]);
+  // Living pixels (desktop redesign): the same piece drawn as ASCII, dithered, dots or pixels.
+  const lookButtons = new Map();
+  const looks = el('div', { class: 'appearance-art-looks', role: 'group', 'aria-label': 'Look' });
+  for (const [id, title] of ART_LOOKS) {
+    const thumb = el('span', { class: 'appearance-art-look-thumb', 'aria-hidden': 'true' });
+    const button = el('button', { type: 'button', class: 'appearance-art-look', 'data-look': id, onclick: () => { updateAppearance({ animatedLook: id }); sync(); } },
+      [thumb, el('span', { text: title })]);
+    lookButtons.set(id, { button, thumb }); looks.append(button);
+  }
+  const lookRow = el('div', { class: 'appearance-effect-control appearance-look-row' }, [el('span', { text: 'Look' }), looks]);
+  let lookPreviewKey = '', lookPreviewStops = [];
   const density = el('input', { type: 'range', min: '3', max: '24', step: '1', id: 'appearance-effect-density' });
   const densityValue = el('output', { for: density.id });
   const densityRow = el('label', { class: 'appearance-effect-control', for: density.id }, [el('span', { text: 'Density (cell size)' }), density, densityValue]);
@@ -214,6 +237,27 @@ export function renderAppearancePanel(content, _status, page) {
       dial('grainMixer', 'Grain mixer', 'Break up the color blend.'), dial('grainOverlay', 'Grain overlay', 'Add a fine texture.'),
     ]), el('label', { class: 'appearance-motion', for: motion.id }, [motion, el('span', { text: 'Animate background' })]),
     el('p', { class: 'meta', text: 'Motion pauses in the background and follows your reduced-motion preference.' }),
+  ]);
+  // Liquid glass: the wallpaper and two strengths.
+  const paperButtons = new Map();
+  const papers = el('div', { class: 'appearance-glass-papers', role: 'group', 'aria-label': 'Wallpaper' });
+  for (const [id, paper] of Object.entries(GLASS_WALLPAPERS)) {
+    const swatch = el('span', { class: 'appearance-glass-swatch', 'aria-hidden': 'true' });
+    swatch.style.background = `radial-gradient(circle at 25% 35%, ${paper.blooms[0]}, transparent 60%), radial-gradient(circle at 80% 65%, ${paper.blooms[1]}, transparent 55%), ${paper.base}`;
+    const button = el('button', { type: 'button', class: 'appearance-glass-paper', 'data-wallpaper': id, onclick: () => { updateAppearance({ glassWallpaper: id }); sync(); } },
+      [swatch, el('strong', { text: paper.title })]);
+    paperButtons.set(id, button); papers.append(button);
+  }
+  const glassSlider = (key, title) => {
+    const input = el('input', { type: 'range', min: '0', max: '100', step: '1', id: `appearance-${key}` });
+    const output = el('output', { for: input.id });
+    input.addEventListener('input', () => { updateAppearance({ [key]: Number(input.value) / 100 }); sync(); });
+    return { input, output, row: el('label', { class: 'appearance-glass-control', for: input.id }, [el('span', { text: title }), input, output]) };
+  };
+  const glassStrength = glassSlider('glassStrength', 'Glass'), glassDither = glassSlider('glassDither', 'Dither');
+  const glassOptions = el('div', { class: 'appearance-glass-options' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Liquid glass' }), papers, glassStrength.row, glassDither.row,
+    el('p', { class: 'meta', text: 'Glass is how much of the wallpaper shows through the window, sidebar, panes and prompt. Dither adds the grain.' }),
   ]);
   const reset = el('button', { type: 'button', class: 'btn quiet', text: 'Reset appearance', onclick: async () => {
     try { await resetAppearance(); sync(); } catch { status.textContent = 'Appearance could not be reset. Try again.'; }
@@ -297,19 +341,32 @@ export function renderAppearancePanel(content, _status, page) {
   }
   const effectControls = el('div', { class: 'appearance-effect-controls' });
   effectSection.insertBefore(effectControls, pieceRow);
-  effectControls.append(pieceRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
+  effectControls.append(pieceRow, lookRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
   const characterSection = el('div', { class: 'appearance-character-setting' }, [
     el('h3', { class: 'rd-appearance-label', text: 'Kip' }), mascotSection,
   ]);
   const styleRow = el('div', { class: 'appearance-style-row' }, [palette, chatStyleSection]);
-  root.append(previewFrame, modeSection, styleRow, halftoneSection, effectSection, imageOptions, shaderOptions, characterSection, overlaySection, status);
+  root.append(previewFrame, modeSection, styleRow, glassOptions, halftoneSection, effectSection, imageOptions, shaderOptions, characterSection, overlaySection, status);
   for (const list of [modes, effectGrid, chatStyles, halftoneSection.querySelector('.appearance-halftone-grid')]) staggerEntrance(list);
   content.replaceChildren(root);
   function sync() {
     const value = getAppearance();
     for (const [mode, button] of modeButtons) button.setAttribute('aria-pressed', String(mode === value.mode));
     for (const [style, button] of styleButtons) button.setAttribute('aria-pressed', String(style === value.chatStyle));
-    palette.hidden = value.mode === 'default'; imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
+    for (const [style, button] of messageButtons) button.setAttribute('aria-pressed', String(style === value.chatMessages));
+    glassOptions.hidden = value.mode !== 'glass';
+    for (const [id, button] of paperButtons) button.setAttribute('aria-pressed', String(id === value.glassWallpaper));
+    for (const [key, control] of [['glassStrength', glassStrength], ['glassDither', glassDither]]) {
+      const number = Math.round(value[key] * 100); control.input.value = number; control.output.textContent = `${number}%`;
+    }
+    for (const [id, { button }] of lookButtons) button.setAttribute('aria-pressed', String(id === value.animatedLook));
+    lookRow.hidden = value.backgroundEffect !== 'animated';
+    const lookKey = `${value.animatedPiece}:${value.mode}:${value.color}`;
+    if (!lookRow.hidden && lookKey !== lookPreviewKey) {
+      lookPreviewStops.forEach(stop => stop()); lookPreviewKey = lookKey;
+      lookPreviewStops = [...lookButtons].map(([id, { thumb }]) => mountBackgroundEffect(thumb, halftoneSource('home'), { effect: 'animated', look: id, preview: true }));
+    }
+    palette.hidden = ['default', 'glass'].includes(value.mode); imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
     kip.sync();
     effectSection.hidden = !['default', 'color'].includes(value.mode);

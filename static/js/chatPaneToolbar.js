@@ -3,19 +3,26 @@ import { paneIsOpen, closePaneKind } from './chatPaneStack.js';
 import { openDesignTab, showArtifactPane } from './chatContent.js';
 import { closeChatDesign, closeForeignChatDesign } from './chatDesignPane.js';
 import { ICONS } from './icons.js';
+import { openBrowser, closeBrowser, isBrowserOpen } from './browserPane.js';
+
+const ICON_GLOBE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
 
 export function mountChatPaneToolbar({ header, host, getSessionId, backgroundTasks, getComputer, openComputer, menu }) {
   let session = null, design = null, disposed = false, revision = 0;
   const toolbar = el('div', { class: 'chat-pane-toolbar', role: 'group', 'aria-label': 'Side panes' });
   const buttons = {};
+  // The browser pane is the side browser (browserPane.js), tracked there.
+  const isOpen = kind => kind === 'browser' ? isBrowserOpen() : paneIsOpen(host, kind);
   const toggle = (kind, open) => {
-    if (paneIsOpen(host, kind)) closePaneKind(host, kind); else open();
+    if (kind === 'browser') { if (isBrowserOpen()) closeBrowser(); else open(); }
+    else if (paneIsOpen(host, kind)) closePaneKind(host, kind); else open();
     paint();
   };
   for (const [kind, label, icon, open] of [
     ['design', 'Design', ICONS.design, () => { if (design) openDesignTab(getSessionId(), design.id); }],
     ['background', 'Background tasks', ICONS.tasks, () => backgroundTasks.toggle()],
     ['documents', 'Documents', ICONS.library, () => showArtifactPane(buttons.documents)],
+    ['browser', 'Browser', ICON_GLOBE, () => openBrowser('')],
     ['computer', 'Computer', ICONS.computer, openComputer],
   ]) {
     const button = buttons[kind] = el('button', { type: 'button', class: 'chat-pane-icon', title: label, 'aria-label': label, 'aria-pressed': 'false',
@@ -32,7 +39,7 @@ export function mountChatPaneToolbar({ header, host, getSessionId, backgroundTas
   function paint() {
     const bg = backgroundTasks.getState();
     buttons.design.hidden = !design; buttons.background.hidden = !bg.available; buttons.computer.hidden = !getComputer();
-    for (const [kind, button] of Object.entries(buttons)) button.setAttribute('aria-pressed', String(paneIsOpen(host, kind)));
+    for (const [kind, button] of Object.entries(buttons)) button.setAttribute('aria-pressed', String(isOpen(kind)));
     buttons.background.classList.toggle('has-running', bg.count > 0);
     buttons.background.setAttribute('aria-label', `Background tasks${bg.count ? `, ${bg.count} running` : ''}`);
     newWindow.hidden = menuItem.hidden = !window.jarvis?.openChatWindow || !getSessionId() || matchMedia('(max-width: 768px)').matches;

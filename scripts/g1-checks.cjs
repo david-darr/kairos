@@ -222,6 +222,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     await waitFor("!!document.querySelector('.session-item[data-session-id=\"s1\"] .rd-conversation-state kairos-mascot')");
     assert.equal(await rowKip('s1'), 'thinking'); assert.equal(await rowKip('s2'), 'thinking');
     assert.equal(await rowKip('s3'), null, 'an idle chat has no Kip');
+    // Desktop redesign: the sidebar's Active list shows both running chats.
+    await waitFor("!!document.querySelector('#nav .rd-chats-active .rd-chat-row[data-session-id=\"s1\"] .rd-chat-dot.is-running') && !!document.querySelector('#nav .rd-chats-active .rd-chat-row[data-session-id=\"s2\"] .rd-chat-dot.is-running')");
     // Stop s1 from its own composer: only s1 clears.
     await navigate('chat', { sessionId: 's1' }); await delay(600);
     await waitFor("document.querySelector('#chat-send')?.dataset.mode === 'stop'");
@@ -234,6 +236,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     soft(stopped.label && stopped.label !== 'undefined', `BUG chatActivity.js:38: the stopped status label is empty (got ${JSON.stringify(stopped.label)})`);
     assert.notEqual(await js("document.querySelector('#chat-send').dataset.mode"), 'stop', 'the composer leaves stop mode');
     await waitFor("!document.querySelector('.session-item[data-session-id=\"s1\"] .rd-conversation-state kairos-mascot')");
+    await waitFor("!document.querySelector('#nav .rd-chats-active .rd-chat-row[data-session-id=\"s1\"]')");
     assert.equal(await rowKip('s2'), 'thinking', 'stopping s1 does not touch s2');
     // s2 is still thinking when reopened.
     await navigate('chat', { sessionId: 's2' }); await delay(600);

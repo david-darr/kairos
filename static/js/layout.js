@@ -30,8 +30,11 @@ const DEFAULT_GROUPS = {
   workspace: ["notes", "library", "calendar", "email", "tasks"],  // Designs live in Library (2026-10-22).
   intelligence: ["tool-store", "cookbook"],
 };
+// The desktop sidebar's pinned strip (desktop redesign, 2026-10-28): tab
+// icons under Search, chosen in Settings > Layout or the strip's Edit.
+export const DEFAULT_PINS = ["agents", "notes", "library", "calendar", "email", "tasks"];
 const defaults = () => ({
-  groups: structuredClone(DEFAULT_GROUPS), hiddenTabs: [],
+  groups: structuredClone(DEFAULT_GROUPS), hiddenTabs: [], pinned: DEFAULT_PINS.slice(),
   home: HOME_SECTIONS.map((s) => s.id), hiddenHome: ["needs", "working"],
 });
 
@@ -48,6 +51,9 @@ function normalize(raw = {}) {
     for (const { id } of SIDEBAR_GROUPS) value.groups[id] = value.groups[id].filter((tab) => !seen.has(tab) && seen.add(tab));
   }
   value.hiddenTabs = ids(raw.hiddenTabs).filter((tab) => tab !== ALWAYS_SHOWN);
+  // Home is a fixed row above the strip, so it is never pinned. A layout saved
+  // before pins existed gets the default strip.
+  if (Array.isArray(raw.pinned)) value.pinned = ids(raw.pinned).filter((tab) => tab !== ALWAYS_SHOWN).slice(0, 18);
   const homeIds = HOME_SECTIONS.map((s) => s.id);
   const order = ids(raw.home, Infinity).filter((id) => homeIds.includes(id) || tabCardId(id));
   value.home = [...order, ...homeIds.filter((id) => !order.includes(id))];
@@ -73,7 +79,11 @@ export function saveLayout(next) {
   try { localStorage.setItem(storageKey, JSON.stringify(layout)); } catch { /* applies for this visit */ }
   document.dispatchEvent(new CustomEvent("kairos:layout"));
 }
-export function resetSidebarLayout() { const d = defaults(); saveLayout({ ...layout, groups: d.groups, hiddenTabs: [] }); }
+export function resetSidebarLayout() { const d = defaults(); saveLayout({ ...layout, groups: d.groups, hiddenTabs: [], pinned: d.pinned }); }
+
+// The pinned tabs that exist and are shown, in their saved order.
+export function pinnedTabs(tabIds) { return layout.pinned.filter((id) => tabIds.includes(id) && !layout.hiddenTabs.includes(id)); }
+export function setPinned(pinned) { saveLayout({ ...layout, pinned }); }
 export function resetHomeLayout() {
   const tabIds = layout.home.filter(tabCardId);
   saveLayout({ ...layout, home: [...defaults().home, ...tabIds], hiddenHome: ["needs", "working", ...tabIds] });

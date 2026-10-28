@@ -1,4 +1,5 @@
-// Keeps a popup menu inside the window. The menu is clamped to the room on
+// Keeps a popup menu inside the window, and sideways inside the chat (or page) it belongs to, so
+// the sidebar, the chat history popout and the side panes never cover it (desktop redesign). The menu is clamped to the room on
 // the side it opens toward, and flips to the side with more room when its
 // content would not fit on the preferred one. Menu content scrolls inside
 // the clamp (see .model-picker-unified in chat.css). Open menus are re-fitted
@@ -12,15 +13,23 @@ addEventListener("resize", () => {
   }
 });
 
-export function fitMenu(menu, anchor, { prefer = "below", fixed = false, gap = 10, margin = 12, cap = 480, keepSide = false } = {}) {
+// `clear`: an element the menu must not cover (the prompt card a pill sits in), so the menu
+// opens beyond that element's edge rather than just beyond the anchor's.
+export function fitMenu(menu, anchor, { prefer = "below", fixed = false, gap = 10, margin = 12, cap = 480, keepSide = false, clear = null } = {}) {
   const run = () => {
     if (!menu.isConnected || menu.classList.contains("hidden") || !anchor.isConnected) return;
     const a = anchor.getBoundingClientRect();
+    const c = clear?.isConnected ? clear.getBoundingClientRect() : a;
+    // An absolute menu's 100% is its positioned ancestor's box, which may be the anchor or the card itself.
+    const box = (!fixed && menu.offsetParent ? menu.offsetParent : anchor).getBoundingClientRect();
+    const reachAbove = gap + Math.max(0, box.top - c.top), reachBelow = gap + Math.max(0, c.bottom - box.bottom);
     const vh = document.documentElement.clientHeight || innerHeight;
     const vw = document.documentElement.clientWidth || innerWidth;
-    const room = { above: a.top - gap - margin, below: vh - a.bottom - gap - margin };
+    const room = { above: c.top - gap - margin, below: vh - c.bottom - gap - margin };
+    const host = menu.closest("#chat-main, #content")?.getBoundingClientRect();
+    const minX = Math.max(0, host ? host.left : 0) + margin, maxX = Math.min(vw, host ? host.right : vw) - margin;
     menu.style.maxHeight = "none";
-    menu.style.maxWidth = `${vw - margin * 2}px`;
+    menu.style.maxWidth = `${Math.max(160, maxX - minX)}px`;
     menu.style.transform = "";
     const frame = menu.offsetHeight - menu.clientHeight;
     const want = Math.min(cap, menu.scrollHeight + frame);
@@ -29,18 +38,18 @@ export function fitMenu(menu, anchor, { prefer = "below", fixed = false, gap = 1
     menu.style.maxHeight = `${Math.max(96, Math.floor(Math.min(cap, room[side])))}px`;
     if (fixed) {
       menu.style.position = "fixed";
-      menu.style.top = side === "below" ? `${a.bottom + gap}px` : "auto";
-      menu.style.bottom = side === "below" ? "auto" : `${vh - a.top + gap}px`;
+      menu.style.top = side === "below" ? `${c.bottom + gap}px` : "auto";
+      menu.style.bottom = side === "below" ? "auto" : `${vh - c.top + gap}px`;
       menu.style.right = "auto";
       const w = menu.getBoundingClientRect().width;
-      menu.style.left = `${Math.max(margin, Math.min(a.right - w, vw - w - margin))}px`;
+      menu.style.left = `${Math.max(minX, Math.min(a.right - w, maxX - w))}px`;
     } else {
       menu.style.position = "absolute";
-      menu.style.top = side === "below" ? `calc(100% + ${gap}px)` : "auto";
-      menu.style.bottom = side === "below" ? "auto" : `calc(100% + ${gap}px)`;
+      menu.style.top = side === "below" ? `calc(100% + ${reachBelow}px)` : "auto";
+      menu.style.bottom = side === "below" ? "auto" : `calc(100% + ${reachAbove}px)`;
       if (!keepSide) { menu.style.left = "auto"; menu.style.right = "0"; }
       const r = menu.getBoundingClientRect();
-      const shift = r.left < margin ? margin - r.left : Math.min(0, vw - margin - r.right);
+      const shift = r.left < minX ? minX - r.left : Math.min(0, maxX - r.right);
       if (shift) menu.style.transform = `translateX(${shift}px)`;
     }
     menu.dataset.opens = side;

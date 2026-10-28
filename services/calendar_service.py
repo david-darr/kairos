@@ -47,6 +47,14 @@ class CalendarService:
     def create_event(self, title: str, start: str, end: str, all_day: bool = False, location: str = "", description: str = "",
                       sync_id: Optional[str] = None, external_uid: Optional[str] = None, completed: bool = False,
                       recurrence: Optional[dict] = None, time_zone: str = "UTC") -> dict:
+        event = self._add_event(title, start, end, all_day, location, description, sync_id, external_uid, completed, recurrence, time_zone)
+        self._save()
+        return event
+
+    def _add_event(self, title: str, start: str, end: str, all_day: bool = False, location: str = "", description: str = "",
+                   sync_id: Optional[str] = None, external_uid: Optional[str] = None, completed: bool = False,
+                   recurrence: Optional[dict] = None, time_zone: str = "UTC") -> dict:
+        """Builds and stores one event in memory only; callers save."""
         recurrence = repeats.normalize(recurrence, start, time_zone, all_day)
         if not all_day:
             start = repeats.stamp(start, time_zone).astimezone(repeats.zone(time_zone)).isoformat()
@@ -86,7 +94,6 @@ class CalendarService:
             "end_exclusive": bool(all_day and len(end) == 10 and end > start),  # iCal feed DTEND is exclusive too
         }
         self._events[event_id] = event
-        self._save()
         return event
 
     def replace_synced_events(self, sync_id: str, events: list[dict]) -> int:
@@ -102,17 +109,29 @@ class CalendarService:
             for e in self._events.values()
             if e.get("sync_id") == sync_id and e.get("external_uid") and e.get("completed")
         }
+        # Apply everything in memory, then write once. If an event is invalid
+        # the in-memory state is restored and nothing is written, so a failed
+        # sync never leaves a half-applied file (the file itself is still
+        # replaced atomically by _save).
+        before = dict(self._events)
         for event_id, e in list(self._events.items()):
             if e.get("sync_id") == sync_id:
                 del self._events[event_id]
+        try:
+            self._apply_synced(sync_id, events, completed_by_uid)
+        except Exception:
+            self._events = before
+            raise
+        self._save()
+        return len(events)
+
+    def _apply_synced(self, sync_id: str, events: list[dict], completed_by_uid: dict) -> None:
         for e in events:
             uid = e.get("uid")
-            self.create_event(
+            self._add_event(
                 e["title"], e["start"], e["end"], e.get("all_day", False),
                 sync_id=sync_id, external_uid=uid, completed=completed_by_uid.get(uid, False),
             )
-        self._save()
-        return len(events)
 
     @staticmethod
     def _public(event: dict) -> dict:

@@ -1,5 +1,8 @@
 // Shared desktop/phone checks, invoked by ui-smoke with its synthetic server.
-module.exports = async ({ js, waitFor, capture, navigate, overflow, reads, writes, label }) => {
+module.exports = async ({ js: rendererJs, waitFor, capture, navigate, overflow, reads, writes, label }) => {
+  // These checks assert that each Drive action sends its own request; the app may otherwise reuse an
+  // identical read from the last second (api.js). Waits still go through ui-smoke's waitFor.
+  const js = async code => { await rendererJs("import('/static/js/api.js').then(m => m.clearSharedReads())"); return rendererJs(code); };
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const requestAfter = async (records, before, predicate) => {
     for (let i = 0; i < 80; i++) {

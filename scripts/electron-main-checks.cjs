@@ -92,7 +92,7 @@ const mainPage = (debugPort, port) => until(async () => {
 const USABLE = `(() => {
   const view = document.querySelector('#view-content');
   if (document.querySelector('.onboarding-card')?.getClientRects().length) return 'onboarding';
-  return view?.children.length && !view.textContent.includes('Loading...') && document.querySelector('#nav .nav-item[data-tab=home]') ? 'home' : '';
+  return view?.children.length && !view.textContent.includes('Loading...') && document.querySelector('#sidebar .nav-item[data-tab=home]') ? 'home' : '';
 })()`;
 
 async function startAndMeasure(label, ctx) {

@@ -26,7 +26,7 @@ function sharedGet(path, options) {
 
 // A "something changed" event means the server's answer may differ, so the share is dropped
 // (this listener is registered first, so it runs before the views' own refresh handlers).
-for (const name of typeof document === "undefined" ? [] : ["jarvis:agents-changed", "jarvis:tabs-changed", "kairos:models-changed", "kairos:addons-changed", "kairos:design-changed", "kairos:turn-state"]) {
+for (const name of typeof document === "undefined" ? [] : ["jarvis:agents-changed", "jarvis:tabs-changed", "kairos:models-changed", "kairos:addons-changed", "kairos:design-changed", "kairos:forge-apps", "kairos:forge-projects", "kairos:turn-state"]) {
   document.addEventListener(name, () => { sharedReads.clear(); recentReads.clear(); });
 }
 

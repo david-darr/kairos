@@ -137,3 +137,6 @@
 .kairos-redesign #content > .view .view-header .sub {
   text-shadow: 0 0 10px rgba(var(--wash-rgb), .95), 0 0 22px rgba(var(--wash-rgb), .8), 0 0 2px rgba(var(--wash-rgb), .9);
 }
+
+/* Desktop cards are a little less round than the phone's (David, 2026-10-28). */
+@media (min-width: 769px) { .kairos-redesign { --rd-radius-card: 18px; } }

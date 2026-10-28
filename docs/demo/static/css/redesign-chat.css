@@ -480,3 +480,120 @@
   .kairos-redesign:not([data-mascot=off]) .chat-author .rd-chat-author-kip kairos-mascot { width: 22px !important; height: 22px !important; }
   .kairos-redesign:not([data-mascot=off]) .chat-author .chat-author-mark { display: none; }
 }
+
+/* -- Desktop redesign (2026-10-28, canvas boards Main and Popups) ------------------------------
+   Plain messages by default: the user's turn right-aligned with a thin gold rule, the reply
+   straight on the backdrop with a soft halo of the backdrop colour so it stays legible.
+   Appearance > Chat messages > Cards keeps the bubble look above. The prompt: + / model /
+   permissions on the left, a square send on the right, sharp edges. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=chat][data-chat-messages=plain]:not([data-chat-style=terminal]) #chat-messages .msg.user { align-items: flex-end; }
+  .kairos-redesign[data-view=chat][data-chat-messages=plain]:not([data-chat-style=terminal]) #chat-messages .msg.user .msg-body {
+    max-width: min(78%, 640px); padding: 12px 16px; border: 1px solid var(--rd-line); border-radius: 12px;
+    background: color-mix(in srgb, var(--rd-surface-solid) 82%, transparent); color: var(--rd-ink); box-shadow: none; text-align: left;
+  }
+  .kairos-redesign[data-view=chat][data-chat-messages=plain]:not([data-chat-style=terminal]) #chat-messages .msg.user .msg-body :is(a, code) { color: inherit; }
+  .kairos-redesign[data-view=chat][data-chat-messages=plain]:not([data-chat-style=terminal]) #chat-messages .msg.assistant :is(.msg-body, .chat-author) {
+    text-shadow: 0 0 2px var(--rd-ground), 0 0 10px var(--rd-ground), 0 0 18px var(--rd-ground);
+  }
+  .kairos-redesign[data-view=chat][data-chat-messages=plain]:not([data-chat-style=terminal]) #chat-messages .msg :is(.chat-code-block, .chat-table-wrap, .artifact-card) { text-shadow: none; }
+
+  /* The prompt. */
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar { border-radius: 14px; border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow); }
+  /* Two rows: the text on top, then + / model / permissions on the left and send on the right. */
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar:not(.forge-composer) { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding: 10px 10px 8px; }
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar:not(.forge-composer) .chat-input-top { grid-column: 1 / -1; grid-row: 1; }
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar:not(.forge-composer) .chat-input-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; grid-column: 1; grid-row: 2; }
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar:not(.forge-composer) .chat-input-left > * { margin: 0; }
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) .chat-input-bar:not(.forge-composer) .chat-input-right { grid-column: 2; grid-row: 2; align-self: end; }
+  .kairos-redesign[data-view=chat]:not([data-chat-style=terminal]) #overflow-plus-btn { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; }
+  .kairos-redesign[data-view=chat] .chat-header-model.model-pill.rd-in-composer { height: 32px; border: 0; border-radius: 8px; max-width: 300px; background: transparent; }
+  .kairos-redesign[data-view=chat] .rd-in-composer .model-picker-btn { border-radius: 8px; gap: 6px; }
+  .kairos-redesign[data-view=chat] .rd-in-composer .model-label-version { color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=chat] #chat-send { width: 34px; height: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: 10px; display: grid; place-items: center; background: var(--rd-primary-bg); color: var(--rd-primary-fg); border: 0; }
+  .kairos-redesign[data-view=chat] #chat-send:hover { background: var(--rd-primary-hover); }
+  /* No mic on the desktop prompt: Dictate is in the + menu, and the button shows while it records. */
+  .kairos-redesign[data-view=chat] #chat-mic:not(.recording, .busy) { display: none; }
+  .kairos-redesign[data-view=chat] #chat-mic:is(.recording, .busy) { border-radius: 10px; }
+
+  /* The permission pill and its menu. */
+  .chat-permission-wrap { position: relative; }
+  .chat-permission-wrap .composer-menu-options { display: none; }
+  .chat-permission-pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--rd-ink); font: 500 12.5px var(--rd-font-ui); cursor: pointer; white-space: nowrap;
+  }
+  .chat-permission-pill:hover { background: color-mix(in srgb, var(--rd-ink) 6%, transparent); }
+  .chat-permission-pill:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+  .chat-permission-pill[data-mode=auto] { border-color: var(--danger); color: var(--danger); }
+  .chat-permission-pill > svg:last-child { width: 9px; height: 9px; opacity: .7; }
+  .chat-permission-menu { width: 280px; padding: 6px; }
+  .chat-permission-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 8px 10px; text-align: left; white-space: normal; }
+  .chat-permission-choice small { color: var(--rd-ink-dim); font-size: 11.5px; line-height: 1.35; }
+  .chat-permission-choice[aria-checked=true] { box-shadow: inset 2px 0 0 var(--point); background: var(--rd-surface-2); }
+  .chat-permission-choice:disabled { opacity: .5; cursor: not-allowed; }
+  .chat-permission-menu .chat-permission-notice { margin: 6px 10px 4px; font-size: 11.5px; color: var(--danger); }
+
+  /* The + menu's groups; Open Mic sits in it as an ordinary row. */
+  .overflow-menu-heading { padding: 8px 10px 3px; font: 500 10px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .overflow-menu-heading:first-child { padding-top: 4px; }
+  #overflow-menu > .chat-openmic-btn { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 34px; padding: 6px 10px; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; justify-content: flex-start; }
+  #overflow-menu > .chat-openmic-btn:hover { background: var(--rd-surface-2); }
+  .kairos-redesign #overflow-menu, .kairos-redesign #model-picker-menu, .kairos-redesign .chat-permission-menu { border-radius: 0; }
+  .kairos-redesign #overflow-menu .overflow-menu-item { border-radius: 0; }
+}
+/* Sharp chrome around a desktop chat: the header's controls and the stacked side panes. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=chat] :is(.rd-chat-header #chat-history-toggle, .chat-pane-toolbar, .chat-pane-icon, .chat-new-window, .chat-phone-tools > button,
+    .chat-jump, .chat-stacked-pane, .artifact-header-controls .btn, .chat-question-host .question-card, .bg-tasks-pill, .chat-queue) { border-radius: 0; }
+  .kairos-redesign[data-view=chat] .chat-stacked-pane { box-shadow: none; border-color: var(--rd-line-strong); }
+  .kairos-redesign[data-view=chat] .chat-pane-icon[aria-pressed="true"] { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+}
+
+/* -- Chats like the reference David chose (2026-10-28) --------------------------------------------------
+   The chat's name on the left of a quiet header with icon buttons on the right; the prompt as a rounded
+   card with a tab above it naming where the chat runs, and the hint and context meter beneath it. */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=chat] .chat-mobile-header.rd-chat-header { gap: 4px; padding-block: 10px; }
+  .kairos-redesign[data-view=chat] .rd-chat-header #chat-history-toggle {
+    width: 32px; height: 32px; padding: 0; justify-content: center; border: 0; border-radius: 8px; background: transparent; box-shadow: none; color: var(--rd-ink-dim);
+  }
+  .kairos-redesign[data-view=chat] .rd-chat-header #chat-history-toggle :is(.rd-conv-label, .rd-conv-count),
+  .kairos-redesign[data-view=chat] .rd-chat-header #chat-history-toggle > svg:last-child { display: none; }
+  .kairos-redesign[data-view=chat] .rd-chat-header #chat-history-toggle:hover,
+  .kairos-redesign[data-view=chat] .rd-chat-header #chat-history-toggle[aria-expanded="true"] { background: color-mix(in srgb, var(--rd-ink) 8%, transparent); color: var(--rd-ink); }
+  .kairos-redesign[data-view=chat] .rd-chat-title { flex: 1 1 auto; font: 500 14px/1.3 var(--rd-font-ui); font-style: normal; color: var(--rd-ink); }
+  .kairos-redesign[data-view=chat] .chat-pane-toolbar { gap: 2px; padding: 0; border: 0; background: transparent; }
+  .kairos-redesign[data-view=chat] :is(.chat-pane-icon, .chat-new-window, .chat-phone-tools > button) {
+    width: 32px; min-width: 32px; height: 32px; min-height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--rd-ink-dim);
+  }
+  .kairos-redesign[data-view=chat] :is(.chat-pane-icon, .chat-new-window, .chat-phone-tools > button):hover { background: color-mix(in srgb, var(--rd-ink) 8%, transparent); color: var(--rd-ink); }
+  .kairos-redesign[data-view=chat] .chat-pane-icon[aria-pressed="true"] { background: color-mix(in srgb, var(--rd-ink) 12%, transparent); color: var(--rd-ink); }
+
+  .chat-prompt-context {
+    display: flex; align-items: center; gap: 16px; min-width: 0; margin: 0 16px -1px; padding: 7px 14px 8px;
+    border: 1px solid var(--rd-line); border-bottom: 0; border-radius: 12px 12px 0 0;
+    background: color-mix(in srgb, var(--rd-surface-solid) 70%, transparent); color: var(--rd-ink-dim); font: 12.5px var(--rd-font-ui);
+  }
+  .chat-prompt-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+  .chat-prompt-chip svg { flex: none; }
+  .chat-prompt-project-name { overflow: hidden; text-overflow: ellipsis; color: var(--rd-ink); font-weight: 500; }
+  .chat-prompt-context #workspace-pill-slot .workspace-pill { margin: 0; padding: 0 2px 0 8px; border-radius: 6px; font-size: 12px; }
+  .chat-prompt-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 6px 0; min-height: 22px; }
+  .chat-prompt-foot .composer-hint { margin: 0; text-align: left; }
+  .chat-prompt-foot .context-pill { flex: none; margin: 0; padding: 0 4px; height: 22px; border: 0; background: transparent; color: var(--rd-ink-dim); font-size: 11.5px; }
+}
+/* The document pane's own buttons follow the chat's quieter controls (desktop). */
+@media (min-width: 769px) {
+  .kairos-redesign[data-view=chat] .chat-stacked-pane .artifact-toolbar .btn { height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--rd-ink-dim); }
+  .kairos-redesign[data-view=chat] .chat-stacked-pane .artifact-toolbar .btn:is(:hover, [aria-pressed=true], .active) { background: color-mix(in srgb, var(--rd-ink) 10%, transparent); color: var(--rd-ink); }
+  .kairos-redesign[data-view=chat] .chat-stacked-pane .artifact-tab { border-radius: 8px; }
+}
+/* Panes keep every control on its own line at any size: the document toolbar scrolls sideways
+   instead of wrapping over the preview (David, 2026-10-28). */
+@media (min-width: 769px) {
+  .kairos-redesign .chat-stacked-pane .artifact-toolbar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; flex: none; }
+  .kairos-redesign .chat-stacked-pane .artifact-toolbar > * { flex: none; }
+  .kairos-redesign .chat-stacked-pane .artifact-header > div { min-width: 0; overflow: hidden; }
+  .kairos-redesign .chat-stacked-pane .artifact-header :is(h2, .artifact-detail) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

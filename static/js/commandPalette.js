@@ -51,7 +51,11 @@ async function open() {
 function close() {
   if (!isOpen()) return;
   backdrop.classList.add("hidden");
-  if (previousFocus?.isConnected) previousFocus.focus();
+  // The sidebar can be rebuilt while the palette is open (a resize across the desktop width);
+  // then focus returns to the same tab's new button rather than to the page.
+  const tab = previousFocus?.dataset?.tab;
+  const target = previousFocus?.isConnected ? previousFocus : tab ? document.querySelector(`#sidebar .nav-item[data-tab="${CSS.escape(tab)}"]`) : null;
+  target?.focus();
   previousFocus = null;
 }
 

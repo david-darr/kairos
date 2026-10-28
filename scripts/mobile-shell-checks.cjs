@@ -331,8 +331,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await waitFor("!!document.querySelector('.ms-finished-card')");
   assert.ok(await js("document.querySelector('.ms-finished-card').textContent.includes('Stopped')"), 'A stopped turn lands in the finished deck');
   await capture('shell-finished-deck');
-  const cards = await js("document.querySelectorAll('.ms-finished-card').length");
-  await js("document.querySelector('.ms-finished-card').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))"); await delay(250);
+  // Count once the deck has stopped changing (a second run's card can still be landing).
+  let cards = -1;
+  for (let i = 0; i < 20; i++) { const now = await js("document.querySelectorAll('.ms-finished-card').length"); if (now === cards) break; cards = now; await delay(150); }
+  await js("document.querySelector('.ms-finished-card').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))");
+  try { await waitFor(`document.querySelectorAll('.ms-finished-card').length === ${cards - 1}`, 3000); } catch { /* the assert below names the count */ }
   assert.equal(await js("document.querySelectorAll('.ms-finished-card').length"), cards - 1, 'Long press puts a finished card away');
   // Stop the second run so later checks start clean.
   await js("fetch('/api/chat/live/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: 's2' }) })"); await delay(500);

@@ -247,7 +247,19 @@ app.whenReady().then(async () => {
     if (details.level === 'error' || /ResizeObserver/i.test(details.message))
       errors.push(/ResizeObserver/i.test(details.message) ? `${details.message} after ${lastCapture} (${details.sourceId}:${details.lineNumber})` : details.message);
   });
+  // A check that edits demoState or the fixture data changed the "server" behind the app's back. The app shares identical
+  // GETs for a moment and keeps slow-changing ones for 30 s (api.js), dropping them on writes and
+  // change events; a fixture edit sends neither, so the next renderer call drops them first, exactly
+  // when the fixtures changed (whatever the check does next: navigate, click or dispatch an event).
+  let lastFixtures;
+  const fixturesChanged = () => {
+    let now; try { now = JSON.stringify([demoState, calendarFixtures]); } catch { return false; }
+    if (lastFixtures === undefined) { lastFixtures = now; return false; }
+    if (now === lastFixtures) return false;
+    lastFixtures = now; return true;
+  };
   const js = async (code) => {
+    if (fixturesChanged()) await win.webContents.executeJavaScript("import('/static/js/api.js').then(m => m.clearSharedReads()).catch(() => {})").catch(() => {});
     try { return await win.webContents.executeJavaScript(code); }
     catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
   };
@@ -414,6 +426,13 @@ app.whenReady().then(async () => {
       console.log('PASS: shared interface on desktop, phone and small phone; chat model, tools, composer, drawers and Settings.');
       console.log('Screenshots: ' + output);
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['shared interface'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--agents-appearance-only')) {  // Agents themes and reduced motion (agents-appearance-checks.cjs).
+      await require('./agents-appearance-checks.cjs')({ js, win, waitFor, navigate, capture });
+      assert.deepEqual(errors, []);
+      console.log('PASS: Agents appearance checks.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents appearance'], errors }, null, 2));
       return;
     }
     if (process.argv.includes('--app-shell-only')) {
@@ -808,7 +827,8 @@ app.whenReady().then(async () => {
       if (width > 768) assert.ok(await js("document.querySelector('.forge-shell').dataset.split === 'true' && !!document.querySelector('[aria-label=\"Left pane\"] .forge-transcript-layout')"), 'preview opens beside session');
       assert.ok(writes.slice(appWriteStart).some(w => w.path === forgeBase + '/app/start'), label + ' own app start');
       assert.ok(await js("document.querySelector('.forge-preview-fallback').textContent.includes('iframe')"), label + ' labelled fallback');
-      await waitFor("!!document.querySelector('.forge-running-strip button') && !document.querySelector('.forge-running-strip').hidden && !!document.querySelector('[data-forge-project=fp1] .forge-app-dot')");
+      try { await waitFor("!!document.querySelector('.forge-running-strip button') && !document.querySelector('.forge-running-strip').hidden && !!document.querySelector('[data-forge-project=fp1] .forge-app-dot')"); }
+      catch (error) { console.log('DIAG', JSON.stringify(await js("(async () => ({ strip: document.querySelector('.forge-running-strip')?.outerHTML, dots: document.querySelectorAll('.forge-app-dot').length, rail: !!document.querySelector('[data-forge-project=fp1]'), running: await fetch('/api/forge/apps/running').then(r => r.json()) }))()")), JSON.stringify(reads.slice(-40).map(r => r.path || r))); throw error; }
       for (const preset of ['tablet', 'phone', 'desktop']) {
         await js(`document.querySelector('[data-preview-width=${preset}]').click()`);
         assert.equal(await js(`document.querySelector('[data-preview-width=${preset}]').getAttribute('aria-pressed')`), 'true');
@@ -1026,7 +1046,8 @@ app.whenReady().then(async () => {
     // Sub-pixel layout (zoom, scrollbars) can land a hair off the nominal width, so compare within a pixel.
     const nearWidth = (actual, nominal, message) => assert.ok(Math.abs(actual - nominal) <= 1, `${message || 'Sidebar width'}: expected ${nominal}, got ${actual}`);
     const railWidth = () => js("Math.round(document.querySelector('#sidebar').getBoundingClientRect().width)");
-    nearWidth(await railWidth(), 248);
+    // Desktop redesign (canvas boards Main and Rail): 232px expanded, a 56px icon rail collapsed.
+    nearWidth(await railWidth(), 232);
     const transitionProperties = await js(`(async () => {
       const rail = document.querySelector('#sidebar');
       document.querySelector('#sidebar-toggle').click();
@@ -1037,25 +1058,33 @@ app.whenReady().then(async () => {
       return properties;
     })()`);
     assert.ok(transitionProperties.includes('width'), `Sidebar animates between widths: ${transitionProperties.join(',')}`);
-    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 52) <= 1");
-    nearWidth(await railWidth(), 52);
-    assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item svg')].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=52})"), 'Icons fit the slim rail');
-    assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item > span, #sidebar .sidebar-user-name')].every(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return (r.width===0||s.opacity==='0'||s.display==='none')&&r.right<=52})"), 'Labels are hidden in the slim rail');
+    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 56) <= 1");
+    nearWidth(await railWidth(), 56);
+    assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item svg')].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=56})"), 'Icons fit the slim rail');
+    assert.ok(await js("[...document.querySelectorAll('#sidebar .nav-item > span, #sidebar .sidebar-user-name')].every(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return (r.width===0||s.opacity==='0'||s.display==='none')&&r.right<=56})"), 'Labels are hidden in the slim rail');
     assert.equal(await js("document.querySelector('#sidebar-toggle').getAttribute('aria-expanded')"), "false");
     assert.equal(await js("localStorage.getItem('jarvis:sidebar-collapsed')"), "true");
     assert.ok(await js("[...document.querySelectorAll('#nav .nav-item')].every(b => b.getAttribute('aria-label') && b.querySelector('svg'))"), "Every icon-only tab has an accessible name and an icon");
+    // All tabs keeps its labels while the sidebar is a rail (David, 2026-10-28).
+    await js("document.querySelector('#rd-all-tabs-btn').click()");
+    await waitFor("!document.querySelector('#rd-all-tabs').hidden");
+    assert.ok(await js("[...document.querySelectorAll('#rd-all-tabs .nav-item > span:not(.nav-badge)')].every(n => n.getBoundingClientRect().width > 20 && getComputedStyle(n).opacity === '1' && n.textContent.trim())"), 'All tabs shows every label in the collapsed sidebar');
+    await capture("desktop-sidebar-collapsed-all-tabs");
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await waitFor("document.querySelector('#rd-all-tabs').hidden");
     await capture("desktop-sidebar-collapsed");
     await win.loadURL(base);
     await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
     await delay(350);
-    nearWidth(await railWidth(), 52, "Collapsed state survives reload");
+    nearWidth(await railWidth(), 56, "Collapsed state survives reload");
     for (const tab of ["chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "cookbook", "school"]) {
       await navigate(tab);
       assert.deepEqual(await overflow(), [], "collapsed " + tab);
       if (tab === 'chat') await capture('desktop-chat-minimal');
     }
-    await js("document.querySelector('[data-tab=chat]').focus()");
-    assert.equal(await js("document.querySelector('.sidebar-tooltip').textContent"), "Chats");
+    // Chats is reached from All tabs and the history popout on desktop; the rail's pins carry tooltips.
+    await js("document.querySelector('#sidebar .nav-item[data-tab=notes]').focus()");
+    assert.equal(await js("document.querySelector('.sidebar-tooltip').textContent"), "Notes");
     assert.ok(await js("document.querySelector('.sidebar-tooltip').classList.contains('show')"));
     win.setContentSize(390, 844);
     await delay(100);
@@ -1074,8 +1103,8 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await win.webContents.debugger.sendCommand("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     // Wait for the 260 ms width transition to settle rather than a fixed delay.
-    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 248) <= 1");
-    nearWidth(await railWidth(), 248, "Keyboard expands sidebar");
+    await waitFor("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 232) <= 1");
+    nearWidth(await railWidth(), 232, "Keyboard expands sidebar");
     await js("document.activeElement.blur()");
     // Page widths on a wide desktop.
     const previousSize = win.getContentSize();
@@ -2058,12 +2087,11 @@ app.whenReady().then(async () => {
               const response = await window.__settingsOriginalFetch.apply(this, args);
               if (authStatus) {
                 // Wait for the body too so the pending open can resume before the assertion.
-                const json = response.json.bind(response);
-                response.json = async () => {
-                  const body = await json();
-                  window.__authAnswered = true;
-                  return body;
-                };
+                // api.js reads a clone of a shared GET, so mark the clones' bodies too.
+                const mark = res => { const json = res.json.bind(res); res.json = async () => { const body = await json(); window.__authAnswered = true; return body; }; return res; };
+                const clone = response.clone.bind(response);
+                response.clone = () => mark(clone());
+                mark(response);
               }
               return response;
             };
@@ -2170,13 +2198,30 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.chat-find-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
     assert.equal(await js("document.querySelector('.chat-find').hidden"), true, "Esc closes it");
     assert.equal(await js("CSS.highlights.has('chat-find')"), false, "and clears the highlights");
+    // Desktop redesign (2026-10-28): the header's history button opens the history popout; the
+    // in-chat panel stays shut on desktop. Filters, Chats/Projects and Escape are checked here.
     await js("document.querySelector('#chat-history-toggle').click()");
-    await delay(300);
-    assert.equal(await js("document.querySelector('#chat-sessions').inert"), false);
+    await waitFor("!!document.querySelector('#rd-history .rd-history-open')");
+    assert.equal(await js("document.querySelector('#chat-sessions').inert"), true, 'Desktop history is the popout, not the in-chat panel');
+    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'The history button reports the open popout');
     assert.equal(await js("getComputedStyle(document.querySelector('.chat-history-close')).display"), 'none', 'Drawer close control stays mobile-only');
+    assert.ok(await js("[...document.querySelectorAll('#rd-history .rd-history-filters button')].map(b => b.dataset.filter).join() === 'all,working,needs,pinned'"), 'History filters: All, Working, Needs you, Pinned');
+    assert.ok(await js("Number(document.querySelector('#rd-history [data-filter=all] small').textContent) === document.querySelectorAll('#rd-history .rd-history-open').length"), 'All counts every listed chat');
+    await js("document.querySelector('#rd-history [data-filter=pinned]').click()");
+    assert.ok(await js("[...document.querySelectorAll('#rd-history .rd-history-name')].every(n => n.textContent.startsWith('★')) && Number(document.querySelector('#rd-history [data-filter=pinned] small').textContent) === document.querySelectorAll('#rd-history .rd-history-open').length"), 'Pinned shows only starred chats');
+    await js("{ document.querySelector('#rd-history [data-filter=all]').click(); const s = document.querySelector('#rd-history .rd-history-search'); s.value = 'zzzz-no-such-chat'; s.dispatchEvent(new Event('input')) }");
+    assert.ok(await js("document.querySelectorAll('#rd-history .rd-history-open').length === 0 && !!document.querySelector('#rd-history .rd-history-empty')"), 'Search narrows the list and says when nothing matches');
+    await js("{ const s = document.querySelector('#rd-history .rd-history-search'); s.value = ''; s.dispatchEvent(new Event('input')) }");
     await capture('desktop-chat-history');
-    await js("document.querySelector('#chat-history-toggle').click()");
-    await delay(300);
+    await js("document.querySelector('#rd-history .rd-history-tab[data-mode=projects]').click()");
+    await waitFor("!!document.querySelector('#rd-history .rd-history-project, #rd-history .rd-history-empty')");
+    if (await js("!!document.querySelector('#rd-history .rd-history-project')")) {
+      await js("document.querySelector('#rd-history .rd-history-project').click()");
+      await waitFor("!!document.querySelector('#rd-history .rd-history-files') && !!document.querySelector('#rd-history .rd-history-back')");
+      await js("document.querySelector('#rd-history .rd-history-back').click()");
+    }
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+    await waitFor("!document.querySelector('#rd-history') && document.activeElement === document.querySelector('#chat-history-toggle')");
     assert.equal(writes.length, navigationWriteBaseline, "Navigation must not write data");
     await js("document.querySelector('#model-picker-btn').click()");
     await capture("desktop-model-menu");
@@ -2194,27 +2239,30 @@ app.whenReady().then(async () => {
     // to 20px on purpose. Take the radius from the model menu and hold the
     // others to it, so a future restyle moves them together or fails here.
     const popupRadius = await js("getComputedStyle(document.querySelector('#model-picker-menu')).borderRadius");
-    assert.ok(/^\d+(\.\d+)?px$/.test(popupRadius) && parseFloat(popupRadius) > 0, `Popups are rounded (got ${popupRadius})`);
+    // Desktop redesign (2026-10-28): popups are sharp, so the shared radius is 0.
+    assert.equal(popupRadius, '0px', `Popups have sharp edges (got ${popupRadius})`);
     const popupLook = `(m => { const s = getComputedStyle(m); const r = m.getBoundingClientRect(); const c = document.querySelector('.chat-input-bar').getBoundingClientRect(); const t = document.querySelector('.chat-input-bar textarea').getBoundingClientRect(); /* The redesign anchors the menu to the pill inside the bar, so it may touch the bar's border; it must never cover the text box. */ const clear = r.bottom <= t.top || r.top >= t.bottom || r.right <= t.left || r.left >= t.right; return s.backgroundImage === 'none' && s.borderRadius === ${JSON.stringify(popupRadius)} && r.bottom <= c.top + 4 && clear; })`;
     assert.ok(await js(popupLook + "(document.querySelector('#model-picker-menu'))"), "Model menu: shared popup look, above the composer");
     await js("document.body.click(); document.querySelector('#overflow-plus-btn').click()");
     // 2026-10-23: the DeskModelPicker board gives the model picker its own 24px radius; the other popups keep sharing one radius.
     const sharedRadius = await js("getComputedStyle(document.querySelector('#overflow-menu')).borderRadius");
-    assert.ok(/^\d+(\.\d+)?px$/.test(sharedRadius) && parseFloat(sharedRadius) > 0, `Popups are rounded (got ${sharedRadius})`);
+    assert.equal(sharedRadius, popupRadius, `The + menu shares the popups' sharp edge (got ${sharedRadius})`);
     assert.ok(await js(popupLook.split(popupRadius).join(sharedRadius) + "(document.querySelector('#overflow-menu'))"), "+ menu: shared popup look, above the composer");
     assert.ok(await js("[...document.querySelectorAll('.chat-input-bar button')].filter(b => !b.closest('#overflow-menu')).every(b => !b.classList.contains('chat-computer-toggle') && b.id !== 'chat-compact' && !['Capture screen', 'Computer', 'Compact'].includes(b.title) && !['Capture screen', 'Computer', 'Compact'].includes(b.textContent.trim()) && b.getAttribute('aria-label') !== 'Capture from this device')"), "Capture screen, Computer and Compact are absent from the composer bar outside the + menu");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item')].some(b => b.textContent.trim() === 'Capture screen' && !b.hidden)"), "+ menu always contains Capture screen");
-    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item:not(.rd-chat-dictation-action)')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Documents', 'Workspace', 'Browse the web', 'Computer', 'Integrations', 'Use a skill', 'Compact'], "+ menu keeps the requested item order (the phone-only Dictate action is excluded)");
+    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item:not(.rd-chat-dictation-action)')].map(b => b.textContent.trim())"), ['Attach files', 'Capture screen', 'Mention an agent', 'Use a skill', 'Vault note', 'Documents', 'Browse the web', 'Computer', 'Workspace', 'Integrations', 'Design mode', 'Compact', 'Dictate'], "+ menu keeps the canvas's grouped order (the phone-only Dictate action is excluded)");
+    assert.deepEqual(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-heading')].map(n => n.textContent)"), ['Add', 'From your tabs', 'Let Kairos use'], "+ menu groups: Add, From your tabs, Let Kairos use");
+    assert.ok(await js("document.querySelector('#overflow-menu').contains(document.querySelector('#chat-openmic'))"), "Open Mic lives in the desktop + menu");
     assert.ok(await js("[...document.querySelectorAll('#overflow-menu .overflow-menu-item[hidden]')].every(b => getComputedStyle(b).display === 'none')"), "Hidden + menu items leave no gaps");
     await capture("desktop-plus-menu");
     await js("document.body.click()");
-    // Native <select>s (the composer's Mode here) open the app's own menu,
-    // above the composer, not the system's list; Escape closes it.
-    await js("document.getElementById('chat-permission-mode').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))");
-    assert.ok(await js("(() => { const m = document.querySelector('.custom-select-menu'); const c = document.querySelector('.chat-input-bar').getBoundingClientRect(); return !!m && m.querySelectorAll('.custom-select-item').length === document.getElementById('chat-permission-mode').options.length && m.querySelector('.custom-select-item.active') && m.getBoundingClientRect().bottom <= c.top; })()"), "Mode opens the app's menu above the composer");
+    // The permission pill (desktop redesign) opens its own menu above the composer, one row per
+    // mode with the saved one checked; Escape closes it.
+    await js("document.getElementById('chat-permission-pill').click()");
+    assert.ok(await js("(() => { const m = document.getElementById('chat-permission-menu'); const c = document.querySelector('.chat-input-bar').getBoundingClientRect(); return !m.classList.contains('hidden') && m.querySelectorAll('.chat-permission-choice').length === document.getElementById('chat-permission-mode').options.length && m.querySelector('[aria-checked=true]') && m.getBoundingClientRect().bottom <= c.top; })()"), "Permissions open the app's menu above the composer");
     await capture("desktop-mode-menu");
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-    assert.ok(await js("!document.querySelector('.custom-select-menu')"), "Escape closes the Mode menu");
+    assert.ok(await js("document.getElementById('chat-permission-menu').classList.contains('hidden')"), "Escape closes the permissions menu");
     // The halftone background: the sky behind a chat with messages, the figure
     // behind a new one; Home to Chat runs a view transition (app.js).
     assert.equal(await js("document.querySelector('.chat-layout > .chat-backdrop').dataset.scene"), "sky", "A chat with messages shows the halftone sky");
@@ -2336,16 +2384,21 @@ app.whenReady().then(async () => {
 
     // Layout (layout.js): Agents sits third by default; a moved and a hidden
     // tab, and Home's order, apply live and survive a reload; resets restore.
-    const navOrder = () => js("[...document.querySelectorAll('#nav .nav-item[data-tab]')].map(n => n.dataset.tab)");
+    // Desktop redesign: the groups and order show in All tabs (#rd-all-tabs); #nav is the pinned strip.
+    const navOrder = () => js("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].map(n => n.dataset.tab)");
+    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['agents', 'notes', 'library', 'calendar', 'email', 'tasks'], 'The default pinned strip');
+    assert.deepEqual(await js("[...document.querySelectorAll('#rd-primary .nav-item')].map(n => n.getAttribute('aria-label'))"), ['Home', 'New chat', 'Chat history'], 'Start rows: Home, New chat, Chat history');
+    assert.ok(await js("(() => { const row = document.querySelector('#sidebar > #rd-search-row'); const s = row?.querySelector('#rd-search'); const f = document.querySelector('#sidebar-footer'); return !!s && row.nextElementSibling === f && s.getAttribute('aria-label') === 'Search' && row.contains(document.querySelector('#sidebar-toggle')) && row.getBoundingClientRect().bottom <= f.getBoundingClientRect().top + 1; })()"), 'Search, with the collapse button beside it, sits just above the line over All tabs');
+    assert.ok(await js("[...document.querySelectorAll('#sidebar kbd')].every(k => !k.getClientRects().length) && getComputedStyle(document.querySelector('#rd-jump')).display === 'none' && !/Ctrl|⌘/.test(document.querySelector('#sidebar').innerText)"), 'No shortcut text shows in the desktop sidebar');
     assert.deepEqual((await navOrder()).slice(0, 3), ["home", "chat", "agents"], "Agents sits with Home and Chats");
     await js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); l.groups.main = ['home', 'notes', 'chat', 'agents']; l.groups.workspace = l.groups.workspace.filter(t => t !== 'notes'); l.hiddenTabs = ['cookbook']; l.home = ['models', 'stats', 'chats', 'schedule', 'projects', 'activity', 'system']; l.hiddenHome = ['projects']; m.saveLayout(l); })`);
-    await waitFor("document.querySelectorAll('#nav .nav-item[data-tab]')[1]?.dataset.tab === 'notes'");
-    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8 && document.querySelector('.dashboard-grid > [data-home-section=store]') === document.querySelector('.dashboard-grid').lastElementChild"), "Layout changes apply live; sections added later join at the end");
+    await waitFor("document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')[1]?.dataset.tab === 'notes'");
+    assert.ok(await js("!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8 && document.querySelector('.dashboard-grid > [data-home-section=store]') === document.querySelector('.dashboard-grid').lastElementChild"), "Layout changes apply live; sections added later join at the end");
     await win.loadURL(base);
-    await waitFor("document.querySelectorAll('#nav .nav-item[data-tab]').length >= 10");
+    await waitFor("document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]').length >= 9");
     assert.deepEqual((await navOrder()).slice(0, 4), ["home", "notes", "chat", "agents"], "The sidebar layout survives a reload");
     await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8");
-    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelector('[data-home-section=models] h2').textContent === 'Model usage'"), "Home's layout survives a reload");
+    assert.ok(await js("!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelector('[data-home-section=models] h2').textContent === 'Model usage'"), "Home's layout survives a reload");
     // The Layout page lists every tab, with Home's switch locked on.
     await js("document.querySelector('.sidebar-settings-btn').click()");
     await waitFor("!!document.querySelector('.settings-nav-item[data-section=layout]')");
@@ -2353,12 +2406,30 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelectorAll('.layout-item').length >= 17");
     assert.ok(await js("document.querySelector('.layout-item[data-id=home] .set-switch').disabled && document.querySelector('.layout-item[data-id=cookbook]').classList.contains('is-hidden')"), "The Layout page shows the layout, Home locked on");
     await capture("desktop-settings-layout");
-    await js("document.querySelector('.layout-item[data-id=notes] .layout-move:nth-of-type(2)').click()");
-    await waitFor("document.querySelectorAll('#nav .nav-item[data-tab]')[2]?.dataset.tab === 'notes'");
+    await js("document.querySelector('.layout-lists:not(.layout-pins) .layout-item[data-id=notes] .layout-move:nth-of-type(2)').click()");
+    await waitFor("document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')[2]?.dataset.tab === 'notes'");
+    // Pinned: unpin, add and move a pin from the Layout page; the strip follows live.
+    await js("document.querySelector('#layout-pins [data-id=notes] .layout-unpin').click()");
+    await waitFor("![...document.querySelectorAll('#nav .rd-pin')].some(n => n.dataset.tab === 'notes')");
+    await js("{ const a = document.querySelector('#layout-pins .layout-pin-add'); a.value = 'tool-store'; a.dispatchEvent(new Event('change')) }");
+    assert.ok(await js("![...document.querySelectorAll('#layout-pins .layout-pin-add option')].some(o => o.value === 'cookbook')"), 'A hidden tab is not offered as a pin');
+    await waitFor("[...document.querySelectorAll('#nav .rd-pin')].at(-1)?.dataset.tab === 'tool-store'");
+    await js("document.querySelector('#layout-pins [data-id=tool-store] .layout-move').click()");
+    await waitFor("[...document.querySelectorAll('#nav .rd-pin')].at(-2)?.dataset.tab === 'tool-store'");
     await js("[...document.querySelectorAll('.set-section .btn')].filter(b => /^Reset (sidebar|Home)$/.test(b.textContent)).forEach(b => b.click())");
-    await waitFor("[...document.querySelectorAll('#nav .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,agents'");
-    assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=cookbook]')"), "Reset shows hidden tabs again");
+    await waitFor("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,agents'");
+    assert.ok(await js("!!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]')"), "Reset shows hidden tabs again");
+    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['agents', 'notes', 'library', 'calendar', 'email', 'tasks'], 'Reset sidebar restores the default pins');
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    // The strip's Edit opens Settings > Layout; All tabs opens over the footer and closes on Escape.
+    await js("document.querySelector('.rd-pins-edit').click()");
+    await waitFor("!!document.querySelector('#layout-pins')");
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await js("document.querySelector('#rd-all-tabs-btn').click()");
+    await waitFor("!document.querySelector('#rd-all-tabs').hidden && document.querySelector('#rd-all-tabs-btn').getAttribute('aria-expanded') === 'true'");
+    await capture('desktop-all-tabs');
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await waitFor("document.querySelector('#rd-all-tabs').hidden && document.activeElement === document.querySelector('#rd-all-tabs-btn')");
     await navigate("home");
     assert.deepEqual(await js("[...document.querySelectorAll('.dashboard-grid > [data-home-section]')].map(n => n.dataset.homeSection)"), ['needs', 'working', 'chats', 'schedule', 'models', 'system'], "Reset restores Home's default cards");
     await navigate("home");
@@ -2370,31 +2441,35 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('#chat-main').classList.contains('is-empty') && !document.querySelector('.chat-welcome')"));
     assert.ok(await js("(() => {const r=document.querySelector('.chat-input-bar').getBoundingClientRect(); return Math.abs((r.top+r.bottom)/2-innerHeight/2)<60})()"), 'New-chat composer is centered');
     await js("window.originalComposer=document.querySelector('#chat-input'); originalComposer.value='A draft worth keeping'; document.querySelector('#chat-history-toggle').click()");
-    await delay(300);
+    await waitFor("!!document.querySelector('#rd-history')");
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true');
     assert.equal(await js("document.querySelector('#chat-input')===window.originalComposer && originalComposer.value==='A draft worth keeping'"), true);
+    assert.equal(await js("!!document.querySelector('.chat-history-goo-wrap')"), false, 'The popout opens without the old pill morph');
+    // Keep open: on, a chat opened from the popout leaves it open; off, opening one closes it. Saved on this device.
+    await js("document.querySelector('#rd-history .rd-history-keep').click()");
+    assert.equal(await js("localStorage.getItem('kairos:history-keep-open')"), 'true', 'Keep open is remembered');
+    await js("document.querySelector('#rd-history .rd-history-tab[data-mode=chats]').click()");
+    await js("document.querySelector('#rd-history .rd-history-row:not(.is-forge) .rd-history-open').click()");
+    await waitFor("document.querySelector('#chat-main')?.classList.contains('is-empty') === false");
+    assert.ok(await js("!!document.querySelector('#rd-history')"), 'Keep open leaves the popout open after opening a chat');
+    await js("document.querySelector('#rd-history .rd-history-keep').click()");
+    await js("document.querySelector('#rd-history .rd-history-new').click()");
+    await waitFor("!document.querySelector('#rd-history') && document.querySelector('#chat-main')?.classList.contains('is-empty')");
+    await js("document.querySelector('#chat-history-toggle').click()");
+    await waitFor("!!document.querySelector('#rd-history')");
     await navigate('notes');
     await navigate('chat');
-    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History preference survives remount');
-    // 2026-10-14: the conversation pill morphs into the panel and back. The
-    // ghost exists only while the morph runs; reduced motion skips it.
-    await js("document.querySelector('#chat-history-toggle').click()");
-    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Closing history morphs into the pill');
-    await waitFor("!document.querySelector('.chat-history-goo-wrap')");
-    await js("document.querySelector('#chat-history-toggle').click()");
-    assert.ok(await js("!!document.querySelector('.chat-history-goo-wrap')"), 'Opening history morphs out of the pill');
-    await waitFor("!document.querySelector('.chat-history-goo-wrap') && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')==='true'");
-    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-    await js("document.querySelector('#chat-history-toggle').click()");
-    assert.equal(await js("!!document.querySelector('.chat-history-goo-wrap')"), false, 'Reduced motion: no morph');
-    await js("document.querySelector('#chat-history-toggle').click()");
-    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
-    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'History is open again after the morph checks');
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+    await waitFor("!document.querySelector('#rd-history')");
+    assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'false', 'Closed popout leaves the history button collapsed');
     // One single-line model control, the same height as the tools button beside it.
     assert.equal(await js("!!document.querySelector('#model-version-btn')"), false, 'Model and version are one control');
-    // The redesign moves the pill into the composer, beside the mic and send buttons, so it is matched to those.
-    assert.equal(await js("!!document.querySelector('.chat-input-right .chat-header-model')"), true, 'The model pill sits in the composer');
-    assert.ok(await js("Math.abs(document.querySelector('.chat-header-model').getBoundingClientRect().height - document.querySelector('.chat-input-right > button:last-child').getBoundingClientRect().height) <= 4"), 'Model pill is level with the send button (40px pill, 44px touch target)');
+    // Desktop redesign: + / model pill / permission pill on the left, the square send on the right.
+    assert.deepEqual(await js("[...document.querySelector('.chat-input-left').children].filter(n => n.getClientRects().length).slice(0, 3).map(n => n.matches('.overflow-wrapper:has(#overflow-plus-btn)') ? 'plus' : n.matches('.chat-header-model') ? 'model' : n.matches('.chat-permission-wrap') ? 'permission' : n.className)"), ['plus', 'model', 'permission'], 'The prompt reads + / model / permissions');
+    assert.ok(await js("Math.abs(document.querySelector('.chat-header-model').getBoundingClientRect().height - document.querySelector('#chat-permission-pill').getBoundingClientRect().height) <= 2"), 'Model and permission pills are level');
+    assert.ok(await js("(() => { const r = document.querySelector('#chat-send').getBoundingClientRect(); const radius = parseFloat(getComputedStyle(document.querySelector('#chat-send')).borderTopLeftRadius); return Math.abs(r.width - r.height) <= 1 && radius > 0 && radius <= r.width / 3; })()"), 'Send is a rounded square (the reference prompt card)');
+    assert.equal(await js("document.querySelector('#chat-input').placeholder"), 'Ask, build, or describe a change…', 'The prompt text');
+    assert.equal(await js("getComputedStyle(document.querySelector('#chat-mic')).display"), 'none', 'No mic on the desktop prompt; Dictate is in the + menu');
     assert.equal(await js("getComputedStyle(document.querySelector('#model-picker-label')).whiteSpace"), 'nowrap', 'Model label is one line');
     // Keyboard: ArrowDown opens with focus inside; Escape closes and returns focus.
     await js("document.querySelector('#model-picker-btn').focus(); document.querySelector('#model-picker-btn').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))");

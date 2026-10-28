@@ -574,6 +574,27 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
   assert.ok(await js("!document.querySelector('#chat-main').inert && !!document.querySelector('.chat-design-pane')"), 'Escape restores the pane');
   await capture('design-pane-editable-560');
+  // Desktop redesign: a document opens beside the design in one stack, split by an adjustable
+  // divider; Background tasks can join them as a third pane.
+  await js("document.querySelector('#chat-messages .artifact-card')?.click(); true");
+  await waitFor("[...document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane')].map(p => p.dataset.paneKind).sort().join() === 'design,documents' || document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane').length === 2");
+  assert.equal(await js("document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane').length"), 2, 'the design and the document share the side');
+  assert.ok(await js("!!document.querySelector('.chat-pane-stack-resizer')"), 'a divider splits the design and the document');
+  const splitBefore = await js("document.querySelector('.chat-pane-stack-resizer').getAttribute('aria-valuenow')");
+  await js("{ const r = document.querySelector('.chat-pane-stack-resizer'); r.focus(); for (let i = 0; i < 4; i++) r.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); true }");
+  assert.notEqual(await js("document.querySelector('.chat-pane-stack-resizer').getAttribute('aria-valuenow')"), splitBefore, 'the divider moves');
+  await delay(700); await clean();
+  await capture('design-and-documents');
+  const bgAt = Date.now() / 1000;
+  await js(`document.dispatchEvent(new CustomEvent('kairos:bg-tasks', { detail: { sessionId: 's1', items: [{ id: 'b1', kind: 'agent', label: 'Research helper', status: 'running', startedAt: ${bgAt - 40}, activity: 'Reading the brief' }, { id: 'b2', kind: 'command', label: 'npm test', status: 'running', startedAt: ${bgAt - 12}, activity: 'Running 40 tests' }], notes: [] } })); true`);
+  await waitFor("!!document.querySelector('.bg-tasks-pill')?.getClientRects().length || !document.querySelector('.chat-pane-icon[aria-label^=\"Background tasks\"]')?.hidden");
+  await js("(document.querySelector('.chat-pane-icon[aria-label^=\"Background tasks\"]:not([hidden])') || document.querySelector('.bg-tasks-pill')).click()");
+  await waitFor("!!document.querySelector('.chat-pane-stack .chat-background-pane .bg-task-row')");
+  await delay(700); await clean();
+  await capture('design-documents-background');
+  // Nothing overlaps or spills in the chat and its three panes at any size or divider position.
+  await require('./overlap-check.cjs').sweepChatFit({ js, win, delay, assert });
+  win.setContentSize(1440, 900); await delay(400);
   liveFinish('s1');
   state.designMode = [];
   await js("document.querySelectorAll('.design-reading-filler').forEach(n => n.remove()); 1");

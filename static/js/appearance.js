@@ -1,9 +1,18 @@
-import { EFFECTS, ART_PIECES, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { EFFECTS, ART_PIECES, ART_LOOKS, normalizeEffectOptions } from './backgroundEffectPreferences.js';
 import { kipStyleOf, DEFAULT_KIP_STYLE } from './kipStyle.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', kip: DEFAULT_KIP_STYLE, mascot: true });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', kip: DEFAULT_KIP_STYLE, mascot: true,
+  animatedLook: 'ascii', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35 });
+// Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting
+// wallpaper behind a translucent window. Each wallpaper is a base (the theme
+// is derived from it like a Color base) and three light blooms.
+export const GLASS_WALLPAPERS = Object.freeze({
+  lagoon: { title: 'Lagoon', base: '#1f3a44', blooms: ['#2f7f86', '#7cc4c0', '#d9b260'] },
+  dusk: { title: 'Dusk', base: '#2a2235', blooms: ['#6b4a7a', '#d99a92', '#e9ba68'] },
+  parchment: { title: 'Parchment', base: '#efe4d2', blooms: ['#d9b260', '#b9d2e3', '#d99a92'] },
+});
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -43,7 +52,7 @@ function normalizeHalftoneSlot(raw) {
 function normalize(raw = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
   const value = { ...DEFAULTS };
-  if (['default', 'color', 'image', 'shader'].includes(raw.mode)) value.mode = raw.mode;
+  if (['default', 'color', 'image', 'shader', 'glass'].includes(raw.mode)) value.mode = raw.mode;
   if (/^#[\da-f]{6}$/i.test(raw.color)) value.color = raw.color;
   for (const key of ['tint', 'distortion', 'swirl', 'grainMixer', 'grainOverlay']) {
     if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
@@ -51,6 +60,13 @@ function normalize(raw = {}) {
   if (EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
   value.effectOptions = normalizeEffectOptions(raw.effectOptions);
   if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
+  if (ART_LOOKS.some(([id]) => id === raw.animatedLook)) value.animatedLook = raw.animatedLook;
+  // Chat messages (desktop redesign): plain text on the backdrop, or the bubble cards.
+  if (['plain', 'cards'].includes(raw.chatMessages)) value.chatMessages = raw.chatMessages;
+  if (Object.hasOwn(GLASS_WALLPAPERS, raw.glassWallpaper || '')) value.glassWallpaper = raw.glassWallpaper;
+  for (const key of ['glassStrength', 'glassDither']) {
+    if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
+  }
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
   // Kip style (David, 2026-10-25): flat, halftone, pixel or hidden. Hidden is
@@ -137,7 +153,8 @@ export function halftoneSharedChatPicture() {
 export function appearanceName(value = getAppearance()) {
   const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite' };
   return value.mode === 'default' ? 'Parchment' : value.mode === 'color'
-    ? palette[value.color?.toLowerCase()] || value.color : { image: 'Image', shader: 'Flow' }[value.mode];
+    ? palette[value.color?.toLowerCase()] || value.color : value.mode === 'glass' ? `Liquid glass, ${GLASS_WALLPAPERS[value.glassWallpaper].title}`
+    : { image: 'Image', shader: 'Flow' }[value.mode];
 }
 
 export function getAppearance() {
@@ -333,13 +350,15 @@ function apply() {
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   root.dataset.mascot = settings.mascot ? 'on' : 'off';
   root.dataset.kip = settings.kip;
+  root.dataset.chatMessages = settings.chatMessages;
   syncRedesign(root);
+  syncGlass(root);
   try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');
   } else {
-    const color = rgb(settings.color), light = luminance(color) > .179;
+    const color = rgb(settings.mode === 'glass' ? GLASS_WALLPAPERS[settings.glassWallpaper].base : settings.color), light = luminance(color) > .179;
     const sidebar = mix(color, 0, .18).map(Math.round);
     const accent = readable(color, .12);
     const text = readable(color), status = STATUS[light ? 'light' : 'dark'];
@@ -373,6 +392,33 @@ function apply() {
   syncTitleBar();
   // The halftone backgrounds redraw in the new colors (chatBackdrop.js, home.js).
   document.dispatchEvent(new CustomEvent('kairos:appearance'));
+}
+
+// Liquid glass: the wallpaper's blooms, how see-through the surfaces are and
+// how strong its dither grain is, as custom properties appearance.css reads.
+const GLASS_PROPS = ['--glass-bloom-1', '--glass-bloom-2', '--glass-bloom-3', '--glass-alpha', '--glass-dither', '--glass-grain'];
+let glassGrain = '';
+function syncGlass(root) {
+  if (settings.mode !== 'glass') { GLASS_PROPS.forEach(key => root.style.removeProperty(key)); document.getElementById('app-glass')?.remove(); return; }
+  const paper = GLASS_WALLPAPERS[settings.glassWallpaper];
+  paper.blooms.forEach((hex, i) => root.style.setProperty(`--glass-bloom-${i + 1}`, hex));
+  // Strength 0 is nearly solid, 1 nearly clear.
+  root.style.setProperty('--glass-alpha', String(Math.round((.92 - settings.glassStrength * .62) * 100) / 100));
+  root.style.setProperty('--glass-dither', String(settings.glassDither));
+  if (!glassGrain) {
+    // A 4x4 Bayer threshold tile, drawn once: the grain laid over the blooms.
+    const tile = document.createElement('canvas'); tile.width = tile.height = 4;
+    const g = tile.getContext('2d'), bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    bayer.forEach((v, i) => { g.fillStyle = `rgba(0,0,0,${(v / 16) * .5})`; g.fillRect(i % 4, Math.floor(i / 4), 1, 1); });
+    glassGrain = `url("${tile.toDataURL()}")`;
+  }
+  root.style.setProperty('--glass-grain', glassGrain);
+  if (!document.getElementById('app-glass')) {
+    const layer = document.createElement('div');
+    layer.id = 'app-glass'; layer.className = 'app-glass'; layer.setAttribute('aria-hidden', 'true');
+    layer.innerHTML = '<span class="app-glass-bloom"></span><span class="app-glass-bloom"></span><span class="app-glass-bloom"></span><span class="app-glass-grain"></span>';
+    document.body.prepend(layer);
+  }
 }
 
 // The shared redesign backdrop reuses the chat scene renderer and palette.
@@ -426,7 +472,8 @@ function draw() {
   const scale = Math.min(1, 1280 / Math.max(innerWidth, innerHeight));
   const width = Math.max(1, Math.round(innerWidth * scale)), height = Math.max(1, Math.round(innerHeight * scale));
   const isShader = settings.mode === 'shader' && !!glScene;
-  imageCanvas.hidden = settings.mode === 'default' || isShader;
+  // Liquid glass draws its own wallpaper (#app-glass), so neither canvas shows.
+  imageCanvas.hidden = settings.mode === 'default' || settings.mode === 'glass' || isShader;
   shaderCanvas.hidden = !isShader;
   fit(imageCanvas, width, height);
   if (isShader) {

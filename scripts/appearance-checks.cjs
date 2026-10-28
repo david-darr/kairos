@@ -18,13 +18,13 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   // Keep every visible card row congruent at the reviewed desktop and phone sizes.
   for (const [width, height] of [[900, 800], [1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
     win.setContentSize(width, height); await delay(250);
-    for (const mode of ['default', 'color', 'image', 'shader']) {
+    for (const mode of ['default', 'color', 'image', 'shader', 'glass']) {
       await set({ mode }); await delay(250);
       const failures = await js(`(() => {
         const failures = [], panel = document.querySelector('.appearance-panel');
         if (panel.scrollWidth > panel.clientWidth + 1) failures.push('panel overflows');
-        for (const selector of ['.appearance-modes', '.appearance-chat-styles', '.appearance-halftone-grid', '.appearance-effects-grid']) {
-          const grid = panel.querySelector(selector);
+        // Every grid of a kind (Chat messages and Chat style share .appearance-chat-styles).
+        for (const selector of ['.appearance-modes', '.appearance-chat-styles', '.appearance-halftone-grid', '.appearance-effects-grid', '.appearance-glass-papers']) for (const grid of panel.querySelectorAll(selector)) {
           if (!grid.getClientRects().length) continue;
           const rows = new Map(), box = grid.getBoundingClientRect();
           for (const card of grid.children) {
@@ -44,7 +44,13 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     }
   }
   win.setContentSize(1440, 900); await delay(250); await set({ mode: 'default' });
-  assert.equal(await js("document.querySelectorAll('.appearance-mode').length"), 4);
+  assert.deepEqual(await js("[...document.querySelectorAll('.appearance-mode')].map(n => n.dataset.mode)"), ['default', 'color', 'image', 'shader', 'glass']);
+  // Chat messages (desktop redesign): Plain by default, Cards on request, on the root for the chat CSS.
+  assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
+  await js("document.querySelector('.appearance-chat-style[data-chat-messages=cards]').click()");
+  assert.equal(await js("document.documentElement.dataset.chatMessages + ':' + document.querySelector('.appearance-chat-style[data-chat-messages=cards]').getAttribute('aria-pressed')"), 'cards:true');
+  await js("document.querySelector('.appearance-chat-style[data-chat-messages=plain]').click()");
+  assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
   assert.equal(await js("document.querySelector('[data-mode=default] strong').textContent"), 'Kairos');
   assert.equal(await js("document.querySelector('.appearance-preview-copy strong').textContent"), 'Not more time. The right time.');
   await js("document.querySelector('[data-mode=color]').click()");

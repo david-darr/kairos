@@ -5,19 +5,51 @@
 import { api, el } from '../api.js';
 import { group, toggle } from '../settingsKit.js';
 import { HOME_SECTIONS, ALWAYS_SHOWN, getLayout, saveLayout, knownTabs, sidebarLayout,
-  resetSidebarLayout, resetHomeLayout, setHomeCards, knownHomeCards } from '../layout.js';
+  resetSidebarLayout, resetHomeLayout, setHomeCards, knownHomeCards, setPinned } from '../layout.js';
 
 const GROUP_TITLES = { main: 'Top', workspace: 'Workspace', intelligence: 'Intelligence' };
 
 export function renderLayoutPanel(body) {
   const sidebarHost = el('div', { class: 'layout-lists' });
   const homeHost = el('div', { class: 'layout-lists' });
+  const pinsHost = el('div', { class: 'layout-lists layout-pins', id: 'layout-pins' });
   body.replaceChildren(
+    group({ title: 'Pinned', description: 'The tab icons under Search in the desktop sidebar. Use the arrows to reorder them.' }, [pinsHost]),
     group({ title: 'Sidebar', description: 'Drag tabs, or use the arrows, to reorder them or move them between groups. Home always shows.',
       actions: [el('button', { class: 'btn quiet', text: 'Reset sidebar', onclick: () => { resetSidebarLayout(); draw(); } })] }, [sidebarHost]),
     group({ title: 'Home', description: "The parts of Home below its card, in order. Hidden ones come back any time.",
       actions: [el('button', { class: 'btn quiet', text: 'Reset Home', onclick: () => { resetHomeLayout(); draw(); } })] }, [homeHost]),
   );
+
+  // The pinned strip: its own ordered list, with Add for any tab not pinned yet.
+  function drawPins() {
+    const labels = new Map(knownTabs().map((t) => [t.id, t.label]));
+    const pinned = getLayout().pinned.filter((id) => labels.has(id));
+    const ol = el('ol', { class: 'layout-list', 'data-group': 'pinned' });
+    pinned.forEach((id, index) => {
+      const label = labels.get(id);
+      const step = (delta) => {
+        const next = pinned.slice(); next.splice(index, 1); next.splice(index + delta, 0, id);
+        setPinned(next); drawPins();
+        pinsHost.querySelector(`[data-id="${id}"] .layout-move:nth-of-type(${delta < 0 ? 1 : 2})`)?.focus();
+      };
+      ol.append(el('li', { class: 'layout-item', 'data-id': id }, [
+        el('span', { class: 'layout-label', text: label }),
+        el('button', { type: 'button', class: 'layout-move', 'aria-label': `Move ${label} up`, text: '↑', disabled: index === 0, onclick: () => step(-1) }),
+        el('button', { type: 'button', class: 'layout-move', 'aria-label': `Move ${label} down`, text: '↓', disabled: index === pinned.length - 1, onclick: () => step(1) }),
+        el('button', { type: 'button', class: 'btn quiet layout-unpin', text: 'Unpin', 'aria-label': `Unpin ${label}`,
+          onclick: () => { setPinned(pinned.filter((other) => other !== id)); drawPins(); } }),
+      ]));
+    });
+    if (!pinned.length) ol.dataset.empty = 'Nothing pinned yet.';
+    const hidden = getLayout().hiddenTabs;  // a hidden tab would not show in the strip
+    const choices = [...labels].filter(([id]) => id !== ALWAYS_SHOWN && !pinned.includes(id) && !hidden.includes(id));
+    const add = el('select', { class: 'layout-pin-add', 'aria-label': 'Pin a tab' }, [
+      el('option', { value: '', text: 'Pin a tab…' }), ...choices.map(([id, label]) => el('option', { value: id, text: label }))]);
+    add.disabled = !choices.length;
+    add.addEventListener('change', () => { if (add.value) { setPinned([...pinned, add.value]); drawPins(); } });
+    pinsHost.replaceChildren(ol, add);
+  }
 
   // Reads the lists back as the layout and saves it.
   function save() {
@@ -113,6 +145,7 @@ export function renderLayoutPanel(body) {
       el('p', { class: 'meta', text: 'Turn a card on to add it to Home, then use the arrows to place it.' }), tabList,
     ]));
     syncButtons();
+    drawPins();
   }
 
   // The very first row can't go up, nor the very last down.

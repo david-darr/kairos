@@ -313,12 +313,20 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   const resetVoice = () => js("(() => { const g = window.__g2; g.transcribes.length = 0; g.gum.length = 0; g.stopped = 0; g.recorders = 0; g.mic = 'ok'; g.transcript = 'hello world'; g.transcribeError = null; g.transcribeDelay = 0; g.speech.active_model = 'base.en'; return true; })()");
   const micIdle = "(() => { const m = document.querySelector('#chat-mic'); return !m.classList.contains('recording') && !m.classList.contains('busy') && !m.disabled; })()";
   await openChat(); await resetVoice();
-  assert.equal(await js("document.querySelector('#chat-mic').hidden"), false, 'the mic shows where recording is supported');
+  assert.equal(await js("document.querySelector('#chat-mic').hidden"), false, 'recording is supported here');
+  if (await js("matchMedia('(min-width: 769px)').matches")) {
+    // Desktop redesign: no idle mic on the prompt; Dictate is in the + menu.
+    assert.equal(await js("getComputedStyle(document.querySelector('#chat-mic')).display"), 'none', 'the desktop prompt has no idle mic');
+    await js("document.body.click(); document.querySelector('#overflow-plus-btn').click()");
+    assert.ok(await js("(() => { const d = [...document.querySelectorAll('#overflow-menu .overflow-menu-item')].find(b => b.textContent.trim() === 'Dictate'); return !!d && !d.hidden && d.getClientRects().length > 0; })()"), 'Dictate is in the + menu');
+    await js("document.body.click()");
+  }
   const livePostsBefore = livePosts().length;
   // 4a. Start, stop: text lands once, appended to the draft; the device is released; nothing is sent.
   await js("(() => { const i = document.querySelector('#chat-input'); i.value = 'Draft'; i.dispatchEvent(new Event('input')); })()");
   await js("document.querySelector('#chat-mic').click()");
   await waitFor("document.querySelector('#chat-mic').classList.contains('recording')");
+  assert.notEqual(await js("getComputedStyle(document.querySelector('#chat-mic')).display"), 'none', 'the mic shows while recording');
   assert.equal(await js("document.querySelector('#chat-mic').getAttribute('aria-label')"), 'Stop recording and transcribe');
   assert.deepEqual(await g('gum[0]'), { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, 'the mic is opened with echo cancellation and noise suppression');
   assert.equal(await g('recorders'), 1, 'one recorder, started immediately');

@@ -33,14 +33,19 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   await navigate('home');
 
   // -- command palette ----------------------------------------------------
-  await js("document.querySelector('#nav .nav-item[data-tab=notes]').focus()");
+  await js("document.querySelector('#sidebar .nav-item[data-tab=notes]').focus()");
   await ctrlK();
   await waitFor(paletteOpen);
   assert.equal(await js("document.activeElement === document.querySelector('.palette-input')"), true, 'Ctrl+K opens the palette with the search focused');
   const labels = await js("[...document.querySelectorAll('.palette-item-label')].map(n => n.textContent)");
-  const nav = await js("[...document.querySelectorAll('#nav .nav-item[data-tab]')].filter(n => n.getClientRects().length).map(n => n.dataset.tab)");
-  for (const tab of ['home', 'chat', 'notes', 'library', 'calendar', 'tasks']) {
+  // Desktop redesign: Home and the pinned tabs show in the sidebar; every tab is in All tabs.
+  const nav = await js("[...document.querySelectorAll('#sidebar .nav-item[data-tab]')].filter(n => n.getClientRects().length).map(n => n.dataset.tab)");
+  for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks']) {
     assert.ok(nav.includes(tab), `${tab} is in the sidebar`);
+  }
+  const allTabs = await js("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].map(n => n.dataset.tab)");
+  for (const tab of ['home', 'chat', 'notes', 'library', 'calendar', 'tasks']) {
+    assert.ok(allTabs.includes(tab), `${tab} is in All tabs`);
   }
   for (const label of ['Go to Home', 'Go to Chats', 'Go to Notes', 'Go to Library', 'Go to Calendar', 'Go to Tasks', 'Open Settings']) {
     assert.ok(labels.includes(label), `palette lists "${label}"`);
@@ -55,10 +60,10 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   assert.equal(await js("document.querySelector('.palette-item.active .palette-item-label').textContent"), second, 'ArrowDown moves the selection');
   await js("(() => { const i = document.querySelector('.palette-input'); i.value = 'calendar'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
   await press('Enter', 'Enter', 13);
-  await waitFor("document.querySelector('#nav .nav-item[data-tab=calendar]')?.classList.contains('active')");
+  await waitFor("document.querySelector('#sidebar .nav-item[data-tab=calendar]')?.classList.contains('active')");
   assert.equal(await js(paletteOpen), false, 'running a command closes the palette');
   await navigate('home');
-  await js("document.querySelector('#nav .nav-item[data-tab=notes]').focus()");
+  await js("document.querySelector('#sidebar .nav-item[data-tab=notes]').focus()");
   await ctrlK(); await waitFor(paletteOpen);
   await escape();
   assert.equal(await js(paletteOpen), false, 'Escape closes the palette');
@@ -67,7 +72,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   console.log('PASS: command palette open, filter, arrows, Enter, Escape and focus return');
 
   // -- nested Escape --------------------------------------------------------
-  await js("import('/static/js/workspaceProfile.js').then(m => { m.openWorkspaceProfile(document.querySelector('#nav .nav-item[data-tab=home]')); })");
+  await js("import('/static/js/workspaceProfile.js').then(m => { m.openWorkspaceProfile(document.querySelector('#sidebar .nav-item[data-tab=home]')); })");
   await waitFor(`${dialogs} === 1 && !!document.querySelector('.workspace-profile-card')`);
   await js("window.__confirm = null; import('/static/js/api.js').then(m => { window.__confirm = m.confirmDialog({ title: 'Nested', message: 'Inner dialog', confirmLabel: 'OK', danger: false }); })");
   await waitFor(`${dialogs} === 2`);
@@ -121,7 +126,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   const truth = await js(`Promise.all(['/api/auth/status', '/api/sessions', '/api/agents', '/api/notes'].map(p => fetch(p).then(r => r.json())))
     .then(([auth, sessions, agents, notes]) => ({ auth, chats: sessions.filter(s => !s.forge).length, agents: agents.length, notes: notes.length }))`);
   const openProfile = async () => {
-    await js("import('/static/js/workspaceProfile.js').then(m => m.openWorkspaceProfile(document.querySelector('#nav .nav-item[data-tab=home]')))");
+    await js("import('/static/js/workspaceProfile.js').then(m => m.openWorkspaceProfile(document.querySelector('#sidebar .nav-item[data-tab=home]')))");
     await waitFor("document.querySelectorAll('.workspace-stat').length > 0");
   };
   await openProfile();
@@ -140,7 +145,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   for (const link of shown.links) {
     await js(`[...document.querySelectorAll('.workspace-profile-setting')].find(b => b.textContent.includes(${JSON.stringify(link)})).click()`);
     if (link === 'Calendar sync') {
-      await waitFor("document.querySelector('#nav .nav-item[data-tab=calendar]')?.classList.contains('active')");
+      await waitFor("document.querySelector('#sidebar .nav-item[data-tab=calendar]')?.classList.contains('active')");
     } else {
       await waitFor(`document.querySelector('.settings-window:not(.hidden) .settings-nav-item.active')?.dataset.section === ${JSON.stringify(destinations[link])}`);
       await js("document.querySelector('.settings-window button[title=Close]').click()");
@@ -155,24 +160,33 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   console.log('PASS: Profile identity, role, counts and every settings link');
 
   await require('./app-shell-gap-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, fixtures, press });
+  // A view keeps mounting after its first element shows (an agent opens its chat pane a beat later).
+  // Navigating away mid-mount lets the old page build avatars while it unloads, and Chromium reports
+  // those data: SVG loads as blocked connects (CSP). Let the page go quiet before each launch link.
+  const pageQuiet = async () => {
+    await waitFor("[...document.images].every(image => image.complete || image.loading === 'lazy')", 10000);
+    await js("new Promise(resolve => { let timer; const done = () => { observer.disconnect(); resolve(true); }; const quiet = () => { clearTimeout(timer); timer = setTimeout(done, 500); }; const observer = new MutationObserver(quiet); observer.observe(document.documentElement, { childList: true, subtree: true }); quiet(); setTimeout(done, 5000); })");
+  };
   for (const [query, check] of [
-    ['?view=calendar', "document.querySelector('#nav .nav-item[data-tab=calendar]')?.classList.contains('active')"],
-    ['?view=notes', "document.querySelector('#nav .nav-item[data-tab=notes]')?.classList.contains('active')"],
-    ['?newchat=1', "document.querySelector('#nav .nav-item[data-tab=chat]')?.classList.contains('active')"],
-    ['?view=not-a-tab', "document.querySelector('#nav .nav-item[data-tab=home]')?.classList.contains('active')"],
+    ['?view=calendar', "document.querySelector('#sidebar .nav-item[data-tab=calendar]')?.classList.contains('active')"],
+    ['?view=notes', "document.querySelector('#sidebar .nav-item[data-tab=notes]')?.classList.contains('active')"],
+    ['?newchat=1', "document.querySelector('#rd-all-tabs .nav-item[data-tab=chat]')?.classList.contains('active')"],
+    ['?view=not-a-tab', "document.querySelector('#sidebar .nav-item[data-tab=home]')?.classList.contains('active')"],
     // Notification links: a bot opens that bot, a chat opens that chat, anything malformed falls back to Home.
-    ['?agent=a1', "document.querySelector('#nav .nav-item[data-tab=agents]')?.classList.contains('active') && !!document.querySelector('.agent-memory')"],
+    ['?agent=a1', "document.querySelector('#sidebar .nav-item[data-tab=agents]')?.classList.contains('active') && !!document.querySelector('.agent-memory')"],
     ['?chat=abcdef123456', "!!document.querySelector('#chat-messages[data-session-id=\"abcdef123456\"]')"],
-    ['?chat=not-a-chat-id', "document.querySelector('#nav .nav-item[data-tab=home]')?.classList.contains('active')"],
+    ['?chat=not-a-chat-id', "document.querySelector('#sidebar .nav-item[data-tab=home]')?.classList.contains('active')"],
   ]) {
+    await pageQuiet();
     await win.loadURL(base + '/' + query);
     await waitFor(check, 15000);
     // The view opens first; the address is cleaned once it has.
     await waitFor("location.pathname + location.search === '/'", 5000).catch(() => {});
     assert.equal(await js("location.pathname + location.search"), '/', `${query} is removed from the address after opening`);
   }
+  await pageQuiet();
   await win.loadURL(base);
-  await waitFor("!!document.querySelector('#nav .nav-item[data-tab=home].active')", 15000);
+  await waitFor("!!document.querySelector('#sidebar .nav-item[data-tab=home].active')", 15000);
   console.log('PASS: launch links open the intended view and unknown views fall back to Home');
   assert.deepEqual(problems, [], 'app shell defects');
 };

@@ -322,3 +322,32 @@
 }
 .kairos-redesign :is(.rd-model-picker, .ms-model-menu) .rd-effort-default { display: none; }
 .kairos-redesign :is(.rd-model-picker, .ms-model-menu) [hidden] { display: none !important; }
+
+/* -- Desktop redesign (2026-10-28, canvas board Popups) ---------------------------------------------
+   The chat's popups and blocks with sharp edges and hairlines: the model menu (provider rows with
+   logos, effort as a segmented row), the + and permission menus, the permission and approval
+   dialog, the inline question, and code, table and file blocks. Markup unchanged. */
+@media (min-width: 769px) {
+  .kairos-redesign :is(.permission-dialog, .permission-args, .permission-args pre, .permission-target, .permission-choices .btn,
+    .question-card, .question-option, .question-free input, .question-item input[type=text], .question-actions .btn,
+    .chat-code-block, .chat-code-header button, .chat-table-wrap, .artifact-card, .artifact-icon,
+    .model-picker-menu, .model-picker-item, .model-effort-row, .model-effort-btn, #chat-model-search, .rd-model-search,
+    .overflow-menu, .overflow-menu-item, .documents-popover, .documents-menu-search, .documents-menu-row,
+    .artifact-toolbar .btn, .artifact-tab, .rd-conversation-menu, .rd-conversation-menu-item, .palette-panel, .palette-input-row, .palette-item, .toast) { border-radius: 0; }
+  .kairos-redesign .permission-dialog:not(.agent-inline-permission) { box-shadow: var(--rd-shadow); border: 1px solid var(--rd-line-strong); }
+  .kairos-redesign .permission-choices .btn.primary { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+  .kairos-redesign .model-effort-row { display: flex; gap: 0; border: 1px solid var(--rd-line-strong); padding: 0; }
+  .kairos-redesign .model-effort-row .model-effort-label { padding: 0 8px; align-self: center; font-size: 11px; color: var(--rd-ink-dim); }
+  .kairos-redesign .model-effort-btn { flex: 1; border: 0; border-left: 1px solid var(--rd-line); }
+  .kairos-redesign .model-effort-btn.active { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .kairos-redesign .model-connection-item .model-mark { width: 18px; height: 18px; }
+  .kairos-redesign .model-picker-item.active { box-shadow: inset 2px 0 0 var(--point); }
+  .kairos-redesign .chat-code-block { border: 1px solid var(--rd-line-strong); }
+  .kairos-redesign .chat-code-header { border-bottom: 1px solid var(--rd-line); font-family: var(--mf-font-mono, ui-monospace, monospace); }
+  .kairos-redesign .chat-table-wrap { border: 1px solid var(--rd-line-strong); }
+  .kairos-redesign .chat-table-wrap :is(th, td) { border-color: var(--rd-line); }
+  .kairos-redesign .chat-table-wrap th { font: 500 11px var(--rd-font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--rd-ink-dim); }
+  .kairos-redesign .artifact-card { border: 1px solid var(--rd-line-strong); box-shadow: none; }
+  .kairos-redesign .question-card { border: 1px solid var(--rd-line-strong); box-shadow: none; }
+  .kairos-redesign .question-option:has(input:checked) { box-shadow: inset 2px 0 0 var(--point); }
+}

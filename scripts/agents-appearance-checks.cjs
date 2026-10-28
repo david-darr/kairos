@@ -54,7 +54,7 @@ module.exports = async ({ js, waitFor, navigate, capture, win }) => {
       await capture(`agents-${name}-create`);
       await js("document.querySelector('.agent-create-dialog [aria-label=\"Close\"]').click()");
     }
-    // Reduced motion must remove the sheet and creation entrance animations.
+    // Reduced motion must remove the sheet and creation entrance animations (keyframe animations and transitions that move or resize; a colour, shadow or scrollbar fade is not motion).
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await navigate('agents', { agentId: 'a1', profile: true });
     await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
@@ -64,7 +64,7 @@ module.exports = async ({ js, waitFor, navigate, capture, win }) => {
     await waitFor("!!document.querySelector('.agents-messenger-welcome')");
     await js("document.querySelector('.agents-messenger-welcome .btn.primary').click()");
     await waitFor("!!document.querySelector('.agent-create-dialog')");
-    assert.equal(await js("document.querySelector('.agent-create-dialog').getAnimations({subtree:true}).length"), 0, 'creation has no reduced-motion animation');
+    assert.deepEqual(await js("document.querySelector('.agent-create-dialog').getAnimations({subtree:true}).filter(a => !a.transitionProperty || /^(transform|translate|scale|rotate|top|left|right|bottom|inset|width|height|margin.*)$/.test(a.transitionProperty)).map(a => (a.animationName || a.transitionProperty || a.id || 'anim') + ' on ' + (a.effect?.target?.className?.baseVal ?? a.effect?.target?.className ?? '?'))"), [], 'creation has no reduced-motion animation');
     await js("document.querySelector('.agent-create-dialog [aria-label=\"Close\"]').click()");
   } finally {
     await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(saved)}))`);
