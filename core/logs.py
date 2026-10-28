@@ -114,13 +114,38 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bbot\d{5,}:[A-Za-z0-9_-]{20,}"), "bot***"),
     (re.compile(r"([?&](?:token|key|api_key|apikey|access_token|secret|password|sig|signature)=)[^&\s\"'#]+", re.IGNORECASE), r"\1***"),
     (re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1***"),
+    # Bare provider keys, wherever they appear. Anchored on a word boundary and
+    # a distinctive prefix so ordinary words and hyphenated names are left
+    # alone ("sk-" also needs a digit, which a real key always has).
+    (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{16,}"), "***"),
+    (re.compile(r"\bsk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}"), "***"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}"), "***"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}"), "***"),
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***"),
+)
+
+# Only for text going to a model (the compaction summariser), where a password
+# written as `password = hunter2` must not travel. Not applied to logs, where
+# the surrounding words are worth keeping.
+_ASSIGNMENT_PATTERN = re.compile(
+    r"(\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[=:]\s*)"
+    r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s,;]+)",
+    re.IGNORECASE,
 )
 
 
-def redact(text: str) -> str:
+def redact(text: str, placeholder: str = "***") -> str:
+    """Mask secrets in `text`; the one helper logs and the summariser share."""
     for pattern, replacement in _SECRET_PATTERNS:
-        text = pattern.sub(replacement, text)
+        text = pattern.sub(replacement.replace("***", placeholder.replace("\\", r"\\")), text)
     return text
+
+
+def scrub_credentials(text: str, placeholder: str = "[REDACTED]") -> str:
+    """`redact` plus key=value passwords and secrets, for text sent to a model.
+    Never used on what is stored."""
+    text = redact(text, placeholder)
+    return _ASSIGNMENT_PATTERN.sub(lambda m: m.group(1) + placeholder, text)
 
 
 class SecretFilter(logging.Filter):

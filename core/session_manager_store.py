@@ -307,6 +307,7 @@ def _connect() -> sqlite3.Connection:
     _conn = conn
     _upgrade_schema(conn)
     _migrate_if_needed(conn)
+    _migrate_compaction_data(conn)
     return conn
 
 
@@ -399,6 +400,81 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
         )
 
 
+NOTICE_MIGRATION_MARKER = "compaction_notices_display_only_v1"
+TOOL_INDEX_MIGRATION_MARKER = "search_index_tool_text_v1"
+COMPACTION_NOTICE_HEAD = "**Conversation compacted**"
+
+
+def is_legacy_compaction_notice(message: dict, index: int, compactions: list) -> bool:
+    """A notice stored by an older build, recognised exactly as compact_session's
+    caller wrote it: an assistant message whose whole text is the heading, a
+    blank line and one of the chat's own checkpoint summaries, sitting at or
+    after that checkpoint's boundary. Ordinary text never matches."""
+    if message.get("role") != "assistant" or message.get("display_only"):
+        return False
+    content = message.get("content")
+    if not isinstance(content, str) or not content.startswith(COMPACTION_NOTICE_HEAD):
+        return False
+    return any(
+        content == f"{COMPACTION_NOTICE_HEAD}{chr(10)}{chr(10)}{c.get('summary')}" and index >= c.get("through_index", 0)
+        for c in compactions
+    )
+
+
+def _migrate_compaction_data(conn: sqlite3.Connection) -> None:
+    """One-time, idempotent fixes for chats written before the compaction
+    changes, each guarded by its own meta marker (set last, so an interrupted
+    run simply repeats; every step is safe to repeat):
+
+    1. flag stored "Conversation compacted" notices display-only;
+    2. add tool-result text to the search index of messages that have saved
+       tool rounds (the only rows whose indexed text changed).
+
+    Work is one short transaction per chat and touches only chats with a
+    checkpoint, and only the message rows that need it."""
+    done = {r["key"] for r in conn.execute(
+        "SELECT key FROM meta WHERE key IN (?, ?)", (NOTICE_MIGRATION_MARKER, TOOL_INDEX_MIGRATION_MARKER))}
+    if NOTICE_MIGRATION_MARKER not in done:
+        flagged = 0
+        for r in conn.execute(
+                "SELECT id, json_extract(doc, '$.compactions') AS c FROM sessions "
+                "WHERE json_extract(doc, '$.compactions') IS NOT NULL").fetchall():
+            try:
+                compactions = json.loads(r["c"]) or []
+            except (TypeError, ValueError):
+                continue
+            first = min((c.get("through_index", 0) for c in compactions), default=0)
+            with conn:
+                for m in conn.execute(
+                        "SELECT idx, doc FROM messages WHERE session_id = ? AND idx >= ? AND role = 'assistant' "
+                        "AND content LIKE ?", (r["id"], first, COMPACTION_NOTICE_HEAD + "%")).fetchall():
+                    doc = json.loads(m["doc"])
+                    if is_legacy_compaction_notice(doc, m["idx"], compactions):
+                        doc["display_only"] = True
+                        conn.execute("UPDATE messages SET doc = ? WHERE session_id = ? AND idx = ?",
+                                     (json.dumps(doc, ensure_ascii=False), r["id"], m["idx"]))
+                        flagged += 1
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (NOTICE_MIGRATION_MARKER,))
+        if flagged:
+            logger.info("session store: flagged %d legacy compaction notice(s) display-only", flagged)
+    if TOOL_INDEX_MIGRATION_MARKER not in done:
+        sessions = conn.execute(
+            "SELECT DISTINCT session_id FROM messages WHERE doc LIKE '%\"tool_rounds\"%'").fetchall()
+        for r in sessions:
+            with conn:
+                for m in conn.execute(
+                        "SELECT idx, role, doc FROM messages WHERE session_id = ? AND doc LIKE '%\"tool_rounds\"%'",
+                        (r["session_id"],)).fetchall():
+                    conn.execute("DELETE FROM messages_fts WHERE session_id = ? AND idx = ?", (r["session_id"], m["idx"]))
+                    conn.execute("INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
+                                 (search_text(json.loads(m["doc"])), r["session_id"], m["idx"], m["role"]))
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
+        if sessions:
+            logger.info("session store: re-indexed tool results for %d chat(s)", len(sessions))
+
+
 def connection() -> sqlite3.Connection:
     with _LOCK:
         return _connect()
@@ -450,6 +526,37 @@ MESSAGES_UNCHANGED = None
 ALL_MESSAGES = 0
 
 
+# ---------------------------------------------------------------- tool evidence
+
+def tool_round_entries(message: dict) -> list[tuple[str, str]]:
+    """(tool name, result text) for each tool call a reply made, from its saved
+    `tool_rounds` (OpenAI-style messages). Evidence that lives only there is
+    invisible to the reply text, so search and compaction read it from here."""
+    rounds = (message.get("tool_rounds") or {}).get("messages") or []
+    names: dict = {}
+    entries: list[tuple[str, str]] = []
+    for r in rounds:
+        if not isinstance(r, dict):
+            continue
+        for call in r.get("tool_calls") or []:
+            fn = (call or {}).get("function") or {}
+            names[(call or {}).get("id")] = fn.get("name") or "tool"
+        if r.get("role") == "tool":
+            content = r.get("content")
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            entries.append((names.get(r.get("tool_call_id"), "tool"), content))
+    return entries
+
+
+def search_text(message: dict) -> str:
+    """What the full-text index holds for a message: its text plus its tool
+    results, so a fact only a tool returned can still be found."""
+    content = message.get("content") or ""
+    extra = chr(10).join(f"{name}: {text}" for name, text in tool_round_entries(message))
+    return f"{content}{chr(10)}{extra}" if extra else content
+
+
 def _write_messages(conn: sqlite3.Connection, session_id: str, messages: list,
                     start: int = ALL_MESSAGES) -> None:
     """Re-derive a session's message and FTS rows from `start` onward.
@@ -489,7 +596,7 @@ def _write_messages(conn: sqlite3.Connection, session_id: str, messages: list,
         # An archived message stays searchable on purpose: compaction folds
         # it out of what the model is sent, not out of the user's history,
         # and "search my past chats" should still find it.
-        fts_rows.append((content, session_id, i, m.get("role")))
+        fts_rows.append((search_text(m), session_id, i, m.get("role")))
     if rows:
         conn.executemany(
             "INSERT INTO messages (session_id, idx, role, content, ts, doc) VALUES (?, ?, ?, ?, ?, ?)",
@@ -584,7 +691,7 @@ def append_message(session_id: str, index: int, message: dict, doc: dict) -> Non
             )
             conn.execute(
                 "INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
-                (content, session_id, index, message.get("role")),
+                (search_text(message), session_id, index, message.get("role")),
             )
             conn.execute(
                 """UPDATE sessions
@@ -831,6 +938,7 @@ def search_archive(session_id: str, query: str, before_index: int, max_results: 
                        FROM messages_fts f
                        LEFT JOIN messages m ON m.session_id = f.session_id AND m.idx = f.idx
                        WHERE messages_fts MATCH ? AND f.session_id = ? AND f.idx < ?
+                         AND COALESCE(json_extract(m.doc, '$.display_only'), 0) = 0
                        ORDER BY rank
                        LIMIT ?""",
                     (match, session_id, before_index, max_results),
@@ -1047,6 +1155,13 @@ def _import_legacy_json(conn: sqlite3.Connection) -> dict:
     return result
 
 
+def _row_search_text(row) -> str:
+    try:
+        return search_text(json.loads(row["doc"]))
+    except (TypeError, ValueError):
+        return row["content"]
+
+
 def rebuild_search_index() -> int:
     """Re-derive every message and FTS row from the stored documents.
 
@@ -1062,12 +1177,12 @@ def rebuild_search_index() -> int:
             conn.execute("DELETE FROM messages_fts")
             for r in rows:
                 msgs = conn.execute(
-                    "SELECT content, idx, role FROM messages WHERE session_id = ? ORDER BY idx",
+                    "SELECT doc, content, idx, role FROM messages WHERE session_id = ? ORDER BY idx",
                     (r["id"],),
                 ).fetchall()
                 conn.executemany(
                     "INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
-                    [(m["content"], r["id"], m["idx"], m["role"]) for m in msgs],
+                    [(_row_search_text(m), r["id"], m["idx"], m["role"]) for m in msgs],
                 )
     return len(rows)
 
