@@ -2272,6 +2272,10 @@ app.whenReady().then(async () => {
     await navigate('calendar');
     await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
     await waitFor("[...document.querySelectorAll('.cal-day-panel-title')].some(n=>n.textContent==='Next 7 Days') && [...document.querySelectorAll('.cal-upcoming .card')].some(c=>c.textContent.includes('Review the course project'))");
+    // The fixture item sits four hours ahead, which is tomorrow after 8 pm. Select the day that really holds it,
+    // so the selected-day agenda is expected to show it at any time of day (the default selection is today).
+    await js("import('/static/js/api.js').then(async m => { const t = new Date(); t.setHours(0, 0, 0, 0); const e = new Date(t); e.setDate(e.getDate() + 7); const items = await m.api('/api/calendar/events?start=' + encodeURIComponent(t.toISOString()) + '&end=' + encodeURIComponent(e.toISOString())); const day = new Date(items.find(i => i.id === 'tab-a1').start).toDateString(); document.querySelector('.cal-day[aria-label=\"' + day + '\"]').click(); })");
+    await waitFor("!!document.querySelector('.cal-selected-agenda') && [...document.querySelectorAll('.cal-upcoming .card')].some(c=>c.textContent.includes('Review the course project')) && [...document.querySelectorAll('.cal-selected-agenda .card')].some(c=>c.textContent.includes('Review the course project'))");
     await js("{ const c=[...document.querySelectorAll('.cal-upcoming .card')].find(c=>c.textContent.includes('Review the course project')); window._reducedCalendarFade=false; c.animate=()=>{ window._reducedCalendarFade=true; return {finished:Promise.resolve()}; }; c.querySelector('input').click(); }");
     await waitFor("![...document.querySelectorAll('.cal-upcoming .card')].some(c=>c.textContent.includes('Review the course project'))");
     assert.equal(await js("window._reducedCalendarFade"), false, 'Reduced motion removes completed upcoming items without animation');
