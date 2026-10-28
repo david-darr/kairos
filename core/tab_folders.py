@@ -4,6 +4,7 @@ Discovery owns policy (settings, overrides and approval); this module owns
 the mechanics. The namespace deliberately has no search path: putting the
 tabs root on it would let an approved tab import an unapproved neighbour.
 """
+import copy
 import hashlib
 import importlib
 import importlib.abc
@@ -13,6 +14,8 @@ import os
 import re
 import shutil
 import sys
+import threading
+import time
 from types import ModuleType
 
 SLUG = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -20,6 +23,8 @@ FILES_URL = "/tab-files"
 _registered = {}
 _suspended = {}
 _allowed = None
+_scan_cache = {}
+_scan_lock = threading.Lock()
 
 
 def is_link(path: str) -> bool:
@@ -111,9 +116,56 @@ def metadata(folder: str) -> dict:
                                       "icon_svg", "blurb", "detail", "reads") if key in value}
 
 
-def scan(root: str, *, user: bool, api_version: int) -> list[dict]:
+def _stat_signature(root: str) -> tuple:
+    """Every path under root with its lstat (type, size, mtime, id): no file is read.
+
+    Folder mtimes alone miss an in-place edit, so file stats are part of the key. Links are
+    recorded, never followed, so a swapped link also changes the key."""
+    rows = []
+    stack = [root]
+    while stack:
+        folder = stack.pop()
+        try:
+            with os.scandir(folder) as it:
+                children = sorted(it, key=lambda e: e.name)
+        except OSError:
+            rows.append((folder, None))
+            continue
+        for child in children:
+            try:
+                info = child.stat(follow_symlinks=False)
+                rows.append((child.path, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ino))
+                if child.is_dir(follow_symlinks=False) and not is_link(child.path):
+                    stack.append(child.path)
+            except OSError:
+                rows.append((child.path, None))
+    return tuple(sorted(rows, key=lambda row: row[0]))
+
+
+def invalidate_scans() -> None:
+    """Forget cached scans (install, remove, enable or disable); the next scan reads the folders."""
+    with _scan_lock:
+        _scan_cache.clear()
+
+
+def scan(root: str, *, user: bool, api_version: int, cached: bool = False) -> list[dict]:
+    """Inspect every tab folder under root.
+
+    cached=True is for read-only listings: the three source hashes per tab are skipped while no
+    file under root has changed (stat signature). Approval and import paths never pass it, so
+    they always hash the real bytes."""
     if not os.path.isdir(root):
         return []
+    if cached:
+        key = (root, user, api_version)
+        signature = _stat_signature(root)
+        # A file written in the last two seconds may still change within the same timestamp tick, so
+        # such a signature is never trusted (the same "racy" rule git applies to its index).
+        cached = max((row[3] for row in signature if len(row) > 3 and row[3]), default=0) < time.time_ns() - 2_000_000_000
+        with _scan_lock:
+            hit = _scan_cache.get(key) if cached else None
+        if hit and hit[0] == signature:
+            return copy.deepcopy(hit[1])
     entries = []
     for slug in sorted(os.listdir(root)):
         if slug == "__pycache__" or (user and slug in ("routes", "services", "views")
@@ -123,6 +175,10 @@ def scan(root: str, *, user: bool, api_version: int) -> list[dict]:
         if not os.path.isdir(folder) and not is_link(folder):
             continue
         entries.append(inspect_folder(folder, user=user, api_version=api_version))
+    if cached:
+        # Take the signature before scanning (above): an edit during the scan changes it next time.
+        with _scan_lock:
+            _scan_cache[key] = (signature, copy.deepcopy(entries))
     return entries
 
 

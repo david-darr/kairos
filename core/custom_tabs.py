@@ -136,6 +136,7 @@ def set_template_enabled(slug: str, enabled: bool) -> dict:
     else:
         current.discard(slug)
     settings_store.update_settings(enabled_tab_templates=sorted(current))
+    tab_folders.invalidate_scans()
     if not enabled:
         tab_folders.unregister_prebuilt(slug)
     return {"slug": slug, "enabled": enabled}
@@ -305,12 +306,12 @@ def approved_view_bytes(slug: str) -> bytes | None:
     return content
 
 
-def _folder_entries() -> list[dict]:
-    entries = tab_folders.scan(PREBUILT_TABS_DIR, user=False, api_version=TAB_API_VERSION)
+def _folder_entries(cached: bool = False) -> list[dict]:
+    entries = tab_folders.scan(PREBUILT_TABS_DIR, user=False, api_version=TAB_API_VERSION, cached=cached)
     from core import addons
     if addons.enabled('roblox'):
-        entries += tab_folders.scan(str(addons.ROOT / 'roblox' / 'tabs'), user=False, api_version=TAB_API_VERSION)
-    entries += tab_folders.scan(USER_TABS_DIR, user=True, api_version=TAB_API_VERSION)
+        entries += tab_folders.scan(str(addons.ROOT / 'roblox' / 'tabs'), user=False, api_version=TAB_API_VERSION, cached=cached)
+    entries += tab_folders.scan(USER_TABS_DIR, user=True, api_version=TAB_API_VERSION, cached=cached)
     for entry in entries:
         _apply_folder_policy(entry)
     return entries
@@ -397,8 +398,8 @@ def _entry_version(entry: dict) -> tuple:
             entry.get("_snapshot"), entry.get("fingerprint"))
 
 
-def _candidates() -> dict[str, dict]:
-    folders = _folder_entries()
+def _candidates(cached: bool = False) -> dict[str, dict]:
+    folders = _folder_entries(cached)
     candidates = {}
     for entry in folders:
         if entry["kind"] == "prebuilt":
@@ -421,9 +422,9 @@ def _candidates() -> dict[str, dict]:
     return candidates
 
 
-def _load_candidates() -> tuple[dict[str, dict], list[tuple[str, ModuleType]]]:
+def _load_candidates(cached: bool = False) -> tuple[dict[str, dict], list[tuple[str, ModuleType]]]:
     ensure_user_tab_dirs()
-    candidates = _candidates()
+    candidates = _candidates(cached)
     tab_folders.register_all([e for e in candidates.values() if e["format"] != "legacy"], _folder_allowed)
     found = []
     for slug, entry in sorted(candidates.items()):
@@ -537,17 +538,20 @@ def set_user_tab_enabled(slug: str, enabled: bool) -> dict:
     else:
         disabled.add(slug)
     settings_store.update_settings(disabled_user_tabs=sorted(disabled))
+    tab_folders.invalidate_scans()
     if not enabled:
         tab_folders.suspend(slug)
     return {"slug": slug, "enabled": enabled}
 
 
 def list_tabs() -> list[dict]:
-    candidates, _ = _load_candidates()
+    # Listing only: folder scans are reused while no tab file has changed. Mounting, approval and
+    # import (discover, _folder_allowed) always hash the real bytes.
+    candidates, _ = _load_candidates(cached=True)
     entries = list(candidates.values())
     # Keep shadowed prebuilts visible to the Tool Store, even though the
     # user's override alone supplies routes and sidebar metadata.
-    for entry in _folder_entries():
+    for entry in _folder_entries(cached=True):
         winner = candidates[entry["slug"]]
         if (winner["kind"], winner["format"]) != (entry["kind"], entry["format"]):
             if entry["status"] == "on":
@@ -599,6 +603,7 @@ def delete(slug: str) -> dict:
     """
     if not _TAB_SLUG.fullmatch(slug):
         raise ValueError("invalid tab slug")
+    tab_folders.invalidate_scans()
     folder = os.path.join(USER_TABS_DIR, slug)
     if os.path.lexists(folder):
         # Verify the whole tree before recursively deleting it, including

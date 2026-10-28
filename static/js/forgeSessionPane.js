@@ -4,7 +4,7 @@ import { forgeRunning } from './forgeUi.js';
 import { subscribeAll } from './chatStream.js';
 import { configureApp, launchApp, permissionAction } from './forgeAppPreview.js';
 
-export async function mountForgeSession(panel, session, project, models, { initialMessage, onReview, onLeave, onDiff, onChanges, onPreview, onTerminal } = {}) {
+export async function mountForgeSession(panel, session, project, models, { initialMessage, onReview, changes, knownApps, onLeave, onDiff, onChanges, onPreview, onTerminal } = {}) {
   const id = session.id, base = `/api/forge/sessions/${encodeURIComponent(id)}`;
   let disposed = false, mutating = false, dialog = null, chatCleanup = () => {};
   const appController = new AbortController();
@@ -31,18 +31,27 @@ export async function mountForgeSession(panel, session, project, models, { initi
     if (appStarting || disposed) return;
     if (appStatus?.ready) { onPreview?.(id); return; }
     appDialogCleanup = configureApp(session, project, panel, async () => {
-      appStarting = true; run.disabled = true; status.textContent = 'Waiting for app approval and readiness...';
+      appStarting = true; syncAppTimer(); run.disabled = true; status.textContent = 'Waiting for app approval and readiness...';
       try { appStatus = await launchApp(id, 'start', { signal: appController.signal, owner: panel }); if (!disposed) { status.textContent = ''; onPreview?.(id); } }
       catch (error) { if (!disposed) status.textContent = error.message; }
       finally { appStarting = false; refreshApp(); }
     });
   } });
-  async function refreshApp() {
-    try { const result = await api(`${base}/app/status`); if (!disposed) { appStatus = result; run.textContent = result.ready ? 'Preview' : 'Run app'; run.disabled = appStarting || !!session.forge.removed; } }
+  async function refreshApp(origin) {
+    // On mount, the shell's running-apps list already says whether this session has an app.
+    const known = origin === 'mount' && knownApps?.();
+    if (known && !known.some(app => app.session_id === id)) { appStatus = { running: false, ready: false }; return; }
+    try { const result = await api(`${base}/app/status`); if (!disposed) { appStatus = result; run.textContent = result.ready ? 'Preview' : 'Run app'; run.disabled = appStarting || !!session.forge.removed; syncAppTimer(); } }
     catch (error) { if (!disposed) status.textContent = error.message; }
   }
-  const appTimer = setInterval(refreshApp, 3000);
-  document.addEventListener('kairos:forge-apps', refreshApp); refreshApp();
+  // Status is polled only while this session's app is running or starting, and never while hidden.
+  let appTimer = null;
+  function syncAppTimer() {
+    const active = !disposed && (appStarting || appStatus?.running);
+    if (active && !appTimer) appTimer = setInterval(() => { if (!document.hidden) refreshApp(); }, 3000);
+    else if (!active && appTimer) { clearInterval(appTimer); appTimer = null; }
+  }
+  document.addEventListener('kairos:forge-apps', refreshApp); refreshApp('mount');
   const terminal = el('button', { class: 'btn quiet forge-open-terminal', text: 'Terminal', disabled: !!session.forge.removed, onclick: () => onTerminal?.(id) });
   const rea = el('button', { class: 'btn quiet', text: 'REA tools', hidden: true, disabled: !!session.forge.removed,
     'aria-pressed': 'false', onclick: toggleRea });
@@ -53,13 +62,13 @@ export async function mountForgeSession(panel, session, project, models, { initi
   explain(); sync();
   refreshRea();
   // Teardown is installed before awaiting the chat mount.
-  const cleanup = () => { disposed = true; appController.abort(); appDialogCleanup(); clearInterval(appTimer); document.removeEventListener('kairos:forge-apps', refreshApp); unsubscribe(); chatCleanup(); dialog?.close(); };
+  const cleanup = () => { disposed = true; appController.abort(); appDialogCleanup(); clearInterval(appTimer); appTimer = null; document.removeEventListener('kairos:forge-apps', refreshApp); unsubscribe(); chatCleanup(); dialog?.close(); };
   panel._cleanup = cleanup;
   try {
     const mounted = await mountForgeTranscript(host, { sessionId: id, title: session.title, modelPicker: !session.forge.removed,
       workspace: session.workspace_dir, branch: session.forge.branch, modeControl: mode, modeBusy: () => mutating,
       hasMessages: !!session.messages?.length,
-      onDiff, onChanges,
+      onDiff, onChanges, changes,
       queue: true, readOnly: !!session.forge.removed, initialMessage, placeholder: 'Message your agent',
       emptyText: 'Describe the next step for this project.', onTurnEnd: onReview,
       onModelChange: (model, override) => { agentLabel.textContent = agentText(model, override); },

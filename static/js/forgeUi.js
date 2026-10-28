@@ -17,6 +17,20 @@ export function diffCounts({ added = 0, removed = 0 }) {
   return el('span', { class: 'forge-counts' }, [el('span', { class: 'forge-added', text: `+${added.toLocaleString()}` }), el('span', { class: 'forge-removed', text: `-${removed.toLocaleString()}` })]);
 }
 
+// First-mount read shared by the Forge rail and Forge Home: one projects + sessions + running-apps
+// read between them instead of one each. Timers and events pass fresh=true and always read.
+let overview = null;
+export function forgeOverview(fresh = false) {
+  if (!fresh && overview && Date.now() - overview.at < 2000) return overview.promise.then(value => structuredClone(value));
+  const promise = api('/api/forge/projects').then(async projects => {
+    const [groups, apps] = await Promise.all([projectSessions(projects), api('/api/forge/apps/running')]);
+    return { projects, groups, apps };
+  });
+  overview = { at: Date.now(), promise };
+  promise.catch(() => { if (overview?.promise === promise) overview = null; });
+  return promise.then(value => structuredClone(value));
+}
+
 export async function projectSessions(projects) {
   const results = await Promise.allSettled(projects.map(p => api(`/api/forge/projects/${encodeURIComponent(p.id)}/sessions`)));
   return results.map((result, i) => ({ project: projects[i], sessions: result.status === 'fulfilled' ? result.value : [], error: result.status === 'rejected' }));
