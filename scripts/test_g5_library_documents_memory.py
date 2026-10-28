@@ -312,9 +312,9 @@ class PrioritiesSyncTests(unittest.TestCase):
         self.assertEqual((second["imported"], second["updated"], second["removed"]), (0, 0, 0))
         self.FILE.write_text("## Now\n- [x] ship it\n## Later\n- [ ] dream\n", encoding="utf-8")
         third = vault_sync.sync_from_vault()
-        # Ticking a box changes the line, which is the key: the old note is removed and a new
-        # one imported (see test_BUG_checking_a_box_in_the_vault_keeps_the_note).
-        self.assertEqual((third["imported"], third["removed"]), (1, 2))
+        # Batch 2 fix (checkbox no longer part of the key): ticking "ship it" updates that note
+        # in place (1 update), and the removed line "done thing" is the single removal.
+        self.assertEqual((third["imported"], third["removed"]), (0, 1))
         self.assertEqual(self.sources(), [("Later", "dream", False), ("Now", "ship it", True)])
 
     def test_BUG_checking_a_box_in_the_vault_keeps_the_note(self):
@@ -355,7 +355,7 @@ class PrioritiesSyncTests(unittest.TestCase):
         self.assertEqual(self.sources(), [("Home", "call dentist", False), ("Work", "call dentist", False)],
                          f"imported {self.sources()}; second sync updated {again['updated']}")
 
-    def test_efficiency_sync_cost_grows_with_items_times_notes(self):
+    def test_sync_list_notes_calls_stay_small_for_many_items(self):
         items = "\n".join(f"- [ ] task number {n}" for n in range(300))
         self.FILE.write_text("## Big\n" + items + "\n", encoding="utf-8")
         t = time.perf_counter(); vault_sync.sync_from_vault(); first = ms(t)
@@ -368,7 +368,9 @@ class PrioritiesSyncTests(unittest.TestCase):
         with patch.object(notes_service, "list_notes", counting):
             t = time.perf_counter(); vault_sync.sync_from_vault(); second = ms(t)
         BENCH["priorities_sync_300_items"] = {"first_sync_ms": first, "no_change_sync_ms": second, "list_notes_calls": calls["n"]}
-        self.assertGreaterEqual(calls["n"], 300, "EFFICIENCY: list_notes() is called once per item (O(n^2))")
+        # Batch 2 fix: sync builds one index instead of calling list_notes() per item. Guard that
+        # the call count stays small for 300 items (was >=300, O(n^2)).
+        self.assertLessEqual(calls["n"], 5, f"list_notes() called {calls['n']} times for 300 items")
 
 
 class RetrievalScopeTests(unittest.TestCase):

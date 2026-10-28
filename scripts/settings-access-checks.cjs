@@ -213,10 +213,16 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   await close();
   // Channels redraws its list every 5 seconds while it is on screen; once Settings is closed nothing should keep asking.
   await open('channels'); await waitFor("document.querySelector('.set-page')?.dataset.page === 'channels' && document.querySelector('.channel-list')"); await delay(400);
-  const livePolls = reads.length; await delay(5600); const whileOpen = reads.length - livePolls;
+  // Only the requests settingsChannels.js's own loop makes count (its draw() reads /api/settings/discord-bots, /api/connectors and
+  // /api/system/status). /api/system/status is shared with the rest of the app, so it is left out; other panels and app-wide polls
+  // are not the Channels loop (batch 2: scoped from "every request after Settings closes").
+  const channelsPath = (r) => r.path === '/api/connectors' || r.path.startsWith('/api/connectors/') || r.path === '/api/settings/discord-bots' || r.path.startsWith('/api/settings/discord-bots/');
+  const channelsCount = (from) => reads.slice(from).filter(channelsPath).length;
+  const livePolls = reads.length; await delay(5600); const whileOpen = channelsCount(livePolls);
+  expect(whileOpen > 0, 'the Channels loop was expected to poll while its panel is open (otherwise the check below proves nothing)');
   await close();
   const closedMark = reads.length; await delay(11000);
-  const afterClose = reads.length - closedMark;
+  const afterClose = channelsCount(closedMark);
   expect(afterClose === 0, `Channels kept polling after Settings was closed: ${afterClose} request(s) in 11 seconds (${whileOpen} while it was open in 5.6 seconds)`);
   console.log('G7_SETTINGS_COST ' + JSON.stringify({ perOpen: costs, switchTimesMs: switchTimes, switchRequests,
     switchP50: percentile(switchTimes, 0.5), switchP95: percentile(switchTimes, 0.95), idleRequestsIn6s: idle,

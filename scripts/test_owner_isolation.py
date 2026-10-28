@@ -146,6 +146,71 @@ class OwnerIsolation(unittest.TestCase):
                 self.refused("anon " + path, self.anon.get(path, params={"session_id": sid, "url": url}))
         session_manager.delete_session(sid)
 
+    # -- reference picker, swarm memory, chat status/summary (batch 2) -------
+
+    def test_the_reference_picker_lists_only_the_askers_own_chats_and_chat_files(self):
+        from core import chat_files
+        from core.session_manager import session_manager
+        sid = self.new_chat()  # titled "alice private"
+        (self.work / "picker.txt").write_text("x", encoding="utf-8")
+        chat_files.record_local(sid, str(self.work), "picker.txt", "created")
+
+        def kinds(c, kind):
+            got = c.get("/api/chat/references", params={"q": "picker" if kind == "file" else "alice private", "kind": kind})
+            self.assertEqual(got.status_code, 200, got.text)
+            return got.json()
+        self.assertEqual(kinds(self.bob, "chat"), [], "a member never sees another member's chat in the picker")
+        self.assertEqual(kinds(self.bob, "file"), [], "nor their chat files")
+        self.assertIn(sid, [r["id"] for r in kinds(self.alice, "chat")], "the owner finds the chat")
+        self.assertTrue(kinds(self.alice, "file"), "the owner finds the chat file")
+        self.assertIn(sid, [r["id"] for r in kinds(self.boss, "chat")], "an admin sees every chat")
+        self.assertTrue(kinds(self.boss, "file"), "an admin sees every chat file")
+        session_manager.delete_session(sid)
+
+    def test_the_reference_picker_searches_message_text_only_in_the_askers_own_chats(self):
+        from core.session_manager import session_manager
+        sid = self.new_chat()
+        self.assertEqual(self.alice.post(f"/api/sessions/{sid}/messages", json={"role": "user", "content": "zebracorn budget decision"}).status_code, 200)
+        probe = {"q": "zebracorn", "kind": "chat"}
+        self.assertEqual(self.bob.get("/api/chat/references", params=probe).json(), [], "member: another member's message text is not searchable")
+        self.assertIn(sid, [r["id"] for r in self.alice.get("/api/chat/references", params=probe).json()])
+        self.assertIn(sid, [r["id"] for r in self.boss.get("/api/chat/references", params=probe).json()])
+        session_manager.delete_session(sid)
+
+    def test_swarm_memory_chat_search_and_read_are_scoped_to_the_owner(self):
+        from core.session_manager import session_manager
+        from core.swarm.memory import SwarmMemory
+        sid = self.new_chat()
+        self.assertEqual(self.alice.post(f"/api/sessions/{sid}/messages", json={"role": "user", "content": "quokkaberry launch plan"}).status_code, 200)
+        settings = {"sources": ["sessions"]}
+        self.assertEqual(SwarmMemory(settings, owner_user="bob").search("quokkaberry"), [], "a member's company cannot find another member's chat")
+        with self.assertRaises(ValueError):
+            SwarmMemory(settings, owner_user="bob").read("session:" + sid)
+        mine = SwarmMemory(settings, owner_user="alice")
+        self.assertEqual([r["ref"] for r in mine.search("quokkaberry")], ["session:" + sid])
+        self.assertIn("quokkaberry", mine.read("session:" + sid))
+        self.assertEqual([r["ref"] for r in SwarmMemory(settings, owner_user=None).search("quokkaberry")], ["session:" + sid], "admin scope (None) sees all")
+        from services.swarm_service import SwarmService
+        self.assertIsNone(SwarmService._memory_owner_scope("boss"), "an admin owner searches every chat")
+        self.assertEqual(SwarmService._memory_owner_scope("bob"), "bob")
+        session_manager.delete_session(sid)
+
+    def test_chat_status_and_summary_are_owner_scoped(self):
+        from core.session_manager import session_manager
+        sid = self.new_chat()
+        for label, c, ok in (("owner", self.alice, True), ("admin", self.boss, True), ("member", self.bob, False), ("anonymous", self.anon, False)):
+            with self.subTest(label=label):
+                status = c.get("/api/chat/status", params={"session_id": sid})
+                summary = c.get("/api/chat/summary", params={"session_id": sid})
+                regenerate = c.post("/api/chat/summary", json={"session_id": sid})
+                if ok:
+                    self.assertEqual((status.status_code, summary.status_code), (200, 200))
+                else:
+                    self.refused(f"{label} status", status)
+                    self.refused(f"{label} summary", summary)
+                    self.refused(f"{label} POST summary", regenerate)
+        session_manager.delete_session(sid)
+
     # -- tasks ---------------------------------------------------------------
 
     def test_tasks_are_owner_scoped_for_reads_and_for_every_mutation(self):

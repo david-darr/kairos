@@ -145,9 +145,15 @@ class VaultSyncTests(NotesBase):
         self.api.patch(f"/api/notes/{note['id']}", json={"completed": False})
         self.assertIn("- [ ] Ship the report", self.read_vault())
         self.write_vault(self.read_vault().replace("- [ ] Fix the sink", "- [x] Fix the sink"))
+        sink = next(n for n in self.notes.list_notes() if n["text"] == "Fix the sink")
         s = vault_sync.sync_from_vault()
-        self.assertEqual((s["imported"], s["removed"]), (1, 1), "the checkbox is part of the matching key, so a vault tick replaces the note")
-        self.assertTrue(next(n for n in self.notes.list_notes() if n["text"] == "Fix the sink")["completed"])
+        # Batch 2 fix (the checkbox is no longer part of the matching key): a tick in the vault
+        # updates the same note instead of replacing it, so nothing is imported or removed.
+        self.assertEqual((s["imported"], s["removed"]), (0, 0), "a vault tick keeps the note")
+        after = next(n for n in self.notes.list_notes() if n["text"] == "Fix the sink")
+        self.assertTrue(after["completed"])
+        self.assertEqual(after["id"], sink["id"], "same id after the vault tick")
+        self.assertEqual(after.get("due_date"), sink.get("due_date"), "due date kept")
         self.assertEqual(len(self.notes.list_notes()), 3)
 
     def test_edited_line_skips_writeback_and_failure_never_fails_the_click(self):
