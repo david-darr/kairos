@@ -332,7 +332,9 @@
 .kairos-redesign .appearance-panel :is(.meta, .appearance-status) { color: var(--rd-ink-dim); font-size: 12px; line-height: 1.45; }
 .kairos-redesign .appearance-halftone-setting > .meta { margin: 10px 0 0; }
 .kairos-redesign .appearance-effect-section { padding: 0; border: 0; border-radius: 0; background: transparent; }
-.kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); gap: 10px; margin: 0 0 12px; }
+/* Five picture effects (Animated is a background style of its own): one row of five, or two
+   columns with the last card spanning its row where the pane is narrow. */
+.kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
 .kairos-redesign .appearance-effect-choice { padding: 8px; border-radius: 20px; background: var(--rd-surface-solid); border-color: var(--rd-line); }
 .kairos-redesign .appearance-effect-choice:has(input:checked) { border-color: var(--rd-ink); box-shadow: 0 0 0 1px var(--rd-ink); }
 .kairos-redesign .appearance-effect-thumb { height: 64px; border-radius: 12px; }
@@ -391,7 +393,8 @@
   .kairos-redesign .appearance-halftone-card-body strong { align-self: end; }
   .kairos-redesign .appearance-halftone-card-body .meta { display: block; grid-column: 1; font-size: 12px; }
   .kairos-redesign .appearance-halftone-card-actions { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; margin: 0; gap: 2px; }
-  .kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kairos-redesign .appearance-effects-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kairos-redesign .appearance-effect-thumb { height: 52px; }
   .kairos-redesign .appearance-effect-label { min-height: 34px; }
   .kairos-redesign .appearance-effect-controls { padding: 4px 16px; }
@@ -464,7 +467,8 @@
 /* Resized desktop panes keep the same controls in a single content column. */
 @container appearance (max-width: 769px) {
   .kairos-redesign .appearance-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kairos-redesign .appearance-effects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kairos-redesign .appearance-effects-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kairos-redesign .appearance-effect-control :is(select, input[type='range']) { flex-basis: 130px; width: 130px; }
 }
 .kairos-redesign .appearance-overlay-setting .set-row { grid-template-columns: minmax(0, 1fr) auto; }

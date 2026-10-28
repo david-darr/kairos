@@ -99,7 +99,8 @@
 /* Background effects use the same quiet surfaces and hairlines as Settings. */
 .appearance-effect-section { margin: 26px 0; padding: 18px; min-width: 0; border: 1px solid var(--hairline-soft); border-radius: 20px; background: var(--bg-panel); }
 .appearance-effect-section legend { padding: 0 8px; font-family: var(--font-display); font-style: italic; font-size: 25px; color: var(--text); }
-.appearance-effects-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+/* Five picture effects since Animated became a style of its own: one row of five. */
+.appearance-effects-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
 .appearance-effect-choice { min-width: 0; padding: 6px; border: 1px solid var(--hairline-soft); border-radius: 14px; cursor: pointer; background: var(--bg-panel-solid); }
 .appearance-effect-choice:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .appearance-effect-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -130,6 +131,7 @@
 .appearance-panel .appearance-dial p { font-size: 11px; }
 @media (max-width: 550px) {
   .appearance-effects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .appearance-effects-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .appearance-effect-section { padding: 12px; }
   .appearance-effect-control > span { min-width: 100%; }
 }
