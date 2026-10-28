@@ -383,10 +383,28 @@ class EgressTests(unittest.TestCase):
             self.assertIn("is not 80 or 443", line)
 
     def test_a_redirect_to_a_private_address_is_refused(self):
-        out = self.fetch(["https://httpbin.org/redirect-to?url=http://127.0.0.1/"])
-        line = next(iter(out.values()))
-        if line.startswith("ERR") or "503" in line or "502" in line:
-            self.skipTest(f"httpbin.org unreachable: {line}")
+        """The redirect comes from a server inside the run itself (no public site, no internet needed).
+        Its own address is exempted from the proxy for the first hop only; the address it redirects
+        to goes through the proxy like any new request and is refused."""
+        script = (
+                  "import os, threading, http.server, urllib.request, urllib.error\n"
+                  "class H(http.server.BaseHTTPRequestHandler):\n"
+                  "    def do_GET(self):\n"
+                  "        self.send_response(302); self.send_header('Location', 'http://127.0.0.1/'); self.end_headers()\n"
+                  "    log_message = lambda *a: None\n"
+                  "srv = http.server.HTTPServer(('127.0.0.1', 8099), H)\n"
+                  "threading.Thread(target=srv.serve_forever, daemon=True).start()\n"
+                  "os.environ['no_proxy'] = os.environ['NO_PROXY'] = '127.0.0.1:8099'\n"
+                  "try:\n"
+                  "    r = urllib.request.urlopen('http://127.0.0.1:8099/', timeout=20)\n"
+                  "    print('OK', r.status, r.url)\n"
+                  "except urllib.error.HTTPError as e:\n"
+                  "    print('HTTP', e.code, e.url, e.read()[:200].decode(errors='replace').strip())\n"
+                  "except Exception as e:\n"
+                  "    print('ERR', type(e).__name__, str(e)[:120])\n")
+        r = run("python probe.py", files={"probe.py": script}, network=True, timeout=60)
+        self.assertEqual(r.exit_code, 0, r.stderr)
+        line = next(l for l in r.stdout.splitlines() if l.startswith(("OK", "HTTP", "ERR")))
         self.assertTrue(line.startswith("HTTP 403") and "private or local" in line, line)
 
     def test_no_way_out_but_the_filter(self):

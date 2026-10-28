@@ -989,7 +989,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
         store.configure("local", {"endpoint_id": "test", "timezone": "America/New_York"})
         bad = store.add_source("local", "connector", "bad", "Bad")
         good = store.add_source("local", "connector", "good", "Good")
-        bad_message = store.capture(bad, message())
+        bad_message = store.capture(bad, message(thread_id="<other@test>"))  # a different conversation: the same message in two mailboxes is one task
         store.capture(good, message())
         extractor = AsyncMock(side_effect=["invalid json", json.dumps({"tasks": [item()]})])
         with patch.object(crm_scanner, "crm_service", store), patch.object(crm_scanner, "extract", extractor):

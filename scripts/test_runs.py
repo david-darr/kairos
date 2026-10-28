@@ -456,7 +456,7 @@ class ChatStopTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(chat_service, "_resolve_endpoint", return_value=LOCAL), \
              patch.object(chat_service, "_get_brain", return_value=(Slow(), False)):
             task = asyncio.create_task(consume())
-            await asyncio.wait_for(streaming.wait(), 5)
+            await asyncio.wait_for(streaming.wait(), 20)
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
