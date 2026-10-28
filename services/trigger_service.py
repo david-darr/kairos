@@ -36,6 +36,7 @@ ACTIONS = ("card", "task")
 MAX_BODY_BYTES = 1_000_000
 RATE_PER_MINUTE = 30
 DUPLICATE_SECONDS = 3600
+PENDING_TTL_SECONDS = 24 * 3600  # an approval nobody answered for a day is no longer live
 EVENT_LOG_LENGTH = 50
 RAW_LIMIT = 4000
 VALUE_LIMIT = 2000
@@ -355,7 +356,16 @@ class TriggerService:
         return pending
 
     def pending(self) -> list[dict]:
+        stale = [pid for pid, p in self._pending.items() if self._expired(p)]
+        for pid in stale:
+            del self._pending[pid]
+        if stale:
+            self._save()
         return sorted(self._pending.values(), key=lambda p: p["created_at"], reverse=True)
+
+    @staticmethod
+    def _expired(pending: dict) -> bool:
+        return time.time() - pending["created_at"] > PENDING_TTL_SECONDS
 
     def code_for(self, pending: dict) -> str:
         return f"[T-{pending['id'][:6]}]"
@@ -398,6 +408,10 @@ class TriggerService:
         del self._pending[pending_id]
         self._save()
         trigger = self._triggers.get(pending["trigger_id"])
+        if approve and self._expired(pending):
+            return "that approval expired; fire the event again if you still want it", None
+        if approve and (trigger is None or not trigger.get("enabled", True)):
+            return "that trigger is off, so nothing was started", None
         if not approve:
             if trigger:
                 self._log(trigger, "declined", pending["event_type"], pending["delivery"])

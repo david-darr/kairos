@@ -3,6 +3,7 @@ onboarding state. All admin-gated (matches Odysseus's own settings-write
 policy — see specs/auth-security.md): in the single-user default this is a
 no-op (SINGLE_USER is always admin), it only matters once AUTH_ENABLED=true.
 """
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -151,8 +152,18 @@ async def complete_onboarding(user: str = Depends(require_admin)) -> dict:
 
 @router.post("/vault-dir")
 async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_admin)) -> dict:
-    settings_store.update_settings(vault_dir=body.path)
-    seed_vault_if_empty(body.path)
+    # Check the folder and seed it first; only a folder that works is saved.
+    # A relative or empty path would resolve against the app's own folder.
+    path = body.path
+    if not path or "\x00" in path or not os.path.isabs(path):
+        raise HTTPException(status_code=400, detail="Choose a full folder path, such as C:\\Users\\you\\Vault.")
+    if os.path.exists(path) and not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail="That path is a file, not a folder.")
+    try:
+        seed_vault_if_empty(path)
+    except OSError as error:
+        raise HTTPException(status_code=400, detail=f"That folder cannot be used: {error}")
+    settings_store.update_settings(vault_dir=path)
     # Only affects *new* Brain connections (new sessions, or existing
     # sessions after their next reconnect) — a session with an already-open
     # Claude Agent SDK connection keeps its original cwd until it reconnects.

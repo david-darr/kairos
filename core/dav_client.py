@@ -14,7 +14,9 @@ Read-only, one-way sync (remote -> JARVIS) — no writeback, matching the
 services/calendar_service.py.
 """
 import re
+from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -63,6 +65,25 @@ def _extract_field(block: str, name: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def _extract_dt(block: str, name: str) -> Optional[str]:
+    """DTSTART/DTEND as ISO. A local time with a `;TZID=Zone` parameter is
+    converted to its UTC instant (a zone that can't be resolved keeps the
+    wall time as written, as before)."""
+    m = re.search(rf"^{name}((?:;[^:\n]*)?):(.+)$", block, re.MULTILINE)
+    if not m:
+        return None
+    value = m.group(2).strip()
+    tz = re.search(r";TZID=([^;:]+)", m.group(1))
+    iso = _to_iso(value)
+    if tz and "T" in value and not value.endswith("Z"):
+        try:
+            local = datetime.fromisoformat(iso).replace(tzinfo=ZoneInfo(tz.group(1).strip('"')))
+            return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, ZoneInfoNotFoundError):
+            pass
+    return iso
+
+
 def parse_vevents(ics_text: str) -> list[dict]:
     """Minimal VEVENT extraction: UID, SUMMARY, DTSTART, DTEND, all-day
     detection (DATE-only values have no 'T'). Recurrence rules (RRULE) are
@@ -74,15 +95,15 @@ def parse_vevents(ics_text: str) -> list[dict]:
         uid = _extract_field(block, "UID")
         summary = _extract_field(block, "SUMMARY")
         dtstart = _extract_field(block, "DTSTART")
-        dtend = _extract_field(block, "DTEND")
         if not (uid and summary and dtstart):
             continue
         all_day = "T" not in dtstart
+        start = _extract_dt(block, "DTSTART")
         events.append({
             "uid": uid,
             "title": summary,
-            "start": _to_iso(dtstart),
-            "end": _to_iso(dtend or dtstart),
+            "start": start,
+            "end": _extract_dt(block, "DTEND") or start,
             "all_day": all_day,
         })
     return events

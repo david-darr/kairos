@@ -66,6 +66,9 @@ def html_zip(design_id: str, boards: Optional[list] = None) -> bytes:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for slug in slugs:
             page = design_render.render_document(design_id, slug, viewer=False, font_base="fonts", data=data)
+            # A click-through to a board that is not in this zip would be a dead page: drop it.
+            page = re.sub(r"""\sdata-kd-goto=(["'])(.*?)\1""",
+                          lambda m: m.group(0) if m.group(2) == "back" or m.group(2) in slugs else "", page)
             page = page.replace("</body>", f"<script>{STATIC_SCRIPT}</script></body>")
             archive.writestr(f"{slug}.html", page)
         cards = "".join(
@@ -91,6 +94,7 @@ def html_zip(design_id: str, boards: Optional[list] = None) -> bytes:
                 folder_name = "kairos" if system["id"] == design_systems.BUILTIN_ID else system["id"]
                 archive.write(str(path), f"fonts/{folder_name}/{path.name}")
         manifest = {k: v for k, v in data.items() if k not in ("chat_ids", "owner", "visible_to")}
+        manifest["boards"] = {slug: data["boards"][slug] for slug in slugs}  # a partial zip lists only what it holds
         archive.writestr("design.json", json.dumps(manifest, indent=2))
     return out.getvalue()
 

@@ -243,7 +243,7 @@ def update_note(note_id: str, **fields) -> dict:
 
 
 def delete_note(note_id: str) -> None:
-    notes_service.delete_note(note_id)
+    notes_service.dismiss_note(note_id)
 
 
 def create_task(name: str, prompt: str, schedule_kind: str, run_at: Optional[str] = None,
