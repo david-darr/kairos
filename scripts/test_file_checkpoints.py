@@ -1,9 +1,11 @@
 """Focused tests for file checkpoints and rollback."""
 import asyncio
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -148,6 +150,148 @@ class FileCheckpointTests(unittest.IsolatedAsyncioTestCase):
             files = list(cp._files(self.repo))
         self.assertLess(asyncio.get_event_loop().time() - started, 20)
         self.assertIn("kept.md", files)
+
+
+class SnapshotCacheTests(unittest.TestCase):
+    """Efficiency (E1): unchanged files are not read again; edits are still caught."""
+
+    def setUp(self):
+        fixture_dir = Path(__file__).resolve().parents[1] / "data"
+        fixture_dir.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=fixture_dir)
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve() / "work"
+        self.root.mkdir()
+        patcher = patch.object(cp, "STORE", Path(self.temp.name) / "archive")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        cp._seen.clear()
+        cp._full_at.clear()
+        self.addCleanup(cp._seen.clear)
+        self.addCleanup(cp._full_at.clear)
+
+    def age(self, path, seconds=30):
+        old = path.stat().st_mtime_ns - seconds * 1_000_000_000
+        os.utime(path, ns=(old, old))
+
+    def blob_writes(self):
+        calls = []
+        real = cp._object
+        def counting(repo, kind, body):
+            if kind == "blob":
+                calls.append(1)
+            return real(repo, kind, body)
+        return calls, patch.object(cp, "_object", side_effect=counting)
+
+    def test_second_snapshot_reuses_hashes_and_matches_first(self):
+        for n in range(20):
+            file = self.root / "dir" / f"f{n}.txt"
+            file.parent.mkdir(exist_ok=True)
+            file.write_text(f"body {n}")
+            self.age(file)
+        first = cp._snapshot(self.root)
+        calls, hook = self.blob_writes()
+        with hook:
+            second = cp._snapshot(self.root)
+        self.assertEqual(first, second)
+        self.assertEqual(calls, [])
+
+    def test_recent_edit_with_same_size_and_restored_mtime_is_still_seen(self):
+        file = self.root / "note.txt"
+        file.write_text("aaaa")
+        stamp = file.stat().st_mtime_ns
+        before = cp._snapshot(self.root)[1]["note.txt"]
+        file.write_text("bbbb")
+        os.utime(file, ns=(stamp, stamp))
+        self.assertNotEqual(cp._snapshot(self.root)[1]["note.txt"], before)
+
+    def test_edit_after_cached_snapshot_is_seen(self):
+        file = self.root / "note.txt"
+        file.write_text("aaaa")
+        self.age(file)
+        before = cp._snapshot(self.root)[1]["note.txt"]
+        file.write_text("longer text")
+        self.assertNotEqual(cp._snapshot(self.root)[1]["note.txt"], before)
+
+    def test_cached_entry_with_missing_blob_is_read_again(self):
+        file = self.root / "note.txt"
+        file.write_text("keep me")
+        self.age(file)
+        oid = cp._snapshot(self.root)[1]["note.txt"]
+        blob = cp._repo(self.root) / "objects" / oid[:2] / oid[2:]
+        blob.unlink()
+        self.assertEqual(cp._snapshot(self.root)[1]["note.txt"], oid)
+        self.assertTrue(blob.exists())
+
+    def test_periodic_full_rehash_reads_everything(self):
+        file = self.root / "note.txt"
+        file.write_text("keep me")
+        self.age(file)
+        cp._snapshot(self.root)
+        calls, hook = self.blob_writes()
+        with hook, patch.object(cp, "FULL_REHASH_SECONDS", 0):
+            cp._snapshot(self.root)
+        self.assertEqual(len(calls), 1)
+
+    def test_deleted_file_leaves_manifest_and_unlisted_names_are_dropped(self):
+        for name in ("a.txt", "b.txt"):
+            (self.root / name).write_text(name)
+            self.age(self.root / name)
+        cp._snapshot(self.root)
+        (self.root / "b.txt").unlink()
+        manifest = cp._snapshot(self.root)[1]
+        self.assertEqual(list(manifest), ["a.txt"])
+        self.assertEqual(list(next(iter(cp._seen.values()))), ["a.txt"])
+
+    def test_total_limit_skips_the_same_files_cached_or_not(self):
+        for name in ("a.txt", "b.txt", "c.txt"):
+            (self.root / name).write_text("x" * 100)
+            self.age(self.root / name)
+        with patch.object(cp, "MAX_TOTAL", 250):
+            first = cp._snapshot(self.root)
+            second = cp._snapshot(self.root)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first[2]), 1)
+
+    def test_symlinked_folder_and_escape_are_skipped(self):
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("nope")
+        (self.root / "ok.txt").write_text("ok")
+        try:
+            os.symlink(outside, self.root / "link", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not permitted here")
+        for _ in range(2):
+            self.assertEqual(list(cp._snapshot(self.root)[1]), ["ok.txt"])
+
+    def test_warm_snapshot_of_many_files_reads_nothing_and_is_fast(self):
+        for n in range(600):
+            file = self.root / f"d{n % 10}" / f"f{n}.txt"
+            file.parent.mkdir(exist_ok=True)
+            file.write_text(f"body {n}")
+            self.age(file)
+        cp._snapshot(self.root)
+        calls, hook = self.blob_writes()
+        started = time.perf_counter()
+        with hook:
+            cp._snapshot(self.root)
+        elapsed = time.perf_counter() - started
+        self.assertEqual(calls, [])
+        self.assertLess(elapsed, 1.5, f"warm snapshot of 600 files took {elapsed:.2f}s")
+
+    def test_start_and_finish_share_the_cache(self):
+        vault = self.root / "vault"
+        vault.mkdir()
+        (vault / "n.md").write_text("one")
+        self.age(vault / "n.md")
+        with patch.object(cp, "resolve_vault_dir", return_value=str(vault)),              patch.object(cp, "BASE_DIR", str(self.root / "nosource")):
+            event = cp._start("chat:x", None)
+            calls, hook = self.blob_writes()
+            with hook:
+                cp._finish(event)
+        self.assertEqual(calls, [])
+        self.assertEqual(event["status"], "unchanged")
 
 
 if __name__ == "__main__":

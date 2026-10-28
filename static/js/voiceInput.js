@@ -19,15 +19,20 @@ const TARGET_RATE = 16000;
 const MAX_SECONDS = 120;
 
 let statusCache = null;
+let staleStatus = false;
 
 // Cached per page load: a status check on every mic press would add a round
 // trip to the one interaction that must feel immediate. refreshSpeechStatus()
 // clears it after a model download changes the answer.
 export async function getSpeechStatus() {
-  if (!statusCache) statusCache = api('/api/speech/status').catch(() => null);
+  if (!statusCache) {
+    // A refresh asks the server again even if api.js still shares an answer from the last second.
+    statusCache = api('/api/speech/status', staleStatus ? { cache: 'no-store' } : {}).catch(() => null);
+    staleStatus = false;
+  }
   return statusCache;
 }
-export function refreshSpeechStatus() { statusCache = null; }
+export function refreshSpeechStatus() { statusCache = null; staleStatus = true; }
 
 // Recording needs a secure context (or localhost) plus a real device. Checked
 // up front so the mic button can be hidden rather than offered and then

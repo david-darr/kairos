@@ -363,11 +363,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
     assert.equal(await g('recorders'), 0, 'no recording ever started');
   }
   await resetVoice(); await clearToasts();
+  await delay(1100);
   await js("window.__g2.speech.active_model = null; import('/static/js/voiceInput.js').then(m => m.refreshSpeechStatus())");
   await js("document.querySelector('#chat-mic').click()");
   await waitFor(toast('No speech model downloaded yet'));
   assert.equal(await g('gum.length'), 0, 'the model is checked before the device is opened');
   // 4e. A saved input device that has been unplugged falls back to the default and forgets the stale choice.
+  await delay(1100);  // api.js shares identical GETs for 1 s, so let the previous speech status expire
   await resetVoice(); await js("window.__g2.mic = 'lost-saved'; import('/static/js/voiceInput.js').then(m => { m.refreshSpeechStatus(); m.setInputDevice('unplugged-mic'); return true; })");
   await js("document.querySelector('#chat-mic').click()");
   await waitFor("document.querySelector('#chat-mic').classList.contains('recording')");
@@ -451,6 +453,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   assert.equal(JSON.parse(resent[0].body).message, 'please do it', 'the original text is what is re-sent');
   // A partial failure can only switch and continue: model switch, no rewind, no resend.
   await js(`window.__g2.session = (${failedSession.toString()})(true); window.__g2.posts.length = 0; true`);
+  await delay(1100);
   await openChat();
   await waitFor("document.querySelector('.msg-fallback')?.textContent === 'Switch model'");
   const liveBeforeSwitch = livePosts().length;
@@ -477,6 +480,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
     await js("(() => { const i = document.querySelector('#chat-input'); i.value = 'Benchmark message'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#chat-send').click(); })()");
     await waitFor("[...document.querySelectorAll('#chat-messages .msg')].some(m => m.textContent.includes('Tab build request received.'))", 15000);
   });
+  await delay(1100);
   await timeIt('dictation_stop_to_text_inserted_ms_stubbed_engine', async () => {
     await js("window.__g2.mic = 'ok'; window.__g2.speech.active_model = 'base.en'; import('/static/js/voiceInput.js').then(m => m.refreshSpeechStatus()); document.querySelector('#chat-input').value = ''; true");
     await js("document.querySelector('#chat-mic').click()");
@@ -486,22 +490,63 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   });
   console.log('BENCH ' + bench.map(([k, v]) => `${k}=${v}`).join(' '));
 
-  // ---- 11. Requests per chat open/switch and idle cost (printed as EFFICIENCY lines) -------------
+  // ---- 11. Requests per chat open/switch and idle cost (EFFICIENCY lines, with regression bounds) -------------
+  // Bounds carry margin over the measured numbers (E2/E3, 2026-10-27); the targets are open <= 8, switch <= 6, idle < 6/min.
   const tally = from => { const counts = {}; for (const r of reads.slice(from)) counts[r.path] = (counts[r.path] || 0) + 1; return counts; };
   const quiet = async ms => { await delay(ms); };
+  const noRepeats = (counts, label) => assert.deepEqual(Object.entries(counts).filter(([path, n]) => n > 1 && !/^\/api\/computer/.test(path)), [], label + ' reads no path twice: ' + JSON.stringify(counts));
+  demoState.stoppedOwners = ['chat:s1'];  // a finished computer: nothing is running, so this is the idle case
   await navigate('home'); await quiet(1500);
   let mark = reads.length, wmark = writes.length;
   await navigate('chat', { sessionId: 's1' });
-  await waitFor("document.querySelectorAll('#chat-messages > .msg').length > 0"); await quiet(1500);
+  await waitFor("document.querySelectorAll('#chat-messages > .msg').length > 0"); await quiet(2600);
   const openReads = tally(mark);
   console.log('EFFICIENCY chat_open_requests total=' + Object.values(openReads).length + ' GETs=' + (reads.length - mark) + ' writes=' + (writes.length - wmark) + ' ' + JSON.stringify(openReads));
+  noRepeats(openReads, 'opening a chat from Home');
+  assert.ok(reads.length - mark <= 12, 'opening a chat from Home is at most 12 GETs (3 are the closed computer), got ' + (reads.length - mark));
+  assert.equal(writes.length - wmark, 0, 'opening a chat writes nothing');
   mark = reads.length;
-  await navigate('chat', { sessionId: 's2' }).catch(() => {}); await quiet(1500);
-  console.log('EFFICIENCY chat_switch_requests GETs=' + (reads.length - mark) + ' ' + JSON.stringify(tally(mark)));
-  mark = reads.length; wmark = writes.length;
-  await navigate('chat', { sessionId: 's1' }); await waitFor("document.querySelectorAll('#chat-messages > .msg').length > 0"); await quiet(1500);
+  await navigate('chat', { sessionId: 's2' }).catch(() => {}); await quiet(2600);
+  const switchReads = tally(mark);
+  console.log('EFFICIENCY chat_switch_requests GETs=' + (reads.length - mark) + ' ' + JSON.stringify(switchReads));
+  noRepeats(switchReads, 'switching chats');
+  assert.ok(reads.length - mark <= 9, 'switching chats is at most 9 GETs, got ' + (reads.length - mark));
+  await navigate('chat', { sessionId: 's1' }); await waitFor("document.querySelectorAll('#chat-messages > .msg').length > 0"); await quiet(3000);
   mark = reads.length; wmark = writes.length;
   const idleStart = Date.now(); await quiet(30000);
   const idleSecs = (Date.now() - idleStart) / 1000;
-  console.log(`EFFICIENCY chat_idle_30s GETs=${reads.length - mark} writes=${writes.length - wmark} per_minute=${Math.round((reads.length - mark) * 60 / idleSecs)} ${JSON.stringify(tally(mark))}`);
+  const idleReads = reads.length - mark;
+  console.log(`EFFICIENCY chat_idle_30s GETs=${idleReads} writes=${writes.length - wmark} per_minute=${Math.round(idleReads * 60 / idleSecs)} ${JSON.stringify(tally(mark))}`);
+  const idleTally = tally(mark);
+  assert.ok((idleTally['/api/computer'] || 0) <= 2, 'an idle chat polls the computer at most twice in 30 s: ' + JSON.stringify(idleTally));
+  assert.ok((idleTally['/api/sessions/s1'] || 0) <= 2, 'an idle chat re-reads its session at most twice in 30 s: ' + JSON.stringify(idleTally));
+  assert.equal(writes.length - wmark, 0, 'an idle chat writes nothing');
+  assert.ok(idleReads <= 14, 'an idle chat (shell pollers included) stays at or under 14 GETs per 30 s, got ' + idleReads);
+  // Hidden tab: the chat's own pollers stop. (The shell's 30 s pollers also skip while hidden; 8 s window.)
+  await js("Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); true");
+  mark = reads.length; await quiet(8000);
+  const hiddenReads = tally(mark);
+  await js("delete document.hidden; true");
+  console.log('EFFICIENCY chat_hidden_8s GETs=' + (reads.length - mark) + ' ' + JSON.stringify(hiddenReads));
+  assert.deepEqual(Object.keys(hiddenReads), [], 'a hidden tab makes no requests: ' + JSON.stringify(hiddenReads));
+  // api.js read sharing (E2): concurrent identical GETs make one request; a write clears the share; a signal opts out.
+  await delay(1200);
+  const share = await js(`(async () => { const m = await import('/static/js/api.js'); const real = window.fetch; let n = 0;
+    window.fetch = (...a) => { n++; return real(...a); };
+    try {
+      await Promise.all([m.api('/api/tasks'), m.api('/api/tasks'), m.api('/api/tasks')]); const concurrent = n; n = 0;
+      await m.api('/api/tasks'); const soon = n; n = 0;
+      await m.api('/api/chat/live/stop', { method: 'POST', body: JSON.stringify({ session_id: 'none' }) }).catch(() => {});
+      n = 0; await m.api('/api/tasks'); const afterWrite = n; n = 0;
+      await Promise.all([m.api('/api/tasks', { signal: new AbortController().signal }), m.api('/api/tasks', { signal: new AbortController().signal })]); const withSignal = n;
+      const a = await m.api('/api/tasks'), b = await m.api('/api/tasks');
+      return { concurrent, soon, afterWrite, withSignal, independent: a !== b };
+    } finally { window.fetch = real; } })()`);
+  assert.deepEqual(share, { concurrent: 1, soon: 0, afterWrite: 1, withSignal: 2, independent: true }, 'api.js shares identical GETs and clears on writes: ' + JSON.stringify(share));
+  // A running computer is the one thing that keeps the 2 s poll going.
+  demoState.stoppedOwners = [];
+  await navigate('chat', { sessionId: 's1' }); await waitFor("document.querySelectorAll('#chat-messages > .msg').length > 0"); await quiet(1500);
+  mark = reads.length; await quiet(7000);
+  assert.ok((tally(mark)['/api/computer'] || 0) >= 2, 'a running computer is still polled while the chat is open: ' + JSON.stringify(tally(mark)));
+  demoState.stoppedOwners = [];
 };

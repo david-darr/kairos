@@ -32,6 +32,7 @@ from core.codex_brain import CodexBrain
 from core.antigravity_brain import AntigravityBrain
 from core.external_brain import ExternalBrain
 from core import session_manager_store as session_store
+from core import tool_registry
 from core.session_manager import sent_text, session_manager
 from core.vault import resolve_vault_dir
 
@@ -273,7 +274,9 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
     # The model's window, when known: a local connection's own cap, or the
     # catalog's for an API model. A small one gets the core tools only.
     capacity = model_catalog.context_capacity(endpoint["kind"], model) if endpoint["kind"] == "api" else None
-    window = num_ctx if endpoint["kind"] == "local" else (capacity or {}).get("window")
+    # A local model with no num_ctx set is Ollama-class (a few thousand tokens by
+    # default), so it is treated as small and gets the deferred tool list (E5a, 2026-10-27).
+    window = (num_ctx or tool_registry.SMALL_WINDOW) if endpoint["kind"] == "local" else (capacity or {}).get("window")
     # exclude_last: the current message is already saved by the time a brain
     # is built, and run_turn() adds it itself. Loading it here too sent it to
     # the model twice on every fresh connection (found 2026-09-22), and the

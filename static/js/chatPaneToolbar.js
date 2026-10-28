@@ -54,7 +54,7 @@ export function mountChatPaneToolbar({ header, host, getSessionId, backgroundTas
   document.addEventListener('kairos:design-changed', changedDesign);
   document.addEventListener('kairos:chat-session', changedDesign);
   for (const event of ['kairos:chat-panes', 'kairos:background-ui']) document.addEventListener(event, paint);
-  const timer = setInterval(refresh, 1000); refresh();
+  const timer = setInterval(() => { if (!document.hidden) refresh(); }, 1000); refresh();
   return () => { disposed = true; revision++; clearInterval(timer); closeChatDesign(); toolbar.remove(); newWindow.remove(); menuItem.remove();
     document.removeEventListener('kairos:design-changed', changedDesign);
     document.removeEventListener('kairos:chat-session', changedDesign);

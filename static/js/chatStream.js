@@ -1,5 +1,7 @@
 // One live feed for Chats, Forge, and the progress overlay. The backend owns
 // each turn; this module only watches it. Closing this page never stops work.
+// api.js drops its shared GET results on this event (a turn starting or ending changes saved state).
+const dropSharedReads = () => { if (typeof document !== 'undefined' && document?.dispatchEvent) document.dispatchEvent(new Event('kairos:turn-state')); };
 const _inflight = new Map();
 const _listeners = new Map();
 const _globalListeners = new Set();
@@ -16,6 +18,7 @@ function _notify(sessionId) {
 
 function _finish(sessionId, entry, status, error = null) {
   if (entry.status !== 'processing') return;
+  dropSharedReads();  // a finished turn changed saved state: later reads must reach the server
   entry.status = status;
   entry.stopping = false;
   entry.permission = null;
@@ -180,6 +183,7 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
   const entry = { text: '', prompt: text, startedAt: Date.now() / 1000, status: 'processing',
     connected: false, sessionTitle, error: null, stopping: false, local: true,
     toolEvents: [], toolSteps: [] };
+  dropSharedReads();  // sending is a write that does not go through api()
   _inflight.set(sessionId, entry);
   _notify(sessionId);
   const requestId = crypto.randomUUID();

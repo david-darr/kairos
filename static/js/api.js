@@ -4,11 +4,58 @@ import { createMascot } from './mascot.js';
 // calling fetch() directly, matching Odysseus's own shared-request-helper
 // pattern (see specs/frontend.md's appConfig.js).
 
+// Identical GETs started within SHARE_MS of each other share one network request
+// (each caller reads its own clone). Any write clears the share, before it is sent
+// and after it settles, so a read that follows a write always reaches the server.
+// Requests with a signal, a custom cache mode or custom headers are never shared.
+const SHARE_MS = 1000;
+const sharedReads = new Map();
+const recentReads = new Map();
+const RECENT_MS = 30000;
+
+function sharedGet(path, options) {
+  let entry = sharedReads.get(path);
+  if (!entry) {
+    entry = fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+    sharedReads.set(path, entry);
+    const forget = () => { if (sharedReads.get(path) === entry) sharedReads.delete(path); };
+    entry.then(() => setTimeout(forget, SHARE_MS), forget);
+  }
+  return entry.then(res => (typeof res.clone === "function" ? res.clone() : res));
+}
+
+// A "something changed" event means the server's answer may differ, so the share is dropped
+// (this listener is registered first, so it runs before the views' own refresh handlers).
+for (const name of typeof document === "undefined" ? [] : ["jarvis:agents-changed", "jarvis:tabs-changed", "kairos:models-changed", "kairos:addons-changed", "kairos:design-changed", "kairos:turn-state"]) {
+  document.addEventListener(name, () => { sharedReads.clear(); recentReads.clear(); });
+}
+
+// For writes that bypass api() (the live chat send) and for turn completion.
+export function clearSharedReads() { sharedReads.clear(); recentReads.clear(); }
+
+// A slow-changing JSON GET (the signed-in user, the connection and project lists) reused for 30 s,
+// so reopening Chats or Home does not ask again. Any write, change event or finished turn drops it.
+export async function apiRecent(path) {
+  const hit = recentReads.get(path);
+  if (hit && Date.now() - hit.at < RECENT_MS) return structuredClone(hit.value);
+  const value = await api(path);
+  if (value && typeof value === "object" && !(value instanceof Response)) recentReads.set(path, { at: Date.now(), value: structuredClone(value) });
+  return value;
+}
+
 export async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const method = (options.method || "GET").toUpperCase();
+  const shareable = method === "GET" && typeof path === "string" && !options.signal && !options.cache && !options.headers;
+  if (method !== "GET") clearSharedReads();
+  let res;
+  try {
+    res = shareable ? await sharedGet(path, options) : await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } finally {
+    if (method !== "GET") clearSharedReads();
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
