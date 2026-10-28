@@ -479,6 +479,9 @@ class SessionManager:
             result = [summary_note] + messages[latest["through_index"]:]
         else:
             result = list(messages)
+        # The stored "Conversation compacted" notice is for the person reading
+        # the chat; the checkpoint above already carries its summary.
+        result = [m for m in result if not m.get("display_only")]
         if exclude_last and result:
             result = result[:-1]
         return [m for m in result if m.get("type") != "handoff"]
@@ -505,6 +508,10 @@ class SessionManager:
         # summary instead.
         _clear_claude_session(session)
         session["updated_at"] = time.time()
+        # The meter described the history that was just folded away. Clearing
+        # it keeps the next send from compacting again on a stale percent; the
+        # next finished turn measures the real, smaller prompt.
+        session["context_state"] = None
         # The `archived` flag is written onto the messages themselves, and a
         # message is its own stored row — so the rows do have to be rewritten.
         # (This said MESSAGES_UNCHANGED while transcripts still lived inside

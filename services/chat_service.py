@@ -31,6 +31,7 @@ from core.brain import Brain
 from core.codex_brain import CodexBrain
 from core.antigravity_brain import AntigravityBrain
 from core.external_brain import ExternalBrain
+from core import session_manager_store as session_store
 from core.session_manager import sent_text, session_manager
 from core.vault import resolve_vault_dir
 
@@ -909,7 +910,8 @@ async def _compact_if_nearly_full(session_id: str) -> bool:
     if (endpoint is None or endpoint.get("kind") not in AUTO_COMPACT_KINDS
             or not isinstance(state.get("percent"), (int, float)) or state["percent"] < AUTO_COMPACT_PERCENT):
         return False
-    messages = (session_manager.get_session(session_id) or {}).get("messages", [])
+    messages = [m for m in (session_manager.get_session(session_id) or {}).get("messages", [])
+                if not m.get("display_only")]
     keep = _auto_tail(messages, int(state.get("capacity_tokens") or 0), _fixed_prompt_chars(session_id))
     try:
         result = await _compact_session(session_id, keep_tail=keep)
@@ -1079,6 +1081,28 @@ COMPACTION_PROMPT = (
 )
 
 
+COMPACTION_TOOL_RESULT_CLIP = 300
+
+
+def _compaction_transcript(messages: list[dict]) -> list[str]:
+    """The summariser's view of the folded messages: each one's text, then one
+    clipped line per tool round (tool name plus the start of its result), so a
+    fact only a tool returned is not lost to the summary."""
+    lines = []
+    for m in messages:
+        parts = []
+        if m.get("content"):
+            parts.append(f'{m["role"]}: {m["content"]}')
+        for name, result in session_store.tool_round_entries(m):
+            result = " ".join(str(result).split())
+            if len(result) > COMPACTION_TOOL_RESULT_CLIP:
+                result = result[:COMPACTION_TOOL_RESULT_CLIP] + "..."
+            parts.append(f"[tool {name} returned: {result}]")
+        if parts:
+            lines.append(chr(10).join(parts))
+    return lines
+
+
 async def compact_session(session_id: str) -> dict:
     async with session_operation(session_id):
         return await _compact_session(session_id)
@@ -1095,12 +1119,21 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     messages = session.get("messages", [])
     compactions = session.get("compactions") or []
     prior_through = compactions[-1]["through_index"] if compactions else 0
-    through_index = max(prior_through, len(messages) - keep_tail)
-    if through_index <= prior_through:
+    # "New conversation" is counted over real messages only: the stored
+    # "Conversation compacted" notice is display-only and must not look like
+    # something said since the last fold (it made a second, paid summary run
+    # with nothing new to fold). Indices stay raw positions.
+    real = [i for i, m in enumerate(messages) if not m.get("display_only")]
+    if keep_tail <= 0:
+        through_index = len(messages)
+    else:
+        through_index = real[-keep_tail] if len(real) > keep_tail else 0
+    through_index = max(prior_through, through_index)
+    to_fold_in = [m for m in messages[prior_through:through_index] if not m.get("display_only")]
+    if through_index <= prior_through or not to_fold_in:
         raise HTTPException(status_code=400, detail="not enough new conversation to compact yet")
 
-    to_fold_in = messages[prior_through:through_index]
-    transcript = (chr(10) * 2).join(f'{m["role"]}: {m["content"]}' for m in to_fold_in if m.get("content"))
+    transcript = (chr(10) * 2).join(_compaction_transcript(to_fold_in))
     prompt = COMPACTION_PROMPT
     if compactions:
         prompt = (
@@ -1108,6 +1141,9 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
             "\n\n[New conversation since then, to fold into that summary:]\n"
         ) + prompt
     prompt += transcript
+    # Credentials never travel to the summariser. Only this copy is scrubbed;
+    # stored history is untouched.
+    prompt = log_files.scrub_credentials(prompt)
 
     # Detached brain, same reasoning as summarise_open_mic above: the live
     # session brain already holds this conversation in its own state, so
@@ -1141,6 +1177,7 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     session_manager.append_message(
         session_id, "assistant",
         "**Conversation compacted**" + chr(10) * 2 + summary,
+        extra={"display_only": True},
     )
     return {"compacted_through": through_index, "archived": through_index - prior_through, "summary": summary}
 
