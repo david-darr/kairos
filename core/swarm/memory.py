@@ -24,7 +24,10 @@ def _snippet(text, query, radius=200):
 
 
 class SwarmMemory:
-    def __init__(self, settings):
+    def __init__(self, settings, owner_user=None):
+        # owner_user: None searches every chat (an admin or accounts off); a name limits
+        # chat search and reads to that member's own chats (same rule as tool_registry).
+        self.owner_user = owner_user
         settings = settings or {}
         self.sources = tuple(settings.get("sources") or ())
         self.project_id = settings.get("project_id")
@@ -66,7 +69,7 @@ class SwarmMemory:
                 add("vault", "vault:" + item["path"], item["path"], item["snippet"])
 
         if "sessions" in self.sources and len(results) < self.max_results:
-            for item in memory_tools.search_sessions(query, max_results=self.max_results - len(results)):
+            for item in memory_tools.search_sessions(query, max_results=self.max_results - len(results), owner_user=self.owner_user):
                 add("sessions", "session:" + item["session_id"], item["session_title"], item["snippet"])
 
         if "library" in self.sources and len(results) < self.max_results:
@@ -83,7 +86,7 @@ class SwarmMemory:
             return memory_tools.read_vault_file(identifier, max_chars=MAX_READ)
         if kind == "session" and "sessions" in self.sources:
             session = session_manager.get_session(identifier)
-            if not session:
+            if not session or (self.owner_user is not None and session.get("owner_user") != self.owner_user):
                 raise ValueError("Memory item was not found")
             text = "\n".join(f"{item.get('role', 'unknown')}: {item.get('content', '')}"
                              for item in session.get("messages", []))

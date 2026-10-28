@@ -26,8 +26,7 @@ def _own_chat(session_id: str, user: str) -> None:
 
 @router.get("/status")
 async def chat_status(session_id: str, user: str = Depends(require_user)) -> dict:
-    if chat_service.session_manager.get_session(session_id) is None:
-        raise HTTPException(404, "session not found")
+    _own_chat(session_id, user)
     return {"busy": chat_service.is_busy(session_id)}
 
 
@@ -258,6 +257,7 @@ async def compact_chat(body: CompactRequest, user: str = Depends(require_user)) 
 
 @router.get("/summary")
 async def get_chat_summary(session_id: str, user: str = Depends(require_user)) -> dict:
+    _own_chat(session_id, user)
     return chat_summary.get_summary(session_id)
 
 
@@ -268,6 +268,7 @@ class SummaryRequest(BaseModel):
 
 @router.post("/summary")
 async def generate_chat_summary(body: SummaryRequest, user: str = Depends(require_user)) -> dict:
+    _own_chat(body.session_id, user)
     return await chat_summary.generate_summary(body.session_id, force=body.force)
 
 
