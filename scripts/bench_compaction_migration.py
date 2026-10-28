@@ -1,6 +1,7 @@
-"""Startup cost of core.session_manager_store._migrate_compaction_data on a large synthetic store.
+"""Cost of core.session_manager_store's compaction data migration on a large synthetic store: the connect-time
+part (startup path, step 1) and the background tool-text re-index (step 2), with requests interleaved.
 Run: .venv/Scripts/python.exe -B -X utf8 scripts/bench_compaction_migration.py [--chats 2000] [--per-chat 100]
-     [--stores 3] [--profile] [--small]
+     [--stores 3] [--profile]
 Builds legacy-shaped stores (notices not display-only, FTS without tool text, markers cleared) in a temp folder
 (JARVIS_DATA_DIR override, same as scripts/test_g12_compaction.py), times the migration cold and already-migrated,
 checks the result, measures peak Python memory with tracemalloc. No network, no app server.
@@ -14,6 +15,7 @@ import random
 import statistics
 import sys
 import tempfile
+import threading
 import time
 import tracemalloc
 from pathlib import Path
@@ -100,20 +102,47 @@ def snapshot(conn):
             conn.execute("SELECT count(*), sum(length(content)) FROM messages_fts").fetchone()[:])
 
 
-def proposed_fix_step2(conn):
-    """The proposed minimal fix for step 2 (NOT app code): one pass over messages_fts to map (session_id, idx) to
-    rowid, then delete/insert by rowid. messages_fts has no index on session_id/idx (UNINDEXED columns), so the
-    app's per-message `DELETE ... WHERE session_id = ? AND idx = ?` scans the whole FTS table every time."""
-    rowid = {(r[1], r[2]): r[0] for r in conn.execute("SELECT rowid, session_id, idx FROM messages_fts")}
-    with conn:
-        for r in conn.execute("SELECT session_id, idx, role, doc FROM messages WHERE doc LIKE '%\"tool_rounds\"%'").fetchall():
-            old = rowid.get((r[0], r[1]))
-            if old is not None:
-                conn.execute("DELETE FROM messages_fts WHERE rowid = ?", (old,))
-            conn.execute("INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
-                         (store.search_text(json.loads(r[3])), r[0], r[1], r[2]))
-    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (store.TOOL_INDEX_MIGRATION_MARKER,))
-    conn.commit()
+def reopen(path):
+    """Close and reconnect, as an app start does; returns (conn, seconds the connect-time migration took)."""
+    if store._conn is not None:
+        store._conn.close()
+    store._conn = None
+    store.DB_FILE = path
+    t0 = time.perf_counter()
+    conn = store._connect()
+    return conn, time.perf_counter() - t0
+
+
+def run_background(conn, probe_sid):
+    """Run step 2 in the app's background thread while a 'request' thread keeps reading the store and one message
+    with tool rounds is appended mid-run. Returns (seconds, worst request wait in ms, requests served, late message
+    indexed exactly once)."""
+    waits, stop_probe = [], threading.Event()
+
+    def requests():
+        while not stop_probe.is_set():
+            t0 = time.perf_counter()
+            store.session_exists(probe_sid)
+            waits.append(time.perf_counter() - t0)
+            time.sleep(0.002)
+
+    probe = threading.Thread(target=requests, daemon=True)
+    probe.start()
+    t0 = time.perf_counter()
+    thread = store.start_background_migration()
+    time.sleep(0.5)  # land the write while the run is in progress
+    header, count = store.get_session_header(probe_sid)
+    late = {"role": "assistant", "content": "late reply", "ts": 9.0, "tool_rounds": {"messages": [
+        {"role": "tool", "tool_call_id": "z", "content": "latebenchword result"}]}}
+    store.append_message(probe_sid, count, late, header)
+    thread.join()
+    dt = time.perf_counter() - t0
+    stop_probe.set()
+    probe.join()
+    once = store.connection().execute(
+        "SELECT count(*) FROM messages_fts WHERE session_id = ? AND idx = ?", (probe_sid, count)).fetchone()[0] == 1 and \
+        store.connection().execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'latebenchword'").fetchone()[0] == 1
+    return dt, max(waits) * 1000 if waits else 0.0, len(waits), once
 
 
 def main():
@@ -121,58 +150,55 @@ def main():
     ap.add_argument("--chats", type=int, default=2000)
     ap.add_argument("--per-chat", type=int, default=100)
     ap.add_argument("--stores", type=int, default=3)
-    ap.add_argument("--fixed", action="store_true", help="run step 1 of the app, then the proposed rowid step 2")
-    ap.add_argument("--profile", action="store_true", help="cProfile the cold run of the last store")
+    ap.add_argument("--profile", action="store_true", help="cProfile the connect-time migration of the last store")
     a = ap.parse_args()
     tools_per_chat = 10  # 2000 chats x 10 = 20,000 tool-result messages
-    cold, warm, peaks, ok = [], [], [], True
+    startup, bg, warm, peaks, ok = [], [], [], [], True
     for n in range(a.stores):
         path = os.path.join(fixture.name, f"store{n}", "sessions.db")
         os.makedirs(os.path.dirname(path))
         exp = build(path, a.chats, a.per_chat, tools_per_chat, random.Random(n))
         conn = exp.pop("conn")
-        print(f"store {n}: {exp['chats']} chats, {exp['messages']} msgs, {exp['tools']} tool msgs, "
+        print(f"store {n}: {exp['chats']} chats, {exp['messages']} msgs, {exp['tool_messages'] if 'tool_messages' in exp else exp['tools']} tool msgs, "
               f"{exp['notices']} notices, {exp['mb']:.0f} MB, built in {exp['build_s']:.1f}s")
         before = check(conn, exp, "\"result 0\"")
         profiler = cProfile.Profile() if (a.profile and n == a.stores - 1) else None
-        tracemalloc.start()
-        t0 = time.perf_counter()
         if profiler:
             profiler.enable()
-        if a.fixed:
-            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (store.TOOL_INDEX_MIGRATION_MARKER,))
-            conn.commit()
-            store._migrate_compaction_data(conn)  # step 1 only (step 2 marker preset)
-            conn.execute("DELETE FROM meta WHERE key = ?", (store.TOOL_INDEX_MIGRATION_MARKER,))
-            conn.commit()
-            proposed_fix_step2(conn)
-        else:
-            store._migrate_compaction_data(conn)
+        conn, dt = reopen(path)  # startup path: _connect() runs step 1 only (timed without tracemalloc)
         if profiler:
             profiler.disable()
-        dt = time.perf_counter() - t0
+        tracemalloc.start()
+        startup.append(dt)
+        mid = check(conn, exp, "\"result 0\"")
+        t_run, worst_ms, served, once = run_background(conn, "chat-00000")
         peaks.append(tracemalloc.get_traced_memory()[1] / 1e6)
         tracemalloc.stop()
-        cold.append(dt)
+        bg.append(t_run)
+        conn = store.connection()
         after = check(conn, exp, "\"result 0\"")
         snap = snapshot(conn)
-        t0 = time.perf_counter()
-        store._migrate_compaction_data(conn)
-        warm.append(time.perf_counter() - t0)
+        conn, w = reopen(path)  # already-migrated start
+        warm.append(w)
         again = snapshot(conn)
-        good = (after["display_only"] == exp["notices"] and after["probe_hits"] >= 1 and before["probe_hits"] == 0
-                and after["markers"] == 2 and after["fts_rows"] == before["fts_rows"] and snap == again)
+        store.migrate_tool_text_index()  # marker set: no change
+        good = (mid["display_only"] == exp["notices"] and mid["probe_hits"] == 0 and mid["markers"] == 1
+                and after["probe_hits"] >= 1 and before["probe_hits"] == 0 and after["markers"] == 2
+                and after["fts_rows"] == before["fts_rows"] + 1 and snap == again and once)
         ok &= good
-        print(f"  cold {dt:.2f}s  already-migrated {warm[-1] * 1000:.2f} ms  peak py mem {peaks[-1]:.1f} MB  "
-              f"display_only {before['display_only']}->{after['display_only']}  tool text hits {before['fts_tool_rows']}->{after['fts_tool_rows']}  "
-              f"second run unchanged={snap == again}  correct={good}")
+        print(f"  startup-path migration {dt:.2f}s  background {t_run:.1f}s  worst request wait {worst_ms:.0f} ms ({served} requests)  "
+              f"already-migrated start {w * 1000:.1f} ms  peak py mem {peaks[-1]:.1f} MB")
+        print(f"  display_only {before['display_only']}->{after['display_only']}  tool text hits {before['fts_tool_rows']}->{after['fts_tool_rows']}  "
+              f"fts rows {before['fts_rows']}->{after['fts_rows']} (+1 late write)  second start unchanged={snap == again}  "
+              f"late write indexed once={once}  correct={good}")
         if profiler:
             pstats.Stats(profiler).sort_stats("cumulative").print_stats(10)
-        conn.close()
+        store._conn.close()
         store._conn = None
-    print(f"cold p50 {statistics.median(cold):.2f}s (runs {', '.join(f'{c:.2f}' for c in cold)})  target < 5 s: "
-          f"{'PASS' if statistics.median(cold) < 5 else 'FAIL'}")
-    print(f"already-migrated p50 {statistics.median(warm) * 1000:.2f} ms  target < 50 ms: "
+    print(f"startup-path p50 {statistics.median(startup):.2f}s (runs {', '.join(f'{c:.2f}' for c in startup)})  target < 1.5 s: "
+          f"{'PASS' if statistics.median(startup) < 1.5 else 'FAIL'}")
+    print(f"background completion p50 {statistics.median(bg):.1f}s  target < 60 s: {'PASS' if statistics.median(bg) < 60 else 'FAIL'}")
+    print(f"already-migrated start p50 {statistics.median(warm) * 1000:.2f} ms  target < 50 ms: "
           f"{'PASS' if statistics.median(warm) < 0.05 else 'FAIL'}")
     print(f"peak python memory p50 {statistics.median(peaks):.1f} MB   correctness on big store: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
@@ -180,5 +206,6 @@ def main():
 
 if __name__ == "__main__":
     code = main()
+    store.stop_background_migration()
     fixture.cleanup()
     sys.exit(code)
