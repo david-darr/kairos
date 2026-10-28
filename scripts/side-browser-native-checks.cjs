@@ -129,9 +129,13 @@ const RESET = `(globalThis.__a05.calls.length = 0, true)`;
       await page.evaluate(`import('/static/js/browserPane.js').then(m => m.openBrowser('http://site.test:${SITE_PORT}/'))`);
     }
     await until(async () => (await view())?.bounds?.width > 50 && (await view()).url.startsWith(`http://site.test:${SITE_PORT}`), 15000, 'the fixture page in the native view');
+    // The pane slides in, so compare once the layout has settled (the page must end up on the viewport).
+    const viewportRect = async () => JSON.parse(await page.evaluate("JSON.stringify((() => { const r = document.querySelector('.browser-viewport').getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })())"));
+    const onViewport = async () => { const b = (await view()).bounds, r = await viewportRect(); return Math.abs(b.x - Math.round(r.x)) <= 1 && Math.abs(b.y - Math.round(r.y)) <= 1 && Math.abs(b.width - Math.round(r.width)) <= 1; };
+    await until(onViewport, 3000, 'the native view settled on the pane viewport').catch(() => {});
     const base = await view();
     assert.equal(base.visible, true, 'the native view is visible once the pane is open');
-    const panelRect = JSON.parse(await page.evaluate("JSON.stringify((() => { const r = document.querySelector('.browser-viewport').getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })())"));
+    const panelRect = await viewportRect();
     assert.ok(Math.abs(base.bounds.x - Math.round(panelRect.x)) <= 1 && Math.abs(base.bounds.width - Math.round(panelRect.width)) <= 1, `native bounds ${JSON.stringify(base.bounds)} follow the pane's viewport ${JSON.stringify(panelRect)}`);
     console.log('PASS: Browse the web opens a live native view at the pane viewport', JSON.stringify(base.bounds));
 

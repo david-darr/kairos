@@ -34,7 +34,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
       const key = method + ' ' + url.pathname, body = options.body ? JSON.parse(options.body) : null;
       window.__net.push({ key, body, at: performance.now() });
       if (S.fail[key]) return reply({ detail: S.fail[key] }, 400);
-      if (key === 'GET /api/auth/status') { const j = await (await real(input, options)).json(); return reply({ ...j, auth_enabled: S.auth }); }
+      if (key === 'GET /api/auth/status') { const j = await (await real(input, options)).json(); return reply({ ...j, auth_enabled: S.auth, totp_enabled: S.totp }); }
       if (key === 'GET /api/settings') { const j = await (await real(input, options)).json(); return reply({ ...j, vault_dir: S.vault }); }
       if (key === 'POST /api/settings/vault-dir') { S.vault = body.path; persist(); return reply({ vault_dir: S.vault }); }
       if (key === 'POST /api/auth/password') {

@@ -39,6 +39,8 @@ async def status(request: Request) -> dict:
         "setup_required": auth_enabled() and not auth_manager.has_any_users(),
         "username": user,
         "is_admin": auth_manager.is_admin(user) if user else False,
+        # Account > Two-factor shows whether it is on and offers only the matching action.
+        "totp_enabled": bool(user) and auth_manager.totp_enabled(user),
         # Whether a real "Switch User" is even meaningful right now (David's
         # ask 2026-08-31) — a plain boolean, not the user list itself:
         # GET /users is admin-only (enumerating accounts is a real privacy

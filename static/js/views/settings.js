@@ -1244,7 +1244,9 @@ async function renderVaultPanel(body, status, page) {
   pick.addEventListener("click", async () => {
     const picked = await window.jarvis.pickVaultFolder();
     if (!picked) return;
-    await api("/api/settings/vault-dir", { method: "POST", body: JSON.stringify({ path: picked }) });
+    // api() already shows the refusal as a toast; the saved path stays as it was.
+    try { await api("/api/settings/vault-dir", { method: "POST", body: JSON.stringify({ path: picked }) }); }
+    catch { return; }
     await renderVaultPanel(body, status, page);
   });
 
@@ -1483,9 +1485,12 @@ async function renderAccountPanel(body, status) {
   );
 }
 
-async function renderTotpSection(host) {
+async function renderTotpSection(host, on) {
+  if (on === undefined) on = !!(await api("/api/auth/status")).totp_enabled;
   const enroll = el("button", { class: "btn", text: "Enable" });
   const disable = el("button", { class: "btn quiet danger", text: "Disable" });
+  enroll.hidden = on;
+  disable.hidden = !on;
   const uri = el("div", { class: "set-mono", style: "word-break:break-all;" });
   const code = el("input", { placeholder: "6-digit code", inputmode: "numeric", style: "width:140px;" });
   const confirm = el("button", { class: "btn primary", text: "Confirm" });
@@ -1501,16 +1506,17 @@ async function renderTotpSection(host) {
   confirm.addEventListener("click", async () => {
     try {
       await api("/api/auth/totp/confirm", { method: "POST", body: JSON.stringify({ code: code.value.trim() }) });
-      setup.hidden = true;
       toast("Two-factor authentication is on", "success");
+      await renderTotpSection(host, true);
     } catch (e) { msg.textContent = errorText(e); }
   });
   disable.addEventListener("click", async () => {
     await api("/api/auth/totp/disable", { method: "POST" });
     toast("Two-factor authentication is off", "success");
+    await renderTotpSection(host, false);
   });
   host.replaceChildren(group({ title: "Two-factor authentication" }, [row({ title: "Authenticator app",
-    description: "A code from your phone on every sign-in.", control: [enroll, disable], below: setup })]));
+    description: "A code from your phone on every sign-in.", control: [pill(on ? "On" : "Off", on ? "ok" : "muted"), enroll, disable], below: setup })]));
 }
 
 // -- Shortcuts --------------------------------------------------------------

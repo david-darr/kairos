@@ -230,14 +230,16 @@ function attach(window, options = {}) {
 
 function open(rawUrl, bounds) {
   if (!host || host.isDestroyed()) return { ok: false, reason: "no window" };
-  const target = fromAddressBar(rawUrl);
-  if (!target) return { ok: false, reason: "That address can't be opened here." };
+  // An empty address (Browse the web) opens a blank pane for the address bar to fill.
+  const blank = !String(rawUrl || "").trim();
+  const target = blank ? null : fromAddressBar(rawUrl);
+  if (!blank && !target) return { ok: false, reason: "That address can't be opened here." };
   if (!view || view.webContents.isDestroyed()) create();
   if (bounds) setBounds(bounds);
   view.setVisible(true);
-  view.webContents.loadURL(target);
+  if (target) view.webContents.loadURL(target);
   push();
-  return { ok: true, url: target };
+  return { ok: true, url: target || "" };
 }
 
 function navigate(rawUrl) {

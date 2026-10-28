@@ -23,7 +23,7 @@ export async function getShortcutGroups() {
 // Synchronous, so a panel can draw at once and never sits empty.
 export function shortcutGroups(quickEntry = null) {
   const quickNote = quickEntry === '' ? 'This development copy has no global shortcut. Open Quick Entry from the tray.'
-    : quickEntry ? 'You can change this in Settings.' : 'Default shortcut. You can change it in Settings.';
+    : quickEntry ? 'Change it in the Quick Entry window.' : 'Default shortcut. Change it in the Quick Entry window.';
   const shortcut = (keys, description, details = '') => ({ keys, description, details });
   return [
     { title: 'Anywhere', items: [

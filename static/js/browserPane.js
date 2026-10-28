@@ -39,7 +39,7 @@ export function isBrowserOpen() { return !!pane; }
 // for the native view; the iframe path obeys normal stacking and ignores it.
 export function suppressBrowser() {
   suppressDepth += 1;
-  if (pane && pane.native) bridge()?.setVisible(false);
+  if (suppressDepth === 1 && pane && pane.native) bridge()?.setVisible(false);
 }
 export function releaseBrowser() {
   suppressDepth = Math.max(0, suppressDepth - 1);
@@ -118,6 +118,12 @@ export function openBrowser(initialUrl) {
     cleanups.push(() => observer.disconnect());
     window.addEventListener('resize', syncBounds);
     cleanups.push(() => window.removeEventListener('resize', syncBounds));
+    // The pane slides in, which moves the viewport without resizing it, so the
+    // observer above misses the final position: re-send once motion settles.
+    for (const type of ['animationend', 'transitionend']) {
+      host.addEventListener(type, syncBounds);
+      cleanups.push(() => host.removeEventListener(type, syncBounds));
+    }
     cleanups.push(api.onHostResized(syncBounds));
 
     cleanups.push(api.onState(state => {
@@ -141,6 +147,21 @@ export function openBrowser(initialUrl) {
     forward.onclick = () => api.forward();
     reload.onclick = () => api.reload();
     external.onclick = () => api.openExternal();
+
+    // Every dialog and the command palette render over the chat area, and the
+    // native view would paint over them, so it stays hidden while one shows.
+    const OVERLAYS = '.modal-backdrop:not(.hidden), .palette-backdrop:not(.hidden)';
+    let overlaid = false;
+    const watchOverlays = () => {
+      const now = !!document.querySelector(OVERLAYS);
+      if (now === overlaid) return;
+      overlaid = now;
+      if (now) suppressBrowser(); else releaseBrowser();
+    };
+    const overlays = new MutationObserver(watchOverlays);
+    overlays.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    cleanups.push(() => { overlays.disconnect(); if (overlaid) { overlaid = false; releaseBrowser(); } });
+    watchOverlays();
 
     syncBounds();
     api.open(initialUrl, viewport.getBoundingClientRect()).then(result => {
