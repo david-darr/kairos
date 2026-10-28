@@ -56,10 +56,12 @@ export function renderAgentHandoff(message, sessionId) {
 export function watchAgentHandoffs(messages, getSessionId, onChange = () => {}) {
   let disposed = false;
   let loading = false;
+  let lastRun = Date.now();
   const refresh = async () => {
     const id = getSessionId();
     if (disposed || loading || !id || !messages.isConnected) return;
     loading = true;
+    lastRun = Date.now();
     try {
       const session = await api(`/api/sessions/${encodeURIComponent(id)}`);
       if (disposed || id !== getSessionId() || !messages.isConnected) return;
@@ -84,7 +86,15 @@ export function watchAgentHandoffs(messages, getSessionId, onChange = () => {}) 
     } catch { /* the saved transcript is recovered on the next refresh */ }
     finally { loading = false; }
   };
-  const timer = setInterval(refresh, 2500);
+  // Poll fast only while a card on screen is unfinished or a turn is running; a stream
+  // event refreshes at turn end, and a 30 s fallback catches anything else. Never while hidden.
+  const unfinished = ':scope > .agent-handoff:not([data-status="done"]):not([data-status="failed"])';
+  const timer = setInterval(() => {
+    if (document.hidden) return;
+    const id = getSessionId();
+    if (messages.querySelector(unfinished) || (id && chatStream.getInFlight(id)?.status === 'processing') ||
+        Date.now() - lastRun >= 30000) refresh();
+  }, 2500);
   const unsubscribe = chatStream.subscribeAll((id, entry) => {
     if (id === getSessionId() && entry?.status !== 'processing') refresh();
   });

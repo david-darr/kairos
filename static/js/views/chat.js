@@ -4,7 +4,7 @@ import { mountChatPaneToolbar } from '../chatPaneToolbar.js';
 import { showConversationMenu, closeConversationMenu } from '../redesignConversations.js';
 import { mountMobileVoiceRow } from '../mobileVoiceRow.js';
 import { creativeSelectionButton } from '../creativeConnections.js';
-import { api, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
+import { api, apiRecent, el, toast, confirmDialog, modelMark, openPanelDialog } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
 import { ICONS } from "../icons.js";
 import { ICON as KAIROS_MARK } from '../brand.js';
@@ -28,6 +28,7 @@ import { mountChatReferences, renderReferenceChips } from '../chatReferences.js'
 import { mountChatTimeline } from '../chatTimeline.js';
 import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
+import { paneIsOpen } from '../chatPaneStack.js';
 import { fitMenu } from '../menuFit.js';
 import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
@@ -232,7 +233,7 @@ async function offerFallback(session, failedIndex, card) {
   panel.append(choices);
   card.append(panel);
   let endpoints;
-  try { endpoints = await api('/api/models/choices'); }
+  try { endpoints = await apiRecent('/api/models/choices'); }
   catch (error) { choices.textContent = `Couldn't load models: ${error.message}`; return; }
   if (!panel.isConnected || session.id !== activeSessionId) return;
   const source = endpoints.find(endpoint => endpoint.id === failed.failure_model_endpoint_id);
@@ -1026,7 +1027,19 @@ export async function render(container, tabId, options = {}) {
     computerWatch.textContent = info?.closed_at ? 'Computer closed - view' : 'Computer is open - watch';
     computerTurn(sessionId, chatStream.getInFlight(sessionId));
   };
-  const computerTimer = setInterval(syncComputer, 2000);
+  // Polled only while it can change: this chat is mid-turn, a computer is running or
+  // its pane is open. Otherwise once on open/switch, then every 30 s, never while hidden.
+  let computerSyncedFor = null, computerSyncedAt = 0;
+  const computerTick = () => {
+    const sessionId = activeSessionId;
+    if (document.hidden || !sessionId) return;
+    const busy = chatStream.getInFlight(sessionId)?.status === 'processing' || paneIsOpen(container, 'computer') ||
+      (computerInfo && !computerInfo.closed_at);
+    if (sessionId === computerSyncedFor && !busy && Date.now() - computerSyncedAt < 30000) return;
+    computerSyncedFor = sessionId; computerSyncedAt = Date.now();
+    syncComputer();
+  };
+  const computerTimer = setInterval(computerTick, 2000);
   const autoModeOption = el('option', { value: 'auto', text: 'Auto', disabled: true });
   const permissionMode = el('select', { id: 'chat-permission-mode', 'aria-label': 'Chat permission mode',
     title: 'Base uses current permissions. Auto approves chat tool requests; Codex and Antigravity Auto also remove their workspace sandbox. Admin only.' }, [
@@ -1035,7 +1048,7 @@ export async function render(container, tabId, options = {}) {
   const permissionControl = el('label', { class: 'chat-permission-control', 'data-mode': 'base' }, [
     el('span', { text: 'Mode' }), permissionMode,
   ]);
-  api('/api/auth/status').then(status => {
+  apiRecent('/api/auth/status').then(status => {
     autoModeOption.disabled = !status.is_admin;
     slashAdmin = !!status.is_admin;
     if (input.isConnected) slashSuggestions.update();
@@ -2157,8 +2170,13 @@ function syncChatBusy(busy) {
 // Ask for this connection's catalog on each picker refresh. The server has a
 // short credential-scoped TTL, so a newly released model appears without a
 // browser reload while repeated chat switches do not hammer the provider.
+const catalogMemo = new Map();
 async function loadModelCatalog(endpoint) {
-  return api(`/api/models/${endpoint.id}/catalog`).catch(() => []);
+  const hit = catalogMemo.get(endpoint.id);
+  if (hit && Date.now() - hit.at < 30000) return hit.value;
+  const value = await api(`/api/models/${endpoint.id}/catalog`).catch(() => null);
+  if (value) catalogMemo.set(endpoint.id, { at: Date.now(), value });
+  return value || [];
 }
 
 let modelPickerGeneration = 0;
@@ -2168,11 +2186,12 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
   const menu = document.getElementById("model-picker-menu");
   if (!label || !menu) return;
   const sessionId = activeSessionId;
-  const endpoints = await api("/api/models/choices").catch(() => []);
+  const endpoints = await apiRecent("/api/models/choices").catch(() => []);
   if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
   // Focus is restored after a rebuild, so choosing a connection with the
   // keyboard lands on its versions rather than dropping focus to the page.
   const hadFocus = menu.contains(document.activeElement);
+  menu.dispatchEvent(new Event('kairos:model-menu-rebuilt'));
   menu.replaceChildren();
   const main = document.getElementById("chat-main");
   main?.querySelector(":scope > .model-setup-empty")?.remove();
@@ -2351,15 +2370,30 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
     el('button', { type: 'button', class: 'model-picker-item', text: 'Use endpoint setting', onclick: () => save(null) })]));
   menu.append(section, setupItem());
   if (!matchMedia('(max-width: 768px)').matches) {
-    const catalogs = await Promise.all(endpoints.filter(other => other.id !== ep.id).map(async other => [other.id, await loadModelCatalog(other)]));
-    if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
-    appendEndpointCatalogs(menu, catalogs, async (endpointId, model) => {
-      if (activeSessionId !== sessionId || chatStream.getInFlight(sessionId)?.status === 'processing') return;
-      try {
-        const result = await api(`/api/sessions/${sessionId}/model`, { method: 'POST', body: JSON.stringify({ model_endpoint_id: endpointId, model_override: model, effort: null }) });
-        if (activeSessionId === sessionId) { closeMenu(menu); await refreshModelPicker(endpointId, result.model_override, result.effort ?? null); }
-      } catch (_) { /* api displays mutation errors */ }
-    });
+    // Other connections' catalogs are fetched when the menu is first opened, not on every picker refresh.
+    const addCatalogs = async () => {
+      const catalogs = await Promise.all(endpoints.filter(other => other.id !== ep.id).map(async other => [other.id, await loadModelCatalog(other)]));
+      if (generation !== modelPickerGeneration || sessionId !== activeSessionId || !menu.isConnected) return;
+      appendEndpointCatalogs(menu, catalogs, async (endpointId, model) => {
+        if (activeSessionId !== sessionId || chatStream.getInFlight(sessionId)?.status === 'processing') return;
+        try {
+          const result = await api(`/api/sessions/${sessionId}/model`, { method: 'POST', body: JSON.stringify({ model_endpoint_id: endpointId, model_override: model, effort: null }) });
+          if (activeSessionId === sessionId) { closeMenu(menu); await refreshModelPicker(endpointId, result.model_override, result.effort ?? null); }
+        } catch (_) { /* api displays mutation errors */ }
+      });
+      menu.dispatchEvent(new Event('kairos:model-menu-updated'));
+    };
+    if (!menu.classList.contains('hidden')) await addCatalogs();
+    else if (endpoints.length > 1) {
+      const watcher = new MutationObserver(() => {
+        if (menu.classList.contains('hidden')) return;
+        watcher.disconnect();
+        addCatalogs();
+      });
+      watcher.observe(menu, { attributes: true, attributeFilter: ['class'] });
+      // A newer refresh replaces this menu's contents, so its pending catalogs no longer apply.
+      menu.addEventListener('kairos:model-menu-rebuilt', () => watcher.disconnect(), { once: true });
+    }
   }
   menu.dispatchEvent(new Event('kairos:model-menu-updated'));
   if (hadFocus) (section.querySelector('.model-catalog-item.active') || section.querySelector('#chat-model-search, .model-catalog-item'))?.focus();
@@ -2379,7 +2413,7 @@ async function refreshProjectPicker(sessionsList, messages) {
   const menu = document.getElementById("project-picker-menu");
   const gearBtn = document.getElementById("project-settings-btn");
   if (!label || !menu) return;
-  const allProjects = await api("/api/projects").catch(() => []);
+  const allProjects = await apiRecent("/api/projects").catch(() => []);
   if (!sessionsList.isConnected) return;
   menu.innerHTML = "";
 
@@ -2526,8 +2560,11 @@ async function openProjectModal(project) {
   };
 }
 
-async function refreshSessions(sessionsList, messages) {
-  const allSessions = await api("/api/sessions");
+// `allowRecent`: reuse a list fetched in the last 5 s (opening a chat right after the view mounted).
+async function refreshSessions(sessionsList, messages, allowRecent = false) {
+  const recent = allowRecent && sessionsList.chatSessions && Date.now() - (sessionsList.chatSessionsAt || 0) < 5000;
+  const allSessions = recent ? sessionsList.chatSessions : await api("/api/sessions");
+  if (!recent) sessionsList.chatSessionsAt = Date.now();
   setArtifactContext(activeSessionId, allSessions);
   if (!sessionsList.isConnected) return;
   closeConversationMenu();
@@ -2826,7 +2863,7 @@ async function openSession(sessionId, sessionsList, messages) {
   // Read from the session record, so the meter is correct straight after a
   // page reload or a switch between chats — not only after a fresh turn.
   refreshContextMeter(sessionId);
-  await refreshSessions(sessionsList, messages);
+  await refreshSessions(sessionsList, messages, true);
   if (activeSessionId === sessionId) activeBackgroundTasks?.setSession(sessionId);
 }
 

@@ -1,4 +1,4 @@
-import { api, el, modelMark, openPanelDialog } from "../api.js";
+import { api, apiRecent, el, modelMark, openPanelDialog } from "../api.js";
 import { createMascot, STATE_WORDS } from "../mascot.js";
 import { wireKipSwitch } from "../kipPicker.js";
 import * as chatStream from "../chatStream.js";
@@ -515,7 +515,7 @@ export function render(container, tabId, options = {}) {
       ["week", "/api/home/week"],
     ].map(([key, path]) => request(key, path));
     const adminReads = (async () => {
-      const auth = await api("/api/auth/status").catch(() => null);
+      const auth = await apiRecent("/api/auth/status").catch(() => null);
       if (disposed) return;
       data.auth = auth;
       redesign?.update("auth");

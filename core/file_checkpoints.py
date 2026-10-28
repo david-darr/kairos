@@ -11,11 +11,14 @@ import json
 import logging
 import os
 from pathlib import Path
+import stat as stat_mod
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from core.constants import BASE_DIR, DATA_DIR
@@ -27,6 +30,16 @@ MAX_FILE = 50 * 1024 * 1024
 MAX_TOTAL = 300 * 1024 * 1024
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist"}
 GIT_TIMEOUT = 20
+# Hash cache: a file whose (size, mtime_ns, inode) is unchanged since it was last
+# stored reuses its blob id instead of being read again. Like Git's racy-timestamp
+# rule, files modified within RACY_NS of the snapshot are always re-read, and every
+# FULL_REHASH_SECONDS the whole root is re-read so a missed in-place edit that kept
+# size and mtime can survive at most that long.
+RACY_NS = 2_000_000_000
+FULL_REHASH_SECONDS = 600
+_seen: dict[str, dict[str, tuple[int, int, int, str]]] = {}
+_full_at: dict[str, float] = {}
+_seen_lock = threading.Lock()
 
 
 class Conflict(Exception):
@@ -108,7 +121,7 @@ def _files(root: Path):
     listed = _git_paths(root)
     if listed is not None:
         for name in listed:
-            if not any(part in SKIP_DIRS for part in Path(name).parts):
+            if SKIP_DIRS.isdisjoint(name.replace("\\", "/").split("/")):
                 yield name
         return
     for folder, dirs, files in os.walk(root, followlinks=False):
@@ -121,32 +134,92 @@ def _files(root: Path):
         for file in files:
             if file == ".git":
                 continue
-            path = Path(folder) / file
-            if not path.is_symlink() and not path.is_dir():
-                yield path.relative_to(root).as_posix()
+            yield (Path(folder) / file).relative_to(root).as_posix()
+
+
+def _lstat_all(root_str: str, names: list[str]) -> list:
+    def one(name: str):
+        try:
+            return os.lstat(os.path.join(root_str, name))
+        except OSError as exc:
+            return exc
+    if len(names) < 300:
+        return [one(name) for name in names]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(one, names, chunksize=64))
+
+
+def _blob_stored(stored: dict[str, set[str]], objects: str, oid: str) -> bool:
+    """Whether the blob file exists, from one directory listing per id prefix per snapshot."""
+    names = stored.get(oid[:2])
+    if names is None:
+        try:
+            names = set(os.listdir(os.path.join(objects, oid[:2])))
+        except OSError:
+            names = set()
+        stored[oid[:2]] = names
+    return oid[2:] in names
 
 
 def _snapshot(root: Path) -> tuple[str, dict[str, str], list[str]]:
     repo = _repo(root)
+    key = os.path.normcase(str(root))
+    start_ns = time.time_ns()
+    now = time.monotonic()
+    with _seen_lock:
+        full = now - _full_at.get(key, float("-inf")) >= FULL_REHASH_SECONDS
+        if full:
+            _full_at[key] = now
+        cache = {} if full else _seen.get(key, {})
+    fresh: dict[str, tuple[int, int, int, str]] = {}
     manifest: dict[str, str] = {}
     skipped: list[str] = []
+    safe_parents: dict[str, bool] = {}
+    stored: dict[str, set[str]] = {}
+    objects = os.fspath(repo / "objects")
+    root_str = os.fspath(root)
     total = 0
-    for name in _files(root):
-        path = root / name
+    names = list(_files(root))
+    # lstat is the floor cost per file and releases the GIL, so a big tree is stat'ed in parallel.
+    infos = _lstat_all(root_str, names)
+    for name, info in zip(names, infos):
+        path = os.path.join(root_str, name)
         try:
-            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+            if isinstance(info, OSError):
+                raise info
+            if not stat_mod.S_ISREG(info.st_mode):
                 continue
-            size = path.stat().st_size
+            parent = os.path.dirname(name)
+            if parent not in safe_parents:
+                safe_parents[parent] = (root / parent).resolve().is_relative_to(root)
+            if not safe_parents[parent]:
+                continue
+            size = info.st_size
             if size > MAX_FILE or total + size > MAX_TOTAL:
                 skipped.append(name)
                 continue
-            body = path.read_bytes()
+            posix = name.replace("\\", "/")
+            stamp = (size, info.st_mtime_ns, info.st_ino)
+            hit = cache.get(posix)
+            if hit and hit[:3] == stamp and _blob_stored(stored, objects, hit[3]):
+                total += size
+                manifest[posix] = hit[3]
+                fresh[posix] = hit
+                continue
+            with open(path, "rb") as handle:
+                body = handle.read()
             total += len(body)
-            manifest[name.replace("\\", "/")] = _object(repo, "blob", body)
+            oid = _object(repo, "blob", body)
+            manifest[posix] = oid
+            if len(body) == size and info.st_mtime_ns < start_ns - RACY_NS:
+                fresh[posix] = (*stamp, oid)
+        except FileNotFoundError:
+            continue
         except (OSError, ValueError) as exc:
             skipped.append(name)
             logger.warning("checkpoint skipped %s: %s", path, exc)
-
+    with _seen_lock:
+        _seen[key] = fresh
     return _tree(repo, manifest), manifest, skipped
 
 
@@ -200,11 +273,18 @@ def _roots(workspace: str | None = None) -> list[Path]:
     return [root for root in roots if root.is_dir()]
 
 
+def _snapshot_all(roots: list[Path]) -> list[tuple[str, dict[str, str], list[str]]]:
+    if len(roots) < 2:
+        return [_snapshot(root) for root in roots]
+    with ThreadPoolExecutor(max_workers=len(roots)) as pool:
+        return list(pool.map(_snapshot, roots))
+
+
 def _start(source: str, workspace: str | None) -> dict:
     event = {"id": uuid.uuid4().hex, "created": time.time(), "source": source,
              "status": "running", "roots": []}
-    for root in _roots(workspace):
-        tree, manifest, skipped = _snapshot(root)
+    roots = _roots(workspace)
+    for root, (tree, manifest, skipped) in zip(roots, _snapshot_all(roots)):
         repo = _repo(root)
         event["roots"].append({"path": str(root), "before": _commit(repo, tree, event["id"], "before"),
                                "before_files": manifest, "before_skipped": skipped})
@@ -214,9 +294,9 @@ def _start(source: str, workspace: str | None) -> dict:
 
 def _finish(event: dict) -> None:
     changed = False
-    for root_info in event["roots"]:
+    snapshots = _snapshot_all([Path(info["path"]) for info in event["roots"]])
+    for root_info, (tree, manifest, skipped) in zip(event["roots"], snapshots):
         root = Path(root_info["path"])
-        tree, manifest, skipped = _snapshot(root)
         root_info["after"] = _commit(_repo(root), tree, event["id"], "after")
         before = root_info.pop("before_files")
         root_info["created_unprotected"] = [name for name in skipped
