@@ -714,7 +714,10 @@ async def main():
             except Exception:
                 info = {'opaque_frame': True}
             step_event(recorded_input(kind, values, info, page.url, window), ident)
-        cast = {'session': None, 'page': None, 'sent': 0.0, 'watching': False, 'gap': 0.1, 'task': None}
+        # Streamed frames stay near 100 KB: JPEG quality steps down until a frame fits.
+        FRAME_BYTES, FRAME_QUALITIES = 100_000, (55, 40, 28, 20, 12)
+        cast = {'session': None, 'page': None, 'sent': 0.0, 'watching': False, 'gap': 0.1, 'task': None,
+                'quality': FRAME_QUALITIES[0], 'tuning': False, 'snap_quality': FRAME_QUALITIES[0]}
         async def capture_loop():
             while cast['watching']:
                 emit({'event': 'frame', 'data': await asyncio.to_thread(desktop_capture, True)})
@@ -727,6 +730,10 @@ async def main():
             if now - cast['sent'] >= cast['gap']:
                 cast['sent'] = now
                 emit({'event': 'frame', 'data': params['data']})
+                # A frame past the cap lowers the screencast quality for the frames after it.
+                if len(params['data']) * 3 // 4 > FRAME_BYTES and cast['quality'] > FRAME_QUALITIES[-1] and not cast['tuning']:
+                    cast['tuning'] = True
+                    asyncio.ensure_future(retune(session))
         async def stop_cast():
             task, cast['task'] = cast['task'], None
             if task:
@@ -739,15 +746,27 @@ async def main():
                     await session.detach()
                 except Exception:
                     pass
+        async def retune(session):
+            try:
+                cast['quality'] = max(FRAME_QUALITIES[-1], cast['quality'] - 12)
+                if cast['session'] is session:
+                    await session.send('Page.stopScreencast')
+                    await session.send('Page.startScreencast', {'format': 'jpeg', 'quality': cast['quality'],
+                                                                'maxWidth': 1280, 'maxHeight': 800, 'everyNthFrame': 1})
+            except Exception:
+                pass
+            finally:
+                cast['tuning'] = False
         async def start_cast():
             await stop_cast()
+            cast['quality'] = FRAME_QUALITIES[0]
             if DESKTOP:
                 cast['task'] = asyncio.create_task(capture_loop())
                 return
             session = await context.new_cdp_session(page)
             cast['session'], cast['page'] = session, page
             session.on('Page.screencastFrame', on_frame)
-            await session.send('Page.startScreencast', {'format': 'jpeg', 'quality': 60,
+            await session.send('Page.startScreencast', {'format': 'jpeg', 'quality': cast['quality'],
                                                         'maxWidth': 1280, 'maxHeight': 800, 'everyNthFrame': 1})
         async def follow_page():
             # A popup or new tab became the page: the screencast follows it.
@@ -1040,6 +1059,7 @@ async def main():
             elif action == 'person_key': await page.keyboard.press(cmd['key'])
             elif action == 'person_scroll': await page.mouse.wheel(cmd.get('dx',0), cmd.get('dy',0))
             elif action == 'open':
+                cast['snap_quality'] = FRAME_QUALITIES[0]
                 response = await page.goto(cmd['url'], wait_until='domcontentloaded', timeout=30000)
                 # 2026-10-16: surface the proxy's local-preview error to the model.
                 if response and response.headers.get('x-kairos-egress-error') == '1':
@@ -1062,7 +1082,9 @@ async def main():
                 else: await page.keyboard.insert_text(cmd['text'])
             elif action == 'key': await page.keyboard.press(cmd['key'])
             elif action == 'scroll': await page.mouse.wheel(cmd.get('dx',0),cmd.get('dy',0))
-            elif action == 'back': await page.go_back(wait_until='domcontentloaded', timeout=30000)
+            elif action == 'back':
+                cast['snap_quality'] = FRAME_QUALITIES[0]
+                await page.go_back(wait_until='domcontentloaded', timeout=30000)
             elif action == 'wait': await asyncio.sleep(min(10,max(0,float(cmd.get('seconds',1)))))
             elif action == 'read':
                 result = await read_page(cmd)
@@ -1077,18 +1099,30 @@ async def main():
                     invalidate('a new tab opened')
                     await follow_page()
                 return {'url':page.url, 'title':await page.title()}
-            await page.wait_for_timeout(250)
+            # A page needs a moment to settle after an action; a plain read, screenshot or frame
+            # has no action before it, so it does not wait.
+            if action not in ('read', 'screenshot', 'snapshot'): await page.wait_for_timeout(250)
             if context.pages and context.pages[-1] is not page:
                 page = context.pages[-1]
                 await page.wait_for_load_state('domcontentloaded', timeout=10000)
                 invalidate('a new tab opened')
                 await follow_page()
             private = page.locator(PRIVATE_SELECTOR)
-            screenshot_type = 'jpeg' if action == 'snapshot' else 'png'
-            quality = {'quality': 65} if action == 'snapshot' else {}
-            result.update(url=page.url, title=await page.title(),
-                screenshot=base64.b64encode(await page.screenshot(type=screenshot_type, mask=[private],
-                    style=PRIVATE_STYLE, **quality)).decode())
+            # A read carries a screenshot only when asked (screenshot: true); the text is the answer.
+            if action == 'read' and not cmd.get('screenshot'):
+                result.update(url=page.url, title=await page.title())
+                return result
+            if action == 'snapshot':
+                # Frames for the viewer: JPEG stepped down in quality until it fits the byte cap.
+                shot = b''
+                # It starts at the quality the last frame needed; a new page starts high again.
+                for quality in [q for q in FRAME_QUALITIES if q <= cast['snap_quality']]:
+                    shot = await page.screenshot(type='jpeg', quality=quality, mask=[private], style=PRIVATE_STYLE)
+                    cast['snap_quality'] = quality
+                    if len(shot) <= FRAME_BYTES: break
+            else:
+                shot = await page.screenshot(type='png', mask=[private], style=PRIVATE_STYLE)
+            result.update(url=page.url, title=await page.title(), screenshot=base64.b64encode(shot).decode())
             return result
         async def run(cmd):
             try:

@@ -546,7 +546,7 @@ class ComputerManager:
         running = self._computers.get(owner)
         if running and code not in ("person_in_control", "computer_stopped"):
             try:
-                final = await self._act_one(owner, "read", {"since": "latest"}, ctx)
+                final = await self._act_one(owner, "read", {"since": "latest", "screenshot": True}, ctx)
                 images = final["images"]
                 observed = "\n\n" + final["text"].split("\n", 1)[-1].lstrip("\n") if "\n" in final["text"] else ""
             except ValueError as error:
@@ -669,6 +669,8 @@ class ComputerManager:
             if problem:
                 return {"text": f"Not run: {problem}", "images": [], "code": "bad_arguments"}
             command.update({key: args[key] for key in ("query", "since", "max_elements") if args.get(key) not in (None, "")})
+            # A read is text; the driver adds a screenshot only when the caller asks (screenshot: true).
+            command["screenshot"] = args.get("screenshot") is True
         elif action == "verify":
             expect, problem = _check_expect(args.get("expect"))
             if problem:
@@ -706,7 +708,8 @@ class ComputerManager:
                 await self._retreat(c)
                 return {"text": f"Not opened: {reason}", "images": []}
         c.url, c.title = new_url, reply.get("title") or ""
-        c.screenshot = base64.b64decode(reply["screenshot"])
+        if reply.get("screenshot"):
+            c.screenshot = base64.b64decode(reply["screenshot"])
         detail = f"URL: {c.url} | Title: {c.title} | {action} completed."
         if note:
             detail += " " + note
@@ -714,7 +717,7 @@ class ComputerManager:
             detail += _read_text(reply)
         if ctx.turn_taint:
             ctx.turn_taint.mark("computer page")
-        result = {"text": detail, "images": [c.screenshot]}
+        result = {"text": detail, "images": [c.screenshot] if reply.get("screenshot") else []}
         if reply.get("point"):
             result["point"] = reply["point"]
         if action == "read":

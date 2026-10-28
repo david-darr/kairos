@@ -92,6 +92,7 @@ class FakeProc:
             elif action == "desktop_input" and self.next_url: self.url = self.next_url
             elif action == "back": self.url = "https://example.com/"
             result.update(url=self.url, title="Example", screenshot=base64.b64encode(PNG).decode())
+            if action == "read" and not cmd.get("screenshot"): result.pop("screenshot")
             if action == "read":
                 result.update(text="Example Domain", elements=[{"ref": "1", "tag": "a", "label": "More", "href": "https://other.com/"}])
             if action == "windows": result["windows"] = [{**self.window, "geometry": {"x": 0, "y": 0, "width": 800, "height": 600}}]
@@ -1500,6 +1501,18 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reads[0]["since"], "latest")
         self.assertIn("Changes since r1 (now r2): 1 added", result["text"])
         self.assertIn("UNTRUSTED", result["text"])
+
+    async def test_read_returns_a_screenshot_only_when_asked(self):
+        plain = await self.manager.act("chat:s1", "read", {}, self.ctx)
+        self.assertEqual(plain["images"], [])
+        self.assertIs(self.ran("read")[-1]["screenshot"], False)
+        shot = await self.manager.act("chat:s1", "read", {"screenshot": True}, self.ctx)
+        self.assertEqual(len(shot["images"]), 1)
+        self.assertIs(self.ran("read")[-1]["screenshot"], True)
+        # A batch still ends with the picture (its final read asks for it).
+        self.assertIs(self.ran("read")[-1]["screenshot"], True)
+        await self.steps([{"action": "key", "key": "Tab"}])
+        self.assertIs(self.ran("read")[-1]["screenshot"], True)
 
     async def test_read_arguments_and_verify(self):
         result = await self.manager.act("chat:s1", "read", {"query": "email", "max_elements": 5}, self.ctx)

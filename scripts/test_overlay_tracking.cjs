@@ -33,7 +33,7 @@ assert.equal(chooseDisplay([left], 99, 1), left, 'missing primary falls back to 
 assert.deepEqual(localPointer({ x: -1200, y: -180 }, { x: -1400, y: -280 }, 1.25), { x: 160, y: 80 });
 assert.equal(boundsDiffer({ x: -1666, y: -179, width: 657, height: 959 }, { x: -1667, y: -180, width: 656, height: 960 }), false);
 
-let tick, stopped = 0, visible = false, destroyed = false, cursor = { x: -1662, y: 300 }, zoom = 1, writes = 0;
+let clockMs = 1000, tick, stopped = 0, visible = false, destroyed = false, cursor = { x: -1662, y: 300 }, zoom = 1, writes = 0;
 let displays = [primary, left], config = { displayId: 2, edge: 'left', offset: 0.5 };
 const target = () => boundsFor(config, chooseDisplay(displays, config.displayId, primary.id));
 let actual = { ...target() };
@@ -46,7 +46,7 @@ win.isVisible = () => visible;
 win.getBounds = win.getContentBounds = () => ({ ...actual });
 win.setBounds = b => { actual = { ...b }; writes++; win.emit('move'); win.emit('resize'); };
 const tracking = trackOverlay(win, { getCursorScreenPoint: () => cursor }, target,
-  { setInterval: fn => { tick = fn; return 7; }, clearInterval: id => { assert.equal(id, 7); stopped++; } });
+  { now: () => clockMs, setInterval: fn => { tick = fn; return 7; }, clearInterval: id => { assert.equal(id, 7); stopped++; } });
 win.emit('ready-to-show');
 assert.equal(sent.length, 0, 'hidden overlays do not send pointers');
 actual.x = 200;
@@ -55,9 +55,16 @@ assert.deepEqual(actual, target(), 'show repairs native bounds before sampling')
 assert.deepEqual(sent.at(-1), { channel: 'usage-overlay:pointer', value: { x: 5, y: 480 } });
 const count = sent.length, stableWrites = writes;
 tick();
-assert.equal(sent.length, count + 1, 'stationary cursor repairs stale renderer hover');
+assert.equal(sent.length, count, 'a still cursor is not resent on every tick');
+// Still-cursor rate: 80 ms ticks for one minute send only the 1 Hz heartbeat (about 60 per minute, not 750).
+const beforeMinute = sent.length;
+for (let t = 0; t < 750; t++) { clockMs += 80; tick(); }
+const perMinute = sent.length - beforeMinute;
+assert.ok(perMinute >= 55 && perMinute <= 62, `still cursor sends ${perMinute} IPC messages a minute (want about 60)`);
+assert.equal(sent.at(-1).channel, 'usage-overlay:pointer', 'the heartbeat keeps the stray-mouseleave repair alive');
+assert.equal(sent.length > count, true, 'stationary cursor repairs stale renderer hover through the heartbeat');
 assert.equal(writes, stableWrites, 'correct native geometry does not cause repeated setBounds');
-zoom = 1.25; tick();
+zoom = 1.25; clockMs += 80; tick();
 assert.deepEqual(sent.at(-1).value, { x: 4, y: 384 }, 'stationary native cursor accounts for a zoom change');
 // DPI/resolution/work area can change on the selected display at runtime.
 displays = [primary, { ...left, scaleFactor: 1.25, workArea: { x: -2048, y: -100, width: 2048, height: 1104 } }];

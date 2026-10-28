@@ -1111,6 +1111,7 @@ async def _browse(args, ctx):
              "query": _str("read: only rows and text lines matching this"),
              "since": {"type": "string", "enum": ["latest"], "description": "read: only what changed since the last read"},
              "max_elements": {"type": "integer", "description": "read: at most this many rows (default 60, up to 200)"},
+             "screenshot": {"type": "boolean", "description": "read: also return a screenshot (default: text only)"},
              "steps": {"type": "array", "maxItems": 16, "items": {"type": "object"},
                        "description": "steps: actions such as {\"action\": \"type\", \"ref\": \"r3:2\", \"text\": \"Ada\"}"},
              "expect": {"type": "object", "description": "verify: url_contains, title_contains, text_present, "
