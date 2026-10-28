@@ -155,6 +155,13 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
   console.log('PASS: Profile identity, role, counts and every settings link');
 
   await require('./app-shell-gap-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, fixtures, press });
+  // A view keeps mounting after its first element shows (an agent opens its chat pane a beat later).
+  // Navigating away mid-mount lets the old page build avatars while it unloads, and Chromium reports
+  // those data: SVG loads as blocked connects (CSP). Let the page go quiet before each launch link.
+  const pageQuiet = async () => {
+    await waitFor("[...document.images].every(image => image.complete || image.loading === 'lazy')", 10000);
+    await js("new Promise(resolve => { let timer; const done = () => { observer.disconnect(); resolve(true); }; const quiet = () => { clearTimeout(timer); timer = setTimeout(done, 500); }; const observer = new MutationObserver(quiet); observer.observe(document.documentElement, { childList: true, subtree: true }); quiet(); setTimeout(done, 5000); })");
+  };
   for (const [query, check] of [
     ['?view=calendar', "document.querySelector('#nav .nav-item[data-tab=calendar]')?.classList.contains('active')"],
     ['?view=notes', "document.querySelector('#nav .nav-item[data-tab=notes]')?.classList.contains('active')"],
@@ -165,12 +172,14 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
     ['?chat=abcdef123456', "!!document.querySelector('#chat-messages[data-session-id=\"abcdef123456\"]')"],
     ['?chat=not-a-chat-id', "document.querySelector('#nav .nav-item[data-tab=home]')?.classList.contains('active')"],
   ]) {
+    await pageQuiet();
     await win.loadURL(base + '/' + query);
     await waitFor(check, 15000);
     // The view opens first; the address is cleaned once it has.
     await waitFor("location.pathname + location.search === '/'", 5000).catch(() => {});
     assert.equal(await js("location.pathname + location.search"), '/', `${query} is removed from the address after opening`);
   }
+  await pageQuiet();
   await win.loadURL(base);
   await waitFor("!!document.querySelector('#nav .nav-item[data-tab=home].active')", 15000);
   console.log('PASS: launch links open the intended view and unknown views fall back to Home');
