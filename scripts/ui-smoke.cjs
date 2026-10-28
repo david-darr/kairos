@@ -27,6 +27,7 @@ const writes = [];
 const reads = [];
 const now = Date.now() / 1000;
 const { fixture, mutate, media, data: calendarFixtures } = require("../demo/fixtures.js")({ now, state: demoState });
+const g4Backend = require('./g4-backend.cjs')({ state: demoState, notes: calendarFixtures.notes });
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
 demoState.computerImage = computerImage;
 const errors = [];
@@ -131,7 +132,7 @@ const server = http.createServer(async (req, res) => {
         if (active) liveFinish(parsed.session_id, 'stopped');
         res.end(JSON.stringify({ stopping: active })); return;
       }
-      const updated = mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
+      const updated = (demoState.g4Live && g4Backend.mutate(url.pathname, req.method, parsed)) || mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
         req.method, parsed, Object.fromEntries(url.searchParams));
       if (updated?._appStart) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -202,7 +203,7 @@ const server = http.createServer(async (req, res) => {
       }
       res.end(JSON.stringify(updated || (url.pathname === "/api/sessions" ? { id: "s1" } : { ok: true }))); return;
     }
-    try { res.end(JSON.stringify(fixture(url))); }
+    try { const g4Read = demoState.g4Live ? g4Backend.read(url.pathname) : undefined; res.end(JSON.stringify(g4Read !== undefined ? g4Read : fixture(url))); }
     catch (error) { errors.push(error.message); res.writeHead(404); res.end('{"detail":"Missing fixture"}'); }
     return;
   }
@@ -426,6 +427,51 @@ app.whenReady().then(async () => {
       assert.deepEqual(errors, [], 'g1 renderer errors');
       console.log('PASS: g1 Kip, appearance and Home checks.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['g1'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--g4-only')) {  // Notes and Email (g4-checks.cjs); not in the default run.
+      await require('./g4-checks.cjs')({ js, win, waitFor, delay, navigate, capture, overflow, reads, writes, demoState, fixtures: calendarFixtures });
+      assert.deepEqual(errors, [], 'Notes and Email renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['notes and email'], errors }, null, 2));
+      console.log('PASS: Notes and Email desktop and phone.'); console.log('Screenshots: ' + output); return;
+    }
+    if (process.argv.includes('--g4-calendar-only')) {  // Calendar lifecycle/repeat checks, desktop and phone (lifecycle-calendar-checks.cjs); not in the default run.
+      for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
+        win.setContentSize(width, height);
+        await delay(100);
+        await require('./lifecycle-calendar-checks.cjs')({ js, waitFor, capture, navigate, overflow, reads, writes, label });
+      }
+      assert.deepEqual(errors, [], 'Calendar lifecycle renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['calendar lifecycle'], errors }, null, 2));
+      console.log('PASS: Calendar lifecycle desktop and phone.'); console.log('Screenshots: ' + output); return;
+    }
+    if (process.argv.includes('--g5-only')) {  // Part 2 group g5 / A10: Library documents (library-docs-checks.cjs) and the Vault (vault-checks.cjs) at both sizes. Design: --design-only.
+      await require('./library-docs-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, overflow });
+      for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
+        win.setContentSize(width, height);
+        await delay(400);
+        await require('./vault-checks.cjs').run({ js, win, waitFor, delay, navigate, capture, overflow, writes, demoState, label });
+        console.log('PASS: ' + label + ' Vault checks');
+      }
+      assert.deepEqual(errors, []);
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['library documents', 'vault'], errors }, null, 2));
+      console.log('PASS: g5 Library documents and Vault.'); console.log('Screenshots: ' + output);
+      return;
+    }
+    if (process.argv.includes('--g6-only')) {  // Part 2 g6: Tasks form/draft/phone sheet, Tool Store and Cookbook first loads.
+      let findings = null;
+      try { await require('./g6-checks.cjs')({ js, win, waitFor, delay, navigate, capture, reads, writes, demoState }); }
+      catch (error) { if (/^g6 findings/.test(error.message)) findings = error.message; else throw error; }
+      assert.deepEqual(errors, [], 'No renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: !findings, checks: ['g6'], findings, errors }, null, 2));
+      if (findings) { console.error(findings); process.exitCode = 1; } else console.log('PASS: g6 Tasks, Tool Store and Cookbook checks.');
+      win.destroy(); server.close(); exitAfterFlush(process.exitCode || 0); return;
+    }
+    if (process.argv.includes('--g7-only')) {  // A14 Settings window: search, gating, drag/resize, close-during-load, panel cost.
+      await require('./settings-access-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, reads, writes });
+      assert.deepEqual(errors, []);
+      console.log('PASS: Settings search, member/admin sections, window drag/resize/minimize, close during load, retired controls, panel cost.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['settings access'], errors }, null, 2));
       return;
     }
     if (process.argv.includes('--mobile-only')) {
