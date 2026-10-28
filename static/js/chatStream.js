@@ -107,8 +107,13 @@ function _packet(packet) {
   if (packet.revision && packet.revision <= (entry.revision || 0)) return;
   if (packet.revision) entry.revision = packet.revision;
   if (packet.type === 'chunk') entry.text += packet.chunk;
-  else if (packet.type === 'tool_event') (entry.toolEvents ||= []).push(packet.value);
-  else if (packet.type === 'tool_step') (entry.toolSteps ||= []).push(packet.value);
+  else if (packet.type === 'tool_event') { (entry.toolEvents ||= []).push(packet.value); entry.waitingSince = null; }
+  else if (packet.type === 'tool_step') {
+    // Mirrors chat_live._stepped: a running tool is not a slow model; once it finishes the wait clock restarts.
+    (entry.toolSteps ||= []).push(packet.value);
+    entry.waitingSince = packet.value?.phase === 'finished' ? packet.value.at || Date.now() / 1000 : null;
+    entry.providerDetail = null;
+  }
   else if (packet.type === 'update') {
     const changes = packet.changes;
     if (changes.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;

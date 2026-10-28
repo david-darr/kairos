@@ -245,6 +245,37 @@ class LiveChatTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(run()["waitingSince"])
                 await self.wait_for(lambda: run()["status"] == "done")
 
+    async def test_the_wait_clock_pauses_for_a_tool_and_restarts_when_it_finishes(self):
+        class ToolBrain(GatedBrain):
+            """Calls a tool, then thinks silently, as a local model does after its helpers report."""
+            def __init__(self):
+                super().__init__()
+                self.tool_done = asyncio.Event()
+            async def events(self, prompt):
+                yield runs.tool_started("c1", "delegate", {"jobs": []})
+                await self.tool_done.wait()
+                yield runs.tool_finished("c1", True, "Helpers' results")
+                await self.continue_reply.wait()
+                yield runs.text("Both done")
+                yield runs.result(True)
+
+        brain = ToolBrain()
+        with patch.object(chat_live, "_ollama_target", return_value=None), \
+                patch.object(chat_service, "_get_brain", AsyncMock(return_value=(brain, False))):
+            chat_live.start(self.session_id, "Delegate", [], True, "", [])
+            run = lambda: chat_live.snapshot()["runs"][self.session_id]
+            await self.wait_for(lambda: len(run()["toolSteps"]) == 1)
+            self.assertIsNone(run()["waitingSince"], "a running tool is not a slow model")
+            before = time.time()
+            brain.tool_done.set()
+            await self.wait_for(lambda: len(run()["toolSteps"]) == 2)
+            self.assertAlmostEqual(run()["waitingSince"], run()["toolSteps"][1]["at"], delta=0.01)
+            self.assertGreaterEqual(run()["waitingSince"], before - 0.01, "the clock restarts from the tool's finish")
+            brain.continue_reply.set()
+            await self.wait_for(lambda: run()["text"] == "Both done")
+            self.assertIsNone(run()["waitingSince"])
+            await self.wait_for(lambda: run()["status"] == "done")
+
     async def test_a_run_that_ends_without_text_clears_the_wait(self):
         viewer, _ = chat_live.subscribe()
         with patch.object(chat_live, "_ollama_target", return_value=None):

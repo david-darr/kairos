@@ -173,6 +173,16 @@ def _responded(run: dict) -> None:
     run["providerDetail"] = None
 
 
+def _stepped(run: dict, step: dict) -> None:
+    # A tool is running: the model is not the one being waited on. Once it
+    # finishes, the model has the result and the clock starts again from then.
+    # The step packet itself carries `at`, so viewers mirror this without extra traffic.
+    _responded(run)
+    run.pop("_checkedAt", None)
+    if step.get("phase") == "finished":
+        run["waitingSince"] = step.get("at") or time.time()
+
+
 def _ollama_target(session_id: str) -> tuple[str, str] | None:
     """(native root, model) when this chat's model is a loopback Ollama, else None."""
     try:
@@ -337,7 +347,7 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                             _broadcast({"type": "tool_event", "sessionId": session_id,
                                         "turnId": run["turnId"], "revision": run["revision"], "value": value})
                         elif key == "tool_step":
-                            _responded(run)
+                            _stepped(run, value)
                             run["toolSteps"].append(value)
                             run["revision"] += 1
                             _broadcast({"type": "tool_step", "sessionId": session_id,

@@ -16,7 +16,6 @@ export function waitNotice(entry, now, lastContact) {
     return { state: 'disconnected', label: 'Lost contact with Kairos', detail: '' };
   }
   if (entry.text || entry.permission || !entry.connected || !entry.waitingSince) return null;
-  if ((entry.toolSteps || []).length || (entry.toolEvents || []).length) return null;
   const waited = now / 1000 - entry.waitingSince;
   if (waited < WAIT_NOTICE_SECONDS) return null;
   return { state: 'waiting', label: `Still waiting on ${entry.provider || 'the model'} · ${formatWait(waited)}`, detail: entry.providerDetail || '' };
