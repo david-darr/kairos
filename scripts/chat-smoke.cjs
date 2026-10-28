@@ -633,6 +633,47 @@ app.whenReady().then(async () => {
     try { pending.res.end(); } catch (e) {}
     pending = null;
 
+    // -- a slow provider and a quiet feed (A04, 2026-10-28). services/chat_live.py
+    // stamps waitingSince and the provider, and heartbeats every 10 s; the chip
+    // tells "the model is slow" apart from "the app lost contact", and Stop still works.
+    deferFirstChunk = true;  // the notice is only for a reply with no text yet
+    await js("document.querySelector('#chat-input').value='Think slowly'; document.querySelector('#chat-send').click()");
+    await waitFor("document.querySelector('#chat-send').dataset.mode==='stop'");
+    while (!pending) await delay(20);
+    deferFirstChunk = false;
+    const slow = liveRuns[pending.sid];
+    const changes = { provider: 'Ollama local-model', waitingSince: Date.now() / 1000 - 70, providerDetail: 'Loading the model into memory' };
+    Object.assign(slow, changes); slow.revision++;
+    liveBroadcast({ type: 'update', sessionId: pending.sid, turnId: slow.turnId, revision: slow.revision, changes });
+    const chip = "[...document.querySelectorAll('.chat-activity')].at(-1)";
+    await waitFor(`${chip}.querySelector('.chat-activity-label').textContent.startsWith('Still waiting on Ollama local-model · 1m 1')`);
+    assert.equal(await js(`${chip}.dataset.state`), 'waiting', 'A slow provider is still a wait, not a failure');
+    assert.equal(await js(`(n => !n.hidden && n.textContent)(${chip}.querySelector('.chat-activity-detail'))`), 'Loading the model into memory');
+    const firstLabel = await js(`${chip}.querySelector('.chat-activity-label').textContent`);
+    // An offscreen window may throttle the chip's 1 s timer, so allow a few ticks.
+    let ticked = false;
+    for (let i = 0; i < 50 && !ticked; i++) { await delay(100); ticked = await js(`${chip}.querySelector('.chat-activity-label').textContent`) !== firstLabel; }
+    assert.ok(ticked, 'The wait clock counts up on its own');
+    await capture('chat-activity-provider-wait');
+    // No packet for over 30 s: shift the renderer clock instead of waiting it out.
+    await js('window.__realNow = Date.now; Date.now = () => window.__realNow() + 31000; 0');
+    await waitFor(`${chip}.dataset.state === 'disconnected'`);
+    assert.equal(await js(`${chip}.querySelector('.chat-activity-label').textContent`), 'Lost contact with Kairos');
+    assert.equal(await js(`${chip}.querySelector('.chat-activity-glyph').textContent`), '!');
+    assert.equal(await js("document.querySelector('#chat-send').dataset.mode"), 'stop', 'Stop stays available out of contact');
+    await capture('chat-activity-lost-contact');
+    liveBroadcast({ type: 'heartbeat' });
+    await waitFor(`${chip}.dataset.state === 'waiting'`);
+    assert.ok(await js(`${chip}.querySelector('.chat-activity-label').textContent.startsWith('Still waiting on Ollama local-model · 1m 4')`), 'A heartbeat restores the wait notice');
+    await js('Date.now = window.__realNow; 0');
+    await js("document.querySelector('#chat-send').click()");
+    await waitFor(`${chip}.dataset.state === 'stopped'`);
+    assert.equal(await js(`${chip}.querySelector('.chat-activity-label').textContent`), 'Stopped');
+    assert.equal(await js(`${chip}.querySelector('.chat-activity-detail').hidden`), true, 'The provider detail clears once the turn ends');
+    await waitFor("document.querySelector('#chat-send').dataset.mode==='send'");
+    try { pending.res.end(); } catch (e) {}
+    pending = null;
+
 
     // -- dictation (David's ask 2026-09-15). The no-model path is checked
     // because it needs no microphone: the button verifies a model exists
