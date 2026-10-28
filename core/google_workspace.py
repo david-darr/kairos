@@ -66,6 +66,7 @@ _pending: dict[str, dict] = {}
 _refresh_locks: dict[str, asyncio.Lock] = {}
 _lock = threading.RLock()
 _calendar_cache: dict[tuple, tuple[float, list[dict]]] = {}
+_calendar_list_cache: dict = {}  # account id -> (monotonic time, calendars); same 60 s TTL and invalidation as _calendar_cache
 _calendar_generation = 0
 
 
@@ -716,6 +717,7 @@ def invalidate_calendar() -> None:
     global _calendar_generation
     _calendar_generation += 1
     _calendar_cache.clear()
+    _calendar_list_cache.clear()
 
 
 def _calendar_access() -> None:
@@ -761,6 +763,20 @@ async def calendar_list() -> list[dict]:
         page = result.get("nextPageToken")
         if not page:
             return calendars
+
+
+async def _cached_calendar_list() -> list[dict]:
+    """calendar_list() shared by one event fetch and its cache window, so an
+    uncached range reads Google's calendarList once and a cached one never."""
+    account = _calendar_account().get("id")
+    cached = _calendar_list_cache.get(account)
+    if cached and time.monotonic() - cached[0] < 60:
+        return deepcopy(cached[1])
+    generation = _calendar_generation
+    calendars = await calendar_list()
+    if generation == _calendar_generation:
+        _calendar_list_cache[account] = (time.monotonic(), deepcopy(calendars))
+    return calendars
 
 
 def _timed(value: str, zone: str = "UTC") -> str:
@@ -820,7 +836,7 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
     if not ids:
         return []
     generation = _calendar_generation
-    calendars = {c["id"]: c for c in await calendar_list()}
+    calendars = {c["id"]: c for c in await _cached_calendar_list()}
     events = []
     for ident in ids:
         calendar = calendars.get(ident)
@@ -856,7 +872,7 @@ async def selected_calendar_events(start: str, end: str) -> list[dict]:
     ids = _calendar_account().get("calendar_ids")
     if ids is None:
         # A calendar Google lists with an ID we cannot use is skipped, not allowed to hide every other calendar.
-        ids = [c["id"] for c in await calendar_list() if c["selected"] and _valid_calendar_id(c["id"])]
+        ids = [c["id"] for c in await _cached_calendar_list() if c["selected"] and _valid_calendar_id(c["id"])]
     return await calendar_events(ids, start, end)
 
 
