@@ -25,6 +25,7 @@ from .live import LiveFeed, TurnEvent
 from .sanitize import clean, one_line
 
 EXIT_DONE, EXIT_FAILED, EXIT_STOPPED = 0, 1, 2
+LOST_AFTER_SECONDS = 20.0  # a reply with the live feed down this long is given up on
 
 
 class Headless:
@@ -64,7 +65,13 @@ class Headless:
             text_parts: list[str] = []
             steps: list[dict] = []
             while True:
-                event = await self.events.get()
+                try:
+                    event = await asyncio.wait_for(self.events.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    lost = feed.down_since is not None and time.monotonic() - feed.down_since > LOST_AFTER_SECONDS
+                    if lost or (feed._task is not None and feed._task.done()):
+                        raise KairosError("Lost the connection to Kairos.") from None
+                    continue
                 if event.session_id != session_id or event.turn.turn_id != turn_id:
                     continue
                 if event.kind == "text":

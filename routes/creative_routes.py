@@ -16,6 +16,8 @@ creative_tools = _Creative()
 def active(request: Request):
     parts = request.url.path.removeprefix('/api/creative').strip('/').split('/')
     provider = parts[0]
+    if provider != 'oauth':  # the provider's browser redirect carries no session
+        require_user(request)  # sign-in is checked before the add-on gate: anonymous gets 401
     if provider in {'blender', 'higgsfield'} and not addons.enabled(provider):
         raise HTTPException(409, 'Install and enable this add-on in Tool Store first')
     if provider == 'oauth' and not addons.enabled('higgsfield'):

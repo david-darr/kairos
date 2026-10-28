@@ -83,7 +83,9 @@ async def health(base_url: str, timeout: float = 2.0) -> Health:
             response = await probe.get(f"{base_url}/api/health")
         if response.status_code != 200:
             return Health(False)
-        body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+        body = response.json()
+        if not isinstance(body, dict) or body.get("status") != "ok":
+            return Health(False)  # something else is listening on this port
         return Health(True, str(body.get("instance") or ""), str(body.get("version") or ""))
     except (httpx.HTTPError, ValueError):
         return Health(False)
@@ -162,7 +164,13 @@ class Connection:
     async def refresh_status(self) -> dict:
         response = await self.client.get("/api/auth/status")
         response.raise_for_status()
-        self.status = response.json()
+        try:
+            status = response.json()
+        except ValueError:
+            status = None
+        if not isinstance(status, dict):
+            raise KairosError(f"Something answered on {self.base_url} that is not Kairos.")
+        self.status = status
         return self.status
 
     async def sign_in(self, interactive: bool, on_words=None) -> None:

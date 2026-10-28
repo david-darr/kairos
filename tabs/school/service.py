@@ -131,21 +131,40 @@ async def _sync_from_ics(ics_url: str) -> list[dict]:
         return _parse_canvas_ics(resp.text)
 
 
+async def _get_all_pages(client: httpx.AsyncClient, path: str, params: dict) -> list:
+    """Every row of a Canvas list, following Link rel="next" until it ends."""
+    rows: list = []
+    response = await client.get(path, params=params)
+    for _ in range(200):  # hard stop against a server that loops its own next link
+        response.raise_for_status()
+        rows.extend(response.json())
+        next_url = response.links.get("next", {}).get("url")
+        if not next_url:
+            return rows
+        response = await client.get(next_url)
+    raise httpx.HTTPError("Canvas kept returning more pages.")
+
+
+class _Fetched(list):
+    """Assignments from one sync; failed_courses names courses that could not be read."""
+    failed_courses: list[str]
+
+
 async def _sync_from_api(base_url: str, token: str) -> list[dict]:
     headers = {"Authorization": f"Bearer {token}"}
-    assignments = []
+    assignments = _Fetched()
+    failed: list[str] = []
     async with httpx.AsyncClient(base_url=base_url.rstrip("/"), headers=headers, timeout=TIMEOUT_SECONDS) as client:
-        courses_resp = await client.get("/api/v1/courses", params={"enrollment_state": "active", "per_page": 100})
-        courses_resp.raise_for_status()
-        for c in courses_resp.json():
+        courses = await _get_all_pages(client, "/api/v1/courses", {"enrollment_state": "active", "per_page": 100})
+        for c in courses:
             course_name = c.get("name") or c.get("course_code") or f"Course {c['id']}"
-            # One page per course (per_page=100) — simpler than following
-            # Link-header pagination, matching core/dav_client.py's stated
-            # "simpler than a full client" scope; plenty for a real course load.
-            r = await client.get(f"/api/v1/courses/{c['id']}/assignments", params={"per_page": 100, "order_by": "due_at"})
-            if r.status_code != 200:
+            try:
+                rows = await _get_all_pages(client, f"/api/v1/courses/{c['id']}/assignments",
+                                            {"per_page": 100, "order_by": "due_at"})
+            except (httpx.HTTPError, ValueError):
+                failed.append(course_name)
                 continue
-            for a in r.json():
+            for a in rows:
                 assignments.append({
                     "uid": f"canvas-api-{a['id']}",
                     "title": a.get("name") or "Untitled assignment",
@@ -154,6 +173,7 @@ async def _sync_from_api(base_url: str, token: str) -> list[dict]:
                     "url": a.get("html_url"),
                     "description": _strip_html(a.get("description") or ""),
                 })
+    assignments.failed_courses = failed
     return assignments
 
 
@@ -200,9 +220,11 @@ class SchoolService:
 
         if base_url and token_encrypted:
             fetched = await _sync_from_api(base_url, api.decrypt(token_encrypted))
+            failed_courses = getattr(fetched, "failed_courses", [])
             source = "canvas_api"
         elif ics_url:
             fetched = await _sync_from_ics(ics_url)
+            failed_courses = []
             source = "ics"
         else:
             raise ValueError("no Canvas API credentials or iCal feed URL configured")
@@ -212,11 +234,20 @@ class SchoolService:
             uid = a["uid"]
             prior = existing.get(uid, {})
             existing[uid] = {**a, "id": uid, "completed": prior.get("completed", False)}
+        if source == "canvas_api":
+            # Gone from Canvas: drop it, except in a course that could not be read this time.
+            fetched_uids = {a["uid"] for a in fetched}
+            for uid in [u for u, a in existing.items()
+                        if u.startswith("canvas-api-") and u not in fetched_uids and a.get("course") not in failed_courses]:
+                del existing[uid]
 
         self._data["last_synced_at"] = time.time()
         self._data["last_sync_source"] = source
         self._save()
-        return {"count": len(fetched), "source": source, "synced_at": self._data["last_synced_at"]}
+        result = {"count": len(fetched), "source": source, "synced_at": self._data["last_synced_at"]}
+        if failed_courses:
+            result["failed_courses"] = failed_courses
+        return result
 
     # -- reads ---------------------------------------------------------------
     def list_courses(self) -> list[dict]:
