@@ -512,14 +512,21 @@ async def _list_tasks(args, ctx):
 
 
 def _tab_task_owner(ctx):
-    from core.auth import auth_enabled, SINGLE_USER
+    from core.auth import auth_enabled, auth_manager, SINGLE_USER
     from core.session_manager import session_manager
     if not auth_enabled():
         return SINGLE_USER
     # An admin flag is not a task-owner identity. Never expose another user's
-    # private records through an ownerless chat or background agent.
-    return ((session_manager.get_session(ctx.session_id) or {}).get("owner_user")
-            if ctx.session_id else ctx.owner_user)
+    # private records through an ownerless chat or background agent: the owner
+    # is the chat's, else the run's trusted scope (never model input), else the
+    # install's only account, which has no other user to expose.
+    owner = ((session_manager.get_session(ctx.session_id) or {}).get("owner_user")
+             if ctx.session_id else None) or ctx.owner_user
+    return owner or auth_manager.sole_user()
+
+
+_NO_OWNER = ("requires a chat with an authenticated owner. Start the chat from the agent's page, "
+             "or open the routine in Tasks and save it to make it yours.")
 
 
 @register("list_tab_tasks",
@@ -533,7 +540,7 @@ async def _list_tab_tasks(args, ctx):
     from core.untrusted import wrap_untrusted
     owner = _tab_task_owner(ctx)
     if not owner:
-        return "Task lookup requires a chat with an authenticated owner."
+        return "Task lookup " + _NO_OWNER
     query, slug = args.get("query", ""), args.get("tab")
     if not isinstance(query, str) or (slug is not None and not isinstance(slug, str)):
         return "Enter a text query and optional tab slug."
@@ -552,7 +559,7 @@ async def _read_tab_task(args, ctx):
     from core.untrusted import wrap_untrusted
     owner = _tab_task_owner(ctx)
     if not owner:
-        return "Task lookup requires a chat with an authenticated owner."
+        return "Task lookup " + _NO_OWNER
     slug, task_id = args.get("tab"), args.get("task_id")
     if not isinstance(slug, str) or not isinstance(task_id, str) or len(task_id) > 200:
         return "Enter the tab slug and task ID returned by list_tab_tasks."
@@ -575,7 +582,7 @@ async def _complete_tab_task(args, ctx):
     from core import tab_hooks
     owner = _tab_task_owner(ctx)
     if not owner:
-        return "Task updates require a chat with an authenticated owner."
+        return "Task updates " + _NO_OWNER.replace("requires", "require", 1)
     slug, task_id, summary = args.get("tab"), args.get("task_id"), args.get("summary")
     if (not isinstance(slug, str) or not isinstance(task_id, str) or len(task_id) > 200
             or not isinstance(summary, str) or not summary.strip()):

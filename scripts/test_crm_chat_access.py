@@ -8,7 +8,8 @@ from test_crm import CRMService, settings, tab_api
 from kairos_tabs.crm import hooks, work, completion
 from core import tab_hooks, tool_registry, system_prompt
 from core.session_manager import session_manager
-from core import tool_access
+from core import tool_access, task_scope
+from core.auth import auth_manager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from routes import tool_routes
@@ -60,8 +61,31 @@ class ChatTaskAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(self.task["id"], found)
             detail = await self.call("read_tab_task", {"tab": "crm", "task_id": self.task["id"], "owner": "local"}, ctx)
             self.assertIn("not found", detail)
-            text = await self.call("list_tab_tasks", {}, tool_registry.ToolContext(is_admin=True))
+            with patch.object(auth_manager, "sole_user", return_value=None):  # several accounts: never a guess
+                text = await self.call("list_tab_tasks", {}, tool_registry.ToolContext(is_admin=True))
             self.assertIn("authenticated owner", text)
+            self.assertIn("save it to make it yours", text, "the refusal says how to fix it")
+
+    async def test_ownerless_agent_chat_or_routine_on_a_one_account_install_is_that_account(self):
+        # Chris, 2026-10-27: a channel chat with an agent, an older agent chat and an old daily
+        # routine have no owner, so every CRM call failed under accounts.
+        with patch("core.auth.auth_enabled", return_value=True), \
+             patch.object(auth_manager, "sole_user", return_value="bob"), \
+             patch.object(session_manager, "get_session", return_value={"owner_user": None}):
+            found = await self.call("list_tab_tasks", {"query": "soccer"}, tool_registry.ToolContext(session_id="old-agent-chat"))
+            self.assertIn(self.other["id"], found)
+            self.assertNotIn(self.task["id"], found, "still only the sole account's own records")
+            found = await self.call("list_tab_tasks", {"query": "soccer"}, tool_registry.ToolContext())
+            self.assertIn(self.other["id"], found, "a scheduled run with no session")
+            self.assertEqual(task_scope.owner_for({"id": "t1"}), "bob", "an ownerless routine runs as that account")
+
+    async def test_ownerless_chat_uses_the_runs_trusted_owner_before_any_fallback(self):
+        with patch("core.auth.auth_enabled", return_value=True), \
+             patch.object(auth_manager, "sole_user", return_value=None), \
+             patch.object(session_manager, "get_session", return_value={"owner_user": None}):
+            found = await self.call("list_tab_tasks", {"query": "soccer"}, tool_registry.ToolContext(session_id="agent-run", owner_user="bob"))
+            self.assertIn(self.other["id"], found)
+            self.assertIsNone(task_scope.owner_for({"id": "t1"}), "several accounts: an ownerless routine stays unowned")
 
     async def test_closed_tasks_are_not_listed_but_remain_readable_by_owner(self):
         self.store.update_task("local", self.task["id"], {"status": "done"})

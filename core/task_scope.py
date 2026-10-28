@@ -17,10 +17,13 @@ def owner_for(task):
         return None
     if owners:
         return owners.pop()
+    owner = None
     if task.get("origin_session_id"):
         from core.session_manager import session_manager
-        return (session_manager.get_session(task["origin_session_id"]) or {}).get("owner_user")
-    return None
+        owner = (session_manager.get_session(task["origin_session_id"]) or {}).get("owner_user")
+    # An ownerless routine on a one-account install is that account's.
+    from core.auth import auth_manager
+    return owner or auth_manager.sole_user()
 
 
 @contextmanager

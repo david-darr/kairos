@@ -121,6 +121,13 @@ class AuthManager:
     def has_any_users(self) -> bool:
         return bool(self._users.get("users"))
 
+    def sole_user(self) -> Optional[str]:
+        """The only account, when there is exactly one. An ownerless chat or
+        routine (made before ownership, or through a channel) is then that
+        person's: there is no other user whose records it could expose."""
+        users = list(self._users.get("users") or {})
+        return users[0] if len(users) == 1 else None
+
     def create_user(self, username: str, password: str, is_admin: bool = False) -> None:
         if username in RESERVED_USERNAMES:
             raise ValueError(f"'{username}' is a reserved username")
