@@ -3,7 +3,6 @@ looks like after the running TUI hits an uncaught exception, Ctrl+C, and Ctrl+Br
 The crash is forced from outside: scripts/kairos_cli_crash_launcher.py patches one TUI
 method and then runs the real kairos_cli main(); no cli/ file is touched.
     python scripts/test_kairos_cli_g18_crash.py
-test_bug_* assert behaviour the CLI does not have yet (see report).
 """
 import os
 import re
@@ -133,9 +132,9 @@ class Crash(T.Interactive):
         self.assertFalse(self.screen().alternate, "a drawing error is hidden behind the alternate screen")
         self.assert_terminal_restored(self.raw(), "while the drawing error is shown", paste=False)
 
-    def test_bug_ctrl_break_restores_the_terminal(self):
-        # Ctrl+Break reaches the whole console and kills Python with its default handler;
-        # the CLI installs none (no `signal` use in cli/kairos_cli), so nothing is undone.
+    def test_ctrl_break_restores_the_terminal(self):
+        # Ctrl+Break reaches the whole console; main() turns it into a KeyboardInterrupt
+        # so the view's teardown runs (Python's default handler would kill it outright).
         self.launch("sigbreak")
         deadline = time.time() + 20
         while time.time() < deadline and self.process.isalive():

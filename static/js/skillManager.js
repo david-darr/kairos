@@ -199,7 +199,12 @@ function curationDetails(skill, list) {
     : "Not scanned (trusted source)";
   const parts = [el("div", { class: "meta", style: "margin-top:4px;", text: `${SOURCE_LABELS[c.source] || c.source}${origin} · ${scan}` })];
 
-  if (c.blocked_for_models) {
+  // Hidden for one of three reasons; only a dangerous scan is something to approve.
+  if (c.disabled) {
+    parts.push(el("div", { class: "meta", style: "color:var(--danger);margin-top:4px;", text: "Turned off by the store: no model is offered it." }));
+  } else if (c.blocked_for_models && c.scan?.verdict !== "dangerous") {
+    parts.push(el("div", { class: "meta", style: "color:var(--danger);margin-top:4px;", text: "Hidden from models: its add-on is off." }));
+  } else if (c.blocked_for_models) {
     const approveBtn = el("button", { class: "btn danger", text: "Approve for models", onclick: async () => {
       const ok = await confirmDialog({
         title: "Let models use this skill?",

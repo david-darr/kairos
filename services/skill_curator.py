@@ -166,6 +166,9 @@ def approve(slug: str) -> dict:
         rec = _reconcile(data, slug)
         if rec is None:
             raise FileNotFoundError(f"no such skill: {slug}")
+        if (rec.get("scan") or {}).get("verdict") != "dangerous":
+            # Nothing to approve: a store-pulled skill is off, not dangerous.
+            raise ValueError("Only a skill scanned as dangerous needs approval")
         rec["approved_hash"] = rec["content_hash"]
         rec["approved_at"] = time.time()
         _save(data)
@@ -190,6 +193,7 @@ def describe(slug: str) -> Optional[dict]:
         "origin": rec.get("origin"),
         "scan": None if scan is None else {k: scan[k] for k in ("verdict", "summary", "findings", "scanner_version", "scanned_at")},
         "blocked_for_models": _blocked(rec) or not addons.skill_available(slug),
+        "disabled": bool(rec.get("disabled")),
         "approved": bool(rec.get("approved_hash")) and rec.get("approved_hash") == rec.get("content_hash"),
         "lint": [f.to_dict() for f in skill_linter.lint(skill.get("description", ""), skill.get("body", ""), _skill_dir(slug))],
     }

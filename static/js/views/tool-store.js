@@ -710,7 +710,7 @@ export async function render(container) {
     return el("article", { class: "tool-store-card" }, [
       el("div", { class: "tool-store-card-top" }, [
         el("span", { class: "tool-store-mark" }, [svg(ICONS.brain)]),
-        el("span", { class: "tool-store-badge" + (blocked ? " blocked" : ""), text: blocked ? "Needs approval" : "Available" }),
+        el("span", { class: "tool-store-badge" + (blocked ? " blocked" : ""), text: item.curation?.disabled ? "Turned off" : blocked ? "Needs approval" : "Available" }),
       ]),
       el("h4", { text: item.slug, "data-display-name": item.display_name || item.name || "" }),
       el("p", { text: item.description || "No description provided." }),
@@ -794,10 +794,13 @@ export async function render(container) {
     }
     const integration = state.integrations.find((item) => item.kind === "mcp_server" &&
       matchesCatalogServer(server, item));
-    const connected = server.added && (server.auth !== "oauth" || !!integration?.signed_in);
+    // The catalog counts a turned-off server as added; its own record says it is off.
+    const suspended = integration?.enabled === false;
+    const connected = !suspended && server.added && (server.auth !== "oauth" || !!integration?.signed_in);
     const actionHost = el("div", { class: "tool-store-action" });
     let action;
-    if (connected) action = el("span", { class: "tool-store-badge", text: "Added" });
+    if (suspended) action = el("span", { class: "tool-store-badge blocked", text: "Turned off" });
+    else if (connected) action = el("span", { class: "tool-store-badge", text: "Added" });
     else if (integration && server.auth === "oauth") {
       action = el("button", { type: "button", class: "btn", text: "Sign in", onclick: () => signIn(integration.id, server.name, actionHost) });
     } else if (server.added) {
@@ -824,7 +827,7 @@ export async function render(container) {
     return el("article", { class: "tool-store-card" }, [
       el("div", { class: "tool-store-card-top" }, [
         el("span", { class: "tool-store-mark" }, [svg(ICONS.store)]),
-        integration?.status?.state === "down"
+        suspended ? el("span", { class: "tool-store-badge blocked", text: "Turned off" }) : integration?.status?.state === "down"
           ? el("span", { class: "tool-store-badge blocked", text: "Not responding" })
           : el("span", { class: "tool-store-badge" + (connected ? "" : " muted"), text: connected ? "Connected" : server.added ? "Needs sign-in" : "Tool server" }),
       ]),

@@ -8,7 +8,6 @@ scripts/mcp_probe_fixture.py, real skill folders, real OAuth token storage):
 working / held / down / signed out / turned off / recovered, and what each
 action (check, accept, sign-in, sign-out, turn off) does to the value.
 
-Tests named test_BUG_* fail today; the failure is the bug report.
 Also prints route timings (BENCH lines) for the two payloads a sheet reads.
 
 Run: python -B -X utf8 scripts/test_a13_detail.py
@@ -162,7 +161,7 @@ class McpHealth(unittest.TestCase):
         self.assertTrue(entry["added"])
         self.assertNotIn("enabled", entry, "the catalog row carries no off flag: the card must read the integration's own enabled")
 
-    def test_BUG_sign_in_leaves_the_old_signed_out_status_on_a_signed_in_server(self):
+    def test_sign_in_clears_the_old_signed_out_status(self):
         item = self.remote()
         self.check(item["id"])
         sign_in(item["id"])
@@ -171,7 +170,7 @@ class McpHealth(unittest.TestCase):
         self.assertNotEqual(row["status"] and row["status"]["state"], "signed_out",
                             "signed in, yet the health line still says Not signed in until the next check (half-hourly)")
 
-    def test_BUG_sign_out_leaves_the_working_status_on_a_signed_out_server(self):
+    def test_sign_out_reports_signed_out_not_the_last_working_check(self):
         item = self.remote()
         sign_in(item["id"])
         async def tools(config):
@@ -184,7 +183,7 @@ class McpHealth(unittest.TestCase):
         self.assertNotEqual(row["status"] and row["status"]["state"], "working",
                             "signed out, yet the health line still says Working · 1 tool")
 
-    def test_BUG_a_dead_refresh_token_leaves_the_working_status(self):
+    def test_a_dead_refresh_token_reports_signed_out(self):
         item = self.remote()
         sign_in(item["id"])
         async def tools(config):
@@ -236,7 +235,7 @@ class SkillAvailability(unittest.TestCase):
         row = self.curation("ok")
         self.assertEqual((row["blocked_for_models"], row["approved"]), (True, False), "approval is bound to the exact text")
 
-    def test_BUG_a_pulled_skill_looks_like_a_dangerous_one_and_approve_does_nothing(self):
+    def test_a_pulled_skill_reads_as_turned_off_and_approve_is_refused(self):
         # The store's revocation turns a community skill off with
         # skill_curator.set_enabled(slug, False) (services/store_catalog.py).
         self.web.post("/api/skills", json={"name": "pulled", "description": "d", "body": SAFE})

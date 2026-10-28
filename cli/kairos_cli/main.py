@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
 import sys
 
 from rich.console import Console
@@ -265,6 +266,10 @@ async def run_login(args, palette) -> int:
         await conn.close()
 
 
+def _interrupt(_signum, _frame) -> None:
+    raise KeyboardInterrupt
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--complete-models"]:
@@ -297,6 +302,10 @@ def main(argv: list[str] | None = None) -> int:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             print("kairos: the interactive view needs a terminal. Use kairos -p for pipes and scripts.", file=sys.stderr)
             return 1
+        if hasattr(signal, "SIGBREAK"):
+            # Ctrl+Break kills Windows Python outright, skipping the view's teardown and
+            # leaving the terminal on the alternate screen; leave like Ctrl+C instead.
+            signal.signal(signal.SIGBREAK, _interrupt)
         return asyncio.run(run_interactive(args, palette, first=" ".join(args.prompt) or None))
     except KairosError as error:
         print(f"kairos: {error}", file=sys.stderr)

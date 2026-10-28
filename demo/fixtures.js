@@ -731,7 +731,7 @@
     }
     // Part 2 A13 detail checks (scripts/a13-detail-checks.cjs): the same answers core/integrations.py gives.
     // A check applies the outcome the test queued; accepting a held tool pins it and counts it as working;
-    // OAuth sign-in stores tokens but, as on the real backend, leaves the last saved status alone.
+    // OAuth health follows the tokens as they are now (core/integrations.py _masked).
     const a13Server = route.match(/^\/api\/integrations\/([^/]+)\/(check|tools\/accept|oauth\/start)$/);
     if (a13Server && method === 'POST' && state.a13Integrations) {
       const item = state.a13Integrations.find(i => i.id === a13Server[1]);
@@ -741,7 +741,7 @@
         Object.assign(item, state.a13Outcome?.[item.id] || {});
         return item;
       }
-      if (a13Server[2] === 'oauth/start') { item.signed_in = true; return { signed_in: true }; }
+      if (a13Server[2] === 'oauth/start') { item.signed_in = true; if (item.status?.state === 'signed_out') item.status = null; return { signed_in: true }; }
       const names = body.names || [];
       if (names.some(n => !(item.held_tools || []).some(h => h.name === n))) return { _status: 409, detail: 'not held' };
       item.held_tools = item.held_tools.filter(h => !names.includes(h.name));
@@ -1503,7 +1503,9 @@
     if (route === "/api/tab-school/assignments/a1/draft") return { content: "" };
     if (route === "/api/tab-school/courses/session") return { session_id: "school-course" };
     if (route === "/api/tab-school/assignments") return url.searchParams.has("overdue") ? [] : list([{ id: "a1", course: "Software Design", title: "Review the project brief", due: future(40), completed: false, attachment_links: [] }]);
-    if (route === "/api/integrations" && state.a13Integrations) return state.a13Integrations;  // Part 2 A13 detail checks
+    if (route === "/api/integrations" && state.a13Integrations) return state.a13Integrations.map(i => i.auth !== 'oauth' ? i  // Part 2 A13 detail checks
+      : !i.signed_in ? { ...i, status: { state: 'signed_out', tools: null, checked_at: i.status?.checked_at ?? null, error: null } }
+      : i.status?.state === 'signed_out' ? { ...i, status: null } : i);
     if (route === "/api/integrations") return list([
       // Roadmap phase 6: a working server with a tool held for review, one
       // signed out, and a local command that is not responding.

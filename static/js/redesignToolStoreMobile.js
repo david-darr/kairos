@@ -109,7 +109,7 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
     const name = heading?.getAttribute('data-display-name') || (/^[a-z0-9]+(?:[-_][a-z0-9]+)+$/.test(original)
       ? original.replace(/[-_]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase()) : original);
     if (heading) heading.replaceChildren(el('span', { class: 'ts-desktop-name', text: original }), el('span', { class: 'ts-phone-name', text: name }));
-    const badge = card.querySelector(":scope > .tool-store-card-top > :is(.tool-store-badge, .pill)") || card.querySelector(":scope > .tool-store-badge");
+    const badge = card.querySelector(":scope > .tool-store-card-top > :is(.tool-store-badge, .pill, .set-pill)") || card.querySelector(":scope > .tool-store-badge");
     const raw = badge?.textContent.trim() || "";
     const label = kind === 'skill' && raw === 'Available' ? 'On' : PILL_TEXT[raw.toLowerCase()] || raw;
     card.dataset.tsKind = kind;

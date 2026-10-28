@@ -82,7 +82,15 @@ def _masked(item: dict) -> dict:
         out["has_api_key"] = bool(item.get("api_key_encrypted"))
         out["auth"] = item.get("auth") or ("key" if item.get("api_key_encrypted") else "none")
         out["signed_in"] = bool((item.get("oauth") or {}).get("tokens"))
-        out["status"] = item.get("status")
+        status = item.get("status")
+        if out["auth"] == "oauth":
+            # A sign-in, sign-out or dead refresh changes the tokens without a check,
+            # so the health follows the tokens as they are now, not the last check.
+            if not out["signed_in"]:
+                status = {"state": "signed_out", "tools": None, "checked_at": (status or {}).get("checked_at"), "error": None}
+            elif (status or {}).get("state") == "signed_out":
+                status = None
+        out["status"] = status
         out["pinned"] = "pinned_tools" in item
         out["held_tools"] = [{"name": name, **{k: held[k] for k in ("kind", "description")}}
                              for name, held in sorted((item.get("held_tools") or {}).items())]

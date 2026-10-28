@@ -729,6 +729,33 @@
       tab.status = !tab.enabled ? 'off' : tab.approved ? 'on' : 'needs_approval';
       return { slug: tab.slug, enabled: tab.enabled, restart_required: false };
     }
+    // Part 2 A13 detail checks (scripts/a13-detail-checks.cjs): the same answers core/integrations.py gives.
+    // A check applies the outcome the test queued; accepting a held tool pins it and counts it as working;
+    // OAuth health follows the tokens as they are now (core/integrations.py _masked).
+    const a13Server = route.match(/^\/api\/integrations\/([^/]+)\/(check|tools\/accept|oauth\/start)$/);
+    if (a13Server && method === 'POST' && state.a13Integrations) {
+      const item = state.a13Integrations.find(i => i.id === a13Server[1]);
+      if (!item) return { _status: 404, detail: 'MCP server not found' };
+      if (a13Server[2] === 'check') {
+        if (item.enabled === false) return item;
+        Object.assign(item, state.a13Outcome?.[item.id] || {});
+        return item;
+      }
+      if (a13Server[2] === 'oauth/start') { item.signed_in = true; if (item.status?.state === 'signed_out') item.status = null; return { signed_in: true }; }
+      const names = body.names || [];
+      if (names.some(n => !(item.held_tools || []).some(h => h.name === n))) return { _status: 409, detail: 'not held' };
+      item.held_tools = item.held_tools.filter(h => !names.includes(h.name));
+      if (item.status?.state === 'working') item.status.tools += names.length;
+      return item;
+    }
+    const a13Addon = route.match(/^\/api\/addons\/([^/]+)$/);
+    if (a13Addon && method === 'POST' && state.a13Addons) {
+      const addon = state.a13Addons.find(i => i.id === a13Addon[1]);
+      if (body.action === 'install') Object.assign(addon, { installed: true, enabled: true });
+      else if (body.action === 'remove') Object.assign(addon, { installed: false, enabled: false });
+      else addon.enabled = body.action === 'enable';
+      return { ok: true, restart_required: false };
+    }
     const taskRoute = route.match(/^\/api\/tasks\/([^/]+)$/);
     if (taskRoute && method === 'PATCH') {
       const task = tasks.find(t => t.id === taskRoute[1]);
@@ -965,7 +992,7 @@
   function fixture(url) {
     if (url.pathname === '/api/chat/live/snapshot') return { type: 'snapshot', runs: {} };
     if (/^\/api\/chat\/background\/[^/]+$/.test(url.pathname)) return { items: [], notes: [] };
-    if (url.pathname === '/api/addons') return [];
+    if (url.pathname === '/api/addons') return state.a13Addons ?? [];
     // The Design canvas: no designs in the demo (its boards are live frames from the backend).
     if (url.pathname === '/api/designs') return [];
     if (url.pathname === '/api/designs/render-status') return { available: false, message: 'Needs the Kairos desktop app' };
@@ -1476,6 +1503,9 @@
     if (route === "/api/tab-school/assignments/a1/draft") return { content: "" };
     if (route === "/api/tab-school/courses/session") return { session_id: "school-course" };
     if (route === "/api/tab-school/assignments") return url.searchParams.has("overdue") ? [] : list([{ id: "a1", course: "Software Design", title: "Review the project brief", due: future(40), completed: false, attachment_links: [] }]);
+    if (route === "/api/integrations" && state.a13Integrations) return state.a13Integrations.map(i => i.auth !== 'oauth' ? i  // Part 2 A13 detail checks
+      : !i.signed_in ? { ...i, status: { state: 'signed_out', tools: null, checked_at: i.status?.checked_at ?? null, error: null } }
+      : i.status?.state === 'signed_out' ? { ...i, status: null } : i);
     if (route === "/api/integrations") return list([
       // Roadmap phase 6: a working server with a tool held for review, one
       // signed out, and a local command that is not responding.
@@ -1494,6 +1524,7 @@
         changes: [{ path: "big.bin", status: "added" }] }];
     if (route === "/api/sandbox/changes/c0ffee000001") return { id: "c0ffee000001", applicable: true, changes: [],
       diff: "--- a/core/a.py\n+++ b/core/a.py\n@@ -1 +1 @@\n-print('<b>old</b>')\n+print('new')\n" };
+    if (route === "/api/integrations/catalog" && state.a13Catalog) return state.a13Catalog;
     if (route === "/api/integrations/catalog") return [
       { id: "deepwiki", name: "DeepWiki", description: "Ask questions about public GitHub repositories.", auth: "none", url: "https://mcp.deepwiki.com/mcp", docs: "https://docs.devin.ai", added: false },
       { id: "linear", name: "Linear", description: "Issues and projects from your Linear workspace.", auth: "oauth", url: "https://mcp.linear.app/mcp", docs: "https://linear.app/docs", added: false },
