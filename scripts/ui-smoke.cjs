@@ -517,6 +517,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['settings access'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--a14-settings-only')) {  // A14 Settings panels save/revert/reset (settings-panels-checks.cjs); not in the default run.
+      await require('./settings-panels-checks.cjs')({ js, win, waitFor, delay, navigate, demoState, writes, base });
+      assert.deepEqual(errors, [], 'a14 settings renderer errors');
+      console.log('PASS: Settings panels save, revert and reset.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['settings panels'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--mobile-only')) {
       await require('./mobile-ui-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow });
       assert.deepEqual(errors, []);
