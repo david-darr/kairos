@@ -35,7 +35,8 @@ async def create_note(body: CreateNoteRequest, user: str = Depends(require_user)
 
 @router.patch("/{note_id}")
 async def update_note(note_id: str, body: UpdateNoteRequest, user: str = Depends(require_user)) -> dict:
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    # An explicit null clears the due date; other fields treat null as "unchanged".
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k == "due_date"}
     try:
         return notes_service.update_note(note_id, **fields)
     except KeyError:
@@ -44,5 +45,5 @@ async def update_note(note_id: str, body: UpdateNoteRequest, user: str = Depends
 
 @router.delete("/{note_id}")
 async def delete_note(note_id: str, user: str = Depends(require_user)) -> dict:
-    notes_service.delete_note(note_id)
+    notes_service.dismiss_note(note_id)
     return {"ok": True}

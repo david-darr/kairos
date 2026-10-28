@@ -17,6 +17,8 @@ from core import ollama_client, llamacpp_engine, model_endpoints
 
 _recommended_tasks = {}
 _recommended_progress = {}
+ESTIMATED_DOWNLOAD_BYTES = 400_000_000
+DISK_MARGIN_BYTES = 500_000_000  # room left over after the download
 
 
 def model_recommendation():
@@ -25,7 +27,7 @@ def model_recommendation():
     while not folder.exists() and folder != folder.parent:
         folder = folder.parent
     free = shutil.disk_usage(folder).free
-    return {**entry, 'estimated_download_bytes': 400_000_000, 'disk_free_bytes': free,
+    return {**entry, 'estimated_download_bytes': ESTIMATED_DOWNLOAD_BYTES, 'disk_free_bytes': free,
             'downloaded': any(m['name'] == entry['name'] for m in llamacpp_engine.list_downloaded())}
 
 
@@ -34,6 +36,9 @@ def setup_recommended(name):
         raise ValueError('Choose the recommended Cookbook model.')
     task = _recommended_tasks.get(name)
     if not task or task.done():
+        current = model_recommendation()
+        if not current['downloaded'] and current['disk_free_bytes'] < ESTIMATED_DOWNLOAD_BYTES + DISK_MARGIN_BYTES:
+            raise ValueError('Not enough free disk space for the local model. Free up some space and try again.')
         _recommended_progress[name] = {'status': 'preparing', 'done': False}
         _recommended_tasks[name] = asyncio.create_task(_finish_recommended(name))
     return {'ok': True, 'name': name, 'background': True}
@@ -88,6 +93,7 @@ CATALOG = [
 ]
 
 _pull_progress: dict[str, dict] = {}
+_pull_tasks: dict[str, asyncio.Task] = {}
 
 
 def get_catalog() -> list[dict]:
@@ -117,10 +123,20 @@ def get_pull_progress(name: str) -> dict:
 
 
 def start_pull(name: str, base_url: str = ollama_client.DEFAULT_BASE_URL) -> None:
-    if _pull_progress.get(name, {}).get("status") == "pulling":
+    task = _pull_tasks.get(name)
+    if task is not None and not task.done():
         return  # already in progress — don't start a second one
     _pull_progress[name] = {"status": "pulling", "completed": 0, "total": 0, "done": False, "error": None}
-    asyncio.create_task(_run_pull(name, base_url))
+    _pull_tasks[name] = asyncio.create_task(_run_pull(name, base_url))
+
+
+async def cancel_pull(name: str) -> bool:
+    task = _pull_tasks.get(name)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    return True
 
 
 async def _run_pull(name: str, base_url: str) -> None:
@@ -134,5 +150,8 @@ async def _run_pull(name: str, base_url: str) -> None:
                 entry["total"] = chunk["total"]
             _pull_progress[name] = entry
         _pull_progress[name] = {**_pull_progress.get(name, {}), "status": "success", "done": True}
+    except asyncio.CancelledError:
+        _pull_progress[name] = {**_pull_progress.get(name, {}), "status": "cancelled", "done": True, "error": None}
+        raise
     except Exception as e:
         _pull_progress[name] = {**_pull_progress.get(name, {}), "status": "error", "done": True, "error": str(e)[:300]}

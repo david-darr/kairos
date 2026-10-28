@@ -129,7 +129,7 @@ class EmailService:
             status, data = imap.search(None, *(criteria or ["ALL"]))
             if status != "OK":
                 return []
-            ids = data[0].split()[-limit:]
+            ids = data[0].split()[-max(1, min(int(limit), 200)):]  # [-0:] would be the whole mailbox
             for msg_id in reversed(ids):
                 status, msg_data = imap.fetch(msg_id, "(FLAGS RFC822.HEADER)")
                 if status != "OK" or not msg_data or not msg_data[0]:

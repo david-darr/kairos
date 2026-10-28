@@ -29,8 +29,8 @@ function modelPicker(models, selected, emptyLabel) {
 export async function renderChannelsPanel(body, _status, page) {
   const [kinds, models] = await Promise.all([api("/api/connectors/kinds"), api("/api/models").catch(() => [])]);
   const byKind = new Map(kinds.map((k) => [k.kind, k]));
-  let timer = null;
-  const stop = () => { clearTimeout(timer); timer = null; };
+  let timer = null, loop = 0;
+  const stop = () => { clearTimeout(timer); timer = null; loop++; };
 
   // -- the list ----------------------------------------------------------------
   async function showList() {
@@ -39,14 +39,18 @@ export async function renderChannelsPanel(body, _status, page) {
     const listGroup = group({ cls: "channel-list" }, [empty("Loading…")]);
     body.replaceChildren(listGroup,
       note("Two-way channels answer only the senders you allow, and those senders can reach your agents by name. Send-only ones carry task results and agent notifications."));
+    const mine = loop;
+    // The window is hidden, not removed, when Settings closes: stop then too.
+    // Opening Settings draws the panel again, which starts one new loop.
+    const gone = () => mine !== loop || !listGroup.isConnected || !!listGroup.closest(".modal-backdrop.hidden");
     const draw = async () => {
-      if (!listGroup.isConnected) return stop();
+      if (gone()) return stop();
       const [bots, connectors, health] = await Promise.all([
         api("/api/settings/discord-bots").catch(() => []),
         api("/api/connectors").catch(() => []),
         api("/api/system/status").catch(() => ({})),
       ]);
-      if (!listGroup.isConnected) return stop();
+      if (gone()) return stop();
       const live = new Set(health.discord_connected_bots || []);
       const rows = [
         ...bots.map((bot) => discordRow(bot, live.has(bot.name))),

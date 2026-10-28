@@ -179,7 +179,13 @@ async function refresh(list, focusTarget) {
       title.classList.remove("is-settled");
       title.classList.toggle("is-done", checkbox.checked);
       const played = new Promise((resolve) => setTimeout(resolve, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320));
-      await api(`/api/notes/${note.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+      try {
+        await api(`/api/notes/${note.id}`, { method: "PATCH", body: JSON.stringify({ completed: checkbox.checked }) });
+      } catch (error) {
+        // The save failed (api() has shown why): put the row back as the server has it.
+        await refresh(list, focusTarget);
+        return;
+      }
       await played;
       await refresh(list, focusTarget);
     });

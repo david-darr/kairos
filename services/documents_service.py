@@ -51,7 +51,7 @@ def get_document(doc_id: str) -> Optional[dict]:
     path = _content_path(doc_id)
     content = ""
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8", newline="") as f:
             content = f.read()
     return {**meta, "content": content}
 
@@ -60,7 +60,7 @@ def create_document(title: str, content: str = "", tags: Optional[list[str]] = N
     doc_id = uuid.uuid4().hex[:12]
     now = time.time()
     os.makedirs(DOCUMENTS_DIR, exist_ok=True)
-    with open(_content_path(doc_id), "w", encoding="utf-8") as f:
+    with open(_content_path(doc_id), "w", encoding="utf-8", newline="") as f:
         f.write(content)
     meta = {"id": doc_id, "title": title, "tags": tags or [], "created_at": now, "updated_at": now}
     index = _load_index()
@@ -75,6 +75,17 @@ def update_document(doc_id: str, title: Optional[str] = None, content: Optional[
     meta = index.get(doc_id)
     if meta is None:
         raise KeyError(f"no such document: {doc_id}")
+    if content is None:
+        # Read the body before touching the index, so a missing or unreadable
+        # body file cannot leave a half-saved update behind.
+        content = ""
+        if os.path.exists(_content_path(doc_id)):
+            with open(_content_path(doc_id), "r", encoding="utf-8", newline="") as f:
+                content = f.read()
+    else:
+        os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+        with open(_content_path(doc_id), "w", encoding="utf-8", newline="") as f:
+            f.write(content)
     if title is not None:
         meta["title"] = title
     if tags is not None:
@@ -82,14 +93,6 @@ def update_document(doc_id: str, title: Optional[str] = None, content: Optional[
     meta["updated_at"] = time.time()
     index[doc_id] = meta
     _save_index(index)
-
-    if content is not None:
-        os.makedirs(DOCUMENTS_DIR, exist_ok=True)
-        with open(_content_path(doc_id), "w", encoding="utf-8") as f:
-            f.write(content)
-    else:
-        with open(_content_path(doc_id), "r", encoding="utf-8") as f:
-            content = f.read()
     return {**meta, "content": content}
 
 
@@ -131,7 +134,7 @@ def search_documents(query: str, max_results: int = 5) -> list[dict]:
         path = _content_path(meta["id"])
         if not os.path.exists(path):
             continue
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8", newline="") as f:
             content = f.read()
         idx = content.lower().find(query_lower)
         if idx == -1:

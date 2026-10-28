@@ -456,8 +456,15 @@ async def _tick() -> None:
     """One pass of the loop: start a lane that is free and has work, and send
     the outbox's due messages. Never waits on a run."""
     loop = asyncio.get_running_loop()
-    if _lane_free("schedule") and task_service.due_tasks():
-        _lanes["schedule"] = loop.create_task(_run_due())
+    if _lane_free("schedule"):
+        try:
+            has_due = bool(task_service.due_tasks())
+        except Exception:
+            # One bad row must not stop the card lane, the outbox or the checks below.
+            logger.exception("scheduler: could not scan for due tasks")
+            has_due = False
+        if has_due:
+            _lanes["schedule"] = loop.create_task(_run_due())
     if _lane_free("card"):
         # One card per pass (see dispatch_cards).
         _lanes["card"] = loop.create_task(dispatch_cards())

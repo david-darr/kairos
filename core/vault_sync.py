@@ -24,8 +24,12 @@ Safety properties, because this touches a user's real memory:
   - Notes created here carry a `vault_source`. App-native notes are never
     touched by sync, and vault-sourced notes are never edited by the app
     except through that one checkbox write-back.
-  - Re-running is idempotent: items are matched on (file, full line text),
-    so a second sync updates rather than duplicates.
+  - Re-running is idempotent: items are matched on (file, heading, line text
+    with the checkbox ignored), so a second sync updates rather than
+    duplicates, a tick made in the vault keeps the note, and the same line
+    under two headings is two tasks.
+  - A note the user deletes in the app stays hidden (not re-imported) for as
+    long as its line is in the vault.
   - An item deleted from the vault removes its imported note, because the
     vault is the source of truth for anything it owns. App-native notes
     are unaffected.
@@ -33,7 +37,6 @@ Safety properties, because this touches a user's real memory:
 import logging
 import os
 import re
-from typing import Optional
 
 from core.vault import resolve_vault_dir
 from services.notes_service import notes_service
@@ -47,6 +50,7 @@ TASK_FILES = ["Active Priorities.md"]
 
 _CHECKBOX_RE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s+(.*)$")
 _HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
+_BOX_RE = re.compile(r"\[[ xX]\]")
 
 # Placeholder text the seeded vault (and David's own file) uses for an empty
 # section — never import it as a real task.
@@ -108,25 +112,34 @@ def sync_from_vault() -> dict:
     vault_dir = resolve_vault_dir()
     summary = {"imported": 0, "updated": 0, "removed": 0, "files": 0, "vault_dir": vault_dir}
 
-    seen_keys: set[tuple[str, str]] = set()
+    # Existing vault notes by (file, heading, line with the box ignored). Hidden
+    # (dismissed) notes are included so a deleted item is not imported again.
+    index: dict[tuple, list[dict]] = {}
+    for note in notes_service.list_notes(include_dismissed=True):
+        if note.get("vault_source"):
+            index.setdefault(_note_key(note), []).append(note)
+    matched: set[str] = set()
     for filename in TASK_FILES:
         path = os.path.join(vault_dir, filename)
         if not os.path.isfile(path):
             continue
         summary["files"] += 1
         for item in parse_task_file(path):
-            key = (filename, item["line"])
-            seen_keys.add(key)
-            existing = _find_by_source(filename, item["line"])
+            candidates = index.get((filename, item["heading"], _norm_line(item["line"])))
+            existing = candidates.pop(0) if candidates else None
             if existing is None:
-                notes_service.create_note(
+                created = notes_service.create_note(
                     text=item["text"],
                     project=item["heading"],
-                    vault_source={"file": filename, "line": item["line"]},
+                    vault_source={"file": filename, "line": item["line"], "heading": item["heading"]},
                     completed=item["completed"],
                 )
+                matched.add(created["id"])
                 summary["imported"] += 1
             else:
+                matched.add(existing["id"])
+                if existing.get("dismissed"):
+                    continue
                 changed = {}
                 if existing["text"] != item["text"]:
                     changed["text"] = item["text"]
@@ -134,20 +147,23 @@ def sync_from_vault() -> dict:
                     changed["project"] = item["heading"]
                 if existing["completed"] != item["completed"]:
                     changed["completed"] = item["completed"]
+                source = existing["vault_source"]
+                if source.get("line") != item["line"] or source.get("heading") != item["heading"]:
+                    # A tick made in the vault changes the line: keep the stored
+                    # original in step so the app's write-back still matches.
+                    changed["vault_source"] = {**source, "line": item["line"], "heading": item["heading"]}
                 if changed:
                     # write_back=False: the vault already says this, echoing
                     # it back would be a redundant rewrite of the user's file.
                     notes_service.update_note(existing["id"], write_back=False, **changed)
-                    summary["updated"] += 1
+                    if changed.keys() - {"vault_source"}:
+                        summary["updated"] += 1
 
     # Anything previously imported that's no longer in the vault is gone from
     # the source of truth, so it goes here too. App-native notes (no
     # vault_source) are never considered.
-    for note in list(notes_service.list_notes()):
-        source = note.get("vault_source")
-        if not source:
-            continue
-        if (source.get("file"), source.get("line")) not in seen_keys:
+    for note in list(notes_service.list_notes(include_dismissed=True)):
+        if note.get("vault_source") and note["id"] not in matched:
             notes_service.delete_note(note["id"])
             summary["removed"] += 1
 
@@ -213,12 +229,14 @@ def write_back_completion(note: dict, completed: bool) -> bool:
     return True
 
 
-def _find_by_source(filename: str, line: str) -> Optional[dict]:
-    for note in notes_service.list_notes():
-        source = note.get("vault_source")
-        if source and source.get("file") == filename and source.get("line") == line:
-            return note
-    return None
+def _norm_line(line: str) -> str:
+    return _BOX_RE.sub("[ ]", line, count=1)
+
+
+def _note_key(note: dict) -> tuple:
+    source = note["vault_source"]
+    # Notes imported before the heading was stored carry it as their project.
+    return (source.get("file"), source.get("heading", note["project"]), _norm_line(source.get("line") or ""))
 
 
 def sync_on_startup() -> None:

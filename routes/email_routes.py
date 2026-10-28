@@ -1,5 +1,5 @@
 """Email account CRUD + connection test + inbox list + send — the Email tab."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core import builtin_tasks, email_triage
@@ -80,7 +80,7 @@ async def test_account(account_id: str, user: str = Depends(require_user)) -> di
 
 
 @router.get("/accounts/{account_id}/messages")
-async def list_messages(account_id: str, folder: str = "INBOX", limit: int = 20, user: str = Depends(require_user)) -> list[dict]:
+async def list_messages(account_id: str, folder: str = "INBOX", limit: int = Query(20, ge=1, le=200), user: str = Depends(require_user)) -> list[dict]:
     try:
         return email_service.list_messages(account_id, folder, limit)
     except KeyError:
