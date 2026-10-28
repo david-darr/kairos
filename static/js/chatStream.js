@@ -147,6 +147,9 @@ export function connect() {
   return connecting;
 }
 
+// True while the live feed is open (EventSource readyState 1); it is 0 while the browser retries.
+export function live() { return !!source && source.readyState === 1; }
+
 export function getInFlight(sessionId) { return _inflight.get(sessionId) || null; }
 export function listInFlight() {
   return [..._inflight.entries()].map(([sessionId, entry]) => ({ sessionId, ...entry }));

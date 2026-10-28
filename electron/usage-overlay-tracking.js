@@ -11,20 +11,29 @@ function boundsDiffer(actual, desired) {
   return ["x", "y", "width", "height"].some(key => Math.abs(actual[key] - desired[key]) > 1);
 }
 
+const HEARTBEAT_MS = 1000;
+
 function trackOverlay(win, screen, getBounds, timers = globalThis) {
-  let timer = null, dragging = false, placing = false;
-  const sample = () => {
+  let timer = null, dragging = false, placing = false, lastPoint = null, lastSent = 0;
+  const clock = () => (timers.now ? timers.now() : Date.now());
+  // The cursor is read every tick, but sent only when the local point changed (moved cursor,
+  // moved or resized window, zoom change) or once a second as a heartbeat: mouseleave, layout
+  // changes, or a click-through transition can invalidate renderer hover without the cursor
+  // moving, and the renderer repairs that from the next sample. `force` is for events that
+  // need the renderer told now (show, reload, placement).
+  const sample = (force = false) => {
     if (win.isDestroyed() || !win.isVisible()) return;
     const point = localPointer(screen.getCursorScreenPoint(), win.getContentBounds(), win.webContents.getZoomFactor());
-    // Repeat even at rest: mouseleave, layout/zoom changes, or a click-through
-    // transition can invalidate renderer hover without the cursor moving.
+    const now = clock();
+    if (!force && lastPoint && point.x === lastPoint.x && point.y === lastPoint.y && now - lastSent < HEARTBEAT_MS) return;
+    lastPoint = point; lastSent = now;
     win.webContents.send("usage-overlay:pointer", point);
   };
   const place = () => {
     if (win.isDestroyed() || dragging || placing) return;
     placing = true;
     try { win.setBounds(getBounds()); } finally { placing = false; }
-    sample();
+    sample(true);
   };
   const tick = () => {
     if (win.isDestroyed() || !win.isVisible()) return;
@@ -41,10 +50,10 @@ function trackOverlay(win, screen, getBounds, timers = globalThis) {
   win.on("hide", stop);
   win.on("closed", stop);
   // Recreate renderer hover state after reload and after moving along an edge.
-  win.webContents.on("did-finish-load", sample);
-  win.on("move", sample);
-  win.on("resize", sample);
+  win.webContents.on("did-finish-load", () => sample(true));
+  win.on("move", () => sample());
+  win.on("resize", () => sample());
   return { place, stop, setDragging: on => { dragging = !!on; if (!dragging) place(); } };
 }
 
-module.exports = { localPointer, boundsDiffer, trackOverlay };
+module.exports = { HEARTBEAT_MS, localPointer, boundsDiffer, trackOverlay };

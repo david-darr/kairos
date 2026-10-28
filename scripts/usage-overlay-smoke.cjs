@@ -317,7 +317,7 @@ async function run() {
     await js("document.body.classList.remove('notch-light')"); await shot(`${name}-expanded-dark.png`); await js("document.body.classList.add('notch-light')"); };
   // Resting with the board's four agents, none at work: the quiet view (NotchQuiet) and four resting agents.
   agents = BOARD_AGENTS.map(agent => ({ ...agent }));
-  await delay(15500); // the notch's agent poll
+  await delay(62000); // the notch's agent poll: once a minute while the live feed is open
   await both('notch-resting');
   await move(430, 15); await delay(450);
   assert.equal(await js("document.getElementById('notch-panel').dataset.layout"), 'quiet', 'nothing at work shows the quiet view');
@@ -526,7 +526,7 @@ async function run() {
   liveRuns = {};
   agents = BOARD_AGENTS.map((agent, i) => ({ ...agent, status: i < 2 ? 'working' : 'idle', status_detail: i ? 'writing draft' : 'asking research' }));
   await js("import('/static/js/chatStream.js').then(stream => stream.sync())");
-  await delay(15500);
+  await delay(62000); // the once-a-minute poll
   await waitFor("document.getElementById('notch-panel').dataset.layout === 'agents'");
   await move(430, 15); await delay(450);
   assert.equal(await js("document.querySelectorAll('.n-chip').length"), 4, 'four agent chips');

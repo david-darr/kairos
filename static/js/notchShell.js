@@ -109,7 +109,7 @@ export function createNotchShell({ card, bridge, hideCard, renderReadings, refre
     const from = shell.getBoundingClientRect();
     expanded = value; shell.classList.toggle('expanded', value);
     shell.setAttribute('aria-expanded', String(value));
-    side.place(); if (value) quietData.refresh(true);
+    side.place(); if (value) quietData.refresh(); // Throttled to once a minute; a collapsed notch does not read it.
     shell.getAnimations().forEach(animation => animation.cancel());
     let morph;
     if (reducedMotion()) morph = shell.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
@@ -412,7 +412,7 @@ export function createNotchShell({ card, bridge, hideCard, renderReadings, refre
   document.addEventListener('kairos:cli-pair', event => { if (event.detail?.id) { pairs.set(event.detail.id, event.detail); renderActivity(); } });
   document.addEventListener('kairos:cli-pair-closed', event => { pairs.delete(event.detail?.id); renderActivity(); });
   chatStream.connect().catch(() => {});
-  const denied = new Set();
+  const denied = new Set(), LIVE_POLL_MS = 60000, DOWN_POLL_MS = 15000;
   async function read(key, url, apply) {
     if (denied.has(key)) return;
     try {
@@ -421,6 +421,7 @@ export function createNotchShell({ card, bridge, hideCard, renderReadings, refre
       if (response.ok) apply(await response.json());
     } catch { /* Preserve the last aggregate on a temporary connection failure. */ }
   }
+  let lastPoll = 0;
   async function poll() {
     await Promise.all([
       read('agents', '/api/agents', data => { remote.agents = Array.isArray(data) ? data : []; }),
@@ -435,7 +436,7 @@ export function createNotchShell({ card, bridge, hideCard, renderReadings, refre
           if (hostFailures >= 2) { document.body.classList.add('notch-offline'); bridge.setInteractive?.(false); reset(); }
         }),
     ]);
-    renderActivity(); quietData.refresh();
+    renderActivity(); lastPoll = Date.now();
   }
   function applyAppearance() {
     let settings = {};
@@ -454,9 +455,15 @@ export function createNotchShell({ card, bridge, hideCard, renderReadings, refre
   read('identity', '/api/auth/status', data => {
     identity = { admin: !!data.is_admin, signedIn: !!data.username };
     appearanceKey = 'jarvis:appearance:v1:' + (data.username || 'local'); applyAppearance();
+    quietData.setIdentity(data.username); quietData.refresh(); // First quiet read, once the shell's identity is in.
   });
   window.addEventListener('storage', event => { if (event.key === appearanceKey) applyAppearance(); });
-  poll(); const timer = setInterval(poll, 15000); // Snapshot fallback while SSE reconnects; also refresh bot/inbox sources.
+  // The live feed already carries chat and agent changes, so while it is open the sources are read
+  // once a minute; while it is down (or the last read failed) every 15 s, to notice the host and recover.
+  poll(); const timer = setInterval(() => {
+    if (chatStream.live() && hostFailures === 0 && Date.now() - lastPoll < LIVE_POLL_MS - 1000) return;
+    poll();
+  }, DOWN_POLL_MS);
   window.addEventListener('pagehide', () => { clearInterval(timer); reset(); }, { once: true });
   applyAppearance(); renderActivity(); renderReadings();
   // The tooltip, and the screen-reader name, of a model's logo.

@@ -107,7 +107,7 @@ function h(tag, className, text) {
 export function createQuietData(onChange, load = defaultLoad) {
   const data = { name: '', sessions: null, notes: null, events: null, snippet: null };
   const denied = new Set();
-  let last = 0, running = false;
+  let last = 0, running = false, identityKnown = false;
   async function read(key, url, apply) {
     if (denied.has(key)) return;
     const value = await load(url);
@@ -119,7 +119,8 @@ export function createQuietData(onChange, load = defaultLoad) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(start); end.setDate(end.getDate() + 7);
     await Promise.all([
-      read('identity', '/api/auth/status', v => { data.name = v.username || ''; }),
+      // The shell already read the identity; ask only when it has not (standalone use).
+      identityKnown ? null : read('identity', '/api/auth/status', v => { data.name = v.username || ''; identityKnown = true; }),
       read('sessions', '/api/sessions', v => { data.sessions = Array.isArray(v) ? v : []; }),
       read('notes', '/api/notes?include_completed=false', v => { data.notes = Array.isArray(v) ? v : []; }),
       read('events', `/api/calendar/events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
@@ -132,7 +133,9 @@ export function createQuietData(onChange, load = defaultLoad) {
     }
     running = false; onChange();
   }
-  return { data, refresh };
+  // The shell passes the sign-in it already read, so this does not ask /api/auth/status again.
+  function setIdentity(name) { data.name = name || ''; identityKnown = true; }
+  return { data, refresh, setIdentity };
 }
 async function defaultLoad(url) {
   try {
