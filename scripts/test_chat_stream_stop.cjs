@@ -68,5 +68,70 @@ const path = require('node:path');
   assert.equal(first.getInFlight('forge-test').text, 'Working live');
   assert.equal(first.getInFlight('forge-test').status, 'stopped');
   assert.equal(first.stopTurn('forge-test'), false);
+
+  // The slow-reply notice, the Ollama detail and the lost-contact state
+  // (static/js/waitNotice.js, fed by chatStream's last-packet time).
+  const notice = await import('data:text/javascript;base64,' + Buffer.from(
+    fs.readFileSync(path.join(__dirname, '../static/js/waitNotice.js'), 'utf8')).toString('base64'));
+  const T = 1_000_000;  // seconds, the server's clock
+  const waiting = extra => ({ status: 'processing', connected: true, turnId: 't', text: '', waitingSince: T,
+    provider: 'Ollama', toolSteps: [], toolEvents: [], ...extra });
+  const at = (seconds, entry, contact = 0) => notice.waitNotice(entry, (T + seconds) * 1000, contact);
+  assert.equal(at(59, waiting()), null, 'plain Waiting for response before a minute');
+  assert.equal(at(60, waiting()).label, 'Still waiting on Ollama · 1m 00s');
+  assert.equal(at(65, waiting()).label, 'Still waiting on Ollama · 1m 05s');
+  assert.equal(at(125, waiting()).label, 'Still waiting on Ollama · 2m 05s');
+  assert.equal(at(70, waiting({ provider: '' })).label, 'Still waiting on the model · 1m 10s');
+  assert.equal(at(70, waiting({ providerDetail: 'Loading the model into memory' })).detail, 'Loading the model into memory');
+  assert.equal(at(70, waiting()).detail, '');
+  assert.equal(at(70, waiting({ text: 'Hi' })), null, 'no notice once text arrives');
+  assert.equal(at(70, waiting({ toolSteps: [{}] })), null, 'a tool step means the model answered');
+  assert.equal(at(70, waiting({ permission: { id: 'p' } })), null, 'waiting on the person, not the model');
+  assert.equal(at(70, waiting({ connected: false })), null, 'only once the request is sent');
+  assert.equal(at(70, waiting({ waitingSince: null })), null);
+  for (const status of ['done', 'failed', 'stopped']) assert.equal(at(500, waiting({ status })), null, `no notice after ${status}`);
+  assert.equal(at(500, waiting({ status: 'done' }), (T + 400) * 1000), null, 'a finished run is never lost contact');
+
+  const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew;
+  try {
+    let paints = 0, fetches = 0;
+    const baseFetch = global.fetch; global.fetch = (...args) => { fetches++; return baseFetch(...args); };
+    first.startTurn('slow-test', 'Forge', 'Think hard', []);
+    await new Promise(resolve => setImmediate(resolve));
+    const slow = first.getInFlight('slow-test');
+    assert.equal(slow.status, 'processing');
+    const unsubscribe = first.subscribe('slow-test', () => paints++);
+    const paintsBefore = paints, fetchesBefore = fetches, contactBefore = first.lastContact();
+    assert.ok(contactBefore > 0);
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()), null, 'fresh turn: no notice');
+
+    skew = 29_000;
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()), null, 'not yet 30 s of silence');
+    skew = 31_000;
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()).state, 'disconnected');
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()).label, 'Lost contact with Kairos');
+
+    viewers[0].active = true;
+    viewers[0].send({ type: 'heartbeat' });
+    assert.ok(first.lastContact() > contactBefore, 'a heartbeat stamps the contact time');
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()), null, 'recovers on the next packet');
+    assert.equal(paints, paintsBefore, 'a heartbeat re-renders nothing');
+    assert.equal(fetches, fetchesBefore, 'a heartbeat refetches nothing');
+    assert.equal(slow.revision, runs['slow-test'].revision, 'a heartbeat changes no run state');
+
+    skew = 31_000 + 29_000;
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()), null);
+    skew = 31_000 + 31_000;
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()).state, 'disconnected');
+    viewers[0].send({ type: 'update', sessionId: 'slow-test', turnId: 'turn-1', revision: 99, changes: { providerDetail: 'Model is working' } });
+    assert.equal(notice.waitNotice(slow, Date.now(), first.lastContact()), null, 'any update packet also counts as contact');
+    assert.equal(slow.providerDetail, 'Model is working');
+    assert.equal(first.stopTurn('slow-test'), true, 'Stop stays available while waiting or out of contact');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(first.getInFlight('slow-test').status, 'stopped');
+    assert.equal(notice.waitNotice(first.getInFlight('slow-test'), Date.now() + 999_000, 1), null, 'no notice after the run ends');
+    unsubscribe();
+    global.fetch = baseFetch;
+  } finally { Date.now = realNow; }
   console.log('Live Chat and Forge survive viewer departure, sync to another device, and stop explicitly.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

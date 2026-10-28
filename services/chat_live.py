@@ -23,6 +23,10 @@ _runs: dict[str, dict] = {}
 _tasks: dict[str, asyncio.Task] = {}
 _subscribers: set[asyncio.Queue] = set()
 _FINISHED_SECONDS = 300
+_HEARTBEAT_SECONDS = 10  # a tiny packet while any run is active; the client calls 30 s of silence lost contact
+_WAIT_NOTICE_SECONDS = 60  # no reply text this long: ask Ollama whether the model is loading or working
+_DETAIL_SECONDS = 10  # at most one /api/ps check per run this often
+_ticker: asyncio.Task | None = None
 
 
 def require_session(session_id: str, user: str) -> dict:
@@ -44,6 +48,8 @@ def visible_packet(packet: dict, user: str, app_window: bool = False) -> dict | 
             return True
         except HTTPException:
             return False
+    if packet['type'] == 'heartbeat':
+        return packet
     if packet['type'] in ('bg_tasks', 'bg_followup'):
         from services.background_tasks import owner_allowed
         return packet if owner_allowed(packet.get('sessionId'), user) else None
@@ -155,8 +161,83 @@ def _update(session_id: str, run: dict, **changes) -> None:
 def _finish(session_id: str, run: dict, status: str, error: str | None = None) -> None:
     if run["status"] != "processing":
         return
-    _update(session_id, run, status=status, stopping=False, permission=None, error=error)
+    _update(session_id, run, status=status, stopping=False, permission=None, error=error,
+            waitingSince=None, providerDetail=None)
     run["endedAt"] = time.time()
+
+
+def _responded(run: dict) -> None:
+    # The model answered (text or a tool call): stop the wait clock. The packet
+    # that carries the text or step tells viewers; nothing extra is sent.
+    run["waitingSince"] = None
+    run["providerDetail"] = None
+
+
+def _ollama_target(session_id: str) -> tuple[str, str] | None:
+    """(native root, model) when this chat's model is a loopback Ollama, else None."""
+    try:
+        from urllib.parse import urlparse
+        from core import model_endpoints, ollama_client
+        endpoint = chat_service._resolve_endpoint(session_id)
+        if not endpoint or endpoint.get("kind") != "local":
+            return None
+        base_url, model, _key, _ctx = model_endpoints.resolve_runtime(endpoint["id"])
+        if not ollama_client.is_ollama_url(base_url) or urlparse(base_url).hostname not in ("localhost", "127.0.0.1", "::1"):
+            return None
+        return ollama_client.native_root(base_url), model
+    except Exception:
+        return None
+
+
+async def _ollama_detail(root: str, model: str) -> str | None:
+    """Is the model in Ollama's /api/ps yet? None when the check fails."""
+    from core import ollama_client
+    try:
+        running = await asyncio.wait_for(ollama_client.list_running(root), 3)
+    except Exception:
+        return None
+    tag = lambda name: name if ":" in name else f"{name}:latest"
+    loaded = {tag(str(item.get("model") or item.get("name") or "")) for item in running}
+    return "Model is working" if tag(model) in loaded else "Loading the model into memory"
+
+
+async def _check_waits(now: float | None = None) -> None:
+    now = now or time.time()
+    for session_id, run in list(_runs.items()):
+        target, since = run.get("_ollama"), run.get("waitingSince")
+        if (run["status"] != "processing" or not target or since is None or now - since < _WAIT_NOTICE_SECONDS
+                or now - run.get("_checkedAt", 0) < _DETAIL_SECONDS):
+            continue
+        run["_checkedAt"] = now
+        detail = await _ollama_detail(*target)
+        if run["status"] == "processing" and run.get("waitingSince") is not None and detail != run.get("providerDetail"):
+            _update(session_id, run, providerDetail=detail)
+
+
+def _active() -> bool:
+    return any(run["status"] == "processing" for run in _runs.values())
+
+
+async def _keepalive() -> None:
+    global _ticker
+    try:
+        while _active():
+            await asyncio.sleep(_HEARTBEAT_SECONDS)
+            if not _active():
+                break
+            for queue in tuple(_subscribers):  # not a chat turn: no phone projection, no snapshot reset
+                if not queue.full():
+                    queue.put_nowait({"type": "heartbeat"})
+            await _check_waits()
+    finally:
+        if _ticker is asyncio.current_task():
+            _ticker = None
+
+
+def _ensure_ticker() -> None:
+    global _ticker
+    if _ticker is None or _ticker.done():
+        _ticker = asyncio.create_task(_keepalive())
 
 
 def _client_error(error: Exception) -> str:
@@ -183,7 +264,9 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
     run = {"turnId": uuid.uuid4().hex, "sessionTitle": session.get("title") or "Chat",
            "prompt": text, "text": "", "startedAt": time.time(), "status": "processing",
            "stopping": False, "permission": None, "toolEvents": [], "toolSteps": [],
-           "handoffs": None, "runId": None, "error": None, "revision": 1}
+           "handoffs": None, "runId": None, "error": None, "revision": 1,
+           "provider": (chat_service._resolve_endpoint(session_id) or {}).get("name") or "",
+           "waitingSince": time.time(), "providerDetail": None, "_ollama": _ollama_target(session_id)}
     _runs[session_id] = run
     try:
         mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint)
@@ -193,6 +276,7 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
         _runs.pop(session_id, None)
         raise
     _tasks[session_id] = task
+    _ensure_ticker()
     task.add_done_callback(lambda completed: _task_done(session_id, run, completed))
     _broadcast({"type": "started", "sessionId": session_id, "run": _visible(run)})
     return {"turn_id": run["turnId"]}
@@ -231,6 +315,7 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                 if context and run["runId"] != context.run_id:
                     _update(session_id, run, runId=context.run_id)
                 if isinstance(item, str):
+                    _responded(run)
                     run["text"] += item
                     run["revision"] += 1
                     _broadcast({"type": "chunk", "sessionId": session_id,
@@ -246,11 +331,13 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                         elif key == "handoffs":
                             _update(session_id, run, handoffs=value)
                         elif key == "tool_event":
+                            _responded(run)
                             run["toolEvents"].append(value)
                             run["revision"] += 1
                             _broadcast({"type": "tool_event", "sessionId": session_id,
                                         "turnId": run["turnId"], "revision": run["revision"], "value": value})
                         elif key == "tool_step":
+                            _responded(run)
                             run["toolSteps"].append(value)
                             run["revision"] += 1
                             _broadcast({"type": "tool_step", "sessionId": session_id,
@@ -287,6 +374,8 @@ def permission_answered(request_id: str) -> None:
 
 async def shutdown() -> None:
     tasks = list(_tasks.values())
+    if _ticker:
+        tasks.append(_ticker)
     for task in tasks:
         task.cancel()
     if tasks:

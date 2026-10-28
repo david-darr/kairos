@@ -4,9 +4,11 @@ Run: .venv/Scripts/python.exe scripts/test_chat_live.py
 """
 import asyncio
 from contextlib import asynccontextmanager
+import json
 import os
 import shutil
 import sys
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,6 +54,14 @@ class GatedBrain:
         return SimpleNamespace(confirmed=True, how="test")
 
 
+class SilentBrain(GatedBrain):
+    """A model that has said nothing yet, as a local one does while it loads."""
+    async def events(self, prompt):
+        await self.continue_reply.wait()
+        yield runs.text("Finally")
+        yield runs.result(True)
+
+
 class LiveChatTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.session_id = session_manager.create_session()["id"]
@@ -78,6 +88,7 @@ class LiveChatTests(unittest.IsolatedAsyncioTestCase):
         self.checkpoint_patch.stop()
         chat_live._runs.clear()
         chat_live._subscribers.clear()
+        chat_live._ticker = None
         chat_service._busy.clear()
 
     async def wait_for(self, condition):
@@ -187,6 +198,114 @@ class LiveChatTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_for(lambda: run()["status"] == "done")
             self.assertIsNone(run()["permission"])
             self.assertEqual(run()["text"], "Waiting for your answer. Got A.")
+
+    async def test_heartbeat_runs_only_while_a_run_is_active(self):
+        beats = lambda viewer: sum(item["type"] == "heartbeat" for item in list(viewer._queue))
+        viewer, _ = chat_live.subscribe()
+        with patch.object(chat_live, "_HEARTBEAT_SECONDS", 0.02):
+            await asyncio.sleep(0.1)
+            self.assertEqual(beats(viewer), 0, "nothing is beating with no run")
+            self.assertIsNone(chat_live._ticker)
+            chat_live.start(self.session_id, "Build it", [], True, "", [])
+            await self.wait_for(lambda: beats(viewer) >= 2)
+            self.assertEqual(chat_live.visible_packet({"type": "heartbeat"}, "local"), {"type": "heartbeat"})
+            self.assertTrue(all(len(json.dumps(item)) < 40 for item in list(viewer._queue) if item["type"] == "heartbeat"))
+            self.brain.continue_reply.set()
+            await self.wait_for(lambda: chat_live.snapshot()["runs"][self.session_id]["status"] == "done")
+            await self.wait_for(lambda: chat_live._ticker is None)
+            viewer._queue.clear()
+            await asyncio.sleep(0.1)
+            self.assertEqual(beats(viewer), 0, "a finished run stops the beat")
+            self.brain.continue_reply.clear()
+            chat_live.start(self.session_id, "Again", [], True, "", [])
+            await self.wait_for(lambda: beats(viewer) >= 1)
+            self.assertTrue(chat_live.stop(self.session_id))
+            await self.wait_for(lambda: chat_live.snapshot()["runs"][self.session_id]["status"] == "stopped")
+            await self.wait_for(lambda: chat_live._ticker is None)
+            viewer._queue.clear()
+            await asyncio.sleep(0.1)
+            self.assertEqual(beats(viewer), 0, "a stopped run stops the beat")
+        chat_live.unsubscribe(viewer)
+
+    async def test_waiting_since_is_set_on_send_and_cleared_when_text_arrives(self):
+        with patch.object(chat_live, "_ollama_target", return_value=None):
+            brain = SilentBrain()
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(brain, False))):
+                before = time.time()
+                chat_live.start(self.session_id, "Hello", [], True, "", [])
+                run = lambda: chat_live.snapshot()["runs"][self.session_id]
+                self.assertTrue(before <= run()["waitingSince"] <= time.time())
+                self.assertEqual(run()["provider"], "Test model")
+                self.assertIsNone(run()["providerDetail"])
+                self.assertFalse(any(key.startswith("_") for key in run()), "private fields stay server-side")
+                await asyncio.sleep(0.05)
+                self.assertIsNotNone(run()["waitingSince"], "no text yet: still waiting")
+                brain.continue_reply.set()
+                await self.wait_for(lambda: run()["text"] == "Finally")
+                self.assertIsNone(run()["waitingSince"])
+                await self.wait_for(lambda: run()["status"] == "done")
+
+    async def test_a_run_that_ends_without_text_clears_the_wait(self):
+        viewer, _ = chat_live.subscribe()
+        with patch.object(chat_live, "_ollama_target", return_value=None):
+            brain = SilentBrain()
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(brain, False))):
+                chat_live.start(self.session_id, "Hello", [], True, "", [])
+                self.assertTrue(chat_live.stop(self.session_id))
+                await self.wait_for(lambda: chat_live.snapshot()["runs"][self.session_id]["status"] == "stopped")
+        self.assertIsNone(chat_live.snapshot()["runs"][self.session_id]["waitingSince"])
+        self.assertIn(None, [item["changes"].get("waitingSince", 0) for item in list(viewer._queue) if item["type"] == "update"])
+        chat_live.unsubscribe(viewer)
+
+    async def test_ollama_detail_says_loading_or_working_and_is_rate_limited(self):
+        target = ("http://127.0.0.1:11434", "qwen3")
+        with patch.object(chat_live, "_ollama_target", return_value=target):
+            brain = SilentBrain()
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(brain, False))):
+                chat_live.start(self.session_id, "Hello", [], True, "", [])
+                run = chat_live._runs[self.session_id]
+                since = run["waitingSince"]
+                viewer, _ = chat_live.subscribe()
+                ps = AsyncMock(return_value=[])
+                with patch("core.ollama_client.list_running", ps):
+                    await chat_live._check_waits(since + 59)
+                    self.assertEqual(ps.await_count, 0, "no check before a minute")
+                    await chat_live._check_waits(since + 61)
+                    self.assertEqual(ps.await_count, 1)
+                    ps.assert_awaited_with("http://127.0.0.1:11434")
+                    self.assertEqual(chat_live.snapshot()["runs"][self.session_id]["providerDetail"], "Loading the model into memory")
+                    await chat_live._check_waits(since + 65)
+                    self.assertEqual(ps.await_count, 1, "at most one check every 10 s")
+                    ps.return_value = [{"name": "qwen3:latest", "model": "qwen3:latest"}]
+                    await chat_live._check_waits(since + 72)
+                    self.assertEqual(ps.await_count, 2)
+                    self.assertEqual(chat_live.snapshot()["runs"][self.session_id]["providerDetail"], "Model is working")
+                    updates = [item["changes"] for item in list(viewer._queue) if item["type"] == "update"]
+                    self.assertEqual([c["providerDetail"] for c in updates if "providerDetail" in c],
+                                     ["Loading the model into memory", "Model is working"])
+                    await chat_live._check_waits(since + 73)
+                    self.assertEqual(ps.await_count, 2)
+                    ps.side_effect = httpx.ConnectError("down")
+                    await chat_live._check_waits(since + 90)
+                    self.assertEqual(ps.await_count, 3)
+                    self.assertIsNone(chat_live.snapshot()["runs"][self.session_id]["providerDetail"], "a failed check shows nothing")
+                brain.continue_reply.set()
+                await self.wait_for(lambda: chat_live.snapshot()["runs"][self.session_id]["status"] == "done")
+                with patch("core.ollama_client.list_running", ps):
+                    ps.reset_mock()
+                    await chat_live._check_waits(since + 200)
+                    self.assertEqual(ps.await_count, 0, "a finished run is never checked")
+                chat_live.unsubscribe(viewer)
+
+    async def test_only_a_loopback_ollama_gets_the_check(self):
+        def target(base_url, kind="local"):
+            with patch.object(chat_service, "_resolve_endpoint", return_value={**ENDPOINT, "kind": kind}), \
+                 patch("core.model_endpoints.resolve_runtime", return_value=(base_url, "m", None, 4096)):
+                return chat_live._ollama_target(self.session_id)
+        self.assertEqual(target("http://localhost:11434/v1"), ("http://localhost:11434", "m"))
+        self.assertIsNone(target("http://192.168.1.5:11434"))
+        self.assertIsNone(target("http://localhost:8000/v1"), "not Ollama")
+        self.assertIsNone(target("http://localhost:11434", kind="api"))
 
 
 if __name__ == "__main__":
