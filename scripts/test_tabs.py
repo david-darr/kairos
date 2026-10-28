@@ -108,6 +108,70 @@ class TabTests(unittest.TestCase):
     def status(self, slug, kind="user"):
         return next(e for e in tabs.list_tabs() if e["slug"] == slug and e["kind"] == kind)
 
+    def settle(self, *folders):
+        """Backdate every file and folder so the two-second racy-timestamp rule trusts the scan cache."""
+        old = time.time() - 3600
+        for folder in folders:
+            for root, dirs, files in os.walk(folder):
+                for name in dirs + files:
+                    os.utime(os.path.join(root, name), (old, old))
+            os.utime(folder, (old, old))
+
+    def test_tab_listing_cache_is_identical_fast_and_never_stale(self):
+        # Efficiency (Part 2 /api/system/tabs): the three source hashes per tab are skipped while no
+        # tab file changed; every state change shows up on the very next listing.
+        self.folder("alpha"); self.folder("beta", user=False)
+        self.settle(self.users / "alpha", self.prebuilt / "beta", self.users, self.prebuilt)
+        tabs.set_template_enabled("beta", True)
+        fresh = [{k: v for k, v in e.items()} for e in tabs.list_tabs()]
+        real = tab_folders.inspect_folder
+        with patch.object(tab_folders, "inspect_folder", side_effect=real) as spy:
+            tab_folders.invalidate_scans()
+            first = tabs.list_tabs()
+            cold_runs = spy.call_count
+            spy.reset_mock()
+            self.assertEqual(tabs.list_tabs(), first)
+            self.assertEqual(tabs.list_tabs(), fresh)
+            self.assertEqual(spy.call_count, 0, "a second listing must not inspect any tab folder")
+        self.assertGreaterEqual(cold_runs, 2)
+        timings = []
+        for _ in range(20):
+            started = time.perf_counter(); tabs.list_tabs(); timings.append(time.perf_counter() - started)
+        self.assertLess(sorted(timings)[10] * 1000, 25, "warm tab listing p50 (regression bound; measured about 2 ms)")
+        # Cached entries are copies: changing a result never changes the next listing.
+        first[0]["status"] = "tampered"
+        self.assertNotEqual(tabs.list_tabs()[0]["status"], "tampered")
+        # Policy is applied live, not cached: approval and enable/disable show immediately.
+        self.assertEqual(self.status("alpha")["status"], "needs_approval")
+        self.approve("alpha")
+        self.assertEqual(self.status("alpha")["status"], "on")
+        tabs.set_user_tab_enabled("alpha", False)
+        self.assertEqual(self.status("alpha")["status"], "off")
+        tabs.set_user_tab_enabled("alpha", True)
+        self.assertEqual(self.status("alpha")["status"], "on")
+        tabs.set_template_enabled("beta", False)
+        self.assertEqual(self.status("beta", "prebuilt")["status"], "off")
+        # An in-place edit of the same size (and a restored timestamp) is caught by the file stat key
+        # whenever the size or time moves; an edit that changes the bytes changes the fingerprint.
+        before = self.status("alpha")["fingerprint"]
+        (self.users / "alpha" / "service.py").write_text("answer = 43\n", encoding="utf-8")
+        self.settle(self.users / "alpha", self.users)
+        (self.users / "alpha" / "service.py").write_text("answer = 4444\n", encoding="utf-8")
+        self.assertNotEqual(self.status("alpha")["fingerprint"], before)
+        # Remove and reinstall are visible at once.
+        self.settle(self.users / "alpha", self.users)
+        tabs.list_tabs()
+        tabs.delete("alpha")
+        self.assertFalse([e for e in tabs.list_tabs() if e["slug"] == "alpha"])
+        self.folder("alpha"); self.settle(self.users / "alpha", self.users)
+        self.assertEqual(self.status("alpha")["status"], "needs_approval")
+        # Guards never use the cache: approval of changed bytes is refused even right after a listing.
+        self.approve("alpha")
+        tabs.mount_all(self.app)
+        self.assertEqual(self.client.get("/fixture/alpha").status_code, 200)
+        (self.users / "alpha" / "service.py").write_text("answer = 99\n", encoding="utf-8")
+        self.assertEqual(self.client.get("/fixture/alpha").status_code, 409)
+
     def test_folder_mounts_and_serves_views_and_styles(self):
         self.folder()
         self.approve("alpha")

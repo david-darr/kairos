@@ -155,6 +155,54 @@ class ForgeSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Links'): self.service.file(session['id'], 'nested/new file.txt')
             with self.assertRaisesRegex(ValueError, 'Links'): self.service.revert_file(session['id'], 'nested/new file.txt', True)
 
+    def test_changes_runs_constant_git_diffs_and_matches_per_file_patches(self):
+        # Efficiency (Part 2 F1/F2): one numstat and one patch run however many files changed, and
+        # every row (renames shown as delete+add, binary, mode change, empty->text, odd names)
+        # equals what the old one-diff-per-file code returned.
+        for name, text in (('a b.txt', 'x\n' * 10), ('gone.txt', 'bye\n'), ('empty.txt', ''), ('run.sh', '#!/bin/sh\n'),
+                           ('caf\u00e9.txt', 'hi\n'), ('crlf.txt', 'a\r\nb\r\n'), ('old.txt', 'move me\n' * 20)):
+            self.write(self.repo / name, text)
+        (self.repo / 'bin.dat').write_bytes(b'\x00\x01')
+        for i in range(30): self.write(self.repo / f'many{i}.txt', 'one\n')
+        self.git('add', '.'); self.git('commit', '-m', 'More')
+        session = self.create(); folder = Path(session['workspace_dir'])
+        self.write(folder / 'a b.txt', 'y\n' * 10); (folder / 'gone.txt').unlink(); self.write(folder / 'empty.txt', 'now\n')
+        self.git('update-index', '--chmod=+x', 'run.sh', cwd=folder); self.write(folder / 'caf\u00e9.txt', 'hello\n')
+        self.write(folder / 'crlf.txt', 'a\r\nc\r\n'); (folder / 'bin.dat').write_bytes(b'\x00\x02')
+        (folder / 'old.txt').rename(folder / 'moved.txt'); self.write(folder / 'diff --git x.txt', '+++ b\ndiff --git fake\n')
+        for i in range(30): self.write(folder / f'many{i}.txt', f'two {i}\n')
+        base = self.service.get(session['id'])['forge']['base_commit']
+        calls = []
+        real = forge_git._run
+        def counting(cwd, args, *a, **k):
+            calls.append(args[0]); return real(cwd, args, *a, **k)
+        with patch.object(forge_git, '_run', side_effect=counting):
+            rows = self.service.changes(session['id'])['files']
+        self.assertLessEqual(calls.count('diff'), 2, calls)
+        tracked = [r for r in rows if not r['untracked']]
+        self.assertGreaterEqual(len(tracked), 36)
+        for row in tracked:
+            self.assertEqual(row['patch'], forge_git.diff(folder, base, row['path']), row['path'])
+        self.assertEqual(sorted(forge_git.diff_names(folder, base)), sorted(r['path'] for r in tracked))
+        self.assertTrue(next(r for r in rows if r['path'] == 'bin.dat')['binary'])
+        self.assertTrue(next(r for r in rows if r['path'] == 'moved.txt')['untracked'])
+        # Folder expand marks the same rows without a patch run, and still sees untracked files.
+        calls.clear()
+        with patch.object(forge_git, '_run', side_effect=counting):
+            entries = self.service.files(session['id'])['entries']
+        self.assertNotIn('--patch', [c for c in calls])
+        self.assertEqual(calls.count('diff'), 1, calls)
+        self.assertTrue(next(e for e in entries if e['path'] == 'moved.txt')['changed'])
+        self.assertTrue(next(e for e in entries if e['path'] == 'gone.txt' or e['path'] == 'a b.txt')['changed'])
+        self.assertFalse(next(e for e in entries if e['path'] == 'AGENTS.md')['changed'])
+
+    def test_changes_falls_back_to_per_file_diffs_when_patch_cannot_be_split(self):
+        session = self.create(); folder = Path(session['workspace_dir'])
+        self.write(folder / 'code.txt', self.original.replace('line 1\n', 'changed\n'))
+        expected = self.service.changes(session['id'])
+        with patch.object(forge_git, 'diff_all', side_effect=lambda p, c: (forge_git.diff(p, c, numstat=True).split('\0')[:-1], None)):
+            self.assertEqual(self.service.changes(session['id']), expected)
+
     def test_single_hunk_revert_stale_hash_and_file_revert(self):
         session = self.create(); folder = Path(session['workspace_dir']); path = folder / 'code.txt'
         modified = self.original.replace('line 1\n', 'first change\n').replace('line 35\n', 'second change\n')
