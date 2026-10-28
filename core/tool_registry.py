@@ -25,7 +25,7 @@ not a read is written to the permission audit (Settings > Permissions).
 
 A model with a small window (SMALL_WINDOW or less, 2026-10-06; vault note
 "Local Model Fit (Build Spec)") is shown only the `core` tools, plus an
-agent's own; the rest are found through core/tool_search.py's bridge, as
+agent's own (and delegate/helper_results while a helper is set up); the rest are found through core/tool_search.py's bridge, as
 Hermes Agent's Tool Search does. Every tool's definition is sent with every
 request, and the whole list was about 4,300 tokens.
 
@@ -346,6 +346,9 @@ def _shown(spec: ToolSpec, small_window: bool, session_id: str | None = None) ->
     if spec.name == 'design_create' and small_window and session_id:
         from core import design_tools  # Offered directly while the chat is in Design mode.
         return design_tools.design_mode(session_id)
+    if small_window and spec.name in ('delegate', 'helper_results'):
+        from core import helpers  # A small model reaches its helpers directly once one is set up.
+        return helpers.helper_endpoint() is not None
     return not small_window or spec.core or spec.agent_only
 
 

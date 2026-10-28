@@ -8,7 +8,10 @@
 .chat-activity[data-state='waiting'] .chat-activity-marker,
 .chat-activity[data-state='responding'] .chat-activity-marker { border: 1.5px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: activity-spin 1.3s linear infinite; }
 .chat-activity[data-state='done'] .chat-activity-marker { animation: activity-complete 280ms ease-out; }
-.chat-activity[data-state='failed'] .chat-activity-marker { color: var(--danger); }
+.chat-activity[data-state='failed'] .chat-activity-marker,
+.chat-activity[data-state='disconnected'] .chat-activity-marker { color: var(--danger); }
+.chat-activity-detail { color: var(--text-dim); }
+.chat-activity-detail::before { content: '\00b7'; margin-right: 9px; }
 .chat-activity-chevron { margin-left: 8px; transition: transform 180ms ease; }
 .chat-activity[open] .chat-activity-chevron { transform: rotate(180deg); }
 .chat-activity-steps { list-style: none; padding: 10px 0 0 0; margin: 0; }

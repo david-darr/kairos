@@ -227,6 +227,27 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("only your most-used tools are listed", small._messages[0]["content"],
                       "a small window is told the rest are searchable")
 
+    async def test_a_small_window_lists_delegate_only_when_a_helper_is_set_up(self):
+        shown = lambda b: {t["function"]["name"] for t in b.tools}
+        pair = {"delegate", "helper_results"}
+        deferred = lambda: set(tool_registry.deferred_tools(is_admin=True, session_id=self.sid))
+        with patch("core.helpers.helper_endpoint", return_value={"id": "h", "kind": "local"}):
+            small = shown(self.brain(8192, is_admin=True))
+            self.assertTrue(pair <= small)
+            self.assertEqual(small, self.CORE | self.BRIDGE | pair)
+            self.assertFalse(pair & deferred(), "listed tools are not in the deferred catalog")
+            names = [t["function"]["name"] for t in tool_registry.openai_tools(is_admin=True, small_window=True)]
+            registered = [s.name for s in tool_registry.specs(tool_registry.OPENAI, True)]
+            self.assertEqual(names, [n for n in registered if n in names], "registration order holds")
+        with patch("core.helpers.helper_endpoint", return_value=None):
+            self.assertFalse(pair & shown(self.brain(8192, is_admin=True)))
+            self.assertTrue(pair <= deferred(), "with no helper both stay behind the bridge")
+        with patch("core.helpers.helper_endpoint", return_value={"id": "h", "kind": "local"}):
+            full = shown(self.brain(200000, is_admin=True))
+            self.assertTrue(pair <= full, "a big window lists them as before")
+            self.assertFalse(pair & set(tool_registry.deferred_tools(is_admin=True, helper=True)))
+            self.assertFalse(pair & {t["function"]["name"] for t in tool_registry.openai_tools(is_admin=True, small_window=True, helper=True)},
+                             "a helper itself never gets them")
     async def test_a_hidden_tool_is_found_and_runs_with_hooks_and_audit(self):
         brain = self.brain(8192)
         found = await brain._execute_tool("kairos_tool_search", {"query": "create task"})

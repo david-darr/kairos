@@ -9,6 +9,9 @@ const FINISHED_RETENTION_MS = 4000;
 let source = null;
 let syncing = null;
 let connecting = null;
+// When the server last spoke on the live feed (any packet, heartbeats included).
+// It only stamps a time: a heartbeat never notifies, re-renders or refetches.
+let lastPacketAt = 0;
 
 function _notify(sessionId) {
   const entry = _inflight.get(sessionId) || null;
@@ -86,6 +89,8 @@ function _snapshot(packet) {
 }
 
 function _packet(packet) {
+  lastPacketAt = Date.now();
+  if (packet.type === 'heartbeat') return;
   if (['bg_tasks', 'bg_followup'].includes(packet.type)) { if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent(packet.type === 'bg_tasks' ? 'kairos:bg-tasks' : 'kairos:bg-followup', { detail: packet })); return; }
   if (packet.type === 'snapshot') { _snapshot(packet); return; }
   if (packet.type === 'cli_pair') { _cliPair('kairos:cli-pair', packet.request); return; }
@@ -102,8 +107,13 @@ function _packet(packet) {
   if (packet.revision && packet.revision <= (entry.revision || 0)) return;
   if (packet.revision) entry.revision = packet.revision;
   if (packet.type === 'chunk') entry.text += packet.chunk;
-  else if (packet.type === 'tool_event') (entry.toolEvents ||= []).push(packet.value);
-  else if (packet.type === 'tool_step') (entry.toolSteps ||= []).push(packet.value);
+  else if (packet.type === 'tool_event') { (entry.toolEvents ||= []).push(packet.value); entry.waitingSince = null; }
+  else if (packet.type === 'tool_step') {
+    // Mirrors chat_live._stepped: a running tool is not a slow model; once it finishes the wait clock restarts.
+    (entry.toolSteps ||= []).push(packet.value);
+    entry.waitingSince = packet.value?.phase === 'finished' ? packet.value.at || Date.now() / 1000 : null;
+    entry.providerDetail = null;
+  }
   else if (packet.type === 'update') {
     const changes = packet.changes;
     if (changes.permission && !entry.permissionStartedAt) entry.permissionStartedAt = Date.now() / 1000;
@@ -126,6 +136,7 @@ export function sync() {
   if (syncing) return syncing;
   syncing = fetch('/api/chat/live/snapshot', { cache: 'no-store' }).then(async res => {
     if (!res.ok) throw new Error(`Live chat unavailable (${res.status})`);
+    lastPacketAt = Date.now();
     _snapshot(await res.json());
   }).finally(() => { syncing = null; });
   return syncing;
@@ -152,6 +163,8 @@ export function connect() {
 
 // True while the live feed is open (EventSource readyState 1); it is 0 while the browser retries.
 export function live() { return !!source && source.readyState === 1; }
+// Milliseconds timestamp of the last packet from the server; 0 before the first.
+export function lastContact() { return lastPacketAt; }
 
 export function getInFlight(sessionId) { return _inflight.get(sessionId) || null; }
 export function listInFlight() {
@@ -184,6 +197,7 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
     connected: false, sessionTitle, error: null, stopping: false, local: true,
     toolEvents: [], toolSteps: [] };
   dropSharedReads();  // sending is a write that does not go through api()
+  lastPacketAt = Date.now();  // a new turn starts the silence clock, not whatever idle gap came before
   _inflight.set(sessionId, entry);
   _notify(sessionId);
   const requestId = crypto.randomUUID();

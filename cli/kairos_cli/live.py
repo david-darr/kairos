@@ -62,6 +62,8 @@ class TurnBook:
 
     def apply(self, packet: dict) -> list[TurnEvent]:
         kind = packet.get("type")
+        if kind == "heartbeat":
+            return []
         if kind == "snapshot":
             return self._snapshot(packet)
         if kind == "started":
