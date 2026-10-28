@@ -328,8 +328,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("[...document.querySelectorAll('.ms-player button')].find(b => b.textContent === 'Stop').click()");
   await delay(600);
   assert.ok(writes.slice(stops).some(w => w.path === '/api/chat/live/stop'), 'Stop uses the existing stop endpoint');
-  await waitFor("!!document.querySelector('.ms-finished-card')");
-  assert.ok(await js("document.querySelector('.ms-finished-card').textContent.includes('Stopped')"), 'A stopped turn lands in the finished deck');
+  // Any card, not the first: a second run's card can land ahead of the stopped one.
+  const stoppedCard = "[...document.querySelectorAll('.ms-finished-card')].some(c => c.textContent.includes('Stopped'))";
+  try { await waitFor(stoppedCard, 5000); } catch { /* the assert below names the failure */ }
+  assert.ok(await js(stoppedCard), 'A stopped turn lands in the finished deck');
   await capture('shell-finished-deck');
   // Count once the deck has stopped changing (a second run's card can still be landing).
   let cards = -1;
