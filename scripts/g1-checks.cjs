@@ -62,6 +62,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     return true;
   })()`);
   const refreshHome = async () => {
+    await delay(1100);  // api.js shares identical GETs for 1 s; let the previous answers expire so the stub is read
     const before = reads.filter(r => r.path === '/api/home/week').length;
     await js("document.dispatchEvent(new CustomEvent('kairos:models-changed'))");
     for (let i = 0; i < 100 && reads.filter(r => r.path === '/api/home/week').length === before; i++) await delay(50);
@@ -69,6 +70,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
   };
   const showEveryCard = () => js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); const ids = [...new Set([...m.HOME_SECTIONS.map(s => s.id), ...m.knownHomeCards().map(c => c.id)])]; l.home = ['activity', ...ids.filter(id => id !== 'activity')]; l.hiddenHome = [];  /* a moved card counts as your own arrangement, so the default is not re-applied */ m.saveLayout(l); })`);
   const homeReady = async () => {
+    await delay(1100);  // as in refreshHome: demoState changes between sections must not meet a shared read
     await installStub();
     await navigate('home');
     await waitFor("!!document.querySelector('.hm-home .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && !!document.querySelector('.dashboard-content.is-filled')");
@@ -591,6 +593,10 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     bench.homeApiReadsFirstRender = homeReads.length;
     bench.homeApiPaths = [...new Set(homeReads.map(r => r.path))].length;
     bench.homeDuplicateReads = homeReads.length - bench.homeApiPaths;
+    // E3 regression bounds (before: 42 reads, 16 duplicates; after: 26 reads, 0 duplicates).
+    const repeated = Object.entries(homeReads.reduce((m, r) => (m[r.path] = (m[r.path] || 0) + 1, m), {})).filter(([, n]) => n > 1);
+    assert.ok(bench.homeDuplicateReads < 5, 'Home first load repeats fewer than 5 reads: ' + JSON.stringify(repeated));
+    assert.ok(bench.homeApiReadsFirstRender <= 32, 'Home first load is at most 32 reads, got ' + bench.homeApiReadsFirstRender);
     // Frame times per Kip style and instance count (offscreen window; compare runs, not absolute numbers).
     const frames = (ms) => js(`new Promise(resolve => { const t = []; let last = performance.now(); const end = last + ${ms};
       const tick = now => { t.push(now - last); last = now; if (now < end) requestAnimationFrame(tick); else { t.shift(); t.sort((a, b) => a - b);
