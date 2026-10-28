@@ -428,6 +428,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['shared interface'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--agents-appearance-only')) {  // Agents themes and reduced motion (agents-appearance-checks.cjs).
+      await require('./agents-appearance-checks.cjs')({ js, win, waitFor, navigate, capture });
+      assert.deepEqual(errors, []);
+      console.log('PASS: Agents appearance checks.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents appearance'], errors }, null, 2));
+      return;
+    }
     if (process.argv.includes('--app-shell-only')) {
       await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base, demoState, fixtures: calendarFixtures });
       assert.deepEqual(errors, []);
@@ -2071,12 +2078,11 @@ app.whenReady().then(async () => {
               const response = await window.__settingsOriginalFetch.apply(this, args);
               if (authStatus) {
                 // Wait for the body too so the pending open can resume before the assertion.
-                const json = response.json.bind(response);
-                response.json = async () => {
-                  const body = await json();
-                  window.__authAnswered = true;
-                  return body;
-                };
+                // api.js reads a clone of a shared GET, so mark the clones' bodies too.
+                const mark = res => { const json = res.json.bind(res); res.json = async () => { const body = await json(); window.__authAnswered = true; return body; }; return res; };
+                const clone = response.clone.bind(response);
+                response.clone = () => mark(clone());
+                mark(response);
               }
               return response;
             };
