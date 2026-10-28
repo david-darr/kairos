@@ -247,7 +247,19 @@ app.whenReady().then(async () => {
     if (details.level === 'error' || /ResizeObserver/i.test(details.message))
       errors.push(/ResizeObserver/i.test(details.message) ? `${details.message} after ${lastCapture} (${details.sourceId}:${details.lineNumber})` : details.message);
   });
+  // A check that edits demoState or the fixture data changed the "server" behind the app's back. The app shares identical
+  // GETs for a moment and keeps slow-changing ones for 30 s (api.js), dropping them on writes and
+  // change events; a fixture edit sends neither, so the next renderer call drops them first, exactly
+  // when the fixtures changed (whatever the check does next: navigate, click or dispatch an event).
+  let lastFixtures;
+  const fixturesChanged = () => {
+    let now; try { now = JSON.stringify([demoState, calendarFixtures]); } catch { return false; }
+    if (lastFixtures === undefined) { lastFixtures = now; return false; }
+    if (now === lastFixtures) return false;
+    lastFixtures = now; return true;
+  };
   const js = async (code) => {
+    if (fixturesChanged()) await win.webContents.executeJavaScript("import('/static/js/api.js').then(m => m.clearSharedReads()).catch(() => {})").catch(() => {});
     try { return await win.webContents.executeJavaScript(code); }
     catch (error) { throw new Error(error.message + '\nRenderer expression: ' + code); }
   };
@@ -808,7 +820,8 @@ app.whenReady().then(async () => {
       if (width > 768) assert.ok(await js("document.querySelector('.forge-shell').dataset.split === 'true' && !!document.querySelector('[aria-label=\"Left pane\"] .forge-transcript-layout')"), 'preview opens beside session');
       assert.ok(writes.slice(appWriteStart).some(w => w.path === forgeBase + '/app/start'), label + ' own app start');
       assert.ok(await js("document.querySelector('.forge-preview-fallback').textContent.includes('iframe')"), label + ' labelled fallback');
-      await waitFor("!!document.querySelector('.forge-running-strip button') && !document.querySelector('.forge-running-strip').hidden && !!document.querySelector('[data-forge-project=fp1] .forge-app-dot')");
+      try { await waitFor("!!document.querySelector('.forge-running-strip button') && !document.querySelector('.forge-running-strip').hidden && !!document.querySelector('[data-forge-project=fp1] .forge-app-dot')"); }
+      catch (error) { console.log('DIAG', JSON.stringify(await js("(async () => ({ strip: document.querySelector('.forge-running-strip')?.outerHTML, dots: document.querySelectorAll('.forge-app-dot').length, rail: !!document.querySelector('[data-forge-project=fp1]'), running: await fetch('/api/forge/apps/running').then(r => r.json()) }))()")), JSON.stringify(reads.slice(-40).map(r => r.path || r))); throw error; }
       for (const preset of ['tablet', 'phone', 'desktop']) {
         await js(`document.querySelector('[data-preview-width=${preset}]').click()`);
         assert.equal(await js(`document.querySelector('[data-preview-width=${preset}]').getAttribute('aria-pressed')`), 'true');
