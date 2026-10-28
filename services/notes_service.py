@@ -5,6 +5,7 @@ real events; Notes stays the one source of truth for the item.
 """
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
@@ -14,6 +15,15 @@ import os
 NOTES_FILE = os.path.join(DATA_DIR, "notes.json")
 
 
+def _utc(value: str) -> Optional[datetime]:
+    """Parse an ISO 8601 string (any offset, or none = UTC) to an aware UTC datetime."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
 class NotesService:
     def __init__(self) -> None:
         self._notes: dict = read_json(NOTES_FILE, {})
@@ -21,8 +31,10 @@ class NotesService:
     def _save(self) -> None:
         write_json_atomic(NOTES_FILE, self._notes)
 
-    def list_notes(self, include_completed: bool = True) -> list[dict]:
+    def list_notes(self, include_completed: bool = True, include_dismissed: bool = False) -> list[dict]:
         items = list(self._notes.values())
+        if not include_dismissed:
+            items = [n for n in items if not n.get("dismissed")]
         if not include_completed:
             items = [n for n in items if not n["completed"]]
         return sorted(items, key=lambda n: (n["completed"], n.get("due_date") or "", -n["created_at"]))
@@ -30,13 +42,21 @@ class NotesService:
     def list_due_between(self, start_iso: str, end_iso: str) -> list[dict]:
         """Notes with a due_date falling in [start_iso, end_iso) — used by
         calendar_service to render due-dated notes alongside real events."""
-        return [
-            n for n in self._notes.values()
-            if n.get("due_date") and start_iso <= n["due_date"] < end_iso and not n["completed"]
-        ]
+        start, end = _utc(start_iso), _utc(end_iso)
+        if start is None or end is None:
+            return []
+        due = []
+        for n in self._notes.values():
+            if not n.get("due_date") or n["completed"] or n.get("dismissed"):
+                continue
+            when = _utc(n["due_date"])
+            if when is not None and start <= when < end:
+                due.append(n)
+        return due
 
     def get_note(self, note_id: str) -> Optional[dict]:
-        return self._notes.get(note_id)
+        note = self._notes.get(note_id)
+        return None if note is None or note.get("dismissed") else note
 
     def create_note(self, text: str, due_date: Optional[str] = None, project: str = "personal",
                     vault_source: Optional[dict] = None, completed: bool = False) -> dict:
@@ -64,7 +84,7 @@ class NotesService:
         """write_back=False suppresses the vault echo. Used by vault_sync
         itself, which is already applying what the vault said — writing it
         back would rewrite the user's file to the value it already has."""
-        note = self._notes.get(note_id)
+        note = self.get_note(note_id)
         if note is None:
             raise KeyError(f"no such note: {note_id}")
 
@@ -97,6 +117,18 @@ class NotesService:
         if note_id in self._notes:
             del self._notes[note_id]
             self._save()
+
+    def dismiss_note(self, note_id: str) -> None:
+        """What a person's delete does. A note imported from the vault is only
+        hidden: its line is still in the vault, so deleting it for real would
+        bring it back at the next sync. vault_sync deletes it for real once the
+        line leaves the vault."""
+        note = self._notes.get(note_id)
+        if note is not None and note.get("vault_source"):
+            note["dismissed"] = True
+            self._save()
+        else:
+            self.delete_note(note_id)
 
 
 notes_service = NotesService()

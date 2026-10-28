@@ -728,13 +728,17 @@ def session_exists(session_id: str) -> bool:
     return row is not None
 
 
-def list_sessions(agent_id: Optional[str] = None, include_agents: bool = False) -> list[dict]:
+def list_sessions(agent_id: Optional[str] = None, include_agents: bool = False,
+                  owner_user: Optional[str] = None) -> list[dict]:
     """Sidebar metadata only — never message bodies. Field set matches what
     the old `sessions_index.json` carried, because static/js reads these keys
     by name. Chats with agents are left out unless asked for: agent_id lists
     one agent's chats, include_agents lists every chat."""
     where, params = ("WHERE agent_id = ?", (agent_id,)) if agent_id else \
         ("", ()) if include_agents else ("WHERE agent_id IS NULL", ())
+    if owner_user is not None:  # a member's list: only the chats they own
+        where += (" AND" if where else "WHERE") + " json_extract(doc, '$.owner_user') = ?"
+        params += (owner_user,)
     with _LOCK:
         conn = _connect()
         rows = conn.execute(
@@ -952,7 +956,7 @@ def search_archive(session_id: str, query: str, before_index: int, max_results: 
 
 
 def search_messages(query: str, exclude_session_id: Optional[str] = None,
-                    max_results: int = 5) -> list[dict]:
+                    max_results: int = 5, owner_user: Optional[str] = None) -> list[dict]:
     """Ranked full-text search across every stored message.
 
     Ordered by bm25 relevance rather than recency-of-session, and capped at
@@ -964,20 +968,23 @@ def search_messages(query: str, exclude_session_id: Optional[str] = None,
     match = _fts_query(query)
     if not match:
         return []
+    # owner_user=None searches every chat; a name limits it to that owner's.
+    owner_clause = "" if owner_user is None else "AND json_extract(s.doc, '$.owner_user') = ?"
+    params = (match,) if owner_user is None else (match, owner_user)
     with _LOCK:
         conn = _connect()
         try:
             rows = conn.execute(
-                """SELECT f.session_id, f.role, f.idx, s.title AS session_title,
+                f"""SELECT f.session_id, f.role, f.idx, s.title AS session_title,
                           snippet(messages_fts, 0, '', '', '...', 24) AS snippet,
                           bm25(messages_fts) AS rank, m.ts AS ts
                    FROM messages_fts f
                    JOIN sessions s ON s.id = f.session_id
                    LEFT JOIN messages m ON m.session_id = f.session_id AND m.idx = f.idx
-                   WHERE messages_fts MATCH ?
+                   WHERE messages_fts MATCH ? {owner_clause}
                    ORDER BY rank
                    LIMIT 500""",
-                (match,),
+                params,
             ).fetchall()
         except sqlite3.OperationalError as e:
             # A MATCH expression this module built should always parse; if it

@@ -383,6 +383,23 @@ async def _forge_app_logs(args, ctx):
         ctx.turn_taint.mark('Forge app output')
     return '\n'.join(result['lines']) or 'No app logs for this session.'
 
+def _search_owner_scope(ctx):
+    """Whose chats this chat may search: None means all (an admin, or accounts
+    off); otherwise the asking chat's owner, so a member only finds their own."""
+    from core.auth import auth_enabled, auth_manager
+    owner = ((session_manager_get(ctx.session_id) or {}).get("owner_user") if ctx.session_id else None) or ctx.owner_user
+    if ctx.is_admin or (owner and auth_manager.is_admin(owner)):
+        return None
+    if owner is None and not auth_enabled():
+        return None
+    return owner or ""  # an ownerless chat under accounts matches nothing
+
+
+def session_manager_get(session_id):
+    from core.session_manager import session_manager
+    return session_manager.get_session(session_id)
+
+
 @register(
     "search_sessions",
     "Search across every other chat session's message history for a keyword or phrase. "
@@ -403,7 +420,8 @@ async def _search_sessions(args, ctx):
         if ctx.turn_taint and result:
             ctx.turn_taint.mark("chat history")
         return result
-    results = memory_tools.search_sessions(args["query"], exclude_session_id=ctx.session_id, max_results=5)
+    results = memory_tools.search_sessions(args["query"], exclude_session_id=ctx.session_id, max_results=5,
+                                           owner_user=_search_owner_scope(ctx))
     result = memory_tools.format_session_hits(results)
     if ctx.turn_taint and results:
         ctx.turn_taint.mark("chat history")

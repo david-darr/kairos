@@ -83,7 +83,7 @@ class CalendarService:
             "completed": completed,
             "recurrence": recurrence,
             "time_zone": time_zone,
-            "end_exclusive": bool(all_day and not sync_id and len(end) == 10 and end > start),
+            "end_exclusive": bool(all_day and len(end) == 10 and end > start),  # iCal feed DTEND is exclusive too
         }
         self._events[event_id] = event
         self._save()

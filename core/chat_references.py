@@ -40,6 +40,8 @@ def search(query: str, current_session_id: str | None = None, is_admin: bool = F
     query = query.strip()[:100]
     needle = query.casefold()
     results: list[dict] = []
+    # Members see only their own chats and chat files; admins and the single local user see all.
+    owner_scope = None if is_admin else (user or "")
     if is_admin:
         from services.agent_service import agent_service
         for agent in agent_service.list_agents():
@@ -60,7 +62,7 @@ def search(query: str, current_session_id: str | None = None, is_admin: bool = F
     docs = documents_service.search_documents(query, max_results=4) if query else documents_service.list_documents()
     for doc in docs:
         results.append({"kind": "document", "id": doc["id"], "label": doc["title"], "detail": "Library document"})
-    for group in chat_files.list_library():
+    for group in chat_files.list_library(owner_scope):
         for item in group["files"]:
             if not item["exists"] or (needle and needle not in (item["name"] + " " + group["title"]).casefold()):
                 continue
@@ -76,12 +78,12 @@ def search(query: str, current_session_id: str | None = None, is_admin: bool = F
             path = hit["path"]
             results.append({"kind": "note", "id": path, "label": Path(path).stem, "detail": path})
 
-    headers = session_manager.list_sessions()
+    headers = session_manager.list_sessions(owner_user=owner_scope)
     matched = [h for h in headers if h["id"] != current_session_id and
                (not needle or needle in (h.get("title") or "").casefold())]
     if needle and len(matched) < 4:
         ids = {h["id"] for h in matched}
-        for hit in memory_tools.search_sessions(query, exclude_session_id=current_session_id, max_results=12):
+        for hit in memory_tools.search_sessions(query, exclude_session_id=current_session_id, max_results=12, owner_user=owner_scope):
             if hit["session_id"] not in ids:
                 matched.append({"id": hit["session_id"], "title": hit["session_title"]})
                 ids.add(hit["session_id"])

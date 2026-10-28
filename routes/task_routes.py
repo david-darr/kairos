@@ -33,6 +33,28 @@ def agent_task_is_admins(task_id: str, request: Request) -> None:
         require_admin(request)
 
 
+def task_is_visible(task_id: str, user: str = Depends(require_user)) -> None:
+    """One owner check for every route that acts on a task: a member gets 404
+    for a task or card that is not theirs. Admins (and the single local user)
+    see all. A missing task falls through so the route answers its own 404."""
+    task = task_service.get_task(task_id)
+    if task is not None and not task_service.visible_to(task, user, auth_manager.is_admin(user)):
+        raise HTTPException(status_code=404, detail="task not found")
+
+
+def _check_channel(channel_id: Optional[str], user: str) -> None:
+    """A delivery channel must exist (400) and be one the user may use (403).
+    Channels are set up by an admin (their Discord DM, connectors), so only
+    an admin, and the single local user, may aim a task at one."""
+    if not channel_id:
+        return
+    from core.channels import registry
+    if channel_id not in {c["id"] for c in registry.list_channels()}:
+        raise HTTPException(status_code=400, detail="deliver_to_channel must name a channel set up in Settings")
+    if not auth_manager.is_admin(user):
+        raise HTTPException(status_code=403, detail="only an admin can send task output to a channel")
+
+
 class CreateTaskRequest(BaseModel):
     name: str
     prompt: str
@@ -98,6 +120,7 @@ class EnableBuiltinRequest(BaseModel):
 async def enable_builtin_task(action_id: str, body: Optional[EnableBuiltinRequest] = None, user: str = Depends(require_user)) -> dict:
     if action_id not in BUILTIN_TASKS:
         raise HTTPException(status_code=404, detail="unknown built-in task")
+    _check_channel(body.deliver_to_channel if body else None, user)
     existing = next((t for t in task_service.list_tasks() if t.get("builtin_action") == action_id), None)
     if existing:
         return task_service.update_task(existing["id"], enabled=True)
@@ -136,6 +159,7 @@ async def get_task(task_id: str, user: str = Depends(require_user)) -> dict:
 @router.post("")
 async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)) -> dict:
     _check_endpoint(body.endpoint_id)
+    _check_channel(body.deliver_to_channel, user)
     try:
         return task_service.create_task(
             body.name, body.prompt, body.schedule_kind, body.run_at, body.interval_seconds,
@@ -148,7 +172,7 @@ async def create_task(body: CreateTaskRequest, user: str = Depends(require_user)
 
 
 @router.patch("/{task_id}")
-async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
+async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     # Explicit null restores the machine zone / every day; an omitted field
     # leaves a live schedule alone (Agents 2.0 phase 2-i, 2026-10-13).
@@ -156,6 +180,9 @@ async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends
         if key in body.model_fields_set:
             fields[key] = getattr(body, key)
     _check_endpoint(fields.get("endpoint_id"))
+    # Re-sending a channel the task already has (even a since-removed one) is not a change.
+    if fields.get("deliver_to_channel") != (task_service.get_task(task_id) or {}).get("deliver_to_channel"):
+        _check_channel(fields.get("deliver_to_channel"), user)
     try:
         existing = task_service.get_task(task_id)
         if existing and existing.get("agent_id"):
@@ -168,7 +195,7 @@ async def update_task(task_id: str, body: UpdateTaskRequest, user: str = Depends
 
 
 @router.post("/{task_id}/status")
-async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
+async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
     """Move a card on the work board. Review -> Ready with a note is
     "request changes"; Review -> Done is approval; Blocked -> Ready retries."""
     try:
@@ -180,13 +207,13 @@ async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Dep
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
+async def delete_task(task_id: str, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
     task_service.delete_task(task_id)
     return {"ok": True}
 
 
 @router.post("/{task_id}/run")
-async def run_task_now(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
+async def run_task_now(task_id: str, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
     task = task_service.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
@@ -208,7 +235,7 @@ async def run_task_now(task_id: str, user: str = Depends(require_user), _: None 
 
 
 @router.post("/{task_id}/stop")
-async def stop_task(task_id: str, user: str = Depends(require_user), _: None = Depends(agent_task_is_admins)) -> dict:
+async def stop_task(task_id: str, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
     """Stop a running task, card or goal (roadmap phase 4). The run is
     recorded as stopped; a stopped card goes to Blocked."""
     if task_service.get_task(task_id) is None:

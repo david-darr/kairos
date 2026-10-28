@@ -163,7 +163,8 @@ class SessionManager:
 
         return store.save_session(fork)
 
-    def list_sessions(self, agent_id: Optional[str] = None, include_agents: bool = False) -> list[dict]:
+    def list_sessions(self, agent_id: Optional[str] = None, include_agents: bool = False,
+                      owner_user: Optional[str] = None) -> list[dict]:
         """Starred first, then newest-first within each group — metadata only
         (no message bodies). Right-click star/delete is David's ask, 2026-08-31.
 
@@ -173,7 +174,7 @@ class SessionManager:
         Chats with agents belong to the Agents tab and are left out unless
         asked for (agent_id: one agent's; include_agents: all).
         """
-        return store.list_sessions(agent_id, include_agents)
+        return store.list_sessions(agent_id, include_agents, owner_user)
 
     def set_untrusted_context(self, session_id: str, reason: str) -> dict:
         """Marks a chat whose own history carries outside text (a tab seeding

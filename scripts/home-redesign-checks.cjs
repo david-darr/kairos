@@ -6,15 +6,35 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
   const layout = await js("import('/static/js/layout.js').then(m => m.getLayout())");
   const originalEmpty = demoState.empty, originalQuotas = demoState.quotas, originalClear = demoState.homeClear;
   const base = win.webContents.getURL();
+  // Settled = no finite animation or transition still running in the page chrome and Home (the section
+  // fill and stagger start when each card's data lands, which can be later than the fixed delay), and the grid,
+  // Systems strip and its parts keep identical rects over several consecutive polls. The tolerances stay as they are.
+  const settle = async () => {
+    await js('window.__homeSettle = {sig: "", n: 0}; true');
+    await waitFor(`(() => {
+      const busy = document.getAnimations().some(a => {
+        const t = a.effect?.getComputedTiming?.(), end = t ? t.endTime : 0;
+        return Number.isFinite(end) && a.playState !== 'finished' && a.playState !== 'idle';
+      });
+      const panel = document.querySelector('[data-home-section=system]'), grid = document.querySelector('.dashboard-grid');
+      const parts = [grid, ...(grid ? grid.children : []), panel?.querySelector('h2'), panel?.querySelector('.dashboard-section-header button'), ...(panel ? panel.querySelectorAll('.dashboard-system-chip') : [])];
+      const sig = parts.map(n => { const r = n && n.getBoundingClientRect(); return r ? [r.left, r.top, r.right, r.bottom].map(v => v.toFixed(2)).join() : '-'; }).join('|') + document.fonts.status;
+      const s = window.__homeSettle;
+      s.n = !busy && sig === s.sig ? s.n + 1 : 0; s.sig = sig;
+      return s.n >= 4 && document.fonts.status === 'loaded';
+    })()`, 15000);
+  };
   const reload = async () => {
     await win.loadURL(base);
     await navigate('home');
     await waitFor("!!document.querySelector('.hm-home .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip')");
     await waitFor("!!document.querySelector('.dashboard-core')?.classList.contains('is-dithered') && !!document.querySelector('.dashboard-core canvas')");
     await delay(900); // Initial stagger has finished before comparing edges.
+    await settle(); // ...and is verified, not assumed.
   };
   const sections = () => js("[...document.querySelectorAll('.dashboard-grid > [data-home-section]')].map(n => n.dataset.homeSection)");
   const congruent = async () => {
+    await settle();
     const result = await js(`(() => {
       const grid = document.querySelector('.dashboard-grid'), bounds = grid.getBoundingClientRect();
       const rows = [];
@@ -84,6 +104,7 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
       await reload();
       await waitFor(clear ? "!document.querySelector('[data-home-section=needs], [data-home-section=working]')" : "!!document.querySelector('[data-home-section=needs] .hm-live-row') && !!document.querySelector('[data-home-section=working] .hm-live-row')");
       await hero(false);
+      await settle();
       assert.ok(await js(`(() => {
         const panel = document.querySelector('[data-home-section=system]');
         const title = panel.querySelector('h2').getBoundingClientRect();
@@ -115,7 +136,7 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
         await js("import('/static/js/layout.js').then(m => m.resetHomeLayout())");
         await reload();
       }
-      win.setContentSize(390, 844); await delay(900);
+      win.setContentSize(390, 844); await delay(900); await settle();
       await hero(true);
       for (const patch of [{halftone:false}, {halftone:true,mode:'image'}, {mode:'shader'}]) {
         await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(patch)}))`);

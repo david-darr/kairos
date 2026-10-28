@@ -55,6 +55,11 @@ async def pull(name: str, user: str = Depends(require_admin)) -> dict:
     return {"ok": True}
 
 
+@router.post("/pull/{name}/cancel")
+async def pull_cancel(name: str, user: str = Depends(require_admin)) -> dict:
+    return {"ok": True, "cancelled": await cookbook_service.cancel_pull(name)}
+
+
 @router.get("/pull/{name}/status")
 async def pull_status(name: str, user: str = Depends(require_admin)) -> dict:
     return cookbook_service.get_pull_progress(name)
@@ -121,6 +126,11 @@ async def engine_download(name: str, user: str = Depends(require_admin)) -> dict
     return {"ok": True}
 
 
+@router.post("/engine/download/{name}/cancel")
+async def engine_download_cancel(name: str, user: str = Depends(require_admin)) -> dict:
+    return {"ok": True, "cancelled": await llamacpp_engine.cancel_download(name)}
+
+
 @router.get("/engine/download/{name}/status")
 async def engine_download_status(name: str, user: str = Depends(require_admin)) -> dict:
     return llamacpp_engine.get_download_progress(name)
@@ -128,7 +138,10 @@ async def engine_download_status(name: str, user: str = Depends(require_admin)) 
 
 @router.delete("/engine/models/{name}")
 async def engine_delete(name: str, user: str = Depends(require_admin)) -> dict:
-    llamacpp_engine.delete_downloaded(name)
+    try:
+        llamacpp_engine.delete_downloaded(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
 
 
@@ -141,6 +154,8 @@ async def engine_status(user: str = Depends(require_admin)) -> dict:
 async def engine_start(name: str, user: str = Depends(require_admin)) -> dict:
     try:
         await llamacpp_engine.start(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:

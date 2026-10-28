@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "8ba514f64f37b131bd58f82ae0ef0572fe0fa0c6750e4b1e34a6459f7fc10d34",
+  "app.js": "0e400e14aaaa916cad5cfa28d4c4f7cddc54007b4bf73d21ed842cea3792c388",
   "fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
   "index.html": "f33aff804892ecd288e84e56a6919b34f3dac15c4d2ee5b73e9c128ecba4d2a4",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -760,9 +760,9 @@
   "static/js/views/layoutPanel.js": "079549c480b8f671af9e82d003037aa73919825cf293434f88c68ad3f47995aa",
   "static/js/views/library.js": "07179a2a54bfa81e727447d341052570bb50f88a67478e36a3aa9fbad06726b0",
   "static/js/views/mobileLaunch.js": "a5872b9d87e27c219b140095c39655e1b3622c3a03cd1c945ffc7c57c85c5c16",
-  "static/js/views/notes.js": "d2515c53c26ed863e7c5114a5645c523d15f9afda244119ce147c6712b8c0274",
+  "static/js/views/notes.js": "6691d323ca3aa03b0d8422ab4b368cc70076dc57b217e53f420283361d2642be",
   "static/js/views/settings.js": "2c40c911f327bd45c09856049c04db0b56cd55088b015387681677751504e562",
-  "static/js/views/settingsChannels.js": "9791f8d567d83a0a2f6d544232d73a1cf154886ea346577033db21c2372e03eb",
+  "static/js/views/settingsChannels.js": "55542d563e6b62ba1f6284de5b2bcfaaed16ab3a3c644b4463f61b32ee8d7e47",
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "7327b00e8c47f00f02f66ff02226a1110fa314c9db1de01de768a2e1c49501f1",
   "static/js/views/speechPanel.js": "bcfd63d1d5f118e4a1ae32b5ebda9850eacc0f6c778ac86d539c7d5dcdfdc2f1",

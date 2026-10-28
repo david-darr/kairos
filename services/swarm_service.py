@@ -231,10 +231,21 @@ class SwarmService:
                 smallest = limit
         return max(MIN_STEP_UNITS, smallest or MIN_STEP_UNITS)
 
+    @staticmethod
+    def _memory_owner_scope(owner):
+        """Whose chats a company's memory search may read: None means all (an admin or
+        accounts off); otherwise the company owner, so a member's company finds only theirs."""
+        from core.auth import auth_enabled, auth_manager
+        if owner and auth_manager.is_admin(owner):
+            return None
+        if not owner and not auth_enabled():
+            return None
+        return owner or ""
+
     def _worker_factory(self, system_id):
         system = self.store.get_system(system_id)
         configuration = json.loads(system.get("configuration") or "{}")
-        memory = SwarmMemory(configuration.get("memory"))
+        memory = SwarmMemory(configuration.get("memory"), self._memory_owner_scope(system.get("owner")))
         scheduled = configuration.get("mode") == "scheduled"
         scratch = self.directory / "systems" / system_id / "work"
         scratch.mkdir(parents=True, exist_ok=True)

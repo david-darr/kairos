@@ -27,8 +27,10 @@ class FakeSessions:
     def get_session(self, session_id):
         return self.sessions.get(session_id)
 
-    def list_sessions(self):
-        return [{"id": item["id"], "title": item["title"]} for item in self.sessions.values()]
+    def list_sessions(self, owner_user=None):
+        # owner_user: the reference picker now scopes members to their own chats (batch 2 ownership fix).
+        return [{"id": item["id"], "title": item["title"]} for item in self.sessions.values()
+                if owner_user is None or item.get("owner_user") == owner_user]
 
     def record_sent_text(self, session_id, index, typed, sent):
         self.sent = (session_id, index, typed, sent)
@@ -79,7 +81,9 @@ class ChatReferenceTests(unittest.TestCase):
         with patch.object(chat_references.chat_files, "list_library", return_value=[]), \
              patch.object(chat_references.memory_tools, "search_vault", return_value=[]), \
              patch.object(chat_references.memory_tools, "search_sessions", return_value=[]):
-            chats = chat_references.search("design", "current")
+            # Batch 2 ownership fix: a caller with no admin rights is scoped to their own chats, so this
+            # fake-store check of "chats are listed" runs as an admin (member scoping: test_owner_isolation).
+            chats = chat_references.search("design", "current", is_admin=True)
         self.assertEqual([(item["kind"], item["id"]) for item in chats], [("chat", "source")])
 
     def test_resolve_uses_current_file_bytes_and_fences_each_source(self):

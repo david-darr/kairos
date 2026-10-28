@@ -19,6 +19,7 @@ with zero extra installs beyond jarvis-app's own Python dependencies.
 """
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from typing import AsyncIterator, Optional
@@ -55,9 +56,16 @@ CATALOG = [
 _process: Optional[subprocess.Popen] = None
 _running_model: Optional[str] = None
 _download_progress: dict[str, dict] = {}
+_download_tasks: dict[str, asyncio.Task] = {}
+
+# A model name is a file name inside GGUF_DIR: letters, digits, dot, dash, underscore.
+# Anything else (a Windows backslash, a slash) could leave the folder.
+_NAME_RE = re.compile(r"^[a-z0-9._-]+$")
 
 
 def _model_path(name: str) -> str:
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+        raise ValueError(f"invalid model name: {name!r}")
     return os.path.join(GGUF_DIR, f"{name}.gguf")
 
 
@@ -85,7 +93,17 @@ def start_download(name: str) -> None:
     if entry is None:
         raise ValueError(f"unknown catalog model: {name}")
     _download_progress[name] = {"status": "downloading", "completed": 0, "total": 0, "done": False, "error": None}
-    asyncio.create_task(_run_download(name, entry["url"]))
+    _download_tasks[name] = asyncio.create_task(_run_download(name, entry["url"]))
+
+
+async def cancel_download(name: str) -> bool:
+    """Stop a running download and remove its .part. False when none is running."""
+    task = _download_tasks.get(name)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    return True
 
 
 async def _run_download(name: str, url: str) -> None:
@@ -105,6 +123,11 @@ async def _run_download(name: str, url: str) -> None:
                         _download_progress[name]["completed"] = completed
         os.replace(tmp_path, _model_path(name))
         _download_progress[name] = {**_download_progress[name], "status": "success", "done": True}
+    except asyncio.CancelledError:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        _download_progress[name] = {**_download_progress.get(name, {}), "status": "cancelled", "done": True, "error": None}
+        raise
     except Exception as e:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -145,7 +168,12 @@ async def start(name: str) -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     _running_model = name
-    if not await _wait_healthy():
+    try:
+        healthy = await _wait_healthy()
+    except RuntimeError:
+        stop()
+        raise
+    if not healthy:
         stop()
         raise RuntimeError("llama.cpp server didn't come up in time")
 
@@ -154,6 +182,9 @@ async def _wait_healthy(timeout_seconds: float = 60) -> bool:
     deadline = asyncio.get_event_loop().time() + timeout_seconds
     async with httpx.AsyncClient(timeout=3) as client:
         while asyncio.get_event_loop().time() < deadline:
+            if _process is not None and _process.poll() is not None:
+                # The child is gone (usually llama-cpp-python is not installed): say so now.
+                raise RuntimeError("the built-in engine stopped as it started; is llama-cpp-python installed?")
             try:
                 resp = await client.get(f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/v1/models")
                 if resp.status_code == 200:

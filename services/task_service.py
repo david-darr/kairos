@@ -47,6 +47,7 @@ Work - Phase 4 (Build Spec)"):
 - A run's channel message is a row in the outbox (core/outbox.py); the run
   record keeps its id, and the history reads its state from there.
 """
+import logging
 import time
 import uuid
 from collections import Counter, deque
@@ -170,6 +171,8 @@ class TaskService:
             self._check_dependencies(None, depends_on or [])
         if schedule_kind == "once" and not run_at:
             raise ValueError("run_at is required for a one-shot task")
+        if schedule_kind == "once" and _stamp_seconds(run_at) is None:
+            raise ValueError("run_at must be a date and time such as 2026-11-02T09:00")
         if schedule_kind == "interval" and (not isinstance(interval_seconds, int) or interval_seconds <= 0):
             raise ValueError("interval_seconds must be a positive integer for a recurring task")
         _schedule_zone(time_zone)
@@ -290,8 +293,8 @@ class TaskService:
         if fields.get("enabled") is True and not task.get("enabled"):
             kind = task["schedule_kind"]
             if kind == "once":
-                stamp = task.get("next_run_at")
-                if not stamp or datetime.fromisoformat(stamp).timestamp() <= time.time():
+                stamp = _stamp_seconds(task.get("next_run_at"))
+                if stamp is None or stamp <= time.time():
                     raise ValueError("This one-time schedule has ended. Use Run now or schedule a new task.")
             elif kind == "daily":
                 task["next_run_at"] = _next_daily(task["run_time"], candidate.get("time_zone"), candidate.get("weekdays"))
@@ -616,8 +619,16 @@ class TaskService:
 
     def is_due(self, task_id: str) -> bool:
         task = self._tasks.get(task_id)
-        return bool(task and task["schedule_kind"] != "card" and task["enabled"] and task["next_run_at"]
-                    and datetime.fromisoformat(task["next_run_at"]).timestamp() <= time.time())
+        if not (task and task["schedule_kind"] != "card" and task["enabled"] and task["next_run_at"]):
+            return False
+        due_at = _stamp_seconds(task["next_run_at"])
+        if due_at is None:
+            # A hand-edited or imported row: it must not stop the other tasks.
+            if task_id not in _unreadable_logged:
+                _unreadable_logged.add(task_id)
+                logger.warning("task %s has an unreadable next_run_at %r; it will not run until fixed", task_id, task["next_run_at"])
+            return False
+        return due_at <= time.time()
 
     def recover_interrupted_runs(self) -> list[dict]:
         """At startup nothing is running yet, so a scheduled task still marked
@@ -871,6 +882,18 @@ def _model_label(endpoint_id: Optional[str]) -> str:
     from core import model_endpoints
     endpoint = model_endpoints.get_endpoint(endpoint_id)
     return endpoint["name"] if endpoint else "a removed model"
+
+
+logger = logging.getLogger(__name__)
+_unreadable_logged: set = set()
+
+
+def _stamp_seconds(stamp) -> Optional[float]:
+    """An ISO date-time as epoch seconds, or None when it cannot be read."""
+    try:
+        return datetime.fromisoformat(stamp).timestamp()
+    except (TypeError, ValueError):
+        return None
 
 
 def _iso_in(seconds: int) -> str:

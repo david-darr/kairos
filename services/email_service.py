@@ -53,6 +53,7 @@ class EmailService:
         imap_host: str, imap_port: int,
         smtp_host: str, smtp_port: int,
         smtp_security: str = "ssl",
+        owner: Optional[str] = None,
     ) -> dict:
         account_id = uuid.uuid4().hex[:12]
         account = {
@@ -65,6 +66,7 @@ class EmailService:
             "smtp_port": smtp_port,
             "smtp_security": smtp_security,  # "ssl" | "starttls" | "none"
             "created_at": time.time(),
+            "owner": owner,  # the Email tab shows an account only to its owner and admins
         }
         self._accounts[account_id] = account
         self._save()
@@ -129,7 +131,7 @@ class EmailService:
             status, data = imap.search(None, *(criteria or ["ALL"]))
             if status != "OK":
                 return []
-            ids = data[0].split()[-limit:]
+            ids = data[0].split()[-max(1, min(int(limit), 200)):]  # [-0:] would be the whole mailbox
             for msg_id in reversed(ids):
                 status, msg_data = imap.fetch(msg_id, "(FLAGS RFC822.HEADER)")
                 if status != "OK" or not msg_data or not msg_data[0]:
