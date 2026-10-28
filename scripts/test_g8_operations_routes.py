@@ -117,7 +117,7 @@ class RouteSweepTests(Base):
             worker.join(10)
             if worker.is_alive():
                 hung.append((method, path))
-            elif box.get("code") not in (401, 403) and not (path in ADDON_GATE_FIRST and box.get("code") == 409):
+            elif box.get("code") not in (401, 403) and not (path == "/api/creative/oauth/callback" and box.get("code") == 409):
                 open_routes.append((method, path, box.get("code")))
         self.assertEqual(hung, [], "routes that never answered an anonymous caller")
         self.assertEqual(open_routes, [], "non-public routes an anonymous caller was not refused on")
