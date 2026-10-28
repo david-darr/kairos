@@ -157,6 +157,9 @@ async def lifespan(_app: FastAPI):
     start_store_watch()
     from services import background_tasks; background_tasks.start()
     task_scheduler.start()
+    # Tool-result search text for old chats: batched in a daemon thread so it never holds the
+    # store lock against startup (core/session_manager_store.py).
+    from core import session_manager_store; session_manager_store.start_background_migration()
     await discord_channel.start()
     # Every other messaging platform (core/connectors), each supervised so a
     # bad token or an outage is a status in Settings, not a failed boot.
@@ -191,6 +194,7 @@ async def lifespan(_app: FastAPI):
             await remote_access.stop()
             await agent_calls.shutdown()
             await background_tasks.stop()
+            session_manager_store.stop_background_migration()
             task_scheduler.stop()
             await discord_channel.stop()
             await connector_hub.stop_all()
