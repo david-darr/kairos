@@ -426,53 +426,195 @@ def _migrate_compaction_data(conn: sqlite3.Connection) -> None:
     changes, each guarded by its own meta marker (set last, so an interrupted
     run simply repeats; every step is safe to repeat):
 
-    1. flag stored "Conversation compacted" notices display-only;
+    1. flag stored "Conversation compacted" notices display-only (inline, at
+       connect: it reads only the messages after each chat's first checkpoint);
     2. add tool-result text to the search index of messages that have saved
-       tool rounds (the only rows whose indexed text changed).
-
-    Work is one short transaction per chat and touches only chats with a
-    checkpoint, and only the message rows that need it."""
+       tool rounds. That one is NOT done here: on a large store it is minutes
+       of work and this runs under the store lock during app startup, where it
+       kept /api/health from answering. migrate_tool_text_index() does it in
+       small batches from a background thread (start_background_migration);
+       here it is only marked done for a store with no messages at all.
+    """
     done = {r["key"] for r in conn.execute(
         "SELECT key FROM meta WHERE key IN (?, ?)", (NOTICE_MIGRATION_MARKER, TOOL_INDEX_MIGRATION_MARKER))}
     if NOTICE_MIGRATION_MARKER not in done:
         flagged = 0
-        for r in conn.execute(
-                "SELECT id, json_extract(doc, '$.compactions') AS c FROM sessions "
-                "WHERE json_extract(doc, '$.compactions') IS NOT NULL").fetchall():
-            try:
-                compactions = json.loads(r["c"]) or []
-            except (TypeError, ValueError):
-                continue
-            first = min((c.get("through_index", 0) for c in compactions), default=0)
+        chats = conn.execute(
+            "SELECT id, json_extract(doc, '$.compactions') AS c FROM sessions "
+            "WHERE json_extract(doc, '$.compactions') IS NOT NULL").fetchall()
+        # One commit per 200 chats: a commit per chat was over half the cost.
+        for start in range(0, len(chats), 200):
             with conn:
-                for m in conn.execute(
-                        "SELECT idx, doc FROM messages WHERE session_id = ? AND idx >= ? AND role = 'assistant' "
-                        "AND content LIKE ?", (r["id"], first, COMPACTION_NOTICE_HEAD + "%")).fetchall():
-                    doc = json.loads(m["doc"])
-                    if is_legacy_compaction_notice(doc, m["idx"], compactions):
-                        doc["display_only"] = True
-                        conn.execute("UPDATE messages SET doc = ? WHERE session_id = ? AND idx = ?",
-                                     (json.dumps(doc, ensure_ascii=False), r["id"], m["idx"]))
-                        flagged += 1
+                for r in chats[start:start + 200]:
+                    try:
+                        compactions = json.loads(r["c"]) or []
+                    except (TypeError, ValueError):
+                        continue
+                    first = min((c.get("through_index", 0) for c in compactions), default=0)
+                    for m in conn.execute(
+                            "SELECT idx, doc FROM messages WHERE session_id = ? AND idx >= ? AND role = 'assistant' "
+                            "AND content LIKE ?", (r["id"], first, COMPACTION_NOTICE_HEAD + "%")).fetchall():
+                        doc = json.loads(m["doc"])
+                        if is_legacy_compaction_notice(doc, m["idx"], compactions):
+                            doc["display_only"] = True
+                            conn.execute("UPDATE messages SET doc = ? WHERE session_id = ? AND idx = ?",
+                                         (json.dumps(doc, ensure_ascii=False), r["id"], m["idx"]))
+                            flagged += 1
         with conn:
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (NOTICE_MIGRATION_MARKER,))
         if flagged:
             logger.info("session store: flagged %d legacy compaction notice(s) display-only", flagged)
-    if TOOL_INDEX_MIGRATION_MARKER not in done:
-        sessions = conn.execute(
-            "SELECT DISTINCT session_id FROM messages WHERE doc LIKE '%\"tool_rounds\"%'").fetchall()
-        for r in sessions:
-            with conn:
-                for m in conn.execute(
-                        "SELECT idx, role, doc FROM messages WHERE session_id = ? AND doc LIKE '%\"tool_rounds\"%'",
-                        (r["session_id"],)).fetchall():
-                    conn.execute("DELETE FROM messages_fts WHERE session_id = ? AND idx = ?", (r["session_id"], m["idx"]))
-                    conn.execute("INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
-                                 (search_text(json.loads(m["doc"])), r["session_id"], m["idx"], m["role"]))
+    if TOOL_INDEX_MIGRATION_MARKER not in done and conn.execute("SELECT 1 FROM messages LIMIT 1").fetchone() is None:
         with conn:
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
-        if sessions:
-            logger.info("session store: re-indexed tool results for %d chat(s)", len(sessions))
+
+
+TOOL_INDEX_BATCH = 200       # messages re-indexed per transaction (one lock hold)
+_FTS_MAP_CHUNK = 5000        # FTS rows read per lock hold while mapping (session, idx) -> rowid
+_tool_index_thread: Optional[threading.Thread] = None
+_tool_index_stop = threading.Event()
+
+
+def _reindex_tool_message(conn: sqlite3.Connection, sid: str, idx: int, rowids: dict, extras: dict,
+                          map_end: int) -> bool:
+    """Re-index one message's search text, by rowid, under the caller's lock and
+    transaction. Re-reads the row first, so a message edited, replaced or
+    deleted since it was chosen is judged as it is now: a row written after
+    the rowid map was taken (rowid > map_end) was indexed by current code
+    already and is left alone."""
+    row = conn.execute("SELECT role, doc FROM messages WHERE session_id = ? AND idx = ?", (sid, idx)).fetchone()
+    if row is None:
+        return False
+    try:
+        message = json.loads(row["doc"])
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(message, dict) or not message.get("tool_rounds"):
+        return False
+    old = rowids.get((sid, idx))
+    if old is None:
+        if conn.execute("SELECT 1 FROM messages_fts WHERE rowid > ? AND session_id = ? AND idx = ?",
+                        (map_end, sid, idx)).fetchone():
+            return False  # indexed after the map was taken
+        new_rowid = None  # no index row at all: add one
+    else:
+        if conn.execute("SELECT 1 FROM messages_fts WHERE rowid = ? AND session_id = ? AND idx = ?",
+                        (old, sid, idx)).fetchone() is None:
+            return False  # replaced since the map was taken; the replacement is current
+        for r in [old, *extras.get((sid, idx), ())]:
+            conn.execute("DELETE FROM messages_fts WHERE rowid = ? AND session_id = ? AND idx = ?", (r, sid, idx))
+        new_rowid = old  # keep the rowid so the table does not grow a tail
+    conn.execute("INSERT INTO messages_fts (rowid, content, session_id, idx, role) VALUES (?, ?, ?, ?, ?)",
+                 (new_rowid, search_text(message), sid, idx, row["role"]))
+    return True
+
+
+def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int = TOOL_INDEX_BATCH) -> bool:
+    """Step 2 of the compaction data migration, in small batches.
+
+    messages_fts has no index on session_id/idx (UNINDEXED columns), so a
+    DELETE per message scanned the whole table each time - hours at 20k tool
+    messages. This reads the FTS table once, in chunks, into a (session, idx)
+    -> rowid map, then replaces rows by rowid, `batch` messages per
+    transaction. The store's lock is taken per chunk or batch, so requests
+    interleave. Idempotent and resumable: the marker is set only after the
+    last batch; an interrupted run is simply redone. Returns True when the
+    marker is set, False if stopped early (or the store was closed)."""
+    stop = stop or threading.Event()
+    with _LOCK:
+        conn = _connect()
+        if conn.execute("SELECT 1 FROM meta WHERE key = ?", (TOOL_INDEX_MIGRATION_MARKER,)).fetchone():
+            return True
+        sessions = [r["id"] for r in conn.execute("SELECT id FROM sessions ORDER BY id")]
+
+    rowids: dict = {}
+    extras: dict = {}
+    last = 0
+    while True:
+        with _LOCK:
+            if stop.is_set() or _conn is not conn:
+                return False
+            rows = conn.execute("SELECT rowid, session_id, idx FROM messages_fts WHERE rowid > ? "
+                                "ORDER BY rowid LIMIT ?", (last, _FTS_MAP_CHUNK)).fetchall()
+        if not rows:
+            break
+        for r in rows:
+            key = (r[1], r[2])
+            if key in rowids:
+                extras.setdefault(key, []).append(r[0])
+            else:
+                rowids[key] = r[0]
+        last = rows[-1][0]
+        stop.wait(0.001)
+    map_end = last
+
+    pending: list = []
+    count = 0
+
+    def flush(items: list) -> bool:
+        nonlocal count
+        with _LOCK:
+            if stop.is_set() or _conn is not conn:
+                return False
+            with conn:
+                count += sum(_reindex_tool_message(conn, sid, idx, rowids, extras, map_end) for sid, idx in items)
+        stop.wait(0.001)
+        return True
+
+    for sid in sessions:
+        with _LOCK:
+            if stop.is_set() or _conn is not conn:
+                return False
+            pending.extend((sid, r[0]) for r in conn.execute(
+                "SELECT idx FROM messages WHERE session_id = ? AND doc LIKE '%\"tool_rounds\"%' ORDER BY idx", (sid,)))
+        while len(pending) >= batch:
+            if not flush(pending[:batch]):
+                return False
+            del pending[:batch]
+        stop.wait(0.0005)
+    if pending and not flush(pending):
+        return False
+    with _LOCK:
+        if stop.is_set() or _conn is not conn:
+            return False
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
+    if count:
+        logger.info("session store: re-indexed tool results of %d message(s)", count)
+    return True
+
+
+def _run_tool_index_migration(stop: threading.Event) -> None:
+    try:
+        migrate_tool_text_index(stop)
+    except Exception:
+        # Not fatal: the marker stays unset, so the next start tries again.
+        logger.exception("session store: background tool-text re-index failed")
+
+
+def start_background_migration() -> Optional[threading.Thread]:
+    """Start the step-2 re-index in a daemon thread, unless one is running.
+    Called once by the app after startup; never from _connect(), so it cannot
+    hold the store lock against startup. A store already indexed (or empty)
+    finishes in one marker lookup. Stop it with stop_background_migration()."""
+    global _tool_index_thread, _tool_index_stop
+    with _LOCK:
+        if _tool_index_thread is not None and _tool_index_thread.is_alive():
+            return _tool_index_thread
+        _tool_index_stop = threading.Event()
+        _tool_index_thread = threading.Thread(target=_run_tool_index_migration, args=(_tool_index_stop,),
+                                              name="session-store-reindex", daemon=True)
+        _tool_index_thread.start()
+        return _tool_index_thread
+
+
+def stop_background_migration(timeout: float = 30.0) -> None:
+    """Ask the re-index thread to stop and wait for it (it checks between
+    batches, so this takes at most one batch). Safe when none ever started."""
+    thread = _tool_index_thread
+    _tool_index_stop.set()
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout)
 
 
 def connection() -> sqlite3.Connection:
@@ -1199,6 +1341,7 @@ def close() -> None:
     a temp data directory can actually be removed — Windows refuses to
     delete a file that still has an open handle."""
     global _conn, _last_migration
+    stop_background_migration()  # before the lock: it takes the lock per batch
     with _LOCK:
         if _conn is not None:
             _conn.close()

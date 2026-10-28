@@ -8,6 +8,8 @@ import asyncio
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -320,6 +322,8 @@ class LegacyDataMigrationTests(CompactionBase):
     def test_legacy_notice_is_flagged_exactly_and_nothing_else(self):
         store, conn = self._legacy_chat()
         store._migrate_compaction_data(conn)
+        self.assertEqual(conn.execute("SELECT count(*) FROM meta WHERE key = ?", (store.TOOL_INDEX_MIGRATION_MARKER,)).fetchone()[0], 0,
+                         "tool-text indexing is not part of the connect-time migration")
         msgs = session_manager.get_session(self.sid)["messages"]
         self.assertEqual([i for i, m in enumerate(msgs) if m.get("display_only")], [16])
         self.assertEqual(len([m for m in self.effective() if m["content"].startswith(NOTICE_HEAD)]), 2)
@@ -328,15 +332,200 @@ class LegacyDataMigrationTests(CompactionBase):
         store, conn = self._legacy_chat()
         self.assertEqual(memory_tools.search_this_chat_archive(self.sid, "vendor badge number"), [])
         store._migrate_compaction_data(conn)
+        self.assertTrue(store.migrate_tool_text_index())
         self.assertTrue(memory_tools.search_this_chat_archive(self.sid, "vendor badge number"))
         before = conn.execute("SELECT count(*) FROM messages_fts WHERE session_id = ?", (self.sid,)).fetchone()[0]
         with conn:
             conn.execute("DELETE FROM meta WHERE key IN (?, ?)", (store.NOTICE_MIGRATION_MARKER, store.TOOL_INDEX_MIGRATION_MARKER))
         store._migrate_compaction_data(conn)  # re-run with the markers cleared: same result
+        store.migrate_tool_text_index()
         self.assertEqual(before, conn.execute("SELECT count(*) FROM messages_fts WHERE session_id = ?", (self.sid,)).fetchone()[0])
         self.assertEqual(len(memory_tools.search_this_chat_archive(self.sid, "vendor badge number")), 1)
         self.assertEqual(conn.execute("SELECT count(*) FROM meta WHERE key IN (?, ?)",
                                       (store.NOTICE_MIGRATION_MARKER, store.TOOL_INDEX_MIGRATION_MARKER)).fetchone()[0], 2)
+
+
+class BackgroundToolIndexTests(unittest.TestCase):
+    """Step 2 (tool text into the search index) runs in batches off the startup path."""
+
+    def setUp(self):
+        from core import session_manager_store as store
+        self.store = store
+        self.ids = []
+        for c in range(6):
+            sid = session_manager.create_session(f"bg{c}")["id"]
+            self.ids.append(sid)
+            for n in range(12):
+                extra = None
+                if n % 3 == 1:
+                    extra = {"tool_rounds": {"endpoint_id": "local", "messages": [
+                        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "read_vault_file", "arguments": "{}"}}]},
+                        {"role": "tool", "tool_call_id": "c1", "content": f"zeta{c}x{n} fact"}]}}
+                session_manager.append_message(sid, "assistant" if n % 2 else "user", f"plain {c} {n}", extra=extra)
+        self.conn = store.connection()
+        self.reset_legacy()
+        self.addCleanup(self.cleanup)
+
+    def cleanup(self):
+        self.store.stop_background_migration()
+        self.conn.set_trace_callback(None)
+        for sid in self.ids:
+            session_manager.delete_session(sid)
+
+    def reset_legacy(self):
+        """As an older build indexed: message text only, tool-text marker cleared."""
+        with self.conn:
+            for r in self.conn.execute("SELECT session_id, idx, role, content FROM messages WHERE session_id IN (%s)"
+                                       % ",".join("?" * len(self.ids)), self.ids).fetchall():
+                self.conn.execute("DELETE FROM messages_fts WHERE session_id = ? AND idx = ?", (r[0], r[1]))
+                self.conn.execute("INSERT INTO messages_fts (content, session_id, idx, role) VALUES (?, ?, ?, ?)",
+                                  (r[3], r[0], r[1], r[2]))
+        self.reset_marker_only()
+
+    def reset_marker_only(self):
+        with self.conn:
+            self.conn.execute("DELETE FROM meta WHERE key = ?", (self.store.TOOL_INDEX_MIGRATION_MARKER,))
+
+    def marker(self):
+        return self.conn.execute("SELECT count(*) FROM meta WHERE key = ?",
+                                 (self.store.TOOL_INDEX_MIGRATION_MARKER,)).fetchone()[0]
+
+    def hits(self, word):
+        return self.conn.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH ?", (word,)).fetchone()[0]
+
+    def fts_rows(self):
+        return self.conn.execute("SELECT count(*) FROM messages_fts").fetchone()[0]
+
+    def test_connect_time_migration_does_not_touch_tool_text(self):
+        self.store._migrate_compaction_data(self.conn)
+        self.assertEqual(self.hits("zeta0x1"), 0)
+        self.assertEqual(self.marker(), 0)
+
+    def test_no_per_row_full_fts_delete(self):
+        statements = []
+        self.conn.set_trace_callback(statements.append)
+        try:
+            self.assertTrue(self.store.migrate_tool_text_index(batch=7))
+        finally:
+            self.conn.set_trace_callback(None)
+        deletes = [s for s in statements if "DELETE FROM messages_fts" in s]
+        self.assertTrue(deletes)
+        self.assertEqual([s for s in deletes if "rowid" not in s], [],
+                         "every FTS delete must be by rowid (session_id/idx are unindexed)")
+
+    def test_runs_in_batches_one_transaction_each(self):
+        commits = []
+        self.conn.set_trace_callback(lambda q: commits.append(q) if q.startswith("COMMIT") else None)
+        try:
+            self.store.migrate_tool_text_index(batch=5)
+        finally:
+            self.conn.set_trace_callback(None)
+        self.assertGreaterEqual(len(commits), 4, "24 tool messages at 5 per batch is several transactions")
+
+    def test_background_thread_completes_and_makes_tool_text_searchable(self):
+        before = self.fts_rows()
+        thread = self.store.start_background_migration()
+        thread.join(30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(self.hits("zeta3x4"), 1)
+        self.assertEqual(self.hits("zeta0x2"), 0, "a message without tool rounds gained nothing")
+        self.assertEqual(self.fts_rows(), before, "re-indexing replaces rows, never adds or drops them")
+        self.assertEqual(self.marker(), 1)
+
+    def test_second_run_changes_nothing(self):
+        self.store.migrate_tool_text_index()
+        snap = self.conn.execute("SELECT count(*), sum(length(content)), sum(rowid) FROM messages_fts").fetchone()[:]
+        self.assertTrue(self.store.migrate_tool_text_index())  # marker set: returns at once
+        self.reset_marker_only()
+        self.assertTrue(self.store.migrate_tool_text_index())  # redone: same rows, same text
+        self.assertEqual(snap, self.conn.execute(
+            "SELECT count(*), sum(length(content)), sum(rowid) FROM messages_fts").fetchone()[:])
+        self.assertEqual(self.hits("zeta1x1"), 1)
+
+    def test_stopped_run_leaves_no_marker_and_a_later_run_finishes(self):
+        stop = threading.Event()
+        calls = []
+        real = self.store._reindex_tool_message
+
+        def stopping(*a, **k):
+            calls.append(1)
+            if len(calls) == 6:
+                stop.set()
+            return real(*a, **k)
+        with patch.object(self.store, "_reindex_tool_message", side_effect=stopping):
+            self.assertFalse(self.store.migrate_tool_text_index(stop, batch=3))
+        self.assertEqual(self.marker(), 0)
+        self.assertTrue(self.store.migrate_tool_text_index(batch=3))  # the restart: redoing done rows is harmless
+        self.assertEqual(self.marker(), 1)
+        for c in range(6):
+            for n in (1, 4, 7, 10):
+                self.assertEqual(self.hits(f"zeta{c}x{n}"), 1, (c, n))
+
+    def test_message_written_during_the_run_is_indexed_exactly_once(self):
+        sid = self.ids[0]
+        real = self.store._reindex_tool_message
+        state = {"done": False}
+
+        def interleaved(*a, **k):
+            if not state["done"]:
+                state["done"] = True  # another request lands between two batches, while the lock is free
+                session_manager.append_message(sid, "assistant", "late reply", extra={"tool_rounds": {
+                    "endpoint_id": "local", "messages": [
+                        {"role": "assistant", "content": None, "tool_calls": [
+                            {"id": "c9", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
+                        {"role": "tool", "tool_call_id": "c9", "content": "lateword fact"}]}})
+            return real(*a, **k)
+        with patch.object(self.store, "_reindex_tool_message", side_effect=interleaved):
+            self.assertTrue(self.store.migrate_tool_text_index(batch=4))
+        self.assertEqual(self.hits("lateword"), 1)
+        for sid2 in self.ids:  # every message still has exactly one index row
+            n_msgs = self.conn.execute("SELECT count(*) FROM messages WHERE session_id = ?", (sid2,)).fetchone()[0]
+            n_fts = self.conn.execute("SELECT count(*) FROM messages_fts WHERE session_id = ?", (sid2,)).fetchone()[0]
+            self.assertEqual(n_msgs, n_fts, sid2)
+
+    def test_message_replaced_during_the_run_keeps_one_current_row(self):
+        sid = self.ids[1]
+        real = self.store._reindex_tool_message
+        state = {"done": False}
+
+        def interleaved(*a, **k):
+            if not state["done"]:
+                state["done"] = True
+                msgs = session_manager.get_session(sid)["messages"]
+                msgs[4]["content"] = "edited text"  # a rewrite re-derives every index row of the chat
+                self.store.save_session({**session_manager.get_session(sid), "messages": msgs})
+            return real(*a, **k)
+        with patch.object(self.store, "_reindex_tool_message", side_effect=interleaved):
+            self.assertTrue(self.store.migrate_tool_text_index(batch=4))
+        self.assertEqual(self.hits("zeta1x4"), 1)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM messages_fts WHERE session_id = ? AND idx = 4",
+                                           (sid,)).fetchone()[0], 1)
+
+    def test_requests_interleave_while_the_thread_runs(self):
+        thread = self.store.start_background_migration()
+        deadline = time.time() + 10
+        served = 0
+        while True:
+            self.assertTrue(self.store.session_exists(self.ids[0]))
+            served += 1
+            if not thread.is_alive() or time.time() > deadline:
+                break
+        thread.join(10)
+        self.assertGreater(served, 0)
+
+    def test_stop_ends_the_thread_and_leaves_none_behind(self):
+        real = self.store._reindex_tool_message
+
+        def slow(*a, **k):
+            time.sleep(0.05)
+            return real(*a, **k)
+        with patch.object(self.store, "_reindex_tool_message", side_effect=slow):
+            thread = self.store.start_background_migration()
+            time.sleep(0.15)
+            self.store.stop_background_migration()
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(self.marker(), 0)
 
 
 class RedactionHelperTests(unittest.TestCase):
