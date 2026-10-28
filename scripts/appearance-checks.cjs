@@ -75,14 +75,32 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   // moves to it; the art fills the window in its own colours and the theme follows them.
   assert.equal(await js("document.querySelectorAll('.appearance-effects-grid input').length"), 5, 'Animated is no longer a background effect');
   await set({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'scatter' });
-  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.backgroundEffect]; })"), ['animated', 'dithered']);
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.backgroundEffect, a.animatedPiece, a.artLook]; })"), ['animated', 'dithered', 'aurora-cabin-snowfall', 'original'], 'Scatter gives way to the default piece, as made');
   assert.equal(await js("!document.querySelector('.appearance-art-options').hidden && document.querySelector('.appearance-effect-section').hidden && !document.querySelector('.appearance-art-options select#appearance-effect-tint')"), true, 'Its own section, with no tint');
-  for (const look of ['ascii', 'dither', 'dots', 'pixels']) {
-    await set({ animatedLook: look });
-    await waitFor("[...document.querySelectorAll('#app-art .background-effect-canvas')].some(c => c.dataset.effect === 'animated' && c.width > 400)");
+  // Shown unchanged (David, 2026-10-28): ASCII Magic's own player draws the whole piece, centred and
+  // as large as the window allows, on their black stage, with nothing over it or around it.
+  const unchanged = `(() => {
+    const art = document.getElementById('app-art'), canvas = art?.querySelector(':scope > canvas'), r = canvas?.getBoundingClientRect();
+    if (!r || !r.width) return 'no canvas';
+    const fills = Math.abs(r.width - innerWidth) <= 2 || Math.abs(r.height - innerHeight) <= 2;
+    const centred = Math.abs(r.left + r.width / 2 - innerWidth / 2) <= 2 && Math.abs(r.top + r.height / 2 - innerHeight / 2) <= 2;
+    const inside = r.width <= innerWidth + 2 && r.height <= innerHeight + 2;
+    const only = [...art.children].every(node => node === canvas || node.matches('pre.art-player'));
+    return [fills, centred, inside, only, getComputedStyle(art).backgroundColor].join(' ');
+  })()`;
+  await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+  for (const look of ['dots', 'ascii', 'dither', 'blocks', 'original']) {
+    await set({ artLook: look });
+    await waitFor(`document.querySelector('.appearance-art-look[data-look=${look}]')?.getAttribute('aria-pressed') === 'true' && (${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
   }
-  await set({ animatedLook: 'ascii' });
-  // The theme is taken from the art: its background as the base, an accent that reads on it.
+  // Every piece, searchable: the three David named are there.
+  for (const [query, name] of [['aurora', 'Aurora Cabin Snowfall'], ['fuji', 'Fuji Dawn Lake'], ['balloon valley', 'Balloon Valley Sunrise']]) {
+    await js(`{ const s = document.getElementById('appearance-art-search'); s.value = ${JSON.stringify(query)}; s.dispatchEvent(new Event('input')); }`);
+    assert.ok(await js(`[...document.getElementById('appearance-art-piece').options].some(o => o.text === ${JSON.stringify(name)})`), `${name} can be found`);
+  }
+  await js("{ const s = document.getElementById('appearance-art-search'); s.value = ''; s.dispatchEvent(new Event('input')); }");
+  assert.ok(await js("document.getElementById('appearance-art-piece').options.length > 700"), 'The whole library is listed');
+  // The theme is taken from the art: a deep shade of its background as the base, an accent that reads on it.
   const readable = `(() => {
     const s = getComputedStyle(document.documentElement), probe = document.createElement('span'); document.body.append(probe);
     const rgb = name => { probe.style.color = s.getPropertyValue(name); return getComputedStyle(probe).color.match(/[0-9.]+/g).slice(0, 3).map(Number); };
@@ -90,20 +108,28 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     const ratio = (a, b) => { const [x, y] = [l(rgb(a)), l(rgb(b))]; return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
     const out = [rgb('--bg').join(','), ratio('--text', '--bg'), ratio('--accent', '--bg')]; probe.remove(); return out;
   })()`;
-  for (const [piece, base] of [['sleepy-moon', '20,30,72'], ['cool-sun-shades', '127,168,203'], ['lava-lamp', '28,16,40']]) {
+  const bases = [];
+  for (const piece of ['fuji-dawn-lake', 'balloon-valley-sunrise', 'lava-lamp']) {
+    const before = await js("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()");
     await set({ animatedPiece: piece });
-    await waitFor(`import('/static/js/appearance.js').then(m => m.getAppearance().artBase !== '' && getComputedStyle(document.documentElement).getPropertyValue('--bg').replace(/ /g, '') === 'rgb(${base})')`);
-    const [, text, accent] = await js(readable);
+    await waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() !== ${JSON.stringify(before)}`);
+    await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+    const [base, text, accent] = await js(readable);
+    bases.push(base);
     assert.ok(text >= 4.5 && accent >= 4.5, `${piece}: text ${text.toFixed(2)} and accent ${accent.toFixed(2)} read on its base`);
+    if (piece === 'fuji-dawn-lake') await capture('appearance-animated-piece');
   }
-  await capture('appearance-animated-piece');
-  await set({ animatedPiece: 'scatter', artPanels: 1 });
+  assert.equal(new Set(bases).size, 3, 'Each piece gives its own colours');
+  await set({ animatedPiece: 'aurora-cabin-snowfall', artPanels: 1 });
   assert.equal(await js("getComputedStyle(document.documentElement).getPropertyValue('--art-alpha').trim()"), '0.34');
   await set({ artPanels: .6 });
-  await waitFor("!!document.querySelector('#app-art .background-effect-canvas[data-effect=animated]')");
-  await capture('appearance-scatter');
+  // Motion off holds a frame; the piece stays whole.
+  await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); m.updateAppearance({ effectOptions: { ...a.effectOptions, animated: { ...a.effectOptions.animated, motion: false } } }); })");
+  await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+  await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); m.updateAppearance({ effectOptions: { ...a.effectOptions, animated: { ...a.effectOptions.animated, motion: true } } }); })");
+  await capture('appearance-animated-aurora');
   // Your own animation: a still PNG and a short WebM made here, each kept and played as it is,
-  // the theme taken from its colours. Removing it goes back to Scatter.
+  // the theme taken from its colours. Removing it goes back to the default piece.
   await js(`(async () => {
     const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 }), g = c.getContext('2d');
     g.fillStyle = '#0c2a1c'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#ff3d7f'; g.fillRect(20, 20, 24, 24);
@@ -127,7 +153,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   await waitFor("document.querySelector('#app-art video')?.readyState >= 2");
   await capture('appearance-animated-own');
   await js("import('/static/js/appearance.js').then(m => m.removeAppearanceArt())");
-  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.animatedPiece, a.hasArt, !!document.querySelector('#app-art video')]; })"), ['scatter', false, false]);
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.animatedPiece, a.hasArt, !!document.querySelector('#app-art video')]; })"), ['aurora-cabin-snowfall', false, false]);
   await set({ mode: 'default' });
   assert.equal(await js("!!document.getElementById('app-art')"), false, 'The art layer goes with the style');
   // See through to the desktop: only where the desktop app offers it, on by default in glass.

@@ -163,11 +163,12 @@
 .appearance-glass-paper[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .appearance-glass-swatch { display: block; height: 34px; border: 1px solid var(--border); }
 .appearance-glass-control { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
-.appearance-art-looks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.appearance-art-looks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .appearance-art-look { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
 .appearance-art-look[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.appearance-art-look-thumb { display: block; position: relative; height: 54px; overflow: hidden; background: var(--bg); }
-.appearance-art-look-thumb canvas { width: 100%; height: 100%; display: block; }
+.appearance-art-look-thumb { display: flex; align-items: center; justify-content: center; position: relative; height: 54px; overflow: hidden; background: var(--art-stage, var(--bg)); }
+/* The tiles show a crop at a readable size; the player otherwise caps its canvas at the tile's width. */
+.appearance-art-look-thumb > canvas { flex: none; max-width: none !important; }
 /* Six background styles since Animated: two rows of three where there is room, otherwise two
    columns with the last card spanning its row, so no card sits alone beside a gap. */
 .kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -188,10 +189,12 @@
 /* Animated (David, 2026-10-28): the art fills the window behind the app (appearance.js #app-art)
    and the theme tokens come from its colours. The surfaces let it through like Liquid glass;
    --art-alpha is how solid they are, set by Show art through panels. */
-.app-art { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--bg); }
-.app-art > :is(canvas, img, video) { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.app-art { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--art-stage, var(--bg)); display: flex; align-items: center; justify-content: center; }
+/* A piece is the player's own canvas, whole and unscaled by CSS (artPlayer.js sizes it). */
+.app-art > canvas:not(.art-still) { flex: none; }
+.app-art > :is(img, video, .art-still) { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-player { margin: 0; }
 :root[data-appearance='animated'] body, :root[data-appearance='animated'] :is(#app, #view-content, .chat-layout, #chat-main, .forge-workspace) { background: transparent; }
-:root[data-appearance='animated'] #content { background: color-mix(in srgb, var(--bg) calc(var(--art-alpha) * 20%), transparent); }
 :root[data-appearance='animated'] .dashboard-hero { background: var(--bg-panel); }
 :root[data-appearance='animated'] :is(.kairos-redesign-backdrop, .chat-backdrop) { display: none; }
 :root:not([data-appearance='default'])[data-appearance='animated'] :is(#sidebar, .chat-input-bar, .chat-stacked-pane, .artifact-panel, .rd-history, .rd-all-tabs, .rd-flyout,
@@ -204,6 +207,12 @@
 :root[data-appearance='animated'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--art-alpha) * 100%), transparent); }
 .art-animated { background: radial-gradient(circle at 30% 40%, var(--k-gold-hi) 0 4px, transparent 5px), radial-gradient(circle at 70% 60%, var(--k-rose) 0 4px, transparent 5px),
   repeating-linear-gradient(90deg, var(--k-powder) 0 2px, transparent 2px 6px), var(--k-ink-dim); }
-.kairos-redesign[data-appearance='animated'] .appearance-preview-scene { inset: 0; mask-image: none; }
+.kairos-redesign[data-appearance='animated'] .appearance-preview-scene { inset: 0; mask-image: none; display: flex; align-items: center; justify-content: center; background: var(--art-stage, var(--bg)); }
+.appearance-art-picker { display: grid; gap: 8px; margin: 14px 0; font-size: 13px; color: var(--text); }
+.appearance-art-picker input[type='search'] { min-height: 40px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--bg-panel-solid); color: var(--text); font: inherit; }
+.appearance-art-picker select { width: 100%; min-height: 220px; padding: 6px; border: 1px solid var(--hairline); border-radius: 14px; background: var(--bg-panel-solid); color: var(--text); font: inherit; }
+.appearance-art-picker select optgroup { color: var(--text-dim); font-style: normal; }
+.appearance-art-picker select option { color: var(--text); padding: 3px 8px; }
+.appearance-art-picker :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .appearance-preview-own { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .appearance-art-options > .meta { font-size: 12px; line-height: 1.6; }

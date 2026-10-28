@@ -47,22 +47,14 @@ function pieceCounts(mod) {
   return { base: average(back), front };
 }
 
-// One piece: its own background as the base, its brightest character colour as the accent.
+// One piece: a deep shade of its own background as the base, so the app sits with the black stage
+// the piece is shown on (as on ascii-magic.com), and its brightest colour as the accent.
 export function pieceColors(mod) {
   const found = pieceCounts(mod);
   if (!found?.base) return null;
-  const accent = pickAccent(found.front, found.base);
-  return { base: hexOf(found.base), accent: accent ? hexOf(accent) : null };
-}
-
-// Scatter: a deep shade of the pieces' backgrounds, so the cut-out characters stand out on it,
-// and the most colourful character colour among them.
-export function scatterColors(mods) {
-  const found = mods.map(pieceCounts).filter(item => item?.base);
-  if (!found.length) return null;
-  let base = average(found.map(item => [item.base, 1]));
+  let base = found.base;
   while (luminance(base) > .025) base = base.map(v => v * .85);
-  const accent = pickAccent(found.flatMap(item => item.front), base);
+  const accent = pickAccent(found.front, base);
   return { base: hexOf(base), accent: accent ? hexOf(accent) : null };
 }
 

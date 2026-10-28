@@ -1,12 +1,13 @@
-import { PICTURE_EFFECTS, ART_PIECES, ART_LOOKS, SCATTER, OWN_ART, pickScatter, normalizeEffectOptions } from './backgroundEffectPreferences.js';
-import { pieceColors, scatterColors, pictureColors } from './artTheme.js';
-import { mountBackgroundEffect } from './backgroundEffects.js';
+import { PICTURE_EFFECTS, ART_LOOKS, OWN_ART, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { pieceColors, pictureColors } from './artTheme.js';
+import { mountArt, isArtPiece, loadArtPiece, DEFAULT_ART_PIECE } from './artPlayer.js';
+import { ART_CATALOG } from './artCatalog.js';
 import { kipStyleOf, DEFAULT_KIP_STYLE } from './kipStyle.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: SCATTER, kip: DEFAULT_KIP_STYLE, mascot: true,
-  animatedLook: 'ascii', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35,
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: DEFAULT_ART_PIECE, kip: DEFAULT_KIP_STYLE, mascot: true,
+  artLook: 'original', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35,
   glassDesktop: true, glassWindow: .5, artBase: '#15171d', artAccent: '', artPanels: .6 });
 // Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting
 // wallpaper behind a translucent window. Each wallpaper is a base (the theme
@@ -35,7 +36,7 @@ let storageIssue = '', imageRevision = 0, identityRevision = 0, imageQueue = Pro
 // Animated (David, 2026-10-28): the art fills the window and the theme follows its colours.
 // Scatter's six pieces are picked once a session; your own animation is kept as it was chosen
 // (IndexedDB, this device only) and played from an object URL.
-let scatterPieces = pickScatter(), ownArt = null, artRevision = 0, artColorsKey = '';
+let ownArt = null, artRevision = 0, artColorsKey = '';
 const artDbKey = () => storageKey + ':art';
 
 // Custom halftone pictures (David, 2026-10-08): one optional picture per
@@ -69,12 +70,14 @@ function normalize(raw = {}) {
   }
   if (PICTURE_EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
   value.effectOptions = normalizeEffectOptions(raw.effectOptions);
-  if ([SCATTER, OWN_ART].includes(raw.animatedPiece) || ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
+  // Any vendored piece, or your own animation. Scatter is gone; it falls back to the default piece.
+  if (raw.animatedPiece === OWN_ART || isArtPiece(raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   // The colours last taken from the art, kept so the theme is right before the art loads.
   if (/^#[\da-f]{6}$/i.test(raw.artBase)) value.artBase = raw.artBase;
   value.artAccent = /^#[\da-f]{6}$/i.test(raw.artAccent) ? raw.artAccent : '';
   if (typeof raw.artPanels === 'number' && Number.isFinite(raw.artPanels)) value.artPanels = Math.max(0, Math.min(1, raw.artPanels));
-  if (ART_LOOKS.some(([id]) => id === raw.animatedLook)) value.animatedLook = raw.animatedLook;
+  // The look starts as made; the earlier animatedLook drew the art in looks of its own and is dropped.
+  if (ART_LOOKS.some(([id]) => id === raw.artLook)) value.artLook = raw.artLook;
   // Chat messages (desktop redesign): plain text on the backdrop, or the bubble cards.
   if (['plain', 'cards'].includes(raw.chatMessages)) value.chatMessages = raw.chatMessages;
   if (Object.hasOwn(GLASS_WALLPAPERS, raw.glassWallpaper || '')) value.glassWallpaper = raw.glassWallpaper;
@@ -169,14 +172,14 @@ export function appearanceName(value = getAppearance()) {
   const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite' };
   return value.mode === 'default' ? 'Parchment' : value.mode === 'color'
     ? palette[value.color?.toLowerCase()] || value.color : value.mode === 'glass' ? `Liquid glass, ${GLASS_WALLPAPERS[value.glassWallpaper].title}`
-    : value.mode === 'animated' ? `Animated, ${value.animatedPiece === SCATTER ? 'Scatter' : value.animatedPiece === OWN_ART ? 'your own'
-      : ART_PIECES.find(([id]) => id === value.animatedPiece)?.[1]}`
+    : value.mode === 'animated' ? `Animated, ${value.animatedPiece === OWN_ART ? 'your own'
+      : ART_CATALOG.find(([id]) => id === value.animatedPiece)?.[1]}`
     : { image: 'Image', shader: 'Flow' }[value.mode];
 }
 
 export function getAppearance() {
   return { ...settings, effectOptions: structuredClone(settings.effectOptions), hasImage: !!imageBitmap, storageIssue,
-    scatterPieces: [...scatterPieces], hasArt: !!ownArt,
+    hasArt: !!ownArt,
     staticFallback: settings.mode === 'shader' && glScene === false,
     halftoneSlots: Object.fromEntries(HALFTONE_SLOTS.map((slot) => [slot,
       { hasImage: !!halftoneUrl[slot], focusX: settings.halftoneImages[slot].focusX, focusY: settings.halftoneImages[slot].focusY }])) };
@@ -389,23 +392,22 @@ export async function removeAppearanceArt() {
   ++artRevision;
   await imageStore('delete', undefined, artDbKey());
   dropOwnArt(); artColorsKey = '';
-  updateAppearance({ animatedPiece: settings.animatedPiece === OWN_ART ? SCATTER : settings.animatedPiece });
+  updateAppearance({ animatedPiece: settings.animatedPiece === OWN_ART ? DEFAULT_ART_PIECE : settings.animatedPiece });
 }
 // Your own animation, for the art layer and the Appearance preview.
 export function ownArtSource() { return ownArt && { url: ownArt.url, video: ownArt.video, still: ownArt.still }; }
 
-// Works out the art's colours once per piece (or Scatter pick, or file) and keeps them with the
-// settings; the theme updates when they differ from the ones it was drawn with.
+// Works out the art's colours once per piece (or file) and keeps them with the settings; the
+// theme updates when they differ from the ones it was drawn with.
 async function refreshArtColors() {
-  const piece = settings.animatedPiece === OWN_ART && !ownArt ? SCATTER : settings.animatedPiece;
-  const key = piece === SCATTER ? `${SCATTER}:${scatterPieces.join(',')}` : piece === OWN_ART ? `${OWN_ART}:${ownArt.url}` : piece;
+  const piece = settings.animatedPiece === OWN_ART && !ownArt ? DEFAULT_ART_PIECE : settings.animatedPiece;
+  const key = piece === OWN_ART ? `${OWN_ART}:${ownArt.url}` : piece;
   if (settings.mode !== 'animated' || key === artColorsKey) return;
   artColorsKey = key;
   let colors = null;
   try {
     if (piece === OWN_ART) colors = pictureColors(ownArt.frames);
-    else if (piece === SCATTER) colors = scatterColors(await Promise.all(scatterPieces.map(id => import(`../vendor/ascii-magic/pieces/${id}.js`))));
-    else colors = pieceColors(await import(`../vendor/ascii-magic/pieces/${piece}.js`));
+    else colors = pieceColors(await loadArtPiece(piece));
   } catch { /* the last colours stay */ }
   if (!colors || key !== artColorsKey) return;
   if (colors.base !== settings.artBase || (colors.accent || '') !== settings.artAccent) updateAppearance({ artBase: colors.base, artAccent: colors.accent || '' });
@@ -537,29 +539,33 @@ function syncGlass(root) {
   }
 }
 
-// Animated: the art behind the whole window (#app-art). A piece or Scatter is drawn by the
-// background effect engine; your own animation plays as an image or a muted looping video, or
-// as its first frame when motion is off. --art-alpha is how solid the panels over it are.
+// Animated: the art behind the whole window (#app-art). A piece is drawn unchanged by ASCII
+// Magic's own player (artPlayer.js); your own animation plays as an image or a muted looping
+// video. Either holds its first frame when motion is off. --art-alpha is how solid the panels
+// over it are.
 let artLayer = null;
 function syncArt(root) {
   if (settings.mode !== 'animated') {
-    root.style.removeProperty('--art-alpha');
+    root.style.removeProperty('--art-alpha'); root.style.removeProperty('--art-stage');
     if (artLayer) { artLayer.dispose(); artLayer.node.remove(); artLayer = null; }
     return;
   }
   root.style.setProperty('--art-alpha', String(Math.round((.94 - settings.artPanels * .6) * 100) / 100));
+  // The stage a piece is shown on: ASCII Magic's own black, so the art looks as it does there.
+  root.style.setProperty('--art-stage', '#000');
   const own = settings.animatedPiece === OWN_ART && ownArt;
-  const still = own && (!settings.effectOptions.animated.motion || motionQuery.matches);
-  const kind = own ? `${own.url}:${still ? 'still' : 'play'}` : 'piece';
+  const still = !settings.effectOptions.animated.motion || motionQuery.matches;
+  const piece = settings.animatedPiece === OWN_ART ? DEFAULT_ART_PIECE : settings.animatedPiece;
+  const kind = own ? `${own.url}:${still ? 'still' : 'play'}` : `${piece}:${settings.artLook}:${still ? 'still' : 'play'}`;
   if (artLayer?.kind !== kind || !artLayer.node.isConnected) {
     if (artLayer) { artLayer.dispose(); artLayer.node.remove(); }
     const node = document.createElement('div');
     node.id = 'app-art'; node.className = 'app-art'; node.setAttribute('aria-hidden', 'true');
     document.body.prepend(node);
     let dispose = () => {};
-    if (!own) dispose = mountBackgroundEffect(node, null, { effect: 'animated', backdrop: true });
+    if (!own) dispose = mountArt(node, { piece, look: settings.artLook, still });
     else if (still) {
-      const canvas = document.createElement('canvas');
+      const canvas = document.createElement('canvas'); canvas.className = 'art-still';
       canvas.width = own.still.width; canvas.height = own.still.height;
       canvas.getContext('2d').drawImage(own.still, 0, 0); node.append(canvas);
     } else if (own.video) {
