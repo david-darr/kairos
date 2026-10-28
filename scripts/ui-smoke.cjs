@@ -90,6 +90,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
       let cursor = Number(url.searchParams.get('after') || 0);
       const send = () => {
+        if (demoState.forgeTerminalDrop) { demoState.forgeTerminalDrop = false; clearInterval(timer); res.destroy(); return; }  // g10: server drops the stream
         url.searchParams.set('after', String(cursor));
         const result = fixture(url);
         for (const event of result.events) { cursor = event.id; res.write(`id: ${event.id}\ndata: ${JSON.stringify({ output: event.data })}\n\n`); }
@@ -419,6 +420,20 @@ app.whenReady().then(async () => {
       assert.deepEqual(errors, []);
       console.log('PASS: app shell palette, nested Escape, short screens, Profile and launch links.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['app shell'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--g8-only')) {  // Part 2 group g8: A21 admin panels (g8-checks.cjs).
+      await require('./g8-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, base, fixtures: calendarFixtures });
+      assert.deepEqual(errors, [], 'g8 renderer errors');
+      console.log('PASS: g8 admin panels checks.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['g8'], errors }, null, 2));
+      return;
+    }
+    if (process.argv.includes('--g10-only')) {  // Part 2 A16: Forge Home and sessions gaps (scripts/g10-checks.cjs).
+      await require('./g10-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, base, overflow, liveControls: { release: () => { demoState.forgeRelease = true; } } });
+      assert.deepEqual(errors, [], 'g10 renderer errors');
+      console.log('PASS: g10 Forge Home and session gap checks.');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['g10'], errors }, null, 2));
       return;
     }
     if (process.argv.includes('--g1-only')) {  // Part 2 group g1: Kip, appearance and Home (scripts/g1-checks.cjs).

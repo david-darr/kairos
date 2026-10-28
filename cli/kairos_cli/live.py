@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -160,6 +161,7 @@ class LiveFeed:
         self.connected = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._stopped = False
+        self.down_since: float | None = None  # monotonic time the feed last lost its connection
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -202,6 +204,7 @@ class LiveFeed:
                     response.raise_for_status()
                     parser = SSEParser()
                     self.connected.set()
+                    self.down_since = None
                     self.on_state("connected")
                     delay = 0.5
                     async for chunk in response.aiter_text():
@@ -214,6 +217,8 @@ class LiveFeed:
             except (httpx.HTTPError, json.JSONDecodeError):
                 pass
             self.connected.clear()
+            if self.down_since is None:
+                self.down_since = time.monotonic()
             self.on_state("reconnecting")
             await asyncio.sleep(delay)
             delay = min(delay * 2, 5.0)

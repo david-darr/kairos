@@ -296,8 +296,11 @@ class CRMService:
                                or target.get("thread_id") != message.get("thread_id")):
                     raise ValueError("A task match must belong to this source thread")
                 if target is None:
+                    # A thread id names the same conversation in every selected mailbox, so the
+                    # same message captured twice is one task; without one, match within the source.
                     target = next((t for t in self._data["tasks"].values() if t["owner"] == owner
-                        and t.get("source_id") == message["source_id"] and t.get("thread_id") == message.get("thread_id")
+                        and (bool(message.get("thread_id")) or t.get("source_id") == message["source_id"])
+                        and t.get("thread_id") == message.get("thread_id")
                         and key(t["title"]) == key(item["title"])), None)
                 if target:
                     if evidence not in target["evidence"]:
