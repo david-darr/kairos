@@ -1,9 +1,22 @@
-import { EFFECTS, ART_PIECES, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { PICTURE_EFFECTS, ART_LOOKS, OWN_ART, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { pieceColors, pictureColors } from './artTheme.js';
+import { mountArt, isArtPiece, loadArtPiece, DEFAULT_ART_PIECE } from './artPlayer.js';
+import { ART_CATALOG } from './artCatalog.js';
 import { kipStyleOf, DEFAULT_KIP_STYLE } from './kipStyle.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', kip: DEFAULT_KIP_STYLE, mascot: true });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: DEFAULT_ART_PIECE, kip: DEFAULT_KIP_STYLE, mascot: true,
+  artLook: 'original', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35,
+  glassDesktop: true, glassWindow: .5, artBase: '#15171d', artAccent: '', artPanels: .6 });
+// Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting
+// wallpaper behind a translucent window. Each wallpaper is a base (the theme
+// is derived from it like a Color base) and three light blooms.
+export const GLASS_WALLPAPERS = Object.freeze({
+  lagoon: { title: 'Lagoon', base: '#1f3a44', blooms: ['#2f7f86', '#7cc4c0', '#d9b260'] },
+  dusk: { title: 'Dusk', base: '#2a2235', blooms: ['#6b4a7a', '#d99a92', '#e9ba68'] },
+  parchment: { title: 'Parchment', base: '#efe4d2', blooms: ['#d9b260', '#b9d2e3', '#d99a92'] },
+});
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 const TOKENS = ['--bg', '--bg-panel', '--bg-panel-solid', '--surface-2', '--sidebar-bg',
   '--text', '--text-dim', '--text-faint', '--sidebar-text', '--sidebar-muted', '--sidebar-accent', '--border', '--border-strong', '--accent', '--accent-rgb',
@@ -20,6 +33,11 @@ let settings, storageKey = '', imageBitmap = null;
 let startupPatch = null;
 let imageCanvas, shaderCanvas, previewCanvas, glScene, animation = 0, lastFrame = 0, time = 0;
 let storageIssue = '', imageRevision = 0, identityRevision = 0, imageQueue = Promise.resolve();
+// Animated (David, 2026-10-28): the art fills the window and the theme follows its colours.
+// Scatter's six pieces are picked once a session; your own animation is kept as it was chosen
+// (IndexedDB, this device only) and played from an object URL.
+let ownArt = null, artRevision = 0, artColorsKey = '';
+const artDbKey = () => storageKey + ':art';
 
 // Custom halftone pictures (David, 2026-10-08): one optional picture per
 // scene - Home's banner and the chat's figure/sky - stored the same way as
@@ -43,14 +61,30 @@ function normalizeHalftoneSlot(raw) {
 function normalize(raw = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
   const value = { ...DEFAULTS };
-  if (['default', 'color', 'image', 'shader'].includes(raw.mode)) value.mode = raw.mode;
+  if (['default', 'color', 'image', 'shader', 'glass', 'animated'].includes(raw.mode)) value.mode = raw.mode;
+  // Animated art was once a background effect; it is now a background style of its own.
+  if (raw.backgroundEffect === 'animated' && ['default', 'color', undefined].includes(raw.mode)) value.mode = 'animated';
   if (/^#[\da-f]{6}$/i.test(raw.color)) value.color = raw.color;
   for (const key of ['tint', 'distortion', 'swirl', 'grainMixer', 'grainOverlay']) {
     if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
   }
-  if (EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
+  if (PICTURE_EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
   value.effectOptions = normalizeEffectOptions(raw.effectOptions);
-  if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
+  // Any vendored piece, or your own animation. Scatter is gone; it falls back to the default piece.
+  if (raw.animatedPiece === OWN_ART || isArtPiece(raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
+  // The colours last taken from the art, kept so the theme is right before the art loads.
+  if (/^#[\da-f]{6}$/i.test(raw.artBase)) value.artBase = raw.artBase;
+  value.artAccent = /^#[\da-f]{6}$/i.test(raw.artAccent) ? raw.artAccent : '';
+  if (typeof raw.artPanels === 'number' && Number.isFinite(raw.artPanels)) value.artPanels = Math.max(0, Math.min(1, raw.artPanels));
+  // The look starts as made; the earlier animatedLook drew the art in looks of its own and is dropped.
+  if (ART_LOOKS.some(([id]) => id === raw.artLook)) value.artLook = raw.artLook;
+  // Chat messages (desktop redesign): plain text on the backdrop, or the bubble cards.
+  if (['plain', 'cards'].includes(raw.chatMessages)) value.chatMessages = raw.chatMessages;
+  if (Object.hasOwn(GLASS_WALLPAPERS, raw.glassWallpaper || '')) value.glassWallpaper = raw.glassWallpaper;
+  if (typeof raw.glassDesktop === 'boolean') value.glassDesktop = raw.glassDesktop;
+  for (const key of ['glassStrength', 'glassDither', 'glassWindow']) {
+    if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
+  }
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
   if (typeof raw.halftone === 'boolean') value.halftone = raw.halftone;
   // Kip style (David, 2026-10-25): flat, halftone, pixel or hidden. Hidden is
@@ -137,11 +171,15 @@ export function halftoneSharedChatPicture() {
 export function appearanceName(value = getAppearance()) {
   const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite' };
   return value.mode === 'default' ? 'Parchment' : value.mode === 'color'
-    ? palette[value.color?.toLowerCase()] || value.color : { image: 'Image', shader: 'Flow' }[value.mode];
+    ? palette[value.color?.toLowerCase()] || value.color : value.mode === 'glass' ? `Liquid glass, ${GLASS_WALLPAPERS[value.glassWallpaper].title}`
+    : value.mode === 'animated' ? `Animated, ${value.animatedPiece === OWN_ART ? 'your own'
+      : ART_CATALOG.find(([id]) => id === value.animatedPiece)?.[1]}`
+    : { image: 'Image', shader: 'Flow' }[value.mode];
 }
 
 export function getAppearance() {
   return { ...settings, effectOptions: structuredClone(settings.effectOptions), hasImage: !!imageBitmap, storageIssue,
+    hasArt: !!ownArt,
     staticFallback: settings.mode === 'shader' && glScene === false,
     halftoneSlots: Object.fromEntries(HALFTONE_SLOTS.map((slot) => [slot,
       { hasImage: !!halftoneUrl[slot], focusX: settings.halftoneImages[slot].focusX, focusY: settings.halftoneImages[slot].focusY }])) };
@@ -169,6 +207,7 @@ export async function initAppearance(username) {
   const revision = ++identityRevision;
   ++imageRevision;
   imageBitmap?.close(); imageBitmap = null; storageIssue = '';
+  ++artRevision; dropOwnArt(); artColorsKey = '';
   for (const slot of HALFTONE_SLOTS) { if (halftoneUrl[slot]) URL.revokeObjectURL(halftoneUrl[slot]); halftoneUrl[slot] = null; ++halftoneRevision[slot]; }
   storageKey = 'jarvis:appearance:v1:' + String(username || 'local');
   try { settings = normalize(JSON.parse(localStorage.getItem(storageKey) || '{}')); }
@@ -190,6 +229,12 @@ export async function initAppearance(username) {
       imageBitmap = bitmap;
     }
   } catch { if (revision === identityRevision) storageIssue = 'The saved image could not be loaded. Choose it again to retry.'; }
+  try {
+    const saved = await imageStore('get', undefined, artDbKey());
+    if (revision !== identityRevision) return;
+    if (saved instanceof Blob) ownArt = await openArt(saved);
+  } catch { /* Animated falls back to Scatter until the file is chosen again */ }
+  if (revision !== identityRevision) { dropOwnArt(); return; }
   for (const slot of HALFTONE_SLOTS) {
     try {
       const saved = await imageStore('get', undefined, halftoneDbKey(slot));
@@ -301,7 +346,75 @@ export function setHalftoneFocus(slot, x, y) {
   updateAppearance({ halftoneImages: { ...settings.halftoneImages, [slot]: { ...prev, focusX: Math.max(0, Math.min(1, x)), focusY: Math.max(0, Math.min(1, y)) } } });
 }
 
+// Your own animation for the Animated style: a GIF, animated WebP or PNG, or a short MP4 or WebM,
+// up to 12 MB. It is kept exactly as chosen, so it plays as it is; only its colours are read.
+const ART_TYPES = ['image/gif', 'image/webp', 'image/png', 'image/apng', 'video/mp4', 'video/webm'];
+function dropOwnArt() {
+  if (!ownArt) return;
+  URL.revokeObjectURL(ownArt.url); ownArt.still?.close(); ownArt = null;
+}
+// Opens a stored or chosen file: its object URL, whether it is a video, a still first frame (for
+// reduced motion) and a few frames to take its colours from.
+async function openArt(blob) {
+  const url = URL.createObjectURL(blob), video = blob.type.startsWith('video/');
+  try {
+    if (!video) {
+      const still = await createImageBitmap(blob);
+      return { url, video, still, frames: [still] };
+    }
+    const element = document.createElement('video');
+    element.muted = true; element.preload = 'auto'; element.src = url;
+    await new Promise((resolve, reject) => { element.onloadeddata = resolve; element.onerror = () => reject(new Error('decode')); });
+    const frames = [];
+    for (const at of [0, .33, .66]) {
+      element.currentTime = Math.min(element.duration || 0, (element.duration || 0) * at);
+      await new Promise(resolve => { element.onseeked = resolve; setTimeout(resolve, 1500); });
+      frames.push(await createImageBitmap(element));
+    }
+    element.removeAttribute('src'); element.load();
+    return { url, video, still: frames[0], frames };
+  } catch (error) { URL.revokeObjectURL(url); throw error; }
+}
+export async function setAppearanceArt(file) {
+  if (!ART_TYPES.includes(file.type)) throw new Error('Choose a GIF, WebP, PNG, MP4 or WebM file.');
+  if (file.size > 12 * 1024 * 1024) throw new Error('Choose a file smaller than 12 MB.');
+  const revision = ++artRevision;
+  let next;
+  try { next = await openArt(file); } catch { throw new Error('This file could not be opened. Try another one.'); }
+  if (revision !== artRevision) { URL.revokeObjectURL(next.url); return; }
+  // Saving first means a quota failure leaves the previous animation intact.
+  try { await imageStore('put', file, artDbKey()); } catch { URL.revokeObjectURL(next.url); throw new Error('This file could not be saved. Free some device storage and retry.'); }
+  if (revision !== artRevision) { URL.revokeObjectURL(next.url); return; }
+  dropOwnArt(); ownArt = next; artColorsKey = '';
+  updateAppearance({ mode: 'animated', animatedPiece: OWN_ART });
+}
+export async function removeAppearanceArt() {
+  ++artRevision;
+  await imageStore('delete', undefined, artDbKey());
+  dropOwnArt(); artColorsKey = '';
+  updateAppearance({ animatedPiece: settings.animatedPiece === OWN_ART ? DEFAULT_ART_PIECE : settings.animatedPiece });
+}
+// Your own animation, for the art layer and the Appearance preview.
+export function ownArtSource() { return ownArt && { url: ownArt.url, video: ownArt.video, still: ownArt.still }; }
+
+// Works out the art's colours once per piece (or file) and keeps them with the settings; the
+// theme updates when they differ from the ones it was drawn with.
+async function refreshArtColors() {
+  const piece = settings.animatedPiece === OWN_ART && !ownArt ? DEFAULT_ART_PIECE : settings.animatedPiece;
+  const key = piece === OWN_ART ? `${OWN_ART}:${ownArt.url}` : piece;
+  if (settings.mode !== 'animated' || key === artColorsKey) return;
+  artColorsKey = key;
+  let colors = null;
+  try {
+    if (piece === OWN_ART) colors = pictureColors(ownArt.frames);
+    else colors = pieceColors(await loadArtPiece(piece));
+  } catch { /* the last colours stay */ }
+  if (!colors || key !== artColorsKey) return;
+  if (colors.base !== settings.artBase || (colors.accent || '') !== settings.artAccent) updateAppearance({ artBase: colors.base, artAccent: colors.accent || '' });
+}
+
 export async function resetAppearance() {
+  await removeAppearanceArt();
   await removeAppearanceImage();
   for (const slot of HALFTONE_SLOTS) await removeHalftoneImage(slot);
   updateAppearance(DEFAULTS);
@@ -322,7 +435,7 @@ function ensureCanvases() {
   shaderCanvas.addEventListener('webglcontextrestored', () => { glScene = undefined; apply(); });
   window.addEventListener('resize', draw);
   document.addEventListener('visibilitychange', animate);
-  motionQuery.addEventListener('change', () => { draw(); animate(); });
+  motionQuery.addEventListener('change', () => { draw(); animate(); if (settings.mode === 'animated') syncArt(document.documentElement); });
 }
 
 function apply() {
@@ -333,20 +446,26 @@ function apply() {
   root.dataset.halftone = halftoneState();  // on | off | none (style.css, app.js)
   root.dataset.mascot = settings.mascot ? 'on' : 'off';
   root.dataset.kip = settings.kip;
+  root.dataset.chatMessages = settings.chatMessages;
   syncRedesign(root);
+  syncGlass(root);
+  syncArt(root);
   try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');
   } else {
-    const color = rgb(settings.color), light = luminance(color) > .179;
+    const art = settings.mode === 'animated';
+    const color = rgb(settings.mode === 'glass' ? GLASS_WALLPAPERS[settings.glassWallpaper].base : art ? settings.artBase : settings.color), light = luminance(color) > .179;
     const sidebar = mix(color, 0, .18).map(Math.round);
-    const accent = readable(color, .12);
     const text = readable(color), status = STATUS[light ? 'light' : 'dark'];
+    // Animated takes its accent from the art, moved toward the text colour until it reads.
+    const artAccent = art && settings.artAccent ? rgb(settings.artAccent) : null;
+    const accent = artAccent ? legible(artAccent, color, text) : readable(color, .12);
     const values = {
       '--bg': css(color), '--sidebar-bg': css(sidebar),
       '--sidebar-text': css(readable(sidebar)), '--sidebar-muted': css(readable(sidebar, .28)),
-      '--sidebar-accent': css(readable(sidebar, .12)),
+      '--sidebar-accent': css(artAccent ? legible(artAccent, sidebar, readable(sidebar)) : readable(sidebar, .12)),
       '--bg-panel': css(mix(color, light ? 255 : 0, light ? .24 : .16)),
       '--bg-panel-solid': css(mix(color, light ? 255 : 0, light ? .4 : .25)),
       '--surface-2': css(mix(color, light ? 0 : 255, light ? .08 : .1)),
@@ -365,6 +484,12 @@ function apply() {
       const value = legible(wanted, color, text);
       values[`--${name}`] = css(value); values[`--${name}-rgb`] = value.join(', ');
     }
+    if (art) {
+      // Every card and pane lets the art through, as solid as Show art through panels asks.
+      const alpha = Math.round((.94 - settings.artPanels * .6) * 100) / 100;
+      values['--bg-panel'] = `rgba(${mix(color, light ? 255 : 0, light ? .24 : .16).map(Math.round).join(', ')}, ${alpha})`;
+      values['--bg-panel-solid'] = `rgba(${mix(color, light ? 255 : 0, light ? .4 : .25).map(Math.round).join(', ')}, ${Math.min(.96, alpha + .08)})`;
+    }
     for (const [key, value] of Object.entries(values)) root.style.setProperty(key, value);
     root.style.colorScheme = light ? 'light' : 'dark';
   }
@@ -373,6 +498,86 @@ function apply() {
   syncTitleBar();
   // The halftone backgrounds redraw in the new colors (chatBackdrop.js, home.js).
   document.dispatchEvent(new CustomEvent('kairos:appearance'));
+}
+
+// Liquid glass: the wallpaper's blooms, how see-through the surfaces are and
+// how strong its dither grain is, as custom properties appearance.css reads.
+const GLASS_PROPS = ['--glass-bloom-1', '--glass-bloom-2', '--glass-bloom-3', '--glass-alpha', '--glass-dither', '--glass-grain', '--glass-window'];
+let glassGrain = '';
+// The desktop app can let the real desktop show through the window in Liquid glass (David,
+// 2026-10-28): Windows 11's acrylic behind a page that goes partly transparent (electron/main.js).
+export const canSeeThroughWindow = () => typeof window.jarvis?.setSeeThrough === 'function';
+let seeThrough = false;
+function syncSeeThrough(root, on) {
+  root.dataset.glassDesktop = on ? 'on' : 'off';
+  if (on !== seeThrough && canSeeThroughWindow()) window.jarvis.setSeeThrough(on);
+  seeThrough = on;
+}
+function syncGlass(root) {
+  syncSeeThrough(root, settings.mode === 'glass' && settings.glassDesktop && canSeeThroughWindow());
+  if (settings.mode !== 'glass') { GLASS_PROPS.forEach(key => root.style.removeProperty(key)); document.getElementById('app-glass')?.remove(); return; }
+  // How much of the wallpaper stays over the desktop: 0 keeps it all, 1 leaves a light veil.
+  root.style.setProperty('--glass-window', String(Math.round((1 - settings.glassWindow * .85) * 100) / 100));
+  const paper = GLASS_WALLPAPERS[settings.glassWallpaper];
+  paper.blooms.forEach((hex, i) => root.style.setProperty(`--glass-bloom-${i + 1}`, hex));
+  // Strength 0 is nearly solid, 1 nearly clear.
+  root.style.setProperty('--glass-alpha', String(Math.round((.92 - settings.glassStrength * .62) * 100) / 100));
+  root.style.setProperty('--glass-dither', String(settings.glassDither));
+  if (!glassGrain) {
+    // A 4x4 Bayer threshold tile, drawn once: the grain laid over the blooms.
+    const tile = document.createElement('canvas'); tile.width = tile.height = 4;
+    const g = tile.getContext('2d'), bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    bayer.forEach((v, i) => { g.fillStyle = `rgba(0,0,0,${(v / 16) * .5})`; g.fillRect(i % 4, Math.floor(i / 4), 1, 1); });
+    glassGrain = `url("${tile.toDataURL()}")`;
+  }
+  root.style.setProperty('--glass-grain', glassGrain);
+  if (!document.getElementById('app-glass')) {
+    const layer = document.createElement('div');
+    layer.id = 'app-glass'; layer.className = 'app-glass'; layer.setAttribute('aria-hidden', 'true');
+    layer.innerHTML = '<span class="app-glass-bloom"></span><span class="app-glass-bloom"></span><span class="app-glass-bloom"></span><span class="app-glass-grain"></span>';
+    document.body.prepend(layer);
+  }
+}
+
+// Animated: the art behind the whole window (#app-art). A piece is drawn unchanged by ASCII
+// Magic's own player (artPlayer.js); your own animation plays as an image or a muted looping
+// video. Either holds its first frame when motion is off. --art-alpha is how solid the panels
+// over it are.
+let artLayer = null;
+function syncArt(root) {
+  if (settings.mode !== 'animated') {
+    root.style.removeProperty('--art-alpha'); root.style.removeProperty('--art-stage');
+    if (artLayer) { artLayer.dispose(); artLayer.node.remove(); artLayer = null; }
+    return;
+  }
+  root.style.setProperty('--art-alpha', String(Math.round((.94 - settings.artPanels * .6) * 100) / 100));
+  // The stage a piece is shown on: ASCII Magic's own black, so the art looks as it does there.
+  root.style.setProperty('--art-stage', '#000');
+  const own = settings.animatedPiece === OWN_ART && ownArt;
+  const still = !settings.effectOptions.animated.motion || motionQuery.matches;
+  const piece = settings.animatedPiece === OWN_ART ? DEFAULT_ART_PIECE : settings.animatedPiece;
+  const kind = own ? `${own.url}:${still ? 'still' : 'play'}` : `${piece}:${settings.artLook}:${still ? 'still' : 'play'}`;
+  if (artLayer?.kind !== kind || !artLayer.node.isConnected) {
+    if (artLayer) { artLayer.dispose(); artLayer.node.remove(); }
+    const node = document.createElement('div');
+    node.id = 'app-art'; node.className = 'app-art'; node.setAttribute('aria-hidden', 'true');
+    document.body.prepend(node);
+    let dispose = () => {};
+    if (!own) dispose = mountArt(node, { piece, look: settings.artLook, still });
+    else if (still) {
+      const canvas = document.createElement('canvas'); canvas.className = 'art-still';
+      canvas.width = own.still.width; canvas.height = own.still.height;
+      canvas.getContext('2d').drawImage(own.still, 0, 0); node.append(canvas);
+    } else if (own.video) {
+      const video = Object.assign(document.createElement('video'), { src: own.url, muted: true, loop: true, autoplay: true, playsInline: true });
+      video.setAttribute('muted', ''); node.append(video);
+      const visibility = () => { if (document.hidden) video.pause(); else video.play().catch(() => {}); };
+      document.addEventListener('visibilitychange', visibility);
+      dispose = () => document.removeEventListener('visibilitychange', visibility);
+    } else node.append(Object.assign(document.createElement('img'), { src: own.url, alt: '' }));
+    artLayer = { node, kind, dispose };
+  }
+  refreshArtColors();
 }
 
 // The shared redesign backdrop reuses the chat scene renderer and palette.
@@ -426,7 +631,8 @@ function draw() {
   const scale = Math.min(1, 1280 / Math.max(innerWidth, innerHeight));
   const width = Math.max(1, Math.round(innerWidth * scale)), height = Math.max(1, Math.round(innerHeight * scale));
   const isShader = settings.mode === 'shader' && !!glScene;
-  imageCanvas.hidden = settings.mode === 'default' || isShader;
+  // Liquid glass draws its own wallpaper (#app-glass), so neither canvas shows.
+  imageCanvas.hidden = ['default', 'glass', 'animated'].includes(settings.mode) || isShader;
   shaderCanvas.hidden = !isShader;
   fit(imageCanvas, width, height);
   if (isShader) {
@@ -434,7 +640,7 @@ function draw() {
     glScene.draw(width, height, motionQuery.matches ? 0 : time, settings);
   } else {
     const ctx = imageCanvas.getContext('2d');
-    ctx.fillStyle = settings.mode === 'default' ? token('--bg') : settings.color;
+    ctx.fillStyle = settings.mode === 'default' ? token('--bg') : settings.mode === 'animated' ? settings.artBase : settings.color;
     ctx.fillRect(0, 0, width, height);
     if (settings.mode === 'image' && imageBitmap) {
       cover(ctx, imageBitmap, width, height);
@@ -449,7 +655,7 @@ function draw() {
   if (previewCanvas?.isConnected) {
     const ctx = previewCanvas.getContext('2d');
     ctx.drawImage(isShader ? shaderCanvas : imageCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
-    ctx.fillStyle = settings.mode === 'default' ? token('--sidebar-bg') : css(mix(rgb(settings.color), 0, .18));
+    ctx.fillStyle = ['default', 'animated'].includes(settings.mode) ? token('--sidebar-bg') : css(mix(rgb(settings.color), 0, .18));
     ctx.fillRect(0, 0, previewCanvas.width * .16, previewCanvas.height);
   } else previewCanvas = null;
 }

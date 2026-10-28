@@ -673,11 +673,30 @@ for (const [channel, method] of [
 // The window controls drawn over the page (Windows) follow its Appearance:
 // the page sends its background and text colors whenever they change.
 const HEX = /^#[0-9a-f]{6}$/i;
+// A see-through window keeps a clear background and clear controls; only their symbols recolour.
+const seeThroughWindows = new WeakSet();
 ipcMain.on("window:title-bar", (event, color, symbolColor) => {
   if (!(fromAppWindow(event) || chatWindows.owns(event)) || !HEX.test(color) || !HEX.test(symbolColor)) return;
   const win = fromAppWindow(event) ? mainWindow : chatWindows.windowFor(event);
+  if (seeThroughWindows.has(win)) { win.setTitleBarOverlay({ color: "#00000000", symbolColor }); return; }
   win.setBackgroundColor(color);
   if (process.platform === "win32") win.setTitleBarOverlay({ color, symbolColor });
+});
+// Liquid glass's see-through window (David, 2026-10-28): Windows 11's acrylic shows the desktop
+// behind the app, blurred, wherever the page is transparent. Turning it off leaves the colours to
+// the page's next window:title-bar, which it sends straight after.
+ipcMain.on("window:see-through", (event, on) => {
+  if (!(fromAppWindow(event) || chatWindows.owns(event)) || process.platform !== "win32") return;
+  const win = fromAppWindow(event) ? mainWindow : chatWindows.windowFor(event);
+  if (on === true) {
+    seeThroughWindows.add(win);
+    win.setBackgroundColor("#00000000");
+    win.setBackgroundMaterial("acrylic");
+    win.setTitleBarOverlay({ color: "#00000000" });
+  } else if (on === false) {
+    seeThroughWindows.delete(win);
+    win.setBackgroundMaterial("none");
+  }
 });
 
 ipcMain.on("browser:bounds", (event, rect) => {

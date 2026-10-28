@@ -107,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     // whole point of reproducing it here is that a CSP difference between
     // fixture and product hides exactly this class of bug.
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https:");
-    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"><link rel="stylesheet" href="/static/css/mascot.css"><link rel="stylesheet" href="/static/css/redesign-chat.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
+    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/chat.css"><link rel="stylesheet" href="/static/css/mascot.css"><link rel="stylesheet" href="/static/css/redesign-chat.css"><link rel="stylesheet" href="/static/css/redesign-sidebar.css"></head><body><div id="view-content" class="view active" style="height:100vh"></div></body></html>'); return;
   }
   if (url.pathname.startsWith('/api/')) {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -289,15 +289,16 @@ app.whenReady().then(async () => {
     };
     await delay(300);
     await waitFor("document.querySelector('.chat-composer-dock').getAnimations().every(a => a.playState !== 'running')");
-    await click('#overflow-plus-btn');
-    await click('#chat-permission-mode');
-    assert.deepEqual(await js("[...document.querySelectorAll('.custom-select-menu .custom-select-item')].map(b => b.textContent)"), ['Base', 'Auto']);
-    assert.equal(await js("document.querySelector('#overflow-menu').classList.contains('hidden')"), false, 'Opening Mode keeps the + menu open');
-    await click('.custom-select-menu .custom-select-item:nth-child(2)');
+    // Desktop redesign: the prompt's permission pill and its menu (Base is Supervised, Auto is Full access).
+    await click('#chat-permission-pill');
+    assert.deepEqual(await js("[...document.querySelectorAll('#chat-permission-menu .chat-permission-choice strong')].map(b => b.textContent)"), ['Supervised', 'Full access']);
+    assert.equal(await js("document.querySelector('#chat-permission-pill').getAttribute('aria-expanded')"), 'true', 'The pill opens its menu');
+    await click('#chat-permission-menu [data-mode=auto]');
     await waitFor("document.querySelector('#chat-permission-mode').value==='auto' && !document.querySelector('#chat-permission-mode').disabled");
     assert.equal(await js("document.querySelector('#chat-permission-mode').value"), 'auto');
     assert.equal(requests.filter(r => r.path.endsWith('/permission-mode')).at(-1)?.data.mode, 'auto');
-    await click('#overflow-plus-btn');
+    assert.equal(await js("document.querySelector('#chat-permission-pill .chat-permission-pill-name').textContent"), 'Full access', 'The pill names the saved mode');
+    assert.equal(await js("document.querySelector('#chat-permission-menu').classList.contains('hidden') && document.activeElement === document.querySelector('#chat-permission-pill')"), true, 'Choosing closes the menu and returns focus to the pill');
     assert.equal(await js("document.querySelectorAll('.chat-prose h1').length"), 1);
     assert.equal(await js("document.querySelectorAll('.chat-prose table').length"), 1);
     assert.equal(await js("document.querySelectorAll('.chat-code-header button').length"), 1);
@@ -326,12 +327,12 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#library-smoke').remove()");
     await js("document.querySelector('#chat-messages').scrollTop=0");
     await capture('desktop-chat');
-    // Conversations sidebar: right-click a chat row -> menu with "Open in new window" (stubbed IPC, no real window).
-    // History starts collapsed on desktop, so open it the way a user does.
+    // Chat history (desktop redesign: the popout): right-click a chat row -> menu with "Open in new
+    // window" (stubbed IPC, no real window). Open it the way a user does.
     await click('#chat-history-toggle');
-    await waitFor("!document.querySelector('#chat-sessions').inert && !!document.querySelector('.session-item')");
+    await waitFor("!!document.querySelector('#rd-history .rd-history-open') && document.querySelector('#rd-history').getAnimations().length === 0");
     await js("window.jarvis = { ...(window.jarvis || {}), openChatWindow: id => { (window.__newWindowIds ||= []).push(id); return Promise.resolve({ ok: true }); } }; true");
-    const rowPoint = await js("(() => { const row = document.querySelector('.session-item'); const r = row.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, id: row.dataset.sessionId }; })()");
+    const rowPoint = await js("(() => { const row = document.querySelector('#rd-history .rd-history-open'); const r = row.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, id: row.dataset.sessionId }; })()");
     const rightClick = async () => { for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: rowPoint.x, y: rowPoint.y, button: 'right', clickCount: 1 }); };
     await rightClick();
     await waitFor("!!document.querySelector('.rd-conversation-menu')");
@@ -345,9 +346,18 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.rd-conversation-menu')");
     for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await waitFor("!document.querySelector('.rd-conversation-menu')");
-    assert.equal(await js("document.activeElement?.classList.contains('session-item')"), true, 'Escape returns focus to the row');
-    await click('#chat-history-toggle');
-    await waitFor("document.querySelector('#chat-sessions').inert");
+    assert.equal(await js("document.activeElement?.classList.contains('rd-history-open')"), true, 'Escape returns focus to the row');
+    // The popout opens over the header button, so it closes from its own × (or Escape, or outside).
+    await click('#rd-history [aria-label="Close chat history"]');
+    await waitFor("!document.querySelector('#rd-history') && document.querySelector('#chat-sessions').inert && document.querySelector('#chat-history-toggle').getAttribute('aria-expanded') === 'false'");
+    // Header pane toggles (desktop redesign): Documents and Browser always, Design, Background tasks
+    // and Computer only when there is something to open; each reflects its pane being open.
+    const paneButtons = () => js("[...document.querySelectorAll('.chat-pane-toolbar .chat-pane-icon')].filter(b => !b.hidden).map(b => b.getAttribute('aria-label') + ':' + b.getAttribute('aria-pressed'))");
+    assert.ok((await paneButtons()).includes('Documents:false') && (await paneButtons()).includes('Browser:false'), 'Documents and Browser toggles show in the header');
+    await js("document.querySelector('.chat-pane-icon[aria-label=Browser]').click()");
+    await waitFor("document.querySelector('.chat-pane-icon[aria-label=Browser]').getAttribute('aria-pressed') === 'true'");
+    await js("document.querySelector('.chat-pane-icon[aria-label=Browser]').click()");
+    await waitFor("document.querySelector('.chat-pane-icon[aria-label=Browser]').getAttribute('aria-pressed') === 'false'");
     await js("{ const m=document.querySelector('#model-picker-menu'); if (m.classList.contains('hidden')) document.querySelector('#model-picker-btn').click(); }");
     await waitFor("!!document.querySelector('#chat-model-id')");
     await js("document.querySelector('#chat-model-id').value='exact-test-model'; document.querySelector('.model-version-form').requestSubmit()");

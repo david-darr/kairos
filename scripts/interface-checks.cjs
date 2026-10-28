@@ -91,9 +91,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.querySelector('.chat-mobile-header #model-picker-btn') && !!document.querySelector('.chat-input-bar #model-picker-btn')"), true, 'Model pill lives in the composer');
       await click('#model-picker-btn');
       assert.equal(await js("(() => { const m=document.getElementById('model-picker-menu'), r=m.getBoundingClientRect(), h=document.querySelector('.chat-header-model').getBoundingClientRect(); return !m.classList.contains('hidden') && r.height>44 && r.bottom <= h.top + 1 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth; })()"), true, 'Model picker opens above the pill and fits');
-      // Desktop exposes the other connections' catalog rows directly on one board.
+      // The desktop card shows the chat's own connection; search reaches every other connection's models.
       await waitFor("!!document.querySelector('.model-other-catalog-item')");
       const pickedModel = await js("document.querySelector('.model-other-catalog-item .model-catalog-name').textContent");
+      await js("{ const s = document.querySelector('#model-picker-menu .rd-model-search'); s.value = document.querySelector('.model-other-catalog-item').dataset.modelSearch.split(' ')[0]; s.dispatchEvent(new Event('input')); }");
+      await waitFor("!!document.querySelector('.model-other-catalog-item')?.offsetParent");
       await js("document.querySelector('.model-other-catalog-item').scrollIntoView({block:'nearest'})");
       await click('.model-other-catalog-item');
       await waitFor("document.getElementById('model-picker-menu').classList.contains('hidden')");
@@ -125,10 +127,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       await waitFor("!document.querySelector('.ms-sheet[open]')");
     }
     await js("document.getElementById('chat-messages').click(); document.getElementById('overflow-plus-btn').click()");
-    assert.equal(await js("document.getElementById('chat-permission-mode').getClientRects().length > 0"), true, 'Permission mode stays visible in More');
+    // Phones keep Mode in More; the desktop prompt shows it as the permission pill (desktop redesign).
+    if (width <= 768) assert.equal(await js("document.getElementById('chat-permission-mode').getClientRects().length > 0"), true, 'Permission mode stays visible in More');
+    else assert.equal(await js("document.getElementById('chat-permission-pill').getClientRects().length > 0 && document.getElementById('overflow-menu').contains(document.getElementById('chat-openmic'))"), true, 'Desktop shows the permission pill, with Open Mic in the + menu');
     assert.equal(await js("(() => {const m=document.getElementById('overflow-menu').getBoundingClientRect(), b=document.getElementById('chat-openmic'), r=b.getBoundingClientRect();return m.width<=230 && m.height<=320 && (b.hidden || r.height<=44.1);})()"), true, 'More is compact and Open Mic stays one row');
-    await click('.chat-permission-control');
-    assert.equal(await js("!document.getElementById('overflow-menu').classList.contains('hidden')"), true, 'Mode row clicks do not dismiss More');
+    await click(width <= 768 ? '.chat-permission-control' : '#overflow-menu .overflow-menu-heading');
+    assert.equal(await js("!document.getElementById('overflow-menu').classList.contains('hidden')"), true, 'Clicks inside More do not dismiss it');
     if (width <= 768) {
       await js("window.__cameraOpened=0; document.getElementById('chat-camera-input').click=()=>window.__cameraOpened++; true");
       await click('.chat-camera-action');
@@ -143,8 +147,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
       assert.equal(await js("document.querySelector('.ms-tabbar').dataset.state === 'hidden' && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
     }
+    if (width > 768) await waitFor("!!document.querySelector('#rd-history')");
     await capture(`interface-${label}-history`);
     if (width <= 768) await js("document.querySelector('.chat-history-close').click()");
+    else { await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))"); await waitFor("!document.querySelector('#rd-history')"); }
     await js("document.querySelector('.sidebar-settings-btn').click()");
     await waitFor(width <= 768 ? "!!document.querySelector('.settings-mobile-page')" : "!!document.querySelector('.settings-window:not(.hidden)')");
     await capture(`interface-${label}-settings`);

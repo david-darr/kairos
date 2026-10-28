@@ -22,7 +22,9 @@ module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay})
   await waitFor("document.querySelectorAll('.rd-usage-tokens').length === 1");
   assert.equal(await js("document.querySelector('[data-model=m3] .rd-usage-tokens').textContent"), 'None this week · 842K tokens in all');
   assert.ok(await js("[...document.querySelectorAll('.rd-usage-tokens')].every(n=>n.title.includes('Tokens this Kairos install')&&n.title.includes('Not a quota')&&!n.textContent.includes('%'))"),'Token accounting is separate from quota');
-  await js("document.querySelector('[data-home-section=chats] .dashboard-row').focus()");
+  // A Forge chat is marked and opens in Forge (desktop redesign); a regular one opens in Chats.
+  assert.ok(await js("[...document.querySelectorAll('[data-home-section=chats] .dashboard-row.is-forge')].every(r => r.querySelector('.rd-forge-tag')?.textContent.includes('Forge'))"), 'Forge chats on Home carry the Forge mark');
+  await js("document.querySelector('[data-home-section=chats] .dashboard-row:not(.is-forge)').focus()");
   assert.ok(await js("document.activeElement.matches('button.dashboard-row') && document.activeElement.tabIndex===0"), 'Recent chats remain keyboard focusable');
   await js("document.activeElement.click()");
   await waitFor("document.getElementById('view-content').dataset.view==='chat'");

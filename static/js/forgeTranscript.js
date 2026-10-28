@@ -100,7 +100,7 @@ function createTranscript(options) {
     const { input, inputTop, send, queueButton, queueList, tools, status } = controls;
     modelStatus = status; sendControl = send; inputControl = input; modeControl = options.modeControl;
     input.addEventListener('input', () => setBusy(getInFlight(id)?.status === 'processing'));
-    input.className = 'forge-transcript-input'; input.placeholder = 'Ask your agent to build or plan';
+    input.className = 'forge-transcript-input'; input.placeholder = 'Ask, build, or describe a change…';
     send.classList.add('forge-send'); queueButton.classList.add('forge-queue-button');
     const path = (options.workspace || '').replace(/\\/g, '/').replace(/^[a-z]:\/Users\/[^/]+/i, '~');
     const context = el('div', { class: 'forge-composer-context', title: options.workspace }, [

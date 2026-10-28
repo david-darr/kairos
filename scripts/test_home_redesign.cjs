@@ -194,10 +194,12 @@ console.log('PASS: Home gates, week matrix, live transitions, refresh motion, cu
     localStorage: { getItem: key => saved.get(key), setItem: (key, value) => saved.set(key, value) },
     normalize: value => ({ motion: true, ...value }),
     ensureCanvases() {}, apply() {}, imageStore: async () => null, Blob, URL,
+    // The Animated style's own animation, which startup also reloads (none stored here).
+    dropOwnArt() {}, artDbKey: () => 'art', openArt: async () => null,
   };
   vm.createContext(state);
   vm.runInContext(`let settings = {}, storageKey = '', startupPatch = null, identityRevision = 0,
-    imageRevision = 0, imageBitmap = null, storageIssue = '';
+    imageRevision = 0, imageBitmap = null, storageIssue = '', artRevision = 0, ownArt = null, artColorsKey = '';
     const HALFTONE_SLOTS = [], halftoneUrl = {}, halftoneRevision = {}, DEFAULTS = {};
     ${startup}
     this.update = updateAppearance; this.init = initAppearance; this.welcome = restoreWelcomeAppearance;

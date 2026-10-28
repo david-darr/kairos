@@ -80,7 +80,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   console.log('PASS: phone background sheet lists work, closes, returns focus and hides when empty');
 
   // -- Library document leave guard -------------------------------------------
-  for (const [label, w, h, homeButton] of [['desktop', 1440, 900, '#nav .nav-item[data-tab=home]'], ['phone', 390, 844, '.ms-tabbar [data-tabbar=home]']]) {
+  for (const [label, w, h, homeButton] of [['desktop', 1440, 900, '#sidebar .nav-item[data-tab=home]'], ['phone', 390, 844, '.ms-tabbar [data-tabbar=home]']]) {
     await size(w, h);
     await navigate('library', { section: 'documents' });
     await waitFor("!!document.querySelector('.library-document-card')");

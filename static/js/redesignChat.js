@@ -2,10 +2,11 @@
 // once, after the chat DOM exists, and calls dispose() on unmount. While the
 // preview switch is on and the window is desktop width, this moves existing
 // nodes (nothing is rebuilt, so every listener, id and state survives):
-//  - the model picker goes from the header into the composer's right-hand
-//    controls, next to the mic and send buttons (where it lived before the
-//    header move in 5f22fd6);
-//  - the conversations button gets an icon, a "Conversations" label and a count,
+//  - the model picker goes from the header into the prompt, right after the
+//    + button and before the permission pill (desktop redesign, 2026-10-28:
+//    + / model / permissions on the left, the square send on the right);
+//  - the history button (it opens the chat history popout) gets an icon, a
+//    "Chats" label and a count,
 //    and the chat title it used to carry sits beside it as its own heading.
 // Switching the preview off, or narrowing to a phone, puts everything back.
 import { fitMenu } from "./menuFit.js";
@@ -19,11 +20,11 @@ export function mountRedesignChat(container) {
   const header = container.querySelector(".chat-mobile-header");
   const toggle = container.querySelector("#chat-history-toggle");
   const pill = container.querySelector(".chat-header-model");
-  const right = container.querySelector(".chat-input-right");
+  const left = container.querySelector(".chat-input-left");
   const menu = container.querySelector("#model-picker-menu");
   const list = container.querySelector("#sessions-list");
   const title = toggle?.querySelector(".chat-title");
-  if (!header || !toggle || !pill || !right || !menu) return { dispose: disposeParts };
+  if (!header || !toggle || !pill || !left || !menu) return { dispose: disposeParts };
 
   let applied = false;
   let pillNext = null;
@@ -36,7 +37,8 @@ export function mountRedesignChat(container) {
   // filter cannot become the fixed-position container.
   const place = () => {
     if (!applied || menu.classList.contains("hidden")) return;
-    fitMenu(menu, pill, { prefer: "above", fixed: false });
+    menu.style.left = "0"; menu.style.right = "auto";
+    fitMenu(menu, pill, { prefer: "above", fixed: false, cap: 440, keepSide: true, clear: pill.closest(".chat-input-bar") });
   };
 
   const syncCount = () => {
@@ -54,13 +56,13 @@ export function mountRedesignChat(container) {
     header.dispatchEvent(new Event('kairos:desktop-chat-layout'));
     applied = true;
     pillNext = pill.nextSibling;
-    right.insertBefore(pill, right.firstChild);
+    left.querySelector(':scope > .overflow-wrapper').after(pill);
     pill.classList.add("rd-in-composer");
 
     const icon = document.createElement("span");
     icon.className = "rd-conv-icon"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = ICON_LIST;
     const label = document.createElement("span");
-    label.className = "rd-conv-label"; label.textContent = "Conversations";
+    label.className = "rd-conv-label"; label.textContent = "Chats";
     const count = document.createElement("span");
     count.className = "rd-conv-count"; count.hidden = true;
     toggle.prepend(icon, label, count);

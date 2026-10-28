@@ -513,7 +513,8 @@ app.whenReady().then(async () => {
     await win.loadURL(base + '/full-app');
     // Teams live in the Agents tab (agents phase 5): Swarm has no tab of its own.
     await until("!!document.querySelector('[data-tab=agents]')");
-    assert.equal(await js("document.querySelectorAll('[data-tab=agents]').length"), 1, 'Built-in tab wins custom name collision');
+    // Desktop redesign: Agents is one pin in the sidebar and one row in All tabs.
+    assert.deepEqual(await js("[document.querySelectorAll('#sidebar [data-tab=agents]').length, document.querySelectorAll('#rd-all-tabs [data-tab=agents]').length, document.querySelectorAll('[data-tab=agents]').length]"), [1, 1, 2], 'Built-in tab wins custom name collision: one Agents pin and one All tabs row');
     assert.equal(await js("document.querySelectorAll('[data-tab=swarm]').length"), 0, 'No separate Swarm tab');
     await js("document.querySelector('[data-tab=agents]').click()");
     await until("!!document.querySelector('.team-tile')");

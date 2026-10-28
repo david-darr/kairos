@@ -1,8 +1,6 @@
 // One owner per decorative surface. The original dither painter is unchanged.
 import { drawDither, loadDitherImage } from './dither.js';
 import { getAppearance, halftonePalette } from './appearance.js';
-import { ART_PIECES } from './backgroundEffectPreferences.js';
-import { paint, GlyphAtlas } from '../vendor/ascii-magic/runtime/canvas.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const owners = new Set();
@@ -28,7 +26,7 @@ function unsubscribe(owner) {
 }
 export function backgroundEffectKey() {
   const a = getAppearance();
-  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.animatedPiece, a.mode, a.halftone]);
+  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.mode, a.halftone, a.artBase]);
 }
 const clamp = x => Math.max(0, Math.min(1, x));
 function canvas(w, h) {
@@ -110,40 +108,6 @@ function picturePainter(target, img, W, H, opts, effect, prefs, colors) {
     ctx.globalAlpha = 1;
   };
 }
-function artPainter(target, W, H, prefs, mod, colors, preview) {
-  const draw = mod.default(), atlas = new GlyphAtlas(), ctx = target.getContext('2d');
-  target.width = W; target.height = H;
-  const { cols, rows } = mod.meta, aspect = 1.66, dpr = Math.min(2, window.devicePixelRatio || 1);
-  // One composition at a normal glyph size (the density, like ASCII), centred,
-  // never tiled. A large backdrop may grow it up to 1.5x; the edges fade out.
-  let cw;
-  if (preview) cw = Math.max(2, Math.floor(Math.min(W / cols, H / (rows * aspect))));
-  else {
-    const base = Math.max(3, Math.round(prefs.density * dpr));
-    cw = Math.round(base * Math.min(1.5, Math.max(1, Math.min(W / (cols * base), H / (rows * base * aspect)))));
-  }
-  const ch = cw * aspect, tw = Math.ceil(cols * cw), th = Math.ceil(rows * ch);
-  const tile = canvas(tw, th), tc = tile.getContext('2d');
-  const left = Math.round((W - tw) / 2), top = Math.round((H - th) / 2);
-  const alpha = preview ? .9 : .5;
-  return t => {
-    tc.globalCompositeOperation = 'source-over'; tc.globalAlpha = 1; tc.clearRect(0, 0, tw, th);
-    paint(tc, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
-      { cw, ch, ink: colors.ink, mode: 'text', atlas, dpr: 1 });
-    if (!preview) {
-      // Soft elliptical edge: opaque in the middle, gone before the borders.
-      tc.save(); tc.globalCompositeOperation = 'destination-in';
-      tc.translate(tw / 2, th / 2); tc.scale(1, th / tw);
-      // destination-in reads only alpha, so the color is irrelevant.
-      const g = tc.createRadialGradient(0, 0, tw * .22, 0, 0, tw * .5);
-      g.addColorStop(0, 'black'); g.addColorStop(1, 'transparent');
-      tc.fillStyle = g; tc.fillRect(-tw / 2, -tw / 2, tw, tw); tc.restore();
-    }
-    ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = alpha; ctx.drawImage(tile, left, top); ctx.globalAlpha = 1;
-  };
-}
-
 // Default preferences pass the same options to the unchanged legacy painter.
 export function drawSceneDither(target, img, W, H, opts = {}) {
   const a = getAppearance(), prefs = a.effectOptions.dithered;
@@ -171,7 +135,7 @@ export function mountBackgroundEffect(el, src, opts = {}) {
   const settle = () => { const fn = pendingReady; pendingReady = null; fn?.(); };
   const visible = () => !document.hidden && el.isConnected && inView && el.clientWidth > 0 && el.clientHeight > 0 &&
     (!el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) &&
-    (opts.preview || document.documentElement.dataset.halftone === 'on');
+    (opts.preview || opts.backdrop || document.documentElement.dataset.halftone === 'on');
   function stop() { cancelAnimationFrame(raf); raf = 0; last = 0; accumulator = 0; }
   function frame(now) {
     raf = 0;
@@ -191,20 +155,10 @@ export function mountBackgroundEffect(el, src, opts = {}) {
     const scale = effect === 'dithered' ? dpr : Math.min(dpr, 2, 2560 / Math.max(el.clientWidth, el.clientHeight));
     const W = Math.max(1, Math.round(el.clientWidth * scale)), H = Math.max(1, Math.round(el.clientHeight * scale));
     try {
-      let next;
-      if (effect === 'animated') {
-        const id = ART_PIECES.some(([key]) => key === a.animatedPiece) ? a.animatedPiece : ART_PIECES[0][0];
-        const mod = await import(`../vendor/ascii-magic/pieces/${id}.js`);
-        if (disposed || token !== revision || !visible()) { dirty = true; return; }
-        next = artPainter(target, W, H, prefs, mod, colors, opts.preview);
-      }
-      else {
-        const img = await loadDitherImage(src, opts.version || 0);
-        if (disposed || token !== revision || !visible()) { dirty = true; return; }
-        if (effect === 'dithered') {
-          next = () => drawSceneDither(target, img, W, H, opts);
-        } else next = picturePainter(target, img, W, H, opts, effect, prefs, colors);
-      }
+      // Animated art is drawn by ASCII Magic's own player (artPlayer.js), not here.
+      const img = await loadDitherImage(src, opts.version || 0);
+      if (disposed || token !== revision || !visible()) { dirty = true; return; }
+      const next = effect === 'dithered' ? () => drawSceneDither(target, img, W, H, opts) : picturePainter(target, img, W, H, opts, effect, prefs, colors);
       if (disposed || token !== revision || !visible()) { dirty = true; return; }
       painter = next; moving = prefs.motion && !['dithered', 'halftone'].includes(effect); wasReduced = reduce.matches;
       const started = performance.now(); painter(0); el.dataset.drawMs = String(Math.round(performance.now() - started));

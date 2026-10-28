@@ -1,6 +1,5 @@
 import { keepReadingPosition } from './chatScrollAnchor.js';
-import { mountMobileModelSheet, renderMobileCatalogMenu } from './mobileModelSheet.js';
-import { mobileOn, phone } from './mobileShared.js';
+import { mountMobileModelSheet, renderMobileCatalogMenu, mountDesktopModelCard } from './mobileModelSheet.js';
 // One embedded conversation (2026-10-08): the Agents tab's chat pane and a
 // tab's own chat (CRM task chats, School course chats) share this. It streams
 // through the same chatStream.js registry as every other chat, so a reply
@@ -10,7 +9,7 @@ import { mobileOn, phone } from './mobileShared.js';
 //
 // Tabs import it as "/static/js/sessionChat.js"; mountSessionChat is part of
 // the tab view contract (skill_templates/build-custom-tab/SKILL.md).
-import { api, el, toast, customSelect } from './api.js';
+import { api, el, toast, customSelect, modelMark } from './api.js';
 import { shouldSendOnEnter } from './composerKeyboard.js';
 import * as chatStream from './chatStream.js';
 import { renderMessageBody } from './chatContent.js';
@@ -34,6 +33,7 @@ const pausedQueues = new Set();
 //   placeholder, emptyTitle, emptyText
 //   modelPicker   show connection and model choices for this chat
 //   permissionPicker show Base/Auto permissions for an existing chat
+//   permissionPill   show them as the prompt's pill: Supervised and Full access (Forge)
 //   openInChats   show a button that opens the chat in Chats
 //   onTurnEnd     called once after each reply finishes
 //   initialMessage sends the first task after loading a new session
@@ -368,16 +368,24 @@ export async function mountSessionChat(host, options = {}) {
       } catch (problem) { connection.value = current.model_endpoint_id || ''; variantNode.value = current.model_override || ''; status.textContent = problem.message; }
       finally { modelSaving = false; syncSend(); refreshPhoneMenu(); }
     };
-    connection.addEventListener('change', async () => { await save(null); await loadVariants(null); });
-    const controls = el('div', { class: 'session-chat-models', role: 'group', 'aria-label': 'Model for this chat' }, [connection, variantNode]);
+    // The connection's logo (core/model_marks.py), like the chat prompt's model pill.
+    const mark = el('span', { class: 'session-chat-model-mark', 'aria-hidden': 'true' });
+    const paintMark = () => {
+      const endpoint = endpoints.find(item => item.id === connection.value);
+      mark.replaceChildren(...[endpoint && modelMark(endpoint.mark, endpoint.name)].filter(Boolean));
+    };
+    paintMark();
+    connection.addEventListener('change', async () => { paintMark(); await save(null); await loadVariants(null); });
+    const controls = el('div', { class: 'session-chat-models', role: 'group', 'aria-label': 'Model for this chat' }, [mark, connection, variantNode]);
     tools.prepend(controls);
     if (transcript) {
       controls.classList.add('ms-phone-model-controls');
       phoneTrigger = el('button', { type: 'button', class: 'ms-embedded-model-trigger model-picker-btn', text: 'Choose model' });
       phoneMenu = el('div', { class: 'model-picker-menu hidden' }); tools.prepend(phoneTrigger, phoneMenu);
       const picker = mountMobileModelSheet({ trigger: phoneTrigger, menu: phoneMenu, permission: options.modeControl });
-      const gate = () => { phoneTrigger.hidden = !mobileOn(); }; gate(); phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate);
-      disposePhoneModels = () => { picker.dispose(); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); };
+      // The same pill opens the desktop card (David, 2026-10-28) in place of the two dropdowns.
+      const card = mountDesktopModelCard({ trigger: phoneTrigger, menu: phoneMenu, replaces: controls, clear: () => tools.closest('form, .chat-input-bar') });
+      disposePhoneModels = () => { picker.dispose(); card(); };
       const syncTrigger = new MutationObserver(() => { phoneTrigger.disabled = connection.disabled; });
       syncTrigger.observe(connection.querySelector('button'), { attributes: true, attributeFilter: ['disabled'] });
       const dispose = disposePhoneModels; disposePhoneModels = () => { syncTrigger.disconnect(); dispose(); };
@@ -393,11 +401,13 @@ export async function mountSessionChat(host, options = {}) {
     try { admin = !!(await api('/api/auth/status')).is_admin; } catch { /* Base remains available. */ }
     if (disposed || !host.isConnected) return;
     const description = 'Auto approves routine chat tool requests. Codex and Antigravity Auto also remove their workspace sandbox. Blender and Higgsfield requests still require approval.';
-    const picker = customSelect({}, [el('option', { value: 'base', text: 'Base' }),
-      el('option', { value: 'auto', text: 'Auto', disabled: !admin })]);
+    const pill = !!options.permissionPill;
+    const picker = customSelect({}, [el('option', { value: 'base', text: pill ? 'Supervised' : 'Base' }),
+      el('option', { value: 'auto', text: pill ? 'Full access' : 'Auto', disabled: !admin })]);
     picker.querySelector('button').setAttribute('aria-label', 'Chat permission mode');
     const notice = el('div', { class: 'chat-permission-notice', text: description, hidden: true });
-    const control = el('div', { class: 'session-chat-permissions', title: `${description} Auto is available only to admins.` }, [el('span', { class: 'meta', text: 'Mode' }), picker]);
+    const control = el('div', { class: `session-chat-permissions${pill ? ' session-chat-permission-pill' : ''}`, title: `${description} ${pill ? 'Full access' : 'Auto'} is available only to admins.` },
+      pill ? [picker] : [el('span', { class: 'meta', text: 'Mode' }), picker]);
     const sync = () => {
       picker.value = session.permission_mode === 'auto' ? 'auto' : 'base';
       control.dataset.mode = picker.value;

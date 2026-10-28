@@ -152,7 +152,7 @@ async function run(ctx) {
   await cm("view.dispatch({ changes: { from: view.state.doc.length, insert: '\\nAdded in the Library.\\n' } });");
   await waitFor("document.querySelector('.vault-note-title').classList.contains('dirty')");
   ok(true, 'a dirty dot shows on the title');
-  await click(phone ? '.ms-tabbar [data-tabbar=home]' : '#nav .nav-item[data-tab=home]');
+  await click(phone ? '.ms-tabbar [data-tabbar=home]' : '#sidebar .nav-item[data-tab=home]');
   await waitFor("!!document.querySelector('.confirm-panel')");
   ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard note edits?')"), 'tab navigation asks before discarding note edits');
   await clickText('.confirm-panel .btn', 'Cancel');

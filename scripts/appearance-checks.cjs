@@ -18,13 +18,13 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   // Keep every visible card row congruent at the reviewed desktop and phone sizes.
   for (const [width, height] of [[900, 800], [1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
     win.setContentSize(width, height); await delay(250);
-    for (const mode of ['default', 'color', 'image', 'shader']) {
+    for (const mode of ['default', 'color', 'image', 'shader', 'glass', 'animated']) {
       await set({ mode }); await delay(250);
       const failures = await js(`(() => {
         const failures = [], panel = document.querySelector('.appearance-panel');
         if (panel.scrollWidth > panel.clientWidth + 1) failures.push('panel overflows');
-        for (const selector of ['.appearance-modes', '.appearance-chat-styles', '.appearance-halftone-grid', '.appearance-effects-grid']) {
-          const grid = panel.querySelector(selector);
+        // Every grid of a kind (Chat messages and Chat style share .appearance-chat-styles).
+        for (const selector of ['.appearance-modes', '.appearance-chat-styles', '.appearance-halftone-grid', '.appearance-effects-grid', '.appearance-glass-papers']) for (const grid of panel.querySelectorAll(selector)) {
           if (!grid.getClientRects().length) continue;
           const rows = new Map(), box = grid.getBoundingClientRect();
           for (const card of grid.children) {
@@ -44,7 +44,128 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     }
   }
   win.setContentSize(1440, 900); await delay(250); await set({ mode: 'default' });
-  assert.equal(await js("document.querySelectorAll('.appearance-mode').length"), 4);
+  assert.deepEqual(await js("[...document.querySelectorAll('.appearance-mode')].map(n => n.dataset.mode)"), ['default', 'color', 'image', 'shader', 'glass', 'animated']);
+  // Chat messages (desktop redesign): Plain by default, Cards on request, on the root for the chat CSS.
+  assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
+  await js("document.querySelector('.appearance-chat-style[data-chat-messages=cards]').click()");
+  assert.equal(await js("document.documentElement.dataset.chatMessages + ':' + document.querySelector('.appearance-chat-style[data-chat-messages=cards]').getAttribute('aria-pressed')"), 'cards:true');
+  await js("document.querySelector('.appearance-chat-style[data-chat-messages=plain]').click()");
+  assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
+  // Settings opened with no page asked for starts on Appearance (David, 2026-10-28).
+  await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow('add-models'))");
+  await waitFor("document.querySelector('.settings-nav-item.active')?.dataset.section === 'add-models'");
+  await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow())");
+  await waitFor("document.querySelector('.settings-nav-item.active')?.dataset.section === 'appearance' && !!document.querySelector('.appearance-panel')");
+  // Picking an effect with the mouse leaves the Settings window where it was: its hidden radio
+  // once scrolled the whole window and threw its header out of place.
+  if (await js("innerWidth > 768")) {
+    const box = "JSON.stringify((r => [r.left, r.top, r.width, r.height])(document.querySelector('.settings-window').getBoundingClientRect())) + ':' + document.querySelector('.settings-window').scrollTop";
+    const before = await js(box);
+    for (const effect of ['dithered', 'halftone', 'ascii', 'binary', 'dithered']) {
+      const [x, y] = await js(`(() => { const label = document.querySelector('label[for=appearance-effect-${effect}]'); label.scrollIntoView({ block: 'nearest' }); const r = label.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + 12)]; })()`);
+      await delay(150);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      await delay(300);
+      assert.equal(await js("document.getElementById('appearance-effect-" + effect + "').checked"), true, `${effect} picked`);
+      assert.equal(await js(box), before, `Picking ${effect} leaves the Settings window in place`);
+    }
+  }
+  // Animated (David, 2026-10-28): a background style of its own. The old Animated art effect
+  // moves to it; the art fills the window in its own colours and the theme follows them.
+  assert.equal(await js("document.querySelectorAll('.appearance-effects-grid input').length"), 5, 'Animated is no longer a background effect');
+  await set({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'scatter' });
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.backgroundEffect, a.animatedPiece, a.artLook]; })"), ['animated', 'dithered', 'aurora-cabin-snowfall', 'original'], 'Scatter gives way to the default piece, as made');
+  assert.equal(await js("!document.querySelector('.appearance-art-options').hidden && document.querySelector('.appearance-effect-section').hidden && !document.querySelector('.appearance-art-options select#appearance-effect-tint')"), true, 'Its own section, with no tint');
+  // Shown unchanged (David, 2026-10-28): ASCII Magic's own player draws the whole piece, centred and
+  // as large as the window allows, on their black stage, with nothing over it or around it.
+  const unchanged = `(() => {
+    const art = document.getElementById('app-art'), canvas = art?.querySelector(':scope > canvas'), r = canvas?.getBoundingClientRect();
+    if (!r || !r.width) return 'no canvas';
+    const fills = Math.abs(r.width - innerWidth) <= 2 || Math.abs(r.height - innerHeight) <= 2;
+    const centred = Math.abs(r.left + r.width / 2 - innerWidth / 2) <= 2 && Math.abs(r.top + r.height / 2 - innerHeight / 2) <= 2;
+    const inside = r.width <= innerWidth + 2 && r.height <= innerHeight + 2;
+    const only = [...art.children].every(node => node === canvas || node.matches('pre.art-player'));
+    return [fills, centred, inside, only, getComputedStyle(art).backgroundColor].join(' ');
+  })()`;
+  await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+  for (const look of ['dots', 'ascii', 'dither', 'blocks', 'original']) {
+    await set({ artLook: look });
+    await waitFor(`document.querySelector('.appearance-art-look[data-look=${look}]')?.getAttribute('aria-pressed') === 'true' && (${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+  }
+  // Every piece, searchable: the three David named are there.
+  for (const [query, name] of [['aurora', 'Aurora Cabin Snowfall'], ['fuji', 'Fuji Dawn Lake'], ['balloon valley', 'Balloon Valley Sunrise']]) {
+    await js(`{ const s = document.getElementById('appearance-art-search'); s.value = ${JSON.stringify(query)}; s.dispatchEvent(new Event('input')); }`);
+    assert.ok(await js(`[...document.getElementById('appearance-art-piece').options].some(o => o.text === ${JSON.stringify(name)})`), `${name} can be found`);
+  }
+  await js("{ const s = document.getElementById('appearance-art-search'); s.value = ''; s.dispatchEvent(new Event('input')); }");
+  assert.ok(await js("document.getElementById('appearance-art-piece').options.length > 700"), 'The whole library is listed');
+  // The theme is taken from the art: a deep shade of its background as the base, an accent that reads on it.
+  const readable = `(() => {
+    const s = getComputedStyle(document.documentElement), probe = document.createElement('span'); document.body.append(probe);
+    const rgb = name => { probe.style.color = s.getPropertyValue(name); return getComputedStyle(probe).color.match(/[0-9.]+/g).slice(0, 3).map(Number); };
+    const l = c => c.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((a, v, i) => a + v * [.2126, .7152, .0722][i], 0);
+    const ratio = (a, b) => { const [x, y] = [l(rgb(a)), l(rgb(b))]; return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+    const out = [rgb('--bg').join(','), ratio('--text', '--bg'), ratio('--accent', '--bg')]; probe.remove(); return out;
+  })()`;
+  const bases = [];
+  for (const piece of ['fuji-dawn-lake', 'balloon-valley-sunrise', 'lava-lamp']) {
+    const before = await js("getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()");
+    await set({ animatedPiece: piece });
+    await waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() !== ${JSON.stringify(before)}`);
+    await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+    const [base, text, accent] = await js(readable);
+    bases.push(base);
+    assert.ok(text >= 4.5 && accent >= 4.5, `${piece}: text ${text.toFixed(2)} and accent ${accent.toFixed(2)} read on its base`);
+    if (piece === 'fuji-dawn-lake') await capture('appearance-animated-piece');
+  }
+  assert.equal(new Set(bases).size, 3, 'Each piece gives its own colours');
+  await set({ animatedPiece: 'aurora-cabin-snowfall', artPanels: 1 });
+  assert.equal(await js("getComputedStyle(document.documentElement).getPropertyValue('--art-alpha').trim()"), '0.34');
+  await set({ artPanels: .6 });
+  // Motion off holds a frame; the piece stays whole.
+  await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); m.updateAppearance({ effectOptions: { ...a.effectOptions, animated: { ...a.effectOptions.animated, motion: false } } }); })");
+  await waitFor(`(${unchanged}) === 'true true true true rgb(0, 0, 0)'`);
+  await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); m.updateAppearance({ effectOptions: { ...a.effectOptions, animated: { ...a.effectOptions.animated, motion: true } } }); })");
+  await capture('appearance-animated-aurora');
+  // Your own animation: a still PNG and a short WebM made here, each kept and played as it is,
+  // the theme taken from its colours. Removing it goes back to the default piece.
+  await js(`(async () => {
+    const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 }), g = c.getContext('2d');
+    g.fillStyle = '#0c2a1c'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#ff3d7f'; g.fillRect(20, 20, 24, 24);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    const m = await import('/static/js/appearance.js');
+    await m.setAppearanceArt(new File([blob], 'mine.png', { type: 'image/png' }));
+  })()`);
+  await waitFor("!!document.querySelector('#app-art img') && getComputedStyle(document.documentElement).getPropertyValue('--bg').replace(/ /g, '') === 'rgb(12,42,28)'");
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.animatedPiece, a.hasArt, parseInt(a.artAccent.slice(1, 3), 16) > 200]; })"), ['animated', 'own', true, true], 'The pink square is the accent');
+  await js(`(async () => {
+    const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 }), g = c.getContext('2d');
+    const recorder = new MediaRecorder(c.captureStream(20), { mimeType: 'video/webm' }), parts = [];
+    recorder.ondataavailable = e => parts.push(e.data);
+    const done = new Promise(r => { recorder.onstop = r; });
+    recorder.start();
+    for (let i = 0; i < 16; i++) { g.fillStyle = '#2a1030'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#3df2ff'; g.fillRect(i * 2, 22, 20, 20); await new Promise(r => setTimeout(r, 50)); }
+    recorder.stop(); await done;
+    const m = await import('/static/js/appearance.js');
+    await m.setAppearanceArt(new File(parts, 'mine.webm', { type: 'video/webm' }));
+  })()`);
+  await waitFor("document.querySelector('#app-art video')?.readyState >= 2");
+  await capture('appearance-animated-own');
+  await js("import('/static/js/appearance.js').then(m => m.removeAppearanceArt())");
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.animatedPiece, a.hasArt, !!document.querySelector('#app-art video')]; })"), ['aurora-cabin-snowfall', false, false]);
+  await set({ mode: 'default' });
+  assert.equal(await js("!!document.getElementById('app-art')"), false, 'The art layer goes with the style');
+  // See through to the desktop: only where the desktop app offers it, on by default in glass.
+  if (await js("typeof window.jarvis?.setSeeThrough === 'function'")) {
+    await set({ mode: 'glass' });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop + ':' + !document.querySelector('.appearance-glass-desktop').hidden"), 'on:true');
+    assert.equal(await js("getComputedStyle(document.documentElement).backgroundColor"), 'rgba(0, 0, 0, 0)', 'The page lets the desktop through');
+    await set({ glassDesktop: false });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop"), 'off');
+    await set({ mode: 'default', glassDesktop: true });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop"), 'off', 'Only Liquid glass sees through');
+  }
   assert.equal(await js("document.querySelector('[data-mode=default] strong').textContent"), 'Kairos');
   assert.equal(await js("document.querySelector('.appearance-preview-copy strong').textContent"), 'Not more time. The right time.');
   await js("document.querySelector('[data-mode=color]').click()");
@@ -279,7 +400,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     const transfer=new DataTransfer(); transfer.items.add(new File([blob],'fixture.png',{type:'image/png'}));
     const input=document.querySelector('#appearance-image'); input.files=transfer.files; input.dispatchEvent(new Event('change'));
   })()`);
-  await waitFor("document.querySelector('.appearance-upload').textContent==='Replace image'");
+  await waitFor("document.querySelector('.appearance-image-options .appearance-upload').textContent==='Replace image'");
   assert.equal((await state()).hasImage, true);
   await set({ tint: .25 }); const untinted = await preview();
   await set({ tint: .8 }); assert.notEqual(await preview(), untinted, 'Image tint changes pixels');

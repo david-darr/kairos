@@ -1,0 +1,206 @@
+/* Desktop redesign (2026-10-28, canvas boards Main and Rail): the sidebar,
+   its 56 px rail, the All tabs popover and the chat history popout. Built by
+   sidebarNav.js and chatHistoryPopout.js; desktop only, phones keep their
+   drawer and tab bar. Sharp edges throughout. Theme tokens only. */
+
+@media (min-width: 769px) {
+  .kairos-redesign:not(.sidebar-collapsed) { --sidebar-width: 232px; }
+  .kairos-redesign { --sidebar-rail-width: 56px; }
+  .kairos-redesign[data-app-mode="kairos"] #sidebar { gap: 10px; padding: 18px 12px 12px; }
+  .kairos-redesign[data-app-mode="kairos"] #sidebar :is(.nav-item, .rd-needs, .sidebar-user-card, .sidebar-settings-btn, #sidebar-toggle) { border-radius: 0; }
+  /* Search replaces Jump to on desktop. */
+  .kairos-redesign[data-app-mode="kairos"] #sidebar .rd-jump { display: none; }
+  .kairos-redesign #sidebar .rd-jump kbd { display: none; }  /* no shortcut text in the sidebar */
+
+  .kairos-redesign[data-app-mode] #sidebar .forge-mode-switch, .kairos-redesign[data-app-mode] #sidebar .forge-mode-switch .segmented-tab { border-radius: 0; }
+  .kairos-redesign #sidebar .rd-needs .rd-needs-count { border-radius: 0; }
+  /* -- Start rows: Home, New chat, Search, Chat history -- */
+  .rd-primary { display: flex; flex-direction: column; gap: 1px; flex: none; }
+  .kairos-redesign #sidebar .rd-primary .nav-item, .kairos-redesign #sidebar #rd-search,
+  .kairos-redesign #sidebar-footer .rd-all-tabs-btn {
+    display: flex; align-items: center; gap: 12px; height: 36px; min-height: 36px; margin: 0; padding: 0 10px;
+    border: 0; border-radius: 0; background: transparent; color: var(--text); font: 13.5px var(--rd-font-ui); text-align: left; cursor: pointer;
+  }
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar .rd-primary .nav-item > svg, .kairos-redesign:not(.sidebar-collapsed) #sidebar #rd-search > svg,
+  .kairos-redesign:not(.sidebar-collapsed) #sidebar-footer .rd-all-tabs-btn > svg { display: block; width: 17px; height: 17px; flex: none; }
+  .kairos-redesign #sidebar #rd-search:hover, .kairos-redesign #sidebar .rd-primary .nav-item:hover, .kairos-redesign #sidebar-footer .rd-all-tabs-btn:hover { background: rgba(var(--ink-rgb), .06); }
+  .kairos-redesign #sidebar .rd-primary .nav-item.active { background: var(--bg-panel-solid); box-shadow: inset 2px 0 0 var(--point); }
+  .kairos-redesign #sidebar .rd-needs { border-radius: 0; height: 40px; }
+
+  /* -- Pinned strip -- */
+  .kairos-redesign[data-app-mode="kairos"] nav#nav { gap: 14px; padding: 4px 0; overflow-y: auto; min-height: 0; flex: 1; }
+  .rd-nav-section-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 0 0; }
+  .kairos-redesign #sidebar .rd-nav-section-head .nav-group-label { margin: 0; padding: 0 10px 6px; }
+  .rd-pins-edit {
+    border: 0; background: none; color: var(--text-dim); font: 11px var(--rd-font-ui); cursor: pointer; padding: 2px 8px 6px;
+  }
+  .rd-pins-edit:hover { color: var(--text); text-decoration: underline; }
+  .rd-pin-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 0 2px; }
+  .kairos-redesign #sidebar .rd-pin-grid .nav-item.rd-pin {
+    position: relative; display: grid; place-items: center; height: 34px; min-height: 34px; margin: 0; padding: 0;
+    border: 1px solid transparent; border-radius: 0; color: var(--text-dim);
+  }
+  .kairos-redesign #sidebar .rd-pin-grid .nav-item.rd-pin > svg { display: block; width: 17px; height: 17px; }
+  .kairos-redesign #sidebar .rd-pin-grid .nav-item.rd-pin > span:not(.nav-badge) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .kairos-redesign #sidebar .rd-pin-grid .nav-item.rd-pin:hover { background: rgba(var(--ink-rgb), .06); color: var(--text); }
+  .kairos-redesign #sidebar .rd-pin-grid .nav-item.rd-pin.active { background: var(--bg-panel-solid); border-color: var(--rd-line-strong); color: var(--text); box-shadow: none; }
+  .kairos-redesign #sidebar .rd-pin .nav-badge { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; line-height: 16px; font-size: 9.5px; border-radius: 0; }
+
+  /* -- Active and Today chats -- */
+  .rd-chats[hidden] { display: none; }
+  .kairos-redesign #sidebar .rd-chats .nav-group-label { margin: 0; padding: 0 10px 4px; }
+  .rd-chat-list { display: flex; flex-direction: column; }
+  .rd-chat-row {
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; background: transparent;
+    color: var(--text-dim); font: 13px var(--rd-font-ui); text-align: left; cursor: pointer; min-width: 0;
+  }
+  .rd-chat-row:hover { background: rgba(var(--ink-rgb), .06); color: var(--text); }
+  .rd-chat-row:focus-visible, .rd-pins-edit:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+  .rd-chat-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rd-chat-dot { flex: none; width: 6px; height: 6px; background: var(--rd-line-strong); }
+  .rd-chat-dot.is-running { background: var(--point); animation: rd-chat-pulse 1.4s ease-in-out infinite; }
+  @keyframes rd-chat-pulse { 50% { opacity: .35; } }
+
+  /* -- Footer: All tabs, profile, Settings -- */
+  .kairos-redesign[data-app-mode="kairos"] #sidebar-footer { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; }
+  .kairos-redesign #sidebar-footer .rd-all-tabs-btn[aria-expanded="true"] { background: var(--bg-panel-solid); }
+  .rd-all-tabs {
+    position: fixed; z-index: 2600; width: 300px; max-height: min(520px, calc(100vh - 24px)); overflow-y: auto; padding: 10px;
+    background: var(--bg-panel-solid); border: 1px solid var(--rd-line-strong); box-shadow: var(--rd-shadow); color: var(--text);
+  }
+  .rd-all-tabs[hidden] { display: none; }
+  .rd-all-tabs .nav-group-label { display: block; padding: 8px 6px 4px; font: 10px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--text-dim); }
+  .rd-all-tabs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
+  .rd-all-tabs .nav-item {
+    position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 0; border-radius: 0;
+    background: transparent; color: var(--text); font: 13px var(--rd-font-ui); text-align: left; cursor: pointer;
+  }
+  .rd-all-tabs .nav-item svg { width: 16px; height: 16px; flex: none; }
+  .rd-all-tabs .nav-item > span:not(.nav-badge) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rd-all-tabs .nav-item:hover { background: rgba(var(--ink-rgb), .06); }
+  .rd-all-tabs .nav-item.active { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--point); }
+  .rd-all-tabs .nav-item:focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+  .rd-all-tabs .nav-badge { border-radius: 0; }
+
+  /* -- The 56 px rail -- */
+  .kairos-redesign.sidebar-collapsed[data-app-mode="kairos"] #sidebar { padding: 14px 6px 10px; gap: 8px; align-items: stretch; }
+  .kairos-redesign.sidebar-collapsed #sidebar :is(.rd-primary .nav-item, .rd-pin-grid .nav-item.rd-pin, #rd-search),
+  .kairos-redesign.sidebar-collapsed #sidebar-footer .rd-all-tabs-btn { justify-content: center; gap: 0; height: 40px; min-height: 40px; padding: 0; }
+  .kairos-redesign.sidebar-collapsed #sidebar .rd-primary .nav-item > svg, .kairos-redesign.sidebar-collapsed #sidebar #rd-search > svg,
+  .kairos-redesign.sidebar-collapsed #sidebar-footer .rd-all-tabs-btn > svg { display: block; width: 18px; height: 18px; }
+  .kairos-redesign.sidebar-collapsed #sidebar-footer .rd-all-tabs-btn > span { width: 0; opacity: 0; overflow: hidden; }
+  .kairos-redesign.sidebar-collapsed .rd-pin-grid { grid-template-columns: 1fr; gap: 2px; padding: 0; }
+  .kairos-redesign.sidebar-collapsed .rd-nav-section-head { justify-content: center; border-top: 1px solid var(--rd-line); padding-top: 8px; }
+  .kairos-redesign.sidebar-collapsed .rd-nav-section-head .nav-group-label { display: none; }
+  .kairos-redesign.sidebar-collapsed .rd-pins-edit { padding: 0 0 4px; font-size: 10px; }
+  .kairos-redesign.sidebar-collapsed .rd-chats { display: none; }
+
+  /* -- Chat history popout -- */
+  .rd-history {
+    /* Below the desktop app's title bar, which would otherwise cover the panel's header. */
+    position: fixed; z-index: 2550; top: var(--titlebar-h); bottom: 0; width: 340px; max-width: calc(100vw - var(--sidebar-width));
+    display: flex; flex-direction: column; gap: 10px; padding: 16px 14px 12px; box-sizing: border-box;
+    background: var(--bg-panel-solid); border-right: 1px solid var(--rd-line-strong); box-shadow: var(--rd-shadow);
+    color: var(--text); font-family: var(--rd-font-ui);
+  }
+  .rd-history-head { display: flex; align-items: center; gap: 6px; }
+  .rd-history-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: italic 500 24px/1.1 var(--rd-font-title); }
+  .rd-history-keep { height: 28px; padding: 0 8px; border: 1px solid var(--rd-line); background: transparent; color: var(--text-dim); font: 11px var(--rd-font-ui); cursor: pointer; }
+  .rd-history-keep[aria-pressed="true"] { background: var(--rd-primary-bg); color: var(--rd-primary-fg); border-color: transparent; }
+  .rd-history-icon { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--rd-line); background: transparent; color: var(--text); cursor: pointer; }
+  .rd-history-icon svg { width: 15px; height: 15px; }
+  .rd-history-icon:hover, .rd-history-keep:hover { background: rgba(var(--ink-rgb), .06); }
+  .rd-history-switch { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--rd-line); }
+  .rd-history-tab { height: 30px; border: 0; background: transparent; color: var(--text-dim); font: 12.5px var(--rd-font-ui); cursor: pointer; }
+  .rd-history-tab[aria-selected="true"] { background: var(--rd-primary-bg); color: var(--rd-primary-fg); }
+  .rd-history-search { height: 34px; padding: 0 10px; border: 1px solid var(--rd-line-strong); border-radius: 0; background: var(--bg); color: var(--text); font: 13px var(--rd-font-ui); }
+  .rd-history-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+  .rd-history-filters[hidden] { display: none; }
+  .rd-history-filters button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--rd-line); background: transparent; color: var(--text-dim); font: 12px var(--rd-font-ui); cursor: pointer; }
+  .rd-history-filters button[aria-pressed="true"] { border-color: var(--rd-ink); color: var(--text); background: var(--surface-2); }
+  .rd-history-count { font-size: 10.5px; color: var(--text-faint); }
+  .rd-history-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .rd-history-list { display: flex; flex-direction: column; }
+  .rd-history-group { padding: 10px 6px 4px; font: 500 10px var(--rd-font-ui); letter-spacing: .16em; text-transform: uppercase; color: var(--text-dim); }
+  .rd-history-row { position: relative; display: flex; align-items: stretch; }
+  .rd-history .rd-history-open, .rd-history-project {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 6px 6px 6px 6px;
+    border: 0; border-bottom: 1px solid var(--rd-line); background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer;
+  }
+  .rd-history-project { padding-right: 6px; }
+  .rd-history .rd-history-open:hover, .rd-history-project:hover { background: rgba(var(--ink-rgb), .05); }
+  .rd-history-dot { flex: none; width: 6px; height: 6px; background: var(--rd-line-strong); }
+  .rd-history-dot.is-working { background: var(--point); animation: rd-chat-pulse 1.4s ease-in-out infinite; }
+  .rd-history-dot.is-needs { background: var(--danger); }
+  .rd-history .model-mark { flex: none; width: 18px; height: 18px; }
+  .rd-history-nomark { background: var(--rd-line); }
+  .rd-history-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .rd-history-name, .rd-history-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rd-history-name { font-size: 13px; font-weight: 500; }
+  .rd-history-detail { font-size: 11.5px; color: var(--text-dim); }
+  .rd-history-age { flex: none; align-self: flex-start; margin-top: 3px; font-size: 11px; color: var(--text-faint); }
+  /* The row's actions take their own space beside it, so nothing ever sits on its text. */
+  .rd-history-more { flex: none; align-self: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text); opacity: 0; cursor: pointer; }
+  .rd-history-row:is(:hover, :focus-within) .rd-history-more { opacity: 1; }
+  .rd-history-letter { flex: none; display: grid; place-items: center; width: 30px; height: 30px; background: var(--surface-2); font: italic 600 17px var(--rd-font-title); }
+  .rd-history-project-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rd-history-back { border: 0; background: none; color: var(--text-dim); font: 12px var(--rd-font-ui); cursor: pointer; padding: 4px 2px; }
+  .rd-history :is(.rd-history-files, .rd-history-new-project) { border-radius: 0; }
+  .rd-history-new-project { align-self: flex-start; }
+  .rd-history-empty { margin: 16px 6px; color: var(--text-dim); font-size: 13px; }
+  .rd-history :is(button, input):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: -2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-chat-dot.is-running, .rd-history-dot.is-working { animation: none; }
+}
+
+/* Opening chat history moves the page over beside it instead of covering it (David, 2026-10-28). */
+@media (min-width: 769px) {
+  .kairos-redesign #content { transition: margin-left .26s cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign.rd-history-docked #content { margin-left: min(340px, calc(100vw - var(--sidebar-width) - 480px)); }
+  .kairos-redesign.rd-history-docked .rd-history { box-shadow: none; }
+}
+@media (min-width: 769px) and (prefers-reduced-motion: reduce) {
+  .kairos-redesign #content { transition: none; }
+}
+
+@media (min-width: 769px) { .kairos-redesign #sidebar #rd-search { flex: none; margin-top: auto; } }
+
+/* Search with the collapse button beside it, just above the line over All tabs; All tabs as a
+   rounded popover like Updates, readable in the rail too (David, 2026-10-28). */
+@media (min-width: 769px) {
+  .rd-search-row { display: flex; align-items: center; gap: 4px; flex: none; margin-top: auto; }
+  .kairos-redesign #sidebar .rd-search-row > #rd-search { flex: 1; min-width: 0; margin: 0; }
+  .kairos-redesign #sidebar .rd-search-row > #sidebar-toggle { flex: none; width: 36px; height: 36px; border-radius: 0; }
+  .kairos-redesign.sidebar-collapsed .rd-search-row { flex-direction: column; align-items: stretch; gap: 2px; }
+  .kairos-redesign.sidebar-collapsed #sidebar .rd-search-row > #sidebar-toggle { width: auto; height: 40px; }
+  .kairos-redesign.sidebar-collapsed #sidebar .sidebar-header:not(:has(#sidebar-toggle)) { display: none; }
+  /* Search is the same palette as Forge's Jump to, so Forge shows it once, at the bottom. */
+  .kairos-redesign #sidebar:has(#rd-search-row) .rd-jump { display: none; }
+
+  .rd-all-tabs {
+    padding: 8px; border-radius: 18px; border-color: var(--rd-line-strong);
+    background: color-mix(in srgb, var(--bg-panel-solid) 92%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 12px 40px rgba(var(--shade-rgb), .16);
+  }
+  .rd-all-tabs .nav-item { border-radius: 12px; }
+  .rd-all-tabs .nav-item.active { box-shadow: none; background: var(--surface-2); }
+  .rd-all-tabs .nav-group-label { padding: 8px 10px 4px; }
+  .kairos-redesign.sidebar-collapsed .rd-all-tabs .nav-item { justify-content: flex-start; gap: 10px; padding: 0 10px; }
+  .kairos-redesign.sidebar-collapsed .rd-all-tabs .nav-item > span { width: auto; opacity: 1; }
+}
+
+/* Forge chats are marked wherever chats are listed: a gold tag with the anvil, and a gold edge
+   on the row (David, 2026-10-28). */
+.rd-forge-tag {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; height: 16px; padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--point) 55%, transparent); border-radius: 4px;
+  background: color-mix(in srgb, var(--point) 16%, transparent); color: var(--text);
+  font: 600 9.5px/1 var(--rd-font-ui); letter-spacing: .06em; text-transform: uppercase;
+}
+.rd-forge-tag svg { width: 10px; height: 10px; color: var(--point); }
+.rd-chat-row.is-forge, .rd-history-row.is-forge .rd-history-open { box-shadow: inset 2px 0 0 var(--point); }
+.rd-history-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rd-history-name-line .rd-history-name { min-width: 0; }
+.kairos-redesign .dashboard-row.is-forge .rd-forge-tag { margin-left: 6px; margin-right: auto; }

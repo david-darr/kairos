@@ -99,7 +99,8 @@
 /* Background effects use the same quiet surfaces and hairlines as Settings. */
 .appearance-effect-section { margin: 26px 0; padding: 18px; min-width: 0; border: 1px solid var(--hairline-soft); border-radius: 20px; background: var(--bg-panel); }
 .appearance-effect-section legend { padding: 0 8px; font-family: var(--font-display); font-style: italic; font-size: 25px; color: var(--text); }
-.appearance-effects-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+/* Five picture effects since Animated became a style of its own: one row of five. */
+.appearance-effects-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
 .appearance-effect-choice { min-width: 0; padding: 6px; border: 1px solid var(--hairline-soft); border-radius: 14px; cursor: pointer; background: var(--bg-panel-solid); }
 .appearance-effect-choice:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .appearance-effect-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -130,6 +131,88 @@
 .appearance-panel .appearance-dial p { font-size: 11px; }
 @media (max-width: 550px) {
   .appearance-effects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .appearance-effects-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .appearance-effect-section { padding: 12px; }
   .appearance-effect-control > span { min-width: 100%; }
 }
+
+/* Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting wallpaper of
+   three blooms with a dither grain (appearance.js #app-glass), behind a translucent window:
+   the background, sidebar, panes, prompt and popovers let it through. --glass-alpha is how
+   solid the surfaces are; the colours come from the wallpaper's own derived tokens. */
+.app-glass { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--bg); }
+.app-glass-bloom { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(60px); opacity: .75; animation: app-glass-drift 38s ease-in-out infinite alternate; }
+.app-glass-bloom:nth-child(1) { left: -18vmax; top: -22vmax; background: radial-gradient(circle, var(--glass-bloom-1), transparent 68%); }
+.app-glass-bloom:nth-child(2) { right: -24vmax; top: 8vmax; background: radial-gradient(circle, var(--glass-bloom-2), transparent 66%); animation-duration: 46s; animation-delay: -12s; }
+.app-glass-bloom:nth-child(3) { left: 18vmax; bottom: -34vmax; background: radial-gradient(circle, var(--glass-bloom-3), transparent 64%); opacity: .55; animation-duration: 54s; animation-delay: -24s; }
+.app-glass-grain { position: absolute; inset: 0; background-image: var(--glass-grain); background-size: 8px 8px; image-rendering: pixelated; opacity: var(--glass-dither); mix-blend-mode: overlay; }
+@keyframes app-glass-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(8vmax, 6vmax) scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .app-glass-bloom { animation: none; } }
+:root[data-appearance='glass'] body, :root[data-appearance='glass'] :is(#app, #content, #view-content, .chat-layout, #chat-main) { background: transparent; }
+:root[data-appearance='glass'] :is(.kairos-redesign-backdrop, .chat-backdrop) { display: none; }
+:root:not([data-appearance='default'])[data-appearance='glass'] :is(#sidebar, .chat-input-bar, .chat-stacked-pane, .artifact-panel, .rd-history, .rd-all-tabs, .rd-flyout,
+  .overflow-menu, .model-picker-menu, .settings-window, .forge-shell-sidebar, .forge-tab-strip, .forge-composer) {
+  background: color-mix(in srgb, var(--bg-panel-solid) calc(var(--glass-alpha) * 100%), transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35);
+}
+:root:not([data-appearance='default'])[data-appearance='glass'] #sidebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--glass-alpha) * 100%), transparent); }
+:root[data-appearance='glass'] :is(.chat-input-bar, .chat-stacked-pane, .rd-history, .rd-all-tabs) { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.art-glass { background: radial-gradient(circle at 25% 30%, var(--k-powder), transparent 55%), radial-gradient(circle at 80% 70%, var(--k-gold-hi), transparent 50%), var(--k-ink-dim); }
+.appearance-glass-options .appearance-glass-papers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.appearance-glass-paper { display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.appearance-glass-paper[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.appearance-glass-swatch { display: block; height: 34px; border: 1px solid var(--border); }
+.appearance-glass-control { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; }
+.appearance-art-looks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.appearance-art-look { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.appearance-art-look[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.appearance-art-look-thumb { display: flex; align-items: center; justify-content: center; position: relative; height: 54px; overflow: hidden; background: var(--art-stage, var(--bg)); }
+/* The tiles show a crop at a readable size; the player otherwise caps its canvas at the tile's width. */
+.appearance-art-look-thumb > canvas { flex: none; max-width: none !important; }
+/* Six background styles since Animated: two rows of three where there is room, otherwise two
+   columns with the last card spanning its row, so no card sits alone beside a gap. */
+.kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@container appearance (max-width: 769px) {
+  .kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kairos-redesign .appearance-panel .appearance-modes > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* See through to the desktop (Liquid glass in the desktop app, David 2026-10-28): the window is
+   Windows 11 acrylic (electron/main.js), so the page itself turns transparent and the wallpaper
+   becomes a veil over the real desktop. --glass-window is how much of the wallpaper remains. */
+:root[data-appearance='glass'][data-glass-desktop='on'] { background: transparent; }
+:root[data-appearance='glass'][data-glass-desktop='on'] .app-glass { background: color-mix(in srgb, var(--bg) calc(var(--glass-window) * 100%), transparent); }
+:root[data-appearance='glass'][data-glass-desktop='on'] .app-glass-bloom { opacity: calc(var(--glass-window) * .75); }
+:root[data-appearance='glass'][data-glass-desktop='on'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--glass-alpha) * 100%), transparent); }
+.appearance-glass-desktop { display: grid; gap: 10px; }
+
+/* Animated (David, 2026-10-28): the art fills the window behind the app (appearance.js #app-art)
+   and the theme tokens come from its colours. The surfaces let it through like Liquid glass;
+   --art-alpha is how solid they are, set by Show art through panels. */
+.app-art { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--art-stage, var(--bg)); display: flex; align-items: center; justify-content: center; }
+/* A piece is the player's own canvas, whole and unscaled by CSS (artPlayer.js sizes it). */
+.app-art > canvas:not(.art-still) { flex: none; }
+.app-art > :is(img, video, .art-still) { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-player { margin: 0; }
+:root[data-appearance='animated'] body, :root[data-appearance='animated'] :is(#app, #view-content, .chat-layout, #chat-main, .forge-workspace) { background: transparent; }
+:root[data-appearance='animated'] .dashboard-hero { background: var(--bg-panel); }
+:root[data-appearance='animated'] :is(.kairos-redesign-backdrop, .chat-backdrop) { display: none; }
+:root:not([data-appearance='default'])[data-appearance='animated'] :is(#sidebar, .chat-input-bar, .chat-stacked-pane, .artifact-panel, .rd-history, .rd-all-tabs, .rd-flyout,
+  .overflow-menu, .model-picker-menu, .settings-window, .forge-shell-sidebar, .forge-tab-strip, .forge-composer) {
+  background: var(--bg-panel-solid);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+}
+:root:not([data-appearance='default'])[data-appearance='animated'] #sidebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--art-alpha) * 100%), transparent); }
+:root[data-appearance='animated'] :is(.chat-input-bar, .chat-stacked-pane, .rd-history, .rd-all-tabs) { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+:root[data-appearance='animated'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--art-alpha) * 100%), transparent); }
+.art-animated { background: radial-gradient(circle at 30% 40%, var(--k-gold-hi) 0 4px, transparent 5px), radial-gradient(circle at 70% 60%, var(--k-rose) 0 4px, transparent 5px),
+  repeating-linear-gradient(90deg, var(--k-powder) 0 2px, transparent 2px 6px), var(--k-ink-dim); }
+.kairos-redesign[data-appearance='animated'] .appearance-preview-scene { inset: 0; mask-image: none; display: flex; align-items: center; justify-content: center; background: var(--art-stage, var(--bg)); }
+.appearance-art-picker { display: grid; gap: 8px; margin: 14px 0; font-size: 13px; color: var(--text); }
+.appearance-art-picker input[type='search'] { min-height: 40px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--bg-panel-solid); color: var(--text); font: inherit; }
+.appearance-art-picker select { width: 100%; min-height: 220px; padding: 6px; border: 1px solid var(--hairline); border-radius: 14px; background: var(--bg-panel-solid); color: var(--text); font: inherit; }
+.appearance-art-picker select optgroup { color: var(--text-dim); font-style: normal; }
+.appearance-art-picker select option { color: var(--text); padding: 3px 8px; }
+.appearance-art-picker :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.appearance-preview-own { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.appearance-art-options > .meta { font-size: 12px; line-height: 1.6; }

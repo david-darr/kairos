@@ -1,5 +1,5 @@
 import { mountMobileForge, wantsOverview, rememberedProject } from '../mobileForge.js';
-import { mountMobileModelSheet, renderMobileCatalogMenu } from '../mobileModelSheet.js';
+import { mountMobileModelSheet, renderMobileCatalogMenu, mountDesktopModelCard } from '../mobileModelSheet.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileDictation } from '../mobileDictation.js';
 import { openMobileSheet } from '../mobileSheet.js';
@@ -74,6 +74,8 @@ export function render(container, tabId, options = {}) {
   const phoneMenu = el('div', { class: 'model-picker-menu hidden' });
   agentPill.classList.add('ms-phone-model-controls'); inputRight.prepend(phoneModel, phoneMenu);
   const phonePicker = mountMobileModelSheet({ trigger: phoneModel, menu: phoneMenu, permission: () => modeSelect });
+  // The same pill opens the desktop card (David, 2026-10-28) in place of the Agent and model dropdowns.
+  const disposeCard = mountDesktopModelCard({ trigger: phoneModel, menu: phoneMenu, replaces: agentPill, clear: () => composer });
   const refreshPhoneMenu = () => {
     const endpoint = models.find(item => item.id === modelSelect?.value);
     phoneModel.textContent = [endpoint?.name || 'Choose model', variantSelect?.value || endpoint?.model, launchEffort].filter(Boolean).join(' · ');
@@ -88,7 +90,7 @@ export function render(container, tabId, options = {}) {
     locationSheet = openMobileSheet({ title: 'Session context', content: inputLeft, opener: phoneAdd, onClose: () => { anchor.after(inputLeft); anchor.remove(); locationSheet = null; } });
   }, 'ms-forge-add');
   phoneAdd.innerHTML = PLUS_ICON; phoneAdd.setAttribute('aria-label', 'Session context'); pickers.prepend(phoneAdd);
-  const gatePhone = () => { phoneAdd.hidden = phoneModel.hidden = !mobileOn(); }; gatePhone(); phone.addEventListener('change', gatePhone); document.addEventListener('kairos:appearance', gatePhone);
+  const gatePhone = () => { phoneAdd.hidden = !mobileOn(); }; gatePhone(); phone.addEventListener('change', gatePhone); document.addEventListener('kairos:appearance', gatePhone);
   const disposeDictation = mountMobileDictation(composer, message, inputRight);
   const disposeComposer = mountMobileComposer({ composer, input: message, context: () => projects.find(item => item.id === projectSelect?.value)?.name || 'Choose a project', busy: () => starting, recording: () => composer.classList.contains('ms-dictating') });
   const drawWorking = () => {
@@ -299,5 +301,5 @@ export function render(container, tabId, options = {}) {
   load();
   document.addEventListener('kairos:forge-apps', refreshActivity);
   const timer = setInterval(() => { if (!document.hidden) { refreshActivity(); lifespan(); } }, 30000);
-  return () => { phoneWorkspace.dispose(); phonePicker.dispose(); locationSheet?.close(); disposeDictation(); disposeComposer(); phone.removeEventListener('change', gatePhone); document.removeEventListener('kairos:appearance', gatePhone); disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
+  return () => { phoneWorkspace.dispose(); phonePicker.dispose(); disposeCard(); locationSheet?.close(); disposeDictation(); disposeComposer(); phone.removeEventListener('change', gatePhone); document.removeEventListener('kairos:appearance', gatePhone); disposed = true; approvalController.abort(); ++summaryVersion; ++branchVersion; unsubscribe(); clearInterval(timer); disposeBanner(); dialog?.close(); document.removeEventListener('kairos:appearance', appearance); document.removeEventListener('kairos:forge-apps', refreshActivity); };
 }

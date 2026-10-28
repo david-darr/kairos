@@ -28,6 +28,8 @@ class Element extends Events {
   setAttribute() {}
   checkVisibility() { return this.visible; }
   prepend(child) { child.parent = this; this.children.unshift(child); }
+  append(...nodes) { for (const child of nodes) { child.parent = this; this.children.push(child); } }
+  after(node) { if (this.parent) { node.parent = this.parent; this.parent.children.splice(this.parent.children.indexOf(this) + 1, 0, node); } }
   remove() { this.isConnected = false; if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); }
   getContext() {
     if (this.ctx) return this.ctx;
@@ -82,11 +84,11 @@ class Element extends Events {
     return mod;
   }
   const prefs = await load(path.join(root, 'static/js/backgroundEffectPreferences.js')); await prefs.evaluate();
-  const { normalizeEffectOptions, EFFECTS, ART_PIECES } = prefs.namespace;
+  const { normalizeEffectOptions, PICTURE_EFFECTS, ART_LOOKS } = prefs.namespace;
   const normalized = normalizeEffectOptions({ ascii: { density: Infinity, motion: 'no', tint: 'bad' }, binary: { density: -1 }, numbers: { density: 100 } });
   assert.equal(normalized.ascii.density, 9); assert.equal(normalized.ascii.motion, true); assert.equal(normalized.ascii.tint, 'theme');
   assert.equal(normalized.binary.density, 3); assert.equal(normalized.numbers.density, 24);
-  appearance = { backgroundEffect: 'ascii', effectOptions: normalizeEffectOptions(), mode: 'default', halftone: true, animatedPiece: 'moonlit-sea' };
+  appearance = { backgroundEffect: 'ascii', effectOptions: normalizeEffectOptions(), mode: 'default', halftone: true };
   const engine = await load(path.join(root, 'static/js/backgroundEffects.js')); await engine.evaluate();
   const dither = await load(path.join(root, 'static/js/dither.js')); await dither.evaluate();
   const a = new Element('canvas'), b = new Element('canvas'), img = new Image();
@@ -118,7 +120,7 @@ class Element extends Events {
   intersectionObservers.at(-1).cb([{ isIntersecting: true }]); assert.equal(rafs.size, 1);
   host.isConnected = false; mutationObservers.at(-1).cb([]); assert.equal(rafs.size, 0); assert.equal(host.children.length, 0);
   dispose();
-  for (const effect of EFFECTS) {
+  for (const effect of PICTURE_EFFECTS) {
     appearance.backgroundEffect = effect;
     const surface = new Element(); surface.clientWidth = 4000; surface.clientHeight = 2400;
     dispose = engine.namespace.mountBackgroundEffect(surface, '/picture'); await flush();
@@ -126,19 +128,26 @@ class Element extends Events {
     if (['ascii', 'numbers', 'binary', 'halftone'].includes(effect)) assert.ok(Number(surface.children[0].dataset.cells) <= 20000);
     dispose(); assert.equal(rafs.size, 0);
   }
-  for (const [slug] of ART_PIECES) {
+  // Animated art (David, 2026-10-28): every vendored ASCII Magic piece is in the generated
+  // catalogue under a known category, declares its own slug, and draws whole frames of its size.
+  // The player that shows them unchanged is ASCII Magic's own (covered in Electron, appearance-checks).
+  const catalog = await load(path.join(root, 'static/js/artCatalog.js')); await catalog.evaluate();
+  const { ART_CATALOG, ART_CATEGORIES } = catalog.namespace;
+  const vendored = fs.readdirSync(path.join(root, 'static/vendor/ascii-magic/pieces')).map(name => name.replace(/\.js$/, '')).sort();
+  // Array.from: the catalogue's arrays belong to the sandbox's realm, which strict equality compares.
+  assert.deepEqual(Array.from(ART_CATALOG, ([slug]) => slug).sort(), vendored, 'The catalogue lists exactly the vendored pieces');
+  assert.ok(ART_CATALOG.length > 700, 'The full library is vendored');
+  for (const slug of ['aurora-cabin-snowfall', 'fuji-dawn-lake', 'balloon-valley-sunrise']) assert.ok(vendored.includes(slug), `${slug} is available`);
+  for (const slug of ['ocean-sunset', 'starry-ridge']) assert.ok(!vendored.includes(slug), `${slug} (Unsplash licence) is not shipped`);
+  assert.ok(ART_CATALOG.every(([, , category]) => ART_CATEGORIES.some(([id]) => id === category)));
+  assert.deepEqual(Array.from(ART_LOOKS, ([id]) => id), ['original', 'dots', 'ascii', 'dither', 'blocks']);
+  for (const [slug] of ART_CATALOG) {
     const mod = await load(path.join(root, 'static/vendor/ascii-magic/pieces', slug + '.js')); if (mod.status === 'linked') await mod.evaluate();
-    appearance.backgroundEffect = 'animated'; appearance.animatedPiece = slug;
-    appearance.effectOptions.animated.motion = false;
-    const artHost = new Element(); dispose = engine.namespace.mountBackgroundEffect(artHost, '/picture'); await flush();
-    assert.equal(artHost.children[0].dataset.effect, 'animated', `${slug} canvas wrapper renders`);
-    assert.equal(rafs.size, 0, `${slug} motion off is static`); dispose();
-    const draw = mod.namespace.default();
-    for (const t of [0, 2, 5]) {
-      const frame = draw(t), text = typeof frame === 'string' ? frame : frame.text;
-      const lines = text.split('\n'); assert.equal(lines.length, mod.namespace.meta.rows);
-      assert.ok(lines.every(line => [...line].length === mod.namespace.meta.cols), `${slug} frame dimensions`);
-    }
+    const { meta } = mod.namespace;
+    assert.equal(meta.slug, slug);
+    const frame = mod.namespace.default()(1.5), text = typeof frame === 'string' ? frame : frame.text;
+    const lines = text.split('\n'); assert.equal(lines.length, meta.rows, `${slug} frame rows`);
+    assert.ok(lines.every(line => [...line].length === meta.cols), `${slug} frame columns`);
   }
   const dissolve = dither.namespace.dissolveCells(new Element('canvas').getContext('2d'), 4, 700);
   assert.equal(rafs.size, 1); document.hidden = true; document.emit('visibilitychange');
@@ -192,12 +201,30 @@ class Element extends Events {
   await api.initAppearance('two'); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   await api.initAppearance('one'); assert.equal(api.getAppearance().effectOptions.binary.motion, false);
   assert.equal(api.getAppearance().animatedPiece, 'snowfall');
+  // Desktop redesign: the animated art's Look and Chat messages persist, and bad values fall back.
+  api.updateAppearance({ artLook: 'blocks', chatMessages: 'cards' });
+  assert.equal(api.getAppearance().artLook, 'blocks'); assert.equal(api.getAppearance().chatMessages, 'cards');
+  assert.equal(document.documentElement.dataset.chatMessages, 'cards');
+  api.updateAppearance({ artLook: 'sparkles', chatMessages: 'bubbles' });
+  assert.equal(api.getAppearance().artLook, 'original', 'an unknown look falls back to the piece as made');
+  assert.equal(api.getAppearance().chatMessages, 'plain', 'an unknown message style falls back to Plain');
   await api.resetAppearance(); assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   assert.equal(api.getAppearance().effectOptions.binary.density, 9);
   saved.set('jarvis:appearance:v1:broken', 'null'); await api.initAppearance('broken');
   assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   api.updateAppearance({ backgroundEffect: 'unknown', animatedPiece: '../not-allowed', effectOptions: [] });
-  assert.equal(api.getAppearance().backgroundEffect, 'dithered'); assert.equal(api.getAppearance().animatedPiece, 'moonlit-sea');
-  console.log('Passed: per-user persistence, welcome snapshot, reset, malformed preferences.');
-  console.log('Passed: normalization, exact legacy dither operations, six renderers, 20k cell cap, local art frames, one loop, hidden/offscreen/reduced-motion/detached cleanup.');
+  assert.equal(api.getAppearance().backgroundEffect, 'dithered'); assert.equal(api.getAppearance().animatedPiece, 'aurora-cabin-snowfall');
+  api.updateAppearance({ animatedPiece: 'scatter' }); assert.equal(api.getAppearance().animatedPiece, 'aurora-cabin-snowfall', 'Scatter is gone; the default piece stands in');
+  // Animated is a background style of its own (David, 2026-10-28): the old effect moves to it, and
+  // the theme takes a deep shade of the piece's own background as its base.
+  api.updateAppearance({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'sleepy-moon' });
+  assert.deepEqual([api.getAppearance().mode, api.getAppearance().backgroundEffect], ['animated', 'dithered']);
+  await flush();
+  const base = api.getAppearance().artBase.slice(1).match(/../g).map(v => parseInt(v, 16));
+  assert.ok(api.getAppearance().artBase !== '#15171d' && base[2] > base[0], 'The base comes from the piece: a deep blue for the night sky');
+  api.updateAppearance({ artBase: 'red', artAccent: 'javascript:', artPanels: 7 });
+  assert.deepEqual([api.getAppearance().artBase, api.getAppearance().artAccent, api.getAppearance().artPanels], ['#15171d', '', 1], 'Bad colours fall back to the default base');
+  await api.resetAppearance(); assert.equal(api.getAppearance().mode, 'default');
+  console.log('Passed: per-user persistence, welcome snapshot, reset, malformed preferences, Animated migration and art colours.');
+  console.log('Passed: normalization, exact legacy dither operations, five renderers, 20k cell cap, the full art catalogue and its frames, one loop, hidden/offscreen/reduced-motion/detached cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

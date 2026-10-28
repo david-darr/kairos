@@ -69,7 +69,8 @@ export async function mountForgeSession(panel, session, project, models, { initi
       workspace: session.workspace_dir, branch: session.forge.branch, modeControl: mode, modeBusy: () => mutating,
       hasMessages: !!session.messages?.length,
       onDiff, onChanges, changes,
-      queue: true, readOnly: !!session.forge.removed, initialMessage, placeholder: 'Message your agent',
+      queue: true, readOnly: !!session.forge.removed, initialMessage, placeholder: 'Ask, build, or describe a change…',
+      permissionPicker: !session.forge.removed, permissionPill: true,
       emptyText: 'Describe the next step for this project.', onTurnEnd: onReview,
       onModelChange: (model, override) => { agentLabel.textContent = agentText(model, override); },
     });

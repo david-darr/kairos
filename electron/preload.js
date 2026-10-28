@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld("jarvis", {
   pickVaultFolder: () => ipcRenderer.invoke("pick-vault-folder"),
   // Two #rrggbb colors; main.js checks both and that the call came from this window.
   setTitleBar: (color, symbolColor) => ipcRenderer.send("window:title-bar", String(color), String(symbolColor)),
+  // Liquid glass's see-through window; main.js checks the platform and the sender.
+  setSeeThrough: on => ipcRenderer.send("window:see-through", !!on),
   openGoogleSignIn: (url) => ipcRenderer.invoke("google:open-sign-in", url),
 
   screenGrab: {

@@ -39,6 +39,8 @@ class Surface {
     button(label, action, className = 'ms-glass') { const node = context.document.createElement('button'); node.textContent = label; node.className = className; node.addEventListener('click', action); return node; }, edgeBlur() {} };
   const stubs = {
     './mobileShared.js': shared,
+    // The desktop card only positions itself in a real window.
+    './menuFit.js': { fitMenu() {} },
     './api.js': { api: async () => ({ providers: [] }), modelMark: () => null, el(tag, attrs = {}, children = []) {
       const node = context.document.createElement(tag);
       for (const [key, value] of Object.entries(attrs)) {

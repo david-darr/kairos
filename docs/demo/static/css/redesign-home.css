@@ -407,3 +407,8 @@
 @media (max-width: 768px) {
   .kairos-redesign .hm-home .rd-usage-card { padding-top: 8px; }
 }
+
+/* Desktop: Home's hero and cards a little less round (David, 2026-10-28). */
+@media (min-width: 769px) {
+  .kairos-redesign .hm-home :is(.dashboard-section, .dashboard-hero), .kairos-redesign .dashboard-hero { border-radius: 18px; }
+}
