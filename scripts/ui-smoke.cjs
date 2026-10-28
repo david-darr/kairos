@@ -501,6 +501,15 @@ app.whenReady().then(async () => {
       if (findings) { console.error(findings); process.exitCode = 1; } else console.log('PASS: g6 Tasks, Tool Store and Cookbook checks.');
       win.destroy(); server.close(); exitAfterFlush(process.exitCode || 0); return;
     }
+    if (process.argv.includes('--a13-detail-only')) {  // Part 2 A13: Tool Store detail sheets show true state and valid actions (a13-detail-checks.cjs).
+      let findings = null;
+      try { await require('./a13-detail-checks.cjs')({ js, win, waitFor, delay, navigate, capture, reads, writes, demoState }); }
+      catch (error) { if (/^a13 findings/.test(error.message)) findings = error.message; else throw error; }
+      assert.deepEqual(errors, [], 'a13 renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: !findings, checks: ['a13 detail'], findings, errors }, null, 2));
+      if (findings) { console.error(findings); process.exitCode = 1; } else console.log('PASS: a13 Tool Store detail sheets.');
+      win.destroy(); server.close(); exitAfterFlush(process.exitCode || 0); return;
+    }
     if (process.argv.includes('--g7-only')) {  // A14 Settings window: search, gating, drag/resize, close-during-load, panel cost.
       await require('./settings-access-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, reads, writes });
       assert.deepEqual(errors, []);
