@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "b00d6611d6b100e09020bf04ea546b8b37bf560eeefc2b8c07879b8c166c0c1c",
+  "app.js": "7df6110b772023d287cdc2903cd89172e43d1bd6af9f1afd78c5dce136686296",
   "fixtures.js": "a5f7dfeef45e7f48f2b4a8babfd9ae8dc75b2bf877b5fb3b7d4267d0dbf631f3",
   "index.html": "f33aff804892ecd288e84e56a6919b34f3dac15c4d2ee5b73e9c128ecba4d2a4",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -390,7 +390,7 @@
   "static/js/agentModelPicker.js": "9ce4a03eb964b6d5f56352356b4bad28e04c5af0208a32dcc29ace2d393f103b",
   "static/js/agentProfile.js": "1aad3e68e4cb0a4c53f3996569bd03df1ab6c82fc9e3ee3366095b156875acc4",
   "static/js/agentsMessenger.js": "38b24c0e6a33bc166572f4bfbfb1208fe86dcc05029a765d5cdc2d3e2e887d70",
-  "static/js/api.js": "6f3ba1fdbb43475eda04125b8a4c8368afa5a41e90045da47eed5ed3bf85ab6f",
+  "static/js/api.js": "8641df6ef31b69b619c7fd00bbde47aa1b9800953b989a44f716f0d7649ef131",
   "static/js/app.js": "6f9cb5ae929a6bb78c46f4aa4838c295cda4c319894a9b02ec7ac7b995261281",
   "static/js/appearance.js": "d3323ebb03b50e1706f1b704e7bc4babc46bf300a0cdd2ef8cdae913cde5a738",
   "static/js/artifactForeignReview.js": "ab903c90601c4397ba5dcd03993ddd239e3732f265f4630d14ea67f3898d1c80",
@@ -448,7 +448,7 @@
   "static/js/forgeEditor.js": "31efd9dfa7f97408464d106b1663e945abb2a764dd93a60433007de007e97606",
   "static/js/forgeGitPanel.js": "b2457d9276eac8fcc430e36d0c5e9b5c61dd661ed57e1600a8b80fd5890367d7",
   "static/js/forgeProjectForms.js": "4061b43c1d528699098867c47c62c65e63906fb18e9cbb5eedfca247ca9637b3",
-  "static/js/forgeRail.js": "5066d3102eeaed70ffac5b0ffb301b0befb6e4645d1dc2a430d3f29f770de577",
+  "static/js/forgeRail.js": "30f13646be66963b9b52a49f2bdfe015506a97c75435e1f04c4833684d12c4a1",
   "static/js/forgeSessionPane.js": "8db7495f09ec616322c005aa5716fe44a88b4e205517ffa51ef99670c7a28fa8",
   "static/js/forgeSurfaces.js": "8df0a605acbfff259e83100248a9c297f36db367c3d19574dd28a734f145720b",
   "static/js/forgeTerminal.js": "1140579e8326d9ae1d24947144e6c21a11ce42cd1cbd5a08f1133c381316743b",

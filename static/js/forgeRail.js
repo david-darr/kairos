@@ -82,6 +82,9 @@ export function mountForgeRail(nav) {
     try {
       const apps = await api('/api/forge/apps/running');
       if (disposed || at !== version) return;
+      // A session created since the last full read is not listed yet: read everything once instead.
+      const known = new Set(groups.flatMap(group => group.sessions.map(session => session.id)));
+      if (apps.some(app => !known.has(app.session_id))) { refresh(); return; }
       for (const group of groups) for (const session of group.sessions) session._appRunning = apps.some(app => app.session_id === session.id);
       draw();
     } catch { /* The next full refresh reports loading errors. */ }
