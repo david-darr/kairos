@@ -338,6 +338,11 @@
 .kairos-redesign .appearance-effect-thumb { height: 64px; border-radius: 12px; }
 .kairos-redesign .appearance-effect-label { min-height: 28px; justify-content: center; text-align: center; font-size: 12px; }
 .kairos-redesign .appearance-effect-label input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+/* The hidden radio stays inside its card. Placed against the Settings window instead, focusing it
+   scrolled the whole window and threw its header and layout out of place when an effect was
+   picked (David, 2026-10-28); clip keeps the window itself from ever scrolling. */
+.kairos-redesign .appearance-effect-choice { position: relative; }
+.kairos-redesign .settings-window { overflow: clip; }
 .kairos-redesign .appearance-effect-controls { border: 1px solid var(--rd-line); border-radius: 26px; background: var(--rd-surface-solid); padding: 4px 22px; }
 .kairos-redesign .appearance-effect-control { flex-wrap: nowrap; gap: 12px; min-height: 56px; margin: 0; padding: 10px 0; border-bottom: 1px solid var(--rd-line); }
 .kairos-redesign .appearance-effect-control > span { flex: 1; min-width: 0; font-size: 15px; }

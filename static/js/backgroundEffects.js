@@ -1,7 +1,7 @@
 // One owner per decorative surface. The original dither painter is unchanged.
 import { drawDither, loadDitherImage } from './dither.js';
 import { getAppearance, halftonePalette } from './appearance.js';
-import { ART_PIECES, ART_LOOKS } from './backgroundEffectPreferences.js';
+import { ART_PIECES, ART_LOOKS, SCATTER, SCATTER_PIECES } from './backgroundEffectPreferences.js';
 import { paint, GlyphAtlas } from '../vendor/ascii-magic/runtime/canvas.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -146,6 +146,69 @@ function artPainter(target, W, H, prefs, mod, colors, preview, look = 'ascii') {
   };
 }
 
+// A piece's own background, learned over a few frames: the colours along its border, and any
+// colour covering a large share of it (a wall or sky), so Scatter shows the character alone.
+function backgroundKeys(mod) {
+  const draw = mod.default(), keys = new Set(), counts = new Map();
+  let cells = 0;
+  for (const t of [0, 1.3, 2.9]) {
+    const frame = draw(t);
+    if (typeof frame === 'string') return null;
+    const rows = frame.color.split('\n').map(row => [...row]), last = rows.length - 1;
+    rows.forEach((row, r) => row.forEach((key, c) => {
+      cells++; counts.set(key, (counts.get(key) || 0) + 1);
+      if (r === 0 || r === last || c === 0 || c === row.length - 1) keys.add(key);
+    }));
+  }
+  for (const [key, count] of counts) if (count > cells * .12) keys.add(key);
+  keys.delete(' ');
+  return keys;
+}
+function cutOut(frame, keys) {
+  if (!keys || typeof frame === 'string') return frame;
+  const colors = frame.color.split('\n').map(row => [...row]);
+  const text = frame.text.split('\n').map((row, r) => [...row].map((ch, c) => keys.has(colors[r][c]) ? ' ' : ch).join('')).join('\n');
+  return { text, color: frame.color };
+}
+// Where Scatter's pieces sit, as fractions of the backdrop: round the edges, the middle left clear.
+const SCATTER_SPOTS = [[.12, .2], [.86, .17], [.1, .8], [.88, .78], [.56, .9], [.36, .12]];
+function scatterPainter(target, W, H, prefs, mods, colors, preview, look = 'ascii') {
+  const ctx = target.getContext('2d'), atlas = new GlyphAtlas();
+  target.width = W; target.height = H;
+  const mode = (ART_LOOKS.find(([id]) => id === look) || ART_LOOKS[0])[2], aspect = mode === 'text' ? 1.66 : 1;
+  const sprites = mods.map((mod, i) => {
+    const { cols, rows } = mod.meta;
+    // Each piece takes about a quarter of the width or a third of the height; the density
+    // setting scales that (9 is the default).
+    const fit = Math.min(W * .24 / cols, H * .34 / (rows * aspect)) * (preview ? 1 : Math.max(.5, Math.min(1.4, prefs.density / 9)));
+    const cw = Math.max(2, Math.floor(fit));
+    const ch = cw * aspect, tw = Math.ceil(cols * cw), th = Math.ceil(rows * ch);
+    const [fx, fy] = SCATTER_SPOTS[i % SCATTER_SPOTS.length];
+    return { mod, draw: mod.default(), keys: backgroundKeys(mod), cw, ch, tw, th, tile: canvas(tw, th),
+      x: Math.round(Math.min(W - tw, Math.max(0, fx * W - tw / 2))), y: Math.round(Math.min(H - th, Math.max(0, fy * H - th / 2))), phase: i * 1.7 };
+  });
+  const alpha = preview ? .95 : .8;
+  return t => {
+    ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
+    for (const s of sprites) {
+      const tc = s.tile.getContext('2d');
+      tc.globalAlpha = 1; tc.clearRect(0, 0, s.tw, s.th);
+      paint(tc, cutOut(s.draw(t * .35 + s.phase), s.keys), prefs.tint === 'picture' ? s.mod.meta.palette : null,
+        { cw: s.cw, ch: s.ch, ink: colors.ink, mode, atlas, dpr: 1 });
+      // A slow drift, a few cells either way.
+      const dx = Math.sin(t * .05 + s.phase) * s.cw * 3, dy = Math.cos(t * .04 + s.phase) * s.ch * 1.5;
+      ctx.globalAlpha = alpha; ctx.drawImage(s.tile, Math.round(s.x + dx), Math.round(s.y + dy));
+    }
+    ctx.globalAlpha = 1;
+  };
+}
+// A fresh handful of pieces for each Scatter backdrop.
+function pickScatter(count = SCATTER_SPOTS.length) {
+  const pool = [...SCATTER_PIECES];
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  return pool.slice(0, count);
+}
+
 // Default preferences pass the same options to the unchanged legacy painter.
 export function drawSceneDither(target, img, W, H, opts = {}) {
   const a = getAppearance(), prefs = a.effectOptions.dithered;
@@ -168,6 +231,8 @@ export function mountBackgroundEffect(el, src, opts = {}) {
   el.prepend(target);
   let disposed = false, connected = el.isConnected, inView = true, raf = 0, timer = 0;
   let revision = 0, dirty = true, building = false, painter = null, moving = false, time = 0, last = 0, accumulator = 0;
+  // The pieces one Scatter backdrop shows; kept across redraws so a resize doesn't reshuffle them.
+  let scatterIds = null;
   let wasReduced = reduce.matches;
   let pendingReady = opts.onReady;
   const settle = () => { const fn = pendingReady; pendingReady = null; fn?.(); };
@@ -194,7 +259,12 @@ export function mountBackgroundEffect(el, src, opts = {}) {
     const W = Math.max(1, Math.round(el.clientWidth * scale)), H = Math.max(1, Math.round(el.clientHeight * scale));
     try {
       let next;
-      if (effect === 'animated') {
+      if (effect === 'animated' && a.animatedPiece === SCATTER) {
+        scatterIds ||= pickScatter();
+        const mods = await Promise.all(scatterIds.map(id => import(`../vendor/ascii-magic/pieces/${id}.js`)));
+        if (disposed || token !== revision || !visible()) { dirty = true; return; }
+        next = scatterPainter(target, W, H, prefs, mods, colors, opts.preview, opts.look || a.animatedLook);
+      } else if (effect === 'animated') {
         const id = ART_PIECES.some(([key]) => key === a.animatedPiece) ? a.animatedPiece : ART_PIECES[0][0];
         const mod = await import(`../vendor/ascii-magic/pieces/${id}.js`);
         if (disposed || token !== revision || !visible()) { dirty = true; return; }

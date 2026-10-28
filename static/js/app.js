@@ -12,7 +12,7 @@ import { setPaneUser } from './chatPaneStack.js';
 import { closeBrowser, openBrowser } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout, pinnedTabs } from "./layout.js";
-import { renderDesktopNav, clearDesktopNav } from "./sidebarNav.js";
+import { renderDesktopNav, clearDesktopNav, mountSearchRow } from "./sidebarNav.js";
 import { registration as notificationRegistration } from './mobileNotifications.js';
 import { mountMobileChrome } from './mobileChrome.js';
 import { mountPageSearch } from './mobilePageSearch.js';
@@ -27,6 +27,7 @@ import { avatarSpec } from './agentAvatar.js';
 import { notchNavigation, whenReady } from './notchNavigate.js';
 
 let forgeRailCleanup = () => {};
+let forgeSearchCleanup = null;
 restoreSidebar();
 if (window.jarvis?.browser) document.documentElement.classList.add("electron-shell");
 if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")) document.documentElement.classList.add("platform-mac");
@@ -384,12 +385,15 @@ async function buildSidebar() {
   if (appMode === 'forge') for (const item of FORGE_NAV) items.set(item.id, { ...item, svg: ICONS[item.icon] });
   // Desktop Kairos: the redesigned sidebar and rail (sidebarNav.js).
   let desktopNav = null;
+  const openSearch = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }));
+  forgeSearchCleanup?.(); forgeSearchCleanup = null;
   if (appMode !== 'forge' && desktopSidebar.matches) {
-    desktopNav = renderDesktopNav({ nav, items, groups, pinned: pinnedTabs([...items.keys()]), switchTab,
-      openSearch: () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })),
+    desktopNav = renderDesktopNav({ nav, items, groups, pinned: pinnedTabs([...items.keys()]), switchTab, openSearch,
       openHistory: () => import('./chatHistoryPopout.js').then(module => module.openChatHistory({ switchTab })),
       editPins: () => openSettings({ section: 'layout' }) });
   } else clearDesktopNav();
+  // Forge on a desktop keeps its own nav but has Search and collapse where Kairos has them.
+  if (appMode === 'forge' && desktopSidebar.matches) forgeSearchCleanup = mountSearchRow(openSearch);
   for (const group of desktopNav ? [] : groups) {
     if (!group.ids.length) continue;
     if (group.label || group.id === 'main') {

@@ -97,7 +97,8 @@
 
   /* -- Chat history popout -- */
   .rd-history {
-    position: fixed; z-index: 2550; top: 0; bottom: 0; width: 340px; max-width: calc(100vw - var(--sidebar-width));
+    /* Below the desktop app's title bar, which would otherwise cover the panel's header. */
+    position: fixed; z-index: 2550; top: var(--titlebar-h); bottom: 0; width: 340px; max-width: calc(100vw - var(--sidebar-width));
     display: flex; flex-direction: column; gap: 10px; padding: 16px 14px 12px; box-sizing: border-box;
     background: var(--bg-panel-solid); border-right: 1px solid var(--rd-line-strong); box-shadow: var(--rd-shadow);
     color: var(--text); font-family: var(--rd-font-ui);
@@ -174,7 +175,9 @@
   .kairos-redesign #sidebar .rd-search-row > #sidebar-toggle { flex: none; width: 36px; height: 36px; border-radius: 0; }
   .kairos-redesign.sidebar-collapsed .rd-search-row { flex-direction: column; align-items: stretch; gap: 2px; }
   .kairos-redesign.sidebar-collapsed #sidebar .rd-search-row > #sidebar-toggle { width: auto; height: 40px; }
-  .kairos-redesign.sidebar-collapsed[data-app-mode="kairos"] #sidebar .sidebar-header:not(:has(#sidebar-toggle)) { display: none; }
+  .kairos-redesign.sidebar-collapsed #sidebar .sidebar-header:not(:has(#sidebar-toggle)) { display: none; }
+  /* Search is the same palette as Forge's Jump to, so Forge shows it once, at the bottom. */
+  .kairos-redesign #sidebar:has(#rd-search-row) .rd-jump { display: none; }
 
   .rd-all-tabs {
     padding: 8px; border-radius: 18px; border-color: var(--rd-line-strong);

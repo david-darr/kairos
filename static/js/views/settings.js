@@ -244,7 +244,7 @@ async function renderComputerUsePanel(body) {
 
 let modalEl = null;
 let pillEl = null;
-let activeSectionId = "add-models";
+let activeSectionId = "appearance";
 let cachedStatus = null;
 let renderVersion = 0;
 // Invalidate pending opens when Settings is closed, minimized, or opened again.
@@ -264,7 +264,8 @@ export async function render(container) {
 export async function openSettingsWindow(section) {
   const version = ++openVersion;
   mobile = null;
-  if (SECTION_GROUPS.some(group => group.sections.some(item => item.id === section))) activeSectionId = section;
+  // Settings opened with no page asked for starts on Appearance (David, 2026-10-28).
+  activeSectionId = SECTION_GROUPS.some(group => group.sections.some(item => item.id === section)) ? section : "appearance";
   if (pillEl) { pillEl.remove(); pillEl = null; }
   cachedStatus = await api("/api/auth/status");
   if (version !== openVersion) return;

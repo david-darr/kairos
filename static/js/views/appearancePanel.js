@@ -1,10 +1,10 @@
 import { el } from '../api.js';
-import { EFFECTS, ART_PIECES, ART_LOOKS } from '../backgroundEffectPreferences.js';
+import { EFFECTS, ART_PIECES, ART_LOOKS, SCATTER } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
 import { kipChoices } from '../kipPicker.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
-  resetAppearance, setAppearancePreview, halftoneSource, GLASS_WALLPAPERS, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
+  resetAppearance, setAppearancePreview, halftoneSource, GLASS_WALLPAPERS, canSeeThroughWindow, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
 
 // The three halftone slots (Build spec, 2026-10-08): Home's banner and the
 // chat's two scenes. Each is optional - an empty slot keeps the Kairos picture.
@@ -146,7 +146,8 @@ export function renderAppearancePanel(content, _status, page) {
       thumb, el('span', { class: 'appearance-effect-label' }, [input, el('span', { text: effectTitles[index] })]),
     ]));
   }
-  const piece = el('select', { id: 'appearance-art-piece' }, ART_PIECES.map(([value, text]) => el('option', { value, text })));
+  const piece = el('select', { id: 'appearance-art-piece' }, [el('option', { value: SCATTER, text: 'Scatter: several small pieces' }),
+    ...ART_PIECES.map(([value, text]) => el('option', { value, text }))]);
   piece.addEventListener('change', () => { updateAppearance({ animatedPiece: piece.value }); sync(); });
   const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Animated piece' }), piece]);
   // Living pixels (desktop redesign): the same piece drawn as ASCII, dithered, dots or pixels.
@@ -255,9 +256,16 @@ export function renderAppearancePanel(content, _status, page) {
     return { input, output, row: el('label', { class: 'appearance-glass-control', for: input.id }, [el('span', { text: title }), input, output]) };
   };
   const glassStrength = glassSlider('glassStrength', 'Glass'), glassDither = glassSlider('glassDither', 'Dither');
+  // The desktop app only: the real desktop behind the window (appearance.js canSeeThroughWindow).
+  const glassDesktop = toggle({ label: 'See through to the desktop', onChange: on => { updateAppearance({ glassDesktop: on }); sync(); } });
+  const glassWindow = glassSlider('glassWindow', 'Desktop');
+  const desktopOptions = el('div', { class: 'appearance-glass-desktop', hidden: !canSeeThroughWindow() }, [
+    group({}, [row({ title: 'See through to the desktop', description: 'Your wallpaper and windows show softly through the app. Windows 11.', control: glassDesktop })]),
+    glassWindow.row,
+  ]);
   const glassOptions = el('div', { class: 'appearance-glass-options' }, [
-    el('h3', { class: 'rd-appearance-label', text: 'Liquid glass' }), papers, glassStrength.row, glassDither.row,
-    el('p', { class: 'meta', text: 'Glass is how much of the wallpaper shows through the window, sidebar, panes and prompt. Dither adds the grain.' }),
+    el('h3', { class: 'rd-appearance-label', text: 'Liquid glass' }), papers, glassStrength.row, glassDither.row, desktopOptions,
+    el('p', { class: 'meta', text: 'Glass is how much of the wallpaper shows through the window, sidebar, panes and prompt. Dither adds the grain. Desktop is how much of your real desktop shows through the wallpaper.' }),
   ]);
   const reset = el('button', { type: 'button', class: 'btn quiet', text: 'Reset appearance', onclick: async () => {
     try { await resetAppearance(); sync(); } catch { status.textContent = 'Appearance could not be reset. Try again.'; }
@@ -356,7 +364,8 @@ export function renderAppearancePanel(content, _status, page) {
     for (const [style, button] of messageButtons) button.setAttribute('aria-pressed', String(style === value.chatMessages));
     glassOptions.hidden = value.mode !== 'glass';
     for (const [id, button] of paperButtons) button.setAttribute('aria-pressed', String(id === value.glassWallpaper));
-    for (const [key, control] of [['glassStrength', glassStrength], ['glassDither', glassDither]]) {
+    glassDesktop.checked = value.glassDesktop; glassWindow.row.hidden = !value.glassDesktop;
+    for (const [key, control] of [['glassStrength', glassStrength], ['glassDither', glassDither], ['glassWindow', glassWindow]]) {
       const number = Math.round(value[key] * 100); control.input.value = number; control.output.textContent = `${number}%`;
     }
     for (const [id, { button }] of lookButtons) button.setAttribute('aria-pressed', String(id === value.animatedLook));

@@ -3,7 +3,7 @@
 // with Edit, then the running and today's chats. The footer gains All tabs,
 // which lists every shown tab by its Settings > Layout group. Collapsed, the
 // same items are a 56 px icon rail (redesign-sidebar.css). Phones and Forge
-// mode keep app.js's own nav. Every tab button stays a `.nav-item[data-tab]`,
+// mode keep app.js's own nav; Forge on a desktop gets only the Search row. Every tab button stays a `.nav-item[data-tab]`,
 // so app.js marks the open tab and the Agents badge the same way as before.
 import { api, el } from './api.js';
 import { ICONS } from './icons.js';
@@ -17,6 +17,19 @@ function tabButton(item, onClick, extra = '') {
   button.querySelector('span').textContent = item.label;
   button.addEventListener('click', onClick);
   return button;
+}
+
+// Search sits at the bottom of the sidebar, just above the line over the footer, with the collapse
+// button beside it (David, 2026-10-28), in Kairos and in Forge alike. Returns the undo, which puts
+// the collapse button back in the header (phones).
+export function mountSearchRow(openSearch) {
+  const search = actionButton(ICONS.search, 'Search', 'rd-search', openSearch);
+  search.id = 'rd-search';
+  const toggle = document.getElementById('sidebar-toggle');
+  const searchRow = el('div', { id: 'rd-search-row', class: 'rd-search-row' }, [search, toggle]);
+  document.getElementById('rd-search-row')?.remove();
+  document.getElementById('sidebar-footer').before(searchRow);
+  return () => { document.querySelector('#sidebar .sidebar-header')?.append(toggle); searchRow.remove(); };
 }
 
 function actionButton(icon, label, cls, onClick) {
@@ -72,15 +85,7 @@ export function renderDesktopNav({ nav, items, groups, pinned, switchTab, openSe
     actionButton(ICONS.chats, 'Chat history', 'rd-history-trigger', openHistory),
   ]);
   document.getElementById('rd-primary')?.remove();
-  // Search sits at the bottom of the sidebar, just above the line over All tabs (David, 2026-10-28).
-  const search = actionButton(ICONS.search, 'Search', 'rd-search', openSearch);
-  search.id = 'rd-search';
-  // The collapse button sits beside Search (David, 2026-10-28); it goes back to the header when
-  // this sidebar is cleared (phones, Forge).
-  const toggle = document.getElementById('sidebar-toggle');
-  const searchRow = el('div', { id: 'rd-search-row', class: 'rd-search-row' }, [search, toggle]);
-  document.getElementById('rd-search-row')?.remove();
-  document.getElementById('sidebar-footer').before(searchRow);
+  const removeSearchRow = mountSearchRow(openSearch);
   // Before the Updates row (redesignShell.js), which sits just above #nav.
   (document.getElementById('rd-jump') || nav).before(primary);
 
@@ -172,8 +177,8 @@ export function renderDesktopNav({ nav, items, groups, pinned, switchTab, openSe
     document.removeEventListener('kairos:chat-session', onChats);
     document.removeEventListener('click', outside); document.removeEventListener('keydown', onKey);
     removeEventListener('resize', place);
-    document.querySelector('#sidebar .sidebar-header')?.append(toggle);
-    primary.remove(); searchRow.remove(); allPanel.remove(); allButton.remove();
+    removeSearchRow();
+    primary.remove(); allPanel.remove(); allButton.remove();
     cleanup = () => {};
   };
   return { allButton };

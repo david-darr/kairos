@@ -82,7 +82,7 @@ class Element extends Events {
     return mod;
   }
   const prefs = await load(path.join(root, 'static/js/backgroundEffectPreferences.js')); await prefs.evaluate();
-  const { normalizeEffectOptions, EFFECTS, ART_PIECES } = prefs.namespace;
+  const { normalizeEffectOptions, EFFECTS, ART_PIECES, SCATTER, SCATTER_PIECES } = prefs.namespace;
   const normalized = normalizeEffectOptions({ ascii: { density: Infinity, motion: 'no', tint: 'bad' }, binary: { density: -1 }, numbers: { density: 100 } });
   assert.equal(normalized.ascii.density, 9); assert.equal(normalized.ascii.motion, true); assert.equal(normalized.ascii.tint, 'theme');
   assert.equal(normalized.binary.density, 3); assert.equal(normalized.numbers.density, 24);
@@ -139,6 +139,22 @@ class Element extends Events {
       const lines = text.split('\n'); assert.equal(lines.length, mod.namespace.meta.rows);
       assert.ok(lines.every(line => [...line].length === mod.namespace.meta.cols), `${slug} frame dimensions`);
     }
+  }
+  // Scatter: several pieces on one backdrop, each a coloured frame it can cut out of its scene.
+  assert.ok(SCATTER_PIECES.length >= 6 && SCATTER_PIECES.every(slug => ART_PIECES.some(([id]) => id === slug)), 'Scatter draws only listed pieces');
+  for (const slug of SCATTER_PIECES) {
+    const mod = await load(path.join(root, 'static/vendor/ascii-magic/pieces', slug + '.js')); if (mod.status === 'linked') await mod.evaluate();
+    assert.equal(typeof mod.namespace.default()(0).color, 'string', `${slug} has colours to cut out by`);
+  }
+  appearance.backgroundEffect = 'animated'; appearance.animatedPiece = SCATTER; appearance.effectOptions.animated.motion = false;
+  // This stand-in canvas has no ImageData, which the dithered and dot looks draw with; those are
+  // covered in Electron (appearance-checks).
+  for (const look of ['ascii', 'pixels']) {
+    appearance.animatedLook = look;
+    const scatterHost = new Element(); scatterHost.clientWidth = 1600; scatterHost.clientHeight = 900;
+    dispose = engine.namespace.mountBackgroundEffect(scatterHost, '/picture'); await flush();
+    assert.equal(scatterHost.children[0].dataset.effect, 'animated', `Scatter renders as ${look}`);
+    assert.equal(rafs.size, 0, 'Scatter with motion off is static'); dispose();
   }
   const dissolve = dither.namespace.dissolveCells(new Element('canvas').getContext('2d'), 4, 700);
   assert.equal(rafs.size, 1); document.hidden = true; document.emit('visibilitychange');
@@ -204,7 +220,8 @@ class Element extends Events {
   saved.set('jarvis:appearance:v1:broken', 'null'); await api.initAppearance('broken');
   assert.equal(api.getAppearance().backgroundEffect, 'dithered');
   api.updateAppearance({ backgroundEffect: 'unknown', animatedPiece: '../not-allowed', effectOptions: [] });
-  assert.equal(api.getAppearance().backgroundEffect, 'dithered'); assert.equal(api.getAppearance().animatedPiece, 'moonlit-sea');
+  assert.equal(api.getAppearance().backgroundEffect, 'dithered'); assert.equal(api.getAppearance().animatedPiece, 'scatter');
+  api.updateAppearance({ animatedPiece: 'scatter' }); assert.equal(api.getAppearance().animatedPiece, 'scatter', 'Scatter is a valid choice');
   console.log('Passed: per-user persistence, welcome snapshot, reset, malformed preferences.');
   console.log('Passed: normalization, exact legacy dither operations, six renderers, 20k cell cap, local art frames, one loop, hidden/offscreen/reduced-motion/detached cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

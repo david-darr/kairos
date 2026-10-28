@@ -702,6 +702,8 @@ app.whenReady().then(async () => {
       await win.loadURL(base);
       await waitFor("document.querySelectorAll('.forge-stats .forge-stat').length === 5");
       assert.equal(await js("localStorage.getItem('kairos:app-mode')"), 'forge', label + ' mode survives reload');
+      // Forge has Search and the collapse button where Kairos has them (David, 2026-10-28).
+      if (await js("innerWidth > 768")) assert.ok(await js("(() => { const row = document.querySelector('#sidebar > #rd-search-row'); return !!row && row.nextElementSibling === document.querySelector('#sidebar-footer') && row.contains(document.querySelector('#sidebar-toggle')) && getComputedStyle(document.querySelector('#rd-jump')).display === 'none'; })()"), label + ' Forge Search row above the footer');
       const customizeOpener = "document.querySelector('.forge-toolbar button')";
       const customizeReady = "!!document.querySelector('[data-widget-toggle=working]')";
       await openPopup(customizeOpener, customizeReady, label + ' Customize');
@@ -2204,6 +2206,7 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('#rd-history .rd-history-open')");
     assert.equal(await js("document.querySelector('#chat-sessions').inert"), true, 'Desktop history is the popout, not the in-chat panel');
     assert.equal(await js("document.querySelector('#chat-history-toggle').getAttribute('aria-expanded')"), 'true', 'The history button reports the open popout');
+    assert.ok(await js("document.querySelector('#rd-history').getBoundingClientRect().top >= (document.querySelector('.titlebar')?.getBoundingClientRect().bottom || 0) - 1"), 'The history panel starts below the desktop title bar');
     assert.equal(await js("getComputedStyle(document.querySelector('.chat-history-close')).display"), 'none', 'Drawer close control stays mobile-only');
     assert.ok(await js("[...document.querySelectorAll('#rd-history .rd-history-filters button')].map(b => b.dataset.filter).join() === 'all,working,needs,pinned'"), 'History filters: All, Working, Needs you, Pinned');
     assert.ok(await js("Number(document.querySelector('#rd-history [data-filter=all] small').textContent) === document.querySelectorAll('#rd-history .rd-history-open').length"), 'All counts every listed chat');

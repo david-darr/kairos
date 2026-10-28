@@ -173,3 +173,12 @@
   .kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kairos-redesign .appearance-panel .appearance-modes > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
+
+/* See through to the desktop (Liquid glass in the desktop app, David 2026-10-28): the window is
+   Windows 11 acrylic (electron/main.js), so the page itself turns transparent and the wallpaper
+   becomes a veil over the real desktop. --glass-window is how much of the wallpaper remains. */
+:root[data-appearance='glass'][data-glass-desktop='on'] { background: transparent; }
+:root[data-appearance='glass'][data-glass-desktop='on'] .app-glass { background: color-mix(in srgb, var(--bg) calc(var(--glass-window) * 100%), transparent); }
+:root[data-appearance='glass'][data-glass-desktop='on'] .app-glass-bloom { opacity: calc(var(--glass-window) * .75); }
+:root[data-appearance='glass'][data-glass-desktop='on'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--glass-alpha) * 100%), transparent); }
+.appearance-glass-desktop { display: grid; gap: 10px; }

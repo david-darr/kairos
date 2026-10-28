@@ -51,6 +51,44 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   assert.equal(await js("document.documentElement.dataset.chatMessages + ':' + document.querySelector('.appearance-chat-style[data-chat-messages=cards]').getAttribute('aria-pressed')"), 'cards:true');
   await js("document.querySelector('.appearance-chat-style[data-chat-messages=plain]').click()");
   assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
+  // Settings opened with no page asked for starts on Appearance (David, 2026-10-28).
+  await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow('add-models'))");
+  await waitFor("document.querySelector('.settings-nav-item.active')?.dataset.section === 'add-models'");
+  await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow())");
+  await waitFor("document.querySelector('.settings-nav-item.active')?.dataset.section === 'appearance' && !!document.querySelector('.appearance-panel')");
+  // Picking an effect with the mouse leaves the Settings window where it was: its hidden radio
+  // once scrolled the whole window and threw its header out of place.
+  if (await js("innerWidth > 768")) {
+    const box = "JSON.stringify((r => [r.left, r.top, r.width, r.height])(document.querySelector('.settings-window').getBoundingClientRect())) + ':' + document.querySelector('.settings-window').scrollTop";
+    const before = await js(box);
+    for (const effect of ['dithered', 'halftone', 'ascii', 'animated', 'dithered']) {
+      const [x, y] = await js(`(() => { const label = document.querySelector('label[for=appearance-effect-${effect}]'); label.scrollIntoView({ block: 'nearest' }); const r = label.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + 12)]; })()`);
+      await delay(150);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      await delay(300);
+      assert.equal(await js("document.getElementById('appearance-effect-" + effect + "').checked"), true, `${effect} picked`);
+      assert.equal(await js(box), before, `Picking ${effect} leaves the Settings window in place`);
+    }
+  }
+  // Scatter (the default animated art): several cut-out pieces, drawn in each look.
+  await set({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'scatter' });
+  for (const look of ['ascii', 'dither', 'dots', 'pixels']) {
+    await set({ animatedLook: look });
+    await waitFor("[...document.querySelectorAll('.background-effect-canvas')].some(c => c.dataset.effect === 'animated' && c.width > 400)");
+  }
+  await capture('appearance-scatter');
+  await set({ backgroundEffect: 'dithered', animatedLook: 'ascii' });
+  // See through to the desktop: only where the desktop app offers it, on by default in glass.
+  if (await js("typeof window.jarvis?.setSeeThrough === 'function'")) {
+    await set({ mode: 'glass' });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop + ':' + !document.querySelector('.appearance-glass-desktop').hidden"), 'on:true');
+    assert.equal(await js("getComputedStyle(document.documentElement).backgroundColor"), 'rgba(0, 0, 0, 0)', 'The page lets the desktop through');
+    await set({ glassDesktop: false });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop"), 'off');
+    await set({ mode: 'default', glassDesktop: true });
+    assert.equal(await js("document.documentElement.dataset.glassDesktop"), 'off', 'Only Liquid glass sees through');
+  }
   assert.equal(await js("document.querySelector('[data-mode=default] strong').textContent"), 'Kairos');
   assert.equal(await js("document.querySelector('.appearance-preview-copy strong').textContent"), 'Not more time. The right time.');
   await js("document.querySelector('[data-mode=color]').click()");

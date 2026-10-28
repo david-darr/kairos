@@ -1,10 +1,11 @@
-import { EFFECTS, ART_PIECES, ART_LOOKS, normalizeEffectOptions } from './backgroundEffectPreferences.js';
+import { EFFECTS, ART_PIECES, ART_LOOKS, SCATTER, normalizeEffectOptions } from './backgroundEffectPreferences.js';
 import { kipStyleOf, DEFAULT_KIP_STYLE } from './kipStyle.js';
 // Device-local appearance. Images are decoded into canvas pixels, never
 // injected as URLs or uploaded. IndexedDB keeps them out of small JSON storage.
 const DEFAULTS = Object.freeze({ mode: 'default', color: '#f3eadb', tint: .65,
-  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: 'moonlit-sea', kip: DEFAULT_KIP_STYLE, mascot: true,
-  animatedLook: 'ascii', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35 });
+  distortion: .35, swirl: .3, grainMixer: .2, grainOverlay: .12, motion: true, chatStyle: 'standard', halftone: true, backgroundEffect: 'dithered', effectOptions: null, animatedPiece: SCATTER, kip: DEFAULT_KIP_STYLE, mascot: true,
+  animatedLook: 'ascii', chatMessages: 'plain', glassWallpaper: 'lagoon', glassStrength: .6, glassDither: .35,
+  glassDesktop: true, glassWindow: .5 });
 // Liquid glass (desktop redesign, 2026-10-28; canvas board Glass): a drifting
 // wallpaper behind a translucent window. Each wallpaper is a base (the theme
 // is derived from it like a Color base) and three light blooms.
@@ -59,12 +60,13 @@ function normalize(raw = {}) {
   }
   if (EFFECTS.includes(raw.backgroundEffect)) value.backgroundEffect = raw.backgroundEffect;
   value.effectOptions = normalizeEffectOptions(raw.effectOptions);
-  if (ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
+  if (raw.animatedPiece === SCATTER || ART_PIECES.some(([id]) => id === raw.animatedPiece)) value.animatedPiece = raw.animatedPiece;
   if (ART_LOOKS.some(([id]) => id === raw.animatedLook)) value.animatedLook = raw.animatedLook;
   // Chat messages (desktop redesign): plain text on the backdrop, or the bubble cards.
   if (['plain', 'cards'].includes(raw.chatMessages)) value.chatMessages = raw.chatMessages;
   if (Object.hasOwn(GLASS_WALLPAPERS, raw.glassWallpaper || '')) value.glassWallpaper = raw.glassWallpaper;
-  for (const key of ['glassStrength', 'glassDither']) {
+  if (typeof raw.glassDesktop === 'boolean') value.glassDesktop = raw.glassDesktop;
+  for (const key of ['glassStrength', 'glassDither', 'glassWindow']) {
     if (typeof raw[key] === 'number' && Number.isFinite(raw[key])) value[key] = Math.max(0, Math.min(1, raw[key]));
   }
   if (typeof raw.motion === 'boolean') value.motion = raw.motion;
@@ -396,10 +398,22 @@ function apply() {
 
 // Liquid glass: the wallpaper's blooms, how see-through the surfaces are and
 // how strong its dither grain is, as custom properties appearance.css reads.
-const GLASS_PROPS = ['--glass-bloom-1', '--glass-bloom-2', '--glass-bloom-3', '--glass-alpha', '--glass-dither', '--glass-grain'];
+const GLASS_PROPS = ['--glass-bloom-1', '--glass-bloom-2', '--glass-bloom-3', '--glass-alpha', '--glass-dither', '--glass-grain', '--glass-window'];
 let glassGrain = '';
+// The desktop app can let the real desktop show through the window in Liquid glass (David,
+// 2026-10-28): Windows 11's acrylic behind a page that goes partly transparent (electron/main.js).
+export const canSeeThroughWindow = () => typeof window.jarvis?.setSeeThrough === 'function';
+let seeThrough = false;
+function syncSeeThrough(root, on) {
+  root.dataset.glassDesktop = on ? 'on' : 'off';
+  if (on !== seeThrough && canSeeThroughWindow()) window.jarvis.setSeeThrough(on);
+  seeThrough = on;
+}
 function syncGlass(root) {
+  syncSeeThrough(root, settings.mode === 'glass' && settings.glassDesktop && canSeeThroughWindow());
   if (settings.mode !== 'glass') { GLASS_PROPS.forEach(key => root.style.removeProperty(key)); document.getElementById('app-glass')?.remove(); return; }
+  // How much of the wallpaper stays over the desktop: 0 keeps it all, 1 leaves a light veil.
+  root.style.setProperty('--glass-window', String(Math.round((1 - settings.glassWindow * .85) * 100) / 100));
   const paper = GLASS_WALLPAPERS[settings.glassWallpaper];
   paper.blooms.forEach((hex, i) => root.style.setProperty(`--glass-bloom-${i + 1}`, hex));
   // Strength 0 is nearly solid, 1 nearly clear.
