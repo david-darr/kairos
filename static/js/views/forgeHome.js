@@ -9,7 +9,7 @@ import { shouldSendOnEnter } from '../composerKeyboard.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { halftoneSource, halftoneFocus, halftonePalette, halftoneVersion } from '../appearance.js';
 import { bars, donut, heatmap, statCard, rankedTable } from '../forgeCharts.js';
-import { projectSessions, sessionRow, forgeRunning } from '../forgeUi.js';
+import { projectSessions, forgeOverview, sessionRow, forgeRunning } from '../forgeUi.js';
 import { openProjectForm } from '../forgeProjectForms.js';
 import { subscribeAll } from '../chatStream.js';
 import { permissionAction } from '../forgeAppPreview.js';
@@ -176,11 +176,13 @@ export function render(container, tabId, options = {}) {
         panel('Most changed files', rankedTable(result.hotspots, 'path', 'Most changed files')), panel('Contributors', rankedTable(result.contributors, 'name', 'Contributors'))]));
     } catch (error) { if (!disposed && version === summaryVersion) body.textContent = `Could not read repository: ${error.message}`; }
   }
-  async function refreshActivity() {
+  async function refreshActivity(initial = false) {
     if (disposed || busy) return;
     busy = true;
     try {
-      const [result, groups, apps] = await Promise.all([api('/api/forge/activity'), projectSessions(projects), api('/api/forge/apps/running')]);
+      // The first load shares the rail's projects/sessions/apps read; later calls read fresh.
+      const shared = initial === true ? await forgeOverview().catch(() => null) : null;
+      const [result, groups, apps] = await Promise.all([api('/api/forge/activity'), shared ? shared.groups : projectSessions(projects), shared ? shared.apps : api('/api/forge/apps/running')]);
       if (disposed) return;
       sessionGroups = groups; runningApps = apps; phoneWorkspace.update(); drawWorking();
       bodies.services.replaceChildren(...(apps.length ? apps.map(app => {
@@ -201,7 +203,7 @@ export function render(container, tabId, options = {}) {
   }
   async function load() {
     try {
-      const results = await Promise.allSettled([api('/api/forge/projects'), api('/api/models/choices')]);
+      const results = await Promise.allSettled([forgeOverview().then(shared => shared.projects), api('/api/models/choices')]);
       if (disposed) return;
       if (results[0].status === 'rejected') throw results[0].reason;
       projects = results[0].value;
@@ -231,7 +233,7 @@ export function render(container, tabId, options = {}) {
       bodies.recent.replaceChildren(...(projects.length ? projects.slice(0, 5).map(p => el('button', { type: 'button', class: 'dashboard-row', onclick: async () => {
         try { await api(`/api/forge/projects/${p.id}/opened`, { method: 'POST' }); if (!disposed && !phoneWorkspace.openProject(p.id)) { projectSelect.value = lifespanSelect.value = p.id; locationChanged(); lifespan(); message.focus(); } } catch { /* api displays the error. */ }
       } }, [el('span', { class: 'dashboard-row-copy' }, [el('strong', { text: p.name }), el('small', { class: 'meta', text: p.path })])])) : [el('p', { class: 'meta', text: 'Add an existing folder, clone a repository, or start a new project.' }), el('button', { type: 'button', class: 'btn', text: 'Open folder', onclick: event => openProjectForm('existing', { owner: page, opener: event.currentTarget, onSaved: () => { document.dispatchEvent(new Event('kairos:forge-projects')); navigate('forgeHome', phoneWorkspace.here()); } }) })]));
-      lifespan(); refreshActivity();
+      lifespan(); refreshActivity(true);
       if (options.compose) message.focus();
     } catch { if (!disposed) grid.replaceChildren(el('p', { role: 'status', text: 'Forge could not load. Open Home again to retry.' })); }
   }

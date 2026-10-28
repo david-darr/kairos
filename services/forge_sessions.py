@@ -212,6 +212,12 @@ class ForgeSessions:
         raw = Path(details['worktree'])
         if session.get('workspace_dir') != str(raw):
             raise ValueError('Forge workspace no longer matches its session.')
+        reads = {}
+        def start():
+            # Independent reads, started together once the path and link checks pass; each result is
+            # still checked below in the original order.
+            for key, folder, recipe in (('actual', raw, 'repo'), ('common_root', raw, 'common'), ('common_repo', repo, 'common')):
+                reads[key] = forge_git.POOL.submit(forge_git.run_git, folder, recipe)
         if details['isolation'] == 'in_place':
             if raw != repo:
                 raise ValueError('In-place workspace no longer matches the project.')
@@ -226,12 +232,13 @@ class ForgeSessions:
         root = Path(projects_module.vet_project(str(raw)))
         if root != raw or _linked(raw / '.git'):
             raise ValueError('Worktree root or Git metadata cannot be a link.')
-        actual = forge_git.run_git(root, 'repo')[1].strip()
+        start()  # only after the link check: git never runs against unvetted metadata
+        actual = reads['actual'].result()[1].strip()
         if os.path.normcase(actual) != os.path.normcase(str(root)):
             raise ValueError('Git working directory no longer matches this session.')
-        def common(folder):
-            return (folder / forge_git.run_git(folder, 'common')[1].strip()).resolve()
-        if common(root) != common(repo):
+        def common(folder, key):
+            return (folder / reads[key].result()[1].strip()).resolve()
+        if common(root, 'common_root') != common(repo, 'common_repo'):
             raise ValueError('Git metadata no longer belongs to this project.')
         return root
 
@@ -247,9 +254,9 @@ class ForgeSessions:
         root = self.workspace(session_id)
         base = self.get(session_id)['forge']['base_commit']
         rows = []
-        for record in forge_git.diff(root, base, numstat=True).split('\0'):
-            if not record:
-                continue
+        untracked = forge_git.POOL.submit(forge_git.run_git, root, 'untracked')
+        records, patches = forge_git.diff_all(root, base)
+        for index, record in enumerate(records):
             added, removed, name = record.split('\t', 2)
             added = added.rsplit('\n', 1)[-1]  # Git may emit a line-ending warning first.
             try:
@@ -258,12 +265,12 @@ class ForgeSessions:
                 rows.append(dict(path=name, added=None, removed=None, binary=True,
                                  untracked=False, patch='', hunks=[], unavailable=str(error)))
                 continue
-            patch = forge_git.diff(root, base, name)
+            patch = patches[index] if patches is not None else forge_git.diff(root, base, name)
             _, hunks = _hunks(name, patch)
             rows.append(dict(path=name, added=int(added) if added.isdigit() else None,
                              removed=int(removed) if removed.isdigit() else None,
                              binary=added == '-', untracked=False, patch=patch, hunks=hunks))
-        for name in forge_git.run_git(root, 'untracked')[1].split('\0'):
+        for name in untracked.result()[1].split('\0'):
             if not name:
                 continue
             try:
@@ -369,14 +376,22 @@ class ForgeSessions:
         folder = confined(root, name, directory=True)
         if not folder.is_dir():
             raise ValueError('Directory is unavailable.')
-        changed = {r['path'] for r in self.changes(session_id)['files']}
-        names = forge_git.run_git(root, 'files')[1].split('\0') + forge_git.run_git(root, 'untracked')[1].split('\0')
+        # The set changes() reports (tracked diff against the base plus untracked), from one cheap
+        # name-only run instead of a patch for every file; the three reads run together.
+        tracked = forge_git.POOL.submit(forge_git.run_git, root, 'files')
+        others = forge_git.POOL.submit(forge_git.run_git, root, 'untracked')
+        diffed = forge_git.diff_names(root, self.get(session_id)['forge']['base_commit'])
+        untracked = others.result()[1].split('\0')
+        changed = {n for n in diffed + untracked if n}
+        names = tracked.result()[1].split('\0') + untracked
         prefix = name + '/' if name else ''
         entries = {}
         for filename in names:
             if not filename or not filename.startswith(prefix):
                 continue
             child = prefix + filename[len(prefix):].split('/', 1)[0]
+            if child in entries:
+                continue  # one confinement check and stat per entry, not per file beneath it
             try:
                 path = confined(root, child)
                 if not path.exists():

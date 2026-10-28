@@ -1,9 +1,11 @@
 """Bounded, non-interactive git recipes for Forge. Never a shell."""
 import copy
 import os
+import re
 import subprocess
 import threading
 from collections import Counter, defaultdict, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +13,9 @@ from core.workspace import vet_workspace
 
 TIMEOUT = 20
 OUTPUT_CAP = 16 * 1024 * 1024
+# Independent reads of one request (a change list, a workspace check) run side by side: a git process
+# costs about 75-100 ms to start on Windows, so four in a row are slower than one round of four.
+POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='forge-git')
 _cache = OrderedDict()
 _cache_lock = threading.RLock()
 
@@ -177,6 +182,59 @@ def diff(path, commit, filename=None, numstat=False):
     return _run(path, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames',
                       *(['--numstat', '-z'] if numstat else ['--patch', '--unified=3']),
                       commit, '--', *([filename] if filename else [])], worktree=True)[1]
+
+
+def _commit(path, ref):
+    # A stored full commit id needs no resolving run; anything else is vetted and resolved.
+    return ref if isinstance(ref, str) and re.fullmatch(r'[0-9a-f]{40}', ref) else rev_parse(path, ref)
+
+
+def diff_names(path, commit):
+    commit = _commit(path, commit)
+    names = []
+    for name in _run(path, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', commit, '--'],
+                     worktree=True)[1].split('\0'):
+        while name.startswith('warning: ') and '\n' in name:  # git's stderr is merged into the output
+            name = name.split('\n', 1)[1]
+        if name:
+            names.append(name)
+    return names
+
+
+def diff_all(path, commit):
+    """Numstat records and one patch per file from two git runs, not one run per file.
+
+    Returns (records, patches) where patches[i] belongs to records[i], or patches is None when the
+    combined patch cannot be split one-to-one (callers then fall back to one diff per file)."""
+    commit = _commit(path, commit)
+    base = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames']
+    numstat = POOL.submit(_run, path, [*base, '--numstat', '-z', commit, '--'], worktree=True)
+    patch = POOL.submit(_run, path, [*base, '--patch', '--unified=3', commit, '--'], worktree=True)
+    records = [r for r in numstat.result()[1].split('\0') if r]
+    if not records:
+        return records, []
+    try:
+        text = patch.result()[1]
+    except GitError:
+        return records, None  # e.g. combined output over the cap: per-file runs stay bounded.
+    # Patch content lines always start with ' ', '+', '-', backslash or '@', so a line starting with
+    # "diff --git " is a file header and one starting with "warning: " is git's own stderr (merged
+    # into the output). Warnings go back in front of the file they name, as in per-file runs.
+    lines = text.splitlines(keepends=True)
+    warnings = [line for line in lines if line.startswith('warning: ')]
+    parts = re.split(r'(?m)^(?=diff --git )', ''.join(line for line in lines if not line.startswith('warning: ')))
+    if parts and not parts[0].startswith('diff --git '):
+        if parts.pop(0):
+            return records, None
+    if len(parts) != len(records):
+        return records, None
+    names = [record.split('\t', 2)[-1] for record in records]
+    owned = [[] for _ in parts]
+    for line in warnings:
+        match = re.search(r"in the working copy of '(.*?)', ", line)
+        owned[names.index(match[1]) if match and match[1] in names else 0].append(line)
+    parts = [''.join(found) + part for found, part in zip(owned, parts)]
+    return records, parts
 
 
 def apply_reverse(path, patch):

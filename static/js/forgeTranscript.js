@@ -243,17 +243,17 @@ function createTranscript(options) {
     }
     if (!state.busy) {
       state.error.hidden = !entry.error && entry.status !== 'stopped'; state.error.textContent = entry.error || 'Stopped';
-      if (wasBusy) { state.fold.open = false; refresh(); }
+      if (wasBusy) { state.fold.open = false; refresh(true); }
     } else if (state.events.some(e => category(e.name) === 'edit' && e.phase === 'finished') && !refreshing && state.diffEvents !== state.events.length) {
-      state.diffEvents = state.events.length; refresh();
+      state.diffEvents = state.events.length; refresh(true);
     }
     follow();
   }
-  async function refresh() {
+  async function refresh(fresh = false) {
     if (disposed) return;
     const version = ++refreshVersion; refreshing = true;
     try {
-      const results = await Promise.all([options.readOnly ? { files: [] } : api(`${base}/changes`), api(`${base}/checkpoints`)]);
+      const results = await Promise.all([options.readOnly ? { files: [] } : options.changes ? options.changes(fresh).then(files => ({ files })) : api(`${base}/changes`), api(`${base}/checkpoints`)]);
       if (disposed || version !== refreshVersion) return;
       files = results[0].files; checkpoints = results[1];
       // The existing admin checkpoint detail has this turn's diff and restore
@@ -300,7 +300,7 @@ function createTranscript(options) {
         state.reviewBusy = true; state.review.querySelectorAll('button').forEach(button => { button.disabled = true; });
         try {
           await api(`${base}/checkpoints/${encodeURIComponent(checkpoint.id)}/undo`, { method: 'POST', body: JSON.stringify({ confirmed: true }) });
-          await refresh(); await options.onTurnEnd?.();
+          await refresh(true); if (!options.changes) await options.onTurnEnd?.();  // changes() already reloaded the shell
         } catch (error) { modelStatus.textContent = error.message; }
         finally { state.reviewBusy = false; if (!disposed) drawReview(state); }
       } }),
@@ -342,9 +342,15 @@ function createTranscript(options) {
       await refresh();
     } catch (error) { if (!disposed) modelStatus.textContent = `Tool history could not load: ${error.message}`; }
   }
-  const followup = event => { if (event.detail.sessionId === id) { const msg = event.detail.message; documentBody.append(card('assistant', msg.content, msg)); refresh(); follow(); } };
+  const followup = event => { if (event.detail.sessionId === id) { const msg = event.detail.message; documentBody.append(card('assistant', msg.content, msg)); refresh(true); follow(); } };
   document.addEventListener('kairos:bg-followup', followup);
-  const reviewChanged = () => { if (!refreshing) refresh(); };
+  const reviewChanged = event => {
+    // The shell publishes the changes it just read: redraw from them (checkpoints do not move with
+    // a changes read). An event without them (a file save) reads fresh.
+    const shared = event?.detail?.changes?.[id];
+    if (shared && !options.readOnly) { files = shared; for (const state of states.values()) { drawSteps(state); drawReview(state); } return; }
+    if (!refreshing) refresh(true);
+  };
   document.addEventListener('kairos:forge-review', reviewChanged);
   return {
     messages: documentBody, mount, card, paint, history, follow, setBusy,

@@ -64,6 +64,8 @@ export async function render(container, tabId, options = {}) {
   panes.append(left, divider, right); shell.append(sidebar, workspace, parked); container.replaceChildren(shell);
   let disposed = false, project, projects = [], models = [], sessions = [], layout, navigation = 0, reviewsVersion = 0, explorerVersion = 0;
   let explorerContext = null, activePane = 'left', tabDrag = null, cancelResize = null, reviewsTask = null;
+  let appTimer = null, appWatchUntil = 0, appRows = null;
+  const reviewsAt = new Map(), wasRunning = new Set();
   let width = Number(readStorage('kairos:forge-sidebar-width', 228)) || 228;
   const panels = new Map(), reviews = new Map();
   const reverting = new Set();
@@ -73,7 +75,7 @@ export async function render(container, tabId, options = {}) {
     disposed = true; phoneShell.dispose(); gitCleanup(); ++navigation; ++reviewsVersion; ++explorerVersion; cancelResize?.(); cleanupPanels(); unsubscribe(); clearInterval(timer); hideArtifact({ navigation: true });
     document.removeEventListener('keydown', onKey); window.removeEventListener('resize', viewportChanged);
     document.removeEventListener('kairos:forge-projects', projectsChanged); if (controller === instance) controller = null;
-    document.removeEventListener('kairos:forge-apps', refreshApps); clearInterval(appTimer);
+    document.removeEventListener('kairos:forge-apps', appsChanged); clearInterval(appTimer); appTimer = null;
   };
   let ready;
   const instance = { open: async next => { await ready; if (!disposed) return openContext(next); } }; controller = instance;
@@ -114,9 +116,14 @@ export async function render(container, tabId, options = {}) {
   const unsubscribe = subscribeAll(id => {
     if (!layout || disposed) return;
     drawCards(); drawChanges(); syncHunkControls();
-    if (sessions.some(s => s.id === id) && !forgeRunning(id)) refreshReviews();
+    // Re-read changes when a turn ends (running -> stopped), not on every stream notification: the
+    // open transcript reads its own turn end through changesFor, which shares this load.
+    if (forgeRunning(id)) wasRunning.add(id);
+    else if (wasRunning.delete(id) && sessions.some(s => s.id === id)) refreshReviews();
   });
-  const timer = setInterval(() => { if (!document.hidden && project) refreshReviews(); }, 30000);
+  // Poll only while the change counts can be seen: tab visible, and the project sidebar open (phone
+  // layouts show the count in the session header instead).
+  const timer = setInterval(() => { if (!document.hidden && project && (mobileOn() || !sidebar.hidden)) refreshReviews(); }, 30000);
   document.addEventListener('keydown', onKey);
   window.addEventListener('resize', viewportChanged);
   document.addEventListener('kairos:forge-projects', projectsChanged);
@@ -136,8 +143,7 @@ export async function render(container, tabId, options = {}) {
   workspace.ondragleave = event => { if (!workspace.contains(event.relatedTarget)) workspace.classList.remove('forge-drop-right'); };
   workspace.ondrop = event => { event.preventDefault(); if (workspace.classList.contains('forge-drop-right') && tabDrag) split(tabDrag); cancelDrag(); };
   strip.onwheel = event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } };
-  const appTimer = setInterval(refreshApps, 5000);
-  document.addEventListener('kairos:forge-apps', refreshApps);
+  document.addEventListener('kairos:forge-apps', appsChanged);
   const phoneShell = mountMobileForgeSession(shell, {
     status, state: () => ({ project, session: sessions.find(s => s.id === layout?.sessionId), tabs: layout?.tabs || [], surface: layout?.tabs.find(t => t.id === layout.left), count: (reviews.get(layout?.sessionId) || []).length }),
     select: selectSidebarTab, panel: key => ({ git: gitPanel, changes: changesPanel, explorer: explorerPanel })[key],
@@ -172,20 +178,25 @@ export async function render(container, tabId, options = {}) {
       status.textContent = ''; name.textContent = project.name;
       document.dispatchEvent(new CustomEvent('kairos:forge-project-selected', { detail: { projectId: id } }));
       showSidebar(true);
-      const loadedSessions = await api(`/api/forge/projects/${encodeURIComponent(id)}/sessions`);
+      // Opening a session of the project already on screen: the list is current (events and the
+      // session read above keep it so), so patch in the fresh record instead of reading it again.
+      const loadedSessions = !changedProject && session && sessions.some(s => s.id === session.id)
+        ? sessions.map(s => s.id === session.id ? session : s)
+        : await api(`/api/forge/projects/${encodeURIComponent(id)}/sessions`);
       if (disposed || version !== navigation) return;
       sessions = loadedSessions;
+      for (const s of sessions) if (forgeRunning(s.id)) wasRunning.add(s.id);
       if (session) {
         layout.sessionId = session.id;
         let tab = layout.tabs.find(t => t.type === 'session' && t.sessionId === session.id);
         if (!tab) { tab = { id: `session:${session.id}`, type: 'session', title: session.title, sessionId: session.id, session }; layout.tabs.push(tab); }
-        tab.session = session;
+        tab.session = session; tab.fetched = { session, at: Date.now() };
         activate(tab.id, 'left');
         if (next.initialMessage) { tab.initialMessage = next.initialMessage; const mounted = panels.get(tab.id); if (mounted) { mounted._cleanup?.(); mounted.remove(); panels.delete(tab.id); } }
       } else if (layout.sessionId && !sessions.some(s => s.id === layout.sessionId)) layout.sessionId = null;
       branch.textContent = sessions.find(s => s.id === layout.sessionId)?.forge.branch || project.git?.branch || 'Project folder';
       drawCards(); drawTabs(); drawPanes();
-      refreshApps();
+      if (changedProject || !appRows) refreshApps();  // otherwise events and the running-app poll keep the strip current
       selectSidebarTab(readStorage(`kairos:forge-panel:${id}`, 'sessions'));
       await refreshReviews();
       if (disposed || version !== navigation) return;
@@ -252,12 +263,21 @@ export async function render(container, tabId, options = {}) {
     try {
       const apps = await api('/api/forge/apps/running');
       if (disposed || !project) return;
+      appRows = apps;
       const rows = apps.filter(app => app.project_id === project.id);
       runningStrip.hidden = !rows.length;
       runningStrip.replaceChildren(el('strong', { text: 'Running' }), ...rows.map(app => el('button', {
         class: 'forge-small-button', text: `:${app.port} ${sessions.find(s => s.id === app.session_id)?.title || 'Session'}`,
         onclick: () => openPreview(app.session_id) })));
+      syncAppTimer(rows.length > 0);
     } catch { /* Session status exposes failures. */ }
+  }
+  // An app start or stop announces itself; poll the running list only while one runs or just changed.
+  function appsChanged() { appWatchUntil = Date.now() + 20000; refreshApps(); }
+  function syncAppTimer(running) {
+    const active = !disposed && (running || Date.now() < appWatchUntil);
+    if (active && !appTimer) appTimer = setInterval(() => { if (!document.hidden) refreshApps(); }, 5000);
+    else if (!active && appTimer) { clearInterval(appTimer); appTimer = null; }
   }
   function openPreview(sessionId) {
     let tab = layout.tabs.find(t => t.id === `preview:${sessionId}`);
@@ -303,7 +323,7 @@ export async function render(container, tabId, options = {}) {
     const version = ++reviewsVersion, id = project.id;
     const results = await Promise.allSettled(sessions.map(async session => [session.id, session.forge.removed ? [] : (await api(`${sessionBase(session.id)}/changes`)).files]));
     if (disposed || version !== reviewsVersion || project.id !== id) return;
-    for (const result of results) if (result.status === 'fulfilled') reviews.set(...result.value);
+    for (const result of results) if (result.status === 'fulfilled') { reviews.set(...result.value); reviewsAt.set(result.value[0], Date.now()); }
     const failed = results.find(r => r.status === 'rejected');
     status.textContent = failed ? `Changes could not load: ${failed.reason.message}` : '';
     drawCards(); drawChanges();
@@ -312,7 +332,16 @@ export async function render(container, tabId, options = {}) {
       if (panel) drawDiff(tab, panel);
     }
     if (!explorerPanel.hidden) await loadExplorer(true);
-    document.dispatchEvent(new Event('kairos:forge-review'));
+    // Listeners (rail, transcript) take these instead of reading every session's changes again.
+    document.dispatchEvent(new CustomEvent('kairos:forge-review', { detail: { changes: Object.fromEntries(results.filter(r => r.status === 'fulfilled').map(r => r.value)) } }));
+  }
+  // The transcript's change list: the load this shell just made (or is making), not a second read.
+  // fresh=true (a turn just ended, a file changed) always reads again.
+  async function changesFor(id, fresh = false) {
+    if (!fresh && reviews.has(id) && Date.now() - (reviewsAt.get(id) || 0) < 5000) return reviews.get(id);
+    await refreshReviews(fresh === true);
+    if (!reviews.has(id)) throw new Error('Changes could not load.');
+    return reviews.get(id);
   }
   function reviewBlocked(id, file) {
     const session = sessions.find(s => s.id === id);
@@ -494,10 +523,12 @@ export async function render(container, tabId, options = {}) {
       try {
         if (disposed || panels.get(tab.id) !== panel) return;
         if (tab.type === 'session') {
-          const session = await api(sessionBase(tab.sessionId));
+          // openContext read this session a moment ago for the same open: use it instead of a second GET.
+          const known = tab.fetched && Date.now() - tab.fetched.at < 5000 ? structuredClone(tab.fetched.session) : null; delete tab.fetched;
+          const session = known || await api(sessionBase(tab.sessionId));
           if (disposed || panels.get(tab.id) !== panel) return;
           const initialMessage = tab.initialMessage; delete tab.initialMessage;
-          await mountForgeSession(panel, session, project, models, { initialMessage, onReview: refreshReviews,
+          await mountForgeSession(panel, session, project, models, { initialMessage, onReview: refreshReviews, changes: fresh => changesFor(tab.sessionId, fresh), knownApps: () => appRows,
             onPreview: openPreview,
             onTerminal: openTerminal,
             onDiff: path => { layout.sessionId = tab.sessionId; activePane = tab.pane || 'left'; openSurface('diff', path, true); },

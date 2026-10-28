@@ -255,6 +255,7 @@ def install(content, *, replace=False, confirmed=False, expected_fingerprint=Non
         settings.update_settings(**{custom_tabs._FOLDER_APPROVALS_KEY: approvals})
         tab_folders.unregister(slug)
         os.rename(folder, target)
+        tab_folders.invalidate_scans()
         return {"slug": slug, "status": "needs_approval", "verdict": result.verdict,
                 "findings": [vars(f) for f in result.findings]}
 

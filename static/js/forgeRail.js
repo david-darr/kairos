@@ -1,6 +1,6 @@
 import { api, el, openOptionMenu, confirmDialog, toast } from './api.js';
 import { openProjectForm } from './forgeProjectForms.js';
-import { projectSessions, navigateForge, sessionStatus, changeTotals, diffCounts } from './forgeUi.js';
+import { forgeOverview, navigateForge, sessionStatus, changeTotals, diffCounts } from './forgeUi.js';
 import { subscribeAll } from './chatStream.js';
 
 export function mountForgeRail(nav) {
@@ -51,11 +51,11 @@ export function mountForgeRail(nav) {
     }));
     if (!groups.length) list.append(el('p', { class: 'meta forge-rail-message', text: 'Open a folder to begin.' }));
   }
-  async function refresh() {
+  async function refresh(initial = false) {
     const at = ++version;
     try {
-      const next = await projectSessions(await api('/api/forge/projects'));
-      const apps = await api('/api/forge/apps/running');
+      // Only the first load may share Forge Home's read; events and timers always read fresh.
+      const { groups: next, apps } = await forgeOverview(initial !== true);
       for (const group of next) for (const session of group.sessions) session._appRunning = apps.some(app => app.session_id === session.id);
       await Promise.allSettled(next.flatMap(g => g.sessions.filter(s => !s.forge.removed).map(async s => {
         s._changes = (await api(`/api/forge/sessions/${encodeURIComponent(s.id)}/changes`)).files;
@@ -68,9 +68,28 @@ export function mountForgeRail(nav) {
   const unsubscribe = subscribeAll(() => { draw(); });
   document.addEventListener('kairos:forge-project-selected', selection);
   document.addEventListener('kairos:forge-projects', refresh);
-  document.addEventListener('kairos:forge-review', refresh);
-  document.addEventListener('kairos:forge-apps', refresh);
-  const timer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
-  refresh();
-  return () => { disposed = true; ++version; clearInterval(timer); unsubscribe(); document.removeEventListener('kairos:forge-project-selected', selection); document.removeEventListener('kairos:forge-projects', refresh); document.removeEventListener('kairos:forge-review', refresh); document.removeEventListener('kairos:forge-apps', refresh); section.remove(); };
+  // The Forge shell already read every session's changes and publishes them: take those instead of
+  // reading again. An event without them (a file save) still means "read fresh".
+  const reviewed = event => {
+    const changes = event.detail?.changes;
+    if (!changes) { refresh(); return; }
+    for (const group of groups) for (const session of group.sessions) if (changes[session.id]) session._changes = changes[session.id];
+    draw();
+  };
+  // An app started or stopped: only the running-apps read changes, not projects, sessions or diffs.
+  const appsChanged = async () => {
+    const at = version;
+    try {
+      const apps = await api('/api/forge/apps/running');
+      if (disposed || at !== version) return;
+      for (const group of groups) for (const session of group.sessions) session._appRunning = apps.some(app => app.session_id === session.id);
+      draw();
+    } catch { /* The next full refresh reports loading errors. */ }
+  };
+  document.addEventListener('kairos:forge-review', reviewed);
+  document.addEventListener('kairos:forge-apps', appsChanged);
+  // While the Forge shell is open its own poll reads the changes and publishes them above.
+  const timer = setInterval(() => { if (!document.hidden && !document.querySelector('.forge-shell')) refresh(); }, 30000);
+  refresh(true);
+  return () => { disposed = true; ++version; clearInterval(timer); unsubscribe(); document.removeEventListener('kairos:forge-project-selected', selection); document.removeEventListener('kairos:forge-projects', refresh); document.removeEventListener('kairos:forge-review', reviewed); document.removeEventListener('kairos:forge-apps', appsChanged); section.remove(); };
 }
