@@ -147,6 +147,7 @@ class Element extends Events {
     assert.equal(typeof mod.namespace.default()(0).color, 'string', `${slug} has colours to cut out by`);
   }
   appearance.backgroundEffect = 'animated'; appearance.animatedPiece = SCATTER; appearance.effectOptions.animated.motion = false;
+  appearance.scatterPieces = SCATTER_PIECES.slice(0, 6);
   // This stand-in canvas has no ImageData, which the dithered and dot looks draw with; those are
   // covered in Electron (appearance-checks).
   for (const look of ['ascii', 'pixels']) {
@@ -222,6 +223,15 @@ class Element extends Events {
   api.updateAppearance({ backgroundEffect: 'unknown', animatedPiece: '../not-allowed', effectOptions: [] });
   assert.equal(api.getAppearance().backgroundEffect, 'dithered'); assert.equal(api.getAppearance().animatedPiece, 'scatter');
   api.updateAppearance({ animatedPiece: 'scatter' }); assert.equal(api.getAppearance().animatedPiece, 'scatter', 'Scatter is a valid choice');
-  console.log('Passed: per-user persistence, welcome snapshot, reset, malformed preferences.');
+  // Animated is a background style of its own (David, 2026-10-28): the old effect moves to it, and
+  // the theme takes the piece's own background as its base.
+  api.updateAppearance({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'sleepy-moon' });
+  assert.deepEqual([api.getAppearance().mode, api.getAppearance().backgroundEffect], ['animated', 'dithered']);
+  await flush();
+  assert.equal(api.getAppearance().artBase, '#141e48', 'The base comes from the piece');
+  api.updateAppearance({ artBase: 'red', artAccent: 'javascript:', artPanels: 7 });
+  assert.deepEqual([api.getAppearance().artBase, api.getAppearance().artAccent, api.getAppearance().artPanels], ['#15171d', '', 1], 'Bad colours fall back to the default base');
+  await api.resetAppearance(); assert.equal(api.getAppearance().mode, 'default');
+  console.log('Passed: per-user persistence, welcome snapshot, reset, malformed preferences, Animated migration and art colours.');
   console.log('Passed: normalization, exact legacy dither operations, six renderers, 20k cell cap, local art frames, one loop, hidden/offscreen/reduced-motion/detached cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

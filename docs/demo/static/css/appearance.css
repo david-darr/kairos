@@ -166,9 +166,9 @@
 .appearance-art-look[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .appearance-art-look-thumb { display: block; position: relative; height: 54px; overflow: hidden; background: var(--bg); }
 .appearance-art-look-thumb canvas { width: 100%; height: 100%; display: block; }
-/* Five background styles since Liquid glass: one row of five where there is room, otherwise two
+/* Six background styles since Animated: two rows of three where there is room, otherwise two
    columns with the last card spanning its row, so no card sits alone beside a gap. */
-.kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @container appearance (max-width: 769px) {
   .kairos-redesign .appearance-panel .appearance-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kairos-redesign .appearance-panel .appearance-modes > :last-child:nth-child(odd) { grid-column: 1 / -1; }
@@ -182,3 +182,26 @@
 :root[data-appearance='glass'][data-glass-desktop='on'] .app-glass-bloom { opacity: calc(var(--glass-window) * .75); }
 :root[data-appearance='glass'][data-glass-desktop='on'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--glass-alpha) * 100%), transparent); }
 .appearance-glass-desktop { display: grid; gap: 10px; }
+
+/* Animated (David, 2026-10-28): the art fills the window behind the app (appearance.js #app-art)
+   and the theme tokens come from its colours. The surfaces let it through like Liquid glass;
+   --art-alpha is how solid they are, set by Show art through panels. */
+.app-art { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--bg); }
+.app-art > :is(canvas, img, video) { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+:root[data-appearance='animated'] body, :root[data-appearance='animated'] :is(#app, #view-content, .chat-layout, #chat-main, .forge-workspace) { background: transparent; }
+:root[data-appearance='animated'] #content { background: color-mix(in srgb, var(--bg) calc(var(--art-alpha) * 20%), transparent); }
+:root[data-appearance='animated'] .dashboard-hero { background: var(--bg-panel); }
+:root[data-appearance='animated'] :is(.kairos-redesign-backdrop, .chat-backdrop) { display: none; }
+:root:not([data-appearance='default'])[data-appearance='animated'] :is(#sidebar, .chat-input-bar, .chat-stacked-pane, .artifact-panel, .rd-history, .rd-all-tabs, .rd-flyout,
+  .overflow-menu, .model-picker-menu, .settings-window, .forge-shell-sidebar, .forge-tab-strip, .forge-composer) {
+  background: var(--bg-panel-solid);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+}
+:root:not([data-appearance='default'])[data-appearance='animated'] #sidebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--art-alpha) * 100%), transparent); }
+:root[data-appearance='animated'] :is(.chat-input-bar, .chat-stacked-pane, .rd-history, .rd-all-tabs) { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+:root[data-appearance='animated'].electron-shell .titlebar { background: color-mix(in srgb, var(--sidebar-bg) calc(var(--art-alpha) * 100%), transparent); }
+.art-animated { background: radial-gradient(circle at 30% 40%, var(--k-gold-hi) 0 4px, transparent 5px), radial-gradient(circle at 70% 60%, var(--k-rose) 0 4px, transparent 5px),
+  repeating-linear-gradient(90deg, var(--k-powder) 0 2px, transparent 2px 6px), var(--k-ink-dim); }
+.kairos-redesign[data-appearance='animated'] .appearance-preview-scene { inset: 0; mask-image: none; }
+.appearance-preview-own { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.appearance-art-options > .meta { font-size: 12px; line-height: 1.6; }

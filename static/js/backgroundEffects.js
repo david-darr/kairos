@@ -1,7 +1,7 @@
 // One owner per decorative surface. The original dither painter is unchanged.
 import { drawDither, loadDitherImage } from './dither.js';
 import { getAppearance, halftonePalette } from './appearance.js';
-import { ART_PIECES, ART_LOOKS, SCATTER, SCATTER_PIECES } from './backgroundEffectPreferences.js';
+import { ART_PIECES, ART_LOOKS, SCATTER, OWN_ART, SCENE_PIECES } from './backgroundEffectPreferences.js';
 import { paint, GlyphAtlas } from '../vendor/ascii-magic/runtime/canvas.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -28,7 +28,7 @@ function unsubscribe(owner) {
 }
 export function backgroundEffectKey() {
   const a = getAppearance();
-  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.animatedPiece, a.animatedLook, a.mode, a.halftone]);
+  return JSON.stringify([a.backgroundEffect, a.effectOptions, a.animatedPiece, a.animatedLook, a.mode, a.halftone, a.artBase]);
 }
 const clamp = x => Math.max(0, Math.min(1, x));
 function canvas(w, h) {
@@ -110,39 +110,37 @@ function picturePainter(target, img, W, H, opts, effect, prefs, colors) {
     ctx.globalAlpha = 1;
   };
 }
+// One piece in its own colours (the Animated style has no tint). A scene fills the backdrop; a
+// character or object is drawn whole in the middle, its edges fading into the base colour,
+// which the theme took from the piece's own background.
 function artPainter(target, W, H, prefs, mod, colors, preview, look = 'ascii') {
   const draw = mod.default(), atlas = new GlyphAtlas(), ctx = target.getContext('2d');
   target.width = W; target.height = H;
   // ASCII draws tall glyph cells; the dithered, dot and pixel looks draw square ones.
   const mode = (ART_LOOKS.find(([id]) => id === look) || ART_LOOKS[0])[2];
-  const { cols, rows } = mod.meta, aspect = mode === 'text' ? 1.66 : 1, dpr = Math.min(2, window.devicePixelRatio || 1);
-  // One composition at a normal glyph size (the density, like ASCII), centred,
-  // never tiled. A large backdrop may grow it up to 1.5x; the edges fade out.
-  let cw;
-  if (preview) cw = Math.max(2, Math.floor(Math.min(W / cols, H / (rows * aspect))));
-  else {
-    const base = Math.max(3, Math.round(prefs.density * dpr));
-    cw = Math.round(base * Math.min(1.5, Math.max(1, Math.min(W / (cols * base), H / (rows * base * aspect)))));
-  }
+  const { cols, rows } = mod.meta, aspect = mode === 'text' ? 1.66 : 1;
+  const scene = SCENE_PIECES.includes(mod.meta.slug);
+  const across = W / cols, down = H / (rows * aspect);
+  // A character keeps a normal glyph size (the Size slider, 9 by default), up to most of the backdrop.
+  const glyph = Math.max(4, prefs.density * Math.min(2, window.devicePixelRatio || 1) * 1.3);
+  const cw = Math.max(2, scene && !preview ? Math.ceil(Math.max(across, down)) : Math.floor(preview ? Math.min(across, down) : Math.min(across * .8, down * .8, glyph)));
   const ch = cw * aspect, tw = Math.ceil(cols * cw), th = Math.ceil(rows * ch);
   const tile = canvas(tw, th), tc = tile.getContext('2d');
   const left = Math.round((W - tw) / 2), top = Math.round((H - th) / 2);
-  const alpha = preview ? .9 : .5;
   return t => {
     tc.globalCompositeOperation = 'source-over'; tc.globalAlpha = 1; tc.clearRect(0, 0, tw, th);
-    paint(tc, draw(t * .2 + 2), prefs.tint === 'picture' ? mod.meta.palette : null,
-      { cw, ch, ink: colors.ink, mode, atlas, dpr: 1 });
-    if (!preview) {
+    paint(tc, draw(t * .2 + 2), mod.meta.palette, { cw, ch, ink: colors.ink, mode, atlas, dpr: 1 });
+    if (!scene && !preview) {
       // Soft elliptical edge: opaque in the middle, gone before the borders.
       tc.save(); tc.globalCompositeOperation = 'destination-in';
       tc.translate(tw / 2, th / 2); tc.scale(1, th / tw);
       // destination-in reads only alpha, so the color is irrelevant.
-      const g = tc.createRadialGradient(0, 0, tw * .22, 0, 0, tw * .5);
+      const g = tc.createRadialGradient(0, 0, tw * .3, 0, 0, tw * .5);
       g.addColorStop(0, 'black'); g.addColorStop(1, 'transparent');
       tc.fillStyle = g; tc.fillRect(-tw / 2, -tw / 2, tw, tw); tc.restore();
     }
     ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = alpha; ctx.drawImage(tile, left, top); ctx.globalAlpha = 1;
+    ctx.drawImage(tile, left, top);
   };
 }
 
@@ -187,13 +185,13 @@ function scatterPainter(target, W, H, prefs, mods, colors, preview, look = 'asci
     return { mod, draw: mod.default(), keys: backgroundKeys(mod), cw, ch, tw, th, tile: canvas(tw, th),
       x: Math.round(Math.min(W - tw, Math.max(0, fx * W - tw / 2))), y: Math.round(Math.min(H - th, Math.max(0, fy * H - th / 2))), phase: i * 1.7 };
   });
-  const alpha = preview ? .95 : .8;
+  const alpha = preview ? 1 : .92;
   return t => {
     ctx.globalAlpha = 1; ctx.fillStyle = colors.base; ctx.fillRect(0, 0, W, H);
     for (const s of sprites) {
       const tc = s.tile.getContext('2d');
       tc.globalAlpha = 1; tc.clearRect(0, 0, s.tw, s.th);
-      paint(tc, cutOut(s.draw(t * .35 + s.phase), s.keys), prefs.tint === 'picture' ? s.mod.meta.palette : null,
+      paint(tc, cutOut(s.draw(t * .35 + s.phase), s.keys), s.mod.meta.palette,
         { cw: s.cw, ch: s.ch, ink: colors.ink, mode, atlas, dpr: 1 });
       // A slow drift, a few cells either way.
       const dx = Math.sin(t * .05 + s.phase) * s.cw * 3, dy = Math.cos(t * .04 + s.phase) * s.ch * 1.5;
@@ -201,12 +199,6 @@ function scatterPainter(target, W, H, prefs, mods, colors, preview, look = 'asci
     }
     ctx.globalAlpha = 1;
   };
-}
-// A fresh handful of pieces for each Scatter backdrop.
-function pickScatter(count = SCATTER_SPOTS.length) {
-  const pool = [...SCATTER_PIECES];
-  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  return pool.slice(0, count);
 }
 
 // Default preferences pass the same options to the unchanged legacy painter.
@@ -231,14 +223,12 @@ export function mountBackgroundEffect(el, src, opts = {}) {
   el.prepend(target);
   let disposed = false, connected = el.isConnected, inView = true, raf = 0, timer = 0;
   let revision = 0, dirty = true, building = false, painter = null, moving = false, time = 0, last = 0, accumulator = 0;
-  // The pieces one Scatter backdrop shows; kept across redraws so a resize doesn't reshuffle them.
-  let scatterIds = null;
   let wasReduced = reduce.matches;
   let pendingReady = opts.onReady;
   const settle = () => { const fn = pendingReady; pendingReady = null; fn?.(); };
   const visible = () => !document.hidden && el.isConnected && inView && el.clientWidth > 0 && el.clientHeight > 0 &&
     (!el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) &&
-    (opts.preview || document.documentElement.dataset.halftone === 'on');
+    (opts.preview || opts.backdrop || document.documentElement.dataset.halftone === 'on');
   function stop() { cancelAnimationFrame(raf); raf = 0; last = 0; accumulator = 0; }
   function frame(now) {
     raf = 0;
@@ -259,9 +249,10 @@ export function mountBackgroundEffect(el, src, opts = {}) {
     const W = Math.max(1, Math.round(el.clientWidth * scale)), H = Math.max(1, Math.round(el.clientHeight * scale));
     try {
       let next;
-      if (effect === 'animated' && a.animatedPiece === SCATTER) {
-        scatterIds ||= pickScatter();
-        const mods = await Promise.all(scatterIds.map(id => import(`../vendor/ascii-magic/pieces/${id}.js`)));
+      // Your own animation plays as itself (appearance.js); without the file, Scatter stands in.
+      if (effect === 'animated' && [SCATTER, OWN_ART].includes(a.animatedPiece)) {
+        // The session's pick (appearance.js), so the backdrop shows the pieces its colours came from.
+        const mods = await Promise.all(a.scatterPieces.map(id => import(`../vendor/ascii-magic/pieces/${id}.js`)));
         if (disposed || token !== revision || !visible()) { dirty = true; return; }
         next = scatterPainter(target, W, H, prefs, mods, colors, opts.preview, opts.look || a.animatedLook);
       } else if (effect === 'animated') {

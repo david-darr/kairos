@@ -1,10 +1,11 @@
 import { el } from '../api.js';
-import { EFFECTS, ART_PIECES, ART_LOOKS, SCATTER } from '../backgroundEffectPreferences.js';
+import { PICTURE_EFFECTS, ART_PIECES, ART_LOOKS, SCATTER, OWN_ART, SCENE_PIECES } from '../backgroundEffectPreferences.js';
 import { mountBackgroundEffect } from '../backgroundEffects.js';
 import { group, row, toggle, staggerEntrance } from '../settingsKit.js';
 import { kipChoices } from '../kipPicker.js';
 import { getAppearance, updateAppearance, setAppearanceImage, removeAppearanceImage,
-  resetAppearance, setAppearancePreview, halftoneSource, GLASS_WALLPAPERS, canSeeThroughWindow, setHalftoneImage, removeHalftoneImage, setHalftoneFocus } from '../appearance.js';
+  resetAppearance, setAppearancePreview, halftoneSource, GLASS_WALLPAPERS, canSeeThroughWindow, setHalftoneImage, removeHalftoneImage, setHalftoneFocus,
+  setAppearanceArt, removeAppearanceArt, ownArtSource } from '../appearance.js';
 
 // The three halftone slots (Build spec, 2026-10-08): Home's banner and the
 // chat's two scenes. Each is optional - an empty slot keeps the Kairos picture.
@@ -26,7 +27,7 @@ export function renderAppearancePanel(content, _status, page) {
   ]);
   const modeButtons = new Map();
   const modes = el('div', { class: 'appearance-modes', role: 'group', 'aria-label': 'Background style' });
-  for (const [mode, title, subtitle] of [['default', 'Kairos', 'Parchment & bistre'], ['color', 'Color', 'A clean canvas'], ['image', 'Image', 'Your perspective'], ['shader', 'Flow', 'Color in motion'], ['glass', 'Liquid glass', 'A see-through window']]) {
+  for (const [mode, title, subtitle] of [['default', 'Kairos', 'Parchment & bistre'], ['color', 'Color', 'A clean canvas'], ['image', 'Image', 'Your perspective'], ['shader', 'Flow', 'Color in motion'], ['glass', 'Liquid glass', 'A see-through window'], ['animated', 'Animated', 'Art sets the colours']]) {
     const button = el('button', { type: 'button', class: 'appearance-mode', 'data-mode': mode, onclick: () => {
       updateAppearance({ mode }); sync();
     } }, [el('span', { class: `appearance-mode-art art-${mode}`, 'aria-hidden': 'true' }), el('strong', { text: title }), el('span', { text: subtitle })]);
@@ -135,8 +136,8 @@ export function renderAppearancePanel(content, _status, page) {
 
   const effectChoices = new Map();
   const effectGrid = el('div', { class: 'appearance-effects-grid' });
-  const effectTitles = ['Dithered', 'Halftone dots', 'ASCII', 'Numbers', 'Binary', 'Animated art'];
-  for (const [index, effect] of EFFECTS.entries()) {
+  const effectTitles = ['Dithered', 'Halftone dots', 'ASCII', 'Numbers', 'Binary'];
+  for (const [index, effect] of PICTURE_EFFECTS.entries()) {
     const input = el('input', { type: 'radio', name: 'background-effect', value: effect,
       id: `appearance-effect-${effect}` });
     const thumb = el('span', { class: 'appearance-effect-thumb', 'aria-hidden': 'true' });
@@ -146,10 +147,25 @@ export function renderAppearancePanel(content, _status, page) {
       thumb, el('span', { class: 'appearance-effect-label' }, [input, el('span', { text: effectTitles[index] })]),
     ]));
   }
+  // Animated (David, 2026-10-28): a background style of its own. The art fills the window in its
+  // own colours and the theme is taken from it (appearance.js refreshArtColors).
+  const ownOption = el('option', { value: OWN_ART, text: 'Your own animation' });
   const piece = el('select', { id: 'appearance-art-piece' }, [el('option', { value: SCATTER, text: 'Scatter: several small pieces' }),
-    ...ART_PIECES.map(([value, text]) => el('option', { value, text }))]);
+    ...ART_PIECES.map(([value, text]) => el('option', { value, text })), ownOption]);
   piece.addEventListener('change', () => { updateAppearance({ animatedPiece: piece.value }); sync(); });
-  const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Animated piece' }), piece]);
+  const pieceRow = el('label', { class: 'appearance-effect-control', for: piece.id }, [el('span', { text: 'Art' }), piece]);
+  const artUpload = el('input', { type: 'file', id: 'appearance-art-file', accept: 'image/gif,image/webp,image/png,image/apng,video/mp4,video/webm' });
+  const artLabel = el('label', { for: artUpload.id, class: 'appearance-upload', text: 'Choose your own animation' });
+  const artRemove = el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
+    try { await removeAppearanceArt(); sync(); } catch { status.textContent = 'Your animation could not be removed. Try again.'; }
+  } });
+  artUpload.addEventListener('change', async () => {
+    const file = artUpload.files[0]; if (!file) return;
+    artUpload.disabled = true; status.textContent = 'Preparing your animation…';
+    try { await setAppearanceArt(file); sync(); }
+    catch (error) { status.textContent = error.message; }
+    finally { artUpload.disabled = false; artUpload.value = ''; }
+  });
   // Living pixels (desktop redesign): the same piece drawn as ASCII, dithered, dots or pixels.
   const lookButtons = new Map();
   const looks = el('div', { class: 'appearance-art-looks', role: 'group', 'aria-label': 'Look' });
@@ -176,14 +192,37 @@ export function renderAppearancePanel(content, _status, page) {
   tint.addEventListener('change', () => saveEffect({ tint: tint.value }));
   const effectMotion = toggle({ label: 'Animate effect', onChange: motion => saveEffect({ motion }) });
   const effectSection = el('fieldset', { class: 'appearance-effect-section', 'aria-describedby': 'appearance-effect-note' }, [
-    el('legend', { text: 'Background effect' }), effectGrid, pieceRow,
+    el('legend', { text: 'Background effect' }), effectGrid,
     densityRow,
     el('label', { class: 'appearance-effect-control', for: tint.id }, [el('span', { text: 'Tint' }), tint]),
     group({}, [row({ title: 'Animate effect', description: 'Motion pauses when hidden. Reduced motion shows a still frame.', control: effectMotion })]),
     el('p', { class: 'meta', id: 'appearance-effect-note', text: 'Options are saved separately for each effect on this device. Smaller cells show more detail. Original palette preserves the existing dithered look. Dithered motion controls scene transitions. Halftone dots stay still.' }),
+  ]);
+  const artPrefs = () => getAppearance().effectOptions.animated;
+  const saveArt = patch => {
+    const a = getAppearance();
+    updateAppearance({ effectOptions: { ...a.effectOptions, animated: { ...a.effectOptions.animated, ...patch } } }); sync();
+  };
+  const artDensity = el('input', { type: 'range', min: '3', max: '24', step: '1', id: 'appearance-art-density' });
+  const artDensityValue = el('output', { for: artDensity.id });
+  artDensity.addEventListener('input', () => saveArt({ density: Number(artDensity.value) }));
+  const artDensityRow = el('label', { class: 'appearance-effect-control', for: artDensity.id }, [el('span', { text: 'Size' }), artDensity, artDensityValue]);
+  const artMotion = toggle({ label: 'Animate art', onChange: motion => saveArt({ motion }) });
+  const artPanels = el('input', { type: 'range', min: '0', max: '100', step: '1', id: 'appearance-artPanels' });
+  const artPanelsValue = el('output', { for: artPanels.id });
+  artPanels.addEventListener('input', () => { updateAppearance({ artPanels: Number(artPanels.value) / 100 }); sync(); });
+  const artUploadRow = el('div', { class: 'appearance-upload-row' }, [artLabel, artUpload, artRemove]);
+  const artOptions = el('div', { class: 'appearance-art-options' }, [
+    el('h3', { class: 'rd-appearance-label', text: 'Animated' }),
+    pieceRow, artUploadRow,
+    el('p', { class: 'meta', text: 'GIF, animated WebP or PNG, MP4 or WebM · Up to 12 MB · Stored only on this device. It plays as it is.' }),
+    lookRow, artDensityRow,
+    el('label', { class: 'appearance-effect-control', for: artPanels.id }, [el('span', { text: 'Show art through panels' }), artPanels, artPanelsValue]),
+    group({}, [row({ title: 'Animate art', description: 'Motion pauses when hidden. Reduced motion shows a still frame.', control: artMotion })]),
+    el('p', { class: 'meta', text: 'The app takes its colours from the art: its background becomes yours, and its brightest colour your accent.' }),
     el('p', { class: 'meta appearance-effect-credit' }, [el('span', { text: 'Credits: Animated art by ' }),
       el('a', { href: 'https://github.com/kailashsr38/ascii-magic-art', target: '_blank', rel: 'noopener noreferrer', text: 'ASCII Magic' }),
-      el('span', { text: ' (MIT). Picture colours uses the art palette for animated pieces.' })]),
+      el('span', { text: ' (MIT).' })]),
   ]);
   let effectPreviewSource = '', effectPreviewStops = [];
 
@@ -348,13 +387,13 @@ export function renderAppearancePanel(content, _status, page) {
     heading.append(el('span', { class: 'rd-appearance-tag', text }));
   }
   const effectControls = el('div', { class: 'appearance-effect-controls' });
-  effectSection.insertBefore(effectControls, pieceRow);
-  effectControls.append(pieceRow, lookRow, densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
+  effectSection.insertBefore(effectControls, densityRow);
+  effectControls.append(densityRow, tint.closest('label'), effectSection.querySelector('.set-section'));
   const characterSection = el('div', { class: 'appearance-character-setting' }, [
     el('h3', { class: 'rd-appearance-label', text: 'Kip' }), mascotSection,
   ]);
   const styleRow = el('div', { class: 'appearance-style-row' }, [palette, chatStyleSection]);
-  root.append(previewFrame, modeSection, styleRow, glassOptions, halftoneSection, effectSection, imageOptions, shaderOptions, characterSection, overlaySection, status);
+  root.append(previewFrame, modeSection, styleRow, glassOptions, artOptions, halftoneSection, effectSection, imageOptions, shaderOptions, characterSection, overlaySection, status);
   for (const list of [modes, effectGrid, chatStyles, halftoneSection.querySelector('.appearance-halftone-grid')]) staggerEntrance(list);
   content.replaceChildren(root);
   function sync() {
@@ -369,13 +408,21 @@ export function renderAppearancePanel(content, _status, page) {
       const number = Math.round(value[key] * 100); control.input.value = number; control.output.textContent = `${number}%`;
     }
     for (const [id, { button }] of lookButtons) button.setAttribute('aria-pressed', String(id === value.animatedLook));
-    lookRow.hidden = value.backgroundEffect !== 'animated';
-    const lookKey = `${value.animatedPiece}:${value.mode}:${value.color}`;
+    const animated = value.mode === 'animated', own = value.animatedPiece === OWN_ART;
+    artOptions.hidden = !animated;
+    ownOption.disabled = !value.hasArt;
+    lookRow.hidden = !animated || own; artDensityRow.hidden = !animated || own || SCENE_PIECES.includes(value.animatedPiece);
+    artRemove.hidden = !value.hasArt;
+    artLabel.textContent = value.hasArt ? 'Replace your animation' : 'Choose your own animation';
+    artDensity.value = value.effectOptions.animated.density; artDensityValue.textContent = `${value.effectOptions.animated.density}`;
+    artMotion.checked = value.effectOptions.animated.motion;
+    artPanels.value = Math.round(value.artPanels * 100); artPanelsValue.textContent = `${Math.round(value.artPanels * 100)}%`;
+    const lookKey = `${value.animatedPiece}:${value.artBase}`;
     if (!lookRow.hidden && lookKey !== lookPreviewKey) {
       lookPreviewStops.forEach(stop => stop()); lookPreviewKey = lookKey;
       lookPreviewStops = [...lookButtons].map(([id, { thumb }]) => mountBackgroundEffect(thumb, halftoneSource('home'), { effect: 'animated', look: id, preview: true }));
     }
-    palette.hidden = ['default', 'glass'].includes(value.mode); imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
+    palette.hidden = ['default', 'glass', 'animated'].includes(value.mode); imageOptions.hidden = value.mode !== 'image'; shaderOptions.hidden = value.mode !== 'shader';
     halftoneSection.hidden = !['default', 'color'].includes(value.mode); halftone.checked = value.halftone;
     kip.sync();
     effectSection.hidden = !['default', 'color'].includes(value.mode);
@@ -384,14 +431,21 @@ export function renderAppearancePanel(content, _status, page) {
     density.value = effectPrefs.density; densityValue.textContent = `${effectPrefs.density} px`;
     tint.options[0].hidden = value.backgroundEffect !== 'dithered';
     tint.value = effectPrefs.tint; effectMotion.checked = effectPrefs.motion;
-    piece.value = value.animatedPiece; pieceRow.hidden = value.backgroundEffect !== 'animated';
+    piece.value = value.animatedPiece;
     const nextPreviewSource = halftoneSource('home');
-    previewScene.hidden = !['default', 'color'].includes(value.mode) || !value.halftone;
-    const homeFocus = value.halftoneSlots.home;
-    const sceneKey = `${nextPreviewSource}:${homeFocus.focusX}:${homeFocus.focusY}`;
+    previewScene.hidden = !animated && (!['default', 'color'].includes(value.mode) || !value.halftone);
+    const homeFocus = value.halftoneSlots.home, ownArt = animated && own ? ownArtSource() : null;
+    const sceneKey = animated ? `art:${value.animatedPiece}:${value.animatedLook}:${ownArt?.url}` : `${nextPreviewSource}:${homeFocus.focusX}:${homeFocus.focusY}`;
     if (sceneKey !== previewSceneKey) {
       stopPreviewScene?.(); previewSceneKey = sceneKey;
-      stopPreviewScene = mountBackgroundEffect(previewScene, nextPreviewSource, { preview: true, focusX: homeFocus.focusX, focusY: homeFocus.focusY });
+      previewScene.querySelector('.appearance-preview-own')?.remove();
+      if (ownArt) {
+        // Your own animation, as it plays behind the app.
+        const media = ownArt.video ? Object.assign(el('video', { class: 'appearance-preview-own' }), { src: ownArt.url, muted: true, loop: true, autoplay: true, playsInline: true })
+          : el('img', { class: 'appearance-preview-own', src: ownArt.url, alt: '' });
+        previewScene.append(media); stopPreviewScene = () => media.remove();
+      } else stopPreviewScene = mountBackgroundEffect(previewScene, nextPreviewSource, animated ? { effect: 'animated', preview: true }
+        : { preview: true, focusX: homeFocus.focusX, focusY: homeFocus.focusY });
     }
     if (nextPreviewSource !== effectPreviewSource) {
       effectPreviewStops.forEach(stop => stop()); effectPreviewSource = nextPreviewSource;

@@ -18,7 +18,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   // Keep every visible card row congruent at the reviewed desktop and phone sizes.
   for (const [width, height] of [[900, 800], [1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
     win.setContentSize(width, height); await delay(250);
-    for (const mode of ['default', 'color', 'image', 'shader', 'glass']) {
+    for (const mode of ['default', 'color', 'image', 'shader', 'glass', 'animated']) {
       await set({ mode }); await delay(250);
       const failures = await js(`(() => {
         const failures = [], panel = document.querySelector('.appearance-panel');
@@ -44,7 +44,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     }
   }
   win.setContentSize(1440, 900); await delay(250); await set({ mode: 'default' });
-  assert.deepEqual(await js("[...document.querySelectorAll('.appearance-mode')].map(n => n.dataset.mode)"), ['default', 'color', 'image', 'shader', 'glass']);
+  assert.deepEqual(await js("[...document.querySelectorAll('.appearance-mode')].map(n => n.dataset.mode)"), ['default', 'color', 'image', 'shader', 'glass', 'animated']);
   // Chat messages (desktop redesign): Plain by default, Cards on request, on the root for the chat CSS.
   assert.equal(await js("document.documentElement.dataset.chatMessages"), 'plain');
   await js("document.querySelector('.appearance-chat-style[data-chat-messages=cards]').click()");
@@ -61,7 +61,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
   if (await js("innerWidth > 768")) {
     const box = "JSON.stringify((r => [r.left, r.top, r.width, r.height])(document.querySelector('.settings-window').getBoundingClientRect())) + ':' + document.querySelector('.settings-window').scrollTop";
     const before = await js(box);
-    for (const effect of ['dithered', 'halftone', 'ascii', 'animated', 'dithered']) {
+    for (const effect of ['dithered', 'halftone', 'ascii', 'binary', 'dithered']) {
       const [x, y] = await js(`(() => { const label = document.querySelector('label[for=appearance-effect-${effect}]'); label.scrollIntoView({ block: 'nearest' }); const r = label.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + 12)]; })()`);
       await delay(150);
       win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
@@ -71,14 +71,65 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
       assert.equal(await js(box), before, `Picking ${effect} leaves the Settings window in place`);
     }
   }
-  // Scatter (the default animated art): several cut-out pieces, drawn in each look.
+  // Animated (David, 2026-10-28): a background style of its own. The old Animated art effect
+  // moves to it; the art fills the window in its own colours and the theme follows them.
+  assert.equal(await js("document.querySelectorAll('.appearance-effects-grid input').length"), 5, 'Animated is no longer a background effect');
   await set({ mode: 'default', backgroundEffect: 'animated', animatedPiece: 'scatter' });
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.backgroundEffect]; })"), ['animated', 'dithered']);
+  assert.equal(await js("!document.querySelector('.appearance-art-options').hidden && document.querySelector('.appearance-effect-section').hidden && !document.querySelector('.appearance-art-options select#appearance-effect-tint')"), true, 'Its own section, with no tint');
   for (const look of ['ascii', 'dither', 'dots', 'pixels']) {
     await set({ animatedLook: look });
-    await waitFor("[...document.querySelectorAll('.background-effect-canvas')].some(c => c.dataset.effect === 'animated' && c.width > 400)");
+    await waitFor("[...document.querySelectorAll('#app-art .background-effect-canvas')].some(c => c.dataset.effect === 'animated' && c.width > 400)");
   }
+  await set({ animatedLook: 'ascii' });
+  // The theme is taken from the art: its background as the base, an accent that reads on it.
+  const readable = `(() => {
+    const s = getComputedStyle(document.documentElement), probe = document.createElement('span'); document.body.append(probe);
+    const rgb = name => { probe.style.color = s.getPropertyValue(name); return getComputedStyle(probe).color.match(/[0-9.]+/g).slice(0, 3).map(Number); };
+    const l = c => c.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((a, v, i) => a + v * [.2126, .7152, .0722][i], 0);
+    const ratio = (a, b) => { const [x, y] = [l(rgb(a)), l(rgb(b))]; return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+    const out = [rgb('--bg').join(','), ratio('--text', '--bg'), ratio('--accent', '--bg')]; probe.remove(); return out;
+  })()`;
+  for (const [piece, base] of [['sleepy-moon', '20,30,72'], ['cool-sun-shades', '127,168,203'], ['lava-lamp', '28,16,40']]) {
+    await set({ animatedPiece: piece });
+    await waitFor(`import('/static/js/appearance.js').then(m => m.getAppearance().artBase !== '' && getComputedStyle(document.documentElement).getPropertyValue('--bg').replace(/ /g, '') === 'rgb(${base})')`);
+    const [, text, accent] = await js(readable);
+    assert.ok(text >= 4.5 && accent >= 4.5, `${piece}: text ${text.toFixed(2)} and accent ${accent.toFixed(2)} read on its base`);
+  }
+  await capture('appearance-animated-piece');
+  await set({ animatedPiece: 'scatter', artPanels: 1 });
+  assert.equal(await js("getComputedStyle(document.documentElement).getPropertyValue('--art-alpha').trim()"), '0.34');
+  await set({ artPanels: .6 });
+  await waitFor("!!document.querySelector('#app-art .background-effect-canvas[data-effect=animated]')");
   await capture('appearance-scatter');
-  await set({ backgroundEffect: 'dithered', animatedLook: 'ascii' });
+  // Your own animation: a still PNG and a short WebM made here, each kept and played as it is,
+  // the theme taken from its colours. Removing it goes back to Scatter.
+  await js(`(async () => {
+    const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 }), g = c.getContext('2d');
+    g.fillStyle = '#0c2a1c'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#ff3d7f'; g.fillRect(20, 20, 24, 24);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    const m = await import('/static/js/appearance.js');
+    await m.setAppearanceArt(new File([blob], 'mine.png', { type: 'image/png' }));
+  })()`);
+  await waitFor("!!document.querySelector('#app-art img') && getComputedStyle(document.documentElement).getPropertyValue('--bg').replace(/ /g, '') === 'rgb(12,42,28)'");
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.mode, a.animatedPiece, a.hasArt, parseInt(a.artAccent.slice(1, 3), 16) > 200]; })"), ['animated', 'own', true, true], 'The pink square is the accent');
+  await js(`(async () => {
+    const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 }), g = c.getContext('2d');
+    const recorder = new MediaRecorder(c.captureStream(20), { mimeType: 'video/webm' }), parts = [];
+    recorder.ondataavailable = e => parts.push(e.data);
+    const done = new Promise(r => { recorder.onstop = r; });
+    recorder.start();
+    for (let i = 0; i < 16; i++) { g.fillStyle = '#2a1030'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#3df2ff'; g.fillRect(i * 2, 22, 20, 20); await new Promise(r => setTimeout(r, 50)); }
+    recorder.stop(); await done;
+    const m = await import('/static/js/appearance.js');
+    await m.setAppearanceArt(new File(parts, 'mine.webm', { type: 'video/webm' }));
+  })()`);
+  await waitFor("document.querySelector('#app-art video')?.readyState >= 2");
+  await capture('appearance-animated-own');
+  await js("import('/static/js/appearance.js').then(m => m.removeAppearanceArt())");
+  assert.deepEqual(await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return [a.animatedPiece, a.hasArt, !!document.querySelector('#app-art video')]; })"), ['scatter', false, false]);
+  await set({ mode: 'default' });
+  assert.equal(await js("!!document.getElementById('app-art')"), false, 'The art layer goes with the style');
   // See through to the desktop: only where the desktop app offers it, on by default in glass.
   if (await js("typeof window.jarvis?.setSeeThrough === 'function'")) {
     await set({ mode: 'glass' });
@@ -323,7 +374,7 @@ module.exports = async function checkAppearance({ js, win, waitFor, capture, bas
     const transfer=new DataTransfer(); transfer.items.add(new File([blob],'fixture.png',{type:'image/png'}));
     const input=document.querySelector('#appearance-image'); input.files=transfer.files; input.dispatchEvent(new Event('change'));
   })()`);
-  await waitFor("document.querySelector('.appearance-upload').textContent==='Replace image'");
+  await waitFor("document.querySelector('.appearance-image-options .appearance-upload').textContent==='Replace image'");
   assert.equal((await state()).hasImage, true);
   await set({ tint: .25 }); const untinted = await preview();
   await set({ tint: .8 }); assert.notEqual(await preview(), untinted, 'Image tint changes pixels');

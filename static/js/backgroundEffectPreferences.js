@@ -1,5 +1,8 @@
 // Shared validation and the allowlist for local art imports. No account data.
 export const EFFECTS = Object.freeze(['dithered', 'halftone', 'ascii', 'numbers', 'binary', 'animated']);
+// The effects drawn from a picture, offered under Background effect. Animated art is a background
+// style of its own (David, 2026-10-28); its density and motion are still kept under 'animated'.
+export const PICTURE_EFFECTS = Object.freeze(EFFECTS.filter(effect => effect !== 'animated'));
 export const ART_PIECES = Object.freeze([
   ['moonlit-sea', 'Moonlit Sea'], ['cloud-drift', 'Cloud Drift'],
   ['ripple-pond', 'Ripple Pond'], ['rain-shower', 'Rain Shower'],
@@ -17,6 +20,19 @@ export const ART_PIECES = Object.freeze([
 // around the edges of one backdrop, each cut out of its own background. Not a file of its own.
 export const SCATTER = 'scatter';
 export const SCATTER_PIECES = Object.freeze(ART_PIECES.slice(8).map(([id]) => id));
+// The first eight pieces are whole scenes, drawn to fill the window; the rest are characters
+// and objects, drawn whole on their own background colour.
+export const SCENE_PIECES = Object.freeze(ART_PIECES.slice(0, 8).map(([id]) => id));
+// The person's own animation (a GIF, animated WebP or PNG, or a short video), kept on this device.
+export const OWN_ART = 'own';
+export const SCATTER_COUNT = 6;
+// A fresh handful of pieces for Scatter, picked once per session so the backdrop and the colours
+// worked out from it agree.
+export function pickScatter(count = SCATTER_COUNT) {
+  const pool = [...SCATTER_PIECES];
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  return pool.slice(0, count);
+}
 // Living pixels (desktop redesign, 2026-10-28): how an animated piece is drawn,
 // each a mode of the ascii-magic runtime's paint(): [id, title, runtime mode].
 export const ART_LOOKS = Object.freeze([

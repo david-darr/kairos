@@ -76,7 +76,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # App Preview hosts; the renderer chooses its session's allowed port.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-            "frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:"
+            "frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; "
+            # Your own animation for the Animated background plays from a local object URL.
+            "media-src 'self' blob:"
         )
         # Odysseus applies this same no-cache rule to .js/.css/.html source
         # files specifically (see specs/frontend.md) — without it, Electron's

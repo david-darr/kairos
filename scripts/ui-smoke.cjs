@@ -56,7 +56,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   // The site (docs/) may read GitHub's public release data; nothing else leaves.
   const site = url.pathname.startsWith("/docs/") || url.pathname.startsWith("/kairos/");
-  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:" + (site ? "; connect-src 'self' https://api.github.com" : ""));
+  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:" + (site ? "; connect-src 'self' https://api.github.com" : ""));
   if (url.pathname === "/__github-latest") {
     // Stands in for api.github.com/repos/david-darr/kairos/releases/latest.
     res.setHeader("Content-Type", "application/json"); res.setHeader("Access-Control-Allow-Origin", "*");
