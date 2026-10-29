@@ -469,17 +469,28 @@ async def _tick() -> None:
         # One card per pass (see dispatch_cards).
         _lanes["card"] = loop.create_task(dispatch_cards())
     await outbox.send_due()
-    # A quiet chat may be tidied on the next poll, including after laptop
-    # sleep. The service checks admission's existing holds (2026-10-13).
-    for agent in agent_service.list_agents():
-        if agent.get("memory_upkeep"):
-            try:
-                agent_service.upkeep_memory(agent["id"])
-                for topic, _ in agent_service.topic_index(agent["id"]):
-                    agent_service.upkeep_memory(agent["id"], topic=topic)
-            except Exception:
-                logger.exception("memory upkeep failed for agent %s", agent["id"])
+    await _memory_tick()
     _check_mcp_servers(loop)
+
+
+async def _memory_tick() -> None:
+    """The notebook's maintenance (services/bot_memory_upkeep.py): one nonblocking pass that starts capture, the
+    daily tidy and dream, and due skill reviews in the background. It replaces the old heuristic upkeep loop
+    (Bots Phase 2); the two never run together."""
+    try:
+        from services import bot_memory_upkeep
+        await bot_memory_upkeep.tick()
+    except Exception:
+        logger.exception("memory tick failed")
+
+
+async def stop_memory() -> None:
+    """Cancel the notebook's background jobs (shutdown). Their cursors are already saved."""
+    try:
+        from services import bot_memory_upkeep
+        await bot_memory_upkeep.shutdown()
+    except Exception:
+        logger.exception("memory shutdown failed")
 
 
 def _check_mcp_servers(loop) -> None:
@@ -544,6 +555,10 @@ def stop() -> None:
     if _loop_task is not None:
         _loop_task.cancel()
         _loop_task = None
+        try:
+            asyncio.get_running_loop().create_task(stop_memory())
+        except RuntimeError:
+            pass  # no loop: the process is ending and the jobs go with it
 
 
 def is_running() -> bool:
