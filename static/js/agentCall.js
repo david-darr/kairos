@@ -530,5 +530,16 @@ export function agentCall(agent, controller) {
   document.addEventListener('kairos:bots-typed-reply', typedReply);
   document.addEventListener('kairos:bots-saved', botSaved);
   function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
-  return { button, minimize, restore, update() {}, dispose() { if (active) { detached = true; minimize(); button.remove(); } else { hangup(); cleanup(); } } };
+  // Moving between Bots conversations keeps a call going in its bar; leaving Bots mode ends it, so a live
+  // microphone never runs behind a page that has no call bar.
+  let modeWatch = null;
+  const inBots = () => document.documentElement.dataset.appMode === 'bots';
+  const endDetached = () => { modeWatch?.disconnect(); modeWatch = null; if (active) hangup(); cleanup(); };
+  return { button, minimize, restore, update() {}, dispose() {
+    if (active && inBots()) {
+      detached = true; minimize(); button.remove();
+      modeWatch = new MutationObserver(() => { if (!inBots()) endDetached(); });
+      modeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-app-mode'] });
+    } else { hangup(); cleanup(); }
+  } };
 }

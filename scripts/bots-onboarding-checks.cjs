@@ -25,12 +25,13 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     await js("document.querySelector('.settings-titlebar-btn[title=Close]').click()");
     await navigate('home'); await navigate('botsShell', { agentId: botId, sessionId: sid }); await delay(300);
     assert.equal(await js("!!document.querySelector('.bots-welcome')"), false, 'welcome shown once');
-    await navigate('settings', { section: 'bots' }); await waitFor("!!document.querySelector('[data-bots-settings]')");
+    await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow('bots')).then(() => true)"); await waitFor("!!document.querySelector('[data-bots-settings]')");
     for (const [label, value, attr] of [['Interface', 'advanced', 'botsInterface'], ['Send key', 'shift-enter', 'botsSendKey'], ['Chat width', 'wide', 'botsWidth'], ['Chat font', 'serif', 'botsChatFont']]) {
       await js(`(()=>{const node=document.querySelector('[data-bots-settings] select[aria-label="${label}"]');node.value=${q(value)};node.dispatchEvent(new Event('change'));return true;})()`);
       assert.equal(await js(`document.documentElement.dataset[${q(attr)}]`), value);
     }
-    await clickText('[data-bots-settings] [role=switch]', 'Show tool calls');
+    // A switch is named by its row's title (aria-labelledby), so find the row and press its switch.
+    await js(`(()=>{const row=[...document.querySelectorAll('[data-bots-settings] .bots-switch-row')].find(r=>r.querySelector('.bots-row-title')?.textContent.trim()==='Show tool calls');if(!row)throw new Error('Missing Show tool calls');row.querySelector('[role=switch]').click();return true;})()`);
     assert.equal(await js("document.documentElement.dataset.botsTools"), 'false');
     await clickText('[data-bots-settings] button', 'Replay welcome'); await waitFor("!!document.querySelector('.bots-welcome[open]')");
     await clickText('.bots-welcome button', 'Not now');
@@ -38,8 +39,9 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     await waitFor("!!document.querySelector('.bots-spotlight-tip')");
     assert.ok(await js("document.querySelector('.bots-spotlight-tip').getAttribute('aria-modal')==='true'"));
     await escape(); await waitFor("!document.querySelector('.bots-spotlight')");
+    for (let i = 0; i < 40 && !demoState.botsOnboarding.tour.done; i++) await delay(50);
     assert.ok(demoState.botsOnboarding.tour.done);
-    await navigate('settings', { section: 'bots' }); await waitFor("!!document.querySelector('[data-bots-settings]')");
+    await js("import('/static/js/views/settings.js').then(m => m.openSettingsWindow('bots')).then(() => true)"); await waitFor("!!document.querySelector('[data-bots-settings]')");
     assert.equal(await js(`document.querySelector('[aria-label="Chat width"]').value`), 'wide');
     await clickText('[data-bots-settings] button', 'Check setup'); await waitFor("document.querySelectorAll('[data-bots-settings] .bots-setup-row').length===6");
     await win.setContentSize(390, 844); await delay(150);
@@ -55,6 +57,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     assert.equal(await js("document.querySelector('.bots-notices').hidden"), true);
     await js("(()=>{const node=document.createElement('div');node.id='hint-check';node.dataset.richKind='widget';document.querySelector('.bots-chat-host').append(node);return true;})()");
     await waitFor("!!document.querySelector('#hint-check .bots-card-hint')");
+    // The hint shows first and saves after, so give the save a moment to land.
+    for (let i = 0; i < 40 && !demoState.botsOnboarding.hints_seen.includes('widget'); i++) await delay(50);
     assert.ok(demoState.botsOnboarding.hints_seen.includes('widget'));
     await js("(()=>{const node=document.createElement('div');node.id='hint-check-twice';node.dataset.richKind='widget';document.querySelector('.bots-chat-host').append(node);return true;})()");
     await delay(100); assert.equal(await js("!!document.querySelector('#hint-check-twice .bots-card-hint')"), false);

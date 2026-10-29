@@ -1,0 +1,32 @@
+.bots-welcome { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); background: var(--bots-panel); color: var(--bots-ink); font-family: var(--bots-font-sans); overflow: auto; }
+.bots-welcome::backdrop { background: color-mix(in srgb, var(--bots-ink) 35%, transparent); }
+.bots-welcome-dashes { display: flex; justify-content: center; gap: 6px; min-height: 68px; align-items: center; }
+.bots-welcome-dash { padding: 0; width: 52px; min-height: 44px; background: transparent; border: 0; cursor: pointer; }
+.bots-welcome-dash::after { content: ''; display: block; height: 4px; border-radius: var(--bots-radius-pill); background: var(--bots-hairline); }
+.bots-welcome-dash[aria-current]::after { background: var(--bots-ink); }
+.bots-welcome-pane { padding: 24px; min-height: 310px; animation: bots-welcome-enter 250ms var(--bots-ease); }
+.bots-welcome-pane h1 { font-size: 28px; margin: 16px 0; }
+.bots-welcome-pane h2, .bots-setup h2 { font-size: 20px; }
+.bots-welcome-composer { background: var(--bots-inset); border-radius: var(--bots-radius-card); padding: 18px; min-height: 64px; }
+.bots-welcome footer { display: grid; gap: 8px; padding: 16px 24px 24px; }
+.bots-welcome footer .bots-btn { width: 100%; min-height: 52px; }
+.bots-setup-row { display: flex; align-items: center; min-height: 60px; gap: 12px; border-bottom: 1px solid var(--bots-hairline); font-size: 14px; }
+.bots-setup-row > :first-child { flex: 1; }
+.bots-setup-status { color: var(--bots-ink-secondary); font-size: 12px; }
+.bots-setup-row[data-status="ready"] .bots-setup-status { color: var(--bots-success); }
+.bots-card-hint { color: var(--bots-ink-secondary); font-size: 13px; }
+.bots-notices { position: fixed; z-index: 990; bottom: 20px; left: 20px; max-width: min(340px, calc(100vw - 40px)); padding: 16px; background: var(--bots-panel); color: var(--bots-ink); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); box-shadow: var(--bots-shadow-float); }
+.bots-notices[hidden] { display: none; }
+.bots-spotlight { position: fixed; inset: 0; z-index: 1200; }
+.bots-spotlight-ring { position: fixed; border: 2px solid var(--bots-focus); border-radius: var(--bots-radius-card); box-shadow: 0 0 0 9999px color-mix(in srgb, var(--bots-ink) 40%, transparent); pointer-events: none; }
+.bots-spotlight-tip { position: fixed; width: min(360px, calc(100vw - 16px)); padding: 20px; background: var(--bots-panel); color: var(--bots-ink); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); box-shadow: var(--bots-shadow-float); font-family: var(--bots-font-sans); }
+.bots-spotlight-tip h2 { font-size: 18px; }
+.bots-tour-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bots-onboarding-error { position: fixed; bottom: 12px; left: 12px; z-index: 1250; padding: 12px; background: var(--bg-panel-solid); color: var(--text); }
+@keyframes bots-welcome-enter { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .bots-welcome-pane { animation: none; } }
+@media (max-width: 767px) {
+  .bots-welcome :is(button, input, select, summary, a), .bots-setup :is(button, input, select, summary, a), .bots-notices :is(button, input, select, summary, a), .bots-spotlight :is(button, input, select, summary, a) { min-height: 44px; }
+  .bots-welcome { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .bots-welcome-pane { padding: 16px; }
+}

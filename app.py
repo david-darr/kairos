@@ -236,6 +236,8 @@ async def lifespan(_app: FastAPI):
             bot_sweeps.stop()
             from services import bot_data
             bot_data.close_all()
+            from core import bot_rooms_store
+            bot_rooms_store.close()
             from services import bot_memory_upkeep, bot_turn_context
             await bot_memory_upkeep.shutdown()
             await bot_turn_context.shutdown()

@@ -74,7 +74,8 @@ def facts(data: str) -> dict:
     db = sqlite3.connect(f"file:{os.path.join(data, 'sessions.db')}?mode=ro", uri=True)
     try:
         version = int(db.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0])
-        chats = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        # Only the old chats: a real start also adds the front desk's main thread (Bots Phase 5).
+        chats = db.execute("SELECT COUNT(*) FROM sessions WHERE id LIKE 'legacychat%'").fetchone()[0]
         words = db.execute("SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'ALDER'").fetchone()[0]
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     finally:

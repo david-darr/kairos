@@ -29,7 +29,6 @@ import { SIMPLE_HOME, sections, setupCard, fact, note, caps, ago, messageOf, loa
 import { chiefDisabledReason } from './botsSectionTeam.js';
 import { openTeamDialog } from './botsTeamHost.js';
 import { loadBotsModule } from './botsPanelHost.js';
-import './botsPhase6Sections.js';
 
 const CSS = '/static/css/bots-panel.css';
 const AVATAR_CSS = '/static/css/bots-avatar.css';

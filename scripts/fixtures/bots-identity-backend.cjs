@@ -35,7 +35,7 @@ module.exports = ({ state, data, now }) => {
       const p = lane().provider;
       return p ? { configured: true, kind: p.kind, base_url: p.base_url, model: p.model } : { configured: false, kind: null, base_url: null, model: null };
     }
-    if (route === '/api/agent-calls/voices') return { voices: state.botsVoices || [], models: [] };
+    if (route === '/api/agent-calls/voices') return { url: '', protocol: 'compatible', voices: state.botsVoices || [], models: [] };
     if (route === '/api/agent-calls/live-choices') return state.botsLiveChoices || [];
     if ((m = route.match(/^\/api\/agents\/([^/]+)\/history$/))) {
       const a = need(m[1]), limit = Number(query.limit || 100);

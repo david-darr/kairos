@@ -1,7 +1,4 @@
-﻿.bots-section-voice, .bots-voice-note { color: var(--text); font-family: var(--bots-font-sans); }
-.bots-section-voice .bots-row { justify-content: space-between; gap: 12px; }
-.bots-section-voice select { max-width: 65%; }
-.bots-voice-note { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
+.bots-voice-note { color: var(--text); font-family: var(--bots-font-sans); display: grid; gap: 8px; padding: 12px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
 .bots-voice-note audio { width: 100%; min-width: 0; }
 .bots-voice-transcript { white-space: pre-wrap; overflow-wrap: anywhere; }
 .bots-call-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: var(--bots-panel); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
@@ -14,7 +11,7 @@
 @keyframes bots-call-pulse { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .bots-call-dot { animation: none; } }
 @media (max-width: 767px) {
-  .bots-section-voice :is(button, input, select, summary, a), .bots-voice-note :is(button, input, select, summary, a), .bots-call-bar :is(button, input, select, summary, a), .bots-live-settings :is(button, input, select, summary, a) { min-height: 44px; }
+  .bots-voice-note :is(button, input, select, summary, a), .bots-call-bar :is(button, input, select, summary, a), .bots-live-settings :is(button, input, select, summary, a) { min-height: 44px; }
   .bots-call-bar[data-floating] { bottom: 12px; left: 12px; max-width: calc(100vw - 24px); }
 }
 

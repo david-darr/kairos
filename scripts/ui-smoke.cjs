@@ -215,9 +215,19 @@ const server = http.createServer(async (req, res) => {
     try {
       const botsRead = botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
       // A voice note's audio (Phase 6 voice lane): served as a real WAV, not JSON.
+      // It answers byte ranges, because the media player only seeks when the server does.
       if (botsRead?._audioWav) {
-        res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
-        res.end(Buffer.from(botsRead._audioWav, 'base64'));
+        const bytes = Buffer.from(botsRead._audioWav, 'base64');
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+        if (range) {
+          const start = range[1] ? Number(range[1]) : Math.max(0, bytes.length - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
+          res.writeHead(206, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${bytes.length}`, 'Content-Length': end - start + 1 });
+          res.end(bytes.subarray(start, end + 1));
+        } else {
+          res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes', 'Content-Length': bytes.length });
+          res.end(bytes);
+        }
         return;
       }
       if (botsRead?._status) res.statusCode = botsRead._status;
@@ -230,6 +240,8 @@ const server = http.createServer(async (req, res) => {
         // The rail's team map and the templates page can still be reading when a check leaves Bots mode (Phases 4 and 6).
         : botsRead === undefined && url.pathname === '/api/bot-team/map' ? { departments: [], members: [], bots: [], rooms: [], handoffs: [] }
         : botsRead === undefined && url.pathname === '/api/bot-lifecycle/templates' ? { teams: [], ready: [] }
+        // An open chat's approval cards can still be loading when a check leaves Bots mode.
+        : botsRead === undefined && url.pathname === '/api/bot-cards' ? { cards: [], pending: 0 }
         // Bots home asks whether the front desk exists (Phase 5); outside the Bots lanes it does, so no notice shows.
         : botsRead === undefined && url.pathname === '/api/front-desk/state' ? { bot_id: 'front-desk', main_thread_id: '', connected: {}, needs_input_count: 0 } : undefined;
       res.end(JSON.stringify(botsRead !== undefined ? botsRead : attentionIdle !== undefined ? attentionIdle : g4Read !== undefined ? g4Read : fixture(url)));

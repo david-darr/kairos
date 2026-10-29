@@ -18,8 +18,8 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }
     otherSid = (await call(`/api/agents/${otherBot}/threads`, 'POST', { title: 'Other voice checks' })).body.id;
     preferences = await js(`Object.fromEntries(${q([botId, otherBot].flatMap(id => ['kairos:call-conversation:', 'kairos:call-model:v2:', 'kairos:call-input:', 'kairos:neural-voice:', 'kairos:agent-voice:'].map(prefix => prefix + id)))}.map(key=>[key,localStorage.getItem(key)]))`);
     demoState.botsVoice.botIds = [botId];
-    await navigate('botsShell', { agentId: botId, sessionId: sid }); await waitFor("!!document.querySelector('.agent-call-open')");
-    // Device voices and a silent MediaStream are the only replaced browser APIs.
+    // Device voices and a silent MediaStream are the only replaced browser APIs. They go in before the bot page opens,
+    // because the call reads the device voices when it mounts.
     await js(`(async()=>{
       const t=window.__botsVoiceCheck={utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia,spoken:[]};
       t.context=new AudioContext();const source=t.context.createOscillator(),gain=t.context.createGain(),destination=t.context.createMediaStreamDestination();gain.gain.value=0;source.connect(gain);gain.connect(destination);source.start();t.source=source;
@@ -28,6 +28,7 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }
       Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{pending:false,speaking:false,getVoices:()=>[{name:'Fixture device',lang:'en-GB',localService:true}],addEventListener(){},cancel(){this.pending=false;this.speaking=false;},speak(u){t.spoken.push(u.text);this.speaking=true;queueMicrotask(()=>{u.dispatchEvent(new Event('start'));this.speaking=false;u.dispatchEvent(new Event('end'));});}}});
       return true;
     })()`);
+    await navigate('botsShell', { agentId: botId, sessionId: sid }); await waitFor("!!document.querySelector('.agent-call-open')");
     await click('.agent-call-open'); await waitFor(`document.querySelector('.agent-call')?.open && !!document.querySelector('[aria-label="Conversation model connection"] option[value="voice-check-model"]')`);
     await js(`(()=>{for(const [label,value] of [['Conversation model connection','voice-check-model'],['Call input mode','hold']]){const node=document.querySelector('[aria-label="'+label+'"]');node.value=value;node.dispatchEvent(new Event('change'));}return true;})()`);
     await waitFor(`!document.querySelector('.agent-call-setup button[type="submit"]').disabled`);
@@ -60,11 +61,14 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }
     await js("document.querySelector('.bots-voice-note audio').currentTime=.05");
     assert.ok(await js("document.querySelector('.bots-voice-note audio').currentTime>=.04"), 'voice note can seek');
     await js(`import('/static/js/botsPanelHost.js').then(m=>m.openBotSettings(${q(botId)},{section:'voice'}))`);
-    await waitFor(`!!document.querySelector('.bots-section-voice [aria-label="Bot voice"]')`);
-    await js("document.querySelector('.bots-section-voice [role=switch]').click()");
+    // The built-in Voice and alerts section saves Speak its replies.
+    const voiceCard = '[data-panel-card=voice]';
+    const speakRow = `[...document.querySelector(${q(voiceCard)})?.querySelectorAll('.bots-switch-row')||[]].find(r=>r.querySelector('.bots-row-title')?.textContent.trim()==='Speak its replies')`;
+    await waitFor(`!!${speakRow}`);
+    await js(`${speakRow}.click()`);
     await waitFor(`fetch('/api/agents/${botId}').then(r=>r.json()).then(d=>d.agent.speak_replies===true)`);
     await win.setContentSize(390, 844);
-    assert.ok(await js("[...document.querySelectorAll('.bots-section-voice button,.bots-section-voice select')].filter(n=>n.getBoundingClientRect().width).every(n=>n.getBoundingClientRect().height>=44)"));
+    assert.deepEqual(await js(`[...document.querySelector(${q(voiceCard)}).querySelectorAll('.bots-switch-row,button:not(.bots-switch),select')].filter(n=>n.getBoundingClientRect().width).filter(n=>n.getBoundingClientRect().height<44).map(n=>n.className+' '+n.textContent.slice(0,30)+' '+n.getBoundingClientRect().height)`), [], 'voice tap targets are 44px on a phone (a switch row is tapped as a whole)');
     await capture?.('phone-bots-voice');
   } finally {
     await js(`(()=>{const t=window.__botsVoiceCheck;if(t){t.reader?.destroy();t.source?.stop();t.context?.close();window.SpeechSynthesisUtterance=t.utterance;if(t.synthesis)Object.defineProperty(window,'speechSynthesis',t.synthesis);else delete window.speechSynthesis;navigator.mediaDevices.getUserMedia=t.getUserMedia;delete window.__botsVoiceCheck;}document.querySelector('#voice-check-note')?.remove();return true;})()`).catch(() => {});

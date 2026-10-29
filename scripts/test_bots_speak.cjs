@@ -88,7 +88,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   mounted.setLive({ turnId: 'three', text: 'New voice.', status: 'done' }); await tick(); assert.equal(selections.at(-1), 'new-local');
   mounted.dispose(); assert.ok(destroyed >= 2);
   global.document = oldDocument; delete global.__speechH; delete global.__speechModule;
-  for (const file of ['static/css/bots-voice.css', 'static/js/botsSpeak.js', 'static/js/botsCallBar.js', 'static/js/botsSectionVoice.js', 'static/js/botsVoiceNote.js']) {
+  for (const file of ['static/css/bots-voice.css', 'static/js/botsSpeak.js', 'static/js/botsCallBar.js', 'static/js/botsVoiceNote.js']) {
     assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /#[a-f0-9]{3,8}\b|rgba?\(|\u2014/i);
   }
   console.log('Bots speech queue: passed');

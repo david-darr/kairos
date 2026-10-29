@@ -51,10 +51,10 @@ Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, on
 - `botsDelegationModel.js`, `botsFrontDesk.js`, `botsFrontDeskCards.js`, `botsFrontDeskModel.js`, `botsGoalCard.js`.
 - `botsHandoffChip.js`, `botsHelpCard.js`, `botsHints.js`, `botsMakeModel.js`, `botsNewRoom.js`.
 - `botsNewTask.js`, `botsNotices.js`, `botsPackageModel.js`, `botsPackagePreview.js`, `botsPeerApprovalCard.js`.
-- `botsPhase6Sections.js`, `botsPlaceChooser.js`, `botsPlanMeters.js`, `botsPoint.js`, `botsPrefs.js`.
+- `botsPlaceChooser.js`, `botsPlanMeters.js`, `botsPoint.js`, `botsPrefs.js`.
 - `botsQuotaCard.js`, `botsReport.js`, `botsRichRows.js`, `botsRoomMembers.js`, `botsRoomModel.js`.
 - `botsRoomPanel.js`, `botsRoomStream.js`, `botsRowKinds.js`, `botsSectionMake.js`, `botsSectionReach.js`.
-- `botsSectionSites.js`, `botsSectionTeam.js`, `botsSectionUsage.js`, `botsSectionVoice.js`, `botsSectionWatch.js`.
+- `botsSectionSites.js`, `botsSectionTeam.js`, `botsSectionUsage.js`, `botsSectionWatch.js`.
 - `botsSectionWork.js`, `botsSettingsBots.js`, `botsSettingsComputers.js`, `botsSettingsPages.js`, `botsSettingsUsage.js`.
 - `botsSetupCard.js`, `botsSetupChecklist.js`, `botsSpeak.js`, `botsSpotlight.js`, `botsTaskPage.js`.
 - `botsTeamCanvas.js`, `botsTeamChips.js`, `botsTeamDialogs.js`, `botsTeamHost.js`, `botsTeamInstructions.js`.
