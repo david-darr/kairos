@@ -172,7 +172,7 @@
   /* The job is Advanced-only and long; on a phone it would push the Conversations button off screen. */
   [data-bots-interface="advanced"][data-app-mode="bots"] .bots-head-role:not(:empty) { display: none; }
   [data-app-mode="bots"] .bots-head-status { display: none; }
-  [data-app-mode="bots"] .bots-head-convos { width: 44px; height: 44px; }
+  [data-app-mode="bots"] .bots-head-convos, [data-app-mode="bots"] .bots-monitor { flex: none; width: 44px; height: 44px; }
   [data-app-mode="bots"] .bots-convos { top: calc(60px + var(--mobile-safe-top, 0px)); right: 12px; }
   /* The panel covers the page; the tab bar steps aside (mobileTabBar.js FULLSCREEN). */
   [data-app-mode="bots"] .bots-panel-aside, [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] {
