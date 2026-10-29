@@ -72,7 +72,8 @@ module.exports = ({ state, now }) => {
       const b = bot(m[1]);
       if (!b.upkeep) throw bad('turn on keeping notes tidy first');
       lane().tidied++;
-      b.report = { kind: 'tidy', at: clock(), expired: 1, duplicates: 0, superseded: 0, deferred: 0, organized: 0, contradictionsChecked: 1, topicChecks: 0, note: '' };
+      // Stamped with the real time: the run-wide `now` is fixed at start, so late in a full run it reads minutes old.
+      b.report = { kind: 'tidy', at: Date.now() / 1000, expired: 1, duplicates: 0, superseded: 0, deferred: 0, organized: 0, contradictionsChecked: 1, topicChecks: 0, note: '' };
       return { queued: true, running: true };
     }
     if ((m = route.match(/^\/api\/bots\/([^/]+)\/memory\/forget$/)) && method === 'POST') {

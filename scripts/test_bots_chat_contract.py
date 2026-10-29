@@ -105,7 +105,7 @@ out.count = backend.read('/api/bot-chat/t1/messages', {}).messages.length;
 out.conflict = post('/api/bot-chat/t1/send', { send_id: 'send-id-0001', text: 'different', expected_leaf_id: null })._status;
 out.stale = post('/api/bot-chat/t1/send', { send_id: 'send-id-0002', text: 'x', expected_leaf_id: 'nope' })._status;
 out.queued = post('/api/bot-chat/t1/send', { send_id: 'send-id-0003', text: 'next', expected_leaf_id: a.message.id }).queued;
-out.foreign = backend.read('/api/bot-chat/zzz/state', {})._status;
+out.foreign = backend.read('/api/bot-chat/zzz/state', {}) === undefined;
 out.staleStop = post('/api/bot-chat/t1/interrupt', { turn_id: 'old' }).outcome;
 out.otherSession = backend.read('/api/bot-chat/t2/messages', {}).messages.length;
 out.unowned = backend.mutate('/api/agents', 'POST', {});
@@ -119,7 +119,7 @@ console.log(JSON.stringify(out));
         self.assertEqual(out["conflict"], 409, "a different message under the same ID is a conflict")
         self.assertEqual(out["stale"], 409, "a stale leaf is a conflict")
         self.assertTrue(out["queued"], "a send during a turn is queued")
-        self.assertEqual(out["foreign"], 404, "an unknown conversation is 404")
+        self.assertTrue(out["foreign"], "an unknown conversation falls through to the next fixture lane (the server answers 404)")
         self.assertEqual(out["staleStop"], "already-stopped")
         self.assertEqual(out["otherSession"], 0, "conversations do not share messages")
         self.assertNotIn("unowned", out, "routes that are not its own are left to others (undefined)")
