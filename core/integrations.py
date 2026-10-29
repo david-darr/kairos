@@ -58,6 +58,10 @@ CHECK_EVERY_SECONDS = 30 * 60
 
 KINDS = {"api_service", "mcp_server", "caldav_calendar", "carddav_contacts", "ical_feed"}
 MCP_TYPES = {"stdio", "http"}
+PASS_ENV = "KAIROS_MCP_PASS_ENV"
+MAX_MCP_SERVERS = 20
+DEFAULT_CALL_MINUTES = 10
+DEFAULT_RESULT_BUDGET = 8_000
 
 
 def _load() -> dict:
@@ -79,7 +83,17 @@ def _masked(item: dict) -> dict:
             out["args"] = item.get("args", [])
         else:
             out["url"] = item.get("url", "")
+            out["http_kind"] = item.get("http_kind") or "http"
         out["has_api_key"] = bool(item.get("api_key_encrypted"))
+        # Saved header and environment values are write-only: only their names ever leave this module.
+        out["header_names"] = sorted(item.get("headers_encrypted") or {})
+        out["env_names"] = sorted(item.get("env_encrypted") or {})
+        out["call_timeout_minutes"] = item.get("call_timeout_minutes", DEFAULT_CALL_MINUTES)
+        out["result_budget"] = item.get("result_budget", DEFAULT_RESULT_BUDGET)
+        out["origin"] = item.get("origin") or "added"
+        client = item.get("oauth_client") or {}
+        out["oauth_client"] = ({"client_id": client.get("client_id", ""), "scopes": client.get("scopes", ""),
+                                "has_secret": bool(client.get("client_secret_encrypted"))} if client else None)
         out["auth"] = item.get("auth") or ("key" if item.get("api_key_encrypted") else "none")
         out["signed_in"] = bool((item.get("oauth") or {}).get("tokens"))
         status = item.get("status")
@@ -153,10 +167,16 @@ def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, 
                                    "args": ["-I", CLEAN_LAUNCHER, "--", item["command"], *(item.get("args") or [])]}
             if api_key:
                 cfg["env"] = {"MCP_API_KEY": api_key}
+            if item.get("env_encrypted"):
+                user_env = {n: decrypt(v) for n, v in item["env_encrypted"].items()}
+                cfg.setdefault("env", {}).update(user_env)
+                # mcp_servers/clean_launch.py hands a server only safe variables; this names the ones the
+                # person set for this server so the launcher passes exactly those on.
+                cfg["env"][PASS_ENV] = ",".join(sorted(user_env))
             if is_rea(item):
                 cfg.setdefault("env", {})["REA_MCP_INPUT_SCHEMA_PROFILE"] = "compact"
         else:
-            cfg = {"type": "http", "url": item["url"]}
+            cfg = {"type": "sse" if item.get("http_kind") == "sse" else "http", "url": item["url"]}
             if item.get("auth") == "oauth":
                 # Signed in through core/mcp_oauth.py, which keeps the token
                 # fresh. Not signed in: left out, rather than handed to a
@@ -164,8 +184,10 @@ def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, 
                 api_key = _oauth_access_token(item)
                 if not api_key:
                     continue
+            if item.get("headers_encrypted"):
+                cfg["headers"] = {n: decrypt(v) for n, v in item["headers_encrypted"].items()}
             if api_key:
-                cfg["headers"] = {"Authorization": f"Bearer {api_key}"}
+                cfg.setdefault("headers", {})["Authorization"] = f"Bearer {api_key}"
         servers[item["name"]] = cfg
     return servers
 
@@ -208,6 +230,9 @@ def record_check(item_id: Optional[str] = None, tools: Optional[list[dict]] = No
                         "description": (t.get("description") or "") if len(t.get("description") or "") <= 8000
                         else t["description"][:8000 - len(marker)] + marker}
             for t in tools}
+        # The server's own read-only claim for each tool that made one; app grants classify from it (kept apart so
+        # the discovered catalog's shape stays as composer references expect it).
+        item["tool_read_only"] = {t["name"]: t["read_only"] for t in tools if isinstance(t.get("read_only"), bool)}
         if "pinned_tools" not in item:
             item["pinned_tools"] = {n: c["fingerprint"] for n, c in current.items()}
         pinned = item["pinned_tools"]
@@ -319,6 +344,8 @@ def create_mcp_server(name: str, mcp_type: str, command: Optional[str] = None,
     previous = data.get(replace_id) if replace_id else None
     if replace_id and (not previous or previous["kind"] != "mcp_server"):
         raise ValueError("Store update requires an existing MCP server")
+    if not previous and sum(1 for i in data.values() if i.get("kind") == "mcp_server") >= MAX_MCP_SERVERS:
+        raise ValueError(f"Kairos keeps up to {MAX_MCP_SERVERS} MCP servers. Remove one first.")
     item_id = replace_id or uuid.uuid4().hex[:12]
     data[item_id] = {
         "id": item_id, "kind": "mcp_server", "name": name, "mcp_type": mcp_type,
@@ -335,6 +362,107 @@ def create_mcp_server(name: str, mcp_type: str, command: Optional[str] = None,
             data[item_id]["oauth"] = previous["oauth"]
     write_json_atomic(INTEGRATIONS_FILE, data)
     return _masked(data[item_id])
+
+
+# -- the MCP editor's storage (services/bot_mcp_config.py validates; this module stores) ----------
+
+def _secret_slots(previous: dict, given: Optional[dict], label: str) -> dict:
+    """Encrypted name -> value slots. A string replaces, True keeps the saved value, a name left out is removed."""
+    out = {}
+    for name, value in (given or {}).items():
+        if value is True:
+            if name not in previous:
+                raise ValueError(f"{label} {name} has no saved value to keep")
+            out[name] = previous[name]
+        elif isinstance(value, str) and value:
+            out[name] = encrypt(value)
+        else:
+            raise ValueError(f"{label} {name} needs a value")
+    return out
+
+
+def save_mcp_config(fields: dict, replace_id: Optional[str] = None) -> dict:
+    """Create or replace an MCP server from validated editor fields. Returns the masked record.
+
+    Secret slots (headers, environment, key, OAuth client secret) are write-only: a string replaces the saved
+    value, True keeps it, a missing name is removed. Tool pins, health and a still-valid sign-in carry over."""
+    data = _load()
+    previous = data.get(replace_id) if replace_id else None
+    if replace_id and (not previous or previous["kind"] != "mcp_server"):
+        raise KeyError(replace_id)
+    if not previous and sum(1 for i in data.values() if i.get("kind") == "mcp_server") >= MAX_MCP_SERVERS:
+        raise ValueError(f"Kairos keeps up to {MAX_MCP_SERVERS} MCP servers. Remove one first.")
+    if previous and fields["name"] != previous["name"]:
+        raise ValueError("a server's name cannot change once it is added")
+    if any(i.get("kind") == "mcp_server" and i["name"] == fields["name"] and i["id"] != replace_id for i in data.values()):
+        raise ValueError("another MCP server already uses that name")
+    old = previous or {}
+    item_id = replace_id or uuid.uuid4().hex[:12]
+    item = {"id": item_id, "kind": "mcp_server", "name": fields["name"], "mcp_type": fields["mcp_type"],
+            "command": fields.get("command"), "args": fields.get("args") or [], "url": fields.get("url"),
+            "http_kind": fields.get("http_kind") if fields["mcp_type"] == "http" else None,
+            "call_timeout_minutes": fields.get("call_timeout_minutes", old.get("call_timeout_minutes", DEFAULT_CALL_MINUTES)),
+            "result_budget": fields.get("result_budget", old.get("result_budget", DEFAULT_RESULT_BUDGET)),
+            "enabled": fields.get("enabled", old.get("enabled", True)), "origin": fields.get("origin") or old.get("origin") or "added"}
+    item["headers_encrypted"] = _secret_slots(old.get("headers_encrypted") or {}, fields.get("headers"), "header")
+    item["env_encrypted"] = _secret_slots(old.get("env_encrypted") or {}, fields.get("env"), "variable")
+    key = fields.get("api_key", "keep" if previous else None)
+    item["api_key_encrypted"] = old.get("api_key_encrypted") if key == "keep" else (encrypt(key) if key else None)
+    if fields.get("auth"):
+        item["auth"] = fields["auth"]
+    client = fields.get("oauth_client")
+    if client:
+        secret = client.get("client_secret", "keep" if previous else None)
+        old_secret = (old.get("oauth_client") or {}).get("client_secret_encrypted")
+        item["oauth_client"] = {"client_id": client["client_id"], "scopes": client.get("scopes", ""),
+                                "client_secret_encrypted": old_secret if secret in ("keep", True) else (encrypt(secret) if secret else None)}
+    if previous:
+        for keep in ("pinned_tools", "held_tools", "discovered_tools", "status"):
+            if keep in previous:
+                item[keep] = previous[keep]
+        if previous.get("url") == item["url"] and previous.get("auth") == item.get("auth") and previous.get("oauth"):
+            item["oauth"] = previous["oauth"]
+    data[item_id] = item
+    write_json_atomic(INTEGRATIONS_FILE, data)
+    return _masked(item)
+
+
+def mcp_options(item_id_or_name: str) -> dict:
+    """How long a call may take and how much of a result a model reads, for one server."""
+    for item in _load().values():
+        if item.get("kind") == "mcp_server" and item_id_or_name in (item["id"], item["name"]):
+            return {"id": item["id"], "name": item["name"],
+                    "call_timeout_seconds": int(item.get("call_timeout_minutes", DEFAULT_CALL_MINUTES)) * 60,
+                    "result_budget": item.get("result_budget", DEFAULT_RESULT_BUDGET)}
+    return {"id": None, "name": item_id_or_name, "call_timeout_seconds": DEFAULT_CALL_MINUTES * 60,
+            "result_budget": DEFAULT_RESULT_BUDGET}
+
+
+def secret_values(item: dict) -> list[str]:
+    """Every secret an MCP record holds, decrypted: for redacting them from an error, never for an API."""
+    values = []
+    for token in [item.get("api_key_encrypted"), *(item.get("headers_encrypted") or {}).values(),
+                  *(item.get("env_encrypted") or {}).values(),
+                  (item.get("oauth_client") or {}).get("client_secret_encrypted")]:
+        if token:
+            try:
+                values.append(decrypt(token))
+            except Exception:
+                continue
+    try:
+        access = _oauth_access_token(item)
+        if access:
+            values.append(access)
+    except Exception:
+        pass
+    return [v for v in values if len(v) >= 4]
+
+
+def redact(item: Optional[dict], text: str) -> str:
+    """`text` with the record's configured secret values replaced by [hidden]."""
+    for value in sorted(secret_values(item or {}), key=len, reverse=True):
+        text = text.replace(value, "[hidden]")
+    return text
 
 
 def create_dav(kind: str, name: str, url: str, username: str, password: str) -> dict:

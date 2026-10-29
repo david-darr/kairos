@@ -1,0 +1,115 @@
+/* Bots connections (Phase 2, unit U5): connected apps, MCP servers, keys, saved logins and the setup import.
+   Loaded through loadBotsCss() by botsSectionConnections.js, botsSectionKeys.js and botsSectionLogins.js.
+   Scope: [data-app-mode="bots"]. Tokens only: --bots-* from bots.css. Settings wraps these pages in a local
+   data-app-mode="bots" element, so nothing here depends on the application's selected mode. */
+
+[data-app-mode="bots"] .bots-conn { display: grid; gap: 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-conn :is(input, textarea, select) { font-family: var(--bots-font-sans); }
+
+/* Status lines */
+[data-app-mode="bots"] .bots-conn-status { padding: 10px 12px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); background: var(--bots-inset); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-conn-status.error { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-conn-status.warn { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-conn-status.good { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-conn-status .bots-btn { margin-left: 8px; }
+[data-app-mode="bots"] .bots-conn-empty { display: flex; align-items: center; gap: 12px; padding: 14px; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-conn-empty .bots-icon { flex: none; }
+
+/* Toolbar */
+[data-app-mode="bots"] .bots-conn-toolbar { display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-conn-search {
+  width: 100%; min-height: 34px; box-sizing: border-box; padding: 4px 12px; font: inherit; color: var(--bots-ink);
+  background: var(--bots-inset); border: 1px solid transparent; border-radius: var(--bots-radius-pill);
+}
+[data-app-mode="bots"] .bots-conn-search:focus { background: var(--bots-control); border-color: var(--bots-control-line); outline: none; }
+[data-app-mode="bots"] .bots-conn-search:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-conn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Chips */
+[data-app-mode="bots"] .bots-conn-chip {
+  flex: none; padding: 2px 8px; font: 500 var(--bots-text-caps)/1.5 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: var(--bots-inset); border: 1px solid transparent; border-radius: var(--bots-radius-pill);
+}
+[data-app-mode="bots"] .bots-conn-chip.good { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-conn-chip.warn { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-conn-chip.bad { color: var(--bots-danger); }
+[data-app-mode="bots"] button.bots-conn-chip { cursor: pointer; }
+[data-app-mode="bots"] button.bots-conn-chip[aria-pressed="true"] { color: var(--bots-accent-ink); background: var(--bots-ink); }
+[data-app-mode="bots"] button.bots-conn-chip:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+
+/* App and server rows */
+[data-app-mode="bots"] .bots-conn-item { border-bottom: 1px solid var(--bots-hairline-dense); min-width: 0; }
+[data-app-mode="bots"] .bots-conn-item:last-child { border-bottom: 0; }
+[data-app-mode="bots"] .bots-conn-row { gap: 10px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-conn-mark {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font: 600 13px/1 var(--bots-font-sans);
+  color: var(--bots-ink); background: var(--bots-inset);
+}
+[data-app-mode="bots"] .bots-conn-main {
+  flex: 1; min-width: 160px; display: grid; gap: 2px; padding: 4px 0; text-align: left; color: inherit; background: transparent; border: 0; cursor: pointer; font: inherit;
+}
+[data-app-mode="bots"] .bots-conn-main.static { cursor: default; }
+[data-app-mode="bots"] .bots-conn-main .bots-row-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-conn-main:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; border-radius: 6px; }
+[data-app-mode="bots"] .bots-conn-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+[data-app-mode="bots"] .bots-conn-detail { display: grid; gap: 10px; padding: 0 14px 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-conn-detail .bots-row-hint { white-space: normal; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-conn-account { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; min-width: 0; }
+[data-app-mode="bots"] .bots-conn-account > .bots-conn-name { flex: 1; min-width: 140px; font-size: var(--bots-text-row); color: var(--bots-ink); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-conn-account input { min-width: 0; width: 160px; box-sizing: border-box; min-height: 30px; padding: 2px 10px; font: inherit; color: var(--bots-ink); background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-conn-account input:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+
+/* Probe strip */
+[data-app-mode="bots"] .bots-conn-probe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; font-size: var(--bots-text-hint-lg); background: var(--bots-inset); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-conn-probe.good { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-conn-probe.warn { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-conn-probe.bad { color: var(--bots-danger); }
+
+/* Editor and forms */
+[data-app-mode="bots"] .bots-conn-editor { display: grid; gap: 12px; padding: 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-conn-editor .bots-caps { margin-top: 2px; }
+[data-app-mode="bots"] .bots-conn-field { display: grid; gap: 4px; min-width: 0; }
+[data-app-mode="bots"] .bots-conn-field > label, [data-app-mode="bots"] .bots-conn-label { font-size: var(--bots-text-hint-lg); font-weight: 500; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-conn-field > .bots-row-hint { white-space: normal; }
+[data-app-mode="bots"] .bots-conn-field :is(input:not([type=checkbox]), textarea, select) {
+  width: 100%; box-sizing: border-box; min-height: 34px; padding: 6px 10px; font: inherit; font-size: var(--bots-text-row); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu);
+}
+[data-app-mode="bots"] .bots-conn-field textarea { min-height: 76px; resize: vertical; }
+[data-app-mode="bots"] .bots-conn-field :is(input, textarea, select):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-conn-mono { font-family: var(--bots-font-mono); font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-conn-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }
+[data-app-mode="bots"] .bots-conn-pair input { min-width: 0; }
+[data-app-mode="bots"] .bots-conn-pair .saved { font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-conn-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-conn-found { padding: 8px 10px; font-size: var(--bots-text-hint-lg); color: var(--bots-success); background: var(--bots-inset); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-conn-checks { display: grid; gap: 6px; }
+[data-app-mode="bots"] .bots-conn-check { display: flex; align-items: flex-start; gap: 8px; font-size: var(--bots-text-row); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-conn-check input { margin-top: 3px; }
+[data-app-mode="bots"] .bots-conn-check .bots-row-hint { display: block; white-space: normal; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-conn-group { display: grid; gap: 6px; }
+[data-app-mode="bots"] .bots-conn-details > summary { cursor: pointer; padding: 6px 0; font-size: var(--bots-text-hint-lg); font-weight: 500; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-conn-details > summary:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+
+/* Keys */
+[data-app-mode="bots"] .bots-conn-key { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 1.6fr) auto; gap: 8px; align-items: center; padding: 10px 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-conn-key input { min-width: 0; width: 100%; box-sizing: border-box; min-height: 34px; padding: 6px 10px; font: inherit; font-size: var(--bots-text-row); color: var(--bots-ink); background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-conn-key input:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-conn-key-result { grid-column: 1 / -1; font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-conn-key-result.good { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-conn-key-result.bad { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-conn-key-result.warn { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-conn-key.focused { box-shadow: inset 0 0 0 2px var(--bots-focus); border-radius: var(--bots-radius-menu); }
+
+/* Phone: rows stack, forms go full width, targets stay large */
+@media (max-width: 640px) {
+  [data-app-mode="bots"] .bots-conn-pair { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-conn-key { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-conn-row .bots-conn-actions { width: 100%; }
+  [data-app-mode="bots"] .bots-conn-account input { width: 100%; }
+  [data-app-mode="bots"] .bots-conn .bots-btn, [data-app-mode="bots"] .bots-conn .bots-icon-btn { min-height: 40px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-conn * { transition: none; animation: none; }
+}

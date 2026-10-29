@@ -23,8 +23,11 @@ Sign-in has to happen on the machine running Kairos: the provider sends the
 browser back to 127.0.0.1.
 """
 import asyncio
+import hmac
+import ipaddress
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -41,6 +44,20 @@ SIGN_IN_TIMEOUT_SECONDS = 300
 START_TIMEOUT_SECONDS = 30
 REFRESH_MARGIN_SECONDS = 300
 CLIENT_NAME = "Kairos"
+
+
+def secure_url(url: str, what: str) -> str:
+    """https, or http only to this computer: a sign-in never travels in the clear to another host."""
+    parts = urlparse(url or "")
+    host = (parts.hostname or "").lower()
+    loopback = host == "localhost"
+    try:
+        loopback = loopback or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    if parts.scheme == "https" and host or parts.scheme == "http" and loopback:
+        return url
+    raise ValueError(f"{what} must use https (or be on this computer)")
 
 
 def _item(item_id: str) -> dict:
@@ -96,6 +113,14 @@ class ItemTokenStorage:
         oauth = _oauth(self.item_id)
         client = _secret(oauth, "client")
         if not client or oauth.get("redirect_uri") != self.redirect_uri:
+            # A client the person registered themselves (the editor's OAuth block) is used as it is.
+            pre = (integrations.get_integration(self.item_id) or {}).get("oauth_client") or {}
+            if pre.get("client_id"):
+                secret = decrypt(pre["client_secret_encrypted"]) if pre.get("client_secret_encrypted") else None
+                return OAuthClientInformationFull(
+                    client_id=pre["client_id"], client_secret=secret, client_name=CLIENT_NAME, redirect_uris=[self.redirect_uri],
+                    grant_types=["authorization_code", "refresh_token"], response_types=["code"],
+                    token_endpoint_auth_method="client_secret_post" if secret else "none", scope=pre.get("scopes") or None)
             return None
         return OAuthClientInformationFull.model_validate(client)
 
@@ -157,6 +182,8 @@ async def start_sign_in(item_id: str, redirect_uri: str) -> dict:
     item = _item(item_id)
     if item.get("mcp_type") != "http" or not item.get("url"):
         raise ValueError("only an http MCP server can be signed in to")
+    secure_url(item["url"], "The server address")
+    secure_url(redirect_uri, "The sign-in return address")
     if item.get("auth") != "oauth":
         data = integrations._load()
         data[item_id]["auth"] = "oauth"
@@ -173,8 +200,13 @@ async def start_sign_in(item_id: str, redirect_uri: str) -> dict:
     sign_in = _SignIn(item_id=item_id, code=loop.create_future())
 
     async def redirect_handler(authorization_url: str) -> None:
-        if not url_ready.done():
+        if url_ready.done():
+            return
+        try:  # the provider's own sign-in page is shown to a person, so it must be a safe address
+            secure_url(authorization_url, "The provider's sign-in address")
             url_ready.set_result(authorization_url)
+        except ValueError as error:
+            url_ready.set_exception(error)
 
     async def callback_handler():
         return await sign_in.code
@@ -222,13 +254,19 @@ def _describe(error: BaseException) -> str:
     # anyio wraps task-group failures; the first real cause is the useful part.
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
-    return (str(error) or type(error).__name__)[:300]
+    text = str(error) or type(error).__name__
+    # Never repeat a credential a provider echoed back: codes, tokens and secrets in a query or body.
+    text = re.sub(r"(?i)((?:code|token|access_token|refresh_token|client_secret|secret|key|password|authorization)[\"']?\s*[=:]\s*[\"']?)[^\s&\"',;]+", r"\1[hidden]", text)
+    return text[:300]
 
 
 async def finish_sign_in(state: str, code: Optional[str], iss: Optional[str], error: Optional[str]) -> tuple[bool, str]:
     """The browser came back. Returns (ok, message) for the page it lands on."""
     from mcp.shared.auth import AuthorizationCodeResult
-    sign_in = _pending.pop(state or "", None)
+    sign_in = None
+    for known in list(_pending):  # constant-time compare: a guess learns nothing from how long a miss takes
+        if hmac.compare_digest(known.encode(), (state or "").encode()):
+            sign_in = _pending.pop(known)  # popped, so a state is single-use
     if sign_in is None:
         return False, "This sign-in link is not one Kairos is waiting for. Start again from Settings."
     name = (integrations.get_integration(sign_in.item_id) or {}).get("name", "the server")

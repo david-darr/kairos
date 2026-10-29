@@ -13,6 +13,9 @@ connections - as one zip:
   sensitive as the passwords themselves. Without it, every encrypted value
   is blanked: a restored connection asks for its key again rather than
   failing to decrypt.
+- Saved logins and their own key (bot-secrets/) never travel, even with keys
+  included: no backup carries them, a backup that names them is refused, and a
+  restore leaves this install's own in place (Bots Phase 2, 2026-10-29).
 - Logs, file checkpoints and review screenshots stay out (history that is
   large and rebuilt), and so does the vault: it is the person's own folder,
   synced their own way.
@@ -32,6 +35,8 @@ import time
 import zipfile
 from typing import Optional
 
+from core.bot_held_secrets import SECRET_FOLDER
+
 logger = logging.getLogger(__name__)
 
 MANIFEST = "jarvis-backup.json"
@@ -42,7 +47,10 @@ PENDING = "pending.zip"
 LAST = "last.json"
 # Never backed up: rebuilt or large history, and the restore area itself.
 SKIPPED_DIRS = {"logs", "file_checkpoints", RESTORE_DIR, "worktrees", "ui-review", "chat-review",
-                "browser-review", "usage-overlay-review", "swarm-codex-review", "__pycache__"}
+                "browser-review", "usage-overlay-review", "swarm-codex-review", "__pycache__",
+                # Saved logins and their own key never travel, even when keys are asked for (Phase 2 unit U5);
+                # held MCP results are rebuilt history.
+                SECRET_FOLDER, "bot-tool-results"}
 SKIPPED_SUFFIXES = ("-wal", "-shm", ".tmp")
 MAX_RESTORE_BYTES = 4 * 1024 ** 3
 
@@ -156,6 +164,8 @@ def check_backup(path: str) -> dict:
                     raise BackupRefused(f"the backup names a path outside the data folder: {name}")
                 if name.split("/", 1)[0] == RESTORE_DIR:
                     raise BackupRefused("the backup contains the restore area")
+                if SECRET_FOLDER in name.replace("\\", "/").split("/"):
+                    raise BackupRefused("the backup contains saved logins, which a backup never carries")
                 total += info.file_size
             if total > MAX_RESTORE_BYTES:
                 raise BackupRefused("the backup is larger than Kairos restores (4 GB)")
@@ -242,8 +252,9 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
         # entered again after the restore is encrypted with a key that exists.
         if not manifest.get("includes_keys") and os.path.exists(os.path.join(safety, KEY_FILE)):
             shutil.copy2(os.path.join(safety, KEY_FILE), os.path.join(data_dir, KEY_FILE))
-        # Logs and checkpoints are not in a backup; this install's own stay.
-        for kept in ("logs", "file_checkpoints"):
+        # Logs and checkpoints are not in a backup; this install's own stay. So do saved logins and their key:
+        # a restore never replaces, removes or adds them.
+        for kept in ("logs", "file_checkpoints", SECRET_FOLDER):
             source = os.path.join(safety, kept)
             if os.path.isdir(source) and not os.path.exists(os.path.join(data_dir, kept)):
                 shutil.copytree(source, os.path.join(data_dir, kept))

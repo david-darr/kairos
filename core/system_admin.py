@@ -88,6 +88,9 @@ def import_backup(data: dict) -> dict:
     (run_at/interval) that aren't safe to blind-import without re-validating
     against the live scheduler."""
     imported = {"settings": 0, "notes": 0, "tasks": 0, "skills": 0}
+    # Saved logins are never part of an export, so an import never takes them either (Phase 2 unit U5).
+    for refused in ("logins", "bot_secrets", "bot-secrets", "secrets"):
+        data.pop(refused, None)
 
     settings_section = data.get("settings")
     if isinstance(settings_section, dict):
