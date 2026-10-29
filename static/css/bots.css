@@ -1,0 +1,310 @@
+/* Bots mode: the look foundation (Agents 3.0 Phase 0, unit U2).
+   Scope: [data-app-mode="bots"] only, never Kairos or Forge. Every value
+   derives from the working tokens in style.css (--bg, --text, --accent,
+   --ink-rgb ...), so Appearance changes carry through and
+   scripts/test_kairos_theme.py finds no raw colour here. Everything else in
+   Bots mode (bots-kip.css, bots-shell.css, bots-create.css, bots-panel.css and
+   the views) reads only the --bots-* names defined below.
+   The token list is pinned by scripts/test_bots_look.cjs.
+   Fonts: Geist (interface), Inter (chat prose), Geist Mono (code), all SIL OFL
+   1.1, self-hosted in static/fonts with their licence files. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/static/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/static/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/static/fonts/Inter-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+[data-app-mode="bots"] {
+  /* Surfaces */
+  --bots-app: var(--bg);
+  --bots-panel: var(--bg-panel-solid);
+  --bots-card: var(--bg-panel-solid);
+  --bots-menu: var(--bg-panel-solid);
+  --bots-composer: var(--bg-panel-solid);
+  --bots-raised: var(--surface-2);
+  --bots-raised-hover: rgba(var(--ink-rgb), .06);
+  --bots-menu-active: rgba(var(--ink-rgb), .08);
+  --bots-inset: color-mix(in srgb, rgb(var(--ink-rgb)) 4%, var(--bg));
+  --bots-control: var(--bg-panel-solid);
+  --bots-control-line: var(--border-strong);
+  --bots-composer-ring: inset 0 0 0 1px rgba(var(--ink-rgb), .07);
+  --bots-hairline: var(--hairline-soft);
+  --bots-hairline-dense: var(--border);
+
+  /* Text and accents */
+  --bots-ink: var(--text);
+  --bots-ink-secondary: var(--text-dim);
+  --bots-ink-tertiary: var(--text-faint);
+  --bots-accent: var(--accent);
+  --bots-accent-text: var(--accent);
+  --bots-accent-border: var(--hairline);
+  --bots-accent-ink: var(--bg-panel-solid);
+  --bots-focus: var(--accent);
+  --bots-success: var(--success);
+  --bots-success-ink: var(--bg-panel-solid);
+  --bots-danger: var(--danger);
+  --bots-danger-ink: var(--bg-panel-solid);
+  --bots-warning: var(--warn);
+
+  /* Bubbles. The person's bubble takes the bot's Kip body colour (a pastel,
+     fixed across Appearance) with Kairos ink on it; the six pairs are
+     contrast-checked by scripts/test_bots_look.py. */
+  --bots-bubble-user: var(--surface-2);
+  --bots-bubble-user-ink: var(--k-ink);
+  --bots-bubble-bot: var(--surface-2);
+  --bots-bot-color: var(--m-body-d9b260);
+
+  /* Corners: rounded inside Bots mode only (spec decision, Q1). One line per
+     token puts D12's hard corners back. */
+  --bots-radius-card: 14px;
+  --bots-radius-bubble: 18px;
+  --bots-radius-menu: 12px;
+  --bots-radius-pill: 999px;
+
+  --bots-shadow-float: var(--popup-shadow);
+
+  /* Motion (all off under prefers-reduced-motion, see the end of this file) */
+  --bots-ease: var(--ease-out);
+  --bots-dur-tap: 120ms;
+  --bots-dur-msg: 180ms;
+  --bots-dur-pop: 200ms;
+  --bots-dur-panel: 240ms;
+  --bots-dur-sheet: 350ms;
+
+  /* Type */
+  --bots-text-caps: 11px;
+  --bots-text-hint: 12px;
+  --bots-text-hint-lg: 13px;
+  --bots-text-row: 14px;
+  --bots-text-bubble: 15px;
+  --bots-leading-bubble: 22px;
+  --bots-font-sans: "Geist", "Inter", var(--k-font-sans);
+  --bots-font-prose: "Inter", "Geist", var(--k-font-sans);
+  --bots-font-mono: "Geist Mono", var(--font-mono);
+
+  /* Layout */
+  --bots-row-h: 46px;
+  --bots-menu-row-h: 30px;
+  --bots-panel-w: 320px;
+  --bots-panel-w-advanced: min(420px, 42vw);
+  --bots-sidebar-w: 280px;
+  --bots-sidebar-w-advanced: 320px;
+
+  font-family: var(--bots-font-sans);
+}
+/* One switch turns every Bots surface to Inter. */
+[data-app-mode="bots"][data-bots-font="inter"] {
+  --bots-font-sans: "Inter", "Geist", var(--k-font-sans);
+  --bots-font-prose: "Inter", "Geist", var(--k-font-sans);
+}
+/* A touch screen gets taller menu rows. */
+@media (pointer: coarse) {
+  [data-app-mode="bots"] { --bots-menu-row-h: 40px; }
+}
+
+/* A bot's colour: its Kip body pastel (kairos-theme.css --m-body-<key>). */
+[data-app-mode="bots"] [data-bot-color="d9b260"] { --bots-bot-color: var(--m-body-d9b260); --bots-bubble-user: var(--m-body-d9b260); }
+[data-app-mode="bots"] [data-bot-color="b9d2e3"] { --bots-bot-color: var(--m-body-b9d2e3); --bots-bubble-user: var(--m-body-b9d2e3); }
+[data-app-mode="bots"] [data-bot-color="e8c39e"] { --bots-bot-color: var(--m-body-e8c39e); --bots-bubble-user: var(--m-body-e8c39e); }
+[data-app-mode="bots"] [data-bot-color="d99a92"] { --bots-bot-color: var(--m-body-d99a92); --bots-bubble-user: var(--m-body-d99a92); }
+[data-app-mode="bots"] [data-bot-color="b5c7a5"] { --bots-bot-color: var(--m-body-b5c7a5); --bots-bubble-user: var(--m-body-b5c7a5); }
+[data-app-mode="bots"] [data-bot-color="cdbfd9"] { --bots-bot-color: var(--m-body-cdbfd9); --bots-bubble-user: var(--m-body-cdbfd9); }
+
+/* -- Primitives ------------------------------------------------------------ */
+
+[data-app-mode="bots"] .bots-icon { flex: none; vertical-align: middle; }
+
+[data-app-mode="bots"] .bots-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 34px; padding: 0 14px;
+  font: 500 var(--bots-text-row)/1 var(--bots-font-sans);
+  color: var(--bots-ink); background: var(--bots-control);
+  border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-pill);
+  cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), border-color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-btn:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-btn.primary { color: var(--bots-accent-ink); background: var(--bots-ink); border-color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-btn.primary:hover { background: var(--bots-ink-secondary); border-color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-btn.danger { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-btn[disabled], [data-app-mode="bots"] .bots-icon-btn[disabled] { opacity: .5; cursor: default; }
+
+[data-app-mode="bots"] .bots-icon-btn {
+  display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0;
+  color: var(--bots-ink-secondary); background: transparent; border: 0;
+  border-radius: var(--bots-radius-pill); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-icon-btn:hover { color: var(--bots-ink); background: var(--bots-raised-hover); }
+
+[data-app-mode="bots"] .bots-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  font-size: var(--bots-text-hint); color: var(--bots-ink-secondary);
+  background: var(--bots-inset); border-radius: var(--bots-radius-pill);
+}
+
+[data-app-mode="bots"] .bots-caps {
+  font-size: var(--bots-text-caps); font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--bots-ink-tertiary);
+}
+
+[data-app-mode="bots"] :is(.bots-btn, .bots-icon-btn, .bots-nav-row, .bots-switch, .bots-radio-row, .bots-segmented button, .bots-menu-row, .bots-text-row input):focus-visible {
+  outline: 2px solid var(--bots-focus); outline-offset: 2px;
+}
+
+[data-app-mode="bots"] .bots-scrim {
+  position: fixed; inset: 0; z-index: 40; background: var(--scrim);
+  animation: bots-fade-in var(--bots-dur-pop) var(--bots-ease);
+}
+
+/* -- Row kit (OMB's Card, NavRow, SwitchRow, RadioRow, TextRow, Segmented, PageHeader, BotSwitch) -- */
+
+[data-app-mode="bots"] .bots-card { margin: 0 0 14px; }
+[data-app-mode="bots"] .bots-card-label { margin: 0 0 6px 14px; }
+[data-app-mode="bots"] .bots-card-body {
+  background: var(--bots-card); border: 1px solid var(--bots-hairline);
+  border-radius: var(--bots-radius-card); overflow: hidden;
+}
+[data-app-mode="bots"] .bots-card-body > * + * { border-top: 1px solid var(--bots-hairline-dense); }
+@media (max-width: 767px) {
+  [data-app-mode="bots"] .bots-card-body { border-radius: 20px; }
+}
+
+[data-app-mode="bots"] .bots-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; min-height: var(--bots-row-h); padding: 8px 14px;
+  font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink);
+  background: transparent; border: 0; text-align: left;
+}
+[data-app-mode="bots"] .bots-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+[data-app-mode="bots"] .bots-row-title { font-size: var(--bots-text-row); font-weight: 500; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-row-hint { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-row-value { flex: none; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-row > .bots-icon { color: var(--bots-ink-secondary); }
+
+[data-app-mode="bots"] button.bots-row { cursor: pointer; transition: background var(--bots-dur-tap) var(--bots-ease); }
+[data-app-mode="bots"] button.bots-row:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] button.bots-row[aria-checked="true"] { background: var(--bots-menu-active); }
+[data-app-mode="bots"] .bots-nav-row .bots-chevron { color: var(--bots-ink-tertiary); }
+
+/* The switch, shared by SwitchRow and BotSwitch. */
+[data-app-mode="bots"] .bots-switch {
+  position: relative; flex: none; width: 36px; height: 22px; padding: 0;
+  background: var(--bots-inset); border: 1px solid var(--bots-control-line);
+  border-radius: var(--bots-radius-pill); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), border-color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  background: var(--bots-ink-tertiary); border-radius: 50%;
+  transition: transform var(--bots-dur-tap) var(--bots-ease), background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-switch[aria-checked="true"] { background: var(--bots-accent); border-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-switch[aria-checked="true"]::after { background: var(--bots-accent-ink); transform: translateX(14px); }
+/* BotSwitch: the switch in the bot's own colour. */
+[data-app-mode="bots"] .bots-switch.bot[aria-checked="true"] { background: var(--bots-bot-color); border-color: var(--bots-bot-color); }
+[data-app-mode="bots"] .bots-switch.bot[aria-checked="true"]::after { background: var(--k-ink); }
+[data-app-mode="bots"] .bots-switch[disabled] { opacity: .5; cursor: default; }
+
+[data-app-mode="bots"] .bots-radio-mark {
+  flex: none; width: 18px; height: 18px; border: 1.5px solid var(--bots-control-line); border-radius: 50%;
+  display: grid; place-items: center;
+}
+[data-app-mode="bots"] .bots-radio-row[aria-checked="true"] .bots-radio-mark { border-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-radio-row[aria-checked="true"] .bots-radio-mark::after {
+  content: ""; width: 8px; height: 8px; background: var(--bots-accent); border-radius: 50%;
+}
+
+[data-app-mode="bots"] .bots-text-row input, [data-app-mode="bots"] .bots-text-row textarea {
+  flex: 1; min-width: 0; min-height: 32px; padding: 4px 10px;
+  font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-text-row .bots-row-main { flex: 0 1 45%; }
+
+[data-app-mode="bots"] .bots-segmented {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--bots-inset); border-radius: var(--bots-radius-pill);
+}
+[data-app-mode="bots"] .bots-segmented button {
+  min-height: 28px; padding: 0 14px;
+  font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: transparent; border: 0; border-radius: var(--bots-radius-pill); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-segmented button[aria-checked="true"] { color: var(--bots-ink); background: var(--bots-card); box-shadow: var(--bots-composer-ring); }
+
+[data-app-mode="bots"] .bots-page-header { display: grid; gap: 6px; margin: 0 0 14px; }
+[data-app-mode="bots"] .bots-page-header-top { display: flex; align-items: center; gap: 8px; }
+[data-app-mode="bots"] .bots-page-title { flex: 1; margin: 0; font: 600 18px/1.3 var(--bots-font-sans); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-page-intro { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-back {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0;
+  font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-accent-text);
+  background: transparent; border: 0; cursor: pointer;
+}
+
+/* -- Menu recipe (OMB menu-recipe: sheet, rows, label, separator, note, meta) -- */
+
+[data-app-mode="bots"] .bots-menu {
+  position: fixed; z-index: 60; min-width: 200px; max-width: min(320px, calc(100vw - 16px)); padding: 6px;
+  color: var(--bots-ink); background: var(--bots-menu);
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu);
+  box-shadow: var(--bots-shadow-float);
+  font: 400 13px/1.3 var(--bots-font-sans);
+  transform-origin: var(--menu-origin, top left);
+  animation: bots-pop-in var(--bots-dur-pop) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-menu[data-closing] { animation: bots-pop-out var(--bots-dur-pop) var(--bots-ease) forwards; pointer-events: none; }
+[data-app-mode="bots"] .bots-menu-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--bots-menu-row-h); padding: 4px 8px;
+  font: inherit; color: inherit; text-align: left; background: transparent; border: 0;
+  border-radius: 8px; cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-menu-row:hover, [data-app-mode="bots"] .bots-menu-row:focus-visible { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-menu-row[aria-checked="true"], [data-app-mode="bots"] .bots-menu-row:active { background: var(--bots-menu-active); }
+[data-app-mode="bots"] .bots-menu-row.danger { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-menu-row[disabled] { opacity: .5; cursor: default; }
+[data-app-mode="bots"] .bots-menu-row-label { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-menu-meta { font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-menu-label { padding: 6px 8px 2px; }
+[data-app-mode="bots"] .bots-menu-sep { height: 1px; margin: 4px 2px; background: var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-menu-note { padding: 4px 8px; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+
+/* -- Entrances --------------------------------------------------------------- */
+
+@keyframes bots-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bots-pop-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes bots-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.96); } }
+@keyframes bots-panel-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes bots-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes bots-msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+[data-app-mode="bots"] .bots-panel-in { animation: bots-panel-in var(--bots-dur-panel) var(--bots-ease); }
+[data-app-mode="bots"] .bots-sheet-in { animation: bots-sheet-in var(--bots-dur-sheet) var(--bots-ease); }
+[data-app-mode="bots"] .bots-msg-in { animation: bots-msg-in var(--bots-dur-msg) var(--bots-ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] *, [data-app-mode="bots"] *::before, [data-app-mode="bots"] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
