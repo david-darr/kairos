@@ -62,7 +62,7 @@ def app_frame(sid: str, mid: str, channel: str = Query(pattern=r"^[A-Za-z0-9_-]{
               rev: Optional[int] = Query(default=None, ge=1, le=1_000_000), user: str = Depends(require_admin)):
     """The page itself, for the sandboxed frame's address. It carries its own policy as a header (plus `sandbox`, so
     it stays sandboxed if opened on its own). X-Kairos-Design-Render asks core/middleware.py to keep this policy
-    instead of the app's: the same exemption a Design board uses."""
+    instead of the app's; the middleware honours that only on this path and a Design board's render path."""
     from services import bot_chat_service
     bot_chat_service.require(user, sid)
     try:

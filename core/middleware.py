@@ -18,6 +18,10 @@ from core.constants import APP_PORT
 
 
 _NO_CACHE_SUFFIXES = (".js", ".mjs", ".css", ".html")
+# The only responses whose own Content-Security-Policy survives (see dispatch): a Design board's render
+# and a bot's sandboxed app page.
+_OWN_POLICY_PATHS = (re.compile(r"/api/designs/[^/]+/boards/[^/]+/render"),
+                     re.compile(r"/api/bot-widgets/[^/]+/apps/[^/]+/frame"))
 
 # The port this process's local listener actually serves on, from the first
 # request that arrives over plain http on 127.0.0.1 (the desktop window and a
@@ -49,9 +53,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         remember_loopback_port(request.scope)
         response = await call_next(request)
         # A Design board's own policy (routes/design_routes.py): its viewer
-        # script's hash, no network, framed only by the app itself.
-        design_board = response.headers.get("X-Kairos-Design-Render") == "1"
+        # script's hash, no network, framed only by the app itself. The same
+        # for a bot's sandboxed app page (routes/bot_widget_routes.py, Bots
+        # Phase 6). Only these paths may keep their own policy: the header
+        # alone is never enough (security review 2026-10-29).
+        design_board = (response.headers.get("X-Kairos-Design-Render") == "1"
+                        and any(p.fullmatch(request.url.path) for p in _OWN_POLICY_PATHS))
         board_policy = response.headers.get("Content-Security-Policy") if design_board else None
+        if "X-Kairos-Design-Render" in response.headers:
+            del response.headers["X-Kairos-Design-Render"]
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
