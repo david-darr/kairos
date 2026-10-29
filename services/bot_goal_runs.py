@@ -10,7 +10,10 @@ reply streams and removed from the saved text afterwards.
 Bounds: 13 steps; the same assignment three times is blocked; one failed step
 is retried once; a missing or unreadable control line stops the goal with a
 plain explanation the person can act on. Stop names the goal's root and its
-current turn. Rooms and a coordinator come in a later phase and extend this.
+current turn. A room goal (services/bot_room_goals.py) drives the same loop with its own
+runner: `begin_custom` takes a runner whose `settle` runs one coordinator turn and returns
+(status, raw reply), `next_step` queues the next instruction and `cancel` stops it. The bounds,
+the control line and `public` are shared, so a goal looks the same wherever it runs.
 """
 import asyncio
 import json
@@ -119,8 +122,11 @@ def parse(text: str) -> tuple[str, dict | None]:
 # -- public view ------------------------------------------------------------------
 
 def public(run: dict) -> dict:
-    turn = chat_live.current_turn(run["session_id"]) if run["status"] == "working" else None
-    tail = logs.scrub_credentials(turn["text"][-400:]) if turn and turn["turn_id"] == run["current_turn_id"] else ""
+    if run.get("tail_fn"):
+        tail = logs.scrub_credentials(run["tail_fn"]()[-400:]) if run["status"] == "working" else ""
+    else:
+        turn = chat_live.current_turn(run["session_id"]) if run["status"] == "working" else None
+        tail = logs.scrub_credentials(turn["text"][-400:]) if turn and turn["turn_id"] == run["current_turn_id"] else ""
     return {"root_id": run["root_id"], "status": run["status"], "label": FINAL_LABELS.get(run["status"], "Working"),
             "goal": run["goal"], "turn": run["turn"], "max_turns": MAX_STEPS,
             "detail": logs.scrub_credentials(run["detail"])[:500], "tail": tail,
@@ -138,6 +144,9 @@ def _frame(run: dict, force: bool = False) -> None:
     if not force and now - run.get("_frame_at", 0) < FRAME_GAP:
         return
     run["_frame_at"] = now
+    if run.get("emit"):
+        run["emit"](public(run))
+        return
     chat_live.broadcast_owner({"type": "bot_goal", "sessionId": run["session_id"], "goal": public(run)})
 
 
@@ -161,6 +170,29 @@ def begin(owner: str, sid: str, bot_id: str, payload: dict, generation: str, mes
     return run
 
 
+def begin_custom(owner: str, key: str, bot_id: str, goal_text: str, runner, *, emit=None, on_finish=None,
+                 tail_fn=None, instruction: str | None = None) -> dict:
+    """A goal run by someone other than a bot's own thread (a room). `key` names it in _RUNS;
+    `runner` has settle(run), next_step(run, instruction), cancel(run) and optionally strip(run, visible)."""
+    now = time.time()
+    run = {"root_id": uuid.uuid4().hex, "session_id": key, "owner": owner, "bot_id": bot_id,
+           "goal": " ".join(goal_text.split())[:180], "status": "working", "turn": 1, "detail": "",
+           "started_at": now, "updated_at": now, "current_turn_id": None, "cancelled": False,
+           "retried": False, "seen": {}, "run_ids": [], "message_id": None, "outcome": None,
+           "instruction": instruction or goal_text, "runner": runner, "emit": emit, "on_finish": on_finish,
+           "tail_fn": tail_fn}
+    _RUNS[key] = run
+    _frame(run, force=True)
+    try:
+        task = asyncio.get_running_loop().create_task(_drive(run))
+    except RuntimeError:
+        return run
+    run["task"] = task
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
+    return run
+
+
 def note_interrupt(sid: str, turn_id: str) -> None:
     run = _RUNS.get(sid)
     if run and run["status"] == "working" and run["current_turn_id"] == turn_id:
@@ -174,7 +206,10 @@ def stop(owner: str, sid: str, root_id: str) -> dict:
     if not run or run["root_id"] != root_id or run["status"] != "working" or run["owner"] != owner:
         return {"outcome": "already-stopped", "root_id": root_id}
     run["cancelled"] = True
-    chat_live.stop_turn(sid, run["current_turn_id"], "person")
+    if run.get("runner"):
+        run["runner"].cancel(run)
+    else:
+        chat_live.stop_turn(sid, run["current_turn_id"], "person")
     return {"outcome": "stopping", "root_id": root_id}
 
 
@@ -195,13 +230,19 @@ def _finish(run: dict, status: str, detail: str) -> None:
     seconds = round(run["updated_at"] - run["started_at"])
     digest = {"root_id": run["root_id"], "status": status, "steps": run["turn"], "seconds": seconds,
               "run_ids": list(run["run_ids"])}
-    try:
-        session_manager.append_message(
-            run["session_id"], "assistant",
-            f"{FINAL_LABELS[status]}: {run['turn']} step{'s' if run['turn'] != 1 else ''}, {seconds} seconds.",
-            extra={"display_only": True, "kind": "goal_digest", "digest": digest, "goal_root": run["root_id"]})
-    except KeyError:
-        pass  # the conversation was deleted while the goal ran
+    line = f"{FINAL_LABELS[status]}: {run['turn']} step{'s' if run['turn'] != 1 else ''}, {seconds} seconds."
+    if run.get("on_finish"):
+        try:
+            run["on_finish"](run, status, line, digest)
+        except Exception:
+            logger.exception("goal %s finish hook failed", run["root_id"])
+    else:
+        try:
+            session_manager.append_message(
+                run["session_id"], "assistant", line,
+                extra={"display_only": True, "kind": "goal_digest", "digest": digest, "goal_root": run["root_id"]})
+        except KeyError:
+            pass  # the conversation was deleted while the goal ran
     events.emit("bot.goal_finished", f"Goal {status}", level="warn" if status in ("failed", "blocked") else "info",
                 agent_id=run["bot_id"], session_id=run["session_id"], owner=run["owner"],
                 root_id=run["root_id"], status=status, steps=run["turn"])
@@ -212,31 +253,54 @@ def _normal(text: str) -> str:
     return " ".join((text or "").lower().split())
 
 
+class SoloRunner:
+    """A goal in one bot's own thread: each step is a normal message through the admission door."""
+
+    async def settle(self, run: dict) -> tuple[str, str | None]:
+        sid, turn_id = run["session_id"], run["current_turn_id"]
+        await chat_live.wait_settled(sid, turn_id, timeout=6 * 3600)
+        outcome = run.get("outcome")
+        status = outcome["status"] if outcome and outcome["turn_id"] == turn_id else "done"
+        reply = _reply(run)
+        run["_reply_index"] = reply["index"] if reply else None
+        return status, (reply["content"] if reply else "")
+
+    def strip(self, run: dict, visible: str) -> None:
+        if run.get("_reply_index") is None:
+            return
+        try:
+            session_manager.edit_message_content(run["session_id"], run["_reply_index"], visible)
+        except (KeyError, IndexError):
+            pass
+
+    async def next_step(self, run: dict, instruction: str):
+        return await _next_step(run, instruction)
+
+    def cancel(self, run: dict) -> None:
+        chat_live.stop_turn(run["session_id"], run["current_turn_id"], "person")
+
+
+_SOLO = SoloRunner()
+
+
 async def _drive(run: dict) -> None:
-    sid = run["session_id"]
+    runner = run.get("runner") or _SOLO
     try:
         while True:
-            turn_id = run["current_turn_id"]
-            await chat_live.wait_settled(sid, turn_id, timeout=6 * 3600)
-            outcome = run.get("outcome")
-            status = outcome["status"] if outcome and outcome["turn_id"] == turn_id else "done"
+            status, content = await runner.settle(run)
             if run["cancelled"] or status == "stopped":
                 return _finish(run, "stopped", "You stopped this.")
-            reply = _reply(run)
             if status == "failed":
                 if run["retried"]:
                     return _finish(run, "failed", "A step failed twice, so the goal stopped.")
                 run["retried"] = True
-                step = await _next_step(run, run["instruction"])
+                step = await runner.next_step(run, run["instruction"])
                 if step is None:
                     return
                 continue
-            visible, envelope = parse(reply["content"] if reply else "")
-            if reply and visible != (reply["content"] or "").strip():
-                try:
-                    session_manager.edit_message_content(sid, reply["index"], visible)
-                except (KeyError, IndexError):
-                    pass
+            visible, envelope = parse(content or "")
+            if content is not None and visible != (content or "").strip() and hasattr(runner, "strip"):
+                runner.strip(run, visible)
             if envelope is None:
                 return _finish(run, "blocked", "The reply did not end with a readable control line, so the goal "
                                                 "stopped. Send a message to carry on.")
@@ -253,7 +317,7 @@ async def _drive(run: dict) -> None:
                 return _finish(run, "limit-reached", f"The goal used all {MAX_STEPS} steps.")
             run["retried"] = False
             run["instruction"] = instruction
-            step = await _next_step(run, instruction)
+            step = await runner.next_step(run, instruction)
             if step is None:
                 return
     except asyncio.CancelledError:

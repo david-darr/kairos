@@ -20,6 +20,7 @@ import { showPermissionPrompt, dismissPermissionPrompt } from './permissionPromp
 import { createBotDraft } from './botsDrafts.js';
 import { mountBotsComposer, createSendController, sendKey, redactForSupport } from './botsComposer.js';
 import { mountTranscript, announcementFor } from './botsTranscript.js';
+import { teamRowRenderers } from './botsTeamChips.js';
 import { createUploader, shouldChipPaste } from './botsChatAttachments.js';
 import { mountFindBar, landOnHit, searchUrl, downloadExport } from './botsChatSearch.js';
 import { agentCall } from './agentCall.js';
@@ -112,6 +113,7 @@ export async function mountBotsChat(host, options) {
   const lastAssistantId = () => [...(transcript.loadedIds())].reverse().find(id => transcript.get(id)?.role === 'assistant' && !transcript.get(id)?.kind) || null;
   const isBusy = () => chatStream.getInFlight(sid)?.status === 'processing' || !!placeholderTurn;
   const transcript = mountTranscript(transcriptHost, {
+    rowRenderers: teamRowRenderers, openTarget: target => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: target })),
     agent, sessionId: sid, replyStyle, simple: () => !isAdvanced(),
     renderBody: (node, text, live) => renderMessageBody(node, text, sid, true, { live }),
     kip: (bot, size, st) => botKip(bot, { size, state: st }),

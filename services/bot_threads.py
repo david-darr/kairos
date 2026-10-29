@@ -107,7 +107,8 @@ def ensure_main_threads(agent_id: Optional[str] = None) -> dict:
         for agent in ([agent_service.get(agent_id)] if agent_id else agent_service.list_agents()):
             if agent is None:
                 continue
-            headers = sorted(session_manager.list_sessions(agent_id=agent["id"]),
+            headers = sorted((h for h in session_manager.list_sessions(agent_id=agent["id"])
+                              if thread_view(h)["opened_by"] != "room"),  # a room seat is never a conversation of its own
                              key=lambda h: (h.get("created_at") or 0, h["id"]))
             flagged = [h for h in headers if (h.get("thread") or {}).get("main")]
             main = flagged[0]["id"] if flagged else None
@@ -134,6 +135,8 @@ def list_threads(agent: dict, include_archived: bool = False) -> dict:
     main_id = ensure_main_threads(agent["id"]).get(agent["id"])
     rows = []
     for header in session_manager.list_sessions(agent_id=agent["id"]):
+        if thread_view(header)["opened_by"] == "room":
+            continue  # a room seat belongs to the room, not to the bot's thread list
         if thread_view(header)["archived_at"] and not include_archived:
             continue
         session = session_manager.get_session(header["id"])
