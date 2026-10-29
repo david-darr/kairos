@@ -870,6 +870,17 @@ def session_exists(session_id: str) -> bool:
     return row is not None
 
 
+def _thread_json(value) -> Optional[dict]:
+    """json_extract hands an object back as JSON text; anything else is no thread."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def list_sessions(agent_id: Optional[str] = None, include_agents: bool = False,
                   owner_user: Optional[str] = None) -> list[dict]:
     """Sidebar metadata only — never message bodies. Field set matches what
@@ -887,7 +898,8 @@ def list_sessions(agent_id: Optional[str] = None, include_agents: bool = False,
             f"""SELECT id, title, starred, created_at, updated_at, message_count,
                        model_endpoint_id, project_id, open_mic, agent_id,
                        json_extract(doc, '$.forge') AS forge,
-                       json_extract(doc, '$.launch_dir') AS launch_dir
+                       json_extract(doc, '$.launch_dir') AS launch_dir,
+                       json_extract(doc, '$.thread') AS thread
                 FROM sessions {where}
                 ORDER BY starred DESC, updated_at DESC""", params
         ).fetchall()
@@ -905,6 +917,8 @@ def list_sessions(agent_id: Optional[str] = None, include_agents: bool = False,
             "agent_id": r["agent_id"],
             "is_forge": bool(r["forge"]),
             "launch_dir": r["launch_dir"],
+            # A bot's conversation-list record (services/bot_threads.py); null on a chat that has none.
+            "thread": _thread_json(r["thread"]),
         }
         for r in rows
     ]

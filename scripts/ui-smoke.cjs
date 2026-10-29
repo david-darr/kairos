@@ -28,6 +28,13 @@ const reads = [];
 const now = Date.now() / 1000;
 const { fixture, mutate, media, data: calendarFixtures } = require("../demo/fixtures.js")({ now, state: demoState });
 const g4Backend = require('./g4-backend.cjs')({ state: demoState, notes: calendarFixtures.notes });
+// The Bots redesign (2026-10-28), generic: every scripts/fixtures/bots-*-backend.cjs answers routes first while
+// demoState.botsLive is set (read(path, query) and mutate(path, method, body, query); undefined = not mine), every
+// scripts/bots-<name>-checks.cjs runs behind --bots-<name>-only, and the full run includes them all.
+const botsBackends = fs.readdirSync(path.join(__dirname, 'fixtures')).filter(file => /^bots-.+-backend\.cjs$/.test(file)).sort()
+  .map(file => require('./fixtures/' + file)({ state: demoState, data: calendarFixtures, now }));
+const botsChecks = fs.readdirSync(__dirname).filter(file => /^bots-.+-checks\.cjs$/.test(file)).sort();
+const botsAnswer = (call) => { if (!demoState.botsLive) return undefined; for (const backend of botsBackends) { const answer = call(backend); if (answer !== undefined) return answer; } return undefined; };
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
 demoState.computerImage = computerImage;
 const errors = [];
@@ -133,7 +140,8 @@ const server = http.createServer(async (req, res) => {
         if (active) liveFinish(parsed.session_id, 'stopped');
         res.end(JSON.stringify({ stopping: active })); return;
       }
-      const updated = (demoState.g4Live && g4Backend.mutate(url.pathname, req.method, parsed)) || mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
+      const updated = botsAnswer(backend => backend.mutate?.(url.pathname, req.method, parsed, Object.fromEntries(url.searchParams)))
+        || (demoState.g4Live && g4Backend.mutate(url.pathname, req.method, parsed)) || mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
         req.method, parsed, Object.fromEntries(url.searchParams));
       if (updated?._appStart) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -204,7 +212,12 @@ const server = http.createServer(async (req, res) => {
       }
       res.end(JSON.stringify(updated || (url.pathname === "/api/sessions" ? { id: "s1" } : { ok: true }))); return;
     }
-    try { const g4Read = demoState.g4Live ? g4Backend.read(url.pathname) : undefined; res.end(JSON.stringify(g4Read !== undefined ? g4Read : fixture(url))); }
+    try {
+      const botsRead = botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
+      if (botsRead?._status) res.statusCode = botsRead._status;
+      const g4Read = botsRead === undefined && demoState.g4Live ? g4Backend.read(url.pathname) : undefined;
+      res.end(JSON.stringify(botsRead !== undefined ? botsRead : g4Read !== undefined ? g4Read : fixture(url)));
+    }
     catch (error) { errors.push(error.message); res.writeHead(404); res.end('{"detail":"Missing fixture"}'); }
     return;
   }
@@ -412,6 +425,18 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['mascot'], errors }, null, 2));
       console.log('PASS: mascot on Home, empty states, Agents, the call, the village and notifications.');
       console.log('Screenshots: ' + output); return;
+    }
+    // The Bots redesign (2026-10-28): --bots-<name>-only runs scripts/bots-<name>-checks.cjs; the full run does them all.
+    const runBotsCheck = (file) => require('./' + file)({ js, waitFor, delay, navigate, win, capture, writes, reads, demoState, base, overflow,
+      agents: calendarFixtures.agentsFixture, fixtures: calendarFixtures, liveChunk, liveEvent, liveFinish, liveChange, liveBroadcast, liveRuns, openPopup, closePopup });
+    const botsFlag = process.argv.map(arg => arg.match(/^--bots-([a-z0-9-]+)-only$/)?.[1]).find(Boolean);
+    if (botsFlag) {
+      const file = `bots-${botsFlag}-checks.cjs`;
+      assert.ok(botsChecks.includes(file), 'No such Bots check: scripts/' + file);
+      await runBotsCheck(file);
+      assert.deepEqual(errors, [], 'Bots ' + botsFlag + ' renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['bots ' + botsFlag], errors }, null, 2));
+      console.log('PASS: Bots ' + botsFlag + ' checks.'); console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
@@ -2878,6 +2903,15 @@ app.whenReady().then(async () => {
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
     console.log('PASS: Agents appearance checks');
     await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base, demoState, fixtures: calendarFixtures });
+    // Every Bots check (scripts/bots-*-checks.cjs), each from a fresh page and the plain demo, leaving it as it found it.
+    for (const file of botsChecks) {
+      win.setContentSize(1440, 900);
+      await win.loadURL(base);
+      await waitFor("!!document.querySelector('.dashboard-core')");
+      try { await runBotsCheck(file); }
+      finally { delete demoState.botsLive; delete demoState.botsCore; }
+      console.log('PASS: ' + file);
+    }
     assert.deepEqual(errors, [], 'Agents birth and turn renderer errors');
     console.log("PASS: app desktop/mobile and icon rail, Forge sessions/composer/review, persistence/keyboard/tooltips, reduced motion, vault/chat/Settings, empty/error states, website layouts/links/images/previews.");
     console.log("Screenshots: " + output);

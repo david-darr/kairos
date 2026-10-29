@@ -178,7 +178,13 @@ class ProfileAndSoulTests(AgentTestCase):
                 agent_service.update(self.agent["id"], **{field: text})
 
     def test_soul_is_optional_and_api_write_mirrors_it(self):
-        self.assertFalse(self.soul_path().exists())
+        # One standing-instruction field (Bots redesign, 2026-10-28): the
+        # `instructions` this bot was made with are its soul, mirrored.
+        self.assertEqual(self.soul_path().read_text(encoding="utf-8"), "Be brief.")
+        bare = agent_service.create("Bare bot")
+        self.addCleanup(self._remove, bare["id"])
+        self.assertNotIn("soul", bare)
+        self.assertFalse((self.soul_path().parent.parent / bare["id"] / "SOUL.md").exists())
         self.assertTrue(agent_service.read_soul(self.agent["id"])["in_sync"])
         before = self.agent["revision"]
         response = web.patch(f"/api/agents/{self.agent['id']}", json={"soul": "# Work\nBe curious.\n"})
@@ -244,11 +250,15 @@ class ProfileAndSoulTests(AgentTestCase):
         with patch("services.agent_service.read_json", side_effect=[{old["id"]: old.copy()}, []]), \
              patch.object(AgentService, "_save") as save:
             loaded = AgentService()
-        # The one load-time rewrite is the mascot migration (David,
-        # 2026-10-22): the bot gains its Ajar and nothing else changes.
+        # One load-time write covers the mascot migration (David, 2026-10-22:
+        # the bot gains its Ajar) and the Bots upgrade (2026-10-28: the new
+        # fields, and `instructions` becoming the soul).
         save.assert_called_once()
         self.assertEqual(loaded.get(old["id"])["avatar"]["version"], 3)
-        self.assertEqual({k: v for k, v in loaded.get(old["id"]).items() if k not in ("avatar", "color")}, old)
+        from services import bot_record
+        migrated = {k: v for k, v in loaded.get(old["id"]).items()
+                    if k not in ("avatar", "color") and k not in bot_record.new_defaults()}
+        self.assertEqual(migrated, {**{k: v for k, v in old.items() if k != "instructions"}, "soul": "Be brief."})
         self.assertEqual(loaded.read_soul(old["id"])["revision"], 0)
         with patch.object(loaded, "_save"):
             self.assertEqual(loaded.update(old["id"], role=old["role"], blurb="new")["role"], old["role"])
@@ -1880,7 +1890,7 @@ class SelfSetupTests(AgentTestCase):
     def test_undo_restores_the_exact_previous_values_and_routine(self):
         from pathlib import Path
         soul_file = Path(agent_service._memory_path(self.agent["id"])).with_name("SOUL.md")
-        self.assertFalse(soul_file.exists())
+        self.assertEqual(soul_file.read_text(encoding="utf-8"), "Be brief.")  # the soul it was made with (2026-10-28)
         receipt = agent_service.configure_self(
             self.agent["id"], {"soul": "Check postings at 8.", "role": "Finds remote roles"},
             {"name": "Morning check", "prompt": "New postings", "schedule_kind": "daily", "run_time": "08:00"})
@@ -1889,8 +1899,8 @@ class SelfSetupTests(AgentTestCase):
         agent_service.undo_setup(self.agent["id"], receipt["id"])
         agent = agent_service.get(self.agent["id"])
         self.assertEqual(agent["role"], "Watches job postings")
-        self.assertNotIn("soul", agent)
-        self.assertFalse(soul_file.exists(), "no soul before means no SOUL.md after undo")
+        self.assertEqual(agent["soul"], "Be brief.")
+        self.assertEqual(soul_file.read_text(encoding="utf-8"), "Be brief.", "undo restores the soul it had before")
         self.assertIsNone(task_service.get_task(receipt["routine_id"]))
         with self.assertRaises(ValueError):
             agent_service.undo_setup(self.agent["id"], receipt["id"])

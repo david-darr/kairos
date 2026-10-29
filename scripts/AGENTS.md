@@ -12,6 +12,9 @@ Tests, Electron checks and helpers. Every suite runs on its own, with temp data
 - `*-checks.cjs`: Electron UI checks run by `ui-smoke.cjs` against the mocked
   backend `demo/fixtures.js`. Most run only behind their own `--<area>-only` flag.
 - `*smoke*.cjs`: standalone Electron smoke runs, such as `chat-smoke.cjs`.
+- Bots checks load by name: `bots-<name>-checks.cjs` runs behind
+  `--bots-<name>-only` (and in the full run); every `fixtures/bots-*-backend.cjs`
+  answers routes before `demo/fixtures.js` while `demoState.botsLive` is set.
 - Helpers: `run-electron-test.cjs`, `build_site_demo.py`, `dev_instance.py`,
   the `bench_*` and `*_audit.py` measurement scripts, and `fixtures/`.
 

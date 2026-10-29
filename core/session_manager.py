@@ -597,6 +597,17 @@ class SessionManager:
             session["agent_unattended"] = True
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
+    def set_thread(self, session_id: str, **fields) -> dict:
+        """Merge fields into this session's `thread` record (a bot's
+        conversation list: main, folder, pinned, archived, snoozed...;
+        services/bot_threads.py owns the vocabulary and the checks). Metadata
+        only: the transcript and `updated_at` are untouched."""
+        session = self._require(session_id)
+        thread = dict(session.get("thread") or {})
+        thread.update(fields)
+        session["thread"] = thread
+        return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
+
     def release_agent_chats(self, agent_id: str) -> int:
         """An agent deleted: its chats move into the Chats list, unchanged
         but no longer speaking as the agent on a fresh connection."""
@@ -605,6 +616,8 @@ class SessionManager:
             session = self._require(header["id"])
             session["agent_id"] = None
             session["agent_prompt"] = None
+            # The thread's place in a bot's conversation list goes with the bot.
+            session.pop("thread", None)
             store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
             moved += 1
         return moved

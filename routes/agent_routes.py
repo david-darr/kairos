@@ -5,10 +5,12 @@ them is approving everything they do, the same rule as a chat's Auto mode."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from core import model_endpoints
 from core.middleware import require_admin
+from services import bot_record, bot_threads
 from services.agent_service import agent_service
 from services.task_service import task_service
 
@@ -33,6 +35,80 @@ class AgentBody(BaseModel):
     keep_signed_in: Optional[bool] = None
     memory_upkeep: Optional[bool] = None
     peers: Optional[list[str]] = None
+    # The Bots-mode fields (services/bot_record.py), checked there.
+    section: Optional[str] = None
+    origin: Optional[dict] = None
+    fallback: Optional[list[dict]] = None
+    cache_keep_warm: Optional[str] = None
+    place: Optional[str] = None
+    tool_scope: Optional[dict] = None
+    connector_scopes: Optional[dict] = None
+    always_allow: Optional[list[str]] = None
+    outbound: Optional[dict] = None
+    approval_mode: Optional[str] = None
+    thread_limit: Optional[int] = None
+    hidden: Optional[bool] = None
+
+
+class ConfiguredBody(BaseModel):
+    profile: dict
+    model: Optional[dict] = None
+    approval_mode: Optional[str] = None
+    integration_ids: Optional[list[str]] = None
+    keep_signed_in: Optional[bool] = None
+    memory_upkeep: Optional[bool] = None
+    memory_seed: Optional[list[dict]] = None
+    routines: Optional[list[dict]] = None
+    use_defaults: bool = False
+    origin: Optional[dict] = None
+
+
+class DuplicateBody(BaseModel):
+    name: Optional[str] = None
+
+
+class OrderBody(BaseModel):
+    ids: list[str]
+
+
+class DefaultsBody(BaseModel):
+    defaults: dict
+
+
+class PresetBody(BaseModel):
+    from_agent_id: Optional[str] = None
+    preset: Optional[dict] = None
+
+
+class ThreadCreateBody(BaseModel):
+    title: Optional[str] = None
+    folder_id: Optional[str] = None
+    approval_mode: Optional[str] = None
+
+
+class ThreadPatchBody(BaseModel):
+    title: Optional[str] = None
+    folder_id: Optional[str] = None
+    pinned: Optional[bool] = None
+    archived: Optional[bool] = None
+    snooze: Optional[str | float] = None
+    approval_mode: Optional[str] = None
+    place: Optional[str] = None
+    unread: Optional[bool] = None
+
+
+class ThreadDeleteBody(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=bot_threads.MAX_DELETE_BATCH)
+
+
+class FolderBody(BaseModel):
+    name: str
+    emoji: Optional[str] = None
+
+
+class FolderPatchBody(BaseModel):
+    name: Optional[str] = None
+    emoji: Optional[str] = None
 
 
 class MemoryBody(BaseModel):
@@ -92,8 +168,10 @@ def _summary(agent: dict) -> dict:
     may_run, why_not = agent_service.can_run(agent["id"])
     status = ("off" if not agent["enabled"] else "working" if activity else "needs_you" if needs_you
               else "capped" if not may_run else "idle")
+    # `instructions` is the old name of the one standing-instruction field: it
+    # reads as the soul, so the older Agents tab shows (and edits) what is used.
     return {**agent, "blurb": agent.get("blurb", ""), "soul": agent.get("soul"),
-            "revision": agent.get("revision", 0),
+            "instructions": agent.get("soul") or "", "revision": agent.get("revision", 0),
             "status": status, "status_detail": activity["name"] if activity else why_not, "activity": activity,
             "needs_you": needs_you, "runs_today": agent_service.runs_today(agent["id"])}
 
@@ -134,6 +212,12 @@ def _require(agent_id: str) -> dict:
     return agent
 
 
+def _refused(error: ValueError) -> HTTPException:
+    """A state refusal (a cap, an unavailable choice, the last visible bot) is
+    409; bad input is 400. Both carry the usual `detail`."""
+    return HTTPException(status_code=409 if isinstance(error, bot_record.BotConflict) else 400, detail=str(error))
+
+
 @router.get("")
 async def list_agents(user: str = Depends(require_admin)) -> list[dict]:
     return [_summary(a) for a in agent_service.list_agents()]
@@ -146,7 +230,7 @@ async def create_agent(body: AgentBody, user: str = Depends(require_admin)) -> d
         fields = {k: v for k, v in body.model_dump().items() if v is not None and k != "enabled"}
         return _summary(agent_service.create(fields.pop("name", ""), **fields))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _refused(e)
 
 
 @router.get("/inbox")
@@ -158,6 +242,67 @@ async def whole_inbox(user: str = Depends(require_admin)) -> dict:
     from services.agent_handoff import person_inbox
     items = person_inbox()
     return {"items": items, "reviews": reviews, "count": len(items) + len(reviews)}
+
+
+@router.post("/configured")
+async def create_configured(body: ConfiguredBody, user: str = Depends(require_admin)) -> dict:
+    """One call makes a bot, its starting notes and its routines, or nothing:
+    a failure undoes what was made (cleanup_errors lists anything that could
+    not be undone). A routine that cannot be switched on is a warning."""
+    try:
+        result = bot_record.create_configured(body.model_dump(exclude_unset=True), owner_user=user)
+    except bot_record.ConfiguredFailure as failure:
+        return JSONResponse(status_code=failure.status,
+                            content={"detail": failure.detail, "cleanup_errors": failure.cleanup_errors})
+    return {"agent": _summary(result["agent"]), "routines": result["routines"], "warnings": result["warnings"]}
+
+
+@router.post("/order")
+async def order_agents(body: OrderBody, user: str = Depends(require_admin)) -> dict:
+    try:
+        agent_service.reorder(body.ids)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="agent not found")
+    except ValueError as e:
+        raise _refused(e)
+    return {"ok": True}
+
+
+@router.get("/defaults")
+async def get_defaults(user: str = Depends(require_admin)) -> dict:
+    return bot_record.defaults_view([a["name"] for a in agent_service.list_agents()])
+
+
+@router.put("/defaults")
+async def put_defaults(body: DefaultsBody, user: str = Depends(require_admin)) -> dict:
+    try:
+        bot_record.write_defaults(body.defaults)
+    except ValueError as e:
+        raise _refused(e)
+    return bot_record.defaults_view([a["name"] for a in agent_service.list_agents()])
+
+
+@router.get("/presets")
+async def get_presets(user: str = Depends(require_admin)) -> list[dict]:
+    return bot_record.list_presets()
+
+
+@router.post("/presets")
+async def add_preset(body: PresetBody, user: str = Depends(require_admin)) -> dict:
+    if (body.from_agent_id is None) == (body.preset is None):
+        raise HTTPException(status_code=400, detail="send either from_agent_id or preset")
+    try:
+        preset = bot_record.preset_from_agent(_require(body.from_agent_id)) if body.from_agent_id else body.preset
+        return bot_record.add_preset(preset)
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.delete("/presets/{preset_id}")
+async def delete_preset(preset_id: str, user: str = Depends(require_admin)) -> dict:
+    if not bot_record.delete_preset(preset_id):
+        raise HTTPException(status_code=404, detail="preset not found")
+    return {"ok": True}
 
 
 class ConversationAction(BaseModel):
@@ -221,7 +366,7 @@ async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(requi
     try:
         agent = agent_service.update(agent_id, **fields)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _refused(e)
     if "name" in fields or "role" in fields:
         _team_change(agent)
     return _summary(agent)
@@ -244,7 +389,8 @@ async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depend
 
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
-    _require(agent_id)
+    if _require(agent_id).get("builtin"):
+        raise HTTPException(status_code=409, detail="this built-in bot cannot be deleted; archive it instead")
     if any(t.get("status") == "running" for t in _owned(agent_id) if t["schedule_kind"] == "card"):
         raise HTTPException(status_code=409, detail="this agent is working on something; wait for it to finish")
     from core.session_manager import session_manager
@@ -354,3 +500,105 @@ async def answer(item_id: str, body: AnswerBody, user: str = Depends(require_adm
         return {"ok": True, "next": agent_service.answer_item(item_id, body.choice, body.text or "")}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{agent_id}/duplicate")
+async def duplicate_agent(agent_id: str, body: Optional[DuplicateBody] = None,
+                          user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return _summary(bot_record.duplicate(agent_id, body.name if body else None))
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.get("/{agent_id}/overview")
+async def agent_overview(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    return bot_record.overview(_require(agent_id))
+
+
+@router.get("/{agent_id}/system-prompt")
+async def agent_system_prompt(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    return agent_service.system_prompt(agent_id)
+
+
+# -- threads: a bot's conversations are its sessions (services/bot_threads.py) ---
+
+@router.get("/{agent_id}/threads")
+async def list_threads(agent_id: str, include_archived: int = 0, user: str = Depends(require_admin)) -> dict:
+    return bot_threads.list_threads(_require(agent_id), bool(include_archived))
+
+
+@router.post("/{agent_id}/threads")
+async def create_thread(agent_id: str, body: Optional[ThreadCreateBody] = None,
+                        user: str = Depends(require_admin)) -> dict:
+    body = body or ThreadCreateBody()
+    try:
+        return bot_threads.create_thread(_require(agent_id), user, body.title, body.folder_id, body.approval_mode)
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.post("/{agent_id}/threads/delete")
+async def delete_threads(agent_id: str, body: ThreadDeleteBody, user: str = Depends(require_admin)) -> dict:
+    return await bot_threads.delete_threads(_require(agent_id), body.thread_ids)
+
+
+@router.post("/{agent_id}/threads/follow-model")
+async def threads_follow_model(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    try:
+        return await bot_threads.follow_model(_require(agent_id))
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.patch("/{agent_id}/threads/{session_id}")
+async def patch_thread(agent_id: str, session_id: str, body: ThreadPatchBody,
+                       user: str = Depends(require_admin)) -> dict:
+    agent = _require(agent_id)
+    try:
+        return bot_threads.update_thread(agent, session_id, body.model_dump(exclude_unset=True))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="thread not found")
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.post("/{agent_id}/folders")
+async def add_folder(agent_id: str, body: FolderBody, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return bot_threads.add_folder(agent_id, body.name, body.emoji)
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.put("/{agent_id}/folders/order")
+async def order_folders(agent_id: str, body: OrderBody, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return {"folders": bot_threads.order_folders(agent_id, body.ids)}
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.patch("/{agent_id}/folders/{folder_id}")
+async def patch_folder(agent_id: str, folder_id: str, body: FolderPatchBody,
+                       user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return bot_threads.update_folder(agent_id, folder_id, body.model_dump(exclude_unset=True))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="folder not found")
+    except ValueError as e:
+        raise _refused(e)
+
+
+@router.delete("/{agent_id}/folders/{folder_id}")
+async def delete_folder(agent_id: str, folder_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return bot_threads.delete_folder(agent_id, folder_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="folder not found")

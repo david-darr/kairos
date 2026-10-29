@@ -100,6 +100,12 @@ def snapshot() -> dict:
     return {"type": "snapshot", "runs": {session_id: _visible(run) for session_id, run in _runs.items()}}
 
 
+def is_processing(session_id: str) -> bool:
+    """Is a turn running in this session right now? (The run map is private.)"""
+    run = _runs.get(session_id)
+    return bool(run and run.get("status") == "processing")
+
+
 def agent_activity(agent_id: str) -> dict | None:
     """Bounded read-only activity for the admin agent summary, without transcripts."""
     active = []
