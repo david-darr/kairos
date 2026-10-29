@@ -31,8 +31,8 @@ tool's command with `--help` to see its arguments.
 ## How Kairos itself is built
 
 `list_specs` and `read_spec` give the architecture notes. Someone with access
-to Kairos's source also has an `AGENTS.md` map in the repository root and in
-each main folder: what lives where and the rules that bite.
+to Kairos's source also has maps: `CLAUDE.md` at the repository root and an
+`AGENTS.md` in each main folder, saying what lives where and the rules that bite.
 
 ## Rules that hold everywhere
 

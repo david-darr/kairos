@@ -1,0 +1,45 @@
+# core/
+
+The engine: how a turn runs, which tools a model gets, what is allowed, and
+where state lives. Routes and services call into it; it never imports `tabs/`.
+
+## Where things are
+
+- **Turns (one brain per provider):** `brain.py` (Claude Agent SDK),
+  `codex_brain.py`, `external_brain.py` (API and local models),
+  `antigravity_brain.py`; `providers/` holds the wire clients. What every model
+  is told first: `system_prompt.py`.
+- **Tools:** `tool_registry.py` declares every model tool once, for all
+  providers. `tool_search.py` is the search bridge for tools not listed directly;
+  `tool_access.py` issues Codex's per-turn tool tokens; `hive_mind_server.py`
+  serves the tools to Claude; `memory_tools.py` holds the shared-memory tools.
+- **Safety:** `permissions.py` (the one approval gate), `turn_taint.py` and
+  `untrusted.py` (outside content), `middleware.py` and `auth.py` (accounts),
+  `task_scope.py` (trusted owner of a background run), `workspace.py`,
+  `secret_storage.py`, and the contained runtimes `sandbox.py` and `computer.py`.
+- **Sessions and runs:** `session_manager.py` over `session_manager_store.py`
+  (SQLite), `runs.py`, `chat_tasks.py`, `file_checkpoints.py`.
+- **Integrations:** `integrations.py`, `mcp_client.py`, `mcp_bridge.py`,
+  `mcp_oauth.py`, `connectors/`, `channels/`, `email_send.py`,
+  `google_workspace.py`, `dav_client.py`.
+- **Tabs contract:** `tab_api.py` (stable, versioned), `tab_hooks.py`,
+  `tab_folders.py`, `tab_install.py`, `tab_checks.py`, `custom_tabs.py`,
+  `home_cards.py`.
+- **Background work:** `task_scheduler.py`, `helpers.py`, `swarm/`, `events.py`,
+  `outbox.py`.
+- **Models:** `model_endpoints.py`, `model_catalog.py`, `model_discovery.py`,
+  `ollama_client.py`, `llamacpp_engine.py`, `claude_cli.py`, `codex_cli.py`.
+- **Design canvas:** the `design_*.py` files. **Computer use:** `computer*.py`.
+- **Storage:** `settings.py`, `constants.py`, `atomic_io.py`, `vault.py`,
+  `backup.py`, `system_admin.py`.
+
+## Rules
+
+- A new model tool is one `register(...)` in `tool_registry.py`. Mark it
+  `core=True` only if most chats need it: small and deferred tool lists show
+  only core tools, and the rest are found through the search bridge.
+- Never let a tool argument choose whose data is read or written; use
+  `task_scope.py` or the session's owner.
+- Tool results that carry outside text are wrapped and taint the turn.
+- Tests: `scripts/test_tools.py`, `scripts/test_chat.py`,
+  `scripts/test_permissions.py`, `scripts/test_owner_isolation.py`.
