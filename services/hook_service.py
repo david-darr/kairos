@@ -100,6 +100,26 @@ class HookService:
         self._hooks: dict = data.get("hooks", {})
         self.paused: bool = bool(data.get("paused"))
         self._in_flight: set = set()
+        # In-process listeners for every emitted event (Bots Phase 3 U4: connected-app triggers that
+        # watch Kairos's own activity). They never change what a hook does and never raise into the emitter.
+        self._listeners: list = []
+
+    def subscribe(self, listener) -> None:
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
+    def unsubscribe(self, listener) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
+    def _notify_listeners(self, event: str, data: dict) -> None:
+        if _in_hook.get():
+            return  # nothing a hook causes starts anything else
+        for listener in list(self._listeners):
+            try:
+                listener(event, dict(data))
+            except Exception:
+                logger.exception("hook listener failed for %s", event)
 
     def _save(self) -> None:
         write_json_atomic(HOOKS_FILE, {"hooks": self._hooks, "paused": self.paused})
@@ -256,6 +276,8 @@ class HookService:
         """A notify-only event. Returns at once; each matching hook runs in
         the background and is logged. Safe from code with no running loop
         (a script): then nothing runs."""
+        if event not in TOOL_EVENTS:
+            self._notify_listeners(event, data)
         hooks = self.matching(event, data)
         if not hooks:
             return
