@@ -46,6 +46,15 @@ Work - Phase 4 (Build Spec)"):
   to Blocked rather than being retried.
 - A run's channel message is a row in the outbox (core/outbox.py); the run
   record keeps its id, and the history reads its state from there.
+
+Routines (Bots redesign phase 3, 2026-10-29; spec: Kairos Projects/Agents
+Redesign/phase-3-design.md section 4): a bot-owned scheduled task may carry a
+`routine` object (services/bot_routines.py owns it): the full schedule (once,
+daily, interval with a window, cron, limit reset), overlap, timeout, checks and
+status. Such a task keeps its legacy columns so the Tasks tab still reads it;
+its next time comes from core/bot_schedules.py, the one schedule
+implementation. Run records gain `automation_status` (queued, running,
+waiting, completed, failed, cancelled, missed) beside the legacy `outcome`.
 """
 import logging
 import time
@@ -55,6 +64,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from core import bot_schedules
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 import os
@@ -160,8 +170,14 @@ class TaskService:
         weekdays: Optional[list[int]] = None,
         origin_session_id: Optional[str] = None,
         owner_user: Optional[str] = None,
+        routine: Optional[dict] = None,
     ) -> dict:
-        if schedule_kind not in ("once", "interval", "daily", "card"):
+        if routine is not None:
+            # A routine's schedule is already validated and normalized by
+            # services/bot_routines.py; its kinds include cron and limit_reset.
+            if schedule_kind not in ("once", "interval", "daily", "cron", "limit_reset"):
+                raise ValueError("a routine's schedule_kind is once, daily, interval, cron or limit_reset")
+        elif schedule_kind not in ("once", "interval", "daily", "card"):
             raise ValueError("schedule_kind must be 'once', 'interval', 'daily' or 'card'")
         if schedule_kind != "card" and (depends_on or status):
             raise ValueError("depends_on and status are for cards (schedule_kind 'card')")
@@ -175,9 +191,11 @@ class TaskService:
             raise ValueError("run_at must be a date and time such as 2026-11-02T09:00")
         if schedule_kind == "interval" and (not isinstance(interval_seconds, int) or interval_seconds <= 0):
             raise ValueError("interval_seconds must be a positive integer for a recurring task")
+        if routine is not None and not agent_id:
+            raise ValueError("a routine belongs to a bot")
         _schedule_zone(time_zone)
         weekdays = _schedule_weekdays(weekdays)
-        if weekdays is not None and schedule_kind != "daily":
+        if weekdays is not None and schedule_kind != "daily" and routine is None:
             raise ValueError("weekdays is for daily schedules")
         if time_zone is not None and schedule_kind == "card":
             raise ValueError("time_zone is for scheduled tasks")
@@ -196,6 +214,8 @@ class TaskService:
         now = time.time()
         if schedule_kind == "card":
             next_run_at = None  # cards are dispatched, not scheduled
+        elif routine is not None:
+            next_run_at = routine.get("next_run_at")
         elif schedule_kind == "once":
             next_run_at = run_at
         elif schedule_kind == "daily":
@@ -254,6 +274,8 @@ class TaskService:
             task["origin_session_id"] = origin_session_id
         if owner_user is not None:
             task["owner_user"] = owner_user
+        if routine is not None:
+            task["routine"] = {k: v for k, v in routine.items() if k != "next_run_at"}
         self._tasks[task_id] = task
         self._save_tasks()
         return task
@@ -283,6 +305,8 @@ class TaskService:
             self._check_dependencies(task_id, fields["depends_on"] or [])
         if fields.get("report_when") not in (None, "always", "notable"):
             raise ValueError("report_when is 'always' or 'notable'")
+        if task.get("routine") and ("time_zone" in fields or "weekdays" in fields):
+            raise ValueError("this routine's schedule is edited through the routine editor")
         schedule_changed = "time_zone" in fields or "weekdays" in fields
         candidate = {**task, **fields}
         if schedule_changed:
@@ -296,6 +320,8 @@ class TaskService:
                 stamp = _stamp_seconds(task.get("next_run_at"))
                 if stamp is None or stamp <= time.time():
                     raise ValueError("This one-time schedule has ended. Use Run now or schedule a new task.")
+            elif task.get("routine"):
+                task["next_run_at"] = self.routine_next(task)
             elif kind == "daily":
                 task["next_run_at"] = _next_daily(task["run_time"], candidate.get("time_zone"), candidate.get("weekdays"))
             elif kind == "interval":
@@ -312,8 +338,31 @@ class TaskService:
                         task[key] = candidate[key]
             if task["schedule_kind"] == "daily":
                 task["next_run_at"] = _next_daily(task["run_time"], task.get("time_zone"), task.get("weekdays"))
+        if task.get("routine") and any(k in fields for k in ("name", "prompt", "enabled", "report_when")):
+            # A configuration change: a stale editor or a stale Undo must see it.
+            task["routine"]["revision"] = int(task["routine"].get("revision") or 0) + 1
         self._save_tasks()
         return task
+
+    @staticmethod
+    def routine_next(task: dict, after: Optional[float] = None) -> Optional[str]:
+        """The next time of a routine task, as a UTC ISO string, or None."""
+        schedule = task["routine"]["schedule"]
+        reset_at = _limit_reset_at(schedule) if schedule["kind"] == "limit_reset" else None
+        found = bot_schedules.next_after(schedule, time.time() if after is None else after, reset_at)
+        return found.isoformat() if found else None
+
+    def update_active_run(self, task_id: str, **fields) -> Optional[dict]:
+        """Fields on a task's live run record (the routine runner's thread,
+        waiting state, attention). The status word follows the outcome."""
+        task = self._tasks.get(task_id)
+        run = next((r for r in self._runs if r["id"] == (task or {}).get("active_run_id")), None)
+        if run is None:
+            return None
+        run.update(fields)
+        run["automation_status"] = automation_status(run)
+        self._save_runs()
+        return run
 
     # -- cards ----------------------------------------------------------------
 
@@ -494,6 +543,7 @@ class TaskService:
         due_at = task.pop("run_for", None)
         source = task.pop("run_source", None)
         run_id = task.pop("run_id", None)
+        extra = task.pop("run_extra", None) or {}
         late = None
         if due_at and (started is not None or missed_reason):
             try:
@@ -534,6 +584,8 @@ class TaskService:
             "model": _model_label(task.get("endpoint_id")),
             "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None,
         }
+        record = {**extra, **{k: v for k, v in (active or {}).items() if k in _ROUTINE_RUN_KEYS}, **record}
+        record["automation_status"] = automation_status(record)
         if active is not None:
             active.update(record)
             # A long run may have accumulated missed receipts while it was
@@ -565,7 +617,9 @@ class TaskService:
                            "source": task.get("run_source"), "scheduled_for": task.get("run_for"),
                            "late_seconds": None, "endpoint_id": task.get("endpoint_id"),
                            "model": _model_label(task.get("endpoint_id")),
-                           "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None})
+                           "attempt": task.get("attempts") if task["schedule_kind"] == "card" else None,
+                           "automation_status": "queued" if outcome == "queued" else "running",
+                           **(task.get("run_extra") or {})})
         self._save_runs()
 
     def mark_running(self, task_id: str) -> None:
@@ -574,7 +628,7 @@ class TaskService:
             return
         run = next((r for r in self._runs if r["id"] == task.get("active_run_id")), None)
         if run is not None and run["outcome"] == "queued":
-            run.update(outcome="running", started_at=time.time())
+            run.update(outcome="running", started_at=time.time(), automation_status="running")
             self._save_runs()
 
     def claim_occurrence(self, task_id: str) -> Optional[dict]:
@@ -701,7 +755,7 @@ class TaskService:
             task["claimed_until"] = None
         elif not task.get("run_started_at"):
             return task
-        self._append_run(task, "", STOPPED_NOTE, "stopped")
+        self._append_run(task, "", task.pop("stop_note", None) or STOPPED_NOTE, "stopped")
         self._save_tasks()
         if task["schedule_kind"] == "card":
             self._sync_handoff(task)
@@ -765,6 +819,8 @@ class TaskService:
         next eligible day's, an interval stays on its original cadence."""
         skipped = []
         now = time.time()
+        if task.get("routine"):
+            return _advance_routine(task, now)
         if task["schedule_kind"] == "once":
             task["enabled"] = False
             task["next_run_at"] = None
@@ -866,6 +922,7 @@ class TaskService:
         for r in sorted(runs, key=lambda r: r["ran_at"], reverse=True):
             run = {"started_at": None, "duration_seconds": None, "model": None, "attempt": None, "late_seconds": None,
                    **r, "outcome": r.get("outcome") or ("failed" if r.get("error") else "succeeded")}
+            run["automation_status"] = automation_status(run)
             if r.get("delivery_id"):
                 from core import outbox
                 delivery = outbox.public(outbox.get(r["delivery_id"]))
@@ -874,6 +931,31 @@ class TaskService:
                     else delivery["status"] == "delivered"
             shown.append(run)
         return shown
+
+
+# Extra run-record keys the routine runner writes onto a live record; they
+# survive the record's finish (services/bot_routines.py, core/bot_routine_runner.py).
+_ROUTINE_RUN_KEYS = ("trigger_type", "event_ref", "retry_cause", "retry_count", "execution_thread_id", "destination",
+                     "attention", "seen", "report_state", "wait_seconds", "model_ran", "waiting", "routine_id",
+                     "check_note", "deferred_seconds", "summary")
+AUTOMATION_STATUSES = ("queued", "running", "waiting", "completed", "failed", "cancelled", "missed")
+
+
+def automation_status(run: dict) -> str:
+    """The canonical status word of a run record. The legacy `outcome` stays
+    as it was written; this maps it (and fills it for old records)."""
+    outcome = run.get("outcome") or ("failed" if run.get("error") else "succeeded")
+    if outcome == "queued":
+        return "queued"
+    if outcome == "running":
+        return "waiting" if run.get("waiting") else "running"
+    if outcome == "succeeded":
+        return "completed"
+    if outcome == "stopped":
+        return "cancelled"
+    if outcome == "lost" and run.get("missed_reason"):
+        return "missed"
+    return "failed"
 
 
 def _model_label(endpoint_id: Optional[str]) -> str:
@@ -931,14 +1013,11 @@ def _schedule_weekdays(days) -> Optional[list[int]]:
 
 
 def _daily_instant(wall: datetime, zone) -> datetime:
-    candidates = [wall.replace(tzinfo=zone, fold=fold).astimezone(timezone.utc) for fold in (0, 1)]
-    local = [(stamp, stamp.astimezone(zone).replace(tzinfo=None)) for stamp in candidates]
-    valid = [stamp for stamp, roundtrip in local if roundtrip == wall]
-    # Fall back: use the first occurrence only, so a daily check never fires
-    # twice. Spring forward: shift forward by the gap (02:30 -> 03:30), so
-    # that day's check still happens. Round trips detect nonexistent times;
-    # attaching ZoneInfo alone does not (Agents 2.0 phase 2-i, 2026-10-13).
-    return min(valid) if valid else min(stamp for stamp, roundtrip in local if roundtrip > wall)
+    # Fall back uses the first occurrence only, so a daily check never fires
+    # twice. Spring forward shifts by the gap (02:30 -> 03:30), so that day's
+    # check still happens (Agents 2.0 phase 2-i, 2026-10-13). The one
+    # implementation lives in core/bot_schedules.py.
+    return bot_schedules.resolve_wall(wall, zone)
 
 
 def _next_daily(run_time: str, time_zone: Optional[str] = None,
@@ -959,6 +1038,31 @@ def _next_daily(run_time: str, time_zone: Optional[str] = None,
             if target > now_utc:
                 return target.isoformat()
         day += timedelta(days=1)
+
+
+def _limit_reset_at(schedule: dict) -> Optional[float]:
+    from services import bot_limit_resets
+    return bot_limit_resets.reset_time(schedule.get("endpoint_id"))
+
+
+def _advance_routine(task: dict, now: float) -> list[str]:
+    """A routine's schedule moves on from the occurrence just claimed: the
+    next time is the first one after now, and every occurrence skipped
+    between is returned for one coalesced missed receipt."""
+    schedule = task["routine"]["schedule"]
+    kind = schedule["kind"]
+    if kind == "once" or (kind == "limit_reset" and schedule.get("repeat") != "every_reset"):
+        task["enabled"] = False
+        task["next_run_at"] = None
+        return []
+    previous = _stamp_seconds(task.get("next_run_at")) or now
+    reset_at = _limit_reset_at(schedule) if kind == "limit_reset" else None
+    following = bot_schedules.next_after(schedule, now, reset_at)
+    task["next_run_at"] = following.isoformat() if following else None
+    if kind == "limit_reset":
+        return []
+    skipped = bot_schedules.occurrences_between(schedule, previous, now, limit=500)
+    return [m.isoformat() for m in skipped][-MAX_RUNS_PER_TASK:]
 
 
 task_service = TaskService()

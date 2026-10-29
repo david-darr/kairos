@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 15
 
 _loop_task: asyncio.Task | None = None
+_bots_task: asyncio.Task | None = None
 # One lock per task id: the run in progress holds it (start_run). Kept
 # with its event loop, since an asyncio lock belongs to the loop it is used on.
 _locks: dict[str, tuple] = {}
@@ -366,6 +367,12 @@ async def _run_task_tagged(task: dict, source: str) -> None:
     if source != "schedule":  # a scheduled run's start was stamped by its claim
         task_service.mark_started(task["id"], source)
     task_service.mark_running(task["id"])
+    if task.get("routine"):
+        # A routine (Bots redesign phase 3): checks, a hidden run conversation,
+        # classed failures and one result, in core/bot_routine_runner.py.
+        from core import bot_routine_runner
+        await bot_routine_runner.execute(task, source)
+        return
     agent = agent_service.get(task.get("agent_id"))
     if agent:
         await _run_goal(task, agent)
@@ -432,6 +439,8 @@ async def _run_builtin_task(task: dict, builtin_id: str) -> None:
 async def _run_due() -> None:
     """The scheduled lane: every task due now, one after another."""
     for task in task_service.due_tasks():
+        if task.get("routine"):
+            continue  # the Bots lane (core/bot_routine_runner.py) decides when a routine starts
         if not task_service.is_due(task["id"]):
             continue  # claimed or changed since the list was read
         try:
@@ -458,7 +467,7 @@ async def _tick() -> None:
     loop = asyncio.get_running_loop()
     if _lane_free("schedule"):
         try:
-            has_due = bool(task_service.due_tasks())
+            has_due = any(not t.get("routine") for t in task_service.due_tasks())
         except Exception:
             # One bad row must not stop the card lane, the outbox or the checks below.
             logger.exception("scheduler: could not scan for due tasks")
@@ -539,19 +548,40 @@ def _report_lost(task: dict) -> None:
                        label=task["name"])
 
 
+async def _bots_loop() -> None:
+    """The Bots lane: routines are decided every 10 seconds and started as
+    background workers, so no routine ever holds up another."""
+    from core import bot_routine_runner
+    while True:
+        try:
+            await bot_routine_runner.tick()
+        except Exception:
+            logger.exception("routine lane iteration failed")
+        await asyncio.sleep(bot_routine_runner.TICK_SECONDS)
+
+
 def start() -> None:
-    global _loop_task
+    global _loop_task, _bots_task
     if _loop_task is None:
         outbox.recover()
         helpers.recover()
-        for task in task_service.recover_interrupted_runs():
+        lost = task_service.recover_interrupted_runs()
+        for task in lost:
             _report_lost(task)
+        from core import bot_routine_runner
+        bot_routine_runner.start_up_state()
+        bot_routine_runner.recover(lost)
         _loop_task = asyncio.create_task(_poll_loop())
-        logger.info("task_scheduler started (poll every %ss)", POLL_INTERVAL_SECONDS)
+        _bots_task = asyncio.create_task(_bots_loop())
+        logger.info("task_scheduler started (poll every %ss, routines every %ss)", POLL_INTERVAL_SECONDS,
+                    bot_routine_runner.TICK_SECONDS)
 
 
 def stop() -> None:
-    global _loop_task
+    global _loop_task, _bots_task
+    if _bots_task is not None:
+        _bots_task.cancel()
+        _bots_task = None
     if _loop_task is not None:
         _loop_task.cancel()
         _loop_task = None

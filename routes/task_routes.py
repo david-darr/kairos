@@ -264,3 +264,11 @@ async def list_task_runs(task_id: str, user: str = Depends(require_user)) -> lis
     if task is None or not task_service.visible_to(task, user, auth_manager.is_admin(user)):
         raise HTTPException(status_code=404, detail="task not found")
     return task_service.list_runs(task_id)
+
+
+# Bots routines (phase 3 unit U2): its routes carry their complete
+# `/api/bot-...` paths, so adding them here mounts them with this router and
+# nothing nests under `/api/tasks`.
+from routes import bot_routine_routes  # noqa: E402
+
+router.routes.extend(bot_routine_routes.router.routes)
