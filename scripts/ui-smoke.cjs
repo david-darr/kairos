@@ -2045,7 +2045,7 @@ app.whenReady().then(async () => {
       // The Bots pages (bot-*) read /api/bots/*, which the Bots fixture lanes answer only while botsLive is on.
       const botsLiveBefore = demoState.botsLive;
       for (const id of await js("[...document.querySelectorAll('.settings-nav-item')].map(i => i.dataset.section)")) {
-        demoState.botsLive = id.startsWith('bot-') ? true : botsLiveBefore;
+        demoState.botsLive = (id === 'bots' || id.startsWith('bot-')) ? true : botsLiveBefore;
         await js(`document.querySelector('[data-section="${id}"]').click()`);
         await waitFor(`document.querySelector('.set-page')?.dataset.page === '${id}' && document.querySelector('#settings-content .set-title')?.textContent === document.querySelector('[data-section="${id}"] .settings-nav-label').textContent
           && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .set-note, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item, .bots-settings-host > [data-section]:not(:empty)')`);

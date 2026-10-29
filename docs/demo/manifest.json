@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "d6d94f2d9b52bc7ed7f40df245291a893eac632eef47037ca79130f90b25032e",
+  "app.js": "075b3db53803f1d1b4068938c2e21e7d70f9512624fa7010557b788e78feacbf",
   "fixtures.js": "a0b8bb7d8ce896779b513f8e33a80a10ea6d77b5b4794ac0a8362bdc01f32258",
   "index.html": "14a7a7ea494b328e1bea9ed53d134c70ad21689a581f70c3e2eb253c87774038",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -74,6 +74,7 @@
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "dd4fec15b07fc37d2fefb8db453909228c84a64911c870e406b0afa15d1bbc52",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
+  "static/data/bots-teams.json": "cede3c4e3cb0c4608f9aa5b1d78a0dcccd94f9c3f8d988bf945c9fc072dd64cd",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -1142,6 +1143,7 @@
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "dd4fec15b07fc37d2fefb8db453909228c84a64911c870e406b0afa15d1bbc52",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
+  "static/data/bots-teams.json": "cede3c4e3cb0c4608f9aa5b1d78a0dcccd94f9c3f8d988bf945c9fc072dd64cd",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -1308,7 +1310,7 @@
   "static/js/botsSectionUsage.js": "5926ae1fbbef64fc2d7a539f3f42c57641c4ac33e50f2efbc7af7bc30986ea6a",
   "static/js/botsSectionWatch.js": "02a86816a4b1c147efff4191541bfdd03aef1040bba959f4ec8d2dd9ad93d15a",
   "static/js/botsSectionWork.js": "35d2436108404e924c3127602457e538484677c4848d7ad5a79d6046ab5d1717",
-  "static/js/botsSettingsBots.js": "bf12ed0d6a0118c1e96153f6408f78305a7d6439c654913f9aee4c7edaced15c",
+  "static/js/botsSettingsBots.js": "a22a322afa725c71e7b2589da59caf67cb2393e76e4e9889da27e87a84df1d03",
   "static/js/botsSettingsComputers.js": "4ab5787228ef575e4860dd8efd3dd5e071984126c6f7b39aedc8c6cd89037ef4",
   "static/js/botsSettingsPages.js": "8f029bf58b24778cbfd804559490e730c6a92d61ea4b580bee560c7447ab754f",
   "static/js/botsSettingsUsage.js": "53715e9bd7727efb268f1cb93dcd5df93a46d62f434b7bf0b2c0f714e17a44b9",

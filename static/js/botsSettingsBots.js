@@ -30,9 +30,11 @@ export async function mount(host, ctx = {}) {
     catch { if (!dead) status.textContent = 'New bot defaults could not load. Try again.'; }
   } });
   const concurrency = h('select', { 'aria-label': 'Thread concurrency', disabled: true }, Array.from({ length: 16 }, (_, i) => h('option', { value: i + 1, text: String(i + 1) })));
+  // PUT replaces every saved default, so the change goes in on top of what was loaded.
+  let saved = {};
   concurrency.onchange = async () => {
     concurrency.disabled = true;
-    try { await api('/api/agents/defaults', { method: 'PUT', signal: abort.signal, toast: false, body: JSON.stringify({ thread_limit: Number(concurrency.value) }) }); if (!dead) status.textContent = 'New bot default saved.'; }
+    try { await api('/api/agents/defaults', { method: 'PUT', signal: abort.signal, toast: false, body: JSON.stringify({ defaults: { ...saved, thread_limit: Number(concurrency.value) } }) }).then(data => { saved = data.defaults || saved; }); if (!dead) status.textContent = 'New bot default saved.'; }
     catch { if (!dead) status.textContent = 'Thread limit could not save. Try again.'; } finally { if (!dead) concurrency.disabled = false; }
   };
   root.append(h('h2', { text: 'Bots' }), h('p', { text: 'Preferences for this device.' }), Card({ label: 'Interface', children: [
@@ -49,7 +51,7 @@ export async function mount(host, ctx = {}) {
       catch { if (!dead) status.textContent = 'Setup checklist could not load. Try again.'; }
     } })] }), status);
   const setupHost = h('div'); let setupHandle = null; root.append(setupHost); host.replaceChildren(root);
-  api('/api/agents/defaults', { signal: abort.signal, toast: false }).then(data => { if (!dead) { concurrency.value = String((data.defaults || data).thread_limit || 3); concurrency.disabled = false; } })
+  api('/api/agents/defaults', { signal: abort.signal, toast: false }).then(data => { if (!dead) { saved = data.defaults || {}; concurrency.value = String(saved.thread_limit || 3); concurrency.disabled = false; } })
     .catch(() => { if (!dead) status.textContent = 'New bot defaults could not load. Reopen this page to try again.'; });
   const destroy = () => { dead = true; abort.abort(); setupHandle?.destroy(); root.remove(); };
   ctx.signal?.addEventListener('abort', destroy, { once: true });

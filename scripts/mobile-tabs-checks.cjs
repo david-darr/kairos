@@ -644,7 +644,7 @@ async function run(ctx) {
   // The Bots pages (bot-*) read /api/bots/*, which the Bots fixture lanes answer only while botsLive is on.
   const botsLiveBefore = ctx.demoState.botsLive;
   for (const id of ids) {
-    ctx.demoState.botsLive = id.startsWith('bot-') ? true : botsLiveBefore;
+    ctx.demoState.botsLive = (id === 'bots' || id.startsWith('bot-')) ? true : botsLiveBefore;
     await js(`document.querySelector('.settings-nav-item[data-section="${id}"]').click()`);
     await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'");
     await delay(450);
