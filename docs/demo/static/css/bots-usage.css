@@ -2,6 +2,8 @@
 .bots-usage-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 10px; }
 .bots-usage select, .bots-usage input { font: inherit; color: var(--bots-ink); background: var(--bots-inset); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu); padding: 8px; max-width: 100%; min-height: 44px; box-sizing: border-box; }
 .bots-usage summary, .bots-usage a[href] { display: inline-flex; align-items: center; min-height: 44px; }
+/* Wins over the shared Bots input rules (bots.css) so number fields keep the 44 px target too. */
+[data-app-mode="bots"] .bots-usage input:not([type=checkbox]):not([type=radio]), [data-app-mode="bots"] .bots-usage select { min-height: 44px; height: auto; }
 .bots-usage-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .bots-usage-stats dt, .bots-usage-note { color: var(--bots-ink-secondary); font-size: 12px; }
 .bots-usage-stats dd { margin: 4px 0; font-variant-numeric: tabular-nums; }
