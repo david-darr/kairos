@@ -99,7 +99,7 @@ const RESET = `(globalThis.__a05.calls.length = 0, true)`;
     // Skip first-run setup through the app's own API, then load the real app shell.
     await page.evaluate("fetch('/api/settings/onboarding-complete', { method: 'POST' }).then(r => r.status)");
     await page.evaluate('location.reload()').catch(() => {}); await sleep(1500);
-    const shellReady = () => page.evaluate("!!document.querySelector('.sidebar-settings-btn') && !!document.querySelector('#nav .nav-item[data-tab=chat]')");
+    const shellReady = () => page.evaluate("!!document.querySelector('.sidebar-settings-btn') && !!document.querySelector('.nav-item[data-tab=chat]')");
     await until(shellReady, 60000, 'the app shell').catch(async () => { await page.evaluate('location.reload()').catch(() => {}); await until(shellReady, 60000, 'the app shell after a second reload'); });
     assert.equal(await page.evaluate('typeof window.jarvis?.browser?.setVisible'), 'function', 'the real preload bridge is present');
     assert.equal(await main.evaluate(INSTALL), 'installed');
@@ -112,7 +112,7 @@ const RESET = `(globalThis.__a05.calls.length = 0, true)`;
     const key = (type, k) => page.send('Input.dispatchKeyEvent', { type, key: k, code: k === 'Escape' ? 'Escape' : undefined });
 
     // -- open the side browser through the UI: chat tab, overflow menu, Browse the web.
-    await click('#nav .nav-item[data-tab=chat]');
+    await click('.nav-item[data-tab=chat]');
     await until(() => page.evaluate("!!document.querySelector('#overflow-plus-btn')"), 20000, 'the chat composer');
     await click('#overflow-plus-btn');
     await page.evaluate("[...document.querySelectorAll('.overflow-menu-item')].find(b => b.textContent.includes('Browse the web')).click()");

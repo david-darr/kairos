@@ -336,7 +336,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     await js("Object.keys(localStorage).filter(k => k.startsWith('kairos:layout:v1:')).forEach(k => localStorage.removeItem(k))");
     await js("document.dispatchEvent(new CustomEvent('kairos:layout'))");
     await navigate('home'); await delay(300);
-    const tabs = () => js("[...document.querySelectorAll('#nav .nav-item[data-tab]')].map(n => n.dataset.tab)");
+    // The desktop redesign keeps the full ordered list in #rd-all-tabs; #nav is its pinned strip.
+    const tabs = () => js("[...document.querySelectorAll(document.querySelector('#rd-all-tabs') ? '#rd-all-tabs .nav-item[data-tab]' : '#nav .nav-item[data-tab]')].map(n => n.dataset.tab)");
     const homeIds = () => js("[...document.querySelectorAll('[data-home-section]')].map(n => n.dataset.homeSection)");
     const layoutStore = () => lsKey('kairos:layout:v1:');
     const defaultTabs = await tabs(), defaultHome = await homeIds();
