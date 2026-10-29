@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from core import addons
 for ident in addons.IDS: addons.change(ident, "install")
-from core import permissions, system_prompt, tool_access, tool_registry, tool_search  # noqa: E402
+from core import permissions, settings, system_prompt, tool_access, tool_registry, tool_search  # noqa: E402
 from core.codex_brain import CodexBrain  # noqa: E402
 from core.external_brain import ExternalBrain  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
@@ -78,8 +78,19 @@ def names(specs):
     return [s.name for s in specs]
 
 
+def full_lists(test):
+    """Settings: defer_tools off, so a large window lists every tool again."""
+    settings.update_settings(defer_tools=False)
+    test.addCleanup(settings.update_settings, defer_tools=True)
+
+
 class SurfaceTests(unittest.TestCase):
     def test_every_surface_lists_from_the_registry(self):
+        lean = ExternalBrain("http://fake", "m", None, is_admin=False)
+        listed = {t["function"]["name"] for t in lean.tools} - {s["function"]["name"] for s in tool_search.bridge_schemas()}
+        self.assertEqual(listed | set(lean._catalog()), set(names(tool_registry.specs(tool_registry.OPENAI))),
+                         "deferred by default: every registry tool is listed or searchable")
+        full_lists(self)
         local = ExternalBrain("http://fake", "m", None, is_admin=False).tools
         self.assertEqual([t["function"]["name"] for t in local], names(tool_registry.specs(tool_registry.OPENAI)))
         for admin, agent in ((False, False), (True, True)):
@@ -216,6 +227,15 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shown(self.brain(8192, is_admin=True)), self.CORE | self.BRIDGE)
         self.assertEqual(shown(self.brain(tool_registry.SMALL_WINDOW, is_admin=True)), self.CORE | self.BRIDGE)
         self.assertIn("agent_remember", shown(self.brain(8192, agent_id="a1")), "an agent keeps its own tools")
+        offered = {s.name for s in tool_registry.specs(tool_registry.OPENAI, True, session_id=self.sid)}
+        for big in (None, tool_registry.SMALL_WINDOW + 1, 200000):
+            # 2026-10-28: a large window defers too, but lists browse, run_code and computer directly.
+            lean = self.brain(big, is_admin=True)
+            direct = tool_registry.DIRECT_ON_LARGE & offered
+            self.assertEqual(shown(lean), self.CORE | self.BRIDGE | direct, big)
+            self.assertEqual(shown(lean) - self.BRIDGE | set(lean._catalog()), offered, "nothing is lost, only moved")
+            self.assertIn("only your most-used tools are listed", lean._messages[0]["content"])
+        full_lists(self)
         for big in (None, tool_registry.SMALL_WINDOW + 1, 200000):
             full = self.brain(big, is_admin=True)
             # Less the Design canvas's editing tools, listed once a design is linked (design_gate).

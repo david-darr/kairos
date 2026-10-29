@@ -150,8 +150,9 @@ HELPER_PROMPT = (
     "you can read, say what you found and what is missing." + UI_DESIGN_DISCIPLINE
 )
 
-# A small-window local/API chat sees only Kairos's core tools (2026-10-06,
-# core/tool_registry.py). Sent once per connection, so the prompt is stable.
+# A local/API chat sees only Kairos's core tools: a small window since
+# 2026-10-06, any window since 2026-10-28 unless Settings turns defer_tools
+# off (core/external_brain.py). Sent once per connection, so the prompt is stable.
 DEFERRED_TOOLS_ADDENDUM = (
     "\n\nTo leave room for the conversation, only your most-used tools are listed. Every other tool "
     "named here (tasks, calendar changes, documents, specs, contacts, Google, code and more) is still "

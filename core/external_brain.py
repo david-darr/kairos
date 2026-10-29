@@ -28,7 +28,7 @@ import contextlib
 import logging
 from typing import AsyncIterator
 
-from core import attachments, integrations, mcp_client, mcp_bridge, permissions, projects, runs, system_prompt, tool_registry, tool_search
+from core import attachments, integrations, mcp_client, mcp_bridge, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry, tool_search
 from core.providers import openai_compatible
 from core.session_manager import sent_text
 from core.turn_taint import TurnTaint
@@ -65,10 +65,20 @@ class ExternalBrain:
         self.helper = helper
         self.read_only = read_only
         self.small_window = bool(window and window <= tool_registry.SMALL_WINDOW) and not helper
-        self.tools = tool_registry.openai_tools(is_admin, agent=bool(agent_id), small_window=self.small_window,
+        # 2026-10-28: a large window defers too (Settings: defer_tools), since
+        # the whole list cost every turn about 11,000 tokens before any history.
+        self.defer_tools = (self.small_window or bool(settings_store.get_setting("defer_tools"))) and not helper
+        self.tools = tool_registry.openai_tools(is_admin, agent=bool(agent_id), small_window=self.defer_tools,
                                                 helper=helper, read_only=read_only, session_id=session_id or '')
         self._deferred: dict[str, dict] = tool_registry.deferred_tools(is_admin, agent=bool(agent_id), helper=helper, read_only=read_only, session_id=session_id or '') \
-            if self.small_window else {}
+            if self.defer_tools else {}
+        if self.defer_tools and not self.small_window:
+            direct = [tool for tool in tool_registry.openai_tools(is_admin, agent=bool(agent_id), helper=helper,
+                                                                  read_only=read_only, session_id=session_id or '')
+                      if tool["function"]["name"] in tool_registry.DIRECT_ON_LARGE]
+            self.tools = self.tools + direct
+            for tool in direct:
+                self._deferred.pop(tool["function"]["name"], None)
         if self._deferred:
             self.tools = self.tools + tool_search.bridge_schemas()
         if is_admin:
@@ -202,7 +212,7 @@ class ExternalBrain:
         """A design now linked to this chat: its editing tools join the list
         in place, so the rest of this turn can use them (core/design_tools.py)."""
         if self.small_window:
-            return  # Already in the bridge catalog.
+            return  # Already in the bridge catalog; a small window has no room to list them.
         have = {tool["function"]["name"] for tool in self.tools if tool.get("type") == "function"}
         self.tools.extend(tool for tool in tool_registry.openai_tools(
             self.is_admin, agent=bool(self.agent_id), helper=self.helper, read_only=self.read_only,

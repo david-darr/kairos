@@ -52,6 +52,9 @@ ALL = frozenset({CLAUDE, OPENAI, CODEX})
 CODEX_ONLY = frozenset({CODEX})
 READ, WRITE, EXEC, EXTERNAL = "read", "write", "exec", "external"
 SMALL_WINDOW = 32768
+# Listed directly on a large window even while the rest are deferred
+# (2026-10-28): used often, or many times in one turn.
+DIRECT_ON_LARGE = frozenset({"browse", "run_code", "computer"})
 # These handlers check the chat, but cannot verify the person's agreement
 # (2026-10-15). Keep Claude's own approval and retire their old seeded grants.
 CLAUDE_REVIEW_TOOLS = frozenset({"agent_configure_self", "agent_setup_undo"})

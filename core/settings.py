@@ -42,6 +42,10 @@ DEFAULTS: dict[str, Any] = {
     # Compact a local/API chat near a full context window before its next
     # message (roadmap phase 3, 2026-10-05; services/chat_service.py).
     "auto_compact": True,
+    # A local/API chat on any window gets the core tools and finds the rest
+    # through the tool search (2026-10-28): the whole list resent every turn
+    # was about 11,000 tokens. Off restores the full list on a large window.
+    "defer_tools": True,
     "computer_use": {"enabled": False, "allow_non_admins": False, "allow_reactions": False, "desktop": False},
     # Days a model's computer steps (core/computer_trajectory.py) are kept; 0 keeps none.
     "computer_steps_days": 7,

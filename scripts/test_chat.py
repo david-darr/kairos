@@ -2463,7 +2463,9 @@ class McpClientTests(unittest.TestCase):
         self.assertFalse(any(n.startswith("mcp__broken") for n in brain._mcp_tools))
         detached = self.brain(session_id=None)
         self.assertEqual(detached._mcp_tools, {})
-        self.assertNotIn(tool_search.SEARCH, [t["function"]["name"] for t in detached.tools])
+        # Since 2026-10-28 its own Kairos tools may sit behind the search, but no third-party tool does.
+        self.assertFalse(any(n.startswith("mcp__") for n in detached._catalog()))
+        self.assertFalse(any(t["function"]["name"].startswith("mcp__") for t in detached.tools))
 
     def test_function_names_are_safe_and_unique(self):
         from core import mcp_client
@@ -2783,8 +2785,10 @@ class ToolRegistryTests(unittest.TestCase):
         from core import tool_registry as reg
         from core.external_brain import ExternalBrain
         claude = set(self.claude_tools())
-        plain = {t["function"]["name"] for t in ExternalBrain("http://x", "m", None).tools}
-        admin = {t["function"]["name"] for t in ExternalBrain("http://x", "m", None, is_admin=True).tools}
+        # What a brain can reach: listed, or behind the tool search (deferred since 2026-10-28).
+        reach = lambda b: ({t["function"]["name"] for t in b.tools} | set(b._catalog())) - {"kairos_tool_search", "kairos_tool_describe", "kairos_tool_call"}
+        plain = reach(ExternalBrain("http://x", "m", None))
+        admin = reach(ExternalBrain("http://x", "m", None, is_admin=True))
         self.assertTrue({"search_vault", "read_repo_file", "run_shell"}.isdisjoint(claude), "Claude has its own file tools")
         self.assertTrue({"save_generated_image", "save_generated_file"}.isdisjoint(plain))
         # write_repo_file is admin-only since roadmap phase 7 (2026-10-06).
