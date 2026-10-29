@@ -36,6 +36,14 @@ from enum import StrEnum
 from typing import AsyncIterator, Optional, Protocol
 
 logger = logging.getLogger(__name__)
+_TOOL_OBSERVERS = []
+
+
+def observe_tool_events(fn):
+    """Passive harness observers; an observer cannot break provider execution."""
+    if fn not in _TOOL_OBSERVERS:
+        _TOOL_OBSERVERS.append(fn)
+    return lambda: _TOOL_OBSERVERS.remove(fn) if fn in _TOOL_OBSERVERS else None
 
 # Tool input and output carried in an event, and provider extras: enough to
 # show and diagnose, never a whole file.
@@ -374,6 +382,12 @@ class Tally:
                               "detail": clip_ends(detail, TIMELINE_CLIP) if detail else "", "seconds": seconds})
 
     def add(self, item: RunEvent) -> None:
+        if item.kind in (EventKind.TOOL_STARTED, EventKind.TOOL_FINISHED):
+            for observer in tuple(_TOOL_OBSERVERS):
+                try:
+                    observer(item, CURRENT.get())
+                except Exception:
+                    logger.exception("tool event observer failed")
         if item.kind is EventKind.TEXT:
             self.parts.append(item.data["text"])
             if item.data["text"]:

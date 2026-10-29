@@ -342,7 +342,7 @@ class AgentService:
             "integration_ids": list(integration_ids) if integration_ids is not None else None,
             "keep_signed_in": bool(keep_signed_in),
             "memory_upkeep": bool(memory_upkeep),
-            "peers": self._check_peers(peers or [], agent_id),
+            "peers": self._check_peers(peers, agent_id),
             "created_at": time.time(),
             **bot_record.new_defaults(), **bot_fields,
         }
@@ -557,7 +557,9 @@ class AgentService:
                 task_service.delete_task(receipt["routine_id"])
         return receipt
 
-    def _check_peers(self, peers, agent_id: str) -> list[str]:
+    def _check_peers(self, peers, agent_id: str) -> Optional[list[str]]:
+        if peers is None:
+            return None
         if not isinstance(peers, list) or any(not isinstance(p, str) for p in peers):
             raise ValueError("peers must be a list of bot ids")
         if len(peers) != len(set(peers)) or agent_id in peers:

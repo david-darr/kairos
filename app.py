@@ -278,6 +278,7 @@ app.include_router(bot_chat_routes.router)
 app.include_router(bot_attention_routes.router)
 # Bots Phase 2 resources (memory, skills, grants, connections) beneath /api/bots, one aggregate router.
 from routes import bot_resources_routes; app.include_router(bot_resources_routes.router)
+from routes import bot_teams_routes; app.include_router(bot_teams_routes.router)
 app.include_router(agent_routes.router)
 app.include_router(computer_routes.router)
 app.include_router(connector_routes.router)

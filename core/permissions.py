@@ -354,8 +354,8 @@ def ceiling_denial(surface: str, tool: str, arguments: dict, agent_id: str | Non
 
 
 EXPLICIT_REVIEW_TOOLS = frozenset({"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install",
-                                   "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app",
-                                   "creative_tools", "folder_access"})
+                                   "forge_git_push", "forge_git_merge", "hand_to_agent", "coordinate_bots",
+                                   "post_to_room", "computer_local_app", "creative_tools", "folder_access"})
 
 
 def _bot_log(outcome, decision: str, source: str, actor: str, scope: str | None = None,

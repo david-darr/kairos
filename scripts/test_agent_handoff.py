@@ -333,7 +333,8 @@ class CoordinationTests(unittest.TestCase):
         self.assertIn("not on your Peers", self.assignment())
 
     def test_non_peers_empty_default_cycles_depth_and_cap(self):
-        self.assertIn("not on your Peers", agent_handoff.assign(self.third["id"], self.agent["id"], "No", self.source,
+        self.assertIsNone(self.third["peers"])
+        self.assertIn("does not belong", agent_handoff.assign(self.third["id"], self.agent["id"], "No", self.source,
                                                                   "empty"))
         agent_service.update(self.peer["id"], peers=[])
         self.assertIn("not on your Peers", agent_handoff.assign(self.peer["id"], self.agent["id"], "No", self.source,
@@ -350,10 +351,10 @@ class CoordinationTests(unittest.TestCase):
         agent_service.update(self.third["id"], peers=[self.agent["id"], self.peer["id"]])
         with agent_service.run(self.third["id"], card_id=second["id"]):
             self.assertIn("cycle", agent_handoff.assign(self.third["id"], self.agent["id"], "Long loop"))
-        deep = dict(second, assignment_chain=[self.agent["id"], self.peer["id"], self.third["id"], "fourth"])
+        deep = dict(second, assignment_chain=[self.agent["id"], self.peer["id"], self.third["id"], "fourth", "fifth"])
         task_service._tasks[second["id"]] = deep
         with agent_service.run(self.third["id"], card_id=second["id"]):
-            self.assertIn("at most 3 hops", agent_handoff.assign(self.third["id"], self.peer["id"], "Too deep"))
+            self.assertIn("at most 4 hops", agent_handoff.assign(self.third["id"], self.peer["id"], "Too deep"))
         for i in range(agent_handoff.MAX_ASSIGNMENTS_PER_RUN - 1):
             self.assertIn("Assigned", self.assignment(f"Work {i}"))
         self.assertIn("at most 5", self.assignment("One too many"))
