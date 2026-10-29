@@ -1340,6 +1340,14 @@
     if (route === "/api/agents") return list(agentsFixture).map(agent => state.homeClear ? { ...agent, status: "idle", needs_you: 0 } : agent);
     // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
     if (route === "/api/notifications") return { devices: [] };
+    // Bots onboarding and voice (Phase 6): the welcome and tour are already seen here, and no voice engine is set up.
+    if (route === "/api/bot-onboarding") return { welcome_seen: true, tour: { done: true, step: 0, variant: "simple" }, hints_seen: [], notices: {}, setup_checked_at: now };
+    if (route === "/api/bot-onboarding/setup") return { checked_at: now, checks: [
+      ["model", "Model", "ready", "add-models"], ["computer", "Computer", "needs_setup", "computer-use"], ["gmail", "Gmail", "needs_setup", "integrations"],
+      ["calendar", "Calendar", "needs_setup", "integrations"], ["notifications", "Notifications", "not_checked", "notifications"], ["voice", "Voice engine", "needs_setup", "speech"],
+    ].map(([id, title, status, fix]) => ({ id, title, status, fix })) };
+    if (route === "/api/bot-voice/live-settings") return { voice: "marin", read_typed: false, idle_minutes: 5 };
+    if (route === "/api/bot-voice/voices") return { voices: [], models: [] };
     if (route === "/api/agents/inbox") return state.empty || state.homeClear ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };
     if (/^\/api\/agents\/a\d$/.test(route)) return agentDetail(route.split("/")[3]);

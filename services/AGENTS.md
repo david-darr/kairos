@@ -41,3 +41,15 @@ Domain logic behind the routes. Routes stay thin and call these; these call
 - `bot_profile.py`, `bot_profile_history.py`, `bot_resource_fields.py`, `bot_routines.py`, `bot_setup_import.py`.
 - `bot_side_jobs.py`, `bot_skill_import.py`, `bot_skill_learning.py`, `bot_skill_library.py`, `bot_skill_review.py`.
 - `bot_skill_sharing.py`, `bot_skills.py`, `bot_turn_context.py`, `bot_x_research.py`.
+
+Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
+- `bot_apps.py`, `bot_audience.py`, `bot_backup.py`, `bot_browser_profiles.py`, `bot_chief.py`.
+- `bot_data.py`, `bot_data_cards.py`, `bot_data_charts.py`, `bot_data_guard.py`, `bot_data_load.py`.
+- `bot_departments.py`, `bot_fallback.py`, `bot_help.py`, `bot_incidents.py`, `bot_keep_warm.py`.
+- `bot_onboarding.py`, `bot_package.py`, `bot_package_import.py`, `bot_peers.py`, `bot_report.py`.
+- `bot_room_events.py`, `bot_room_goals.py`, `bot_room_guard.py`, `bot_room_holds.py`, `bot_room_turns.py`.
+- `bot_rooms.py`, `bot_scout.py`, `bot_setup.py`, `bot_spend.py`, `bot_sweeps.py`.
+- `bot_team_changes.py`, `bot_team_memory.py`, `bot_trace.py`, `bot_usage.py`, `bot_usage_alerts.py`.
+- `bot_voice.py`, `bot_widgets.py`, `bot_workbench.py`, `front_desk.py`, `front_desk_brief.py`.
+- `front_desk_cards.py`, `front_desk_drafts.py`, `front_desk_ledger.py`, `front_desk_make.py`, `front_desk_routing.py`.
+- `front_desk_suggestions.py`, `front_desk_tasks.py`, `front_desk_watch.py`, `front_desk_work.py`.

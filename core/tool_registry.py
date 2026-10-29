@@ -2074,8 +2074,15 @@ def _register_bots_tool_data() -> None:
     """Bots Phase 5 (front desk) and Phase 6 (data, widgets, apps) keep their tools as data in their own modules."""
     from core import front_desk_tools
     from services import bot_apps, bot_data, bot_widgets
+    from importlib import import_module
+    try:
+        voice_tools = import_module('services.bot_voice').TOOLS
+    except ModuleNotFoundError as error:
+        if error.name != 'services.bot_voice':
+            raise
+        voice_tools = []
     front_desk_tools.register_all(register)
-    for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS:
+    for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS + voice_tools:
         if spec["name"] not in _REGISTRY:
             register(spec["name"], spec["description"], spec["schema"], agent_only=True, effect=spec["effect"])(spec["handler"])
     # Computer help (Phase 6 U1): a bot asks the person to take over its computer, or to sign in to one site.

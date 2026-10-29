@@ -29,3 +29,9 @@ Chat: `chat_routes.py`, `session_routes.py`, `background_task_routes.py`,
 - `bot_access_routes.py`, `bot_approval_routes.py`, `bot_attention_routes.py`, `bot_automation_change_routes.py`, `bot_card_routes.py`.
 - `bot_chat_routes.py`, `bot_connections_routes.py`, `bot_event_routes.py`, `bot_memory_routes.py`, `bot_recall_routes.py`.
 - `bot_resources_routes.py`, `bot_routine_routes.py`, `bot_skills_routes.py`.
+
+Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
+- `bot_data_routes.py`, `bot_department_routes.py`, `bot_lifecycle_routes.py`, `bot_onboarding_routes.py`, `bot_peer_routes.py`.
+- `bot_room_routes.py`, `bot_team_routes.py`, `bot_teams_routes.py`, `bot_usage_routes.py`, `bot_voice_routes.py`.
+- `bot_widget_routes.py`, `bot_workbench_routes.py`, `front_desk_make_routes.py`, `front_desk_routes.py`, `front_desk_watch_routes.py`.
+- `front_desk_work_routes.py`.

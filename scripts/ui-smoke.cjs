@@ -214,6 +214,12 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const botsRead = botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
+      // A voice note's audio (Phase 6 voice lane): served as a real WAV, not JSON.
+      if (botsRead?._audioWav) {
+        res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+        res.end(Buffer.from(botsRead._audioWav, 'base64'));
+        return;
+      }
       if (botsRead?._status) res.statusCode = botsRead._status;
       const g4Read = botsRead === undefined && demoState.g4Live ? g4Backend.read(url.pathname) : undefined;
       // The attention host (app.js) polls these on every page; the plain demo answers them empty. The Bots backend answers them for real.

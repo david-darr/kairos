@@ -15,6 +15,10 @@ async function isolateBotsCheck({ js, demoState }, state = {}) {
   const preferences = {
     'kairos:app-mode': 'kairos', 'kairos:bots-interface': null,
     'kairos:bots-last-bot': null, 'kairos:bots-last-section': null,
+    'kairos:bots-send-key': null, 'kairos:bots-chat-width': null,
+    'kairos:bots-show-tool-calls': null, 'kairos:bots-colour-bubbles': null,
+    'kairos:bots-font': null, 'kairos:bots-show-threads': null,
+    'kairos:bots-pinned-circles': null, 'kairos:bots-run-card': null,
     'jarvis:sidebar-collapsed': 'false',
     'jarvis:agent-chat:a1': null, 'jarvis:agent-chat:a2': null,
   };
@@ -29,6 +33,8 @@ async function isolateBotsCheck({ js, demoState }, state = {}) {
   const restoreState = replace(demoState, {
     botsLive: true, botsCore: undefined, botsWorking: [],
     botsConfiguredFail: undefined, botsConfiguredWarnings: undefined,
+    botsOnboarding: { welcome_seen: true, tour: { done: true, step: 0, variant: 'simple' }, hints_seen: [], notices: {} },
+    botsVoice: { catalog: { voices: [], models: [] }, notes: {}, counter: 0 },
     // The attention host polls /api/bot-attention in Bots mode; an empty feed keeps those polls answered.
     botsAttention: { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] },
     isAdmin: true, empty: false, homeClear: false, ...state,

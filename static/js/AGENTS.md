@@ -44,3 +44,25 @@ per tab (`views/chat.js`, `views/settings.js`, `views/tool-store.js` and so on).
 - `../css/bots-create.css`, `../css/bots-grants.css`, `../css/bots-kip.css`, `../css/bots-memory-activity.css`, `../css/bots-memory.css`.
 - `../css/bots-panel.css`, `../css/bots-permissions.css`, `../css/bots-shell.css`, `../css/bots-sidebar.css`, `../css/bots-skills.css`.
 - `../css/bots.css`.
+
+Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
+- `botsAppBridge.js`, `botsAppFrame.js`, `botsBackup.js`, `botsBrowserProfiles.js`, `botsCallBar.js`.
+- `botsDataChart.js`, `botsDataChip.js`, `botsDataGrid.js`, `botsDataModel.js`, `botsDataSql.js`.
+- `botsDelegationModel.js`, `botsFrontDesk.js`, `botsFrontDeskCards.js`, `botsFrontDeskModel.js`, `botsGoalCard.js`.
+- `botsHandoffChip.js`, `botsHelpCard.js`, `botsHints.js`, `botsMakeModel.js`, `botsNewRoom.js`.
+- `botsNewTask.js`, `botsNotices.js`, `botsPackageModel.js`, `botsPackagePreview.js`, `botsPeerApprovalCard.js`.
+- `botsPhase6Sections.js`, `botsPlaceChooser.js`, `botsPlanMeters.js`, `botsPoint.js`, `botsPrefs.js`.
+- `botsQuotaCard.js`, `botsReport.js`, `botsRichRows.js`, `botsRoomMembers.js`, `botsRoomModel.js`.
+- `botsRoomPanel.js`, `botsRoomStream.js`, `botsRowKinds.js`, `botsSectionMake.js`, `botsSectionReach.js`.
+- `botsSectionSites.js`, `botsSectionTeam.js`, `botsSectionUsage.js`, `botsSectionVoice.js`, `botsSectionWatch.js`.
+- `botsSectionWork.js`, `botsSettingsBots.js`, `botsSettingsComputers.js`, `botsSettingsPages.js`, `botsSettingsUsage.js`.
+- `botsSetupCard.js`, `botsSetupChecklist.js`, `botsSpeak.js`, `botsSpotlight.js`, `botsTaskPage.js`.
+- `botsTeamCanvas.js`, `botsTeamChips.js`, `botsTeamDialogs.js`, `botsTeamHost.js`, `botsTeamInstructions.js`.
+- `botsTeamMapModel.js`, `botsTeamMemory.js`, `botsTeamSettings.js`, `botsTeamSetupCard.js`, `botsTemplates.js`.
+- `botsTour.js`, `botsTraceView.js`, `botsTraceWaterfall.js`, `botsUsageModel.js`, `botsVoiceNote.js`.
+- `botsWelcome.js`, `botsWidget.js`, `botsWidgetModel.js`, `botsWorkModel.js`, `botsWorkbenchBrowser.js`.
+- `botsWorkbenchComputer.js`, `botsWorkbenchData.js`, `botsWorkbenchFiles.js`, `botsWorkbenchHost.js`, `botsWorkbenchModel.js`.
+- `views/botsRoom.js`, `views/botsTeamMap.js`, `../css/bots-data.css`, `../css/bots-delegation.css`, `../css/bots-frontdesk.css`.
+- `../css/bots-lifecycle.css`, `../css/bots-onboarding.css`, `../css/bots-prefs.css`, `../css/bots-rooms.css`, `../css/bots-teams.css`.
+- `../css/bots-usage.css`, `../css/bots-voice.css`, `../css/bots-watch.css`, `../css/bots-widgets.css`, `../css/bots-work.css`.
+- `../css/bots-workbench.css`.

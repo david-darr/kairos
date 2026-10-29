@@ -1,0 +1,21 @@
+﻿[data-bots-settings] { display: grid; gap: 16px; color: var(--bots-ink); font: 14px/1.5 var(--bots-font-sans); }
+[data-bots-settings] .bots-row { justify-content: space-between; gap: 12px; }
+[data-bots-settings] h2 { font-size: 20px; }
+[data-bots-settings] .bots-card-body > .bots-btn { margin: 8px; }
+html[data-bots-width="default"] .bots-log, html[data-bots-width="default"] .bots-composer { max-width: 760px; margin-inline: auto; width: 100%; }
+html[data-bots-width="wide"] .bots-log, html[data-bots-width="wide"] .bots-composer { max-width: 1100px; margin-inline: auto; width: 100%; }
+html[data-bots-width="full"] .bots-log, html[data-bots-width="full"] .bots-composer { max-width: none; width: 100%; }
+html[data-bots-tools="false"] .bots-now, html[data-bots-tools="false"] .bots-now-steps { display: none; }
+html[data-bots-run-card="false"] .bots-chip-row.digest { display: none; }
+html[data-bots-bubbles="false"] .bots-msg.user .bots-msg-bubble { background: var(--bots-inset); color: var(--bots-ink); }
+html[data-bots-bubbles="true"] .bots-msg.user .bots-msg-bubble { background: var(--bots-bot-color); color: var(--bots-bubble-user-ink); }
+html[data-bots-chat-font="system"] .bots-msg-body { font-family: system-ui, sans-serif; }
+html[data-bots-chat-font="inter"] .bots-msg-body { font-family: "Inter", var(--bots-font-prose); }
+html[data-bots-chat-font="serif"] .bots-msg-body { font-family: Georgia, serif; }
+html[data-bots-threads="false"] .bots-thread-line, html[data-bots-threads="false"] .bots-rail-newthread { display: none; }
+html[data-bots-pins="false"] .bots-pins { display: none; }
+@media (max-width: 767px) {
+  [data-bots-settings] :is(button, input, select, summary, a) { min-height: 44px; }
+}
+
+

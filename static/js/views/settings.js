@@ -86,6 +86,8 @@ const NAV_ICONS = {
   "bot-housekeeping": I('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'),
   "bot-templates": I('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   "bot-computers": I('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  "bots": I('<circle cx="12" cy="12" r="7"/><path d="M12 2v3M8 11h.01M16 11h.01M8 16h8"/>'),
+  "bot-voice": I('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
 
@@ -119,6 +121,10 @@ const SECTION_GROUPS = [
       { id: "bot-skill-library", label: "Skill library", render: (body) => renderBotResource(body, () => import("../botsSectionSkillLibrary.js")),
         description: "Reviewed procedures you can share with your bots.", keywords: ["bots", "skills", "library", "reviewed"] },
       // Bots Phase 6: usage and spend, run-detail housekeeping, and the bots' computers.
+      { id: "bots", label: "Bots", render: (body) => renderBotResource(body, () => import("../botsSettingsBots.js")),
+        description: "Interface, conversations, voice, and getting started.", keywords: ["bots", "simple", "advanced", "send key", "chat width", "tool calls", "tour", "welcome"] },
+      { id: "bot-voice", label: "Bot voice", render: (body) => renderBotResource(body, () => import("../botsCallBar.js"), "mountLiveSettings"),
+        description: "Live call voice, typed replies, and idle time.", keywords: ["bots", "voice", "calls", "live", "idle", "speech"] },
       { id: "bot-usage", label: "Bot usage", render: (body) => renderBotResource(body, () => import("../botsSettingsUsage.js")),
         description: "What your bots used and cost, a monthly spend cap, and plan meters.",
         keywords: ["bots", "usage", "spend", "cost", "budget", "cap", "tokens", "plan", "traces"] },
@@ -584,7 +590,7 @@ function visibleSections() {
   }
   return [
     ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-templates', 'bot-computers']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bots', 'bot-voice', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-templates', 'bot-computers']],
     ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
     ['access', 'Access', ['account', 'users']],
     ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],
@@ -708,14 +714,16 @@ async function renderBotResource(body, load, exportName = "mount") {
   const mine = renderVersion;
   const host = el("div", { class: "bots-settings-host", "data-app-mode": "bots" });
   body.replaceChildren(host);
-  const module = await load();
+  let module;
+  try { module = await load(); }
+  catch { if (mine === renderVersion) host.replaceChildren(el('p', { role: 'status', text: 'This settings page could not load. Choose it again to retry.' })); return; }
   if (mine !== renderVersion) return;  // another page was chosen while this one loaded
   const pages = { keys: "bot-keys", apps: "bot-apps", logins: "bot-logins" };
   // Phase 6 pages mount asynchronously and clean up when their signal aborts; earlier ones return {destroy}.
   const control = new AbortController();
   const mounted = module[exportName](host, {
     agentId: "", state: { agent: null }, advanced: () => true, embedded: true, flush: async () => true, refresh() {},
-    go: (name) => { if (pages[name]) selectSection(pages[name]); }, signal: control.signal,
+    go: (name) => { if (pages[name]) selectSection(pages[name]); }, close: closeSettingsWindow, signal: control.signal,
   });
   botResource = {
     destroy() {

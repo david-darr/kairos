@@ -280,7 +280,9 @@ export function mountBotsComposer(host, o) {
       return;
     }
     if (event.key === 'ArrowUp' && !input.value && !event.shiftKey && !event.altKey && !event.metaKey) { event.preventDefault(); o.onEditLast?.(); return; }
-    if (sendKey(event, { phone: phoneMedia.matches, preference: o.sendPreference || 'enter' })) {
+    let preference = o.sendPreference || 'enter';
+    try { preference = localStorage.getItem('kairos:bots-send-key') || preference; } catch {}
+    if (sendKey(event, { phone: phoneMedia.matches, preference })) {
       event.preventDefault();
       if (!o.room && isSteerChord({ empty: !input.value && !hasContent(), busy, lastEnter, now: now() })) { lastEnter = 0; Promise.resolve(o.steer?.()).catch(showError); }
       else { if (input.value.trim() || hasContent()) lastEnter = now(); send(); }

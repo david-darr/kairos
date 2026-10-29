@@ -237,6 +237,32 @@ const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-r
 //   handlers (tray handlers), react, selectVersion, jump(id), goToSource(id), onNeedOlder(), onNeedNewer(), onEdit(id, text), onUnpin(),
 //   isSendKey(event), replyStyle(), simple() }
 export function mountTranscript(host, opts) {
+  opts = { ...opts, agent: { ...opts.agent } };
+  // This instance owns speech, including cancellation when the conversation closes.
+  let speech = null, speechLoad = null, speechTurn = '', speechText = '', speechFinal = false, announcedReply = '', speechEpoch = 0;
+  let speechTimer = null, lastSpeechAt = 0, pendingSpeech = null;
+  const clearSpeechTimer = () => { clearTimeout(speechTimer); speechTimer = null; pendingSpeech = null; lastSpeechAt = 0; };
+  const speakSnapshot = async (text, final, reset = false) => {
+    const mine = speechEpoch;
+    try {
+      speechLoad ||= import('./botsSpeak.js');
+      const module = await speechLoad;
+      if (disposed || mine !== speechEpoch) return;
+      speech ||= module.createReadAloud({ voiceId: opts.agent.voice_id || '', onError: error => announcer.textContent = error.message || 'Speech could not play.' });
+      if (reset) speech.cancel();
+      await speech.update(text, final);
+    } catch { speechLoad = null; if (!disposed) announcer.textContent = 'Read aloud could not load. Try again.'; }
+  };
+  const speakLive = (text, final) => {
+    if (final || Date.now() - lastSpeechAt >= 150) {
+      clearSpeechTimer(); lastSpeechAt = Date.now(); speakSnapshot(text, final); return;
+    }
+    pendingSpeech = text;
+    if (!speechTimer) speechTimer = setTimeout(() => {
+      const snapshot = pendingSpeech; clearSpeechTimer(); lastSpeechAt = Date.now();
+      if (!disposed && snapshot !== null) speakSnapshot(snapshot, false);
+    }, Math.max(1, 150 - (Date.now() - lastSpeechAt)));
+  };
   const win = createWindow(), follow = createFollow(), raw = new Set();
   const nodes = new Map();
   let rows = [], readId = null, editing = null, live = null, liveTimer = null, loading = false, disposed = false, flashTimer = null;
@@ -248,10 +274,23 @@ export function mountTranscript(host, opts) {
   const announcer = h('div', { class: 'bots-announcer', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const root = h('div', { class: 'bots-transcript-wrap' }, [pinned, scroller, later, jump, announcer]);
   host.append(root);
+  const voiceChanged = event => {
+    if (event.detail?.agentId !== opts.agent.id || !event.detail.agent) return;
+    const before = opts.agent; opts.agent = { ...before, ...event.detail.agent };
+    if (opts.agent.voice_id !== before.voice_id || !opts.agent.speak_replies) {
+      clearSpeechTimer(); speechEpoch++; speech?.destroy(); speech = null; speechText = ''; speechFinal = false;
+    }
+  };
+  document.addEventListener('kairos:bots-saved', voiceChanged);
+  document.addEventListener('kairos:bots-rolledback', voiceChanged);
 
   const ctx = () => ({ busy: false, ...opts.getContext?.() });
   const timeNode = message => h('time', { class: 'bots-msg-time', datetime: new Date(message.ts * 1000).toISOString(), text: clock(message.ts) });
   const lookup = id => win.get(id);
+  const destroyRow = node => {
+    node?.destroy?.();
+    for (const child of node?.querySelectorAll?.('[data-section="voice-note"]') || []) child.destroy?.();
+  };
 
   function bodyNode(message, text, extra = '') {
     const body = h('div', { class: `bots-msg-body ${extra}`.trim() });
@@ -297,7 +336,7 @@ export function mountTranscript(host, opts) {
       const p = message.meta?.auto?.p;
       if (Number.isFinite(p)) card.append(h('span', { class: 'bots-hint', text: `Chosen by auto (${Math.round(p * 100)} percent)` }));
     }
-    if (!opts.room) card.append(messageTray(message, { ...ctx(), raw: raw.has(message.id) }, { ...opts.handlers, raw: m => toggleRaw(m.id) }));
+    if (!opts.room) card.append(messageTray(message, { ...ctx(), raw: raw.has(message.id) }, { ...opts.handlers, speak: m => speakSnapshot(m.content || '', true, true), raw: m => toggleRaw(m.id) }));
     else if (opts.handlers) card.append(h('div', { class: 'bots-msg-tray', role: 'toolbar', 'aria-label': 'Message actions' },
       [['reply', 'Reply'], ['copy', 'Copy'], ['pin', ctx().pinnedId === message.id ? 'Unpin' : 'Pin']].filter(([key]) => opts.handlers[key])
         .map(([key, label]) => h('button', { type: 'button', class: 'bots-btn', text: label, onclick: () => opts.handlers[key](message) }))));
@@ -323,7 +362,7 @@ export function mountTranscript(host, opts) {
   function draw({ keep = false, anchor = null } = {}) {
     const before = { scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight };
     rows = buildRows(win.slice(), { readId, simple: opts.simple ? opts.simple() : true });
-    nodes.clear();
+    nodes.forEach(destroyRow); nodes.clear();
     const frag = rows.map(row => { const node = rowNode(row); if (row.message) nodes.set(row.message.id, node); return node; });
     log.replaceChildren(...frag, ...(live ? [live.node] : []));
     if (anchor) scroller.scrollTop = anchorAfterPrepend(before, scroller.scrollHeight);
@@ -336,6 +375,7 @@ export function mountTranscript(host, opts) {
     if (!row || !old) return;
     row.message = win.get(id) || row.message;
     const next = rowNode(row); old.replaceWith(next); nodes.set(id, next);
+    destroyRow(old);
   }
   function pills() {
     const below = win.hiddenBelow();
@@ -430,6 +470,19 @@ export function mountTranscript(host, opts) {
   }
   function setLive(entry) {
     if (!entry) { clearLive(); return; }
+    if (entry.status === 'done' && announcedReply !== entry.turnId) {
+      announcedReply = entry.turnId;
+      document.dispatchEvent(new CustomEvent('kairos:bots-typed-reply', { detail: { agentId: opts.agent.id, text: entry.text || '' } }));
+    }
+    if (opts.agent.speak_replies && !opts.room && document.documentElement.dataset.botsCallActive !== 'true') {
+      if (speechTurn !== entry.turnId) { clearSpeechTimer(); speechEpoch++; speech?.cancel(); speechTurn = entry.turnId; speechText = ''; speechFinal = false; }
+      const final = entry.status === 'done';
+      if (entry.stopping || ['failed', 'stopped'].includes(entry.status)) { clearSpeechTimer(); speechEpoch++; speech?.cancel(); }
+      else if (entry.text !== speechText || final !== speechFinal) {
+        speechText = entry.text || ''; speechFinal = final;
+        speakLive(speechText, final);
+      }
+    }
     if (!live) { live = buildLive(); log.append(live.node); }
     live.entry = entry; paintLive();
     if (!liveTimer) liveTimer = setInterval(() => { if (live?.entry?.status === 'processing') live.status.textContent = liveStatus(live.entry).line; }, 1000);
@@ -464,6 +517,6 @@ export function mountTranscript(host, opts) {
     isFollowing: () => follow.following(),
     announce(text) { announcer.textContent = ''; setTimeout(() => { if (!disposed) announcer.textContent = text; }, 30); },
     redraw: () => draw({ keep: true }),
-    dispose() { disposed = true; clearInterval(liveTimer); clearTimeout(flashTimer); root.remove(); },
+    dispose() { disposed = true; clearSpeechTimer(); speechEpoch++; speech?.destroy(); document.removeEventListener('kairos:bots-saved', voiceChanged); document.removeEventListener('kairos:bots-rolledback', voiceChanged); nodes.forEach(destroyRow); clearInterval(liveTimer); clearTimeout(flashTimer); root.remove(); },
   };
 }

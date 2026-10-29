@@ -60,3 +60,31 @@ export function railLabel(mode) {
   const next = nextRailMode(mode);
   return next === 'kairos' ? 'Switch to Kairos' : `Switch to ${MODE_LABELS[next]} Preview`;
 }
+
+// Mode entry is observed here so Home, a bot deep link and restored Bots mode
+// share the same once-per-person welcome. Pure policy helpers above stay usable in Node.
+if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  let control = null, mode = '', handle = null;
+  const sync = () => {
+    const next = document.documentElement.dataset.appMode;
+    if (next === mode) return;
+    mode = next; control?.abort(); handle?.destroy?.(); handle = null;
+    if (next !== 'bots') return;
+    control = new AbortController(); const signal = control.signal;
+    import('./botsPrefs.js').then(module => { if (!signal.aborted) module.applyBotsPrefs(); }).catch(() => {
+      if (signal.aborted) return;
+      const note = document.createElement('p'); note.className = 'bots-onboarding-error'; note.textContent = 'Bots preferences could not load. Reopen Bots to try again.';
+      document.body.append(note); signal.addEventListener('abort', () => note.remove(), { once: true });
+    });
+    import('./botsWelcome.js').then(module => module.enterBots({ signal })).then(mounted => {
+      if (signal.aborted) mounted?.destroy?.(); else handle = mounted;
+    }).catch(error => {
+      if (signal.aborted || error.name === 'AbortError') return;
+      const note = document.createElement('p'); note.className = 'bots-onboarding-error'; note.setAttribute('role', 'status');
+      note.textContent = 'Welcome could not load. Reopen Bots to try again.'; document.body.append(note);
+      signal.addEventListener('abort', () => note.remove(), { once: true });
+    });
+  };
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['data-app-mode'] });
+  queueMicrotask(sync);
+}

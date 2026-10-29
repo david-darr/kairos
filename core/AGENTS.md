@@ -50,3 +50,8 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
 - `bot_codex_transport.py`, `bot_event_receipts.py`, `bot_held_secrets.py`, `bot_message_tree.py`, `bot_outbound.py`.
 - `bot_policy.py`, `bot_routine_checks.py`, `bot_routine_runner.py`, `bot_schedules.py`, `bot_tool_catalog.py`.
 - `bot_tool_results.py`.
+
+Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
+- `bot_assignments.py`, `bot_chief_tools.py`, `bot_delegation_tools.py`, `bot_loop_guard.py`, `bot_room_tools.py`.
+- `bot_rooms_store.py`, `bot_team_tools.py`, `front_desk_checks.py`, `front_desk_tick.py`, `front_desk_tools.py`.
+- `front_desk_watch_adapter.py`.

@@ -294,6 +294,16 @@ app.include_router(checkpoint_routes.router)
 from routes import bot_chat_routes, bot_attention_routes
 app.include_router(bot_chat_routes.router)
 app.include_router(bot_attention_routes.router)
+# A missing optional Bots module leaves its UI's visible recovery in place.
+from importlib import import_module as _bots_import_module
+for _bots_extra_name in ("routes.bot_voice_routes", "routes.bot_onboarding_routes"):
+    try:
+        _bots_extra = _bots_import_module(_bots_extra_name)
+    except ModuleNotFoundError as _bots_missing:
+        if _bots_missing.name != _bots_extra_name:
+            raise
+    else:
+        app.include_router(_bots_extra.router)
 # Bots Phase 2 resources (memory, skills, grants, connections) beneath /api/bots, one aggregate router.
 from routes import bot_resources_routes; app.include_router(bot_resources_routes.router)
 from routes import bot_teams_routes; app.include_router(bot_teams_routes.router)

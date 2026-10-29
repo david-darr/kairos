@@ -14,9 +14,55 @@ import { createMascot } from './mascot.js';
 // while speaking, and a halo swells with the level. The orb core stays as
 // the fallback when Show Kip is off.
 const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listening', transcribing: 'thinking', thinking: 'thinking', speaking: 'speaking', paused: 'sleeping' };
+let ongoingCall = null;
 
 export function agentCall(agent, controller) {
+  if (ongoingCall?.isActive()) {
+    const current = ongoingCall;
+    const button = el('span', { class: 'agent-call-slot' });
+    button.append(el('button', { type: 'button', class: 'agent-call-open btn quiet', text: 'Return to call', onclick: () => current.restore() }));
+    let replacement = null, dead = false, summaryTimer = null;
+    const refreshSummary = async (id, attempt = 0) => {
+      if (dead || attempt > 90) return;
+      try {
+        const record = await api(`/api/agent-calls/${id}`, { toast: false });
+        if (dead) return;
+        if (record.summary_state === 'saved') { await controller.summarySaved?.(record); return; }
+        if (record.summary_state === 'failed') return;
+      } catch { /* a later check can recover a pending summary */ }
+      summaryTimer = setTimeout(() => refreshSummary(id, attempt + 1), 2000);
+    };
+    const ended = event => {
+      if (dead || event.detail.active || current.isActive()) return;
+      document.removeEventListener('kairos:bots-call-state', ended);
+      replacement = agentCall(agent, controller); button.replaceChildren(replacement.button);
+      if (event.detail.callId && event.detail.agentId === agent.id && event.detail.sessionId === controller.sessionId()) refreshSummary(event.detail.callId);
+    };
+    document.addEventListener('kairos:bots-call-state', ended);
+    return { button, update() {}, dispose() { dead = true; clearTimeout(summaryTimer); document.removeEventListener('kairos:bots-call-state', ended); replacement?.dispose(); button.remove(); } };
+  }
   let recorder = null, active = false, disposed = false, starting = false, epoch = 0;
+  let minimized = false, detached = false, callBar = null, lastActivity = Date.now();
+  let livePrefs = { voice: 'marin', read_typed: false, idle_minutes: 5 };
+  let readingTyped = false;
+  const emitState = () => {
+    document.documentElement.dataset.botsCallActive = String(active);
+    document.dispatchEvent(new CustomEvent('kairos:bots-call-state', { detail: { agentId: agent.id, sessionId: controller.sessionId(), callId: transport.record?.id || null, active, minimized, muted: microphoneMuted, startedAt } }));
+    callBar?.refresh();
+  };
+  const restore = () => { minimized = false; if (!dialog.open) dialog.showModal(); emitState(); };
+  const minimize = async () => {
+    if (!active) return;
+    minimized = true; cancelHold(); dialog.close();
+    try {
+      const { mountCallBar } = await import('./botsCallBar.js');
+      if (!active || disposed) return;
+      callBar ||= mountCallBar({ agent, snapshot: () => ({ active, minimized, muted: microphoneMuted, startedAt }),
+        mute: () => setMicrophoneMuted(!microphoneMuted), hangup, restore,
+        onSettings: () => { document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section: 'bot-voice' } })); minimize(); } });
+      emitState();
+    } catch { minimized = false; if (!dialog.open) dialog.showModal(); error.textContent = 'Call bar could not load. The call is still open.'; }
+  };
   let microphoneMuted = false, assistantMuted = false, state = 'setup';
   let pending = null, startedAt = 0, timer = null, downloadTimer = null;
   let voices = [], speech = null, wordTimer = null, speechFlushTimer = null;
@@ -138,7 +184,7 @@ export function agentCall(agent, controller) {
   dialog.addEventListener('keydown', keyDown); dialog.addEventListener('keyup', keyUp); window.addEventListener('blur', loseFocus);
   document.addEventListener('visibilitychange', visibilityChanged);
   function visibilityChanged() { if (document.hidden) loseFocus(); }
-  const chat = action('Chat', () => { if (!active) { hangup(); return; } const speaking = state === 'speaking'; setMicrophoneMuted(true); stopPlayback(); if (speaking) listen(); dialog.close(); });
+  const chat = action('Chat', () => { if (!active) { hangup(); return; } minimize(); });
   const close = action('Close', () => hangup());
   dialog.append(el('header', { class: 'agent-call-header' }, [clock,
     el('div', { class: 'agent-call-tabs' }, [chat, el('span', { text: 'Voice', 'aria-current': 'page' })]), close]),
@@ -159,7 +205,7 @@ export function agentCall(agent, controller) {
     onLevel:level=>{if(active&&state==='speaking')orb.style.setProperty('--word',String(level));},
     getVoice: () => voices.find(item => item.name === voice.value) || resolveVoice(voices),
     onStart: () => { if (active) { setState('speaking', `${agent.name} is speaking. Interrupt to speak.`); if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms})}).catch(()=>{}); } } },
-    onEnd: () => { if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${agent.name} is finishing the reply...`);else listen(); scheduleFlush(); } },
+    onEnd: () => { if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${agent.name} is finishing the reply...`);else listen(); scheduleFlush(); } },
     onBoundary: () => {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
@@ -167,7 +213,7 @@ export function agentCall(agent, controller) {
       orb.style.setProperty('--word', '1'); clearTimeout(wordTimer);
       wordTimer = setTimeout(() => orb.style.setProperty('--word', '0'), 180);
     },
-    onError: () => { if (active) error.textContent = 'Voice playback failed. Check the selected device voice or mute the assistant to continue.'; },
+    onError: () => { if (active) { error.textContent = 'Voice playback failed. Check the selected device voice or mute the assistant to continue.'; if (readingTyped) { stopPlayback(); listen(); } } },
   };
   const deviceSpeaker=createSpeaker(speakerOptions), localSpeaker=neuralSpeaker(speakerOptions,neural.selection);
   const selectedSpeaker=()=>neural.selection().provider==='neural'?localSpeaker:deviceSpeaker;
@@ -177,6 +223,8 @@ export function agentCall(agent, controller) {
   voice.onchange = () => { try { localStorage.setItem(voiceKey, voice.value); } catch {} };
   function setState(next, text) {
     state = next; dialog.dataset.state = next; status.textContent = text;
+    if (['speaking', 'thinking', 'transcribing'].includes(next)) lastActivity = Date.now();
+    emitState();
     callMascot.setAttribute('state', CALL_MASCOT[next] || 'idle');
     if (next !== 'listening') orb.style.setProperty('--level', '0');
     if (next !== 'speaking') orb.style.setProperty('--word', '0');
@@ -185,9 +233,19 @@ export function agentCall(agent, controller) {
   async function loadSetup() {
     const token = epoch; start.disabled = true;
     try {
-      const [nextSpeech, available, choices, _, liveChoices] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/agent-calls/live-choices')]);
+      const [nextSpeech, available, choices, _, liveChoices, prefs] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/agent-calls/live-choices'), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null)]);
       if (disposed || epoch !== token || active || !dialog.open) return;
       liveEndpoint.replaceChildren(...liveChoices.map(e=>el('option',{value:e.id,text:e.name})));
+      if (prefs) { livePrefs = prefs; liveVoiceChoice.value = prefs.voice; }
+      if (agent.call_mode === 'live' && liveChoices.length) { callMode.value = 'cloud'; cloudSetup.hidden = false; }
+      else if (agent.call_mode === 'turns') { callMode.value = 'local'; cloudSetup.hidden = true; }
+      if (agent.voice_id) {
+        const profile = neural.node.querySelector('[aria-label="Neural voice profile"]');
+        const provider = neural.node.querySelector('[aria-label="Voice provider"]');
+        if ([...profile.options].some(option => option.value === agent.voice_id)) {
+          profile.value = agent.voice_id; provider.value = 'neural'; profile.dispatchEvent(new Event('change'));
+        }
+      }
       endpoints=choices;let savedConversation={};try{savedConversation=JSON.parse(localStorage.getItem(conversationKey)||'{}');}catch{}
       conversation.replaceChildren(el('option',{value:'',text:'Choose a connection'}),...endpoints.map(e=>el('option',{value:e.id,text:e.name})));
       conversation.value=endpoints.some(e=>e.id===savedConversation.endpoint)?savedConversation.endpoint:'';conversationModel.value=savedConversation.model||endpoints.find(e=>e.id===conversation.value)?.model||'';
@@ -263,9 +321,11 @@ export function agentCall(agent, controller) {
     // Change state first so the speaker's cancel callback cannot resume capture.
     if (state === 'speaking') state = 'paused';
     speaker.cancel();
+    if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); }
   }
   async function setMicrophoneMuted(value) {
     microphoneMuted = value;
+    emitState();
     if(callMode.value==='cloud'){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
     microphone.setAttribute('aria-pressed', String(value)); microphone.textContent = value ? 'Unmute microphone' : 'Mute microphone';
     if (value) { cancelHold(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; }
@@ -396,6 +456,7 @@ export function agentCall(agent, controller) {
   }
   setup.addEventListener('submit', async event => {
     event.preventDefault(); if (active || starting) return;
+    if (ongoingCall?.isActive()) { ongoingCall.restore(); return; }
     if (callMode.value==='local' && (!speech?.models?.some(item => item.name === model.value && item.downloaded) || !neural.ready() || (neural.selection().provider==='device'&&!voices.length))) { start.textContent = 'Start call'; await loadSetup(); return; }
     starting = true; start.disabled = true; error.textContent = '';
     const token = ++epoch;
@@ -425,8 +486,8 @@ export function agentCall(agent, controller) {
       await openMicrophone();
       if (!active || epoch !== token) return;
       }
-      setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = callMode.value==='cloud'||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = Date.now(); listen();
-      timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }, 1000);
+      setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = callMode.value==='cloud'||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) { if (epoch === token) { active = false; live.stop();transport.end();recorder?.close(); recorder = null; setState('setup','Call could not start');error.textContent = problem.message; } }
     finally { starting = false; start.disabled = false; }
   });
@@ -438,6 +499,8 @@ export function agentCall(agent, controller) {
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
     setState('setup', 'Ready when you are'); dialog.close(); button.classList.remove('is-call-active');
+    minimized = false; ongoingCall = null; callBar?.destroy(); callBar = null; emitState();
+    if (detached) cleanup();
   }
   dialog.addEventListener('cancel', event => { event.preventDefault(); hangup(); });
   async function loadPendingSummaries() {
@@ -450,5 +513,22 @@ export function agentCall(agent, controller) {
     if(disposed||attempt>90)return;
     setTimeout(async()=>{if(disposed)return;try{const record=await api(`/api/agent-calls/${id}`);if(record.summary_state==='saved'){await controller.summarySaved(record);summaryStatus.textContent='Call summary saved in chat.';}else if(record.summary_state==='pending')watchSummary(id,attempt+1);else await loadPendingSummaries();}catch{}},2000);
   }
-  return { button, update() {}, dispose() { disposed = true; hangup();transport.dispose();localSpeaker.dispose(); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); } };
+  const settingsChanged = event => { livePrefs = event.detail; };
+  const botSaved = event => { if (event.detail?.agentId === agent.id && event.detail.agent) Object.assign(agent, event.detail.agent); };
+  const typedReply = async event => {
+    if (!active || assistantMuted || !livePrefs.read_typed || event.detail.agentId !== agent.id || voiceBusy || state === 'speaking') return;
+    const mine = epoch;
+    try {
+      const prepared = await api('/api/bot-voice/speak/prepare', { method: 'POST', toast: false, body: JSON.stringify({ text: event.detail.text.slice(0, 100000), voice_id: null }) });
+      if (!active || epoch !== mine || assistantMuted || voiceBusy || state === 'speaking' || !livePrefs.read_typed || prepared.withheld) return;
+      const text = prepared.blocks.slice(0, 3).join(' ') + (prepared.blocks.length > 3 ? ' The full answer is in the chat.' : '');
+      if (!text) return;
+      readingTyped = true; if (callMode.value === 'cloud') live.muteMicrophone(true); say(text);
+    } catch { if (active && epoch === mine) error.textContent = 'Typed reply speech could not load. The reply is in chat.'; }
+  };
+  document.addEventListener('kairos:bots-live-settings', settingsChanged);
+  document.addEventListener('kairos:bots-typed-reply', typedReply);
+  document.addEventListener('kairos:bots-saved', botSaved);
+  function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
+  return { button, minimize, restore, update() {}, dispose() { if (active) { detached = true; minimize(); button.remove(); } else { hangup(); cleanup(); } } };
 }

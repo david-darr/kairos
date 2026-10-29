@@ -1,0 +1,68 @@
+const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
+module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, capture }) => {
+  const q = JSON.stringify, originalSize = win.getContentSize();
+  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined,
+    botsOnboarding: { welcome_seen: false, tour: { done: true, step: 0, variant: 'simple' }, hints_seen: [], notices: {}, log: [] } });
+  const call = (path, method = 'GET', body) => js(`fetch(${q(path)},{method:${q(method)},headers:{'Content-Type':'application/json'},body:${body ? q(JSON.stringify(body)) : 'undefined'}}).then(r=>r.json())`);
+  const clickText = (selector, text) => js(`(()=>{const n=[...document.querySelectorAll(${q(selector)})].find(n=>n.textContent.trim()===${q(text)});if(!n)throw new Error('Missing '+${q(text)});n.click();return true;})()`);
+  const escape = () => js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+  let botId, sid;
+  try {
+    await win.loadURL(base); await waitFor("!!document.querySelector('.dashboard-core')");
+    botId = (await call('/api/agents', 'POST', { name: `Welcome ${Date.now()} ${Math.random()}` })).id;
+    sid = (await call(`/api/agents/${botId}/threads`, 'POST', { title: 'Welcome checks' })).id;
+    assert.ok(botId && sid);
+    await navigate('botsShell', { agentId: botId, sessionId: sid });
+    await waitFor("!!document.querySelector('.bots-welcome[open]')");
+    assert.equal(await js("document.querySelectorAll('.bots-welcome-dash').length"), 2);
+    await js("document.querySelectorAll('.bots-welcome-dash')[1].click()");
+    await waitFor("document.querySelectorAll('.bots-setup-row').length===6");
+    assert.equal(await js("document.querySelector('[data-check=model] .bots-setup-status').textContent"), 'Ready');
+    await js("document.querySelector('[data-check=computer] button').click()");
+    await waitFor("!document.querySelector('.bots-welcome') && !!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
+    assert.ok(demoState.botsOnboarding.welcome_seen);
+    await js("document.querySelector('.settings-titlebar-btn[title=Close]').click()");
+    await navigate('home'); await navigate('botsShell', { agentId: botId, sessionId: sid }); await delay(300);
+    assert.equal(await js("!!document.querySelector('.bots-welcome')"), false, 'welcome shown once');
+    await navigate('settings', { section: 'bots' }); await waitFor("!!document.querySelector('[data-bots-settings]')");
+    for (const [label, value, attr] of [['Interface', 'advanced', 'botsInterface'], ['Send key', 'shift-enter', 'botsSendKey'], ['Chat width', 'wide', 'botsWidth'], ['Chat font', 'serif', 'botsChatFont']]) {
+      await js(`(()=>{const node=document.querySelector('[data-bots-settings] select[aria-label="${label}"]');node.value=${q(value)};node.dispatchEvent(new Event('change'));return true;})()`);
+      assert.equal(await js(`document.documentElement.dataset[${q(attr)}]`), value);
+    }
+    await clickText('[data-bots-settings] [role=switch]', 'Show tool calls');
+    assert.equal(await js("document.documentElement.dataset.botsTools"), 'false');
+    await clickText('[data-bots-settings] button', 'Replay welcome'); await waitFor("!!document.querySelector('.bots-welcome[open]')");
+    await clickText('.bots-welcome button', 'Not now');
+    await clickText('[data-bots-settings] button', 'Replay tour');
+    await waitFor("!!document.querySelector('.bots-spotlight-tip')");
+    assert.ok(await js("document.querySelector('.bots-spotlight-tip').getAttribute('aria-modal')==='true'"));
+    await escape(); await waitFor("!document.querySelector('.bots-spotlight')");
+    assert.ok(demoState.botsOnboarding.tour.done);
+    await navigate('settings', { section: 'bots' }); await waitFor("!!document.querySelector('[data-bots-settings]')");
+    assert.equal(await js(`document.querySelector('[aria-label="Chat width"]').value`), 'wide');
+    await clickText('[data-bots-settings] button', 'Check setup'); await waitFor("document.querySelectorAll('[data-bots-settings] .bots-setup-row').length===6");
+    await win.setContentSize(390, 844); await delay(150);
+    assert.ok(await js("[...document.querySelectorAll('[data-bots-settings] button,[data-bots-settings] input,[data-bots-settings] select,[data-bots-settings] a')].filter(n=>n.getBoundingClientRect().width).every(n=>n.getBoundingClientRect().height>=44)"));
+    await capture?.('phone-bots-onboarding');
+    // The public notice and hint lanes: wait for a dialog to close, then show one at a time.
+    await js("document.dispatchEvent(new CustomEvent('kairos:bots-notice',{detail:{id:'fixture-notice',text:'A check notice'}}))");
+    await delay(150); assert.equal(await js("document.querySelector('.bots-notices').hidden"), true, 'notices wait for Settings');
+    await js("document.querySelector('.settings-titlebar-btn[title=Close]').click()");
+    await waitFor("document.querySelector('.bots-notices:not([hidden])')?.textContent.includes('A check notice')");
+    await clickText('.bots-notices button', 'Got it'); await waitFor("document.querySelector('.bots-notices').hidden");
+    await js("document.dispatchEvent(new CustomEvent('kairos:bots-notice',{detail:{id:'fixture-notice',text:'Must not return'}}))"); await delay(100);
+    assert.equal(await js("document.querySelector('.bots-notices').hidden"), true);
+    await js("(()=>{const node=document.createElement('div');node.id='hint-check';node.dataset.richKind='widget';document.querySelector('.bots-chat-host').append(node);return true;})()");
+    await waitFor("!!document.querySelector('#hint-check .bots-card-hint')");
+    assert.ok(demoState.botsOnboarding.hints_seen.includes('widget'));
+    await js("(()=>{const node=document.createElement('div');node.id='hint-check-twice';node.dataset.richKind='widget';document.querySelector('.bots-chat-host').append(node);return true;})()");
+    await delay(100); assert.equal(await js("!!document.querySelector('#hint-check-twice .bots-card-hint')"), false);
+  } finally {
+    await js("document.querySelector('#hint-check')?.remove();document.querySelector('#hint-check-twice')?.remove();import('/static/js/botsTour.js').then(m=>m.closeTour());document.querySelector('.settings-titlebar-btn[title=Close]')?.click()").catch(() => {});
+    await navigate('home').catch(() => {});
+    if (sid) await call(`/api/agents/${botId}/threads/delete`, 'POST', { thread_ids: [sid] }).catch(() => {});
+    if (botId) await call(`/api/agents/${botId}`, 'DELETE').catch(() => {});
+    await win.setContentSize(...originalSize); await restore();
+  }
+};
