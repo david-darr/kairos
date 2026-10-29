@@ -114,11 +114,8 @@ module.exports = ({ state, now }) => {
     let m;
     if (route === '/api/bot-chat/presence' && method === 'POST') { r.log.push(['presence', body]); return { ok: true }; }
     if (!(m = route.match(/^\/api\/bot-chat\/([^/]+)\/(send|interrupt|regenerate|active-branch|pin|read|compact|queue\/resume|queue\/([^/]+)(?:\/(edit|steer))?|messages\/([^/]+)\/(edit|reaction))$/))) return undefined;
-<<<<<<< HEAD
     if (state.botsRuntime?.convs?.[m[1]]) return undefined;   // the runtime fixture owns its own conversations
-=======
     if (!owned(m[1])) return undefined;   // not ours: fall through to the next fixture
->>>>>>> bots/phase1
     const sid = m[1], s = store(sid), what = m[2];
     if (what === 'send' && method === 'POST') {
       const plan = r.failNext; r.failNext = null;
