@@ -174,7 +174,7 @@ export async function render(container, tabId, options = {}) {
       const next = (await api(`/api/agents/${encodeURIComponent(agent.id)}`))?.agent;
       if (disposed || !next) return;
       agent = { ...agent, ...next };
-      chat?.update({ agent: next });
+      chat?.update?.({ agent: next });
       nameEl.textContent = agent.name; roleEl.textContent = agent.role || ''; shell.dataset.botName = agent.name;
       withBotColor(shell, agent.color);
       paintState();
@@ -200,11 +200,15 @@ export async function render(container, tabId, options = {}) {
     closeChat();
     currentId = id; rememberThread(agent.id, id);
     paintConvos(); paintTitle(); paintState();
-    const next = await mountBotsChat(chatHost, { agent, sessionId: id, initialMessage: landOn, onRetry: () => openThread(id),
-      onThreadChanged: () => { readThreads(); }, mentions: () => visibleBots(knownBots).filter(bot => bot.id !== agent.id) });
+    // The front desk (Phase 5) has its own page around the conversation: Chat, Tasks and Make tabs.
+    const next = agent.builtin === 'front_desk'
+      ? (await import('../botsFrontDesk.js')).mountFrontDesk(chatHost, { agent, sessionId: id, onThreadChanged: () => { readThreads(); } })
+      : await mountBotsChat(chatHost, { agent, sessionId: id, initialMessage: landOn, onRetry: () => openThread(id),
+        onThreadChanged: () => { readThreads(); }, mentions: () => visibleBots(knownBots).filter(bot => bot.id !== agent.id) });
     if (disposed || mine !== opening || !shell.isConnected) { next.dispose(); return; }
     chat = next;
-    active = { owner: shell, jumpToMessage: next.jumpToMessage, insert: next.insert, focus: next.focus, sessionId: () => id };
+    const none = () => {};
+    active = { owner: shell, jumpToMessage: next.jumpToMessage || none, insert: next.insert || none, focus: next.focus || none, sessionId: () => id };
     paintState();
   }
   async function newThread() {
@@ -212,7 +216,7 @@ export async function render(container, tabId, options = {}) {
       const created = await api(`/api/agents/${encodeURIComponent(agent.id)}/chat`, { method: 'POST' });
       await readThreads();
       await openThread(created.id);
-      chat?.focus();
+      chat?.focus?.();
     } catch (problem) { toast(problem.message, 'error'); }
   }
   async function deleteThread(item) {

@@ -5,7 +5,7 @@ import { lifetime } from './botsWorkbenchModel.js';
 
 export async function mount(host, ctx = {}) {
   loadBotsCss('/static/css/bots.css'); loadBotsCss('/static/css/bots-workbench.css');
-  const life = lifetime(ctx), root = el('div', { 'data-app-mode': 'bots' });
+  const life = lifetime(ctx), root = el('div', { 'data-app-mode': 'bots', 'data-section': 'computers' });
   host.replaceChildren(root);
   async function refresh() {
     root.replaceChildren(el('p', { role: 'status', text: 'Loading computers' }));

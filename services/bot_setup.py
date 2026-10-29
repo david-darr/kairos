@@ -109,7 +109,11 @@ def suggestions(bot_id, user, *, generator=None):
 def request(bot_id, user):
     bot_attention.require_bot(bot_id, user)
     row = _read()["requests"].get(bot_id)
-    return copy.deepcopy(row) if row and row.get("owner_user") == user else {"state": "none"}
+    mine = copy.deepcopy(row) if row and row.get("owner_user") == user else None
+    shown = mine or {"state": "none"}
+    # The card shows only while setup is still open: never after it was sent or the person closed it.
+    shown["eligible"] = (shown["state"] not in ("sent", "closed")) and eligible(bot_id, user)
+    return shown
 
 
 async def pick(bot_id, thread_id, text, user):

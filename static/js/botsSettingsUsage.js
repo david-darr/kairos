@@ -6,7 +6,7 @@ import { cost } from './botsUsageModel.js';
 
 export async function mount(host, ctx = {}) {
   loadBotsCss('/static/css/bots.css'); loadBotsCss('/static/css/bots-usage.css');
-  const root = h('section', { 'data-app-mode': 'bots', class: 'bots-usage' });
+  const root = h('section', { 'data-app-mode': 'bots', class: 'bots-usage', 'data-section': 'usage' });
   const budget = h('div'), usage = h('div'), plan = h('div');
   root.append(h('h2', { text: 'Usage and spend' }), budget, usage, plan); host.replaceChildren(root);
   let dead = false, generation = 0, controls = [];
@@ -52,7 +52,7 @@ export async function mount(host, ctx = {}) {
 
 export async function mountHousekeeping(host, ctx = {}) {
   loadBotsCss('/static/css/bots.css'); loadBotsCss('/static/css/bots-usage.css');
-  const root = h('section', { 'data-app-mode': 'bots', class: 'bots-usage' });
+  const root = h('section', { 'data-app-mode': 'bots', class: 'bots-usage', 'data-section': 'housekeeping' });
   host.replaceChildren(root);
   const abort = new AbortController();
   let dead = false;

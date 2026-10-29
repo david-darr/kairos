@@ -82,6 +82,9 @@ const NAV_ICONS = {
   "bot-about-you": I('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),
   "bot-skill-library": I('<path d="M4 5a2 2 0 012-2h12v16H6a2 2 0 00-2 2V5z"/><path d="M8 7h6"/>'),
   "bot-logins": I('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>'),
+  "bot-usage": I('<path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1117.4 0"/>'),
+  "bot-housekeeping": I('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'),
+  "bot-computers": I('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
 
@@ -114,6 +117,14 @@ const SECTION_GROUPS = [
         description: "What your bots know about you, including facts you can review and remove.", keywords: ["bots", "profile", "about you", "memory"] },
       { id: "bot-skill-library", label: "Skill library", render: (body) => renderBotResource(body, () => import("../botsSectionSkillLibrary.js")),
         description: "Reviewed procedures you can share with your bots.", keywords: ["bots", "skills", "library", "reviewed"] },
+      // Bots Phase 6: usage and spend, run-detail housekeeping, and the bots' computers.
+      { id: "bot-usage", label: "Bot usage", render: (body) => renderBotResource(body, () => import("../botsSettingsUsage.js")),
+        description: "What your bots used and cost, a monthly spend cap, and plan meters.",
+        keywords: ["bots", "usage", "spend", "cost", "budget", "cap", "tokens", "plan", "traces"] },
+      { id: "bot-housekeeping", label: "Bot housekeeping", render: (body) => renderBotResource(body, () => import("../botsSettingsUsage.js"), "mountHousekeeping"),
+        description: "How long your bots' run details are kept.", keywords: ["bots", "retention", "housekeeping", "runs", "prune"] },
+      { id: "bot-computers", label: "Bot computers", render: (body) => renderBotResource(body, () => import("../botsSettingsComputers.js")),
+        description: "Your bots' computers and the limits they run within.", keywords: ["bots", "computers", "desktop", "browser", "limits"] },
       { id: "channels", label: "Channels", render: renderChannelsPanel,
         description: "Reach Kairos and your agents from Discord, Telegram, Slack and other apps, and choose where task results and notifications go.",
         keywords: ["discord", "bot", "token", "telegram", "slack", "signal", "imessage", "email", "sms", "whatsapp", "matrix",
@@ -569,7 +580,7 @@ function visibleSections() {
   }
   return [
     ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-computers']],
     ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
     ['access', 'Access', ['account', 'users']],
     ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],
@@ -689,17 +700,25 @@ function dropBotResource() {
   botResource = null;
   try { handle?.destroy(); } catch { /* a page that is already gone */ }
 }
-async function renderBotResource(body, load) {
+async function renderBotResource(body, load, exportName = "mount") {
   const mine = renderVersion;
   const host = el("div", { class: "bots-settings-host", "data-app-mode": "bots" });
   body.replaceChildren(host);
   const module = await load();
   if (mine !== renderVersion) return;  // another page was chosen while this one loaded
   const pages = { keys: "bot-keys", apps: "bot-apps", logins: "bot-logins" };
-  botResource = module.mount(host, {
+  // Phase 6 pages mount asynchronously and clean up when their signal aborts; earlier ones return {destroy}.
+  const control = new AbortController();
+  const mounted = module[exportName](host, {
     agentId: "", state: { agent: null }, advanced: () => true, embedded: true, flush: async () => true, refresh() {},
-    go: (name) => { if (pages[name]) selectSection(pages[name]); },
+    go: (name) => { if (pages[name]) selectSection(pages[name]); }, signal: control.signal,
   });
+  botResource = {
+    destroy() {
+      control.abort();
+      Promise.resolve(mounted).then((handle) => (handle?.destroy || handle?.dispose)?.call(handle)).catch(() => {});
+    },
+  };
 }
 
 // -- Add Models (moved from Cookbook, David's ask 2026-08-31). Kairos ships

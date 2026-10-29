@@ -27,8 +27,11 @@ module.exports = ({ state }) => {
         lease_id: bot.lease_id, title: 'Workbench page', url: bot.url, last_action_at: 1, badges: ['Browser'] },
       browser: { enabled: bot.browser_enabled, profile: bot.browser_profile, sites: bot.sites }, help: bot.help };
   };
+  // Every Bots page may read the workbench (Settings' Bot computers, the panel's Access sites) before a check
+  // seeds it; a bot's record is made on demand for any bot the core lane knows. The computer route stays seeded-only.
+  const global = route => route.startsWith('/api/bot-workbench/');
   const read = (route, query = {}) => {
-    if (!state.botsLive || !state.botsWorkbench) return undefined;
+    if (!state.botsLive || (!state.botsWorkbench && !global(route))) return undefined;
     const r = root();
     if (route === '/api/bot-workbench/profiles') return r.profiles.map(p => ({ ...p, used_by: Object.entries(r.bots).filter(([, b]) => b.browser_profile === 'shared:' + p.id).map(([id, b]) => ({ id, name: b.name, running: b.running })) }));
     if (route === '/api/bot-workbench/computers') return { settings: r.settings, docker: { available: true, reason: '' },
@@ -46,7 +49,7 @@ module.exports = ({ state }) => {
     return undefined;
   };
   const mutate = (route, method, body = {}) => {
-    if (!state.botsLive || !state.botsWorkbench) return undefined;
+    if (!state.botsLive || (!state.botsWorkbench && !global(route))) return undefined;
     const r = root();
     if (route === '/api/bot-workbench/computers/settings' && method === 'PUT') {
       if (!Number.isInteger(body.max_running) || body.max_running < 1 || body.max_running > 8 || !Number.isInteger(body.idle_minutes) || body.idle_minutes < 5 || body.idle_minutes > 1440) return fail(422, 'Choose valid limits');

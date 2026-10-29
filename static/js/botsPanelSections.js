@@ -523,7 +523,12 @@ const accessSection = ctx => {
   const reach = h('div', { 'data-module': 'Reach' });
   const track = ctx.bindTrack ? ctx.bindTrack() : ctx.track;
   track?.(mountTeamModule(reach, 'reach', ctx));
-  return h('div', { 'data-panel-card': 'access' }, [modular(ctx, 'Grants', () => accessBasics(ctx), { what: 'Access' }), reach]);
+  // Signed-in sites and browser profiles (Phase 6, botsSectionSites.js); Access's own Habits card is the fallback.
+  const sites = modular(ctx, 'Sites', () => h('div'), { what: 'Signed-in sites' });
+  const profiles = h('div', { 'data-module': 'BrowserProfiles' });
+  import('./botsBrowserProfiles.js').then(m => m.mount(profiles, ctx)).then(handle => { if (handle) track?.(handle); })
+    .catch(() => profiles.replaceChildren(note('Browser profiles could not load.')));
+  return h('div', { 'data-panel-card': 'access' }, [modular(ctx, 'Grants', () => accessBasics(ctx), { what: 'Access' }), reach, sites, profiles]);
 };
 
 // -- Model -------------------------------------------------------------------------------------------------

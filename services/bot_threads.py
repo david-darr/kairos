@@ -22,7 +22,7 @@ THREAD_DEFAULTS = {
     "active_leaf_id": None, "last_read_message_id": None, "pinned_message_id": None,
     "branch_revision": 0, "queue_revision": 0, "queue_paused": False, "link": None,
 }
-OPENED_BY = ("person", "bot", "routine", "room", "handoff")
+OPENED_BY = ("person", "bot", "routine", "room", "handoff", "task")  # task: a front-desk task's own conversation
 TITLE_SOURCES = ("machine", "person", "llm")
 THREAD_APPROVAL_MODES = ("ask", "edits", "auto", "full", "custom")
 SNOOZES = ("activity", "tonight", "tomorrow", "stop")

@@ -90,10 +90,19 @@ export async function mountBotsChat(host, options) {
     const module = await import(path);
     if (disposed) return;
     const piece = await module.mount(host, { agentId: agent.id, threadId: sid, signal: control.signal, ...extra });
-    if (disposed) piece?.dispose?.(); else offs.push(() => piece?.dispose?.());
+    const end = () => (piece?.dispose || piece?.destroy)?.call(piece);  // pieces return {dispose} or {destroy}
+    if (disposed) end(); else offs.push(end);
   };
   mountPiece('./botsApprovalCards.js', cardTranscript, { slot: 'transcript' }).catch(error => console.warn('Bots cards could not load', error));
   mountPiece('./botsApprovalCards.js', cardComposer, { slot: 'composer', onPending: waiting => { composerHost.hidden = waiting; } }).catch(error => console.warn('Bots cards could not load', error));
+  // First-run setup card for a new blank bot (Phase 4). The server sends the chosen "/setup <job>" itself, so a
+  // pick only reloads the conversation; "Something else" puts "/setup " in the composer to finish by hand.
+  const setupHost = h('div', { class: 'bots-setup-host' });
+  root.insertBefore(setupHost, goalHost);
+  mountPiece('./botsSetupCard.js', setupHost, { onPick: async (text, info = {}) => {
+    if (info.other) { composer?.insert('/setup '); composer?.focus(); return; }
+    await Promise.all([refreshLatest({ keepPosition: false }), refreshState()]).catch(() => {});
+  } }).catch(error => console.warn('Bots setup card could not load', error));
   mountPiece('./botsLimitReset.js', limitHost, { stoppedByLimit: () => /limit|quota|usage/i.test(chatStream.getInFlight(sid)?.error || '') }).catch(error => console.warn('Bots limits could not load', error));
   let skillCommands = [];
   loadSkillCommands(agent.id, path => api(path, { toast: false })).then(commands => { skillCommands = commands; }).catch(error => console.warn('Bots skill commands could not load', error));
