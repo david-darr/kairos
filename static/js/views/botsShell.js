@@ -1,16 +1,15 @@
-// One bot's page (Agents 3.0 Phase 0, unit U3). Options: agentId, sessionId,
-// panel (a section id, or true), panelPage, panelCard.
+// One bot's page (Agents 3.0 Phase 0 unit U3, Phase 1 unit U3). Options: agentId, sessionId,
+// messageId (a message to land on), panel (a section id, or true), panelPage, panelCard.
 //
 // The header is the Simple pill from OMB 3.5: a 24 px live Kip, the bot's name and
 // "> thread title" when away from the main thread; pressing it opens or closes the
-// bot panel. Below it is the real conversation, mountAgentChat (agentChat.js), so
-// the chat streams, keeps its queue, model picker, permission prompts and drafts.
-// Phase 1 replaces it with the OMB chat screen. The conversation list is a popover
-// from the header's Conversations button.
+// bot panel. Below it is the conversation, mountBotsChat (botsChat.js): streaming,
+// drafts, queue, branches, search. The conversation list is a popover from the
+// header's Conversations button; it lists this bot's sessions and opens one at a time.
 //
 // The panel itself is drawn by botsPanelHost.js, which loads U4's botsPanel.js.
-import { api } from '../api.js';
-import { mountAgentChat } from '../agentChat.js';
+import { api, confirmDialog, toast } from '../api.js';
+import { mountBotsChat } from '../botsChat.js';
 import { botKip, stateForBot } from '../botsKip.js';
 import { botStatus, botStatusLine } from '../botStatus.js';
 import { loadBotsCss, withBotColor, applyBotsInterface } from '../botsUi.js';
@@ -21,6 +20,7 @@ import * as chatStream from '../chatStream.js';
 
 const SHELL_CSS = '/static/css/bots-shell.css';
 const LAST_BOT = 'kairos:bots-last-bot';
+const LAST_THREAD = 'jarvis:agent-chat:';
 const POLL_MS = 10000;
 
 function h(tag, attrs = {}, children = []) {
@@ -37,6 +37,12 @@ function h(tag, attrs = {}, children = []) {
 
 const remembered = () => { try { return localStorage.getItem(LAST_BOT) || ''; } catch { return ''; } };
 const remember = id => { try { localStorage.setItem(LAST_BOT, id); } catch { /* Device storage is optional. */ } };
+const lastThread = botId => { try { return localStorage.getItem(LAST_THREAD + botId) || ''; } catch { return ''; } };
+const rememberThread = (botId, id) => { try { id ? localStorage.setItem(LAST_THREAD + botId, id) : localStorage.removeItem(LAST_THREAD + botId); } catch { /* Device storage is optional. */ } };
+
+// The conversation that is open, for the navigation layer: land on a message, or insert text into the composer.
+let active = null;
+export const currentBotsChat = () => active;
 const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
 
 // The Kip beat that goes with a change of state (OMB's beats, 1.4 s).
@@ -88,11 +94,14 @@ export async function render(container, tabId, options = {}) {
     'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'bots-convos' }, [icon('messages-square', { size: 18 })]);
   const header = h('header', { class: 'bots-shell-header' }, [back, pill, statusEl, h('span', { class: 'bots-head-fill' }), convoButton]);
 
-  // -- Conversations popover: the list mountAgentChat draws ---------------------------
+  // -- Conversations popover ---------------------------------------------------------------------
   const convos = h('div', { id: 'bots-convos', class: 'bots-convos', role: 'dialog', 'aria-label': `Conversations with ${agent.name}`, hidden: true });
+  const convoList = h('div', { class: 'bots-convo-list', role: 'list', 'aria-label': `Chats with ${agent.name}` });
+  const newConvo = h('button', { type: 'button', class: 'bots-btn bots-convo-new', text: 'New conversation' });
+  convos.append(h('div', { class: 'bots-convo-head' }, [h('h3', { text: 'Conversations' }), newConvo]), convoList);
   const setConvos = open => {
     convos.hidden = !open; convoButton.setAttribute('aria-expanded', String(open));
-    if (open) (convos.querySelector('.agent-chat-item.active .agent-chat-open, .agent-chat-open, .agent-chat-new') || convos).focus?.();
+    if (open) (convos.querySelector('.bots-convo-item.active .bots-convo-open, .bots-convo-open, .bots-convo-new') || convos).focus?.();
   };
   convoButton.addEventListener('click', () => { const open = convos.hidden; setConvos(open); if (!open) convoButton.focus(); });
   const onKey = event => {
@@ -113,7 +122,8 @@ export async function render(container, tabId, options = {}) {
   document.dispatchEvent(new CustomEvent('kairos:bots-selected', { detail: { agentId: agent.id } }));
 
   // -- State: the Kip pose, the status line, the thread title --------------------------
-  const threadIds = () => new Set([...convos.querySelectorAll('.agent-chat-item')].map(item => item.dataset.session));
+  let threads = [], currentId = '';
+  const threadIds = () => new Set(threads.map(item => item.id));
   const paintState = () => {
     if (disposed) return;
     const ids = threadIds();
@@ -129,23 +139,34 @@ export async function render(container, tabId, options = {}) {
     }
   };
   const paintTitle = () => {
-    const active = convos.querySelector('.agent-chat-item.active');
-    const away = !!active && !!mainId && active.dataset.session !== mainId;
-    threadEl.textContent = away ? `> ${active.querySelector('.agent-chat-title')?.textContent || ''}` : '';
+    const activeThread = threads.find(item => item.id === currentId);
+    const away = !!activeThread && !!mainId && activeThread.id !== mainId;
+    threadEl.textContent = away ? `> ${activeThread.title || 'Untitled'}` : '';
     threadEl.hidden = !away;
     pill.setAttribute('aria-label', `${agent.name}${away ? `, ${threadEl.textContent.slice(2)}` : ''}, settings and details`);
   };
-  new MutationObserver(paintTitle).observe(convos, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
   offs.push(chatStream.subscribeAll(paintState));
   paintState(); paintTitle();
 
-  // The main thread tells which conversation needs no label: the session list carries each one's
-  // thread record (core/session_manager_store.py), and an older record has none.
-  const readMain = () => api(`/api/sessions?agent_id=${encodeURIComponent(agent.id)}`).then(list => {
-    if (disposed) return;
-    mainId = String((Array.isArray(list) ? list.find(item => item.thread?.main) : null)?.id || ''); paintTitle();
-  }).catch(() => {});
-  readMain();
+  // The session list carries each conversation's thread record (core/session_manager_store.py), and an older
+  // record has none: the main thread is the one marked so, which needs no label in the header.
+  const paintConvos = () => {
+    convoList.replaceChildren(...threads.map(chat => h('div', { class: `bots-convo-item${chat.id === currentId ? ' active' : ''}`, role: 'listitem', 'data-session': chat.id }, [
+      h('button', { type: 'button', class: 'bots-convo-open', 'aria-current': String(chat.id === currentId), onclick: () => openThread(chat.id) }, [
+        h('span', { class: 'bots-convo-title', text: chat.title || 'Untitled' }),
+        h('span', { class: 'bots-convo-meta', text: chat.updated_at ? new Date(chat.updated_at * 1000).toLocaleDateString() : '' })]),
+      h('button', { type: 'button', class: 'bots-icon-btn bots-convo-delete', 'aria-label': `Delete ${chat.title || 'conversation'}`, title: 'Delete conversation', onclick: () => deleteThread(chat) }, [icon('trash-2', { size: 15 })]),
+    ])));
+    if (!threads.length) convoList.append(h('div', { class: 'bots-convo-none', text: 'No conversations yet.' }));
+  };
+  const readThreads = async () => {
+    const list = await api(`/api/sessions?agent_id=${encodeURIComponent(agent.id)}`).catch(() => null);
+    if (disposed || !Array.isArray(list)) return threads;
+    threads = list;
+    mainId = String(list.find(item => item.thread?.main)?.id || '');
+    paintConvos(); paintTitle();
+    return threads;
+  };
 
   // A fresh read of the bot keeps its name, job and status current while the page is open.
   const reread = async () => {
@@ -153,6 +174,7 @@ export async function render(container, tabId, options = {}) {
       const next = (await api(`/api/agents/${encodeURIComponent(agent.id)}`))?.agent;
       if (disposed || !next) return;
       agent = { ...agent, ...next };
+      chat?.update({ agent: next });
       nameEl.textContent = agent.name; roleEl.textContent = agent.role || ''; shell.dataset.botName = agent.name;
       withBotColor(shell, agent.color);
       paintState();
@@ -170,11 +192,47 @@ export async function render(container, tabId, options = {}) {
   offs.push(onBotPanelChange(paintPanel)); paintPanel(botPanelState());
 
   // -- The conversation ----------------------------------------------------------------
-  let disposeChat = () => {};
-  const mounted = await mountAgentChat(chatHost, agent, options.sessionId || null, { conversations: convos, onPick: () => setConvos(false) });
-  if (disposed || !shell.isConnected) { mounted?.(); return undefined; }
-  disposeChat = mounted || disposeChat;
-  paintState(); paintTitle();
+  let chat = null, opening = 0;
+  const closeChat = () => { chat?.dispose(); chat = null; if (active?.owner === shell) active = null; };
+  async function openThread(id, { landOn = '' } = {}) {
+    const mine = ++opening;
+    setConvos(false);
+    closeChat();
+    currentId = id; rememberThread(agent.id, id);
+    paintConvos(); paintTitle(); paintState();
+    const next = await mountBotsChat(chatHost, { agent, sessionId: id, initialMessage: landOn, onRetry: () => openThread(id),
+      onThreadChanged: () => { readThreads(); }, mentions: () => visibleBots(knownBots).filter(bot => bot.id !== agent.id) });
+    if (disposed || mine !== opening || !shell.isConnected) { next.dispose(); return; }
+    chat = next;
+    active = { owner: shell, jumpToMessage: next.jumpToMessage, insert: next.insert, focus: next.focus, sessionId: () => id };
+    paintState();
+  }
+  async function newThread() {
+    try {
+      const created = await api(`/api/agents/${encodeURIComponent(agent.id)}/chat`, { method: 'POST' });
+      await readThreads();
+      await openThread(created.id);
+      chat?.focus();
+    } catch (problem) { toast(problem.message, 'error'); }
+  }
+  async function deleteThread(item) {
+    if (!await confirmDialog({ title: 'Delete this conversation?', message: `"${item.title || 'Untitled'}" will be deleted.`, confirmLabel: 'Delete conversation' })) return;
+    try { await api(`/api/sessions/${encodeURIComponent(item.id)}`, { method: 'DELETE' }); }
+    catch (problem) { toast(problem.message, 'error'); return; }
+    await readThreads();
+    if (item.id === currentId) { rememberThread(agent.id, null); await openThread(pickThread('')); }
+  }
+  newConvo.addEventListener('click', () => { setConvos(false); newThread(); });
+  // Which conversation opens: the one asked for, the one left open last time, the main one, then the newest.
+  const pickThread = wanted => [wanted, lastThread(agent.id), mainId, threads[0]?.id].find(id => id && threads.some(item => item.id === id)) || '';
+  let knownBots = [];
+  api('/api/agents').then(list => { knownBots = Array.isArray(list) ? list : []; }).catch(() => {});
+  await readThreads();
+  if (disposed || !shell.isConnected) return undefined;
+  const first = pickThread(options.sessionId || '');
+  if (first) await openThread(first, { landOn: options.messageId || '' });
+  else await newThread();
+  if (disposed) return undefined;
 
   if (options.panel) {
     openBotSettings(agent.id, { section: typeof options.panel === 'string' ? options.panel : '', page: options.panelPage || '', card: options.panelCard || '', opener: pill });
@@ -184,7 +242,7 @@ export async function render(container, tabId, options = {}) {
     disposed = true;
     for (const off of offs) off();
     closeBotSettings({ restoreFocus: false });
-    disposeChat();
+    opening++; closeChat();
     if (document.documentElement.dataset.botsAgent === agent.id) delete document.documentElement.dataset.botsAgent;
     document.dispatchEvent(new CustomEvent('kairos:bots-selected', { detail: { agentId: '' } }));
   };
