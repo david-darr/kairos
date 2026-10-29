@@ -35,6 +35,8 @@ class TriggerBody(BaseModel):
     auto_run: Optional[bool] = None
     deliver_to_channel: Optional[str] = None
     enabled: Optional[bool] = None
+    room_id: Optional[str] = None
+    bot_id: Optional[str] = None
 
 
 class AnswerBody(BaseModel):
@@ -120,6 +122,9 @@ async def receive(trigger_id: str, request: Request) -> JSONResponse:
         return JSONResponse({"error": "too large"}, status_code=413)
     body = await request.body()
     status, content, work = trigger_service.receive(trigger_id, dict(request.headers), body)
+    if work and work["trigger"].get("action") == "post":
+        status, content = trigger_service.deliver_post(work)  # a room post needs no approval and starts no run
+        return JSONResponse(content, status_code=status)
     if work:
         try:
             started = trigger_service.start(work)
