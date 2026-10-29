@@ -26,9 +26,9 @@ scripts/.test-runtime/
 # Personal AI-assistant boot pointer (David's own CLAUDE.md/vault setup) —
 # local-only. jarvis-app is a public repo; this points at a personal path
 # and identity that has no business being published alongside the OSS code.
-# Root only (2026-10-28): the per-folder AGENTS.md maps are part of the repo;
-# the repo-wide map is the root CLAUDE.md.
-/AGENTS.md
+# Since 2026-10-28 it is AGENTS.local.md: the tracked AGENTS.md files are the
+# repository maps, and the root map tells agents to read the local file first.
+/AGENTS.local.md
 # Launcher that always grants Codex CLI write access to David's personal
 # vault path alongside this repo — same personal-path reasoning as above.
 codex-jarvis.cmd
