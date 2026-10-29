@@ -4,13 +4,13 @@ Admin only: agents always run in Auto (David, 2026-10-05), so whoever directs
 them is approving everything they do, the same rule as a chat's Auto mode."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, StrictBool
 
 from core import model_endpoints
 from core.middleware import require_admin
-from services import bot_record, bot_threads
+from services import bot_avatar_service, bot_record, bot_threads
 from services.agent_service import agent_service
 from services.task_service import task_service
 
@@ -48,6 +48,17 @@ class AgentBody(BaseModel):
     approval_mode: Optional[str] = None
     thread_limit: Optional[int] = None
     hidden: Optional[bool] = None
+    # Phase 1 identity and preference fields, checked in services/bot_record.py.
+    reply_style: Optional[str] = None
+    notifications: Optional[StrictBool] = None
+    speak_replies: Optional[StrictBool] = None
+    voice_id: Optional[str] = None
+    call_mode: Optional[str] = None
+    skill_selection: Optional[dict] = None
+    avatar_image: Optional[dict] = None
+    mascot_expression: Optional[str] = None
+    # Conflict-sensitive clients send the profile revision they last read.
+    expected_revision: Optional[int] = None
 
 
 class ConfiguredBody(BaseModel):
@@ -118,6 +129,40 @@ class MemoryBody(BaseModel):
 class SoulApplyBody(BaseModel):
     expected_file_text: Optional[str]
     expected_revision: int
+
+
+class RollbackBody(BaseModel):
+    expected_revision: int
+    expected_file_text: Optional[str]
+
+
+class UndoProposalBody(BaseModel):
+    expected_revision: int
+
+
+class AvatarImageBody(BaseModel):
+    """Apply a staged picture (or reset with asset_id null) against the avatar snapshot."""
+    model_config = {"extra": "forbid"}
+    asset_id: Optional[str] = None
+    shape: str = "circle"
+    zoom: float = Field(default=1, ge=1, le=3)
+    focus_x: float = Field(default=0.5, ge=0, le=1)
+    focus_y: float = Field(default=0.5, ge=0, le=1)
+    expected_snapshot: Optional[str] = None
+
+
+class AvatarGenerateBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    direction: str = Field(max_length=bot_avatar_service.MAX_DIRECTION_CHARS)
+    snapshot: Optional[str] = None
+
+
+class AvatarProviderBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: str
+    key: str = Field(max_length=400)
+    base_url: Optional[str] = Field(default=None, max_length=300)
+    model: Optional[str] = Field(default=None, max_length=120)
 
 
 class GoalBody(BaseModel):
@@ -227,7 +272,8 @@ async def list_agents(user: str = Depends(require_admin)) -> list[dict]:
 async def create_agent(body: AgentBody, user: str = Depends(require_admin)) -> dict:
     _check_endpoint(body.endpoint_id)
     try:
-        fields = {k: v for k, v in body.model_dump().items() if v is not None and k != "enabled"}
+        fields = {k: v for k, v in body.model_dump().items()
+                  if v is not None and k not in ("enabled", "expected_revision")}
         return _summary(agent_service.create(fields.pop("name", ""), **fields))
     except ValueError as e:
         raise _refused(e)
@@ -249,12 +295,23 @@ async def create_configured(body: ConfiguredBody, user: str = Depends(require_ad
     """One call makes a bot, its starting notes and its routines, or nothing:
     a failure undoes what was made (cleanup_errors lists anything that could
     not be undone). A routine that cannot be switched on is a warning."""
+    payload = body.model_dump(exclude_unset=True)
+    # A picture chosen before the bot exists sits in the owner's draft scope.
+    draft = (payload.get("profile") or {}).pop("avatar_image", None)
     try:
-        result = bot_record.create_configured(body.model_dump(exclude_unset=True), owner_user=user)
+        result = bot_record.create_configured(payload, owner_user=user)
     except bot_record.ConfiguredFailure as failure:
         return JSONResponse(status_code=failure.status,
                             content={"detail": failure.detail, "cleanup_errors": failure.cleanup_errors})
-    return {"agent": _summary(result["agent"]), "routines": result["routines"], "warnings": result["warnings"]}
+    agent, warnings = result["agent"], list(result["warnings"])
+    if draft:
+        try:
+            bot_record.clean_field("avatar_image", draft)
+            bot_avatar_service.adopt_draft(user, draft["asset_id"], agent["id"])
+            agent = agent_service.update(agent["id"], avatar_image=draft)
+        except ValueError as error:
+            warnings.append(f"The picture was not added: {error}")
+    return {"agent": _summary(agent), "routines": result["routines"], "warnings": warnings}
 
 
 @router.post("/order")
@@ -336,6 +393,84 @@ async def organize_conversation(kind: str, ident: str, body: ConversationAction,
     except ValueError as error: raise HTTPException(400, str(error)) from error
 
 
+# -- avatar pictures and the saved image connection (declared before /{agent_id}) -----------------
+
+async def _read_image_body(request: Request) -> bytes:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > bot_avatar_service.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="That picture is larger than 10 MB.")
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > bot_avatar_service.MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="That picture is larger than 10 MB.")
+    return bytes(data)
+
+
+def _image_response(data: bytes, mime: str) -> Response:
+    return Response(content=data, media_type=mime, headers={
+        "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+def _avatar_failure(error: ValueError) -> HTTPException:
+    if isinstance(error, bot_avatar_service.AvatarUnavailable):
+        return HTTPException(status_code=502, detail=str(error))
+    conflict = isinstance(error, (bot_record.BotConflict, bot_avatar_service.AvatarConflict))
+    return HTTPException(status_code=409 if conflict else 400, detail=str(error))
+
+
+@router.get("/section-modules")
+async def section_modules(user: str = Depends(require_admin)) -> dict:
+    """Which later-phase panel sections are installed (static/js/botsSection*.js), so the panel loads
+    only files that exist and shows its own basics for the rest."""
+    from pathlib import Path
+    folder = Path(__file__).resolve().parent.parent / "static" / "js"
+    return {"modules": sorted(p.stem[len("botsSection"):] for p in folder.glob("botsSection*.js") if p.stem != "botsSection")}
+
+
+@router.get("/avatar-provider")
+async def get_avatar_provider(user: str = Depends(require_admin)) -> dict:
+    return bot_avatar_service.provider_state()
+
+
+@router.put("/avatar-provider")
+async def put_avatar_provider(body: AvatarProviderBody, user: str = Depends(require_admin)) -> dict:
+    try:
+        return bot_avatar_service.save_provider(body.kind, body.key, body.base_url, body.model)
+    except ValueError as error:
+        raise _avatar_failure(error)
+
+
+@router.delete("/avatar-provider")
+async def delete_avatar_provider(user: str = Depends(require_admin)) -> dict:
+    return bot_avatar_service.clear_provider()
+
+
+@router.post("/avatar-drafts")
+async def upload_avatar_draft(request: Request, user: str = Depends(require_admin)) -> dict:
+    try:
+        return bot_avatar_service.store(bot_avatar_service.draft_scope(user), await _read_image_body(request))
+    except ValueError as error:
+        raise _avatar_failure(error)
+
+
+@router.post("/avatar-drafts/generate")
+async def generate_avatar_draft(body: AvatarGenerateBody, user: str = Depends(require_admin)) -> dict:
+    try:
+        return await bot_avatar_service.generate(bot_avatar_service.draft_scope(user), body.direction)
+    except ValueError as error:
+        raise _avatar_failure(error)
+
+
+@router.get("/avatar-drafts/{asset_id}")
+async def read_avatar_draft(asset_id: str, user: str = Depends(require_admin)) -> Response:
+    try:
+        return _image_response(*bot_avatar_service.read(bot_avatar_service.draft_scope(user), asset_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="picture not found")
+
+
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
     from services.agent_handoff import person_inbox
@@ -355,6 +490,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
         "runs": [r for r in task_service.list_runs() if r["task_id"] in owned_ids][:50],
         "teams": _teams(agent_id),
         "triggers": _triggers(agent_id),
+        "avatar_snapshot": bot_avatar_service.snapshot_of(agent),
     }
 
 
@@ -362,9 +498,10 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
 async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(require_admin)) -> dict:
     _require(agent_id)
     fields = body.model_dump(exclude_unset=True)
+    expected = fields.pop("expected_revision", None)
     _check_endpoint(fields.get("endpoint_id"))
     try:
-        agent = agent_service.update(agent_id, **fields)
+        agent = agent_service.update(agent_id, expected_revision=expected, **fields)
     except ValueError as e:
         raise _refused(e)
     if "name" in fields or "role" in fields:
@@ -385,6 +522,116 @@ async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depend
         return agent_service.apply_soul_file(agent_id, body.expected_file_text, body.expected_revision)
     except ValueError as e:
         raise HTTPException(status_code=409 if "stale" in str(e) else 400, detail=str(e))
+
+
+@router.post("/{agent_id}/soul/discard-file")
+async def discard_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_admin)) -> dict:
+    """Put the stored standing instructions back over a hand edit of SOUL.md."""
+    _require(agent_id)
+    try:
+        return agent_service.discard_soul_file(agent_id, body.expected_file_text, body.expected_revision)
+    except ValueError as error:
+        raise _refused(error)
+
+
+@router.get("/{agent_id}/history/{history_id}")
+async def profile_history_row(agent_id: str, history_id: str, user: str = Depends(require_admin)) -> dict:
+    """One row with its full before and after, for a diff."""
+    _require(agent_id)
+    row = next((r for r in agent_service.profile_history(agent_id, 500, True)["rows"] if r["id"] == history_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no history row with that id")
+    return row
+
+
+@router.get("/{agent_id}/memory/topics")
+async def memory_topics(agent_id: str, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    return {"topics": [{"name": name, "description": description} for name, description in agent_service.topic_index(agent_id)]}
+
+
+@router.get("/{agent_id}/history")
+async def profile_history(agent_id: str, limit: int = 100, user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        return agent_service.profile_history(agent_id, limit)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@router.post("/{agent_id}/history/{history_id}/rollback")
+async def rollback_profile(agent_id: str, history_id: str, body: RollbackBody,
+                           user: str = Depends(require_admin)) -> dict:
+    _require(agent_id)
+    try:
+        agent = agent_service.rollback_profile(agent_id, history_id, body.expected_revision, body.expected_file_text)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no history row with that id")
+    except ValueError as error:
+        raise _refused(error)
+    return {"agent": _summary(agent), "soul_file": agent_service.read_soul(agent_id)}
+
+
+@router.post("/{agent_id}/proposals/{receipt_id}/undo")
+async def undo_proposal(agent_id: str, receipt_id: str, body: UndoProposalBody,
+                        user: str = Depends(require_admin)) -> dict:
+    """Undo a change the bot made to itself, only while nothing changed after it."""
+    _require(agent_id)
+    try:
+        receipt = agent_service.undo_profile_proposal(agent_id, receipt_id, body.expected_revision)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no change with that receipt")
+    except ValueError as error:
+        raise _refused(error)
+    return {"receipt": receipt, "agent": _summary(agent_service.get(agent_id))}
+
+
+@router.get("/{agent_id}/avatar-image/{asset_id}")
+async def read_avatar_image(agent_id: str, asset_id: str, user: str = Depends(require_admin)) -> Response:
+    _require(agent_id)
+    try:
+        return _image_response(*bot_avatar_service.read(bot_avatar_service.bot_scope(agent_id), asset_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="picture not found")
+
+
+@router.post("/{agent_id}/avatar-image")
+async def upload_avatar_image(agent_id: str, request: Request, user: str = Depends(require_admin)) -> dict:
+    """Stage a picture for this bot. It is not shown until applied with PUT."""
+    agent = _require(agent_id)
+    try:
+        staged = bot_avatar_service.store(bot_avatar_service.bot_scope(agent_id), await _read_image_body(request))
+    except ValueError as error:
+        raise _avatar_failure(error)
+    return {**staged, "snapshot": bot_avatar_service.snapshot_of(agent)}
+
+
+@router.post("/{agent_id}/avatar-image/generate")
+async def generate_avatar_image(agent_id: str, body: AvatarGenerateBody, user: str = Depends(require_admin)) -> dict:
+    agent = _require(agent_id)
+    started = bot_avatar_service.snapshot_of(agent)
+    try:
+        staged = await bot_avatar_service.generate(bot_avatar_service.bot_scope(agent_id), body.direction)
+    except ValueError as error:
+        raise _avatar_failure(error)
+    return {**staged, "snapshot": body.snapshot or started}
+
+
+@router.put("/{agent_id}/avatar-image")
+async def apply_avatar_image(agent_id: str, body: AvatarImageBody, user: str = Depends(require_admin)) -> dict:
+    """Apply a staged picture and its framing, or reset to the bot's Kip (asset_id null)."""
+    agent = _require(agent_id)
+    if body.expected_snapshot and body.expected_snapshot != bot_avatar_service.snapshot_of(agent):
+        raise HTTPException(status_code=409, detail="The look changed while this picture was being made. "
+                                                   "Choose it again to use it.")
+    try:
+        if body.asset_id is None:
+            updated = agent_service.update(agent_id, avatar_image=None, mascot_expression=None)
+        else:
+            updated = agent_service.update(agent_id, avatar_image=bot_avatar_service.framing(body.model_dump()))
+    except ValueError as error:
+        raise _refused(error)
+    return _summary(updated)
 
 
 @router.delete("/{agent_id}")

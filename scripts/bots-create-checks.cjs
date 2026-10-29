@@ -24,7 +24,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   // A row-kit text field commits on blur.
   const commit = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)});
-    n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); n.blur(); return true; })()`);
+    n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); n.blur(); n.dispatchEvent(new Event('blur')); return true; })()`);
   const key = (name, selector) => js(`(() => { const t = ${selector ? `document.querySelector(${q(selector)})` : 'document.activeElement'} || document.body;
     t.dispatchEvent(new KeyboardEvent('keydown', { key: ${q(name)}, bubbles: true, cancelable: true })); return true; })()`);
   const waitWrite = async (start, path, method, matches = () => true, tries = 80) => {
@@ -370,10 +370,10 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.match(await text('#bots-u4-host .bots-back'), /Details/);
     assert.ok(await exists('#bots-u4-host [data-panel-card="soul"] textarea'), 'instructions on the Settings page');
     assert.ok(await exists('#bots-u4-host [data-panel-card="permissions"]'));
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host [role=radiogroup] [role=radio]').length"), 1, 'approval offers only Full');
-    assert.match(await js("document.querySelector('#bots-u4-host [role=radiogroup] [role=radio]').textContent"), /Full access/);
+    assert.equal(await js("document.querySelectorAll('#bots-u4-host [aria-label=Approval] [role=radio]:not([disabled])').length"), 1, 'approval offers only Full');
+    assert.match(await js("document.querySelector('#bots-u4-host [aria-label=Approval] [role=radio]').textContent"), /Full access/);
     const more = await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row .bots-row-title')].map(n => n.textContent)");
-    assert.deepEqual(more, ['Access', 'History', 'Usage'], 'the pages that are real today');
+    assert.deepEqual(more, ['Overview', 'Skills', 'Memory', 'Routines', 'Access', 'Voice and alerts', 'Who can see it', 'History', 'Usage'], 'every section that is not on Details or Settings');
     await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row')].find(n => n.textContent.includes('Access')).click()");
     await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Access'");
     assert.match(await text('#bots-u4-host .bots-back'), /Settings/);
@@ -398,9 +398,9 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     // ======================= The panel, Advanced ======================================================================================================
     await setInterfaceMode(true);
     await mountPanel('advanced');
-    await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 8");
+    await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 14");
     assert.deepEqual(await js("[...document.querySelectorAll('#bots-u4-host .bots-acc-label')].map(n => n.textContent)"),
-      ['Overview', 'Identity', 'Soul', 'Model', 'Access', 'Permissions', 'History', 'Usage'], 'the sections that are real today');
+      ['Overview', 'Identity', 'Delivery', 'Soul', 'Skills', 'Memory', 'Routines', 'Access', 'Model', 'Permissions', 'Voice and alerts', 'Who can see it', 'History', 'Usage'], 'all fourteen sections');
     assert.equal(await js("document.querySelectorAll('#bots-u4-host .bots-acc-item[data-open=true]').length"), 1, 'one open at a time');
     assert.equal(await js("document.querySelector('#bots-u4-host .bots-acc-item[data-open=true]').dataset.section"), 'overview');
     assert.ok(await js("document.getElementById('bots-u4-host').getBoundingClientRect().width > 330"), 'Advanced is wider than Simple');
@@ -418,10 +418,10 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await js("[...document.querySelectorAll('#bots-u4-host .bots-setup-step')].find(n => n.textContent.includes('standing instructions')).click()");
     await waitFor("document.querySelector('#bots-u4-host .bots-acc-item[data-open=true]')?.dataset.section === 'soul'");
     assert.ok(await exists('#bots-u4-host .bots-acc-item[data-open=true] textarea'));
-    // The step with no section to open (routines) is a plain line, not a dead link.
+    // Every step now has a section to open (routines too), so each is a link.
     await js("[...document.querySelectorAll('#bots-u4-host .bots-acc-head')].find(n => n.dataset.section === 'overview').click()");
     await waitFor("document.querySelector('#bots-u4-host .bots-acc-item[data-open=true]')?.dataset.section === 'overview'");
-    assert.equal(await js("[...document.querySelectorAll('#bots-u4-host .bots-setup-step')].find(n => n.textContent.includes('schedule')).tagName"), 'DIV');
+    assert.equal(await js("[...document.querySelectorAll('#bots-u4-host .bots-setup-step')].find(n => n.textContent.includes('schedule')).tagName"), 'BUTTON');
     // Search filters by label and keyword.
     await fill('#bots-u4-host .bots-search', 'instructions');
     await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 1");
@@ -430,7 +430,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 0");
     assert.match(await text('#bots-u4-host .bots-accordion'), /Nothing matches/);
     await fill('#bots-u4-host .bots-search', '');
-    await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 8");
+    await waitFor("document.querySelectorAll('#bots-u4-host .bots-acc-item').length === 14");
 
     // ======================= Edits: one debounced PATCH, rollback, model at once ======================================================================
     await js("[...document.querySelectorAll('#bots-u4-host .bots-acc-head')].find(n => n.dataset.section === 'identity').click()");
@@ -479,7 +479,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.ok(Array.isArray(picked.integration_ids), 'turning off "every server" sends a list');
     await js("[...document.querySelectorAll('#bots-u4-host .bots-acc-head')].find(n => n.dataset.section === 'permissions').click()");
     await waitFor("!!document.querySelector('#bots-u4-host [data-panel-card=permissions]')");
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host [data-panel-card=permissions] [role=radio]').length"), 1, 'approval offers only Full');
+    assert.equal(await js("document.querySelectorAll('#bots-u4-host [data-panel-card=permissions] [aria-label=Approval] [role=radio]:not([disabled])').length"), 1, 'approval offers only Full');
     await clearToasts();
     await commit('#bots-u4-host [data-panel-card=permissions] .bots-text-row input', '500');
     assert.match((await errorToasts()).join(' '), /1 to 200/, 'a bad run cap is refused before sending');
@@ -513,7 +513,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await js(`import('/static/js/botsPanel.js').then(P => { P.registerBotSection({ id: 'probe', label: 'Probe', iconName: 'zap', order: 90, keywords: 'later phase', render: () => { const n = document.createElement('p'); n.id = 'probe-body'; n.textContent = 'registered later'; return n; } }); return true; })`);
     await mountPanel('advanced', { section: 'probe' });
     await waitFor("!!document.querySelector('#probe-body')");
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host .bots-acc-item').length"), 9);
+    assert.equal(await js("document.querySelectorAll('#bots-u4-host .bots-acc-item').length"), 15);
 
     // ======================= Archive with Undo, the Archived panel, duplicate ============================================================================
     await mountPanel('simple');

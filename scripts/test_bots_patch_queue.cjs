@@ -236,6 +236,52 @@ const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(
     assert.equal(queue.isPending('a1'), false);
   });
 
+  await check('flushResult says whether the settings saved, and never rejects', async () => {
+    const { queue, clk, saved, server, fail } = rig();
+    assert.deepEqual(Object.keys(await queue.flushResult('a1')).sort(), ['agent', 'ok'], 'nothing pending is a success');
+    queue.update('a1', { role: 'Saved role' });
+    const good = await queue.flushResult('a1');
+    assert.equal(good.ok, true);
+    assert.equal(good.agent.role, 'Saved role');
+    assert.equal(server.a1.role, 'Saved role');
+    fail();
+    queue.update('a1', { role: 'Refused role' });
+    const bad = await queue.flushResult('a1');
+    assert.equal(bad.ok, false);
+    assert.match(bad.error.message, /already exists/);
+    assert.equal(server.a1.role, 'Saved role', 'a refused edit never reaches the record');
+    assert.equal((await queue.flushResult('a1')).ok, true, 'a failure is reported once');
+    assert.equal(saved.length, 1);
+  });
+
+  await check('a failed debounced save is still reported to the next flush (a send must not run on unchosen settings)', async () => {
+    const { queue, clk, fail, rolled } = rig();
+    fail();
+    queue.update('a1', { role: 'Will be refused' });
+    await clk.advance(400);
+    assert.equal(rolled.length, 1);
+    const result = await queue.flushResult('a1');
+    assert.equal(result.ok, false);
+    assert.equal(result.error.message, '400: a bot called Scout already exists');
+  });
+
+  await check('flushBotEdits goes through the registered queue and resolves {ok, agent}', async () => {
+    const mod = await import(pathToFileURL(path.join(__dirname, '..', 'static', 'js', 'botsPatchQueue.js')).href);
+    assert.deepEqual(await mod.flushBotEdits('a1'), { ok: true, agent: null }, 'with no panel loaded nothing can be pending');
+    const { queue, fail } = rig();
+    mod.setSharedQueue(queue);
+    queue.update('a1', { role: 'Through the shared queue' });
+    assert.equal((await mod.flushBotEdits('a1')).ok, true);
+    fail();
+    queue.update('a1', { role: 'Refused' });
+    const bad = await mod.flushBotEdits('a1');
+    assert.equal(bad.ok, false);
+    assert.ok(bad.error);
+    mod.setSharedQueue({ flushResult: () => Promise.reject(new Error('boom')) });
+    assert.equal((await mod.flushBotEdits('a1')).ok, false, 'an unexpected failure is a result, not a rejection');
+    mod.setSharedQueue(null);
+  });
+
   console.log(`PASS: ${passed.length} bots patch-queue checks`);
   for (const name of passed) console.log('  ok - ' + name);
 })().catch(error => { console.error(error); process.exit(1); });

@@ -48,7 +48,9 @@ SELECTOR = re.compile(r"(native:\S+|mcp:[^:\s]+:\S+)")
 
 # Fields a person may set through create and PATCH, beyond the original set.
 BOT_EDITABLE = ("section", "origin", "fallback", "cache_keep_warm", "place", "tool_scope", "connector_scopes",
-                "always_allow", "outbound", "approval_mode", "thread_limit", "hidden")
+                "always_allow", "outbound", "approval_mode", "thread_limit", "hidden", "reply_style",
+                "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "avatar_image",
+                "mascot_expression")
 # Changes to these do not bump the profile revision: they are not the profile,
 # and a bump would stale a pending setup Undo or SOUL.md apply.
 NO_REVISION = ("hidden", "hidden_at", "order", "folders")
@@ -56,7 +58,8 @@ NO_REVISION = ("hidden", "hidden_at", "order", "folders")
 # What a saved default or preset may carry: preferences only, never grants,
 # ids or execution state (OMB F2). Presets are narrower still.
 DEFAULT_FIELDS = ("role", "blurb", "soul", "color", "section", "daily_run_cap", "memory_upkeep", "keep_signed_in",
-                  "cache_keep_warm", "place", "thread_limit", "memory_seed", "routines")
+                  "cache_keep_warm", "place", "thread_limit", "memory_seed", "routines", "reply_style",
+                  "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "mascot_expression")
 PRESET_FIELDS = ("name", "role", "blurb", "soul", "avatar", "routines", "memory_seed")
 
 
@@ -85,7 +88,9 @@ def new_defaults() -> dict:
             "folders": [], "thread_limit": 3, "approval_mode": "full",
             "outbound": {"policy": "ask", "daily_cap": 25}, "fallback": [], "cache_keep_warm": "follow",
             "place": "auto", "tool_scope": {"allow": [], "deny": []}, "connector_scopes": {}, "always_allow": [],
-            "builtin": None}
+            "builtin": None, "reply_style": "default", "notifications": True, "speak_replies": False,
+            "voice_id": None, "call_mode": "turns", "skill_selection": {"mode": "all", "disabled": []},
+            "avatar_image": None, "mascot_expression": None}
 
 
 def upgrade(record: dict, write_soul=None) -> bool:
@@ -260,6 +265,44 @@ def clean_field(key: str, value, current: Optional[dict] = None):
     BotConflict (NotAvailableYet) for a refusal that is state."""
     if key == "section":
         return _clean_section(value)
+    if key in ("notifications", "speak_replies"):
+        if type(value) is not bool:
+            raise ValueError(f"{key} is true or false")
+        return value
+    if key == "reply_style":
+        return _choice(value, ("default", "conversational"), key)
+    if key == "call_mode":
+        return _choice(value, ("turns", "live"), key)
+    if key == "voice_id":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not re.fullmatch(r"[\w.:-]{1,200}", value):
+            raise ValueError("voice_id is a saved voice identifier, up to 200 characters")
+        return value
+    if key == "mascot_expression":
+        if value is None:
+            return None
+        return _choice(value, ("sleeping", "idle", "listening", "thinking", "speaking", "success", "needs", "error", "carry"), key)
+    if key == "skill_selection":
+        if not isinstance(value, dict) or set(value) - {"mode", "disabled"} or value.get("mode") != "all":
+            raise ValueError("skill_selection is {mode: all, disabled: []}")
+        disabled = value.get("disabled", [])
+        if not isinstance(disabled, list) or len(disabled) > 256 or any(
+                not isinstance(v, str) or not re.fullmatch(r"[\w.-]{1,160}", v) for v in disabled):
+            raise ValueError("disabled contains up to 256 skill identifiers")
+        return {"mode": "all", "disabled": list(dict.fromkeys(disabled))}
+    if key == "avatar_image":
+        if value is None:
+            return None
+        if not isinstance(value, dict) or set(value) != {"asset_id", "shape", "zoom", "focus_x", "focus_y"}:
+            raise ValueError("avatar_image needs asset_id, shape, zoom, focus_x and focus_y")
+        if not isinstance(value["asset_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", value["asset_id"]):
+            raise ValueError("invalid avatar asset")
+        _choice(value["shape"], ("circle", "rounded", "square", "kip"), "avatar shape")
+        for field, low, high in (("zoom", 1, 3), ("focus_x", 0, 1), ("focus_y", 0, 1)):
+            if type(value[field]) not in (float, int) or not low <= value[field] <= high:
+                raise ValueError(f"avatar {field} must be from {low} to {high}")
+        return dict(value)
     if value is None:
         raise ValueError(f"{key} cannot be empty")
     if key == "origin":
@@ -554,8 +597,11 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
                                  else base.get("memory_seed") or [])
         routines = clean_routines(payload["routines"] if payload.get("routines") is not None
                                   else base.get("routines") or [])
-        extras = {key: base[key] for key in ("daily_run_cap", "memory_upkeep", "keep_signed_in", "cache_keep_warm",
-                                              "place", "thread_limit") if key in base}
+        preference_keys = ("daily_run_cap", "memory_upkeep", "keep_signed_in", "cache_keep_warm", "place", "thread_limit",
+                           "reply_style", "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection",
+                           "mascot_expression")
+        extras = {key: base[key] for key in preference_keys if key in base}
+        extras.update({key: profile[key] for key in preference_keys if key in profile})
         for key in ("keep_signed_in", "memory_upkeep"):
             if payload.get(key) is not None:
                 extras[key] = payload[key]
@@ -617,7 +663,8 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
 DUPLICATE_FIELDS = ("role", "blurb", "soul", "color", "avatar", "endpoint_id", "model_override", "model_effort",
                     "integration_ids", "daily_run_cap", "section", "approval_mode", "outbound", "fallback",
                     "cache_keep_warm", "place", "tool_scope", "connector_scopes", "always_allow", "thread_limit",
-                    "memory_upkeep")
+                    "memory_upkeep", "reply_style", "notifications", "speak_replies", "voice_id", "call_mode",
+                    "skill_selection", "mascot_expression")
 
 
 def duplicate_name(source_name: str, taken) -> str:
@@ -671,8 +718,8 @@ def overview(agent: dict) -> dict:
     if not agent.get("enabled", True):
         wont.append("It is turned off, so it will not run until you turn it on.")
     wont.append(f"It stops after {agent.get('daily_run_cap')} runs a day.")
-    wont.extend(f"It never uses {selector}." for selector in scope.get("deny", []))
-    wont.extend(f"It has no access to {app_id}." for app_id, level in (agent.get("connector_scopes") or {}).items()
+    wont.extend(f"Saved, not enforced yet: avoid {selector}." for selector in scope.get("deny", []))
+    wont.extend(f"Saved, not enforced yet: turn off {app_id}." for app_id, level in (agent.get("connector_scopes") or {}).items()
                 if level == "off")
     integrations = agent.get("integration_ids")
     setup = [

@@ -13,7 +13,11 @@ const SECTIONS = ['About this work', 'Preferences', 'Corrections', 'Notes'];
 const COLORS = ['#d9b260', '#b9d2e3', '#e8c39e', '#d99a92', '#b5c7a5', '#cdbfd9'];
 const NAMES = ['Juniper', 'Maple', 'Pebble', 'Tansy', 'Wren', 'Sorrel', 'Fennel', 'Cricket'];
 const BOT_EDITABLE = ['section', 'origin', 'fallback', 'cache_keep_warm', 'place', 'tool_scope', 'connector_scopes',
-  'always_allow', 'outbound', 'approval_mode', 'thread_limit', 'hidden'];
+  'always_allow', 'outbound', 'approval_mode', 'thread_limit', 'hidden', 'reply_style', 'notifications', 'speak_replies', 'voice_id',
+  'call_mode', 'skill_selection', 'avatar_image', 'mascot_expression'];
+const EXPRESSIONS = ['sleeping', 'idle', 'listening', 'thinking', 'speaking', 'success', 'needs', 'error', 'carry'];
+// Routes other units or lanes own under /api/agents: the generic bot-id matcher must never answer them.
+const RESERVED = ['inbox', 'section-modules', 'avatar-provider', 'avatar-drafts'];
 const NO_REVISION = ['hidden', 'hidden_at', 'order', 'folders'];
 const THREAD_DEFAULTS = () => ({ main: false, folder_id: null, pinned: false, archived_at: null, snoozed_until: null,
   approval_mode: null, place: null, unread: false, last_read_index: null, pinned_message_index: null,
@@ -21,7 +25,8 @@ const THREAD_DEFAULTS = () => ({ main: false, folder_id: null, pinned: false, ar
 const DEFAULTS = () => ({ section: null, origin: { kind: 'blank' }, hidden: false, hidden_at: null, order: null,
   folders: [], thread_limit: 3, approval_mode: 'full', outbound: { policy: 'ask', daily_cap: 25 }, fallback: [],
   cache_keep_warm: 'follow', place: 'auto', tool_scope: { allow: [], deny: [] }, connector_scopes: {},
-  always_allow: [], builtin: null });
+  always_allow: [], builtin: null, reply_style: 'default', notifications: true, speak_replies: false, voice_id: null, call_mode: 'turns',
+  skill_selection: { mode: 'all', disabled: [] }, avatar_image: null, mascot_expression: null });
 
 class Refusal extends Error { constructor(status, detail, extra = {}) { super(detail); this.status = status; this.extra = extra; } }
 const bad = (detail) => new Refusal(400, detail);
@@ -39,6 +44,7 @@ const approval = (v, label = 'approval_mode', allowed = APPROVAL) => {
   return mode;
 };
 
+let seeded0 = () => ({});
 function clean(key, value, current) {
   if (key === 'section') {
     if (value === null) return null;
@@ -46,6 +52,28 @@ function clean(key, value, current) {
     const text = value.split(/\s+/).filter(Boolean).join(' ');
     if (text.length > 60) throw bad('section is limited to 60 characters');
     return text || null;
+  }
+  if (key === 'notifications' || key === 'speak_replies') { if (typeof value !== 'boolean') throw bad(`${key} is true or false`); return value; }
+  if (key === 'reply_style') return choice(value, ['default', 'conversational'], key);
+  if (key === 'call_mode') return choice(value, ['turns', 'live'], key);
+  if (key === 'voice_id') { if (value === null) return null; if (typeof value !== 'string' || !/^[\w.:-]{1,200}$/.test(value)) throw bad('voice_id is a saved voice identifier'); return value; }
+  if (key === 'mascot_expression') return value === null ? null : choice(value, EXPRESSIONS, key);
+  if (key === 'skill_selection') {
+    if (!value || typeof value !== 'object' || value.mode !== 'all' || Object.keys(value).some(k => !['mode', 'disabled'].includes(k))) throw bad('skill_selection is {mode: all, disabled: []}');
+    const disabled = value.disabled || [];
+    if (!Array.isArray(disabled) || disabled.length > 256 || disabled.some(v => typeof v !== 'string' || !/^[\w.-]{1,160}$/.test(v))) throw bad('disabled contains up to 256 skill identifiers');
+    return { mode: 'all', disabled: [...new Set(disabled)] };
+  }
+  if (key === 'avatar_image') {
+    if (value === null) return null;
+    const keys = ['asset_id', 'shape', 'zoom', 'focus_x', 'focus_y'];
+    if (typeof value !== 'object' || keys.some(k => !(k in value)) || Object.keys(value).some(k => !keys.includes(k))) throw bad('avatar_image needs asset_id, shape, zoom, focus_x and focus_y');
+    if (!/^[0-9a-f]{32}$/.test(String(value.asset_id))) throw bad('invalid avatar asset');
+    choice(value.shape, ['circle', 'rounded', 'square', 'kip'], 'avatar shape');
+    for (const [k, lo, hi] of [['zoom', 1, 3], ['focus_x', 0, 1], ['focus_y', 0, 1]]) if (typeof value[k] !== 'number' || value[k] < lo || value[k] > hi) throw bad(`avatar ${k} must be from ${lo} to ${hi}`);
+    const owned = (current && (seeded0().assets || {})[current.id]) || [];
+    if (current && !owned.includes(value.asset_id)) throw bad('That picture does not belong to this bot.');
+    return { ...value };
   }
   if (value === null || value === undefined) throw bad(`${key} cannot be empty`);
   if (key === 'origin') {
@@ -107,6 +135,7 @@ function seedNotes(list) {
 
 module.exports = ({ state, data, now }) => {
   const clock = () => (typeof now === 'number' ? now : Date.now() / 1000);
+  seeded0 = () => state.botsCore || {};
   const seeded = () => {
     if (state.botsCore) return state.botsCore;
     const store = state.botsCore = { counter: 100, maxBots: MAX_BOTS, agents: [], threads: [], defaults: {}, presets: [], created: [] };
@@ -172,9 +201,14 @@ module.exports = ({ state, data, now }) => {
     return record;
   }
 
-  function patch(agent, body) {
+  function patch(agent, body, actor = 'user') {
     const changes = {};
     const fields = { ...body };
+    if ('expected_revision' in fields) {
+      const expected = fields.expected_revision; delete fields.expected_revision;
+      if (expected !== null && expected !== undefined && (agent.revision || 0) !== expected) throw new Refusal(409, 'The profile changed. Reload it before saving.');
+    }
+    const before = JSON.parse(JSON.stringify(agent));
     if ('instructions' in fields) { if (!('soul' in fields)) fields.soul = fields.instructions ?? ''; delete fields.instructions; }
     for (const [key, value] of Object.entries(fields)) {
       if (BOT_EDITABLE.includes(key)) {
@@ -192,7 +226,17 @@ module.exports = ({ state, data, now }) => {
     }
     if ('hidden' in changes) { if (changes.hidden === !!agent.hidden) delete changes.hidden; else changes.hidden_at = changes.hidden ? clock() : null; }
     const differs = Object.entries(changes).some(([k, v]) => JSON.stringify(agent[k]) !== JSON.stringify(v));
-    if (differs) { Object.assign(agent, changes); if (Object.keys(changes).some(k => !NO_REVISION.includes(k))) agent.revision = (agent.revision || 0) + 1; }
+    if (differs) {
+      const drifted = (seeded().soulFiles || {})[agent.id];
+      if ('soul' in changes && drifted !== undefined && drifted !== (agent.soul ?? null)) throw bad('SOUL.md differs from the stored soul; read and apply the external edit first');
+      Object.assign(agent, changes);
+      if (Object.keys(changes).some(k => !NO_REVISION.includes(k))) agent.revision = (agent.revision || 0) + 1;
+      const rows = (seeded().history ||= {})[agent.id] ||= [];
+      for (const [key, value] of Object.entries(changes)) {
+        if (['revision', 'hidden_at'].includes(key) || JSON.stringify(before[key]) === JSON.stringify(value)) continue;
+        rows.push({ id: `h${seeded().counter++}`, ts: clock(), actor, field: key, summary: `Changed ${key.replace(/_/g, ' ')}`, before: before[key] ?? null, after: value, revision: agent.revision || 0, receipt_id: null });
+      }
+    }
     return agent;
   }
 
@@ -203,6 +247,7 @@ module.exports = ({ state, data, now }) => {
     const mode = approval(body.approval_mode ?? 'full');
     const base = body.use_defaults ? store.defaults : {};
     const profile = { ...body.profile };
+    const draftImage = profile.avatar_image; delete profile.avatar_image;
     for (const key of ['role', 'blurb', 'soul', 'color', 'section']) if (!profile[key] && base[key]) profile[key] = base[key];
     const seed = seedNotes(body.memory_seed ?? base.memory_seed ?? []);
     const routines = (body.routines ?? base.routines ?? []).map(routine);
@@ -215,6 +260,11 @@ module.exports = ({ state, data, now }) => {
     const made = routines.map((r, i) => ({ id: `r${record.id}-${i + 1}`, agent_id: record.id, enabled: true, schedule_kind: r.schedule_kind, ...r }));
     store.memories = { ...(store.memories || {}), [record.id]: seed };
     const warnings = [...(state.botsConfiguredWarnings || [])];
+    if (draftImage) {
+      const drafts = store.drafts || [];
+      if (drafts.includes(draftImage.asset_id)) { store.drafts = drafts.filter(id => id !== draftImage.asset_id); (store.assets ||= {})[record.id] = [draftImage.asset_id]; record.avatar_image = { ...draftImage }; }
+      else warnings.push('The picture was not added: That draft picture is no longer available.');
+    }
     if (warnings.length && made.length) made[made.length - 1].enabled = false;
     (store.routines ||= {})[record.id] = made;
     return { agent: summary(record), routines: made, warnings };
@@ -227,7 +277,7 @@ module.exports = ({ state, data, now }) => {
       reaches: { endpoint_id: a.endpoint_id, model_override: a.model_override || null, model_effort: a.model_effort || null,
         integrations: a.integration_ids === null ? 'all' : a.integration_ids, place: a.place, keep_signed_in: !!a.keep_signed_in, deliver_to_channel: a.deliver_to_channel },
       wont: [...(a.enabled === false ? ['It is turned off, so it will not run until you turn it on.'] : []), `It stops after ${a.daily_run_cap} runs a day.`,
-        ...a.tool_scope.deny.map(s => `It never uses ${s}.`)],
+        ...a.tool_scope.deny.map(s => `Saved, not enforced yet: avoid ${s}.`)],
       recent: [], grants: { approval_mode: a.approval_mode, outbound: a.outbound, always_allow: a.always_allow, tool_scope: a.tool_scope, connector_scopes: a.connector_scopes },
       setup: [{ id: 'identity', done: !!(a.role || '').trim(), label: 'Give it a name and a job', section: 'identity' },
         { id: 'soul', done: !!(a.soul || '').trim(), label: 'Write its standing instructions', section: 'soul' },
@@ -245,6 +295,12 @@ module.exports = ({ state, data, now }) => {
       note: "This is what Kairos adds about this bot at the start of a chat. The model's provider adds its own system prompt as well, which is not shown here." };
   }
 
+  const soulFile = (a) => {
+    const drifted = (seeded().soulFiles || {})[a.id];
+    const file = drifted === undefined ? (a.soul ?? null) : drifted;
+    return { soul: a.soul ?? null, file_text: file, in_sync: file === (a.soul ?? null), revision: a.revision || 0, bytes: Buffer.byteLength(a.soul || ''), limit: 24000 };
+  };
+  const avatarSnapshot = (a) => JSON.stringify([a.avatar, a.avatar_image, a.mascot_expression]).length.toString(16) + ':' + [a.avatar?.shape, a.avatar?.color, a.avatar?.acc, a.avatar_image?.asset_id, a.avatar_image?.shape, a.mascot_expression].join('/');
   const preset = (p) => {
     if (!p || typeof p !== 'object') throw bad('a preset is an object');
     const extra = Object.keys(p).filter(k => !['name', 'role', 'blurb', 'soul', 'avatar', 'routines', 'memory_seed'].includes(k));
@@ -255,7 +311,8 @@ module.exports = ({ state, data, now }) => {
   };
   const defaultsView = () => ({ defaults: seeded().defaults, model_selection: { endpoint_id: 'm1', model_override: null, model_effort: null,
     source: 'the first Claude connection until a bot picks its own' }, suggested_name: suggestName() });
-  const DEFAULT_FIELDS = ['role', 'blurb', 'soul', 'color', 'section', 'daily_run_cap', 'memory_upkeep', 'keep_signed_in', 'cache_keep_warm', 'place', 'thread_limit', 'memory_seed', 'routines'];
+  const DEFAULT_FIELDS = ['role', 'blurb', 'soul', 'color', 'section', 'daily_run_cap', 'memory_upkeep', 'keep_signed_in', 'cache_keep_warm', 'place', 'thread_limit', 'memory_seed', 'routines',
+    'reply_style', 'notifications', 'speak_replies', 'voice_id', 'call_mode', 'skill_selection', 'mascot_expression'];
 
   return {
     read(route, query = {}) {
@@ -264,6 +321,7 @@ module.exports = ({ state, data, now }) => {
       catch (error) { if (error instanceof Refusal) return { _status: error.status, detail: error.message }; throw error; }
     },
 
+    store: () => seeded(),
     mutate(route, method, body = {}, query = {}) {
       if (!state.botsLive) return undefined;
       try { return handle(route, method, body || {}); }
@@ -279,10 +337,11 @@ module.exports = ({ state, data, now }) => {
       if (route === '/api/agents/conversations')
         return { agents: seeded().agents.map(a => ({ id: a.id, session_id: mainOf(a.id), preview: threadsOf(a.id)[0]?.preview || '', at: clock() - 600, message_count: threadsOf(a.id).length, pinned: false, unread: 0 })), preferences: {} };
       if (route === '/api/sessions' && query.agent_id) return threadsOf(query.agent_id).map(header);
-      if ((m = route.match(/^\/api\/agents\/([^/]+)$/)) && !['inbox'].includes(m[1])) {
+      if ((m = route.match(/^\/api\/agents\/([^/]+)$/)) && !RESERVED.includes(m[1])) {
         const a = need(m[1]);
-        return { agent: summary(a), soul_file: { soul: a.soul || null, file_text: a.soul || null, in_sync: true, revision: a.revision || 0 }, memory: '', memory_upkeep_journal: [],
-          setup_receipts: [], goals: [], cards: [], inbox: [], answered: [], runs: [], teams: [], triggers: [] };
+        return { agent: summary(a), soul_file: soulFile(a), memory: (seeded().memoryText || {})[a.id] ?? '', memory_upkeep_journal: (seeded().journal || {})[a.id] || [],
+          setup_receipts: [], goals: (seeded().goals || {})[a.id] || [], cards: [], inbox: [], answered: [], runs: (seeded().runs || {})[a.id] || [], teams: [], triggers: [],
+          avatar_snapshot: avatarSnapshot(a) };
       }
       if ((m = route.match(/^\/api\/agents\/([^/]+)\/(overview|system-prompt|threads)$/))) {
         const a = need(m[1]);
@@ -329,7 +388,7 @@ module.exports = ({ state, data, now }) => {
       if (at < 0) throw new Refusal(404, 'preset not found');
       store.presets.splice(at, 1); return { ok: true };
     }
-    if ((m = route.match(/^\/api\/agents\/([^/]+)$/))) {
+    if ((m = route.match(/^\/api\/agents\/([^/]+)$/)) && !RESERVED.includes(m[1])) {
       if (method === 'PATCH') return summary(patch(need(m[1]), body));
       if (method === 'DELETE') {
         const a = need(m[1]);
@@ -344,7 +403,8 @@ module.exports = ({ state, data, now }) => {
       let name = body.name;
       if (!name) { name = `${a.name} copy`; for (let n = 2; taken().includes(name.toLowerCase()); n++) name = `${a.name} copy ${n}`; }
       const copy = {}; for (const k of ['role', 'blurb', 'soul', 'color', 'avatar', 'endpoint_id', 'model_override', 'model_effort', 'integration_ids', 'daily_run_cap', 'section', 'approval_mode',
-        'outbound', 'fallback', 'cache_keep_warm', 'place', 'tool_scope', 'connector_scopes', 'always_allow', 'thread_limit', 'memory_upkeep']) if (a[k] !== undefined && a[k] !== null) copy[k] = JSON.parse(JSON.stringify(a[k]));
+        'outbound', 'fallback', 'cache_keep_warm', 'place', 'tool_scope', 'connector_scopes', 'always_allow', 'thread_limit', 'memory_upkeep',
+        'reply_style', 'notifications', 'speak_replies', 'voice_id', 'call_mode', 'skill_selection', 'mascot_expression']) if (a[k] !== undefined && a[k] !== null) copy[k] = JSON.parse(JSON.stringify(a[k]));
       return summary(newBot({ name }, { ...copy, origin: { kind: 'duplicate', from_agent_id: a.id } }));
     }
     if ((m = route.match(/^\/api\/agents\/([^/]+)\/threads$/)) && method === 'POST') {

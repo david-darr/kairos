@@ -25,6 +25,9 @@ function h(tag, attrs = {}, children = []) {
   return node;
 }
 
+// The same builder, for the other Bots modules (the panel's sections draw with it).
+export { h };
+
 const reducedMotion = () => hasDom && typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // -- CSS loader ----------------------------------------------------------------
@@ -167,12 +170,13 @@ export function SwitchRow({ title, hint = '', checked = false, onChange, disable
 }
 
 // One option of a radio list. Group them with RadioGroup (arrow keys move the choice).
-export function RadioRow({ title, hint = '', value, checked = false, onSelect } = {}) {
+export function RadioRow({ title, hint = '', value, checked = false, disabled = false, onSelect } = {}) {
   const node = h('button', {
     type: 'button', role: 'radio', class: 'bots-row bots-radio-row',
     'aria-checked': checked ? 'true' : 'false', tabindex: checked ? '0' : '-1', 'data-value': String(value ?? ''),
+    disabled: disabled || undefined, 'aria-disabled': disabled ? 'true' : undefined,
   }, [h('span', { class: 'bots-radio-mark' }), rowMain(title, hint)]);
-  node.addEventListener('click', () => onSelect?.(value));
+  node.addEventListener('click', () => { if (!disabled) onSelect?.(value); });
   return node;
 }
 
@@ -193,8 +197,10 @@ export function RadioGroup({ label = '', options = [], value, onChange } = {}) {
     const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
     if (!step || !rows.length) return;
     event.preventDefault();
-    const at = Math.max(0, rows.findIndex(row => row.getAttribute('aria-checked') === 'true'));
-    const target = rows[(at + step + rows.length) % rows.length];
+    const live = rows.filter(row => !row.disabled);
+    if (!live.length) return;
+    const at = Math.max(0, live.findIndex(row => row.getAttribute('aria-checked') === 'true'));
+    const target = live[(at + step + live.length) % live.length];
     target.focus(); target.click();
   });
   return group;

@@ -48,7 +48,11 @@ export function kipStateFor(ombState) {
 // ctx.status is a botStatus.js word (needs_you, working, ...), ctx.live is true
 // while a turn streams, ctx.failedTool is true after a tool failed this turn.
 // OMB's guess from the bot's name and job is not ported.
+// A bot with a chosen expression (Phase 1: avatar settings) always shows it; the mood below is the
+// automatic one, for a bot whose expression is left on Automatic (mascot_expression null).
+export const EXPRESSIONS = Object.freeze(['sleeping', 'idle', 'listening', 'thinking', 'speaking', 'success', 'needs', 'error', 'carry']);
 export function stateForBot(bot, ctx = {}) {
+  if (EXPRESSIONS.includes(bot?.mascot_expression)) return bot.mascot_expression;
   const status = ctx.status || '';
   if (ctx.failedTool) return 'error';
   if (status === 'working' || ctx.live) return 'thinking';
