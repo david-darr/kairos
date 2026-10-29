@@ -1,37 +1,38 @@
-// A bot's panel (Agents 3.0 Phase 0, unit U4; OMB features F5 to F9 and F13, section 3.4 of the
-// report, re-written for Kairos). One component, two shapes:
+// A bot's panel (Agents 3.0 Phase 0 unit U4, completed in Phase 1 unit U2; OMB features F5 to F9 and F13,
+// section 3.4 of the report, re-written for Kairos). One component, two shapes:
 //
-//   Simple   a 320 px panel: a hero (Kip, name, job), a Details page (what is left to set up,
-//            model, conversations) and a Settings page with drill-down pages (Apps and tools,
-//            History, Usage), each with a Back link.
-//   Advanced a searchable accordion of sections, one open at a time.
+//   Simple   a 320 px panel: a hero (the bot's face, name, job) with three pages (Details, Library,
+//            Computer) and a Settings page whose rows open the other sections, each with a Back link.
+//   Advanced a searchable accordion of all fourteen sections, one open at a time.
 //
-//   mountBotPanel(host, {agentId, section, mode, onClose})  -> {destroy, openSection, flush, refresh}
-//   registerBotSection({id, label, iconName, keywords, order, render(ctx)})
-//       how later phases add their sections (Skills, Memory, Routines ...); nothing is shown for a
-//       section nobody has registered, so there are no placeholders.
-//   openBotMenu(anchor, agent, {onChanged})   the bot's menu (Duplicate, Save as preset, Archive ...)
+//   mountBotPanel(host, {agentId, section, mode, onClose}) -> {destroy, openSection, flush, refresh}
+//   registerBotSection({id, label, iconName, keywords, order, render(ctx), keepMounted})
+//       the sections themselves live in botsPanelSections.js; later phases add more through this.
+//   flushBotEdits(id) -> Promise<{ok, agent, error?}>  sends the pending settings and says whether they saved
+//   openBotMenu(anchor, agent, {onChanged}) the bot's menu (Duplicate, Save as preset, Archive ...)
 //
-// Every edit goes through botsPatchQueue.js: a PATCH 400 ms after the last change, merged, with an
-// overlay so a poll cannot undo what was just typed; model changes are sent at once; a failed send
-// rolls the screen back to what is stored and says why. Edits are flushed when the panel closes
-// or the app navigates away.
+// Every edit goes through botsPatchQueue.js: a PATCH 400 ms after the last change, merged, with an overlay
+// so a poll cannot undo what was just typed; model changes are sent at once; a failed send rolls the screen
+// back to what is stored and says why. Edits are flushed when the panel closes or the app navigates away.
+// A section kept mounted (Memory) is built once and only hidden, so its draft survives polls and tabs.
 import { api, el, toast, confirmDialog, customSelect, openPanelDialog } from './api.js';
-import { agentAvatar, avatarPicker } from './agentAvatar.js';
+import { agentAvatar } from './agentAvatar.js';
 import { agentModelPicker } from './agentModelPicker.js';
 import { creativeSelectionButton } from './creativeConnections.js';
 import { botStatusLine } from './botStatus.js';
 import { botKip, stateForBot } from './botsKip.js';
-import { Card, NavRow, SwitchRow, TextRow, RadioGroup, Button, IconButton, PageHeader, openMenu, withBotColor, isAdvanced, setAdvanced, onBotsInterface, loadBotsCss } from './botsUi.js';
+import { Card, NavRow, TextRow, Segmented, Button, IconButton, PageHeader, openMenu, withBotColor, isAdvanced, setAdvanced, onBotsInterface, loadBotsCss } from './botsUi.js';
 import { icon } from './botsIcons.js';
-import { createPatchQueue } from './botsPatchQueue.js';
+import { createPatchQueue, setSharedQueue, flushBotEdits as flushShared } from './botsPatchQueue.js';
 import { archiveBotWithNotice, deleteBotWithConfirm, duplicateBot } from './botsArchived.js';
+import { SIMPLE_HOME, sections, setupCard, fact, note, caps, ago, messageOf, loading, mountModule } from './botsPanelSections.js';
+import { loadBotsModule } from './botsPanelHost.js';
 
 const CSS = '/static/css/bots-panel.css';
+const AVATAR_CSS = '/static/css/bots-avatar.css';
 const LAST_KEY = 'kairos:bots-last-section';
 const POLL_MS = 20000;
-const SOUL_BYTES = 24000;
-const messageOf = error => String(error?.message || error).replace(/^\d+:\s*/, '');
+const TABS = [['details', 'Details'], ['library', 'Library'], ['computer', 'Computer']];
 const announce = (name, detail = {}) => document.dispatchEvent(new CustomEvent(name, { detail }));
 
 // -- the shared settings queue -------------------------------------------------------------------
@@ -42,19 +43,13 @@ const queue = createPatchQueue({
   onSaved: (id, agent, body) => announce('kairos:bots-saved', { agentId: id, agent, body }),
   onRollback: (id, agent, error) => { toast(messageOf(error), 'error'); announce('kairos:bots-rolledback', { agentId: id, agent }); },
 });
-export const flushBotEdits = id => queue.flush(id);
+// Send what is pending and say whether the settings really are saved: {ok, agent, error}. It never
+// rejects. A caller that is about to act on the settings (send a message) must check `ok`.
+setSharedQueue(queue);
+export const flushBotEdits = flushShared;
 
 const rememberSection = id => { try { localStorage.setItem(LAST_KEY, id); } catch { /* per-device nicety only */ } };
 const lastSection = () => { try { return localStorage.getItem(LAST_KEY) || ''; } catch { return ''; } };
-
-function ago(seconds) {
-  if (!seconds) return '';
-  const gap = Math.max(0, Date.now() / 1000 - seconds);
-  if (gap < 90) return 'just now';
-  if (gap < 3600) return `${Math.round(gap / 60)} min ago`;
-  if (gap < 86400) return `${Math.round(gap / 3600)} h ago`;
-  return `${Math.round(gap / 86400)} d ago`;
-}
 
 // -- the section registry ----------------------------------------------------------------------------
 const registry = [];
@@ -65,241 +60,9 @@ export function registerBotSection(def) {
   registry.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
 }
 export const botSections = () => registry.map(({ id, label, iconName }) => ({ id, label, iconName }));
-// Where a section lives in the Simple panel: a page of its own, or a card on Details or Settings.
-const SIMPLE_HOME = { overview: 'details', identity: 'details', model: 'details', soul: 'settings', permissions: 'settings' };
-
-// -- small pieces ----------------------------------------------------------------------------------------
-const fact = (title, lines) => el('div', { class: 'bots-row bots-fact' }, [el('span', { class: 'bots-row-main' }, [
-  el('span', { class: 'bots-row-title', text: title }), ...[].concat(lines).filter(Boolean).map(text => el('span', { class: 'bots-row-hint', text }))])]);
-const note = text => el('div', { class: 'bots-row bots-note-line' }, [icon('info', { size: 16 }), el('span', { class: 'bots-row-hint', text })]);
-const lazy = build => {
-  const holder = el('div', { class: 'bots-lazy' });
-  Promise.resolve().then(build).then(node => holder.replaceChildren(node)).catch(error => holder.replaceChildren(note(messageOf(error))));
-  return holder;
-};
-const caps = (text) => el('div', { class: 'bots-caps bots-card-label', text });
-
-function longText(ctx, { value, limit, bytes = false, rows = 8, label, onChange }) {
-  const area = el('textarea', { rows: String(rows), 'aria-label': label });
-  const count = el('small', { class: 'bots-count' });
-  const paint = () => { const used = bytes ? new TextEncoder().encode(area.value).length : area.value.length;
-    count.textContent = `${used.toLocaleString('en-US')} / ${limit.toLocaleString('en-US')} ${bytes ? 'bytes' : 'characters'}`; count.classList.toggle('over', used > limit); };
-  area.value = value || '';
-  area.addEventListener('input', () => {
-    if (bytes) { while (new TextEncoder().encode(area.value).length > limit) area.value = area.value.slice(0, -1); }
-    else if (area.value.length > limit) area.value = area.value.slice(0, limit);
-    paint(); onChange(area.value);
-  });
-  paint();
-  return el('div', { class: 'bots-row bots-stack-row' }, [area, count]);
-}
-
-// -- the sections ------------------------------------------------------------------------------------------
-
-function overviewSection(ctx) {
-  const { agent, overview } = ctx.state;
-  const body = el('div', {});
-  if (overview) {
-    const routines = overview.does?.routines || [];
-    const on = routines.filter(r => r.enabled).length;
-    const does = [routines.length ? `${routines.length} routine${routines.length === 1 ? '' : 's'}, ${on} on` : 'No routines yet',
-      overview.does?.triggers?.length ? `${overview.does.triggers.length} trigger${overview.does.triggers.length === 1 ? '' : 's'}` : '',
-      overview.does?.open_cards ? `${overview.does.open_cards} open task${overview.does.open_cards === 1 ? '' : 's'}` : ''].filter(Boolean);
-    const integrations = overview.reaches?.integrations;
-    const reaches = [integrations === 'all' ? 'Every connected tool server' : integrations?.length ? `${integrations.length} tool server${integrations.length === 1 ? '' : 's'}` : 'No tool servers',
-      overview.reaches?.keep_signed_in ? 'Stays signed in to sites' : '', overview.reaches?.deliver_to_channel ? `Reports on ${overview.reaches.deliver_to_channel}` : 'Reports in the app'].filter(Boolean);
-    body.append(Card({ label: 'At a glance', className: 'bots-glance', children: [
-      fact('Who', [agent.role || 'No job set yet', overview.who?.section ? `Group: ${overview.who.section}` : '']),
-      fact('What it does', does), fact('What it can reach', reaches),
-      fact('What it will not do', overview.wont?.length ? overview.wont : 'Nothing is held back.'),
-      ...(overview.recent?.length ? [fact('Recently', overview.recent.map(r => `${r.name || 'A run'}: ${r.outcome || 'ran'} ${ago(r.ran_at)}`.trim()))] : []),
-    ] }));
-    body.append(setupCard(ctx, overview.setup || []));
-  } else body.append(Card({ children: [note('The overview could not be loaded just now.')] }));
-  body.append(el('div', { class: 'bots-actions' }, [Button({ label: `Set up with ${agent.name}`, iconName: 'sparkles', onClick: () => ctx.setupWithBot() })]));
-  if (ctx.advanced) body.append(conversationsCard(ctx), promptPreview(ctx));
-  return body;
-}
-
-// What is left to do, each step opening the section that does it.
-function setupCard(ctx, steps) {
-  if (!steps.length) return el('div');
-  const known = new Set(registry.map(s => s.id));
-  const rows = steps.map(step => {
-    const target = known.has(step.section);
-    const mark = icon(step.done ? 'check' : 'circle-alert', { size: 18 });
-    const main = el('span', { class: 'bots-row-main' }, [el('span', { class: 'bots-row-title', text: step.label })]);
-    const row = target
-      ? el('button', { type: 'button', class: 'bots-row bots-nav-row bots-setup-step', 'data-done': String(!!step.done), onclick: () => ctx.go(step.section) }, [mark, main, el('span', { class: 'bots-chevron' }, [icon('chevron-right', { size: 16 })])])
-      : el('div', { class: 'bots-row bots-setup-step', 'data-done': String(!!step.done) }, [mark, main]);
-    return row;
-  });
-  const left = steps.filter(s => !s.done).length;
-  return Card({ label: left ? `Set up (${left} to go)` : 'Set up', className: 'bots-setup', children: rows });
-}
-
-// "What the model sees": the sections Kairos adds, with their size. Same builder as a live chat.
-function promptPreview(ctx) {
-  const holder = el('div', { class: 'bots-prompt-body' });
-  const box = el('details', { class: 'bots-prompt' }, [el('summary', {}, [icon('eye', { size: 16 }), el('span', { class: 'bots-prompt-summary', text: 'What the model sees' })]), holder]);
-  let loaded = false;
-  box.addEventListener('toggle', async () => {
-    if (!box.open || loaded) return;
-    loaded = true; holder.replaceChildren(note('Reading…'));
-    try {
-      await ctx.flush();
-      const data = await api(`/api/agents/${ctx.agentId}/system-prompt`, { toast: false });
-      box.querySelector('.bots-prompt-summary').textContent = `What the model sees: ${data.total_bytes.toLocaleString('en-US')} bytes, about ${data.approx_tokens.toLocaleString('en-US')} tokens`;
-      holder.replaceChildren(...data.sections.map(s => el('details', { class: 'bots-prompt-part', 'data-part': s.id }, [
-        el('summary', { text: `${s.label} (${s.bytes.toLocaleString('en-US')} bytes)` }), el('pre', { text: s.text })])), el('p', { class: 'bots-hint', text: data.note }));
-    } catch (error) { loaded = false; holder.replaceChildren(note(messageOf(error))); }
-  });
-  return box;
-}
-
-function identitySection(ctx) {
-  const { agent } = ctx.state;
-  const nameRow = TextRow({ title: 'Name', value: agent.name, maxLength: 100, onCommit: v => {
-    const name = v.trim();
-    if (!name) { toast('A bot needs a name.', 'error'); nameRow.set(ctx.state.agent.name); return; }
-    ctx.update({ name });
-  } });
-  const jobRow = TextRow({ title: 'Job', hint: 'What is this bot for?', value: agent.role || '', maxLength: 200, onCommit: v => ctx.update({ role: v.trim() }) });
-  const blurbRow = TextRow({ title: 'Introduction', value: agent.blurb || '', maxLength: 4000, multiline: true, onCommit: v => ctx.update({ blurb: v }) });
-  const groupRow = TextRow({ title: 'Group', hint: 'Optional. Bots in a group sit together.', value: agent.section || '', maxLength: 60, onCommit: v => ctx.update({ section: v.trim() }) });
-  const picker = avatarPicker(agent.avatar || { id: agent.id, color: agent.color }, spec => ctx.update({ avatar: spec }));
-  const wrap = el('div', {}, [Card({ className: 'bots-identity', children: [nameRow, jobRow, blurbRow, groupRow] }), Card({ label: 'Look', children: [picker.root] })]);
-  wrap.nameField = nameRow.field;
-  return wrap;
-}
-
-function soulSection(ctx) {
-  const { agent } = ctx.state;
-  const row = longText(ctx, { value: agent.soul || agent.instructions || '', limit: SOUL_BYTES, bytes: true, rows: 10, label: 'Standing instructions', onChange: v => ctx.update({ soul: v }) });
-  return el('div', { 'data-panel-card': 'soul' }, [Card({ label: 'Standing instructions', children: [row] }),
-    el('p', { class: 'bots-hint', text: 'How this bot works, every time. It reads this at the start of each chat.' })]);
-}
-
-function modelSection(ctx) {
-  return el('div', { 'data-panel-card': 'model' }, [caps('Model'), lazy(async () => {
-    const models = await ctx.ensure('models');
-    const picker = agentModelPicker(models, ctx.state.agent, () => ctx.update(picker.get()));
-    const parts = [el('div', { class: 'bots-model' }, [picker.root])];
-    const stray = (ctx.state.threads?.threads || []).filter(t => t.follows_bot_model === false && !t.thread?.archived_at);
-    if (stray.length) {
-      const hint = el('span', { class: 'bots-row-hint', text: `${stray.length} conversation${stray.length === 1 ? ' uses' : 's use'} a different model.` });
-      const button = Button({ label: 'Switch them too', iconName: 'refresh-cw', onClick: async () => {
-        button.disabled = true;
-        try {
-          await ctx.flush();
-          const result = await api(`/api/agents/${ctx.agentId}/threads/follow-model`, { method: 'POST', body: JSON.stringify({}), toast: false });
-          toast(`${result.updated.length} switched${result.busy.length ? `, ${result.busy.length} busy and left alone` : ''}`, 'success');
-          await ctx.refresh();
-        } catch (error) { toast(messageOf(error), 'error'); button.disabled = false; }
-      } });
-      parts.push(el('div', { class: 'bots-row bots-follow' }, [hint, button]));
-    }
-    return el('div', {}, parts);
-  })]);
-}
-
-function accessSection(ctx) {
-  const { agent } = ctx.state;
-  const wrap = el('div', {});
-  wrap.append(lazy(async () => {
-    const [integrations, channels] = await Promise.all([ctx.ensure('integrations'), ctx.ensure('channels')]);
-    const servers = integrations.filter(i => i.kind === 'mcp_server');
-    const body = el('div', { class: 'bots-card-body' });
-    const draw = () => {
-      body.replaceChildren();
-      const all = ctx.state.agent.integration_ids === null || ctx.state.agent.integration_ids === undefined;
-      body.append(SwitchRow({ title: 'Every connected tool server', hint: servers.length ? 'Turn off to pick which ones this bot may use.' : 'None are connected yet. Add one in Settings, under Integrations.',
-        checked: all, onChange: v => { ctx.update({ integration_ids: v ? null : servers.map(s => s.id) }); draw(); } }));
-      if (!all) for (const s of servers) body.append(SwitchRow({ title: s.name, checked: ctx.state.agent.integration_ids.includes(s.id),
-        onChange: v => { const set = new Set(ctx.state.agent.integration_ids); if (v) set.add(s.id); else set.delete(s.id); ctx.update({ integration_ids: [...set] }); } }));
-    };
-    draw();
-    const select = customSelect({}, [el('option', { value: '', text: 'In the app only' }), ...channels.map(c => el('option', { value: c.id, text: c.label }))]);
-    select.value = agent.deliver_to_channel || '';
-    select.addEventListener('change', () => ctx.update({ deliver_to_channel: select.value || null }));
-    return el('div', {}, [
-      el('div', { class: 'bots-card' }, [caps('Tool servers'), body]),
-      Card({ label: 'Habits', children: [
-        SwitchRow({ title: 'Stay signed in', hint: 'Keep the sites it logs into between runs.', checked: !!agent.keep_signed_in, onChange: v => ctx.update({ keep_signed_in: v }) }),
-        SwitchRow({ title: 'Keep its own notes tidy', hint: 'It reviews and cleans up what it remembers.', checked: !!agent.memory_upkeep, onChange: v => ctx.update({ memory_upkeep: v }) }),
-      ] }),
-      Card({ label: 'Reports', children: [el('div', { class: 'bots-row' }, [el('span', { class: 'bots-row-main' }, [el('span', { class: 'bots-row-title', text: 'Tell me on' }),
-        el('span', { class: 'bots-row-hint', text: 'Where its reports and questions reach you.' })]), select])] }),
-    ]);
-  }));
-  wrap.append(el('div', { class: 'bots-actions' }, [creativeSelectionButton(() => ({ agentId: ctx.agentId }), wrap)]));
-  return wrap;
-}
-
-function permissionsSection(ctx) {
-  const { agent } = ctx.state;
-  const capRow = TextRow({ title: 'Runs per day', hint: 'It stops for the day after this many (1 to 200).', value: String(agent.daily_run_cap ?? 12), onCommit: v => {
-    const n = Number(v);
-    if (!Number.isInteger(n) || n < 1 || n > 200) { toast('Runs per day is a whole number from 1 to 200.', 'error'); capRow.set(String(ctx.state.agent.daily_run_cap ?? 12)); return; }
-    ctx.update({ daily_run_cap: n });
-  } });
-  return el('div', { 'data-panel-card': 'permissions' }, [
-    caps('Before it acts'),
-    RadioGroup({ label: 'Approval', value: 'full', options: [{ value: 'full', title: 'Full access', hint: 'It acts without asking. You can stop it at any time.' }], onChange: v => ctx.update({ approval_mode: v }) }),
-    Card({ label: 'Limits', children: [SwitchRow({ title: 'This bot is on', hint: 'Off, it takes no new work and its routines do not run.', checked: agent.enabled !== false, onChange: v => ctx.update({ enabled: v }) }), capRow] }),
-  ]);
-}
-
-const OUTCOME = { succeeded: 'Done', failed: 'Failed', lost: 'Did not finish', skipped: 'Skipped', stopped: 'Stopped' };
-function historySection(ctx) {
-  const { agent, detail } = ctx.state;
-  const names = new Map((detail?.goals || []).map(g => [g.id, g.name]));
-  const parts = [Card({ children: [fact('Version', `Settings version ${agent.revision || 0}`), fact('Created', agent.created_at ? new Date(agent.created_at * 1000).toLocaleDateString() : 'Unknown')] })];
-  if (agent.instructions_legacy) parts.push(Card({ label: 'Earlier instructions', children: [note('These were replaced by the standing instructions. They are kept here and never sent to the model.'),
-    el('div', { class: 'bots-row' }, [el('pre', { class: 'bots-legacy', text: agent.instructions_legacy })])] }));
-  const receipts = (detail?.setup_receipts || []).slice().reverse();
-  if (receipts.length) {
-    const FIELDS = { role: 'job', blurb: 'introduction', soul: 'standing instructions', deliver_to_channel: 'where it reports' };
-    parts.push(Card({ label: 'Setup changes', children: receipts.map(r => {
-      const what = [...Object.keys(r.after || {}).map(k => FIELDS[k] || k), ...(r.routine_id ? ['a routine'] : [])].join(', ');
-      const undo = Button({ label: r.undone ? 'Undone' : 'Undo', iconName: 'undo-2', disabled: !!r.undone, onClick: async () => {
-        undo.disabled = true;
-        try { await api(`/api/agents/${ctx.agentId}/setup/${r.id}/undo`, { method: 'POST', toast: false }); toast('Setup change undone', 'success'); await ctx.refresh(); }
-        catch (error) { toast(messageOf(error), 'error'); undo.disabled = false; }
-      } });
-      return el('div', { class: 'bots-row' }, [el('span', { class: 'bots-row-main' }, [el('span', { class: 'bots-row-title', text: `Set ${what || 'nothing'}` }), el('span', { class: 'bots-row-hint', text: new Date(r.ts * 1000).toLocaleString() })]), undo]);
-    }) }));
-  }
-  const runs = (detail?.runs || []).slice(0, 15);
-  parts.push(Card({ label: 'Recent runs', children: runs.length ? runs.map(r => fact(names.get(r.task_id) || 'A routine', `${OUTCOME[r.outcome] || r.outcome || 'Ran'} ${ago(r.ran_at)}${r.duration_seconds ? `, ${Math.round(r.duration_seconds)} s` : ''}`))
-    : [note('No routine has run yet.')] }));
-  return el('div', { 'data-panel-card': 'history' }, parts);
-}
-
-function usageSection(ctx) {
-  const { agent, detail } = ctx.state;
-  const cap = agent.daily_run_cap || 12, used = agent.runs_today || 0;
-  const runs = detail?.runs || [];
-  const tally = runs.reduce((m, r) => { m[r.outcome] = (m[r.outcome] || 0) + 1; return m; }, {});
-  const timed = runs.filter(r => r.duration_seconds);
-  const average = timed.length ? Math.round(timed.reduce((n, r) => n + r.duration_seconds, 0) / timed.length) : 0;
-  const meter = el('div', { class: 'bots-meter', role: 'img', 'aria-label': `${used} of ${cap} daily runs used` }, [el('span', { class: 'bots-meter-fill', style: `width:${Math.min(100, Math.round((used / cap) * 100))}%` })]);
-  return el('div', { 'data-panel-card': 'usage' }, [
-    Card({ label: 'Today', children: [el('div', { class: 'bots-row bots-stack-row' }, [el('span', { class: 'bots-row-main' }, [el('span', { class: 'bots-row-title', text: `${used} of ${cap} daily runs used` }),
-      el('span', { class: 'bots-row-hint', text: used >= cap ? 'It is done for today.' : `${cap - used} left today.` })]), meter])] }),
-    Card({ label: `Last ${runs.length} runs`, children: runs.length ? [fact('Results', Object.entries(tally).map(([k, n]) => `${OUTCOME[k] || k}: ${n}`)), ...(average ? [fact('Average length', `${average} seconds`)] : [])]
-      : [note('There are no runs to count yet.')] }),
-  ]);
-}
-
-registerBotSection({ id: 'overview', label: 'Overview', iconName: 'info', keywords: 'summary setup checklist prompt', order: 10, render: overviewSection });
-registerBotSection({ id: 'identity', label: 'Identity', iconName: 'pencil', keywords: 'name job role look avatar kip group introduction', order: 20, render: identitySection });
-registerBotSection({ id: 'soul', label: 'Soul', iconName: 'brain', keywords: 'instructions standing how it works', order: 30, render: soulSection });
-registerBotSection({ id: 'model', label: 'Model', iconName: 'sliders-horizontal', keywords: 'connection reasoning effort version', order: 40, render: modelSection });
-registerBotSection({ id: 'access', label: 'Access', iconName: 'plug', keywords: 'apps tools mcp servers signed in delivery channel', order: 50, render: accessSection });
-registerBotSection({ id: 'permissions', label: 'Permissions', iconName: 'shield', keywords: 'approval full limits runs per day on off', order: 60, render: permissionsSection });
-registerBotSection({ id: 'history', label: 'History', iconName: 'history', keywords: 'runs setup changes undo version', order: 70, render: historySection });
-registerBotSection({ id: 'usage', label: 'Usage', iconName: 'gauge', keywords: 'daily runs cap results', order: 80, render: usageSection });
+for (const def of sections()) registerBotSection(def);
+// Where a section lives in the Simple panel: a card on Details or Settings, or a page of its own.
+const homeOf = id => SIMPLE_HOME[id] || 'page';
 
 // -- the bot's menu ----------------------------------------------------------------------------------------------
 export function openBotMenu(anchor, agent, { onChanged, onClose } = {}) {
@@ -421,35 +184,109 @@ function conversationsCard(ctx) {
   return holder;
 }
 
+// -- the Simple Library and Computer pages ----------------------------------------------------------------------
+function libraryPage(ctx) {
+  const { agent, detail, threads } = ctx.state;
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const folders = agent.folders || [];
+  const live = (threads?.threads || []).filter(t => !t.thread?.archived_at);
+  const skills = el('span', { class: 'bots-row-value', text: '' });
+  const skillRow = NavRow({ title: 'Skills', hint: 'What it can use', iconName: 'sparkles', onClick: () => ctx.go('skills') });
+  ctx.ensure('skills').then(list => {
+    const total = Array.isArray(list) ? list.length : 0, off = (agent.skill_selection?.disabled || []).length;
+    skillRow.querySelector('.bots-row-hint').textContent = total ? `${count(total - off, 'skill', 'skills')} on of ${total}` : 'No skills yet';
+  });
+  const topics = el('span', { class: 'bots-row-hint', text: '' });
+  const memoryChars = (detail?.memory || '').length;
+  const memoryRow = NavRow({ title: 'Memory', hint: memoryChars ? `${memoryChars.toLocaleString('en-US')} characters of notes` : 'No notes yet', iconName: 'book-open', onClick: () => ctx.go('memory') });
+  return el('div', { class: 'bots-page-section', 'data-panel-card': 'library' }, [
+    Card({ label: 'Its library', children: [memoryRow, skillRow,
+      NavRow({ title: 'Routines', hint: count((detail?.goals || []).length, 'routine', 'routines'), iconName: 'repeat', onClick: () => ctx.go('routines') })] }),
+    Card({ label: 'Conversations', children: [fact('Open', count(live.length, 'conversation', 'conversations')), fact('Folders', folders.length ? folders.map(f => `${f.emoji ? `${f.emoji} ` : ''}${f.name}`) : 'No folders yet')] }),
+    el('div', { class: 'bots-skill-library', 'data-panel-card': 'skill-library' }, [mountModule(ctx, 'SkillLibrary')]),
+    Card({ label: 'Saved files', children: [note('Files it saves are kept with the conversation that made them. A shared place for them comes with a later update.')] }),
+    skills, topics,
+  ].filter(Boolean));
+}
+
+function computerPage(ctx) {
+  const wrap = el('div', { class: 'bots-page-section', 'data-panel-card': 'computer' });
+  wrap.append(loading(async () => {
+    // Viewing only reads status. Nothing here starts a computer.
+    const status = await ctx.ensure('computer', { fresh: true });
+    const mine = (status.profiles || []).find(p => p.id === ctx.agentId);
+    const place = Segmented({ label: 'Where it works', value: ctx.state.agent.place || 'auto', options: [{ value: 'auto', label: 'Auto' }, { value: 'computer', label: 'Computer' }, { value: 'browser', label: 'Browser' }, { value: 'off', label: 'Off' }],
+      onChange: v => ctx.update({ place: v }) });
+    const parts = [Card({ label: 'Contained computer', children: [
+      fact('Runtime', status.docker_available ? 'Available on this device' : `Not available. ${status.docker_reason || ''}`.trim()),
+      fact('Image', status.image_ready ? 'Ready' : 'Not downloaded yet'),
+      fact('This bot', mine ? (mine.running ? 'Its computer is running' : 'It has saved logins. Its computer is closed.') : 'Nothing saved and nothing running')] }),
+    Card({ label: 'Where it works', children: [el('div', { class: 'bots-row bots-stack-row' }, [place, el('span', { class: 'bots-row-hint', text: 'Saved. It decides for itself on Auto.' })])] })];
+    if (mine?.running) parts.push(el('div', { class: 'bots-actions' }, [Button({ label: 'Stop its computer', iconName: 'square', onClick: async () => {
+      try { await api(`/api/computer/${encodeURIComponent(`agent:${ctx.agentId}`)}/stop`, { method: 'POST', toast: false }); toast('Computer stopped', 'success'); await ctx.refresh(); }
+      catch (error) { toast(messageOf(error), 'error'); }
+    } })]));
+    parts.push(Card({ children: [NavRow({ title: 'Signed-in sites', hint: 'See and forget its saved logins', iconName: 'lock', onClick: () => ctx.go('access') })] }));
+    return el('div', {}, parts);
+  }, 'The computer status'));
+  return wrap;
+}
+
 // -- the panel ------------------------------------------------------------------------------------------------------------
 export function mountBotPanel(host, { agentId, section = null, mode = null, onClose } = {}) {
-  loadBotsCss(CSS);
+  loadBotsCss(CSS); loadBotsCss(AVATAR_CSS);
   let advanced = mode ? mode === 'advanced' : isAdvanced();
-  const state = { agent: null, detail: null, overview: null, threads: null, open: null, stack: [], search: '', cache: {}, signature: '', stale: false, gone: false, popover: false };
-  let destroyed = false, kip = null, pollTimer = 0, pendingFocus = null, initialSection = section;
+  const state = { agent: null, detail: null, overview: null, threads: null, open: null, stack: [], tab: 'details', search: '', cache: {}, signature: '', stale: false, gone: false, popover: false, kept: new Map() };
+  let destroyed = false, kip = null, pollTimer = 0, pendingFocus = null, initialSection = section, modules = null;
+  const tracked = new Set(), keptHandles = new Set();
+  let bucket = tracked;
   const root = el('div', { class: 'bots-panel', role: 'region', 'aria-label': 'Bot settings' });
   host.replaceChildren(root);
 
-  const sig = () => JSON.stringify([state.agent, state.overview?.setup, state.threads?.threads?.map(t => [t.id, t.title, t.updated_at, t.message_count, t.follows_bot_model, t.thread, t.status]), state.detail?.runs?.length, state.detail?.setup_receipts?.length]);
-  const ensure = async name => {
-    if (state.cache[name]) return state.cache[name];
-    const path = { models: '/api/models', integrations: '/api/integrations', channels: '/api/channels' }[name];
-    return (state.cache[name] = await api(path, { toast: false }).catch(() => []));
+  const sig = () => JSON.stringify([state.agent, state.overview?.setup, state.threads?.threads?.map(t => [t.id, t.title, t.updated_at, t.message_count, t.follows_bot_model, t.thread, t.status]),
+    state.detail?.runs?.length, state.detail?.setup_receipts?.length, state.detail?.soul_file, state.detail?.goals?.map(g => [g.id, g.enabled, g.name, g.run_time]), state.detail?.memory_upkeep_journal?.length]);
+  const PATHS = { models: '/api/models', integrations: '/api/integrations', channels: '/api/channels', bots: '/api/agents', skills: '/api/skills', computer: '/api/computer/status' };
+  const ensure = async (name, { fresh = false } = {}) => {
+    if (!fresh && state.cache[name]) return state.cache[name];
+    const value = await api(PATHS[name], { toast: false }).catch(error => { if (name === 'computer') throw error; return []; });
+    return (state.cache[name] = value);
   };
+  const destroyTracked = () => { for (const handle of tracked) { try { handle.destroy?.(); } catch { /* a section's cleanup never blocks the panel */ } } tracked.clear(); };
   const ctx = {
     get agentId() { return agentId; }, state, get advanced() { return advanced; }, ensure,
+    ui: { api, el, toast, confirmDialog, customSelect, openPanelDialog, agentModelPicker, creativeSelectionButton },
     update(patch, options) {
       state.agent = { ...state.agent, ...patch };
-      if ('avatar' in patch || 'color' in patch) kip = null;
+      if ('avatar' in patch || 'color' in patch || 'avatar_image' in patch) kip = null;
       if ('name' in patch) root.querySelectorAll('[data-live-name]').forEach(n => { if (n.tagName !== 'INPUT') n.textContent = patch.name; });
       return queue.update(agentId, patch, options);
     },
+    // A change the server already accepted (a saved picture): take it without sending it again.
+    adopt(saved) { state.agent = { ...state.agent, ...saved }; kip = null; announce('jarvis:agents-changed', { agentId, source: 'panel' }); },
     refresh: () => load(),
     flush: () => queue.flush(agentId),
+    flushResult: () => queue.flushResult(agentId),
+    rerender: () => render(),
+    resetKept: id => { state.kept.delete(id); },
     go: id => openSection(id),
+    track: handle => { if (handle) bucket.add(handle); return handle; },
+    // The later-phase section modules that exist (listed by the server, so none is requested blind).
+    sectionModules() {
+      if (!modules) modules = api('/api/agents/section-modules', { toast: false }).then(r => new Set(r.modules || [])).catch(() => new Set());
+      return modules;
+    },
+    loadModule: name => loadBotsModule(`section:${name}`),
+    conversationsCard: () => conversationsCard(ctx),
+    async mountAvatar(holder, { draft = false } = {}) {
+      const { mountAvatarEditor } = await import('./botsAvatarEditor.js');
+      if (destroyed) return null;
+      const editor = mountAvatarEditor(holder, { agent: { ...state.agent, avatar_snapshot: state.detail?.avatar_snapshot }, draft, ctx: { update: ctx.update, flush: ctx.flush, adopt: ctx.adopt, api, toast } });
+      return ctx.track(editor);
+    },
     async setupWithBot() {
       try {
-        await queue.flush(agentId);
+        const saved = await queue.flushResult(agentId);
+        if (!saved.ok) throw saved.error;
         const thread = await api(`/api/agents/${agentId}/threads`, { method: 'POST', body: JSON.stringify({}), toast: false });
         announce('jarvis:agents-changed', { agentId, source: 'panel' });
         announce('jarvis:navigate', { tab: 'botsShell', agentId, sessionId: thread.id, initialMessage: '/setup' });
@@ -469,7 +306,7 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     } catch (error) {
       if (destroyed) return;
       if (/^404/.test(String(error.message))) { state.gone = true; state.agent = state.agent || null; render(); return; }
-      if (!state.agent) { root.replaceChildren(el('div', { class: 'bots-panel-body' }, [note(messageOf(error))])); return; }
+      if (!state.agent) { root.replaceChildren(el('div', { class: 'bots-panel-body' }, [note(messageOf(error)), Button({ label: 'Try again', iconName: 'refresh-cw', onClick: () => load() })])); return; }
       return;
     }
     if (initialSection) { place(initialSection, { focus: false }); initialSection = null; }
@@ -487,6 +324,7 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     if (destroyed) return;
     const prevScroll = root.querySelector('.bots-panel-scroll')?.scrollTop || 0;
     root.dataset.mode = advanced ? 'advanced' : 'simple';
+    destroyTracked();
     root.replaceChildren();
     if (state.gone || !state.agent) { root.append(el('div', { class: 'bots-panel-body' }, [note('This bot no longer exists.'), Button({ label: 'Close', onClick: () => onClose?.() })])); return; }
     withBotColor(root, state.agent.color);
@@ -496,6 +334,13 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     root.append(scroll);
     scroll.scrollTop = prevScroll;
     if (pendingFocus) { const job = pendingFocus; pendingFocus = null; queueMicrotask(job); }
+  }
+
+  // A section's node. Kept sections are built once and re-used, so their drafts are never rebuilt.
+  function bodyOf(def) {
+    if (!def.keepMounted) return def.render(ctx);
+    if (!state.kept.has(def.id)) { bucket = keptHandles; try { state.kept.set(def.id, def.render(ctx)); } finally { bucket = tracked; } }
+    return state.kept.get(def.id);
   }
 
   const status = () => botStatusLine(state.agent);
@@ -509,35 +354,60 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     const gear = IconButton({ iconName: 'settings', label: 'Settings', onClick: () => { state.stack = state.stack[0] === 'settings' ? [] : ['settings']; render(); } });
     const head = bar(null, [gear]);
     const a = state.agent, live = status();
-    if (!kip) kip = botKip(a, { size: 80, state: stateForBot(a, { status: live.state }) });
-    else kip.setState(stateForBot(a, { status: live.state }));
-    const edit = el('button', { type: 'button', class: 'bots-hero-edit', 'aria-label': 'Edit look', title: 'Edit look', onclick: () => togglePopover() }, [icon('pencil', { size: 14 })]);
-    const face = el('div', { class: 'bots-hero-face' }, [kip, edit]);
+    let face;
+    if (a.avatar_image) face = agentAvatar(a, 80);
+    else {
+      if (!kip) kip = botKip(a, { size: 80, state: stateForBot(a, { status: live.state }) });
+      else kip.setState(stateForBot(a, { status: live.state }));
+      face = kip;
+    }
+    const edit = el('button', { type: 'button', class: 'bots-hero-edit', 'aria-label': 'Edit look', title: 'Edit look', 'aria-expanded': String(state.popover), onclick: () => togglePopover() }, [icon('pencil', { size: 14 })]);
+    const faceBox = el('div', { class: 'bots-hero-face' }, [face, edit]);
     const name = el('input', { class: 'bots-hero-name', value: a.name, 'aria-label': 'Name', maxlength: '100', 'data-live-name': '' });
     const job = el('input', { class: 'bots-hero-job', value: a.role || '', 'aria-label': 'Job', placeholder: 'What is this bot for?', maxlength: '200' });
     name.value = a.name; job.value = a.role || '';
-    const bind = (input, field, key, empty) => {
+    const bind = (input, key, required) => {
       let committed = input.value;
-      const commit = () => { const v = input.value.trim(); if (v === committed) return; if (!v && empty === false) { toast('A bot needs a name.', 'error'); input.value = committed; return; } committed = v; ctx.update({ [key]: v }); };
+      const commit = () => { const v = input.value.trim(); if (v === committed) return; if (!v && required) { toast('A bot needs a name.', 'error'); input.value = committed; return; } committed = v; ctx.update({ [key]: v }); };
       input.addEventListener('blur', commit);
       input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } else if (e.key === 'Escape') { e.stopPropagation(); input.value = committed; input.blur(); } });
     };
-    bind(name, 'name', 'name', false); bind(job, 'job', 'role', true);
+    bind(name, 'name', true); bind(job, 'role', false);
     const line = el('div', { class: 'bots-hero-status' }, [el('span', { class: `bots-dot ${live.state}` }), el('span', { text: live.text })]);
-    const hero = el('div', { class: 'bots-hero' }, [face, name, job, line]);
+    const hero = el('div', { class: 'bots-hero' }, [faceBox, name, job, line]);
     if (state.popover) hero.append(lookPopover());
-    return el('div', { class: 'bots-panel-top' }, [head, hero]);
+    return el('div', { class: 'bots-panel-top' }, [head, hero, state.stack.length ? null : tabBar()]);
+  }
+  function tabBar() {
+    const buttons = TABS.map(([id, label]) => el('button', { type: 'button', role: 'tab', id: `bots-tab-${id}`, class: 'bots-tab', 'data-tab': id,
+      'aria-selected': String(state.tab === id), 'aria-controls': 'bots-tab-body', tabindex: state.tab === id ? '0' : '-1', text: label,
+      onclick: () => { state.tab = id; render(); pendingFocus = () => root.querySelector(`#bots-tab-${id}`)?.focus(); queueMicrotask(() => root.querySelector(`#bots-tab-${id}`)?.focus()); } }));
+    const bar = el('div', { class: 'bots-tabs', role: 'tablist', 'aria-label': 'Bot pages' }, buttons);
+    bar.addEventListener('keydown', event => {
+      const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+      if (!step && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault();
+      const at = TABS.findIndex(([id]) => id === state.tab);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : (at + step + TABS.length) % TABS.length;
+      state.tab = TABS[next][0]; render(); queueMicrotask(() => root.querySelector(`#bots-tab-${state.tab}`)?.focus());
+    });
+    return bar;
   }
   function lookPopover() {
-    const picker = avatarPicker(state.agent.avatar || { id: agentId, color: state.agent.color }, spec => { kip?.beat?.('customize'); ctx.update({ avatar: spec }); });
-    return el('div', { class: 'bots-popover', role: 'dialog', 'aria-label': 'Edit look' }, [picker.root, Button({ label: 'Done', onClick: () => togglePopover(false) })]);
+    const holder = el('div', { class: 'bots-look-editor' });
+    const box = el('div', { class: 'bots-popover', role: 'dialog', 'aria-label': 'Edit look' }, [holder, Button({ label: 'Done', onClick: () => togglePopover(false) })]);
+    ctx.mountAvatar(holder);
+    return box;
   }
-  function togglePopover(force) { state.popover = typeof force === 'boolean' ? force : !state.popover; render(); }
+  function togglePopover(force) {
+    state.popover = typeof force === 'boolean' ? force : !state.popover; render();
+    if (!state.popover) queueMicrotask(() => root.querySelector('.bots-hero-edit')?.focus());
+  }
 
   function advancedChrome() {
     const a = state.agent;
     const search = el('input', { type: 'search', class: 'bots-search', placeholder: 'Search settings', 'aria-label': 'Search settings', value: state.search });
-    search.addEventListener('input', () => { state.search = search.value; const body = root.querySelector('.bots-panel-scroll'); body.replaceChildren(accordion()); });
+    search.addEventListener('input', () => { state.search = search.value; const body = root.querySelector('.bots-panel-scroll'); destroyTracked(); body.replaceChildren(accordion()); });
     const title = el('div', { class: 'bots-adv-title' }, [agentAvatar(a, 30), el('span', { class: 'bots-adv-id' }, [el('strong', { 'data-live-name': '', text: a.name }), el('span', { class: 'bots-row-hint', text: status().text })])]);
     return el('div', { class: 'bots-panel-top' }, [bar(title), el('div', { class: 'bots-search-wrap' }, [icon('search', { size: 16 }), search])]);
   }
@@ -554,34 +424,38 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
       const head = el('button', { type: 'button', class: 'bots-acc-head', 'aria-expanded': String(isOpen), 'data-section': s.id, onclick: () => { state.open = isOpen && !q ? '' : s.id; if (state.open) rememberSection(s.id); render(); } },
         [icon(s.iconName || 'settings', { size: 18 }), el('span', { class: 'bots-acc-label', text: s.label }), icon(isOpen ? 'chevron-down' : 'chevron-right', { size: 16 })]);
       const item = el('section', { class: 'bots-acc-item', 'data-open': String(isOpen), 'data-section': s.id }, [head]);
-      if (isOpen) item.append(el('div', { class: 'bots-acc-body' }, [s.render(ctx)]));
+      if (isOpen || (s.keepMounted && state.kept.has(s.id))) {
+        const body = el('div', { class: 'bots-acc-body', hidden: !isOpen || undefined }, [bodyOf(s)]);
+        item.append(body);
+      }
       wrap.append(item);
     }
     return wrap;
   }
 
-  // The Simple pages: a stack, Details at the bottom.
+  // The Simple pages: a stack, the three tabs at the bottom.
   function simplePage() {
-    const top = state.stack.at(-1) || 'details';
-    const previous = state.stack.length > 1 ? PAGE_TITLE(state.stack.at(-2)) : state.stack.length === 1 ? 'Details' : '';
+    const top = state.stack.at(-1) || 'tabs';
+    const previous = state.stack.length > 1 ? PAGE_TITLE(state.stack.at(-2)) : state.stack.length === 1 ? PAGE_TITLE(TABS.find(([id]) => id === state.tab)[0]) : '';
     const pop = () => { state.stack.pop(); render(); };
-    const wrap = el('div', { class: 'bots-pages' });
-    if (top === 'details') wrap.append(detailsPage());
+    const wrap = el('div', { class: 'bots-pages', id: 'bots-tab-body', role: state.stack.length ? undefined : 'tabpanel', 'aria-labelledby': state.stack.length ? undefined : `bots-tab-${state.tab}` });
+    if (top === 'tabs') wrap.append(state.tab === 'library' ? libraryPage(ctx) : state.tab === 'computer' ? computerPage(ctx) : detailsPage());
     else {
       const def = registry.find(s => s.id === top);
       const title = top === 'settings' ? 'Settings' : def?.label || top;
       wrap.append(PageHeader({ title, backLabel: previous, onBack: pop }));
-      wrap.append(top === 'settings' ? settingsPage() : def ? el('div', { class: 'bots-page-section' }, [def.render(ctx)]) : note('This page is not available.'));
+      wrap.append(top === 'settings' ? settingsPage() : def ? el('div', { class: 'bots-page-section' }, [bodyOf(def)]) : note('This page is not available.'));
     }
     return wrap;
   }
-  const PAGE_TITLE = id => (id === 'settings' ? 'Settings' : id === 'details' ? 'Details' : registry.find(s => s.id === id)?.label || id);
+  const PAGE_TITLE = id => (id === 'settings' ? 'Settings' : id === 'details' ? 'Details' : id === 'library' ? 'Library' : id === 'computer' ? 'Computer' : registry.find(s => s.id === id)?.label || id);
+  const sectionNode = id => { const def = registry.find(s => s.id === id); return def ? bodyOf(def) : note('This section is not available.'); };
 
   function detailsPage() {
     const parts = [];
     const left = (state.overview?.setup || []).filter(s => !s.done);
     if (left.length) parts.push(setupCard(ctx, state.overview.setup));
-    parts.push(modelSection(ctx), conversationsCard(ctx));
+    parts.push(sectionNode('model'), conversationsCard(ctx));
     parts.push(el('div', { class: 'bots-actions' }, [Button({ label: `Set up with ${state.agent.name}`, iconName: 'sparkles', onClick: () => ctx.setupWithBot() })]));
     return el('div', { class: 'bots-page-section' }, parts);
   }
@@ -589,24 +463,31 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     const a = state.agent;
     const intro = TextRow({ title: 'Introduction', value: a.blurb || '', maxLength: 4000, multiline: true, onCommit: v => ctx.update({ blurb: v }) });
     const group = TextRow({ title: 'Group', hint: 'Optional. Bots in a group sit together.', value: a.section || '', maxLength: 60, onCommit: v => ctx.update({ section: v.trim() }) });
-    const homes = new Set(Object.keys(SIMPLE_HOME));
-    const pages = registry.filter(s => !homes.has(s.id));
+    const onPage = registry.filter(s => homeOf(s.id) === 'page');
+    const extra = [];
     return el('div', { class: 'bots-page-section' }, [
-      soulSection(ctx), Card({ children: [intro, group] }), permissionsSection(ctx),
-      Card({ label: 'More', children: pages.map(s => NavRow({ title: s.label, iconName: s.iconName, onClick: () => { state.stack = ['settings', s.id]; render(); } })) })]);
+      sectionNode('soul'), Card({ children: [intro, group] }), sectionNode('delivery'), sectionNode('permissions'),
+      Card({ label: 'More', children: [NavRow({ title: 'Overview', iconName: 'info', onClick: () => { state.stack = ['settings', 'overview']; render(); } }),
+        ...onPage.map(s => NavRow({ title: s.label, iconName: s.iconName, onClick: () => { state.stack = ['settings', s.id]; render(); } })), ...extra] })]);
   }
 
   // -- moving around ---------------------------------------------------------------------------------------
   // Put the panel on a section without drawing (the first load) or with a scroll and focus (a link).
   function place(id, { focus = true } = {}) {
+    if (id === 'library' || id === 'computer') {
+      if (advanced) return false;
+      state.tab = id; state.stack = []; rememberSection(id);
+      return true;
+    }
     if (!registry.some(s => s.id === id)) return false;
     rememberSection(id);
     if (advanced) {
       state.open = id; state.search = '';
       if (focus) pendingFocus = () => root.querySelector(`.bots-acc-item[data-section="${id}"]`)?.scrollIntoView({ block: 'nearest' });
     } else {
-      const home = SIMPLE_HOME[id];
-      state.stack = home === 'details' ? [] : home === 'settings' ? ['settings'] : ['settings', id];
+      const home = homeOf(id);
+      if (home === 'details') { state.stack = []; state.tab = 'details'; }
+      else state.stack = home === 'settings' ? ['settings'] : ['settings', id];
       if (focus) pendingFocus = () => {
         if (id === 'identity') root.querySelector('.bots-hero-name')?.focus();
         else root.querySelector(`[data-panel-card="${id}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -661,13 +542,15 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     destroy() {
       if (destroyed) return;
       destroyed = true; queue.flush(agentId); clearInterval(pollTimer); offInterface();
+      destroyTracked();
+      for (const handle of keptHandles) { try { handle.destroy?.(); } catch { /* ignore */ } }
       document.removeEventListener('kairos:bots-saved', onSaved);
       document.removeEventListener('kairos:bots-rolledback', onRolledBack);
       document.removeEventListener('jarvis:agents-changed', onChanged);
       window.removeEventListener('jarvis:navigate', onNavigate, true);
       root.remove();
     },
-    openSection, flush: () => queue.flush(agentId), refresh: () => load({ quiet: true }),
+    openSection, flush: () => queue.flushResult(agentId), refresh: () => load({ quiet: true }),
     get mode() { return advanced ? 'advanced' : 'simple'; },
   };
 }

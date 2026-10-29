@@ -35,6 +35,10 @@ export async function loadBotsModule(name) {
     const stub = stubs.get(name);
     return typeof stub === 'function' ? stub() : stub;
   }
+  // A later phase's panel section: 'section:Memory' loads botsSectionMemory.js (the panel asks the
+  // server which exist first, so a file that is not there is never requested).
+  const section = /^section:([A-Za-z]{1,32})$/.exec(name);
+  if (section) return import(`./botsSection${section[1]}.js`);
   const load = LOADERS[name];
   if (!load) throw new Error(`There is no Bots module called ${name}`);
   return load();
@@ -135,6 +139,16 @@ function build(shell, agentId, { section = '', page = '', card = '', opener = nu
   };
   document.addEventListener('keydown', onKey);
   state.off.push(() => document.removeEventListener('keydown', onKey));
+  // On a phone the panel is a sheet: Tab stays inside it.
+  const trap = event => {
+    if (event.key !== 'Tab' || !matchMedia('(max-width: 720px)').matches) return;
+    const items = [...aside.querySelectorAll('button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')].filter(n => !n.disabled && !n.hidden && n.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items.at(-1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === aside)) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+  aside.addEventListener('keydown', trap);
   // Simple and Advanced size and lay out the panel differently: draw it again.
   state.off.push(onBotsInterface(() => {
     if (panel !== state) return;

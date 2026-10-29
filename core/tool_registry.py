@@ -57,7 +57,8 @@ SMALL_WINDOW = 32768
 DIRECT_ON_LARGE = frozenset({"browse", "run_code", "computer"})
 # These handlers check the chat, but cannot verify the person's agreement
 # (2026-10-15). Keep Claude's own approval and retire their old seeded grants.
-CLAUDE_REVIEW_TOOLS = frozenset({"agent_configure_self", "agent_setup_undo"})
+CLAUDE_REVIEW_TOOLS = frozenset({"agent_configure_self", "agent_setup_undo", "agent_propose_profile",
+                                "agent_propose_model", "agent_profile_undo"})
 
 # Claude Code's native tools, shared with Settings > Agent Tools and the
 # composer catalog. The SDK supplies these tools, not our dispatch table.
@@ -1580,6 +1581,75 @@ async def _agent_setup_undo(args, ctx):
         agent_service.undo_setup(ctx.agent_id, args["receipt_id"])
     except KeyError:
         return "No setup change has that receipt id."
+    except ValueError as error:
+        return f"Not undone: {error}"
+    return "Undone: the previous values are back."
+
+
+def _proposal_text(receipt: dict) -> str:
+    diff = "; ".join(f"{key}: {str(receipt['before'].get(key))[:60]!r} -> {str(receipt['after'].get(key))[:60]!r}"
+                     for key in receipt["after"]) or "nothing changed"
+    return (f"Applied ({diff}). Receipt {receipt['id']}, profile revision {receipt['revision']}. Tell the person "
+            "what changed; they can undo it with Undo under History, or ask you to.")
+
+
+@register(
+    "agent_propose_profile",
+    "Change your own identity after the person agreed in this chat: name, job (role), blurb, standing "
+    "instructions (soul), notifications or speak_replies. You cannot change permissions, tools, peers, "
+    "channels, credentials or schedules. The change applies at once and the person sees a diff with Undo. "
+    "Always give a short reason.",
+    _object({"changes": {"type": "object", "description": "Only name, role, blurb, soul, notifications, speak_replies"},
+             "reason": _str("Why, in one or two sentences")}, ("changes", "reason")),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_propose_profile(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    try:
+        return _proposal_text(agent_service.propose_profile(ctx.agent_id, args.get("changes"), args.get("reason"),
+                                                            kind="profile"))
+    except (ValueError, KeyError) as error:
+        return f"Not applied: {error}"
+
+
+@register(
+    "agent_propose_model",
+    "Change your own model after the person agreed in this chat: endpoint_id, model_override, model_effort. "
+    "The choice is validated like the person's own. It applies at your next turn and shows a diff with Undo.",
+    _object({"changes": {"type": "object", "description": "Only endpoint_id, model_override, model_effort"},
+             "reason": _str("Why, in one or two sentences")}, ("changes", "reason")),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_propose_model(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    try:
+        return _proposal_text(agent_service.propose_profile(ctx.agent_id, args.get("changes"), args.get("reason"),
+                                                            kind="model"))
+    except (ValueError, KeyError) as error:
+        return f"Not applied: {error}"
+
+
+@register(
+    "agent_profile_undo",
+    "Undo one of your own profile or model changes by receipt id, when the person asks. Refused if your "
+    "profile changed afterwards, so a later edit is never lost.",
+    _object({"receipt_id": _str("The receipt id from agent_propose_profile or agent_propose_model")}, ("receipt_id",)),
+    agent_only=True, effect=WRITE,
+)
+async def _agent_profile_undo(args, ctx):
+    from services.agent_service import agent_service
+    if (refusal := _own_chat(ctx)):
+        return refusal
+    try:
+        receipt = next((r for r in agent_service.get(ctx.agent_id).get("profile_proposals", [])
+                        if r["id"] == args["receipt_id"]), None)
+        if receipt is None:
+            return "No change has that receipt id."
+        agent_service.undo_profile_proposal(ctx.agent_id, args["receipt_id"], receipt["revision"])
     except ValueError as error:
         return f"Not undone: {error}"
     return "Undone: the previous values are back."

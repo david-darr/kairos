@@ -10,15 +10,70 @@
 // (mascot.js), used only where a state changes.
 import { AJAR_ACCESSORIES, AJAR_ACCESSORY_NAMES, AJAR_COLORS, AJAR_COLOR_NAMES, AJAR_SHAPES,
   createMascot, defaultMascot, mascotUrl, rememberBot, toAjarSpec } from './mascot.js';
+import { loadBotsCss } from './botsUi.js';
 
 export function defaultAvatar(id, color) { return defaultMascot(id, color); }
 // Any stored spec, v2 dot face or v3 Ajar, as a clean Ajar spec.
 export function avatarSpec(agent) { return toAjarSpec(agent?.avatar, { id: agent?.id, color: agent?.color }); }
 export function avatarUrl(spec, pose = 'idle') { return mascotUrl(spec, pose); }
 
+// -- an uploaded picture beside the Kip (Phase 1, unit U2) --------------------------------------
+// A bot may carry avatar_image {asset_id, shape, zoom, focus_x, focus_y}: a picture owned by the bot
+// (services/bot_avatar_service.py), drawn in a circle, a rounded square, a square or the Kip's own
+// silhouette. The Kip spec is untouched, so clearing the picture brings the same Kip back.
+export const IMAGE_SHAPES = Object.freeze(['circle', 'rounded', 'square', 'kip']);
+const ASSET_ID = /^[0-9a-f]{32}$/;
+const clampTo = (value, low, high, fallback) => (Number.isFinite(Number(value)) ? Math.min(high, Math.max(low, Number(value))) : fallback);
+// A saved or drafted framing as a safe one: a known shape, zoom 1 to 3, focus 0 to 1.
+export function cleanFraming(image) {
+  if (!image || typeof image !== 'object' || !ASSET_ID.test(String(image.asset_id || ''))) return null;
+  return { asset_id: image.asset_id, shape: IMAGE_SHAPES.includes(image.shape) ? image.shape : 'circle',
+    zoom: clampTo(image.zoom, 1, 3, 1), focus_x: clampTo(image.focus_x, 0, 1, 0.5), focus_y: clampTo(image.focus_y, 0, 1, 0.5) };
+}
+// Where the picture is fetched from: the bot's own folder, or the signed-in person's draft folder
+// (a bot that is not made yet; the framing then carries draft: true).
+export function avatarImageUrl(agent) {
+  const image = cleanFraming(agent?.avatar_image);
+  if (!image) return '';
+  if (agent.avatar_image.draft) return `/api/agents/avatar-drafts/${image.asset_id}`;
+  return agent.id ? `/api/agents/${encodeURIComponent(agent.id)}/avatar-image/${image.asset_id}` : '';
+}
+// The crop as CSS for the <img>: the picture fills the box, is scaled around the focus point.
+export function framingStyle(image) {
+  const f = cleanFraming(image) || { zoom: 1, focus_x: 0.5, focus_y: 0.5 };
+  const origin = `${(f.focus_x * 100).toFixed(1)}% ${(f.focus_y * 100).toFixed(1)}%`;
+  return { objectFit: 'cover', objectPosition: origin, transformOrigin: origin, transform: `scale(${f.zoom})` };
+}
+
+function pictureNode(agent, size, spec, pose) {
+  const image = cleanFraming(agent.avatar_image), src = avatarImageUrl(agent);
+  if (!image || !src) return null;
+  loadBotsCss('/static/css/bots-avatar.css');
+  const node = document.createElement('span');
+  node.className = 'agent-avatar agent-dot-avatar agent-mascot agent-avatar-picture';
+  node.style.width = `${size}px`; node.style.height = `${size}px`;
+  node.dataset.avatarSpec = JSON.stringify(spec); node.dataset.pose = pose;
+  node.dataset.shape = image.shape; node.dataset.avatarImage = image.asset_id;
+  node.setAttribute('aria-hidden', 'true');
+  if (image.shape === 'kip') node.style.setProperty('--avatar-mask', `url("${mascotUrl(spec, pose)}")`);
+  const picture = document.createElement('img');
+  picture.alt = ''; picture.decoding = 'async'; picture.src = src;
+  Object.assign(picture.style, framingStyle(image));
+  // A picture that will not load (deleted, offline) falls back to the bot's Kip, never a broken box.
+  picture.addEventListener('error', () => {
+    node.classList.remove('agent-avatar-picture'); delete node.dataset.shape; delete node.dataset.avatarImage;
+    node.style.removeProperty('--avatar-mask');
+    picture.removeAttribute('style'); picture.src = mascotUrl(spec, pose);
+  }, { once: true });
+  node.append(picture);
+  return node;
+}
+
 export function agentAvatar(agent, size = 72, pose = 'idle') {
   rememberBot(agent);
   const spec = avatarSpec(agent);
+  const withPicture = agent?.avatar_image ? pictureNode(agent, size, spec, pose) : null;
+  if (withPicture) return withPicture;
   const node = document.createElement('span');
   // agent-dot-avatar stays as the layout hook every view already sizes by.
   node.className = 'agent-avatar agent-dot-avatar agent-mascot';
@@ -49,7 +104,12 @@ export function liveAgentAvatar(agent, size = 42, state = 'idle') {
 // ones on screen when Appearance changes (mascotUrl caches per theme).
 if (typeof document !== 'undefined') document.addEventListener('kairos:appearance', () => {
   for (const node of document.querySelectorAll('.agent-mascot[data-avatar-spec]')) {
-    try { node.firstElementChild.src = mascotUrl(JSON.parse(node.dataset.avatarSpec), node.dataset.pose || 'idle'); } catch { /* left as drawn */ }
+    try {
+      const url = mascotUrl(JSON.parse(node.dataset.avatarSpec), node.dataset.pose || 'idle');
+      // A picture keeps its own image; only the Kip silhouette it may be cut to follows the theme.
+      if (node.dataset.avatarImage) { if (node.dataset.shape === 'kip') node.style.setProperty('--avatar-mask', `url("${url}")`); }
+      else node.firstElementChild.src = url;
+    } catch { /* left as drawn */ }
   }
 });
 

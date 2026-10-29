@@ -80,7 +80,8 @@ function botsSources() {
       'folder-plus', 'message-square', 'messages-square', 'zap', 'check', 'circle-alert', 'triangle-alert', 'info', 'eye',
       'sliders-horizontal', 'brain', 'wrench', 'plug', 'calendar-clock', 'shield', 'history', 'gauge', 'bell', 'sparkles', 'upload',
       'image', 'refresh-cw', 'arrow-left', 'arrow-down', 'chevron-down', 'chevron-right', 'chevron-left', 'external-link', 'lock',
-      'clock', 'send', 'mic', 'paperclip', 'square', 'undo-2', 'share-2', 'download', 'panel-right'];
+      'clock', 'send', 'mic', 'paperclip', 'square', 'undo-2', 'share-2', 'download', 'panel-right',
+      'user', 'users', 'book-open', 'phone', 'repeat', 'monitor', 'rotate-ccw', 'play', 'pause'];
     assert.deepEqual([...ICON_NAMES].sort(), [...set].sort());
     for (const name of set) {
       const svg = iconSvg(name);

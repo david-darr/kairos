@@ -20,6 +20,30 @@ const fresh = () => {
 const status = (answer) => answer?._status ?? 200;
 
 (() => {
+  // Phase 1 identity fields and the identity lane answer like routes/agent_routes.py.
+  const { state, backend, get, send } = fresh();
+  const identity = require('./fixtures/bots-identity-backend.cjs')({ state, data: { agentsFixture: seedAgents() }, now: 1_800_000_000 });
+  get('/api/agents');
+  const ok = send('/api/agents/a1', 'PATCH', { reply_style: 'conversational', notifications: false, skill_selection: { mode: 'all', disabled: ['x'] } });
+  assert.deepEqual([ok.reply_style, ok.notifications, ok.skill_selection.disabled], ['conversational', false, ['x']]);
+  for (const bad of [{ reply_style: 'loud' }, { notifications: 'yes' }, { call_mode: 'video' }, { mascot_expression: 'angry' },
+    { avatar_image: { asset_id: 'a'.repeat(32), shape: 'circle', zoom: 1, focus_x: 0, focus_y: 0 } }]) assert.equal(status(send('/api/agents/a1', 'PATCH', bad)), 400, JSON.stringify(bad));
+  assert.equal(status(send('/api/agents/a1', 'PATCH', { expected_revision: 99, role: 'x' })), 409, 'a stale revision is refused');
+  assert.equal(get('/api/agents/section-modules'), undefined, 'the core lane leaves the identity namespaces alone');
+  assert.deepEqual(identity.read('/api/agents/section-modules'), { modules: [] });
+  assert.equal(identity.read('/api/agents/a1/history').rows[0].field, 'skill_selection', 'history is newest first');
+  const staged = identity.mutate('/api/agents/a1/avatar-image', 'POST', {});
+  assert.equal(status(identity.mutate('/api/agents/a1/avatar-image', 'PUT', { asset_id: 'b'.repeat(32) })), 400, 'a foreign picture is refused');
+  assert.equal(status(identity.mutate('/api/agents/a1/avatar-image', 'PUT', { asset_id: staged.asset_id, shape: 'rounded', zoom: 2, expected_snapshot: 'stale' })), 409);
+  assert.equal(identity.mutate('/api/agents/a1/avatar-image', 'PUT', { asset_id: staged.asset_id, shape: 'rounded', zoom: 2 }).avatar_image.shape, 'rounded');
+  assert.equal(identity.mutate('/api/agents/a1/avatar-image', 'PUT', { asset_id: null }).avatar_image, null);
+  assert.equal(status(identity.mutate('/api/agents/a1/avatar-image/generate', 'POST', { direction: 'a fox' })), 502, 'no connection saved');
+  identity.mutate('/api/agents/avatar-provider', 'PUT', { kind: 'openai', key: 'sk-test-key-123' });
+  assert.equal(identity.read('/api/agents/avatar-provider').key, undefined, 'the key is never returned');
+  assert.equal(status(identity.mutate('/api/agents/a1/avatar-image/generate', 'POST', { direction: 'x'.repeat(401) })), 400);
+})();
+
+(() => {
   // A long smoke run contributes extra agents and can reorder/edit the seeds.
   const agents = [...seedAgents().reverse(), ...Array.from({ length: 7 }, (_, i) => ({
     id: `a${101 + i}`, name: `Earlier ${i}`, created_at: 100 + i,

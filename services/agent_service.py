@@ -353,9 +353,12 @@ class AgentService:
         self.write_memory(agent_id, _memory_template(agent))
         return agent
 
-    def update(self, agent_id: str, **fields) -> dict:
+    def update(self, agent_id: str, *, expected_revision=None, actor="user", receipt_id=None, **fields) -> dict:
         with self._profile_lock:
             agent = self._require(agent_id)
+            if expected_revision is not None and agent.get("revision", 0) != expected_revision:
+                raise bot_record.BotConflict("The profile changed. Reload it before saving.")
+            before = copy.deepcopy(agent)
             changes = {}
             # One standing-instruction field (2026-10-28): the old name is a
             # synonym of `soul`, and `soul` wins when both arrive.
@@ -368,6 +371,10 @@ class AgentService:
                     raise ValueError(f"{key} cannot be changed")
                 if key in bot_record.BOT_EDITABLE:
                     value = bot_record.clean_field(key, value, agent)
+                    if key == "avatar_image" and value:
+                        from services import bot_avatar_service
+                        if not bot_avatar_service.exists(bot_avatar_service.bot_scope(agent_id), value["asset_id"]):
+                            raise ValueError("That picture does not belong to this bot.")
                     if key == "hidden" and value and not agent.get("hidden"):
                         if not any(not other.get("hidden") for other in self._agents.values()
                                    if other["id"] != agent_id):
@@ -429,6 +436,8 @@ class AgentService:
                 if any(key not in bot_record.NO_REVISION for key in changes):
                     agent["revision"] = agent.get("revision", 0) + 1
                 self._save()
+                from services import bot_profile_history
+                bot_profile_history.append(self, agent_id, before, changes, agent.get("revision", 0), actor, receipt_id)
             return agent
 
     def mutate_bot(self, agent_id: str, change) -> dict:
@@ -569,7 +578,8 @@ class AgentService:
         file_text = self._file_soul(agent_id)
         stored = agent.get("soul")
         return {"soul": stored, "file_text": file_text, "in_sync": stored == file_text,
-                "revision": agent.get("revision", 0)}
+                "revision": agent.get("revision", 0), "bytes": len((stored or "").encode("utf-8")),
+                "limit": SOUL_LIMIT_BYTES}
 
     def apply_soul_file(self, agent_id: str, expected_file_text: Optional[str], expected_revision: int) -> dict:
         """Accept a hand edit only against the exact file and profile seen by its reader."""
@@ -584,10 +594,84 @@ class AgentService:
                 raise ValueError("SOUL.md is missing; there is no external edit to apply")
             _check_soul(file_text)
             if agent.get("soul") != file_text:
+                before = copy.deepcopy(agent)
                 agent["soul"] = file_text
                 agent["revision"] = agent.get("revision", 0) + 1
                 self._save()
+                from services import bot_profile_history
+                bot_profile_history.append(self, agent_id, before, {"soul": file_text}, agent["revision"], "file")
             return self.read_soul(agent_id)
+
+    def discard_soul_file(self, agent_id, expected_file_text, expected_revision):
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            if agent.get("revision", 0) != expected_revision or self._file_soul(agent_id) != expected_file_text:
+                raise bot_record.BotConflict("The instructions changed. Reload before discarding the file edit.")
+            if agent.get("soul") is None:
+                Path(self._soul_path(agent_id)).unlink(missing_ok=True)
+            else:
+                self._write_soul_file(agent_id, agent["soul"])
+            return self.read_soul(agent_id)
+
+    def profile_history(self, agent_id, limit=100, full=False):
+        from services import bot_profile_history
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            return {"rows": bot_profile_history.rows(self, agent_id, limit, full), "revision": agent.get("revision", 0)}
+
+    def rollback_profile(self, agent_id, history_id, expected_revision, expected_file_text):
+        with self._profile_lock:
+            rows = self.profile_history(agent_id, 500, True)["rows"]
+            row = next((r for r in rows if r["id"] == history_id), None)
+            if not row:
+                raise KeyError(history_id)
+            if row["field"] != "soul":
+                raise ValueError("Only standing instructions can be restored from history.")
+            if self._file_soul(agent_id) != expected_file_text:
+                raise bot_record.BotConflict("The instructions file changed. Reload before restoring.")
+            return self.update(agent_id, soul=row.get("before") or "", expected_revision=expected_revision)
+
+    def propose_profile(self, agent_id, changes, reason, *, kind="profile"):
+        """Trusted self-call only. The tool broker checks the attended caller.
+
+        Full applies immediately. Store the diff and revision for stale-safe Undo;
+        never accept permission, scope, peer, channel or credential fields here.
+        """
+        allowed = ({"name", "role", "blurb", "soul", "notifications", "speak_replies"} if kind == "profile"
+                   else {"endpoint_id", "model_override", "model_effort"} if kind == "model" else set())
+        if not isinstance(changes, dict) or not changes or set(changes) - allowed:
+            raise ValueError("Only your identity or validated model selection can be proposed.")
+        if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+            raise ValueError("Give a reason of 1 to 500 characters.")
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            before = copy.deepcopy(agent)
+            ident = uuid.uuid4().hex
+            self.update(agent_id, actor="bot", receipt_id=ident, **changes)
+            # Include model normalization in the reversible diff.
+            keys = set(changes) | ({"model_override", "model_effort"} if kind == "model" else set())
+            changed = [k for k in keys if before.get(k) != agent.get(k)]
+            from core.logs import redact as redact_text
+            receipt = {"id": ident, "kind": kind, "reason": redact_text(reason.strip()), "ts": time.time(),
+                       "before": {k: before.get(k) for k in changed}, "after": {k: agent.get(k) for k in changed},
+                       "revision": agent.get("revision", 0), "state": "applied"}
+            agent["profile_proposals"] = [*(agent.get("profile_proposals") or [])[-19:], receipt]
+            self._save()
+            return copy.deepcopy(receipt)
+
+    def undo_profile_proposal(self, agent_id, receipt_id, expected_revision):
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            receipt = next((r for r in agent.get("profile_proposals", []) if r["id"] == receipt_id), None)
+            if not receipt:
+                raise KeyError(receipt_id)
+            if receipt["state"] != "applied" or receipt["revision"] != expected_revision:
+                raise bot_record.BotConflict("This change is no longer available to undo.")
+            restore = {k: ("" if k == "soul" and v is None else v) for k, v in receipt["before"].items()}
+            self.update(agent_id, expected_revision=expected_revision, receipt_id=receipt_id, **restore)
+            receipt["state"] = "undone"
+            self._save()
+            return copy.deepcopy(receipt)
 
     def delete(self, agent_id: str) -> None:
         """The identity, memory and open inbox items go; its pending work is
@@ -605,6 +689,9 @@ class AgentService:
         soul_path = self._soul_path(agent_id)
         if os.path.exists(soul_path):
             os.remove(soul_path)
+        from services import bot_avatar_service, bot_profile_history
+        bot_avatar_service.delete_bot(agent_id)
+        bot_profile_history.path_for(self, agent_id).unlink(missing_ok=True)
         try:
             os.rmdir(os.path.dirname(path))
         except OSError:
@@ -1164,6 +1251,12 @@ class AgentService:
         return {"sections": sections, "total_bytes": total, "approx_tokens": -(-total // 4),
                 "note": "This is what Kairos adds about this bot at the start of a chat. The model's provider adds "
                         "its own system prompt as well, which is not shown here."}
+
+    def prompt_snapshot(self, agent_id: str, session_id: Optional[str] = None) -> dict:
+        with self._profile_lock:
+            agent = self._require(agent_id)
+            text = identity_block(agent, self.read_memory(agent_id), chat=True, session_id=session_id)
+            return {"text": text, "revision": agent.get("revision", 0)}
 
     def recent_work(self, agent_id: str, current_session_id: Optional[str] = None,
                     now: Optional[float] = None) -> str:
