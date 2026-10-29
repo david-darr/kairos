@@ -177,7 +177,7 @@ export function mountBotsComposer(host, o) {
   function choose(i) { const item = menuItems[i], apply = menu?.apply; closeMenu(); if (item && apply) apply(item); input.focus(); }
   function suggest() {
     const text = input.value;
-    const slash = slashItems(text, o.skills?.() || []);
+    const slash = slashItems(text, o.skills?.() || []).filter(item => !o.room || item.id === 'goal');
     if (slash.length) { menuAt = 0; openList('slash', slash, item => {
       if (item.id === 'goal') { input.value = ''; draft.update({ text: '', mode: 'goal' }); }
       else if (item.id === 'learn') { input.value = ''; draft.update({ text: '' }); say('Teaching a task arrives with the skills update. For now, tell the bot what to remember in plain words.'); }
@@ -185,7 +185,7 @@ export function mountBotsComposer(host, o) {
       paint();
     }); return; }
     const token = mentionToken(text, input.selectionStart ?? text.length);
-    const mentions = mentionItems(token, o.mentions?.() || [], o.selfId || '');
+    const mentions = o.mentionSource ? o.mentionSource(token) : mentionItems(token, o.mentions?.() || [], o.selfId || '');
     if (mentions.length) { menuAt = 0; openList('mention', mentions, item => {
       if (item.kind === 'support') { input.value = text.slice(0, token.start) + text.slice(token.end); draft.update({ text: input.value }); o.onSupport?.(); paint(); return; }
       input.value = `${text.slice(0, token.start)}${item.label} ${text.slice(token.end)}`; draft.update({ text: input.value }); paint();
@@ -193,9 +193,9 @@ export function mountBotsComposer(host, o) {
     closeMenu();
   }
   plus.addEventListener('click', () => openMenu(plus, [
-    { label: 'Attach files', iconName: 'paperclip', onSelect: () => picker.click() },
+    ...(o.attachments === false ? [] : [{ label: 'Attach files', iconName: 'paperclip', onSelect: () => picker.click() }]),
     { label: draft.read().mode === 'goal' ? 'Stop working until done' : 'Work until done', iconName: 'zap', onSelect: toggleGoal },
-    { label: 'Teach a task', iconName: 'sparkles', meta: 'Soon', onSelect: () => say('Teaching a task arrives with the skills update.') },
+    ...(o.room ? [] : [{ label: 'Teach a task', iconName: 'sparkles', meta: 'Soon', onSelect: () => say('Teaching a task arrives with the skills update.') }]),
   ]));
 
   // -- Painting ------------------------------------------------------------------------
@@ -233,7 +233,7 @@ export function mountBotsComposer(host, o) {
     goalChip.setAttribute('aria-pressed', String(d.mode === 'goal'));
     goalChip.hidden = form() !== 'advanced' && d.mode !== 'goal';
     modelLabel.textContent = o.modelLabel?.() || ''; modelLabel.hidden = !modelLabel.textContent;
-    hint.hidden = !busy || form() === 'phone'; hint.textContent = busy ? busyHint({ queued: queue.items.length }) : '';
+    hint.hidden = !busy || form() === 'phone'; hint.textContent = busy ? (o.room ? 'Messages wait their turn.' : busyHint({ queued: queue.items.length })) : '';
     context.replaceChildren();
     if (d.reply_to_id) context.append(h('div', { class: 'bots-context-chip' }, [h('span', { text: `Replying to ${o.replyLabel?.(d.reply_to_id) || 'a message'}` }), h('button', { type: 'button', class: 'bots-msg-act', 'aria-label': 'Cancel reply', onclick: () => { draft.update({ reply_to_id: null }); paint(); } }, [icon('x', { size: 14 })])]));
     d.citations.forEach((cite, index) => context.append(h('div', { class: 'bots-context-chip' }, [h('span', { text: `Quote: ${String(cite.quote || '').slice(0, 60)}` }), h('button', { type: 'button', class: 'bots-msg-act', 'aria-label': 'Remove quote', onclick: () => { const citations = draft.read().citations; citations.splice(index, 1); draft.update({ citations }); paint(); } }, [icon('x', { size: 14 })])])));
@@ -281,7 +281,7 @@ export function mountBotsComposer(host, o) {
     if (event.key === 'ArrowUp' && !input.value && !event.shiftKey && !event.altKey && !event.metaKey) { event.preventDefault(); o.onEditLast?.(); return; }
     if (sendKey(event, { phone: phoneMedia.matches, preference: o.sendPreference || 'enter' })) {
       event.preventDefault();
-      if (isSteerChord({ empty: !input.value && !hasContent(), busy, lastEnter, now: now() })) { lastEnter = 0; Promise.resolve(o.steer?.()).catch(showError); }
+      if (!o.room && isSteerChord({ empty: !input.value && !hasContent(), busy, lastEnter, now: now() })) { lastEnter = 0; Promise.resolve(o.steer?.()).catch(showError); }
       else { if (input.value.trim() || hasContent()) lastEnter = now(); send(); }
     }
   });
@@ -304,6 +304,8 @@ export function mountBotsComposer(host, o) {
   const pagehide = () => draft.flush(); window.addEventListener('pagehide', pagehide);
   const media = () => paint(); phoneMedia.addEventListener?.('change', media);
   input.value = draft.read().text; paint();
+  if (o.attachments === false) { clip.hidden = true; picker.disabled = true; }
+  if (o.room) access.hidden = true;
 
   return {
     input, root, paint, showError, closeMenu, send, stageFiles,

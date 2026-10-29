@@ -17,6 +17,17 @@ import { attachmentGallery } from './botsChatAttachments.js';
 export const WINDOW_SIZE = 120, TOP_REVEAL_PX = 250, FOLLOW_PX = 80, QUIET_GAP = 900, JOIN_GAP = 300;
 export const COLLAPSE_CHARS = 600, COLLAPSE_LINES = 8;
 
+const rowRenderers = new Map();
+// Returns an unregister function. Callers can also supply instance rowRenderers.
+export function registerRowRenderer(kind, renderer) {
+  const entries = rowRenderers.get(kind) || [], entry = { renderer };
+  entries.push(entry); rowRenderers.set(kind, entries);
+  return () => { const at = entries.indexOf(entry); if (at >= 0) entries.splice(at, 1); if (!entries.length) rowRenderers.delete(kind); };
+}
+export function renderRegisteredRow(kind, row, options) {
+  return (rowRenderers.get(kind)?.at(-1)?.renderer || options?.rowRenderers?.[kind])?.(row, options) || null;
+}
+
 // -- Pure: time ----------------------------------------------------------------
 const startOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 export function dayLabel(ts, now = Date.now() / 1000) {
@@ -70,7 +81,7 @@ export function buildRows(messages, { now = Date.now() / 1000, readId = null, qu
     else if (simple && lastTs && message.ts - lastTs > quietGap) { rows.push({ type: 'day', key: `gap:${message.id}`, label: `${label} ${clock(message.ts)}`.trim() }); marker = true; }
     if (index === unreadFrom && !rows.some(r => r.type === 'unread')) rows.push({ type: 'unread', key: 'unread' });
     const rich = !!message.kind && message.kind !== 'message';
-    const joinPrev = !!prev && !marker && !rich && !prev.rich && prev.message.role === message.role && message.ts - prev.message.ts < JOIN_GAP && rows.at(-1)?.type === 'message';
+    const joinPrev = !!prev && !marker && !rich && !prev.rich && prev.message.role === message.role && prev.message.bot_id === message.bot_id && message.ts - prev.message.ts < JOIN_GAP && rows.at(-1)?.type === 'message';
     const row = { type: rich ? message.kind : 'message', key: message.id, message, rich, joinPrev, joinNext: false };
     if (joinPrev) prev.joinNext = true;
     rows.push(row); prev = row; lastTs = message.ts;
@@ -258,6 +269,7 @@ export function mountTranscript(host, opts) {
   }
   function messageNode(row) {
     const message = row.message, user = message.role === 'user';
+    const speaker = opts.messageAgent?.(message) || opts.agent;
     const card = h('article', { class: `bots-msg ${user ? 'user' : 'bot'}${row.joinPrev ? ' join-prev' : ''}${row.joinNext ? ' join-next' : ''}${message.status === 'failed' ? ' failed' : ''}`,
       'data-message-id': message.id, 'data-role': message.role, tabindex: '-1' });
     const bubbles = h('div', { class: 'bots-msg-bubbles' });
@@ -278,8 +290,16 @@ export function mountTranscript(host, opts) {
     const parts = [replyQuote(message, lookup, opts.jump), bubbles, attachmentGallery(message.attachments, { sessionId: opts.sessionId }),
       citationBadges(message, opts.goToSource), reactionBar(message, opts.react), meta];
     card.append(...parts.filter(Boolean));
-    if (!row.joinPrev && !user && opts.kip) card.prepend(h('div', { class: 'bots-msg-face', 'aria-hidden': 'true' }, [opts.kip(opts.agent, 24, 'idle')]));
-    card.append(messageTray(message, { ...ctx(), raw: raw.has(message.id) }, { ...opts.handlers, raw: m => toggleRaw(m.id) }));
+    if (!row.joinPrev && !user && opts.kip) card.prepend(h('div', { class: 'bots-msg-face', 'aria-hidden': 'true' }, [opts.kip(speaker, 24, 'idle')]));
+    if (!row.joinPrev && opts.speakerLabels) card.prepend(h('strong', { class: 'bots-room-speaker', text: user ? 'You' : speaker.name }));
+    if (opts.room) {
+      const p = message.meta?.auto?.p;
+      if (Number.isFinite(p)) card.append(h('span', { class: 'bots-hint', text: `Chosen by auto (${Math.round(p * 100)} percent)` }));
+    }
+    if (!opts.room) card.append(messageTray(message, { ...ctx(), raw: raw.has(message.id) }, { ...opts.handlers, raw: m => toggleRaw(m.id) }));
+    else if (opts.handlers) card.append(h('div', { class: 'bots-msg-tray', role: 'toolbar', 'aria-label': 'Message actions' },
+      [['reply', 'Reply'], ['copy', 'Copy'], ['pin', ctx().pinnedId === message.id ? 'Unpin' : 'Pin']].filter(([key]) => opts.handlers[key])
+        .map(([key, label]) => h('button', { type: 'button', class: 'bots-btn', text: label, onclick: () => opts.handlers[key](message) }))));
     touchTray(card);
     return card;
   }
@@ -296,7 +316,7 @@ export function mountTranscript(host, opts) {
   function rowNode(row) {
     if (row.type === 'day') return h('div', { class: 'bots-day', role: 'separator', text: row.label });
     if (row.type === 'unread') return h('div', { class: 'bots-unread', role: 'separator', text: 'New messages' });
-    return row.rich && row.type !== 'message' ? richNode(row) : messageNode(row);
+    return renderRegisteredRow(row.type, row, opts) || (row.rich && row.type !== 'message' ? richNode(row) : messageNode(row));
   }
 
   function draw({ keep = false, anchor = null } = {}) {
@@ -379,7 +399,14 @@ export function mountTranscript(host, opts) {
   function paintLive() {
     if (!live || !live.entry) return;
     const entry = live.entry, state = liveStatus(entry);
+    const speaker = opts.liveAgent?.(entry);
+    if (speaker && live.speakerId !== speaker.id) {
+      live.speakerId = speaker.id;
+      if (opts.kip) live.face.replaceChildren(opts.kip(speaker, 36, 'thinking'));
+    }
     live.status.textContent = state.line; live.node.dataset.state = state.state;
+    if (speaker) live.status.textContent = `${speaker.name}: ${state.line}`;
+    if (opts.room && entry.incomplete) live.status.textContent = `${speaker?.name || 'Bot'} is replying. Waiting for the complete reply.`;
     live.node.setAttribute('aria-busy', String(entry.status === 'processing'));
     live.face.firstElementChild?.setState?.(state.state === 'needs' ? 'alert' : state.state === 'working' ? 'working' : 'thinking');
     const text = entry.text || '';
