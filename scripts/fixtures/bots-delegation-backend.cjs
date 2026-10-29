@@ -6,7 +6,16 @@
 module.exports = ({ state }) => {
   class Refusal extends Error { constructor(status, message) { super(message); this.status = status; } }
   const lane = () => state.botsDelegation;
-  const reachOf = id => lane()?.reach?.[id];
+  // A seeded bot keeps its own reach; any other bot the core lane knows reads and writes its record's `peers`, as the
+  // server does (null reaches every bot, [] none). The panel's Access page uses this for every bot.
+  const coreReach = id => {
+    const agent = state.botsCore?.agents?.find(a => a.id === id);
+    if (!agent) return undefined;
+    return { get mode() { return agent.peers == null ? 'all' : agent.peers.length ? 'listed' : 'none'; },
+      get peers() { return agent.peers || []; }, get revision() { return agent.revision || 0; }, approve_peer_comms: true,
+      save(peers) { agent.peers = peers; agent.revision = (agent.revision || 0) + 1; } };
+  };
+  const reachOf = id => lane()?.reach?.[id] || coreReach(id);
   const peersOf = r => r.mode === 'all' ? null : r.mode === 'none' ? [] : [...r.peers];
   const widens = (before, after) => before !== null && (after === null || after.some(id => !before.includes(id)));
 
@@ -16,7 +25,7 @@ module.exports = ({ state }) => {
       const r = reachOf(m[1]);
       return r ? { bot_id: m[1], mode: r.mode, peers: [...r.peers], revision: r.revision, approve_peer_comms: r.approve_peer_comms !== false } : undefined;
     }
-    if ((m = route.match(/^\/api\/bot-peers\/([^/]+)\/roster$/))) return reachOf(m[1]) ? (lane().roster || []) : undefined;
+    if ((m = route.match(/^\/api\/bot-peers\/([^/]+)\/roster$/))) return reachOf(m[1]) ? (lane()?.roster || []) : undefined;
     if (route === '/api/bot-assignments' && lane()?.assignments) {
       return lane().assignments.filter(a => (!query.bot_id || a.assignee_bot_id === query.bot_id || a.requester?.bot_id === query.bot_id)
         && (!query.status || a.status === query.status));
@@ -32,20 +41,21 @@ module.exports = ({ state }) => {
     if (!['all', 'listed', 'none'].includes(body.mode)) throw new Refusal(400, 'Choose all, listed or none.');
     const proposed = body.mode === 'all' ? null : body.mode === 'none' ? [] : [...(body.peers || [])];
     if (widens(peersOf(r), proposed) && !body.acknowledge_scope) throw new Refusal(400, 'Confirm the wider reach before saving.');
-    Object.assign(r, { mode: body.mode, peers: proposed || [], revision: r.revision + 1 });
+    if (r.save) r.save(proposed);
+    else Object.assign(r, { mode: body.mode, peers: proposed || [], revision: r.revision + 1 });
     if (typeof body.approve_peer_comms === 'boolean') r.approve_peer_comms = body.approve_peer_comms;
-    (lane().writes ||= []).push({ bot_id: m[1], ...body });
+    if (lane()) (lane().writes ||= []).push({ bot_id: m[1], ...body });
     return read(route);
   }
 
   return {
     read(route, query = {}) {
-      if (!state.botsLive || !lane()) return undefined;
+      if (!state.botsLive || (!lane() && !route.startsWith('/api/bot-peers/'))) return undefined;
       try { return read(route, query); }
       catch (error) { if (error instanceof Refusal) return { _status: error.status, detail: error.message }; throw error; }
     },
     mutate(route, method, body = {}) {
-      if (!state.botsLive || !lane()) return undefined;
+      if (!state.botsLive || (!lane() && !route.startsWith('/api/bot-peers/'))) return undefined;
       try { return mutate(route, method, body || {}); }
       catch (error) { if (error instanceof Refusal) return { _status: error.status, detail: error.message }; throw error; }
     },

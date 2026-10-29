@@ -2486,7 +2486,16 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('#layout-pins')");
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await js("document.querySelector('#rd-all-tabs-btn').click()");
-    await waitFor("!document.querySelector('#rd-all-tabs').hidden && document.querySelector('#rd-all-tabs-btn').getAttribute('aria-expanded') === 'true'");
+    try { await waitFor("!document.querySelector('#rd-all-tabs').hidden && document.querySelector('#rd-all-tabs-btn').getAttribute('aria-expanded') === 'true'"); }
+    catch (error) {  // TEMPORARY diagnostics (2026-10-29): what stands in the way of All tabs
+      console.log('ALLTABS', JSON.stringify(await js(`(() => { const b = document.querySelector('#rd-all-tabs-btn'); const r = b.getBoundingClientRect();
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return { rect: [r.x, r.y, r.width, r.height], size: [innerWidth, innerHeight], hidden: document.querySelector('#rd-all-tabs').hidden, expanded: b.getAttribute('aria-expanded'),
+          top: top && (top.id || String(top.className) || top.tagName), mode: document.documentElement.dataset.appMode, view: document.getElementById('view-content')?.dataset.view,
+          settings: !!document.querySelector('.settings-nav-item'), active: document.activeElement?.id || String(document.activeElement?.className),
+          dialogs: [...document.querySelectorAll('dialog[open], [aria-modal=true]')].map(d => String(d.className) || d.id), body: String(document.body.className) }; })()`)));
+      throw error;
+    }
     await capture('desktop-all-tabs');
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await waitFor("document.querySelector('#rd-all-tabs').hidden && document.activeElement === document.querySelector('#rd-all-tabs-btn')");

@@ -103,12 +103,20 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, win, 
     assert.equal(await js(`document.querySelector('${card('identity')} .bots-identity .bots-text-row:nth-child(1) input').maxLength`), 100, 'name limit');
     assert.equal(await js(`document.querySelector('${card('identity')} .bots-identity .bots-text-row:nth-child(2) input').maxLength`), 200, 'job limit');
 
-    // 5. Access saves the selected peer by id.
+    // 5. Access saves the selected peer by id, through the reach editor (Phase 4: "Only these bots").
     await openSection('access');
-    await waitFor(`[...document.querySelectorAll('${card('access')} .bots-switch-row')].some(n => n.textContent.includes(${q(friend.name)}))`);
+    const reach = `${card('access')} .bots-reach`;
+    await waitFor(`!!document.querySelector('${reach} select')`);
+    await js(`(() => { const s = document.querySelector('${reach} select'); s.value = 'listed'; s.dispatchEvent(new Event('change')); })()`);
+    await waitFor(`[...document.querySelectorAll('${reach} .bots-reach-picker label')].some(n => n.textContent.includes(${q(friend.name)}))`);
+    await js(`(() => { const box = [...document.querySelectorAll('${reach} .bots-reach-picker label')].find(n => n.textContent.includes(${q(friend.name)})).querySelector('input');
+      box.checked = true; box.dispatchEvent(new Event('change'));
+      const ack = document.querySelector('${reach} [data-reach-ack]'); if (!ack.closest('label').hidden) { ack.checked = true; ack.dispatchEvent(new Event('change')); } })()`);
     mark = writes.length;
-    await js(`[...document.querySelectorAll('${card('access')} .bots-switch-row')].find(n => n.textContent.includes(${q(friend.name)})).click()`);
-    await waitPatch(mark, bot.id, p => Array.isArray(p.peers) && p.peers.includes(friend.id), 'the peer');
+    await js(`document.querySelector('${reach} .bots-reach-save').click()`);
+    for (let tries = 0; tries < 50 && !((await record(bot.id)).peers || []).includes(friend.id); tries++) await delay(100);
+    assert.equal(await js(`document.querySelector('${reach} .bots-reach-error')?.textContent || ''`), '', 'the save was not refused');
+    assert.ok(writes.slice(mark).some(w => w.method === 'PUT' && w.path === `/api/bot-peers/${bot.id}/reach` && JSON.parse(w.body).peers.includes(friend.id)), 'the reach save names the peer');
     assert.deepEqual((await record(bot.id)).peers, [friend.id], 'the peer id persisted in the profile');
 
     // 6. Standing instructions are counted in UTF-8 bytes and multi-byte characters stay whole.
