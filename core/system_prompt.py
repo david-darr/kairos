@@ -54,6 +54,9 @@ UI_DESIGN_DISCIPLINE = (
 # Every chat model (not helpers, which cannot write): a design request goes to
 # the Design canvas (core/design_tools.py), not a hand-built HTML file.
 DESIGN_CANVAS_LINE = "\n\nTo design screens, pages or slides, use the Design canvas: design_create, then design_edit by id."
+# 2026-10-28: the index of how-to skills for extending Kairos (skill_templates/kairos-developer).
+DEVELOPER_LINE = ("\n\nTo build or automate something with Kairos itself (a tab, skill, integration, routine, agent "
+                  "or code project), read_skill kairos-developer first.")
 
 
 def computer_allowed(is_admin: bool) -> bool:
@@ -137,7 +140,7 @@ You also have a run_shell tool — admin-only (David's ask 2026-09-02), no restr
 
 
 def for_claude(is_admin: bool = False, computer_available: bool = True) -> str:
-    return _SHARED_CORE + _CLAUDE_ADDENDUM + (_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
+    return _SHARED_CORE + _CLAUDE_ADDENDUM + DEVELOPER_LINE + (_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
 
 
 # A helper's whole system prompt (core/helpers.py, roadmap phase 5,
@@ -165,7 +168,7 @@ ASK_USER_GUIDANCE = "When you need the person to choose or clarify before contin
 
 def for_external(is_admin: bool = False, allow_user_tab_source: bool = False, computer_available: bool = True) -> str:
     tab_access = _EXTERNAL_CUSTOM_TABS_ADDENDUM if allow_user_tab_source else ""
-    return _SHARED_CORE + _EXTERNAL_ADDENDUM + "\n\n" + ASK_USER_GUIDANCE + tab_access + (_EXTERNAL_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
+    return _SHARED_CORE + _EXTERNAL_ADDENDUM + DEVELOPER_LINE + "\n\n" + ASK_USER_GUIDANCE + tab_access + (_EXTERNAL_SHELL_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available)
 
 
 # Codex CLI, Phase 1 (added 2026-09-11): full hive-mind tool parity via a
@@ -246,6 +249,6 @@ def for_codex(python_exe: str, cli_script: str, is_admin: bool = False, full_acc
               'kairos_tool_describe --name TOOL and kairos_tool_call --name TOOL --args_json JSON_OBJECT. '
               'Use these helpers to find and call the integrations enabled for this chat.') if enabled else ""
     return (_codex_core(python_exe, cli_script, full_access, is_admin, agent, session_id)
-            + UI_DESIGN_DISCIPLINE + DESIGN_CANVAS_LINE
+            + UI_DESIGN_DISCIPLINE + DESIGN_CANVAS_LINE + DEVELOPER_LINE
             + (_CODEX_ADMIN_ADDENDUM if is_admin and not full_access else "")
             + (_CODEX_GOOGLE_ADDENDUM if is_admin else "") + _computer_addendum(is_admin, computer_available) + bridge)
