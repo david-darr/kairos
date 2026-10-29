@@ -274,7 +274,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await waitFor("document.documentElement.dataset.view === 'agents' && !!document.querySelector('.agents-messenger')");
     assert.equal(await mode(), 'kairos', 'a notification-style link opens the legacy tab in Kairos');
     assert.equal(await js("document.querySelector('#forge-mode-switch [data-mode=kairos]').getAttribute('aria-pressed')"), 'true');
-    assert.equal(await js("[...document.querySelectorAll('.agents-rail-item')].some(n => n.dataset.search.includes('scout'))"), true, 'the legacy list still shows the bots');
+    // The legacy list renders after its own fetch; after a long run it can trail the messenger shell.
+    await waitFor("[...document.querySelectorAll('.agents-rail-item')].some(n => (n.dataset.search || '').includes('scout'))");
     assert.equal(await js("!!document.querySelector('.agents-rail-create [aria-label=\"New agent\"]')"), true, 'and its own New agent button');
     assert.equal(await js("document.querySelector('#nav .nav-item[data-tab=agents], #rd-all-tabs .nav-item[data-tab=agents]') !== null"), true, 'the Agents tab is still in the Kairos nav');
 
