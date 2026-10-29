@@ -1,20 +1,22 @@
-"""Quiet, reversible upkeep of an opted-in agent's dated memory bullets.
+"""Quiet, reversible upkeep of an opted-in bot's dated notes (Agents 2.0, 2026-10-13; moved onto the
+notebook for Bots Phase 2, 2026-10-29).
 
-The pending journal is a write-ahead record: after a crash, the next read
-rolls both files back before exposing memory (Agents 2.0, 2026-10-13).
+This is the deterministic pass: it archives expired and superseded notes, merges exact near-duplicates and
+drops finished projects, never touching a safety or health fact or any hand-written text. It runs through
+services/bot_memory.py, so every pass is one journaled, guarded-Undo change in the protected journal, and an
+interrupted pass is finished by the notebook's own crash recovery. Unit U2's model-assisted tidy (organize,
+dream) replaces the scheduler's call to it; both use the same transactions.
 """
-import base64
-import hashlib
 import json
-import os
 import re
 import time
-import uuid
-from datetime import date, datetime
-from pathlib import Path
+from datetime import datetime
 
 from core import events
+from services import bot_memory, bot_memory_journal, bot_memory_store as store
+redact = bot_memory_journal.redact
 from services.agent_service import _memory_entry
+from services.bot_memory_entries import is_protected_text, _PROTECTED_SECTIONS
 
 
 # Five minutes clears an ordinary pause; the 15-second scheduler sees it on
@@ -23,75 +25,31 @@ QUIET_SECONDS = 300
 # At most two removed bullets and at most a quarter of dated bullets. A small
 # file therefore gets one cautious change at a time (2026-10-13).
 MAX_REMOVALS = 2
-MAX_UNDOABLE = 50
 FINISHED_DAYS = 30
+ACTORS = ("upkeep",)
 
 
-def _journal_path(service, agent_id):
-    return Path(service._memory_path(agent_id)).with_name("memory-upkeep.json")
+def _checked_path(agent_id):
+    return store.state_dir(agent_id) / "upkeep-checked.json"
 
 
-def _read_journal(path):
-    if not path.exists():
-        return {"entries": [], "checked": {}}
-    return json.loads(path.read_text(encoding="utf-8"))
+def _read_checked(agent_id):
+    try:
+        data = json.loads(_checked_path(agent_id).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
 
 
-def _atomic(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".upkeep-tmp")
-    with temporary.open("wb") as file:
-        file.write(data)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary, path)
-
-
-def _save(path, journal):
-    _atomic(path, json.dumps(journal, ensure_ascii=False, indent=2).encode("utf-8"))
-
-
-def _pack(value):
-    return None if value is None else base64.b64encode(value).decode("ascii")
-
-
-def _unpack(value):
-    return None if value is None else base64.b64decode(value)
-
-
-def _bytes(path):
-    return path.read_bytes() if path.exists() else None
-
-
-def _restore(path, value):
-    if value is None:
-        if path.exists():
-            path.unlink()
-    else:
-        _atomic(path, value)
+def _save_checked(agent_id, checked):
+    from services import bot_memory_journal as journal
+    journal._dir(agent_id)
+    journal._atomic(_checked_path(agent_id), json.dumps(checked).encode("utf-8"))
 
 
 def recover(service, agent_id):
-    """Finish an interrupted rollback before any memory access."""
-    path = _journal_path(service, agent_id)
-    if not path.exists():
-        return
-    journal = _read_journal(path)
-    pending = next((e for e in journal["entries"] if e["status"] in ("pending", "undo-pending")), None)
-    if pending is None:
-        return
-    for file in pending["files"]:
-        target = path.parent / file["name"]
-        if _bytes(target) not in (_unpack(file["before"]), _unpack(file["after"])):
-            raise ValueError("upkeep recovery refused: a file changed during the interrupted pass")
-    for file in pending["files"]:
-        _restore(path.parent / file["name"],
-                 _unpack(file["before"] if pending["status"] == "pending" else file["after"]))
-    if pending["status"] == "pending":
-        journal["entries"].remove(pending)
-    else:
-        pending["status"] = "committed"
-    _save(path, journal)
+    """Finish an interrupted change before any memory access (the notebook does it for every access)."""
+    bot_memory.ensure_notebook(agent_id)
 
 
 def _tokens(body):
@@ -124,6 +82,7 @@ def _plan(content, now):
     sections = []
     current = ""
     entries = []
+    multi = set()   # a note with continuation lines is left to the person: removing only its first line would orphan the rest
     for i, line in enumerate(lines):
         if line.startswith("## "):
             current = line[3:].strip()
@@ -131,6 +90,8 @@ def _plan(content, now):
         parsed = _memory_entry(line)
         if parsed and current:
             entries.append((i, current, *parsed))
+            if i + 1 < len(lines) and lines[i + 1].startswith("  ") and lines[i + 1].strip():
+                multi.add(i)
     if len(entries) < 2:
         return None
     newest = max(entries, key=lambda e: (e[2], e[0]))[0]
@@ -141,8 +102,10 @@ def _plan(content, now):
 
     def select(old, reason, replacement=None):
         index, section = old[:2]
-        if index == newest or index in removals or len(removals) >= limit:
+        if index == newest or index in removals or len(removals) >= limit or index in multi:
             return False
+        if section.lower() in _PROTECTED_SECTIONS or is_protected_text(old[4]):
+            return False   # a safety or health fact stays in the index
         # A section with even one handwritten line is still nonempty; count
         # every substantive line, not only recognized bullets.
         remaining = [i for i, line in enumerate(lines) if sections[i] == section
@@ -199,8 +162,11 @@ def _plan(content, now):
                              for n, i in enumerate(removals)]
 
 
-def upkeep(service, agent_id, *, now=None, topic=None):
-    """Run one quiet pass, or return None without writing unchanged memory."""
+
+
+def upkeep(service, agent_id, *, now=None, topic=None, force=False):
+    """Run one quiet pass, or return None without writing unchanged memory. force: the person asked for it now,
+    so the quiet window is skipped (a chat in progress still holds it off)."""
     from core.session_manager import session_manager
     from services import chat_service
 
@@ -209,64 +175,65 @@ def upkeep(service, agent_id, *, now=None, topic=None):
         return None
     moment = time.time() if now is None else now
     sessions = [s for s in session_manager.list_sessions(agent_id=agent_id) if s.get("message_count")]
-    if not sessions or moment - max(s["updated_at"] for s in sessions) < QUIET_SECONDS:
+    if not force and (not sessions or moment - max(s["updated_at"] for s in sessions) < QUIET_SECONDS):
         return None
     if any(chat_service.is_busy(s["id"]) for s in sessions):
         return None
     with service._admission_lock:
         if any(h["agent_id"] == agent_id for h in service._reservations.values()):
             return None
-        recover(service, agent_id)
-        memory = Path(service._topic_path(agent_id, topic) if topic is not None else service._memory_path(agent_id))
-        before = _bytes(memory)
-        if not before:
-            return None
-        journal_path = _journal_path(service, agent_id)
-        journal = _read_journal(journal_path)
-        digest = hashlib.sha256(before).hexdigest()
-        today = datetime.fromtimestamp(moment).date()
-        # Reconsider on a new day so a previously future expiry can mature.
-        # Repeated polls within the day do no planning or writing (2026-10-13).
-        checked = digest + ":" + today.isoformat()
-        if journal["checked"].get(memory.name if topic is None else "memory/" + memory.name) == checked:
-            return None
-        if sum(e["status"] == "committed" for e in journal["entries"]) >= MAX_UNDOABLE:
-            return None  # Never evict an undoable pass silently.
-        planned = _plan(before, today)
-        key = memory.name if topic is None else "memory/" + memory.name
-        if planned is None:
-            journal["checked"][key] = checked
-            _save(journal_path, journal)
-            return None
-        after, addition, changes = planned
-        archive = memory.parent.parent / f"memory-{topic}-archive.md" if topic else memory.with_name("memory-archive.md")
-        archive_before = _bytes(archive)
-        archive_after = (archive_before or b"") + addition
-        entry = {"id": uuid.uuid4().hex, "at": moment, "topic": topic, "status": "pending",
-                 "changes": changes, "files": [
-                     {"name": key, "before": _pack(before), "after": _pack(after)},
-                     {"name": archive.name, "before": _pack(archive_before), "after": _pack(archive_after)}]}
-        journal["entries"] = [e for e in journal["entries"] if e["status"] != "undone"] + [entry]
-        # A large archive can make snapshots expensive. Stop at the byte cap
-        # instead of silently evicting still-undoable history (2026-10-13).
-        if len(json.dumps(journal).encode("utf-8")) > 8_000_000:
-            return None
-        _save(journal_path, journal)
-        _atomic(archive, archive_after)
-        _atomic(memory, after)
-        entry["status"] = "committed"
-        journal["checked"][key] = hashlib.sha256(after).hexdigest() + ":" + today.isoformat()
-        _save(journal_path, journal)
+        path = store.topic_path(topic) if topic is not None else store.INDEX_NAME
+        with bot_memory.lock(agent_id):
+            bot_memory.ensure_notebook(agent_id)
+            before = store.read_bytes(agent_id, path)
+            if not before:
+                return None
+            digest = store.sha256(before)
+            today = datetime.fromtimestamp(moment).date()
+            # Reconsider on a new day so a previously future expiry can mature.
+            # Repeated polls within the day do no planning or writing (2026-10-13).
+            checked = digest + ":" + today.isoformat()
+            marks = _read_checked(agent_id)
+            if marks.get(path) == checked:
+                return None
+            try:
+                planned = _plan(before, today)
+            except UnicodeDecodeError:
+                return None   # a file that is not text is left alone
+            if planned is None:
+                marks[path] = checked
+                _save_checked(agent_id, marks)
+                return None
+            after, addition, changes = planned
+            archive = store.read_bytes(agent_id, store.ARCHIVE_PATH)
+            changes_list = [{"path": path, "expected_hash": digest, "data": after},
+                            {"path": store.ARCHIVE_PATH, "expected_hash": store.sha256(archive),
+                             "data": (archive or b"") + addition}]
+            try:
+                result = bot_memory.apply_transaction(
+                agent_id, changes_list, actor="upkeep", source="tidy", now=moment,
+                summary=f"Tidied {len(changes)} note{'' if len(changes) == 1 else 's'}",
+                extra={"topic": topic, "changes": [{"section": c["section"], "line": redact(c["line"]), "reason": c["reason"]}
+                                                    for c in changes]})
+            except (store.CapacityError, store.StaleState):
+                return None   # an archive at its size limit, or a note edited mid-pass: try again another day
+            row = result["row"]
+            marks[path] = store.sha256(after) + ":" + today.isoformat()
+            _save_checked(agent_id, marks)
     events.emit("agent.memory_upkeep", f"{agent['name']} tidied {len(changes)} memory entr{'y' if len(changes) == 1 else 'ies'}.",
-                agent_id=agent_id, upkeep_id=entry["id"])
-    return {"id": entry["id"], "at": moment, "topic": topic, "changes": changes}
+                agent_id=agent_id, upkeep_id=row["id"])
+    return {"id": row["id"], "at": moment, "topic": topic, "changes": changes}
 
 
 def journal_entries(service, agent_id):
+    """The tidy passes, newest first: {id, at, ts, topic, status, summary, changes}."""
     service._require(agent_id)
-    recover(service, agent_id)
-    return [{k: v for k, v in entry.items() if k != "files"}
-            for entry in reversed(_read_journal(_journal_path(service, agent_id))["entries"])]
+    bot_memory.ensure_notebook(agent_id)
+    from services import bot_memory_journal as journal
+    return [{"id": row["id"], "at": row["time"], "ts": row["time"], "topic": row.get("topic"),
+             "status": "undone" if row.get("reverted_by") else "committed",
+             "summary": row.get("summary", ""), "changes": row.get("changes", [])}
+            for row in journal.rows(agent_id, 200) if row.get("actor") in ACTORS]
 
 
 def undo(service, agent_id, upkeep_id):
@@ -274,24 +241,10 @@ def undo(service, agent_id, upkeep_id):
     with service._admission_lock:
         if any(h["agent_id"] == agent_id for h in service._reservations.values()):
             raise ValueError("Undo refused: this agent has work in flight")
-        recover(service, agent_id)
-        path = _journal_path(service, agent_id)
-        journal = _read_journal(path)
-        entry = next((e for e in journal["entries"] if e["id"] == upkeep_id), None)
-        if entry is None or entry["status"] != "committed":
+        from services import bot_memory_journal as journal
+        bot_memory.ensure_notebook(agent_id)
+        row = journal.find_row(agent_id, upkeep_id)
+        if row is None or row.get("actor") not in ACTORS or row.get("reverted_by"):
             raise ValueError("Undo refused: pass is missing or already undone")
-        names = {f["name"] for f in entry["files"]}
-        if any(e["status"] == "committed" and names.intersection(f["name"] for f in e["files"])
-               for e in journal["entries"][journal["entries"].index(entry) + 1:]):
-            raise ValueError("Undo refused: a newer pass changed the same file; undo it first")
-        for file in entry["files"]:
-            if _bytes(path.parent / file["name"]) != _unpack(file["after"]):
-                raise ValueError("Undo refused: memory or archive changed since this pass")
-        entry["status"] = "undo-pending"
-        _save(path, journal)
-        for file in entry["files"]:
-            _restore(path.parent / file["name"], _unpack(file["before"]))
-        entry["status"] = "undone"
-        journal["checked"].pop(entry["files"][0]["name"], None)
-        _save(path, journal)
+        bot_memory.revert(agent_id, upkeep_id, actor="person", source="undo of a tidy pass")
         return {"id": upkeep_id, "undone": True}
