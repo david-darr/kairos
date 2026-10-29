@@ -50,6 +50,18 @@ module.exports = ({ state }) => {
   }
 
   function mutate(route, method, body = {}) {
+    const change = route.match(/^\/api\/bot-team\/changes\/([^/]+)\/(apply|cancel|undo)$/);
+    if (change && method === 'POST') {
+      const row = lane().changes.find(c => c.id === decodeURIComponent(change[1]));
+      if (!row) return { _status: 404, detail: 'Team change not found' };
+      const action = change[2];
+      lane().log.push({ change: row.id, action });
+      if (action === 'undo' && row.undoStale) return { _status: 409, detail: 'A bot changed since this setup. Undo is unavailable' };
+      const allowed = { apply: ['proposed'], cancel: ['proposed'], undo: ['applied'] }[action];
+      if (!allowed.includes(row.state)) return { _status: 409, detail: 'This change cannot be ' + action + 'ed' };
+      row.state = { apply: 'applied', cancel: 'cancelled', undo: 'undone' }[action];
+      return { receipt: { ...row } };
+    }
     const m = route.match(/^\/api\/bot-setup\/([^/]+)\/request$/);
     if (!m) return undefined;
     const row = (lane().setup[m[1]] ||= { eligible: false });
