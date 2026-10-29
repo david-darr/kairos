@@ -262,6 +262,12 @@ def notifications(user):
     return {"rows": allowed, "unread": sum(not r["read"] for r in allowed)}
 
 
+def mark_thread_read(owner, sid, message_id):
+    """The runtime's read cursor moved (bot_chat_service.mark_read): mark this
+    conversation's notifications read up to that message."""
+    store.read_thread(owner, sid, message_id, None)
+
+
 def ingest_event(event):
     """One trusted event-bus subscriber, called from bot_push.start().
 
@@ -315,9 +321,9 @@ def ingest_event(event):
         inbox_id = "item:" + item["id"]
     elif kind == "agent.review" and task and task.get("status") == "review":
         notification_kind, inbox_id = "approval", "review:" + task["id"]
-    elif kind in ("bot.turn.completed", "bot.completed"):
+    elif kind in ("bot.turn.completed", "bot.completed", "bot.turn_done"):
         notification_kind = "done"
-    elif kind in ("bot.turn.failed", "bot.failed"):
+    elif kind in ("bot.turn.failed", "bot.failed", "bot.turn_failed"):
         notification_kind = "turn-failed"
     elif kind == "bot.runtime":
         terminal = runtime.get("type") or runtime.get("kind")
