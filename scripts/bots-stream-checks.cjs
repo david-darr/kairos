@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
 // Streaming bot replies (Phase 0 U5, 2026-10-28). Run behind --bots-stream-only,
 // which U1's generic `--bots-<name>-only` loader in ui-smoke.cjs dispatches to
@@ -6,27 +7,34 @@ const assert = require('node:assert/strict');
 // navigates to the `botsShell` tab (U3's contract), so a full run waits for
 // integration; the Agents-tab half uses the same chat component and selectors
 // as agents-birth-checks.cjs.
-module.exports = async ({ js, waitFor, delay, navigate, demoState, liveChunk, liveEvent, liveFinish, liveRuns }) => {
+module.exports = async ({ js, waitFor, delay, navigate, win, base, demoState, liveChunk, liveEvent, liveFinish, liveRuns }) => {
   const body = "[...document.querySelectorAll('.agent-chat-main .msg.assistant .msg-body')].at(-1)";
   const card = "[...document.querySelectorAll('.agent-chat-main .msg.assistant')].at(-1)";
   const fill = (selector, value) => js(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); n.value=${JSON.stringify(value)}; n.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   const send = async text => {
+    const previousTurn = liveRuns.as1?.turnId;
     await fill('.agent-chat-main .side-chat-input', text);
     await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
     await waitFor(`${card}?.getAttribute('aria-busy') === 'true'`);
-    for (let tries = 0; liveRuns.as1?.status !== 'processing'; tries++) {
+    for (let tries = 0; liveRuns.as1?.status !== 'processing' || liveRuns.as1.turnId === previousTurn; tries++) {
       if (tries > 100) throw new Error('The bot turn never reached the test server');
       await delay(50);
     }
   };
   const opens = {
-    'Agents tab': () => navigate('agents', { agentId: 'a1' }),
-    'Bots mode': () => navigate('botsShell', { agentId: 'a1' }),
+    'Agents tab': () => navigate('agents', { agentId: 'a1', sessionId: 'as1' }),
+    'Bots mode': () => navigate('botsShell', { agentId: 'a1', sessionId: 'as1' }),
   };
 
-  demoState.sessionFields = { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } };
-  demoState.liveHoldIds = ['as1', 's1'];
+  const restore = await isolateBotsCheck({ js, demoState }, {
+    botsLive: false,
+    sessionFields: { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' }, s1: { agent_id: null } },
+    sidebarBotSessions: undefined, sidebarBotMessages: undefined,
+    liveHoldIds: ['as1', 's1'],
+  });
   try {
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
     for (const [surface, open] of Object.entries(opens)) {
       const say = text => `${surface}: ${text}`;
       await open();
@@ -56,6 +64,10 @@ module.exports = async ({ js, waitFor, delay, navigate, demoState, liveChunk, li
       await waitFor(`${body}?.textContent.includes('Saved so far')`);
       await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
       await waitFor(`${card}?.textContent.includes('Stopped')`);
+      for (let tries = 0; liveRuns.as1?.status === 'processing'; tries++) {
+        if (tries > 100) throw new Error('The stopped bot turn never finished on the test server');
+        await delay(50);
+      }
       assert.ok(await js(`${body}?.textContent.includes('Saved so far')`), say('Stop keeps the partial text'));
       assert.equal(await js(`!!${card}?.querySelector('.msg-cursor')`), false, say('no cursor after Stop'));
     }
@@ -65,13 +77,19 @@ module.exports = async ({ js, waitFor, delay, navigate, demoState, liveChunk, li
     await js("import('/static/js/views/chat.js').then(m => m.openSessionById('s1'))");
     await waitFor("!!document.querySelector('#chat-input')");
     await fill('#chat-input', 'Ordinary stream check');
+    const previousTurn = liveRuns.s1?.turnId;
     await js("document.querySelector('#chat-send').click()");
+    for (let tries = 0; liveRuns.s1?.status !== 'processing' || liveRuns.s1.turnId === previousTurn; tries++) {
+      if (tries > 100) throw new Error('The ordinary chat turn never reached the test server');
+      await delay(50);
+    }
     await waitFor("!![...document.querySelectorAll('#chat-messages .msg.user')].find(n => n.textContent.includes('Ordinary stream check'))");
     liveChunk('s1', 'Visible before completion');
     await waitFor("[...document.querySelectorAll('#chat-messages .msg.assistant')].at(-1)?.textContent.includes('Visible before completion')");
     liveFinish('s1');
+    await waitFor("[...document.querySelectorAll('#chat-messages .msg.assistant')].at(-1)?.getAttribute('aria-busy') === 'false'");
   } finally {
-    delete demoState.liveHoldIds;
+    await restore();
   }
   console.log('PASS: bot replies stream in the Agents tab and Bots mode (cursor, heading, Stop, return); Chats unchanged.');
 };

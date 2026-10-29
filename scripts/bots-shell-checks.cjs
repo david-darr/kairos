@@ -7,6 +7,7 @@
 // through botsPanelHost.js, so this check does not depend on them and never asks
 // the server for a file that may not exist.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
 module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, liveChunk, liveFinish, liveRuns, base, overflow }) => {
   const call = (path, method, body) => js(`fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' },
@@ -34,11 +35,37 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     return true; })`);
   const open = (id, options = {}) => navigate('botsShell', { agentId: id, ...options });
   const errorToasts = "[...document.querySelectorAll('#toast-host .toast.error')].map(n => n.textContent)";
+  const restore = await isolateBotsCheck({ js, demoState }, {
+    sessionFields: { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } },
+    sidebarBotSessions: undefined, sidebarBotMessages: undefined, liveHoldIds: undefined,
+  });
+  // botsRail.js orders finite numeric `order` values first, then names
+  // (case-insensitive) and IDs. The API's creation-time order is different.
+  const visibleRoster = () => js(`fetch('/api/agents').then(r => r.json()).then(agents => agents.filter(a => a && !a.hidden).sort((a, b) => {
+    const ao = typeof a.order === 'number' && Number.isFinite(a.order) ? a.order : null;
+    const bo = typeof b.order === 'number' && Number.isFinite(b.order) ? b.order : null;
+    if (ao !== bo) { if (ao === null) return 1; if (bo === null) return -1; return ao - bo; }
+    return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+      || String(a.id || '').localeCompare(String(b.id || ''));
+  }).map(a => ({ id: a.id, name: a.name || 'Bot' })))`);
+  const railRows = "[...document.querySelectorAll('.bots-rail-row')].map(n => ({ id: n.dataset.agentId, name: n.querySelector('.bots-rail-name').textContent }))";
+  const cardIds = "[...document.querySelectorAll('.bots-grid .bots-bot-card')].map(n => n.dataset.agentId || 'new')";
+  const expectRoster = async expected => {
+    await waitFor(`JSON.stringify(${railRows}) === ${JSON.stringify(JSON.stringify(expected))}`);
+    assert.deepEqual(await js(railRows), expected, 'the rail lists every visible bot in rail order, by name');
+  };
 
   try {
     demoState.botsLive = true;
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
+    // Own the status examples without resetting extra bots from earlier checks.
+    assert.equal((await call('/api/agents/a1', 'PATCH', { name: 'Scout', role: 'Watches job postings and applications', hidden: false, enabled: true })).status, 200);
+    assert.equal((await call('/api/agents/a2', 'PATCH', { name: 'Archivist', hidden: false, enabled: true })).status, 200);
+    Object.assign(demoState.botsCore.agents.find(a => a.id === 'a1'), { status: 'needs_you', needs_you: 2, status_detail: '' });
+    Object.assign(demoState.botsCore.agents.find(a => a.id === 'a2'), { status: 'working', needs_you: 0, status_detail: 'Sort inbox notes' });
+    const roster = await visibleRoster();
+    const archivedCount = (await call('/api/agents', 'GET')).body.filter(a => a.hidden).length;
     await js("localStorage.removeItem('kairos:app-mode'); localStorage.removeItem('kairos:bots-interface'); localStorage.removeItem('kairos:bots-last-bot'); true");
     await stubs();
 
@@ -60,15 +87,14 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     assert.equal(await js("(() => { const t = document.documentElement.dataset.appMode; document.documentElement.dataset.appMode = 'kairos'; const v = getComputedStyle(document.documentElement).getPropertyValue('--bots-ink').trim(); document.documentElement.dataset.appMode = t; return v; })()"), '');
 
     // -- The rail ------------------------------------------------------------------------
-    assert.deepEqual(await js("[...document.querySelectorAll('.bots-rail-row')].map(n => n.dataset.agentId)"), ['a2', 'a1'], 'the rail lists the bots by name');
-    assert.deepEqual(await js("[...document.querySelectorAll('.bots-rail-row .bots-rail-name')].map(n => n.textContent)"), ['Archivist', 'Scout']);
+    await expectRoster(roster);
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a1] .bots-rail-count').textContent"), '2', 'the Needs-you count shows on the row');
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a1]').dataset.state"), 'needs_you');
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a2]').dataset.state"), 'working');
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a1]').getAttribute('aria-label')"), 'Scout, Needs you: 2 items');
-    assert.equal(await js("document.querySelectorAll('.bots-rail-row img').length"), 2, 'rows use the static face');
+    assert.equal(await js("document.querySelectorAll('.bots-rail-row img').length"), roster.length, 'every row uses the static face');
     assert.equal(await js("document.querySelectorAll('.bots-rail-row kairos-mascot').length"), 0, 'no live mascot per row');
-    assert.equal(await js("document.querySelector('.bots-rail-archived').hidden"), true, 'no Archived row while nothing is archived');
+    assert.equal(await js("document.querySelector('.bots-rail-archived').hidden"), !archivedCount, 'Archived is shown exactly when bots are archived');
     assert.equal(await js("[...document.querySelectorAll('.bots-rail .bots-segmented button')].map(n => n.textContent).join()"), 'Simple,Advanced');
     assert.equal(await js("document.querySelector('.bots-rail .bots-segmented button[aria-checked=true]').textContent"), 'Simple', 'Simple is the default');
     assert.equal(await js("!!document.getElementById('rd-search-row') && !!document.getElementById('rd-search')"), true, 'the Search row sits above the footer, as in Forge');
@@ -76,26 +102,31 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     // An archived bot leaves the rail and the home grid, and the Archived row counts it.
     assert.equal((await call('/api/agents/a2', 'PATCH', { hidden: true })).status, 200);
     await changed();
-    await waitFor("document.querySelectorAll('.bots-rail-row').length === 1 && !document.querySelector('.bots-rail-archived').hidden");
-    assert.equal(await js("document.querySelector('.bots-rail-archived-label').textContent"), 'Archived (1)');
-    await waitFor("document.querySelectorAll('.bots-grid .bots-bot-card[data-agent-id]').length === 1");
+    const archivedRoster = await visibleRoster();
+    assert.deepEqual(archivedRoster, roster.filter(a => a.id !== 'a2'));
+    await expectRoster(archivedRoster);
+    assert.equal(await js("document.querySelector('.bots-rail-archived-label').textContent"), `Archived (${archivedCount + 1})`);
+    await waitFor(`JSON.stringify(${cardIds}) === ${JSON.stringify(JSON.stringify([...archivedRoster.map(a => a.id), 'new']))}`);
     assert.equal(await js("document.querySelector('.bots-home-actions .bots-btn[hidden]')"), null, 'Home shows its Archived button');
     await js("document.querySelector('.bots-rail-archived').click()");
     await waitFor("window.__botsCalls.length > 0");
     assert.deepEqual(await tell(), [['archived']], 'the Archived row goes to botsArchived.js');
     assert.equal((await call('/api/agents/a2', 'PATCH', { hidden: false })).status, 200);
     await changed();
-    await waitFor("document.querySelectorAll('.bots-rail-row').length === 2 && document.querySelector('.bots-rail-archived').hidden");
+    await expectRoster(roster);
+    assert.equal(await js("document.querySelector('.bots-rail-archived').hidden"), !archivedCount);
 
     // -- Bots home -----------------------------------------------------------------------
     assert.equal(await js("document.querySelector('.bots-home-title').textContent"), 'Your bots');
-    assert.deepEqual(await js("[...document.querySelectorAll('.bots-grid .bots-bot-card')].map(n => n.dataset.agentId || 'new')"), ['a2', 'a1', 'new'], 'the cards, then New bot last');
+    const expectedCards = [...roster.map(a => a.id), 'new'];
+    await waitFor(`JSON.stringify(${cardIds}) === ${JSON.stringify(JSON.stringify(expectedCards))}`);
+    assert.deepEqual(await js(cardIds), expectedCards, 'every visible bot in rail order, then New bot last');
     assert.equal(await js("document.querySelector('.bots-bot-card[data-agent-id=a1] .bots-bot-card-name').textContent"), 'Scout');
     assert.equal(await js("document.querySelector('.bots-bot-card[data-agent-id=a1] .bots-bot-card-job').textContent"), 'Watches job postings and applications');
     assert.equal(await js("document.querySelector('.bots-bot-card[data-agent-id=a1] .bots-bot-card-status').textContent"), 'Needs you: 2 items');
     assert.equal(await js("document.querySelector('.bots-bot-card[data-agent-id=a2] .bots-bot-card-status').textContent"), 'Working on Sort inbox notes');
-    assert.equal(await js("document.querySelectorAll('.bots-bot-card img').length"), 2, 'cards use the static face');
-    assert.deepEqual(await js("[...document.querySelectorAll('.bots-home-actions .bots-btn')].filter(n => !n.hidden).map(n => n.textContent)"), ['Ready-made bots', 'New bot'], 'Ready-made bots and New bot beside the heading (Archived appears with an archived bot)');
+    assert.equal(await js("document.querySelectorAll('.bots-bot-card img').length"), roster.length, 'every bot card uses the static face');
+    assert.deepEqual(await js("[...document.querySelectorAll('.bots-home-actions .bots-btn')].filter(n => !n.hidden).map(n => n.textContent)"), ['Ready-made bots', ...(archivedCount ? [`Archived (${archivedCount})`] : []), 'New bot'], 'Home actions include Archived exactly when bots are archived');
     await capture('desktop-bots-home');
     await js("document.querySelector('.bots-home-actions .bots-btn.primary').click()");
     await js("[...document.querySelectorAll('.bots-home-actions .bots-btn')].find(n => n.textContent === 'Ready-made bots').click()");
@@ -146,14 +177,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     // A reply streams into the page (the stream check, bots-stream-checks.cjs, covers Stop and returning).
     // The plain demo answers the bot's chat, as in that check; the fixture backend takes over again after.
     delete demoState.botsLive;
-    await open('a1');
+    await open('a1', { sessionId: 'as1' });
     await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .side-chat-input')");
     demoState.sessionFields = { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } };
     demoState.liveHoldIds = ['as1', 's1'];
     const body = "[...document.querySelectorAll('.bots-shell .agent-chat-main .msg.assistant .msg-body')].at(-1)";
+    const previousTurn = liveRuns.as1?.turnId;
     await fill('.bots-shell .side-chat-input', 'What changed today?');
     await js("document.querySelector('.bots-shell .side-chat-send').click()");
-    for (let tries = 0; liveRuns.as1?.status !== 'processing'; tries++) {
+    for (let tries = 0; liveRuns.as1?.status !== 'processing' || liveRuns.as1.turnId === previousTurn; tries++) {
       if (tries > 100) throw new Error('The bot turn never reached the test server');
       await delay(50);
     }
@@ -312,7 +344,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').getAttribute('aria-current')"), 'page');
     assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome] .ms-tabbar-label').textContent"), 'Bots');
     assert.deepEqual(await overflow(), [], 'Bots home has no sideways scroll on a phone');
-    assert.equal(await js("document.querySelectorAll('.bots-bot-card').length"), 3, 'cards on a phone: two bots and New bot');
+    await waitFor(`document.querySelectorAll('.bots-bot-card').length === ${roster.length + 1}`);
+    assert.deepEqual(await js(cardIds), expectedCards, 'cards on a phone: every visible bot, then New bot');
     await capture('mobile-bots-home');
     // A bot's page: the header is a pill with a back button, the chat is in place, the Bots tab stays selected.
     await js("document.querySelector('.bots-bot-card[data-agent-id=a1]').click()");
@@ -354,7 +387,6 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await js(`(() => { try { localStorage.setItem('kairos:app-mode', 'kairos'); localStorage.removeItem('kairos:bots-interface'); localStorage.removeItem('kairos:bots-last-bot'); } catch {}
       window.__botsHost?.clearBotsStubs?.(); window.__botsHost?.closeBotSettings?.(); delete window.__botsHost; delete window.__botsCalls;
       delete document.documentElement.dataset.botsInterface; return true; })()`).catch(() => {});
-    demoState.isAdmin = true;
-    delete demoState.liveHoldIds; delete demoState.sessionFields; delete demoState.botsLive; delete demoState.botsCore;
+    await restore();
   }
 };

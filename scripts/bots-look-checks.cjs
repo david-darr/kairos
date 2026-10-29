@@ -10,8 +10,9 @@
 // Appearance change repaints the kit. Everything scratch is removed at the end
 // and the mode attribute is put back.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
-module.exports = async ({ js, waitFor, delay, navigate, win, capture }) => {
+module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState, base }) => {
   const TOKENS = ['--bots-app', '--bots-panel', '--bots-card', '--bots-menu', '--bots-raised', '--bots-raised-hover', '--bots-menu-active',
     '--bots-inset', '--bots-control', '--bots-composer-ring', '--bots-hairline', '--bots-ink', '--bots-ink-secondary', '--bots-ink-tertiary',
     '--bots-accent', '--bots-accent-ink', '--bots-focus', '--bots-success', '--bots-danger', '--bots-warning', '--bots-bubble-user',
@@ -20,9 +21,11 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture }) => {
     '--bots-font-sans', '--bots-font-prose', '--bots-font-mono'];
   const reduce = value => win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: value ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [] });
   const savedAppearance = await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return { mode: a.mode, color: a.color }; })");
+  const restore = await isolateBotsCheck({ js, demoState });
 
   try {
-    await navigate('home');
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
     await js(`(() => { window.__botsLookMode = document.documentElement.dataset.appMode || ''; document.documentElement.dataset.appMode = 'bots'; return true; })()`);
 
     // -- Tokens and fonts -----------------------------------------------------
@@ -179,10 +182,12 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture }) => {
     // The bot's pastel does not move with Appearance (illustration colour).
     assert.equal(await js(`(() => { const cs = getComputedStyle(document.getElementById('bots-look-scratch')); return cs.getPropertyValue('--bots-bubble-user').trim() === cs.getPropertyValue('--m-body-d99a92').trim(); })()`), true, 'the bubble token stays on the pastel');
   } finally {
-    await reduce(false);
-    await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(savedAppearance)}))`);
-    await js(`(() => { document.getElementById('bots-look-scratch')?.remove(); document.querySelectorAll('.bots-menu').forEach(n => n.remove());
-      const prior = window.__botsLookMode; if (prior) document.documentElement.dataset.appMode = prior; else delete document.documentElement.dataset.appMode;
-      delete window.__botsLook; delete window.__botsLookMode; return true; })()`);
+    try {
+      await reduce(false);
+      await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(savedAppearance)}))`);
+      await js(`(() => { document.getElementById('bots-look-scratch')?.remove(); document.querySelectorAll('.bots-menu').forEach(n => n.remove());
+        const prior = window.__botsLookMode; if (prior) document.documentElement.dataset.appMode = prior; else delete document.documentElement.dataset.appMode;
+        delete window.__botsLook; delete window.__botsLookMode; return true; })()`);
+    } finally { await restore(); }
   }
 };

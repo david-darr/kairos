@@ -11,6 +11,7 @@
 // archive with Undo; duplicate; the system-prompt preview; the setup checklist; conversations.
 // Every scratch node is removed at the end and the mode attribute is put back.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
 module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, demoState, base }) => {
   const q = JSON.stringify;
@@ -63,6 +64,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
 
   const savedInterface = await js("localStorage.getItem('kairos:bots-interface') || ''");
   const savedSection = await js("localStorage.getItem('kairos:bots-last-section')");
+  const restore = await isolateBotsCheck({ js, demoState });
   let phone = false;
   try {
     demoState.botsLive = true;
@@ -76,6 +78,11 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await js("fetch('/api/agents').then(r => r.json()).then(() => true)");  // seeds the in-memory backend
     const store = () => demoState.botsCore;
     assert.ok(['a1', 'a2'].every(id => store().agents.some(a => a.id === id)), 'the backend is seeded with the two demo bots');
+    // The main demo's profile checks edit these records. Arrange the profile
+    // this panel scenario exercises, in our private store only.
+    assert.equal((await call('/api/agents/a1', 'PATCH', { name: 'Scout', role: 'Watches job postings and applications',
+      soul: 'Be brief.', endpoint_id: null, integration_ids: null, daily_run_cap: 12, hidden: false })).status, 200);
+    assert.equal((await call('/api/agents/a2', 'PATCH', { name: 'Archivist', hidden: false })).status, 200);
 
     // ======================= Simple create =================================================================
     await setInterfaceMode(false);
@@ -534,6 +541,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitFor("!document.querySelector('.bots-notice')");
 
     // Archive Archivist, open the Archived panel, restore it; archive again and delete from there.
+    const alreadyArchived = store().agents.filter(a => a.hidden).map(a => a.id);
     await call('/api/agents/a2', 'PATCH', { hidden: true });
     await js("import('/static/js/botsArchived.js').then(m => { m.openArchivedBots(); return true; })");
     await waitFor("!!document.querySelector('.bots-archived-row[data-agent=a2]')");
@@ -544,8 +552,9 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitWrite(start, '/api/agents/a2', 'PATCH');
     await waitFor("!document.querySelector('.bots-archived-row[data-agent=a2]')");
     assert.equal((await botRow('a2')).hidden, false, 'Restore brings it back');
-    assert.match(await text('.bots-archived-list'), /Nothing is archived/);
-    assert.equal(await js("[...document.querySelectorAll('.bots-dialog-footer .bots-btn')].filter(b => b.disabled).length"), 2, 'restore all and delete all wait for something to act on');
+    assert.deepEqual(await js("[...document.querySelectorAll('.bots-archived-row')].map(r => r.dataset.agent).sort()"), [...alreadyArchived].sort(), 'Restore leaves the previously archived bots alone');
+    if (!alreadyArchived.length) assert.match(await text('.bots-archived-list'), /Nothing is archived/);
+    assert.equal(await js("[...document.querySelectorAll('.bots-dialog-footer .bots-btn')].filter(b => b.disabled).length"), alreadyArchived.length ? 0 : 2, 'bulk actions are enabled exactly when archived bots remain');
     await closeDialogs();
     // Delete from the Archived panel, with its confirm and the server's guard.
     await call('/api/agents/a2', 'PATCH', { hidden: true });
@@ -669,7 +678,6 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
       delete window.__panel; delete window.__nav; delete window.__changed; delete window.__closed; delete window.__botsCreatePriorMode;
       return true;
     })()`).catch(() => {});
-    delete demoState.botsConfiguredWarnings; delete demoState.botsConfiguredFail;
-    delete demoState.botsLive; delete demoState.botsCore;
+    await restore();
   }
 };

@@ -20,6 +20,25 @@ const fresh = () => {
 const status = (answer) => answer?._status ?? 200;
 
 (() => {
+  // A long smoke run contributes extra agents and can reorder/edit the seeds.
+  const agents = [...seedAgents().reverse(), ...Array.from({ length: 7 }, (_, i) => ({
+    id: `a${101 + i}`, name: `Earlier ${i}`, created_at: 100 + i,
+  }))];
+  const original = structuredClone(agents);
+  const state = { botsLive: true };
+  const backend = backendFactory({ state, data: { agentsFixture: agents }, now: 1_800_000_000 });
+  assert.equal(backend.read('/api/agents').length, agents.length, 'every inherited bot survives seeding');
+  assert.equal(backend.read('/api/agents/a107').agent.created_at, 106);
+  assert.equal(backend.read('/api/agents/a107').agent.avatar.color, '#E8C39E', 'avatar fallback wraps past six seeds');
+  assert.deepEqual(backend.read('/api/agents/a1/threads').threads.map(t => t.id), ['bots-t1', 'bots-t2']);
+  assert.deepEqual(backend.read('/api/agents/a2/threads').threads.map(t => t.id), ['bots-t3']);
+  const made = backend.mutate('/api/agents', 'POST', { name: 'New after the long run' });
+  assert.equal(made.id, 'a108', 'new IDs cannot collide with inherited IDs');
+  backend.mutate('/api/agents/a1', 'PATCH', { role: 'Private edit' });
+  assert.deepEqual(agents, original, 'fixture mutations never change the main demo');
+})();
+
+(() => {
   // Off unless a check turns it on, so the demo is untouched.
   const { state, get, send } = fresh();
   state.botsLive = false;
@@ -223,4 +242,40 @@ const status = (answer) => answer?._status ?? 200;
   assert.equal(get('/api/agents/a1/threads').threads[0].follows_bot_model, true);
 })();
 
-console.log('PASS: the Bots fixture backend keeps to the data and API contract.');
+(async () => {
+  // Exercise the same check boundary with dirty defaults/presets/threads and
+  // stored preferences, without launching Electron.
+  const { isolateBotsCheck } = require('./bots-check-support.cjs');
+  const values = new Map([
+    ['kairos:app-mode', 'bots'], ['kairos:bots-interface', 'advanced'],
+    ['jarvis:sidebar-collapsed', 'true'], ['jarvis:agent-chat:a1', 'earlier-thread'],
+  ]);
+  const originalStorage = new Map(values);
+  const localStorage = {
+    getItem: k => values.get(k) ?? null,
+    setItem: (k, v) => values.set(k, v), removeItem: k => values.delete(k),
+  };
+  const js = async source => require('node:vm').runInNewContext(source, { localStorage });
+  const demoState = { botsLive: false, botsCore: { defaults: { role: 'Earlier default' }, presets: [{ id: 'old' }], threads: [{ id: 'old' }] },
+    botsWorking: ['bots-t1'], botsConfiguredFail: { status: 500 }, isAdmin: false };
+  const originalState = { ...demoState };
+  const backend = backendFactory({ state: demoState, data: { agentsFixture: seedAgents() }, now: 1_800_000_000 });
+  for (let run = 0; run < 2; run++) {
+    const restore = await isolateBotsCheck({ js, demoState });
+    assert.equal(values.get('kairos:app-mode'), 'kairos');
+    assert.equal(values.get('jarvis:sidebar-collapsed'), 'false');
+    assert.equal(values.has('jarvis:agent-chat:a1'), false);
+    assert.deepEqual(backend.read('/api/agents/defaults').defaults, {});
+    assert.deepEqual(backend.read('/api/agents/presets'), []);
+    assert.equal(backend.read('/api/agents/a1/threads').threads.length, 2);
+    assert.deepEqual(demoState.botsWorking, []);
+    assert.equal(demoState.botsConfiguredFail, undefined);
+    assert.equal(demoState.isAdmin, true);
+    assert.equal(backend.mutate('/api/agents/configured', 'POST', { profile: { name: 'Made in this check' } }).agent.name, 'Made in this check');
+    await restore();
+    assert.deepEqual(demoState, originalState, 'restore the prior store, switches and absent keys');
+    assert.equal(demoState.botsCore, originalState.botsCore, 'the prior store is untouched');
+    assert.deepEqual(values, originalStorage, 'restore the prior preferences');
+  }
+  console.log('PASS: the Bots fixture backend keeps to the data and API contract; check state is isolated.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

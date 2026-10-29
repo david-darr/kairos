@@ -111,16 +111,21 @@ module.exports = ({ state, data, now }) => {
     if (state.botsCore) return state.botsCore;
     const store = state.botsCore = { counter: 100, maxBots: MAX_BOTS, agents: [], threads: [], defaults: {}, presets: [], created: [] };
     for (const [index, a] of (data.agentsFixture || []).entries()) {
-      const record = { ...DEFAULTS(), ...JSON.parse(JSON.stringify(a)), created_at: clock() - 86400 * (10 - index) };
+      const record = { ...DEFAULTS(), ...JSON.parse(JSON.stringify(a)), created_at: a.created_at ?? clock() - 86400 * (10 - index) };
       record.soul = record.soul || record.instructions || ''; delete record.instructions;
-      record.avatar ||= { version: 3, character: 'ajar', shape: 'round', color: (a.color || COLORS[index]).toUpperCase(), acc: 'none', finish: 'flat' };
+      record.avatar ||= { version: 3, character: 'ajar', shape: 'round', color: (a.color || COLORS[index % COLORS.length]).toUpperCase(), acc: 'none', finish: 'flat' };
       store.agents.push(record);
+      // Earlier demo checks can create IDs past the fixture's initial counter.
+      const suffix = /^a(\d+)$/.exec(a.id);
+      if (suffix) store.counter = Math.max(store.counter, Number(suffix[1]));
     }
-    const first = store.agents[0]?.id, second = store.agents[1]?.id;
+    // These conversations belong to the named fixture bots, regardless of the
+    // incoming roster's order or how many other agents earlier checks created.
+    const scout = store.agents.find(a => a.id === 'a1'), archivist = store.agents.find(a => a.id === 'a2');
     const thread = (id, agent_id, title, age, extra = {}, messages = 2) => store.threads.push({ id, agent_id, title, created_at: clock() - age, updated_at: clock() - age / 2,
       message_count: messages, model_endpoint_id: 'm1', model_override: null, model_effort: null, preview: messages ? 'The reference notes are ready.' : '', thread: { ...THREAD_DEFAULTS(), ...extra } });
-    if (first) { thread('bots-t1', first, 'Chat with Scout', 5000, { main: true }); thread('bots-t2', first, 'Weekly postings', 3000); }
-    if (second) thread('bots-t3', second, 'Chat with Archivist', 4000, { main: true });
+    if (scout) { thread('bots-t1', scout.id, `Chat with ${scout.name}`, 5000, { main: true }); thread('bots-t2', scout.id, 'Weekly postings', 3000); }
+    if (archivist) thread('bots-t3', archivist.id, `Chat with ${archivist.name}`, 4000, { main: true });
     return store;
   };
   const find = (id) => seeded().agents.find(a => a.id === id);

@@ -425,7 +425,8 @@ class Surface {
   const tabbarSource = source('mobileTabBar.js');
   assert.doesNotMatch(tabbarSource, /\bPUSHED\b/);
   const fullscreen = tabbarSource.match(/const FULLSCREEN = \[([\s\S]*?)\]\.join/)[1];
-  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel']);
+  // The Bots panel opens full screen on a phone and hides the tab bar like the others (Bots Phase 0).
+  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside']);
   const hides = tabbarSource.match(/function hiddenNow\(\) \{([\s\S]*?)\n\}/)[1];
   assert.match(hides, /!mobileOn\(\)/);
   assert.match(hides, /document\.querySelector\(FULLSCREEN\)/);
@@ -441,7 +442,7 @@ class Surface {
   }
   assert.match(source('agentsMessenger.js'), /class: 'agents-conversation-back'/);
   assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, phoneActions, viewTabs\]/, 'The Agents bar keeps Back and Open chats, then the v2 phone actions, before the view tabs');
-  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar'\]\)/, 'More lists the tabs the bar does not');
+  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar', 'botsHome'\]\)/, 'More lists the tabs the bar does not (Bots home is on the bar in Bots mode)');
   assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);
   assert.doesNotMatch(source('mobileShell.js'), /'Your workspace':/);

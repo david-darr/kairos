@@ -3,20 +3,22 @@
 // The Bots fixture backend (scripts/fixtures/bots-core-backend.cjs) answers /api/agents* while demoState.botsLive is
 // set: a record with the new fields (section, place, hidden, thread data), an archived bot, and the real create route.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
 module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, demoState, base }) => {
   const fill = (selector, value) => js(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); n.value=${JSON.stringify(value)}; n.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   const call = (path, method, body) => js(`fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' },
     body: ${body === undefined ? 'undefined' : JSON.stringify(JSON.stringify(body))} }).then(async r => ({ status: r.status, body: await r.json() }))`);
   const errorToasts = "[...document.querySelectorAll('#toast-host .toast.error')].map(n => n.textContent)";
+  const restore = await isolateBotsCheck({ js, demoState });
   try {
     demoState.botsLive = true;
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
 
     // Records carry the new fields; one bot is archived (still returned), one sits in a section.
+    assert.equal((await call('/api/agents/a1', 'PATCH', { section: 'Work', place: 'browser', hidden: false })).status, 200);
     assert.equal((await call('/api/agents/a2', 'PATCH', { hidden: true })).status, 200);
-    assert.equal((await call('/api/agents/a1', 'PATCH', { section: 'Work', place: 'browser' })).status, 200);
     const listed = (await call('/api/agents', 'GET')).body;
     const scout = listed.find(a => a.id === 'a1'), archivist = listed.find(a => a.id === 'a2');
     assert.deepEqual([scout.section, scout.place, scout.hidden, scout.approval_mode, scout.thread_limit], ['Work', 'browser', false, 'full', 3], 'the list carries the new fields');
@@ -33,6 +35,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await capture?.('desktop-bots-data-legacy-agents');
 
     // Its create dialog still posts, and the route accepts it against the new record.
+    const existingIds = new Set(listed.map(a => a.id));
     const before = writes.length;
     await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
     await waitFor("!!document.querySelector('.agent-create-dialog')");
@@ -45,7 +48,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.ok(post, 'the older dialog posts a new bot');
     assert.equal(post.status, 200, 'and the route accepts it');
     assert.equal(JSON.parse(post.body).name, 'Legacy Made');
-    const made = (await call('/api/agents', 'GET')).body.find(a => a.name === 'Legacy Made');
+    const made = (await call('/api/agents', 'GET')).body.find(a => !existingIds.has(a.id) && a.name === 'Legacy Made');
     assert.ok(made, 'the new bot is in the list');
     assert.deepEqual([made.hidden, made.approval_mode, made.thread_limit, made.soul], [false, 'full', 3, 'Standing text from the older dialog'], 'it gets the new fields and its standing instructions in one field');
     assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'Legacy Made', 'its profile opens');
@@ -56,7 +59,6 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
 
     assert.deepEqual(await js(errorToasts), [], 'no error toast');
   } finally {
-    delete demoState.botsLive;
-    delete demoState.botsCore;
+    await restore();
   }
 };
