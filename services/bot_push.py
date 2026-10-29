@@ -20,15 +20,36 @@ def kind_for(event: dict) -> str | None:
     return None
 
 
+def device_kind(notification_kind: str) -> str:
+    """A retained feed row's kind -> the device push preference it falls under."""
+    return "bot_needs_you" if notification_kind in ("question", "approval") else "bot_results"
+
+
 def on_event(event: dict) -> None:
-    kind = kind_for(event)
-    agent_id = event.get("agent_id")
-    if not kind or not agent_id:
-        return
+    """Every bus event reaches the attention feed once (a receipt makes a repeat
+    a no-op); a bot with notifications turned off keeps its feed but sends no
+    device alert. Each failure is its own: a subscriber never breaks the emitter."""
+    agent_id = event.get("agent_id") or event.get("bot_id")
+    kinds = set()
+    legacy = kind_for(event)
+    if legacy and agent_id:
+        try:
+            from services.agent_service import agent_service
+            agent = agent_service.get(agent_id) or {}
+            if agent.get("notifications") is not False:
+                kinds.add(legacy)
+        except Exception:
+            logger.exception("bot push preference unreadable")
     try:
-        mobile_activity.enqueue_bot(kind, agent_id, auth_manager.is_admin)
-    except Exception:  # an event subscriber must never break the emitter
-        logger.exception("bot push not queued")
+        from services import bot_attention
+        kinds.update(device_kind(row["kind"]) for row in bot_attention.ingest_event(event))
+    except Exception:
+        logger.exception("bot attention feed not updated")
+    for kind in kinds:
+        try:
+            mobile_activity.enqueue_bot(kind, agent_id, auth_manager.is_admin)
+        except Exception:
+            logger.exception("bot push not queued")
 
 
 def start() -> None:
