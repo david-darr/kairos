@@ -773,6 +773,8 @@ async function run(ctx) {
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'launch');
     // The More sheet reaches the true bottom.
     await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(350);
+    // The sheet slides up; under a loaded full run it can still be settling at 350 ms, so give it up to a second.
+    for (let i = 0; i < 13 && Math.round((await rect('.ms-tab-sheet')).b) !== screen; i++) await delay(50);
     eq(Math.round((await rect('.ms-tab-sheet')).b), screen, `${name}: the More sheet reaches the screen bottom`);
     await js("document.querySelector('.ms-tab-sheet').close()");
     // A conversation's composer.
