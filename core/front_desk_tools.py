@@ -243,6 +243,9 @@ def guard_call(name, ctx):
 
 
 def register_all(register):
+    """Safe to call twice: the registry registers these at import (core/tool_registry.py)."""
+    from core.tool_registry import _REGISTRY
     for spec in TOOLS:
-        register(spec["name"], spec["description"], spec["schema"], agent_only=True,
-                 effect=spec["effect"])(spec["handler"])
+        if spec["name"] not in _REGISTRY:
+            register(spec["name"], spec["description"], spec["schema"], agent_only=True,
+                     effect=spec["effect"])(spec["handler"])

@@ -56,6 +56,9 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     'x_user_posts x_post trigger_info '
     # Phase 4 teams, reviewed 2026-10-29: reads of the bot's own peers, assignments, rooms and team, fenced as data.
     'list_peers assignment_status list_room_targets search_team_memory list_team_setup read_incidents '
+    # Phase 5 front desk (front-desk bot only, core/front_desk_tools.guard_call) and Phase 6 data, reviewed 2026-10-29:
+    # reads of the roster, Forge project names, the person's conversation titles and the bot's own analysis database.
+    'fd_list_bots fd_forge_projects fd_find_chat data_describe data_show '
 ).split()}
 
 

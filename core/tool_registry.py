@@ -273,6 +273,12 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
     refusal = _grant_refusal(ctx, name, args)
     if refusal:
         return refusal
+    # The front desk's own limits (Bots Phase 5): a watch run only reads, suggests or saves a local draft,
+    # and a tainted turn offers work through Up next instead of handing it on.
+    from core import front_desk_tools, front_desk_watch_adapter
+    refusal = front_desk_watch_adapter.tool_refusal(name, ctx) or front_desk_tools.guard_call(name, ctx)
+    if refusal:
+        return refusal
     from core import permissions
     gate = await permissions.gate_bot_call(ctx, name, args)
     if gate.behavior != "allow":
@@ -2062,3 +2068,16 @@ def register_connection_tools() -> list[str]:
 register_resource_tools()
 
 from core import bot_team_tools  # noqa: E402,F401
+
+
+def _register_bots_tool_data() -> None:
+    """Bots Phase 5 (front desk) and Phase 6 (data, widgets, apps) keep their tools as data in their own modules."""
+    from core import front_desk_tools
+    from services import bot_apps, bot_data, bot_widgets
+    front_desk_tools.register_all(register)
+    for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS:
+        if spec["name"] not in _REGISTRY:
+            register(spec["name"], spec["description"], spec["schema"], agent_only=True, effect=spec["effect"])(spec["handler"])
+
+
+_register_bots_tool_data()

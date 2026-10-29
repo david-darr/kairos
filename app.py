@@ -167,6 +167,19 @@ async def lifespan(_app: FastAPI):
     bot_memory_routes.tidy_runner = tidy_notebook
     from core import bot_app_events
     bot_app_events.start()
+    # Bots Phases 4-6: rooms mark cut-off turns and resume their queues, incidents listen for failed turns,
+    # the front desk exists and keeps its watch, warm caches and run-detail pruning run in the background.
+    from services import bot_rooms, bot_incidents, front_desk, bot_keep_warm, bot_sweeps
+    from core import front_desk_tick
+    await bot_rooms.startup()
+    bot_incidents.start()
+    try:
+        front_desk.ensure()
+    except Exception:
+        logging.getLogger(__name__).exception("the front desk could not be set up; Bots home offers to bring it back")
+    front_desk_tick.start()
+    bot_keep_warm.start()
+    bot_sweeps.start()
     from services import bot_cards, bot_automation_changes, chat_live
     def publish_bot_resource(packet):
         record = packet.get("card") or packet.get("receipt") or {}
@@ -218,6 +231,11 @@ async def lifespan(_app: FastAPI):
             session_manager_store.stop_background_migration()
             task_scheduler.stop()
             bot_app_events.stop()
+            await front_desk_tick.stop()
+            bot_keep_warm.stop()
+            bot_sweeps.stop()
+            from services import bot_data
+            bot_data.close_all()
             from services import bot_memory_upkeep, bot_turn_context
             await bot_memory_upkeep.shutdown()
             await bot_turn_context.shutdown()
@@ -279,6 +297,12 @@ app.include_router(bot_attention_routes.router)
 # Bots Phase 2 resources (memory, skills, grants, connections) beneath /api/bots, one aggregate router.
 from routes import bot_resources_routes; app.include_router(bot_resources_routes.router)
 from routes import bot_teams_routes; app.include_router(bot_teams_routes.router)
+# Bots Phase 5 front desk and Phase 6 workbench, data, widgets, usage and lifecycle: each mounted once.
+from routes import (front_desk_routes, front_desk_make_routes, front_desk_watch_routes, front_desk_work_routes,
+                    bot_data_routes, bot_widget_routes, bot_workbench_routes, bot_usage_routes, bot_lifecycle_routes)
+for _bots_router in (front_desk_routes, front_desk_make_routes, front_desk_watch_routes, front_desk_work_routes,
+                     bot_data_routes, bot_widget_routes, bot_workbench_routes, bot_usage_routes, bot_lifecycle_routes):
+    app.include_router(_bots_router.router)
 app.include_router(agent_routes.router)
 app.include_router(computer_routes.router)
 app.include_router(connector_routes.router)
