@@ -133,3 +133,13 @@ async def receive(trigger_id: str, request: Request) -> JSONResponse:
             trigger_service.notify(work["trigger"], started["pending"])
             content = {**content, "waiting_for_approval": True}
     return JSONResponse(content, status_code=status)
+
+
+# Bots Phase 3 U4 (2026-10-29): the webhook-address and connected-app event routes live in
+# routes/bot_event_routes.py with complete absolute prefixes (`/api/bot-webhooks`,
+# `/api/bot-app-triggers`). They are NOT appended to `router` above: scripts/test_triggers.py
+# requires every route on this router to be admin-gated except the signed ingress, and the new public
+# address ingress is a second deliberate exception. app.py mounts `bot_event_router` beside `router`.
+from routes import bot_event_routes  # noqa: E402
+
+bot_event_router = bot_event_routes.router
