@@ -182,6 +182,12 @@ async def send(owner: str, sid: str, body: dict) -> dict:
         raise HTTPException(409, cap.detail, headers={"X-Reason": cap.code}) from None
     context = await _context(owner, sid, payload["references"])
     context += _phase6_context(bot["id"], sid, payload)
+    # A typed reply answers an open computer help request from this conversation (Phase 6 U1, "answer in chat").
+    from services import bot_help
+    try:
+        bot_help.answer_in_chat(bot["id"], sid)
+    except (KeyError, ValueError):
+        pass  # already settled or replaced: the message still goes
     return _admit(owner, sid, bot, payload, context)
 
 

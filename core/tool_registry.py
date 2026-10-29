@@ -2078,6 +2078,21 @@ def _register_bots_tool_data() -> None:
     for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS:
         if spec["name"] not in _REGISTRY:
             register(spec["name"], spec["description"], spec["schema"], agent_only=True, effect=spec["effect"])(spec["handler"])
+    # Computer help (Phase 6 U1): a bot asks the person to take over its computer, or to sign in to one site.
+    if "request_help" not in _REGISTRY:
+        from services import bot_help
+
+        async def request_help(args, ctx):
+            try:
+                item = bot_help.raise_help(ctx.agent_id, args.get("reason"), args.get("site") or None, ctx.session_id)
+            except (KeyError, ValueError) as error:
+                return f"Not run: {error}"
+            return (f"Asked the person to sign in to {item['site']}" if item["site"] else "Asked the person to take over your computer") + \
+                ". End this turn; they answer in the computer panel or by replying here."
+        register("request_help", "Ask the person to take over your computer for a step you cannot do, or to sign in to one site "
+                 "(give the bare host name). They answer in the computer panel or by replying in this conversation.",
+                 _object({"reason": {"type": "string", "minLength": 1, "maxLength": 280},
+                          "site": {"type": "string", "maxLength": 253}}, ("reason",)), agent_only=True, effect=WRITE)(request_help)
 
 
 _register_bots_tool_data()

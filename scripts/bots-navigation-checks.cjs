@@ -212,7 +212,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.equal(keys.length, 1, 'one preference record');
     const saved = JSON.parse(await js(`localStorage.getItem(${JSON.stringify(keys[0])})`));
     assert.ok(saved.expanded.includes(botId), 'the open bot is remembered');
-    assert.ok(Array.isArray(saved.sections) && saved.sections.length === 3);
+    // Pinned, attention and bots, plus Channels (rooms) from Phase 4's team surfaces.
+    assert.ok(Array.isArray(saved.sections) && saved.sections.length === 4 && saved.sections.includes('channels'));
 
     // -- Pin the bot: a circle in Simple ------------------------------------------------------------------------------------------
     await js(`window.__navPins = new Set(); window.__navFetch = window.fetch;

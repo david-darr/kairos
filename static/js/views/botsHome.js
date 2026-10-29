@@ -66,8 +66,28 @@ export async function render(container) {
     actionButton('New bot', 'plus', () => openNewBot(), true),
   ]);
   const body = h('div', { class: 'bots-home-body' });
-  const root = h('div', { class: 'bots-home' }, [h('header', { class: 'bots-home-header' }, [heading, actions]), body]);
+  // The front desk (Phase 5) is set up at startup and cannot be deleted; if its record is missing, offer it back here.
+  const frontDesk = h('div', { class: 'bots-home-frontdesk', role: 'status', hidden: true });
+  const root = h('div', { class: 'bots-home' }, [h('header', { class: 'bots-home-header' }, [heading, actions]), frontDesk, body]);
   container.replaceChildren(root);
+
+  async function checkFrontDesk() {
+    let state;
+    try { state = await api('/api/front-desk/state', { toast: false }); } catch { return; }  // no front desk service: say nothing
+    if (disposed) return;
+    frontDesk.hidden = !!state?.bot_id;
+    if (state?.bot_id) { frontDesk.replaceChildren(); return; }
+    const status = h('span', { class: 'bots-home-frontdesk-note' });
+    const restore = actionButton('Bring back the front desk', 'rotate-ccw', async () => {
+      restore.disabled = true; status.textContent = '';
+      try {
+        await api('/api/front-desk/ensure', { method: 'POST', body: '{}', toast: false });
+        document.dispatchEvent(new CustomEvent('jarvis:agents-changed'));
+        await checkFrontDesk();
+      } catch (error) { if (!disposed) { status.textContent = error.message || 'The front desk could not come back. Try again.'; restore.disabled = false; } }
+    }, true);
+    frontDesk.replaceChildren(h('p', { text: 'Kip, the front desk, is not here. It answers first and hands work to your bots.' }), restore, status);
+  }
 
   function empty() {
     const kip = botKip({ id: 'bots-home-empty' }, { size: 96, state: 'idle', beat: 'arrive' });
@@ -109,6 +129,7 @@ export async function render(container) {
   document.addEventListener('jarvis:agents-changed', refresh);
   const timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
   await refresh();
+  checkFrontDesk();
   return () => {
     disposed = true; ++version; clearInterval(timer);
     document.removeEventListener('jarvis:agents-changed', refresh);

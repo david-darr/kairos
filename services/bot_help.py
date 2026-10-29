@@ -53,7 +53,11 @@ def raise_help(bot_id, reason, site=None, thread_id=None):
                 "thread_id": thread_id, "type": "sign_in" if site else "computer_help"}
         data["help"][bot_id] = item
         state.save_state(data)
-        return copy.deepcopy(item)
+    # Tell the person, who may not have the computer panel open (the attention inbox turns this into a notification).
+    from core import events
+    events.emit("bot.help", f"Sign in to {site}" if site else "Take over the computer", agent_id=bot_id, session_id=thread_id,
+                help_id=item["id"])
+    return copy.deepcopy(item)
 
 
 def settle_help(bot_id, help_id, outcome):
