@@ -167,6 +167,9 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
     await waitFor("[...document.images].every(image => image.complete || image.loading === 'lazy')", 10000);
     await js("new Promise(resolve => { let timer; const done = () => { observer.disconnect(); resolve(true); }; const quiet = () => { clearTimeout(timer); timer = setTimeout(done, 500); }; const observer = new MutationObserver(quiet); observer.observe(document.documentElement, { childList: true, subtree: true }); quiet(); setTimeout(done, 5000); })");
   };
+  // A bot link opens that bot's page, which the in-memory Bots backend answers while botsLive is set.
+  const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention };
+  demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
   for (const [query, check] of [
     ['?view=calendar', "document.querySelector('#sidebar .nav-item[data-tab=calendar]')?.classList.contains('active')"],
     ['?view=notes', "document.querySelector('#sidebar .nav-item[data-tab=notes]')?.classList.contains('active')"],
@@ -185,8 +188,10 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
     assert.equal(await js("location.pathname + location.search"), '/', `${query} is removed from the address after opening`);
   }
   await pageQuiet();
+  await js("localStorage.setItem('kairos:app-mode', 'kairos'); true");
   await win.loadURL(base);
   await waitFor("!!document.querySelector('#sidebar .nav-item[data-tab=home].active')", 15000);
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
   console.log('PASS: launch links open the intended view and unknown views fall back to Home');
   assert.deepEqual(problems, [], 'app shell defects');
 };

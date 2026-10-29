@@ -564,6 +564,8 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
       for (let i = 0; i < 40 && !state.posts.slice(posts).some(p => p.path.endsWith('/comments')); i++) await delay(50);
       assert.equal(state.posts.slice(posts).find(p => p.path.endsWith('/comments'))?.body.text, 'Pane comment');
     } else {
+      // The frame turns the heading editable a moment after the click; poll instead of reading once (flaky under the full run's load).
+      for (let i = 0; i < 60 && !(await frameJs('home', "!!document.querySelector('[contenteditable]')", PID).catch(() => false)); i++) await delay(50);
       assert.ok(await frameJs('home', "!!document.querySelector('[contenteditable]')", PID), 'pane text tool edits live elements');
       await frameJs('home', "(() => { const t = document.querySelector('[contenteditable]'); t.innerText = 'Edited from pane'; t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()", PID);
       for (let i = 0; i < 40 && !state.posts.slice(posts).some(p => p.path.endsWith('/text')); i++) await delay(50);

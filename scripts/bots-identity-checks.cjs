@@ -228,8 +228,9 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     await js('window.__panel.refresh()');
     await openSection('memory');
     assert.equal(await js(`document.querySelector('${card('memory')} textarea').value`), 'A draft the person has not saved', 'a Memory draft survives leaving the section and a poll');
+    const memoryMark = writes.length;   // earlier checks in a full run wrote to bots with the same IDs
     await click(`${card('memory')} .bots-actions .bots-btn`);
-    for (let i = 0; i < 60 && !writes.some(w => w.path === `/api/agents/${botId}/memory` && w.method === 'PUT' && w.status === 200); i++) await delay(50);
+    for (let i = 0; i < 60 && !writes.slice(memoryMark).some(w => w.path === `/api/agents/${botId}/memory` && w.method === 'PUT' && w.status === 200); i++) await delay(50);
     assert.equal(demoState.botsCore.memoryText[botId], 'A draft the person has not saved');
 
     await openSection('routines');

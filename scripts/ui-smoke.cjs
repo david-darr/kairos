@@ -1206,11 +1206,13 @@ app.whenReady().then(async () => {
       // 2026-10-20: Agents is the messenger (David approved), which fills the
       // content area on a wide window instead of sitting in a 1200px column.
       // Agents became Bots: its home fills the content area beside the Bots sidebar instead of a 1200px column.
+      {
       await navigate("agents");
       await waitFor("document.getElementById('view-content').dataset.view === 'botsHome' && !!document.querySelector('#view-content .bots-home')");
       assert.ok(await js("(() => { const m=document.querySelector('#view-content .bots-home').getBoundingClientRect(), c=document.getElementById('view-content').getBoundingClientRect(); return m.width >= 1000 && m.width <= c.width; })()"), "Bots home uses its own wide column (1040px cap) in the wide content area");
       assert.ok(await js("!document.querySelector('#view-content .view-constrained')"), "Bots home is not held in the 1200px column");
       await navigate("home"); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+      }
     } finally {
       win.setContentSize(...previousSize);
       await delay(100);
@@ -1230,11 +1232,17 @@ app.whenReady().then(async () => {
             : "document.querySelector('.chat-layout > .chat-backdrop')?.dataset.scene === 'figure' && document.querySelector('.chat-layout > .chat-backdrop').dataset.drawMs !== undefined");
           // The phone's Chats page draws its own backdrop and hides the conversation one.
           if (width > 768) assert.ok(await js("document.querySelector('.chat-layout > .chat-backdrop').clientWidth > 0"), label + " default Chat draws the halftone background");
-          await waitFor("!!document.querySelector('.session-item[data-session-id=s1]')");
-          await js("document.querySelector('.session-item[data-session-id=s1]').click()");
+          if (width > 768) {
+            await waitFor("!!document.querySelector('.session-item[data-session-id=s1]')");
+            await js("document.querySelector('.session-item[data-session-id=s1]').click()");
+          } else {
+            // On a phone the hidden sidebar list is not a control; open the conversation by its link, as the Chats page does.
+            await navigate('chat', { sessionId: 's1' });
+            await waitFor("!!document.querySelector('.ms-conversation .ms-composer')");
+          }
           await waitFor("!!document.querySelector('#overflow-menu .chat-computer-toggle:not([hidden])')");
           const chatComputerStart = writes.length;
-          await waitFor("document.querySelector('.chat-computer-history .computer-thumbnail')?.naturalWidth > 0");
+          await waitFor("document.querySelector('.chat-computer-history .computer-thumbnail')?.naturalWidth > 0").catch(async error => { throw new Error(label + ' ' + await js("(() => { const t = document.querySelector('.chat-computer-history .computer-thumbnail'); return JSON.stringify({ img: t && [t.src.slice(0, 80), t.complete, t.naturalWidth], mode: document.documentElement.dataset.appMode, view: document.getElementById('view-content').dataset.view, session: document.querySelector('#chat-messages')?.dataset.sessionId, rect: t && JSON.stringify(t.getBoundingClientRect()), vis: t && !!t.getClientRects().length, tabs: [...document.querySelectorAll('[role=tab]')].map(n => n.id + ':' + n.getAttribute('aria-selected')).join(), pager: [...document.querySelectorAll('.ms-pager > *, .ms-page')].map(n => n.className + ':' + n.hidden + ':' + Math.round(n.getBoundingClientRect().left)).join(), live: !!document.querySelector('.ms-live-chat'), conv: [...document.querySelectorAll('.ms-conversation')].map(n => n.className).join() }); })()") + ' ' + error.message); });
           await capture(label + '-chat-computer-history');
           await js("document.querySelector('.chat-computer-history .computer-shot summary').click()");
           assert.ok(await js("document.querySelector('.chat-computer-history .computer-shot').open"), label + ' screenshot expands');
@@ -1462,6 +1470,8 @@ app.whenReady().then(async () => {
           assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
           await capture(label + '-bot-memory');
           await js("import('/static/js/botsUi.js').then(m => { m.setAdvanced(false); return true; })");
+          // The chat computer checks earlier in this pass leave recordings behind; the old Agents block cleared them for the next pass.
+          demoState.stoppedOwners = []; demoState.takenOwners = []; demoState.recordingOwners = []; demoState.recordedSteps = {};
           demoState.botsCore.memoryText = priorBots.memory; demoState.botsCore.journal = priorBots.journal;
           if (demoState.botsCore.memoryText === undefined) delete demoState.botsCore.memoryText;
           if (demoState.botsCore.journal === undefined) delete demoState.botsCore.journal;
@@ -2457,7 +2467,7 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#layout-pins [data-id=tool-store] .layout-move').click()");
     await waitFor("[...document.querySelectorAll('#nav .rd-pin')].at(-2)?.dataset.tab === 'tool-store'");
     await js("[...document.querySelectorAll('.set-section .btn')].filter(b => /^Reset (sidebar|Home)$/.test(b.textContent)).forEach(b => b.click())");
-    await waitFor("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,notes'");
+    await waitFor("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,notes' && !!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]')");
     assert.ok(await js("!!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]')"), "Reset shows hidden tabs again");
     assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['notes', 'library', 'calendar', 'email', 'tasks'], 'Reset sidebar restores the default pins');
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
@@ -2771,7 +2781,7 @@ app.whenReady().then(async () => {
       await js("document.getElementById('demo-frame').loading = 'eager'");
       await waitDemo("d && d.querySelectorAll('.nav-item[data-tab]').length >= 10 && !!d.querySelector('.dashboard-core')", "Home loads in the demo");
       assert.ok(await inDemo("!!d.querySelector('.demo-badge')"), label + " the demo says it is a demo");
-      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "botsHome", "cookbook", "school", "home"]) {
+      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "agents", "cookbook", "school", "home"]) {  // docs/demo is generated output (built from the app before Bots); when the integration owner rebuilds it, this entry becomes botsHome
         await inDemo("d.querySelector('.nav-item[data-tab=" + tab + "]').click()");
         // On a phone the Chat tab is the mobile launch page, owned by Chats.
         const shown = label === "mobile" && tab === "chat" ? "mobileLaunch" : tab;
@@ -2864,6 +2874,7 @@ app.whenReady().then(async () => {
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
     await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture, base });
+    await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");  // the Bots profile check leaves Bots mode on
     // 2026-10-14: David removed the sidebar's Bots, Teams and Pinned sections. The
     // precedence they showed is tested in scripts/test_bot_status.cjs.
     assert.equal(await js("document.querySelectorAll('#nav [data-section], #nav .sidebar-bot, #nav .sidebar-bot-create').length"), 0,

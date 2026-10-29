@@ -26,7 +26,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, base, writes, demoS
   const setAdvanced = on => js(`import('/static/js/botsUi.js').then(m => { m.setAdvanced(${on}); return true; })`);
   const store = () => chatBackend.latest;
 
-  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined, liveHoldIds: undefined });
+  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined, liveHoldIds: undefined, sessionFields: { ...(demoState.sessionFields || {}) } });
   const botsToRemove = [];
   try {
     demoState.botsLive = true;
@@ -204,6 +204,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, base, writes, demoS
     liveChunk('s1', 'Visible before completion');
     await waitFor("[...document.querySelectorAll('#chat-messages .msg.assistant')].at(-1)?.textContent.includes('Visible before completion')");
     liveFinish('s1');
+    await navigate('home');
     console.log('PASS: bot birth and first turns in Bots (10 cases).');
   } finally {
     chatBackend.hooks.live = null;
