@@ -503,8 +503,13 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
         from services import bot_skills, bot_skill_learning, bot_turn_context
         scope = bot_turn_context.scope_for_session(session_id)
         model_text = bot_skill_learning.expand_learn(text) or bot_skills.expand_command(scope, text) or text
-    if text.strip().lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
-        model_text = BOT_SETUP_INSTRUCTIONS
+    command, _, job = text.strip().partition(" ")
+    if command.lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
+        from services import bot_setup
+        from services.agent_service import agent_service
+        agent = agent_service.get(session_manager.get_session(session_id)["agent_id"])
+        if agent:
+            model_text = bot_setup.brief(agent, job.strip())
     sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, model_text, attachment_ids) + reference_context)
     sent += turn_note  # a private instruction for this turn only (goal mode), kept with the message
     if (session_manager.get_session(session_id) or {}).get('forge'):
