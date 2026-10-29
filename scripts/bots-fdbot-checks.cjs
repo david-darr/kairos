@@ -12,6 +12,12 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base }) => {
   try {
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
+    // With no front desk, Bots home offers it back, and the button brings it back.
+    await navigate('botsHome');
+    await waitFor("!!document.querySelector('.bots-home-frontdesk:not([hidden]) button')");
+    assert.match(await js("document.querySelector('.bots-home-frontdesk').textContent"), /front desk, is not here.*Bring back the front desk/);
+    await js("document.querySelector('.bots-home-frontdesk button').click()");
+    await waitFor("document.querySelector('.bots-home-frontdesk').hidden");
     const ensured = await call('/api/front-desk/ensure', 'POST', {});
     assert.equal(ensured.status, 200);
     const bot = ensured.body.agent;
