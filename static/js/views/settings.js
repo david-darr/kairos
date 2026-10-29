@@ -77,6 +77,9 @@ const NAV_ICONS = {
   runs: I('<circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><path d="M5 8v8"/><path d="M10 6h10M10 12h10M10 18h10"/>'),
   "sandbox-changes": I('<path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/>'),
   "computer-use": I('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 20v2M16 20v2M8 10h8M8 14h5"/>'),
+  "bot-apps": I('<path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 01-4 4h-4a4 4 0 01-4-4V8z"/>'),
+  "bot-keys": I('<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2M16 7l3 3M14 9l2 2"/>'),
+  "bot-logins": I('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
 
@@ -96,6 +99,15 @@ const SECTION_GROUPS = [
       { id: "integrations", label: "Integrations", render: renderIntegrationsPanel,
         description: "Tool servers, calendars, contacts and API services Kairos can use.",
         keywords: ["calendar", "email", "mcp", "connector", "tools", "caldav", "ical", "calendar feed", "google", "api service"] },
+      { id: "bot-apps", label: "Connected apps", render: (body) => renderBotResource(body, () => import("../botsSectionConnections.js")),
+        description: "The apps and MCP tool servers your bots can use, with their sign-ins, accounts and tests. Add a server by pasting a link, a setup command or a config block.",
+        keywords: ["bots", "apps", "mcp", "server", "google", "account", "alias", "connector", "tool server", "paste", "import", "highlevel", "x research", "whop", "sign in"] },
+      { id: "bot-keys", label: "Keys", render: (body) => renderBotResource(body, () => import("../botsSectionKeys.js")),
+        description: "API keys for the services your bots use. Keys are saved encrypted and never shown again. Also the helper model and quiet-time settings.",
+        keywords: ["api key", "keys", "token", "secret", "test key", "helper model", "tidy", "memory", "voice", "computers", "servers"] },
+      { id: "bot-logins", label: "Signed-in sites", render: (body) => renderBotResource(body, () => import("../botsSectionLogins.js")),
+        description: "Saved logins a bot's computer can fill in for you, and 1Password. A bot never sees a password and filling never presses the sign-in button.",
+        keywords: ["login", "logins", "password", "1password", "totp", "two factor", "sign in", "saved logins", "signed in sites", "bots"] },
       { id: "channels", label: "Channels", render: renderChannelsPanel,
         description: "Reach Kairos and your agents from Discord, Telegram, Slack and other apps, and choose where task results and notifications go.",
         keywords: ["discord", "bot", "token", "telegram", "slack", "signal", "imessage", "email", "sms", "whatsapp", "matrix",
@@ -356,6 +368,7 @@ export async function renderMobilePage(container, section, onExit) {
 // jump to Home). The window floats over that tab, so hiding it is enough.
 function closeSettingsWindow() {
   openVersion++;
+  dropBotResource();
   if (modalEl) modalEl.classList.add("hidden");
   restorePageBehind();
 }
@@ -550,7 +563,7 @@ function visibleSections() {
   }
   return [
     ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins']],
     ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
     ['access', 'Access', ['account', 'users']],
     ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],
@@ -629,6 +642,7 @@ function buildNav() {
 // a body the page renders into. `page` lets a page add header actions or show
 // a sub-page with its own title and a way back.
 async function selectSection(id) {
+  dropBotResource();
   const groups = visibleSections();
   const reachable = groups.flatMap((group) => group.sections);
   const section = reachable.find((s) => s.id === id) || reachable[0];
@@ -658,6 +672,28 @@ async function selectSection(id) {
   page.actions();
   await section.render(body, cachedStatus, page);
   if (page.current) staggerEntrance(body);
+}
+
+// The Bots resource pages (Phase 2, unit U5; also U2's About you and U3's Skill library). Each is a module that mounts into
+// a host and returns {destroy, refresh, flush}. The host carries data-app-mode="bots", so the page gets the Bots tokens and
+// type without changing the application's selected mode.
+let botResource = null;
+function dropBotResource() {
+  const handle = botResource;
+  botResource = null;
+  try { handle?.destroy(); } catch { /* a page that is already gone */ }
+}
+async function renderBotResource(body, load) {
+  const mine = renderVersion;
+  const host = el("div", { class: "bots-settings-host", "data-app-mode": "bots" });
+  body.replaceChildren(host);
+  const module = await load();
+  if (mine !== renderVersion) return;  // another page was chosen while this one loaded
+  const pages = { keys: "bot-keys", apps: "bot-apps", logins: "bot-logins" };
+  botResource = module.mount(host, {
+    agentId: "", state: { agent: null }, advanced: () => true, embedded: true, flush: async () => true, refresh() {},
+    go: (name) => { if (pages[name]) selectSection(pages[name]); },
+  });
 }
 
 // -- Add Models (moved from Cookbook, David's ask 2026-08-31). Kairos ships

@@ -78,6 +78,7 @@ REFUSAL_CODES = (
     ("choose files, editor", "bad_arguments"),
     ("Not pressed:", "not_approved"),
     ("Not opened:", "site_not_approved"),
+    ("Not filled:", "login_not_filled"),
 )
 
 
@@ -479,6 +480,11 @@ class ComputerManager:
                 await asyncio.to_thread(computer_trajectory.record, owner, run_id, action, args, failed, before,
                                         not_before, self.trajectories)
             raise
+        # Saved passwords and recent one-time codes never reach a model or a transcript, whatever a page echoes back.
+        from core.bot_held_secrets import held
+        result["text"] = held.scrub(result["text"])
+        if isinstance(result.get("state"), dict):
+            result["state"] = held.scrub_value(result["state"])
         code = result.get("code") or refusal_code(result["text"])
         if code:
             result["code"] = code
@@ -725,6 +731,72 @@ class ComputerManager:
         if info:
             result["element"] = {key: info[key] for key in ("label", "role", "tag", "type", "autocomplete") if key in info}
         return result
+
+    async def fill_login(self, owner: str, bot_id: str, login_id: str, ctx) -> dict:
+        """Fill a saved login into the sign-in fields of the page this computer is on (Phase 2 unit U5).
+
+        The harness fills; the model never sees a value. The page's real top-level host, and the host of every
+        frame holding a sign-in field, must belong to the login (services/bot_logins.py); another host needs
+        the person's own answer at that moment. The page is checked again inside the driver immediately before
+        typing. Nothing is submitted, and the answer names what was filled, never what was typed."""
+        from services import bot_logins
+        from core.bot_held_secrets import held
+        c = self._computers.get(owner)
+        if c is None:
+            return {"text": "Not filled: open the site's sign-in page first.", "images": []}
+        if c.taken_over:
+            return {"text": "Not filled: the person has control of the computer.", "images": []}
+        current = await self._command(c, "state")
+        url = current.get("url") or "about:blank"
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return {"text": f"Not filled: the computer is not on a web page. URL: {url}", "images": []}
+        host = parts.hostname.lower()
+        allowed, reason = await self._site(c, host, ctx, url=url)
+        if not allowed:
+            return {"text": f"Not filled: {reason} URL: {url}", "images": []}
+        scan = await self._command(c, "login_fields", expected_url=url)
+        if scan.get("opaque"):
+            _needs_frame_person(owner, url)
+            return {"text": "Not filled: this page has an embedded frame Kairos can't inspect. Ask the person to take over. "
+                    f"URL: {url}", "images": []}
+        if not scan.get("fields"):
+            return {"text": f"Not filled: no sign-in fields are on this page. URL: {url}", "images": []}
+        frames = scan.get("frames") or []
+        frame_hosts = sorted({(urlsplit(frames[f["frame"]]).hostname or "").lower() for f in scan["fields"] if f["frame"] < len(frames)} - {""})
+        confirmed = False
+        while True:
+            try:
+                grant = bot_logins.resolve_fill(login_id, bot_id, host, frame_hosts, confirmed_cross_site=confirmed)
+                break
+            except bot_logins.LoginRefused as refused:
+                if not refused.needs_confirmation or confirmed:
+                    return {"text": f"Not filled: {refused}", "images": []}
+                decision = await permissions.decide(
+                    surface=ctx.permission_surface, tool="computer_fill_login", arguments={"login": login_id, "host": host}, target=host,
+                    title=f"Fill a saved login on {host}?",
+                    description="This is not the site the login belongs to. Only allow it if you trust this page.",
+                    choices=[{"id": "once", "label": "Fill once", "behavior": "allow", "scope": "once"},
+                             {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}],
+                    is_admin=ctx.is_admin, force_prompt=True)
+                # Only a person's own answer counts. An Auto surface's automatic allowance does not.
+                if decision.behavior != "allow" or decision.reason != "Allowed by the owner.":
+                    return {"text": f"Not filled: the person did not confirm filling a login on {host}.", "images": []}
+                if self._computers.get(owner) is not c or c.taken_over:
+                    return {"text": "Not filled: the computer changed while waiting.", "images": []}
+                confirmed = True
+        try:
+            reply = await self._command(c, "fill_login", expected_url=url, expected_frames=frames,
+                                        values={"username": grant["username"], "password": grant["password"], "code": grant["code"]})
+        except sandbox.SandboxUnavailable:
+            await self.stop(owner)
+            raise
+        except ValueError as error:
+            return {"text": "Not filled: " + held.scrub(str(error)), "images": []}
+        c.last_action = self.clock()
+        c.last_action_at = time.time()
+        filled = ", ".join(reply.get("filled") or []) or "nothing"
+        return {"text": f"URL: {url} | Filled {filled} for the saved login at {grant['site']}. Nothing was submitted.", "images": []}
 
     async def _desktop_act(self, c: Computer, action: str, args: dict, ctx) -> dict:
         if action == "launch" and args.get("app") not in computer_image.DESKTOP_APPS:

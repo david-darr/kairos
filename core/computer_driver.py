@@ -981,6 +981,58 @@ async def main():
                 await xdo('type', '--clearmodifiers', '--delay', '0', '--', text)
             await asyncio.sleep(0.3)
             return {'how': how, 'url': page.url, 'title': await page.title(), 'screenshot': await asyncio.to_thread(desktop_capture)}
+        LOGIN_ROWS = """() => { const vis = e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e);
+  return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !e.disabled && !e.readOnly; };
+  const hint = e => ((e.name || '') + ' ' + (e.id || '') + ' ' + (e.getAttribute('aria-label') || '') + ' ' + (e.placeholder || ''));
+  const out = []; const all = Array.from(document.querySelectorAll('input'));
+  all.forEach((e, i) => { if (!vis(e)) return; const t = (e.type || 'text').toLowerCase(), a = (e.autocomplete || '').toLowerCase(); let kind = null;
+    if (t === 'password' || a === 'current-password') kind = 'password';
+    else if (a === 'one-time-code' || /otp|totp|verification|2fa|one.?time/i.test(hint(e))) kind = 'code';
+    else if (a === 'username' || a === 'email' || t === 'email' || ((t === 'text' || t === 'tel') && /user|login|email|account/i.test(hint(e)))) kind = 'username';
+    if (kind) out.push({kind: kind, index: i, label: (e.getAttribute('aria-label') || e.placeholder || e.name || '').slice(0, 80)}); });
+  return out; }"""
+        async def login_candidates():
+            """Visible sign-in inputs in every frame the browser can read, by kind. Reads no values. A frame it
+            cannot read is reported as opaque, and the host refuses to fill a page that has one."""
+            found, frames, opaque = [], [], False
+            for frame in page.frames:
+                if frame is not page.main_frame and frame.url.startswith(('about:', 'data:', 'blob:')): continue
+                try:
+                    rows = await frame.evaluate(LOGIN_ROWS)
+                except Exception:
+                    if frame is page.main_frame: raise
+                    opaque = True
+                    continue
+                frames.append(frame.url)
+                found.extend({'frame': len(frames) - 1, 'frame_ref': frame, **row} for row in rows)
+            return found, frames, opaque
+        async def login_command(action, cmd):
+            found, frames, opaque = await login_candidates()
+            public = [{k: v for k, v in row.items() if k != 'frame_ref'} for row in found]
+            if action == 'login_fields':
+                return {'url': page.url, 'frames': frames, 'fields': public, 'opaque': opaque}
+            # fill_login: the page must still be exactly the one the host checked, frames included.
+            if opaque or frames != list(cmd.get('expected_frames') or []):
+                raise ValueError('the page changed; check it again before filling')
+            values = cmd.get('values') or {}
+            order = {'username': 0, 'password': 1, 'code': 2}
+            password = next((r for r in found if r['kind'] == 'password'), None)
+            chosen = {}
+            for row in found:
+                if row['kind'] in chosen: continue
+                if password and row['kind'] == 'username' and row['frame'] != password['frame']: continue
+                chosen[row['kind']] = row
+            if 'password' not in chosen and 'username' not in chosen:
+                raise ValueError('no sign-in fields were found on this page')
+            filled = []
+            for kind in sorted(chosen, key=order.get):
+                value = values.get(kind)
+                if not value: continue
+                handle = (await chosen[kind]['frame_ref'].evaluate_handle('(i) => document.querySelectorAll("input")[i]', chosen[kind]['index'])).as_element()
+                if not handle: raise ValueError('a sign-in field disappeared; check the page again')
+                await handle.fill(value)
+                filled.append(kind)
+            return {'url': page.url, 'filled': filled}
         async def execute(cmd):
             nonlocal page
             action = cmd['action']
@@ -988,6 +1040,7 @@ async def main():
             if action == 'state': return {'url':page.url, 'title':await page.title()}
             if 'expected_url' in cmd and page.url != cmd['expected_url']:
                 raise ValueError('the page changed; inspect it again')
+            if action in ('login_fields', 'fill_login'): return await login_command(action, cmd)
             if action in ('desktop_read', 'desktop_inspect', 'desktop_ref_input', 'desktop_focused', 'desktop_verify'):
                 if not DESKTOP: raise ValueError('[needs_desktop] the agent desktop is off')
                 return await desktop_semantics(cmd, action)
