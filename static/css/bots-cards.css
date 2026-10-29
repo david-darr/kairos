@@ -1,0 +1,124 @@
+/* Bots mode: approval cards, question cards and applied-change cards (Agents 3.0 Phase 3, unit U5).
+   Scope: [data-app-mode="bots"] only. Every value reads the --bots-* tokens from bots.css, so
+   scripts/test_kairos_theme.py finds no raw colour here. Motion follows bots.css (off under
+   prefers-reduced-motion). Modules: static/js/botsApprovalCards.js, static/js/botsAutomationChangeCard.js. */
+
+[data-app-mode="bots"] .bots-cards { display: grid; gap: 6px; font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-cards:empty, [data-app-mode="bots"] .bots-changes:empty { display: none; }
+
+/* -- The compact row every card becomes ----------------------------------------------------- */
+
+[data-app-mode="bots"] .bots-card-row {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 8px 12px;
+  background: var(--bots-inset); border-radius: var(--bots-radius-menu);
+  font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary);
+}
+[data-app-mode="bots"] .bots-card-row-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-card-row[data-status="allowed"] .bots-card-row-icon, [data-app-mode="bots"] .bots-card-row[data-status="answered"] .bots-card-row-icon { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-card-row[data-status="denied"] .bots-card-row-icon { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-card-row[data-status="pending"] .bots-card-row-icon { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-card-row-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+[data-app-mode="bots"] .bots-card-row-title { color: var(--bots-ink); font-weight: 500; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-card-row-text { overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-card-row-answers { flex-basis: 100%; padding-left: 28px; font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-card-row-answers summary { cursor: pointer; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-card-row-answers ul { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 2px; }
+[data-app-mode="bots"] .bots-card-q { color: var(--bots-ink); }
+
+/* -- The pending panel (takes the composer's place) ------------------------------------------ */
+
+[data-app-mode="bots"] .bots-cards-panel {
+  display: grid; gap: 10px; padding: 14px 16px;
+  background: var(--bots-card); border: 1px solid var(--bots-accent-border); border-radius: var(--bots-radius-card);
+  box-shadow: var(--bots-composer-ring);
+  animation: bots-msg-in var(--bots-dur-msg) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-cards-panel[aria-busy="true"] { opacity: .75; }
+[data-app-mode="bots"] .bots-cards-title { display: flex; align-items: center; gap: 8px; margin: 0; font: 600 15px/1.3 var(--bots-font-sans); color: var(--bots-ink); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-cards-title .bots-icon { color: var(--bots-accent-text); }
+[data-app-mode="bots"] .bots-cards-summary, [data-app-mode="bots"] .bots-cards-prompt { margin: 0; color: var(--bots-ink); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-cards-prompt { font-weight: 500; }
+[data-app-mode="bots"] .bots-cards-hint, [data-app-mode="bots"] .bots-cards-more { margin: 0; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-cards-target { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+[data-app-mode="bots"] .bots-cards-target code {
+  padding: 2px 8px; font: 400 var(--bots-text-hint-lg)/1.4 var(--bots-font-mono); color: var(--bots-ink);
+  background: var(--bots-inset); border-radius: 6px; overflow-wrap: anywhere;
+}
+[data-app-mode="bots"] .bots-cards-error { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-danger); }
+
+[data-app-mode="bots"] .bots-card-details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-card-details dt { color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-card-details dd { margin: 0; color: var(--bots-ink); overflow-wrap: anywhere; font-family: var(--bots-font-mono); font-size: var(--bots-text-hint); }
+
+[data-app-mode="bots"] .bots-cards-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+[data-app-mode="bots"] .bots-cards-actions .bots-btn { min-height: 36px; }
+[data-app-mode="bots"] .bots-cards-actions .bots-btn[aria-disabled="true"] { opacity: .5; }
+
+/* -- Questions -------------------------------------------------------------------------------- */
+
+[data-app-mode="bots"] .bots-cards-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 2px; background: var(--bots-inset); border-radius: var(--bots-radius-pill); }
+[data-app-mode="bots"] .bots-cards-tab {
+  flex: none; min-height: 28px; max-width: 180px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: transparent; border: 0; border-radius: var(--bots-radius-pill); cursor: pointer;
+}
+[data-app-mode="bots"] .bots-cards-tab[aria-selected="true"] { color: var(--bots-ink); background: var(--bots-card); box-shadow: var(--bots-composer-ring); }
+[data-app-mode="bots"] .bots-cards-tab[data-answered="true"]::after { content: " \2713"; color: var(--bots-success); }
+[data-app-mode="bots"] .bots-cards-question { display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-cards-options { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; }
+[data-app-mode="bots"] .bots-cards-option {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; cursor: pointer;
+  border: 1px solid var(--bots-hairline-dense); border-radius: 10px;
+}
+[data-app-mode="bots"] .bots-cards-option:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-cards-option[data-checked="true"] { background: var(--bots-menu-active); border-color: var(--bots-accent-border); }
+[data-app-mode="bots"] .bots-cards-option input { flex: none; margin-top: 3px; accent-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-cards-option-main { display: grid; gap: 1px; min-width: 0; }
+[data-app-mode="bots"] .bots-cards-option-label { color: var(--bots-ink); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-cards-option-hint { font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-cards-custom-row { display: flex; align-items: center; gap: 8px; }
+[data-app-mode="bots"] .bots-cards-custom {
+  flex: 1; min-width: 0; min-height: 36px; padding: 4px 12px;
+  font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 10px;
+}
+[data-app-mode="bots"] .bots-cards-count { flex: none; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+
+/* -- The applied-change card ------------------------------------------------------------------ */
+
+[data-app-mode="bots"] .bots-changes { display: grid; gap: 8px; margin-top: 6px; }
+[data-app-mode="bots"] .bots-change-card {
+  display: grid; gap: 8px; padding: 10px 12px;
+  background: var(--bots-card); border: 1px solid var(--bots-hairline); border-left: 3px solid var(--bots-bot-color);
+  border-radius: var(--bots-radius-menu);
+}
+[data-app-mode="bots"] .bots-change-card[data-state="undone"] { opacity: .8; }
+[data-app-mode="bots"] .bots-change-card[data-state="failed"] { border-left-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-change-head { display: flex; align-items: flex-start; gap: 8px; }
+[data-app-mode="bots"] .bots-change-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: var(--bots-success); }
+[data-app-mode="bots"] .bots-change-card[data-state="failed"] .bots-change-icon { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-change-card[data-state="undone"] .bots-change-icon { color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-change-line { flex: 1; min-width: 0; color: var(--bots-ink); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-change-status { flex: none; }
+[data-app-mode="bots"] .bots-change-details { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-change-details summary { cursor: pointer; }
+[data-app-mode="bots"] .bots-change-diff { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; }
+[data-app-mode="bots"] .bots-change-diff dt { color: var(--bots-ink-tertiary); text-transform: capitalize; }
+[data-app-mode="bots"] .bots-change-diff dd { margin: 0; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-change-before { color: var(--bots-ink-tertiary); text-decoration: line-through; }
+[data-app-mode="bots"] .bots-change-after { color: var(--bots-ink); }
+
+/* -- Focus and phones --------------------------------------------------------------------------- */
+
+[data-app-mode="bots"] :is(.bots-cards-tab, .bots-cards-option input, .bots-cards-custom, .bots-change-details summary, .bots-card-row-answers summary):focus-visible {
+  outline: 2px solid var(--bots-focus); outline-offset: 2px;
+}
+@media (max-width: 767px) {
+  [data-app-mode="bots"] .bots-cards-panel { padding: 14px; border-radius: 20px; }
+  [data-app-mode="bots"] .bots-cards-actions { flex-direction: column-reverse; }
+  [data-app-mode="bots"] .bots-cards-actions .bots-btn { width: 100%; min-height: 44px; }
+  [data-app-mode="bots"] .bots-change-card .bots-cards-actions { flex-direction: row; }
+  [data-app-mode="bots"] .bots-change-card .bots-cards-actions .bots-btn { width: auto; flex: 1; min-height: 44px; }
+  [data-app-mode="bots"] .bots-card-details, [data-app-mode="bots"] .bots-change-diff { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-cards-option { padding: 12px; }
+}
