@@ -67,6 +67,76 @@ class BotStreaming(unittest.TestCase):
         self.assertLess(packets.index(chunks[-1]), packets.index(last), "done comes after the last chunk")
         self.assertEqual(run["text"], "".join(CHUNKS))
 
+    def test_stop_names_its_turn_and_a_stale_turn_id_is_a_no_op(self):
+        async def drive():
+            run = new_run()
+            sid = "guard-session"
+            task = asyncio.create_task(asyncio.sleep(30))
+            chat_live._runs[sid], chat_live._tasks[sid] = run, task
+            try:
+                self.assertFalse(chat_live.stop(sid, "an-older-turn"))
+                self.assertEqual(chat_live.stop_turn(sid, "an-older-turn"), "already-stopped")
+                self.assertFalse(task.cancelled() or run["stopping"])
+                self.assertEqual(chat_live.stop_turn(sid, "turn-1"), "stopping")
+                self.assertTrue(run["stopping"] and run["_stop_reason"] == "person")
+                self.assertTrue(chat_live.stop(sid), "the old call without a turn still works")
+            finally:
+                task.cancel()
+                chat_live._runs.pop(sid, None)
+                chat_live._tasks.pop(sid, None)
+        with patch.object(chat_live, "_mobile_packet"):
+            asyncio.run(drive())
+
+    def test_a_turn_with_an_accepted_message_does_not_append_it_again(self):
+        from core.session_manager import session_manager
+        session = session_manager.create_session("Accepted", owner_user="david")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        index = session_manager.append_message(session["id"], "user", "already saved")
+        endpoint = {"id": "e", "name": "E", "kind": "claude_cli"}
+
+        class Brain:
+            async def events(self, prompt, stream=True):
+                from core import runs
+                yield runs.text("reply")
+                yield runs.result(True)
+
+        async def drive():
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(Brain(), False))),                  patch.object(chat_service, "_resolve_endpoint", return_value=endpoint),                  patch.object(chat_service, "_compact_if_nearly_full", AsyncMock()),                  patch.object(chat_service, "_reply_hook"), patch.object(chat_service, "_record_turn_telemetry"):
+                async with chat_service.session_operation(session["id"]):
+                    return [c async for c in chat_service._stream_message(
+                        session["id"], "already saved", None, True, "", None, accepted_index=index, turn_note="[note]")]
+
+        self.assertEqual([c for c in asyncio.run(drive()) if isinstance(c, str)], ["reply"])
+        rows = session_manager.get_session(session["id"])["messages"]
+        self.assertEqual([m["role"] for m in rows], ["user", "assistant"])
+        self.assertEqual(rows[0]["sent"], "already saved[note]", "the private note went to the model, not the transcript")
+
+    def test_the_chunk_filter_keeps_text_out_of_the_live_feed(self):
+        from services import bot_goal_runs
+        packets = []
+        run = new_run()
+        run["_filter"] = bot_goal_runs.EnvelopeFilter()
+
+        async def fake_stream(*args, **kwargs):
+            for chunk in ["Hello <kairos", "-goal>{}</kairos-goal>", " there"]:
+                yield chunk
+
+        async def drive():
+            queue, _ = chat_live.subscribe()
+            try:
+                with patch.object(chat_service, "stream_message", fake_stream), patch.object(chat_service, "release_session"),                      patch.object(chat_live, "_mobile_packet"),                      patch.object(chat_service.session_manager, "get_session", return_value={"id": "f", "agent_id": "a1"}):
+                    chat_live._runs["f"] = run
+                    await chat_live._run("f", run, [], True, "", [])
+                while not queue.empty():
+                    packets.append(queue.get_nowait())
+            finally:
+                chat_live.unsubscribe(queue)
+                chat_live._runs.pop("f", None)
+
+        asyncio.run(drive())
+        self.assertEqual("".join(p["chunk"] for p in packets if p["type"] == "chunk"), "Hello  there")
+        self.assertEqual(run["text"], "Hello  there")
+
     def test_channel_direct_returns_whole_text_and_never_uses_live_feed(self):
         agent = {"id": "a1", "name": "Scout"}
         send = AsyncMock(return_value="Found three changes today.")

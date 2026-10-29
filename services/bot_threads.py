@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
 from services import bot_record
@@ -18,6 +19,8 @@ THREAD_DEFAULTS = {
     "main": False, "folder_id": None, "pinned": False, "archived_at": None, "snoozed_until": None,
     "approval_mode": None, "place": None, "unread": False, "last_read_index": None,
     "pinned_message_index": None, "opened_by": "person", "routine_run_id": None, "title_source": "machine",
+    "active_leaf_id": None, "last_read_message_id": None, "pinned_message_id": None,
+    "branch_revision": 0, "queue_revision": 0, "queue_paused": False, "link": None,
 }
 OPENED_BY = ("person", "bot", "routine", "room", "handoff")
 TITLE_SOURCES = ("machine", "person", "llm")
@@ -51,7 +54,8 @@ def follows_bot_model(session: dict, agent: dict) -> bool:
 
 
 def _preview(session: dict) -> str:
-    for message in reversed(session.get("messages") or []):
+    from core.bot_message_tree import ancestry
+    for message in reversed(ancestry(session)):
         if message.get("role") in ("user", "assistant") and message.get("content"):
             return " ".join(str(message["content"]).split())[:240]
     return ""
@@ -176,9 +180,9 @@ def create_thread(agent: dict, user: str, title: Optional[str] = None, folder_id
 
 # -- changing one thread --------------------------------------------------------
 
-def snooze_until(value, now: Optional[float] = None) -> Optional[float]:
+def snooze_until(value, now: Optional[float] = None, timezone: Optional[str] = None) -> Optional[float]:
     """"activity" -> 0 (until new activity), "stop" -> None, "tonight" ->
-    18:00 local (tomorrow's if it has passed), "tomorrow" -> 08:00 local
+    18:00 in the person's timezone, "tomorrow" -> 09:00
     tomorrow, a number -> that unix time."""
     now = time.time() if now is None else now
     if value == "activity":
@@ -186,13 +190,17 @@ def snooze_until(value, now: Optional[float] = None) -> Optional[float]:
     if value == "stop":
         return None
     if value in ("tonight", "tomorrow"):
-        moment = datetime.fromtimestamp(now)
+        try:
+            zone = ZoneInfo(timezone) if timezone else None
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("Choose a valid IANA timezone")
+        moment = datetime.fromtimestamp(now, zone)
         if value == "tonight":
             target = moment.replace(hour=18, minute=0, second=0, microsecond=0)
             if target.timestamp() <= now:
                 target += timedelta(days=1)
         else:
-            target = (moment + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+            target = (moment + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
         return target.timestamp()
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
         return float(value)
@@ -222,7 +230,29 @@ def update_thread(agent: dict, session_id: str, fields: dict) -> dict:
                 raise bot_record.BotConflict("this is the main conversation; make another one the main first")
             changes["archived_at"] = time.time() if value else None
         elif key == "snooze":
-            changes["snoozed_until"] = snooze_until(value)
+            changes["snoozed_until"] = snooze_until(value, timezone=fields.get("timezone"))
+        elif key == "timezone":
+            if not isinstance(value, str) or len(value) > 100:
+                raise ValueError("Choose a valid IANA timezone")
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("Choose a valid IANA timezone")
+        elif key == "main":
+            if value is not True:
+                raise ValueError("Promote another conversation to change the main conversation")
+            with _LOCK:
+                for header in session_manager.list_sessions(agent_id=agent["id"]):
+                    session_manager.set_thread(header["id"], main=header["id"] == session_id)
+            changes.update(main=True, archived_at=None)
+        elif key == "link":
+            from urllib.parse import urlsplit
+            if value is not None and (not isinstance(value, str) or len(value) > 2000 or
+                                      any(ord(c) < 32 for c in value) or
+                                      urlsplit(value).scheme != "https" or not urlsplit(value).hostname or
+                                      urlsplit(value).username or urlsplit(value).password):
+                raise ValueError("Use an https link without credentials")
+            changes["link"] = value
         elif key == "approval_mode":
             changes["approval_mode"] = None if value is None else bot_record.check_approval(
                 value, "thread approval_mode", THREAD_APPROVAL_MODES)

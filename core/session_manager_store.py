@@ -107,7 +107,7 @@ LEGACY_INDEX_FILE = os.path.join(DATA_DIR, "sessions_index.json")
 LEGACY_CHANNEL_FILE = os.path.join(DATA_DIR, "channel_sessions.json")
 LEGACY_BACKUP_DIR = os.path.join(DATA_DIR, "sessions.pre-sqlite-backup")
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # Columns schema v8 added to `runs`, for upgrading an older database.
 RUN_V8_COLUMNS = (("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("cache_write_tokens", "INTEGER"),
                   ("first_output_at", "REAL"), ("last_output_at", "REAL"))
@@ -126,6 +126,29 @@ _SESSION_COLUMNS = (
 )
 
 _SCHEMA = """
+-- Bots acceptance and queue share the transcript's transaction (schema v9).
+CREATE TABLE IF NOT EXISTS bot_send_receipts (
+    owner TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    send_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    result TEXT NOT NULL,
+    PRIMARY KEY (owner, session_id, send_id)
+);
+CREATE TABLE IF NOT EXISTS bot_followups (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL,
+    bot_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    send_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    state TEXT NOT NULL,
+    generation TEXT,
+    message_id TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bot_followups_pending ON bot_followups(bot_id, state, sequence);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -358,7 +381,7 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
         if "doc" not in columns:
             conn.execute("ALTER TABLE messages ADD COLUMN doc TEXT")
         rows = conn.execute("SELECT id, doc FROM sessions").fetchall()
-        with conn:
+        with _atomic(conn):
             for r in rows:
                 doc = json.loads(r["doc"])
                 messages = doc.get("messages") or []
@@ -374,7 +397,7 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
         # v3 mirrors a session's agent out of its document (agent chats live
         # in the Agents tab, 2026-10-05).
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-        with conn:
+        with _atomic(conn):
             if "agent_id" not in columns:
                 conn.execute("ALTER TABLE sessions ADD COLUMN agent_id TEXT")
             conn.execute("UPDATE sessions SET agent_id = json_extract(doc, '$.agent_id')")
@@ -387,12 +410,12 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
         # its first and last output arrived (David, 2026-10-22: in/out and
         # tok/s in the CLI). Older runs keep null: nothing is back-filled.
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
-        with conn:
+        with _atomic(conn):
             for name, kind in RUN_V8_COLUMNS:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {kind}")
 
-    with conn:
+    with _atomic(conn):
         conn.execute(
             "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -444,7 +467,7 @@ def _migrate_compaction_data(conn: sqlite3.Connection) -> None:
             "WHERE json_extract(doc, '$.compactions') IS NOT NULL").fetchall()
         # One commit per 200 chats: a commit per chat was over half the cost.
         for start in range(0, len(chats), 200):
-            with conn:
+            with _atomic(conn):
                 for r in chats[start:start + 200]:
                     try:
                         compactions = json.loads(r["c"]) or []
@@ -460,12 +483,12 @@ def _migrate_compaction_data(conn: sqlite3.Connection) -> None:
                             conn.execute("UPDATE messages SET doc = ? WHERE session_id = ? AND idx = ?",
                                          (json.dumps(doc, ensure_ascii=False), r["id"], m["idx"]))
                             flagged += 1
-        with conn:
+        with _atomic(conn):
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (NOTICE_MIGRATION_MARKER,))
         if flagged:
             logger.info("session store: flagged %d legacy compaction notice(s) display-only", flagged)
     if TOOL_INDEX_MIGRATION_MARKER not in done and conn.execute("SELECT 1 FROM messages LIMIT 1").fetchone() is None:
-        with conn:
+        with _atomic(conn):
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
 
 
@@ -556,7 +579,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
         with _LOCK:
             if stop.is_set() or _conn is not conn:
                 return False
-            with conn:
+            with _atomic(conn):
                 count += sum(_reindex_tool_message(conn, sid, idx, rowids, extras, map_end) for sid, idx in items)
         stop.wait(0.001)
         return True
@@ -577,7 +600,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
     with _LOCK:
         if stop.is_set() or _conn is not conn:
             return False
-        with conn:
+        with _atomic(conn):
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
     if count:
         logger.info("session store: re-indexed tool results of %d message(s)", count)
@@ -623,12 +646,32 @@ def connection() -> sqlite3.Connection:
 
 
 @contextlib.contextmanager
+def _atomic(conn):
+    """Savepoints compose facade writes into an acceptance transaction.
+
+    sqlite's connection context commits even inside another context. A nested
+    message append must never commit its outer send receipt prematurely.
+    """
+    import uuid
+    name = "write_" + uuid.uuid4().hex
+    conn.execute("SAVEPOINT " + name)
+    try:
+        yield conn
+    except BaseException:
+        conn.execute("ROLLBACK TO " + name)
+        conn.execute("RELEASE " + name)
+        raise
+    else:
+        conn.execute("RELEASE " + name)
+
+
+@contextlib.contextmanager
 def transaction():
     """The store's connection inside one transaction, under the store's lock,
     for a module that keeps its own table here (core/outbox.py)."""
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             yield conn
 
 
@@ -768,7 +811,7 @@ def save_session(doc: dict, rebuild_messages_from: Optional[int] = ALL_MESSAGES)
     payload = json.dumps(_document_only(doc), ensure_ascii=False)
     with _LOCK:
         conn = _connect()
-        with conn:  # BEGIN/COMMIT, rollback on exception
+        with _atomic(conn):  # BEGIN/COMMIT, rollback on exception
             conn.execute(
                 f"""INSERT INTO sessions (id, doc, {', '.join(_SESSION_COLUMNS)})
                     VALUES (?, ?, {', '.join('?' * len(_SESSION_COLUMNS))})
@@ -825,7 +868,7 @@ def append_message(session_id: str, index: int, message: dict, doc: dict) -> Non
     content = message.get("content") or ""
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             conn.execute(
                 "INSERT INTO messages (session_id, idx, role, content, ts, doc) VALUES (?, ?, ?, ?, ?, ?)",
                 (session_id, index, message.get("role"), content, message.get("ts"),
@@ -853,7 +896,7 @@ def update_message_fields(session_id: str, index: int, fields: dict) -> None:
         raise ValueError("role and content are not changed through update_message_fields")
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             row = conn.execute("SELECT doc FROM messages WHERE session_id = ? AND idx = ?",
                                (session_id, index)).fetchone()
             if row is None:
@@ -861,6 +904,33 @@ def update_message_fields(session_id: str, index: int, fields: dict) -> None:
             message = {**json.loads(row["doc"]), **fields}
             conn.execute("UPDATE messages SET doc = ? WHERE session_id = ? AND idx = ?",
                          (json.dumps(message, ensure_ascii=False), session_id, index))
+
+
+def get_message(session_id: str, index: int) -> Optional[dict]:
+    """One stored message by its row index, without loading the transcript."""
+    with _LOCK:
+        row = _connect().execute("SELECT doc FROM messages WHERE session_id = ? AND idx = ?",
+                                 (session_id, index)).fetchone()
+    return json.loads(row["doc"]) if row else None
+
+
+def update_document(session_id: str, mutate) -> Optional[dict]:
+    """Change the session document alone (never its message rows) under one
+    savepoint: for metadata edits that must stay cheap and compose with a
+    surrounding transaction. `mutate` receives the document without its
+    transcript and edits it in place. Returns None for an unknown session."""
+    with _LOCK:
+        conn = _connect()
+        with _atomic(conn):
+            row = conn.execute("SELECT doc FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if row is None:
+                return None
+            doc = json.loads(row["doc"])
+            mutate(doc)
+            conn.execute("UPDATE sessions SET doc = ?, title = ?, updated_at = ? WHERE id = ?",
+                         (json.dumps(_document_only(doc), ensure_ascii=False),
+                          doc.get("title"), doc.get("updated_at"), session_id))
+            return doc
 
 
 def session_exists(session_id: str) -> bool:
@@ -933,7 +1003,7 @@ def session_count() -> int:
 def delete_session(session_id: str) -> None:
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             conn.execute("DELETE FROM messages_fts WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             conn.execute("DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
@@ -953,7 +1023,7 @@ def delete_all_sessions() -> None:
         from core import chat_tasks
         for row in conn.execute('SELECT id FROM sessions').fetchall():
             chat_tasks.forget(row['id'])
-        with conn:
+        with _atomic(conn):
             conn.execute("DELETE FROM messages_fts")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM sessions")
@@ -976,7 +1046,7 @@ def record_run(run: dict, timeline: Optional[list] = None) -> None:
     the newest RUNS_KEPT runs; an older run's timeline goes with it."""
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             conn.execute(f"INSERT OR REPLACE INTO runs ({', '.join(_RUN_COLUMNS)}) "
                          f"VALUES ({', '.join('?' for _ in _RUN_COLUMNS)})",
                          tuple(run.get(c) for c in _RUN_COLUMNS))
@@ -1049,7 +1119,7 @@ def get_channel_session(channel_key: str) -> Optional[str]:
 def set_channel_session(channel_key: str, session_id: str) -> None:
     with _LOCK:
         conn = _connect()
-        with conn:
+        with _atomic(conn):
             conn.execute(
                 """INSERT INTO channel_sessions (channel_key, session_id) VALUES (?, ?)
                    ON CONFLICT(channel_key) DO UPDATE SET session_id = excluded.session_id""",
@@ -1294,7 +1364,7 @@ def _import_legacy_json(conn: sqlite3.Connection) -> dict:
         shutil.move(src, dest)
 
     # Last, so any interruption above leaves the import to be resumed.
-    with conn:
+    with _atomic(conn):
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1336,7 +1406,7 @@ def rebuild_search_index() -> int:
     with _LOCK:
         conn = _connect()
         rows = conn.execute("SELECT id FROM sessions").fetchall()
-        with conn:
+        with _atomic(conn):
             conn.execute("DELETE FROM messages_fts")
             for r in rows:
                 msgs = conn.execute(

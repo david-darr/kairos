@@ -8,6 +8,8 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from unittest.mock import patch
 
@@ -90,7 +92,8 @@ class HeaderAndStorageTests(ThreadTestCase):
         session_manager.set_thread(sid, main=True)
         session_manager.set_thread(sid, pinned=True)
         after = session_manager.get_session(sid)
-        self.assertEqual(after["thread"], {"main": True, "pinned": True}, "fields merge")
+        self.assertTrue(after["thread"]["main"] and after["thread"]["pinned"], "fields merge")
+        self.assertEqual(after["thread"]["active_leaf_id"], after["messages"][-1]["bot_message_id"])
         self.assertEqual((after["messages"], after["updated_at"]), (before["messages"], before["updated_at"]))
 
     def test_release_agent_chats_clears_the_thread_record(self):
@@ -275,7 +278,12 @@ class ThreadCrudTests(ThreadTestCase):
         evening = time.mktime((2026, 10, 28, 19, 30, 0, 0, 0, -1))
         self.assertEqual(time.localtime(bot_threads.snooze_until("tonight", morning))[2:5], (28, 18, 0))
         self.assertEqual(time.localtime(bot_threads.snooze_until("tonight", evening))[2:5], (29, 18, 0))
-        self.assertEqual(time.localtime(bot_threads.snooze_until("tomorrow", evening))[2:5], (29, 8, 0))
+        self.assertEqual(time.localtime(bot_threads.snooze_until("tomorrow", evening))[2:5], (29, 9, 0))
+        zone_now = datetime(2026, 10, 28, 12, 0, tzinfo=ZoneInfo("Asia/Tokyo")).timestamp()
+        got = datetime.fromtimestamp(bot_threads.snooze_until("tomorrow", zone_now, timezone="Asia/Tokyo"), ZoneInfo("Asia/Tokyo"))
+        self.assertEqual((got.day, got.hour), (29, 9))
+        with self.assertRaises(ValueError):
+            bot_threads.snooze_until("tomorrow", zone_now, timezone="Nowhere/Land")
         web.patch(self.url(tail=f"/{sid}"), json={"snooze": "tonight"})
         self.assertGreater(self.thread_of(sid)["snoozed_until"], time.time())
 

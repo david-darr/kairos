@@ -488,7 +488,7 @@ BOT_SETUP_INSTRUCTIONS = (
 
 
 def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: list[str] | None,
-                       reference_context: str = "") -> str:
+                       reference_context: str = "", turn_note: str = "") -> str:
     """The user message as the model receives it - the attachment note and
     Open Mic instruction added - recorded beside the saved message so every
     later replay sends the same text (see SessionManager.record_sent_text).
@@ -501,6 +501,7 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
     if text.strip().lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
         model_text = BOT_SETUP_INSTRUCTIONS
     sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, model_text, attachment_ids) + reference_context)
+    sent += turn_note  # a private instruction for this turn only (goal mode), kept with the message
     if (session_manager.get_session(session_id) or {}).get('forge'):
         from services.forge_sessions import forge_sessions
         sent += forge_sessions.repo_context(session_id)
@@ -549,7 +550,8 @@ def _taint_turn(session_id: str, brain, reference_context: str) -> None:
 
 
 def _hand_off_references(session_id: str, text: str, attachment_ids: list[str] | None, is_admin: bool,
-                         reference_context: str, references: list[dict] | None) -> list[dict] | None:
+                         reference_context: str, references: list[dict] | None,
+                         accepted_index: int | None = None) -> list[dict] | None:
     agents = list(dict.fromkeys(ref.get("id") for ref in (references or []) if ref.get("kind") == "agent"))
     if not agents:
         return None
@@ -564,7 +566,8 @@ def _hand_off_references(session_id: str, text: str, attachment_ids: list[str] |
     if not text.strip() and not attachment_ids:
         raise ValueError("Say what work to hand over")
     context = recent_context(session_id)
-    session_manager.append_message(session_id, "user", text, extra=_user_message_extra(references, attachment_ids))
+    if accepted_index is None:  # a Bots send already saved its message at admission
+        session_manager.append_message(session_id, "user", text, extra=_user_message_extra(references, attachment_ids))
     work = _apply_attachments(session_id, text, attachment_ids) + reference_context
     return [hand_off(agent_id, work, session_id, context) for agent_id in agents]
 
@@ -628,19 +631,49 @@ def _reply_hook(session_id: str, endpoint: dict, message: str, reply: str) -> No
                                      "model": endpoint.get("name"), "message": message, "reply": reply})
 
 
+async def _refresh_bot_prompt(session_id: str) -> None:
+    """At a turn boundary, pick up a changed bot profile (Bots Phase 1). The
+    cached identity text is replaced only when the effective bytes changed,
+    and the old brain is closed first so the next one is built from the new
+    text. An unchanged profile keeps its exact bytes (and the prompt cache).
+    Uses agent_service.prompt_snapshot when the profile service provides it."""
+    session = session_manager.get_session(session_id) or {}
+    agent_id = session.get("agent_id")
+    if not agent_id:
+        return
+    from services.agent_service import agent_service
+    snapshot_for = getattr(agent_service, "prompt_snapshot", None)
+    if snapshot_for is None:
+        return
+    try:
+        snapshot = snapshot_for(agent_id, session_id)
+    except Exception:
+        logger.exception("could not read the prompt snapshot of bot %s", agent_id)
+        return
+    text = (snapshot or {}).get("text")
+    if not isinstance(text, str) or text == session.get("agent_prompt"):
+        return
+    await close_session_brain(session_id)
+    session_manager.set_agent(session_id, agent_id, text)
+
+
 async def stream_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                          is_admin: bool = False, reference_context: str = "",
-                         references: list[dict] | None = None, *, claimed: bool = False) -> AsyncIterator[str]:
+                         references: list[dict] | None = None, *, claimed: bool = False,
+                         accepted_index: int | None = None, turn_note: str = "") -> AsyncIterator[str]:
+    """accepted_index: the user message is already saved (a Bots send accepted
+    it before dispatch, services/bot_chat_service.py), so it is not appended
+    again. turn_note: a private line sent to the model with this message only."""
     tag = log_files.set_log_tag(session_id)  # see send_message
     try:
         if claimed:
             async for chunk in _stream_message(session_id, text, attachment_ids, is_admin, reference_context,
-                                               references):
+                                               references, accepted_index, turn_note):
                 yield chunk
         else:
             async with session_operation(session_id):
                 async for chunk in _stream_message(session_id, text, attachment_ids, is_admin, reference_context,
-                                                   references):
+                                                   references, accepted_index, turn_note):
                     yield chunk
     finally:
         session = session_manager.get_session(session_id) or {}
@@ -652,17 +685,23 @@ async def stream_message(session_id: str, text: str, attachment_ids: list[str] |
 
 async def _stream_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
                           is_admin: bool = False, reference_context: str = "",
-                          references: list[dict] | None = None) -> AsyncIterator[str]:
+                          references: list[dict] | None = None, accepted_index: int | None = None,
+                          turn_note: str = "") -> AsyncIterator[str]:
     from services.chat_background import settle
     await settle(session_id)
-    handed = _hand_off_references(session_id, text, attachment_ids, is_admin, reference_context, references)
+    handed = _hand_off_references(session_id, text, attachment_ids, is_admin, reference_context, references,
+                                  accepted_index)
     if handed is not None:
         yield {"handoffs": handed}
         return
     image_ids = validate_image_attachments(session_id, attachment_ids)
+    await _refresh_bot_prompt(session_id)
     await _compact_if_nearly_full(session_id)
-    index = session_manager.append_message(session_id, "user", text,
-                                           extra=_user_message_extra(references, attachment_ids))
+    if accepted_index is None:
+        index = session_manager.append_message(session_id, "user", text,
+                                               extra=_user_message_extra(references, attachment_ids))
+    else:
+        index = accepted_index
     endpoint = _resolve_endpoint(session_id)
     if endpoint is None:
         session_manager.append_message(session_id, "assistant", NO_MODEL_MESSAGE)
@@ -678,7 +717,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     context = _run_context(session_id, endpoint, is_admin)
     runs.enter(context)  # what the turn starts names it (core/helpers.py)
     try:
-        full_text = _prepare_sent_text(session_id, index, text, attachment_ids, reference_context)
+        full_text = _prepare_sent_text(session_id, index, text, attachment_ids, reference_context, turn_note)
         provider_started = True
         brain, just_created = await _get_brain(session_id, endpoint, is_admin)
         _taint_turn(session_id, brain, reference_context)
@@ -1122,6 +1161,14 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     messages = session.get("messages", [])
     compactions = session.get("compactions") or []
     prior_through = compactions[-1]["through_index"] if compactions else 0
+    if session.get("agent_id"):
+        # A bot's conversation is a tree: compact the selected branch only, and
+        # count from the fold that applies to it (core/bot_message_tree.py).
+        from core import bot_message_tree as tree
+        session = tree.ensure(session_id)
+        messages = tree.ancestry(session)
+        compactions = tree.checkpoints(session, messages)
+        prior_through = tree.boundary(messages, compactions[-1]) if compactions else 0
     # "New conversation" is counted over real messages only: the stored
     # "Conversation compacted" notice is display-only and must not look like
     # something said since the last fold (it made a second, paid summary run

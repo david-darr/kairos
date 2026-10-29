@@ -38,7 +38,8 @@ def agent_threads(user, agents):
         sessions = session_manager.list_sessions(agent_id=agent['id'])
         latest = max(sessions, key=lambda item: item.get('updated_at', 0), default=None)
         session = session_manager.get_session(latest['id']) if latest else None
-        messages = [m for m in (session or {}).get('messages', []) if m.get('role') in {'user','assistant'}]
+        from core.bot_message_tree import ancestry
+        messages = [m for m in ancestry(session or {}) if m.get('role') in {'user','assistant'} and not m.get('display_only')]
         pref = saved.get('agent:' + agent['id'], {})
         last = messages[-1] if messages else {}
         same_session = pref.get('session_id') == (latest or {}).get('id')
