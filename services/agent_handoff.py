@@ -12,10 +12,11 @@ from services.task_service import STOPPED_NOTE, task_service
 # 2026-10-14: five lets a coordinator fan out without unbounded model spend.
 # A batch resumes at 30 minutes even if an off bot never starts.
 MAX_ASSIGNMENTS_PER_RUN = 5
-MAX_CHAIN_HOPS = 3
+MAX_CHAIN_HOPS = 4
 RESUME_CEILING_SECONDS = 30 * 60
 _waking: set[str] = set()
 _question_waking: set[str] = set()
+_reconciled = False
 
 
 def requester(card: dict) -> dict | None:
@@ -38,7 +39,8 @@ def _thread(card: dict) -> str | None:
 def _event(card: dict, agent: dict) -> dict:
     return {"type": "handoff", "id": uuid.uuid4().hex[:12], "agent_id": agent["id"],
             "agent_name": agent["name"], "agent_color": agent.get("color"), "agent_avatar": agent.get("avatar"), "card_id": card["id"],
-            "handoff_status": "queued", "note": queue_note(agent["id"])}
+            "handoff_status": "queued", "note": queue_note(agent["id"]),
+            **{key: card.get(key) for key in ("mode", "reason", "done_when", "assignment_id", "partner", "work_session_id")}}
 
 
 def _post_event(card: dict, agent: dict) -> dict:
@@ -73,19 +75,21 @@ def hand_off(agent_id: str, work: str, source_session_id: str, context: list[dic
 
 
 def assign(requesting_id: str, target: str, work: str, session_id: str | None = None,
-           run_id: str | None = None, source_card_id: str | None = None) -> str:
+           run_id: str | None = None, source_card_id: str | None = None, *, mode="work", reply="resume",
+           thread="new", title="", reason="", done_when="", rework=False, room_id=None,
+           approved=False) -> str:
     """A model-facing refusal is text, so bad delegation cannot end its turn."""
     from core import runs
+    from core import bot_assignments as assignments
+    from services import bot_peers
     source = agent_service.get(requesting_id)
     if source is None:
         return "Assignment refused: the requesting bot no longer exists."
-    matches = [a for a in agent_service.list_agents()
-               if target.strip().casefold() in (a["id"].casefold(), a["name"].casefold())]
-    if len(matches) != 1:
-        return "Assignment refused: name one existing peer bot."
-    peer = matches[0]
-    if peer["id"] not in (source.get("peers") or []):
-        return f"Assignment refused: {peer['name']} is not on your Peers list."
+    try:
+        peer = bot_peers.resolve(target)
+        bot_peers.authorize(source, peer, approved=approved, session_id=session_id)
+    except (ValueError, PermissionError, KeyError) as error:
+        return f"Assignment refused: {error}"
     if not isinstance(work, str) or not work.strip():
         return "Assignment refused: say what work to assign."
     current = agent_service._current.get() or {}
@@ -127,16 +131,73 @@ def assign(requesting_id: str, target: str, work: str, session_id: str | None = 
         return "Assignment refused: the requesting thread does not belong to this bot."
     # The work is output from another model, perhaps copied from the web.
     # Keep it inside an untrusted fence in the assignee's actual prompt.
-    framed = wrap_untrusted(f"work requested by {source['name']}", work.strip())
+    framed = bot_peers.provenance(source, work.strip(), kind="Delegated by")
     request = {"kind": "bot", "agent_id": requesting_id, "session_id": session_id,
                "run_id": turn_id, "source_card_id": source_card_id,
                "created_at": time.time()}
+    if room_id:
+        # The room runner, not a model argument, must supply room authority.
+        from services import bot_rooms
+        if not bot_rooms.can_speak(requesting_id, room_id):
+            return "Assignment refused: the requesting bot cannot speak in this room."
+        request.update(kind="room", room_id=room_id)
+    try:
+        admission_request = {key: value for key, value in request.items() if key != "created_at"}
+        node = assignments.admit(admission_request, peer["id"], work.strip(),
+            parent_id=(origin or {}).get("assignment_id"), mode=mode, reply=reply,
+            destination="standing_thread" if thread == "standing" or mode == "notify" else "work_thread",
+            origin="room" if room_id else "routine" if origin else "person", title=title,
+            reason=reason, done_when=done_when, rework=rework, approved=approved,
+            room_lane=bool(room_id and any(n["requester"].get("room_id") == room_id and
+                           n["status"] not in assignments.TERMINAL for n in assignments.tree())))
+    except (ValueError, PermissionError) as error:
+        return f"Assignment refused: {error}"
+    if node.get("card_id"):
+        return f"Assigned to {peer['name']} (card {node['card_id']}). End this turn and do not poll."
+    request["assignment_id"] = node["id"]
+    if mode == "notify":
+        work_session = _work_thread(peer, source, session_id, standing=True)
+        session_manager.append_message(work_session, "assistant", framed, extra={
+            "type": "handoff", "assignment_id": node["id"], "mode": "notify", "handoff_status": "done",
+            "partner": {"id": source["id"], "name": source["name"]}})
+        session_manager.set_untrusted_context(work_session, "message from another bot")
+        assignments.update(node["id"], work_session_id=work_session)
+        assignments.settle(node["id"], result="Notification delivered.")
+        session_manager.append_message(session_id, "assistant", f"Notified {peer['name']}", extra={
+            "type": "handoff", "assignment_id": node["id"], "mode": mode, "handoff_status": "done",
+            "partner": {"id": peer["id"], "name": peer["name"]}, "work_session_id": work_session})
+        return f"Notified {peer['name']}. End this turn and do not poll."
+    work_session = _work_thread(peer, source, session_id, standing=thread == "standing", title=title)
     card = task_service.create_task(work.strip().splitlines()[0][:60], framed, "card", status="ready",
                                     agent_id=peer["id"], requester=request)
     card["assignment_chain"] = chain + [peer["id"]]
+    card.update(assignment_id=node["id"], mode=mode, reason=reason, done_when=done_when,
+                work_session_id=work_session, partner={"id": peer["id"], "name": peer["name"]})
+    assignments.update(node["id"], card_id=card["id"], work_session_id=work_session)
+    session_manager.append_message(work_session, "assistant", framed, extra={
+        "type": "handoff", "assignment_id": node["id"], "card_id": card["id"], "mode": mode,
+        "handoff_status": "queued", "partner": {"id": source["id"], "name": source["name"]}})
+    session_manager.set_untrusted_context(work_session, "delegated work from another bot")
     task_service._save_tasks()
     event = _post_event(card, peer)
-    return f"Assigned to {peer['name']} (card {card['id']})." + (f" {event['note']}" if event["note"] else "")
+    return f"Assigned to {peer['name']} (card {card['id']}, assignment {node['id']})." + (f" {event['note']}" if event["note"] else "") + " End this turn and do not poll."
+
+
+def _work_thread(peer, source, source_session, *, standing=False, title=""):
+    from services import bot_threads
+    if standing:
+        main = next((s for s in session_manager.list_sessions(agent_id=peer["id"]) if s.get("agent_id") == peer["id"]
+                     and (s.get("thread") or {}).get("main")), None)
+        if main:
+            return main["id"]
+    owner = (session_manager.get_session(source_session) or {}).get("owner_user")
+    session = session_manager.create_session(title or f"@{source['name']} work", owner_user=owner)
+    agent_service.make_agent_chat(session["id"], peer, attended=False)
+    endpoint = agent_service.chat_endpoint(peer)
+    if endpoint:
+        session_manager.set_model_endpoint(session["id"], endpoint)
+    session_manager.set_thread(session["id"], opened_by="handoff")
+    return session["id"]
 
 
 def queue_note(agent_id: str) -> str:
@@ -155,6 +216,7 @@ def _update(session_id: str, predicate, fields: dict) -> None:
 
 
 def sync_card(card: dict) -> None:
+    _sync_assignment(card)
     session_id = _thread(card)
     if not session_id:
         return
@@ -164,6 +226,9 @@ def sync_card(card: dict) -> None:
         status = "needs_you"
     _update(session_id, lambda m: m.get("type") == "handoff" and m.get("card_id") == card["id"],
             {"handoff_status": status, "note": queue_note(card["agent_id"]) if status == "queued" else ""})
+    if card.get("work_session_id"):
+        _update(card["work_session_id"], lambda m: m.get("type") == "handoff" and m.get("card_id") == card["id"],
+                {"handoff_status": status})
     if (requester(card) or {}).get("kind") == "bot" and status in ("done", "failed"):
         schedule_wake()
 
@@ -182,9 +247,17 @@ def _post(card: dict, text: str, key: str, **extra) -> None:
 
 def finished(card: dict, output: str) -> None:
     if requester(card):
-        reply = (wrap_untrusted("result from another bot", output)
-                 if requester(card)["kind"] == "bot" else output)
-        _post(card, reply, f"handoff:{card['id']}:{card.get('run_id') or card.get('attempts')}")
+        from services import bot_peers
+        reply = (bot_peers.provenance(card["agent_id"], output)
+                 if requester(card)["kind"] in ("bot", "room") else output)
+        if card.get("mode") != "notify" and (requester(card)["kind"] != "room"):
+            _post(card, reply, f"handoff:{card['id']}:{card.get('run_id') or card.get('attempts')}")
+        if card.get("work_session_id"):
+            sid = card["work_session_id"]
+            key = f"assignment-result:{card['id']}:{card.get('attempts')}"
+            if not any(m.get("handoff_message_id") == key for m in (session_manager.get_session(sid) or {}).get("messages", [])):
+                session_manager.append_message(sid, "assistant", output, extra={"handoff_message_id": key,
+                                               "agent_id": card["agent_id"], "assignment_id": card.get("assignment_id")})
         sync_card(card)
 
 
@@ -242,6 +315,7 @@ def _settled(card: dict) -> bool:
 async def wake_batches(now: float | None = None) -> None:
     """Poll from the scheduler, so settled batches and deadlines survive restart."""
     now = time.time() if now is None else now
+    _assignment_tick(now)
     for batch_id, cards in _groups().items():
         deadline = min(c["requester"]["created_at"] for c in cards) + RESUME_CEILING_SECONDS
         # 2026-10-14: an asking run cut off by process loss has no finally
@@ -268,6 +342,13 @@ async def wake_batches(now: float | None = None) -> None:
                     if card["status"] == "blocked" else "still outstanding")
                 lines.append(f"{card['name']} ({card['id']}): {label}. " +
                              (wrap_untrusted("peer result", result) if result else ""))
+            from core import bot_assignments
+            roots = {n["root_id"] for c in cards if c.get("assignment_id")
+                     if (n := bot_assignments.get(c["assignment_id"]))}
+            if any(not bot_assignments.consume_wake(root) for root in roots):
+                for root in roots:
+                    bot_assignments.cancel(root, "budget", whole_tree=True)
+                continue
             await _resume(req, "Your delegated assignments have settled or reached the 30 minute ceiling:\n" +
                           "\n".join(lines) + "\nContinue the work with these results.")
             for card in cards:
@@ -415,3 +496,66 @@ def answer_question(requesting_id: str, item_id: str, answer: str = "", escalate
     if not answer.strip():
         return "Write an answer, or choose to escalate."
     return agent_service.answer_item(item_id, "reply", wrap_untrusted("answer from another bot", answer.strip()))
+
+
+def _sync_assignment(card):
+    from core import bot_assignments as assignments
+    aid = card.get("assignment_id")
+    if not aid or not (node := assignments.get(aid)) or node["status"] in assignments.TERMINAL:
+        return
+    items = agent_service.open_items_for_card(card["id"])
+    if items:
+        assignments.update(aid, status="needs_input", question=items[0]["title"])
+    elif card["status"] in ("review", "done", "blocked"):
+        result = next((c["text"] for c in reversed(card.get("comments") or []) if c["kind"] in ("result", "error")), "")
+        assignments.settle(aid, "done" if card["status"] in ("review", "done") else
+                           "stopped" if result == STOPPED_NOTE else "provider_error", result,
+                           evidence=assignments.evidence(card.get("run_id")))
+    else:
+        assignments.update(aid, status="running" if card["status"] == "running" else "queued",
+                           run_id=card.get("run_id"))
+
+
+def _assignment_changed(node):
+    """Keep cancelled/expired nodes out of the card dispatch queue."""
+    if node["status"] not in ("failed", "cancelled") or not node.get("card_id"):
+        return
+    card = task_service.get_task(node["card_id"])
+    if not card or card["status"] in ("review", "done", "blocked"):
+        return
+    from core import task_scheduler
+    task_scheduler.stop_run(card["id"])
+    card.update(status="blocked", claimed_until=None)
+    task_service._save_tasks()
+    sid = _thread(card)
+    if sid:
+        _update(sid, lambda m: m.get("card_id") == card["id"] and m.get("type") == "handoff",
+                {"handoff_status": "failed", "note": node["outcome"]})
+
+
+def _assignment_tick(now):
+    global _reconciled
+    from core import bot_assignments as assignments
+    if not _reconciled:
+        assignments.reconcile_startup(now=now, read_evidence=lambda n: assignments.evidence(
+            (task_service.get_task(n.get("card_id")) or {}).get("run_id")))
+        for node in assignments.tree():
+            card = task_service.get_task(node.get("card_id"))
+            if card and node.get("restart_marker") == "rerun" and card["status"] == "running":
+                card.update(status="ready", claimed_until=None)
+                card["prompt"] = "Restart note: the previous run was interrupted before any outward action.\n" + card["prompt"]
+                task_service._save_tasks()
+        _reconciled = True
+    assignments.tick(now=now, parked=lambda n: bool(agent_service.open_items_for_card(n.get("card_id"))))
+
+
+def _deleted_bot(bot_id):
+    from core import bot_assignments as assignments
+    for node in assignments.tree(bot_id=bot_id):
+        if node["status"] not in assignments.TERMINAL:
+            assignments.cancel(node["id"], "refused", whole_tree=True)
+
+
+from core import bot_assignments as _assignments
+_assignments.on_change(_assignment_changed)
+agent_service.on_delete(_deleted_bot)

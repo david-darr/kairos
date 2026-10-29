@@ -274,6 +274,7 @@ class AgentService:
         self._admission_lock = threading.RLock()
         self._profile_lock = threading.RLock()
         self._reservations: dict[str, dict] = {}
+        self._delete_hooks = []
 
     # -- identities -------------------------------------------------------------
 
@@ -331,7 +332,7 @@ class AgentService:
             "integration_ids": list(integration_ids) if integration_ids is not None else None,
             "keep_signed_in": bool(keep_signed_in),
             "memory_upkeep": bool(memory_upkeep),
-            "peers": self._check_peers(peers or [], agent_id),
+            "peers": self._check_peers(peers, agent_id),
             "created_at": time.time(),
             **bot_record.new_defaults(), **bot_fields,
         }
@@ -546,7 +547,9 @@ class AgentService:
                 task_service.delete_task(receipt["routine_id"])
         return receipt
 
-    def _check_peers(self, peers, agent_id: str) -> list[str]:
+    def _check_peers(self, peers, agent_id: str) -> Optional[list[str]]:
+        if peers is None:
+            return None
         if not isinstance(peers, list) or any(not isinstance(p, str) for p in peers):
             raise ValueError("peers must be a list of bot ids")
         if len(peers) != len(set(peers)) or agent_id in peers:
@@ -673,11 +676,19 @@ class AgentService:
             self._save()
             return copy.deepcopy(receipt)
 
+    def on_delete(self, fn):
+        """Subscribe before-delete cleanup. A failed cleanup preserves the bot."""
+        if fn not in self._delete_hooks:
+            self._delete_hooks.append(fn)
+        return lambda: self._delete_hooks.remove(fn) if fn in self._delete_hooks else None
+
     def delete(self, agent_id: str) -> None:
         """The identity, memory and open inbox items go; its pending work is
         removed by the caller (task_service), its finished history stays."""
         if self._require(agent_id).get("builtin"):
             raise bot_record.BotConflict("this built-in bot cannot be deleted; archive it instead")
+        for fn in tuple(self._delete_hooks):
+            fn(agent_id)
         self.forget_logins(agent_id)
         del self._agents[agent_id]
         self._save()

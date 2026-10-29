@@ -1471,9 +1471,8 @@ async def _hand_to_agent(args, ctx):
     agent_only=True, effect=WRITE, core=True,
 )
 async def _agent_assign(args, ctx):
-    from services.agent_handoff import assign
-    return assign(ctx.agent_id, str(args.get("agent") or ""), str(args.get("work") or ""), ctx.session_id,
-                  ctx.assignment_run_id, ctx.source_card_id)
+    from core.bot_delegation_tools import coordinate
+    return await coordinate({"bot_ids": [str(args.get("agent") or "")], "message": str(args.get("work") or "")}, ctx)
 
 
 @register(
@@ -1824,3 +1823,4 @@ async def _roblox_assets(args, ctx):
 
 # The Design canvas's tools register themselves into this table.
 from core import design_tools  # noqa: E402,F401
+from core import bot_team_tools  # noqa: E402,F401
