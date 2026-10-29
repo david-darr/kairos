@@ -1,0 +1,49 @@
+{
+  "v": 1,
+  "id": "58f6927ba4c3",
+  "title": "Old site, renamed",
+  "owner": "local",
+  "chat_ids": [],
+  "visible_to": [],
+  "design_system": "kairos",
+  "token_overrides": {},
+  "boards": {
+    "home": {
+      "title": "Home",
+      "x": 1560,
+      "y": 34,
+      "w": 1468,
+      "h": 3990,
+      "frame": "none",
+      "order": 2
+    },
+    "features": {
+      "title": "Features",
+      "x": 0,
+      "y": 34,
+      "w": 1440,
+      "h": 2500,
+      "frame": "none",
+      "order": 1
+    },
+    "home-phone": {
+      "title": "Home (phone)",
+      "x": 12,
+      "y": 4414,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 3,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait",
+      "min_h": null
+    }
+  },
+  "notes": [],
+  "version": 6,
+  "created": 1793300755.035,
+  "updated": 1793300755.137,
+  "source": null,
+  "layout": "auto"
+}

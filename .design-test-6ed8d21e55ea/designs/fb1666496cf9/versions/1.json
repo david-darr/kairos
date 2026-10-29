@@ -1,0 +1,72 @@
+{
+  "n": 1,
+  "at": 1793300756.335,
+  "by": "Model",
+  "tool": "design_create",
+  "summary": "Created with 3 boards",
+  "boards_changed": [
+    "welcome",
+    "pick-a-habit",
+    "reminders"
+  ],
+  "changed_ids": {
+    "welcome": [],
+    "pick-a-habit": [],
+    "reminders": []
+  },
+  "files": [
+    "pick-a-habit",
+    "reminders",
+    "welcome"
+  ],
+  "manifest": {
+    "title": "Habit onboarding",
+    "boards": {
+      "welcome": {
+        "title": "Welcome",
+        "x": 12,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 1,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      },
+      "pick-a-habit": {
+        "title": "Pick a habit",
+        "x": 546,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 2,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      },
+      "reminders": {
+        "title": "Reminders",
+        "x": 1080,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 3,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": "e382a7160fee",
+  "user_edit": false,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

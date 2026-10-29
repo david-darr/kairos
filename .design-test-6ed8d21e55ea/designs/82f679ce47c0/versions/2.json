@@ -1,0 +1,54 @@
+{
+  "n": 2,
+  "at": 1793300756.575,
+  "by": "Model",
+  "tool": "design_add_board",
+  "summary": "Added board Two",
+  "boards_changed": [
+    "two"
+  ],
+  "changed_ids": {
+    "two": []
+  },
+  "files": [
+    "two"
+  ],
+  "manifest": {
+    "title": "Habit onboarding",
+    "boards": {
+      "one": {
+        "title": "One",
+        "x": 12,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 1,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      },
+      "two": {
+        "title": "Two",
+        "x": 18,
+        "y": 1312,
+        "w": 820,
+        "h": 1180,
+        "frame": "tablet",
+        "order": 2,
+        "format": "app",
+        "size": "tablet",
+        "orientation": "portrait"
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": "9f176c129e3c",
+  "user_edit": false,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

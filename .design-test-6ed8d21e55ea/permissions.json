@@ -1,0 +1,588 @@
+{
+  "rules": [
+    {
+      "id": "a4eb4147b4d84ca28d62532a1eff62a7",
+      "tool": "run_shell",
+      "content": null,
+      "behavior": "allow",
+      "scope": "forever",
+      "granted_at": 1793300755.5413868,
+      "granted_by": "jarvis",
+      "source": "built-in",
+      "admin_only": true
+    }
+  ],
+  "audit": [
+    {
+      "at": 1793300754.291647,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:a7edbe0ba7b0"
+    },
+    {
+      "at": 1793300754.3278766,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:20942acc6a2e"
+    },
+    {
+      "at": 1793300754.4140532,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:a882d6b2d9d6"
+    },
+    {
+      "at": 1793300754.5874553,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:351db25db58b"
+    },
+    {
+      "at": 1793300754.6030233,
+      "decision": "tool refused",
+      "tool": "design_export",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:351db25db58b"
+    },
+    {
+      "at": 1793300754.632234,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:510259369733"
+    },
+    {
+      "at": 1793300754.6799648,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:d310ced174b3"
+    },
+    {
+      "at": 1793300754.7404828,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:90edada9e34d"
+    },
+    {
+      "at": 1793300754.8176715,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:1d785d1a56d6"
+    },
+    {
+      "at": 1793300754.8412995,
+      "decision": "tool used",
+      "tool": "design_add_board",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:1d785d1a56d6"
+    },
+    {
+      "at": 1793300754.8853736,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:549b16a1143f"
+    },
+    {
+      "at": 1793300754.9798784,
+      "decision": "tool refused",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:5ff1f7b3574d"
+    },
+    {
+      "at": 1793300755.0127118,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:3ff7a62f8dc5"
+    },
+    {
+      "at": 1793300755.171129,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:25ce6088caec"
+    },
+    {
+      "at": 1793300755.1983116,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:25ce6088caec"
+    },
+    {
+      "at": 1793300755.2186549,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:25ce6088caec"
+    },
+    {
+      "at": 1793300755.2398589,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:25ce6088caec"
+    },
+    {
+      "at": 1793300755.3005748,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:0b87751de2d6"
+    },
+    {
+      "at": 1793300755.3259816,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:0b87751de2d6"
+    },
+    {
+      "at": 1793300755.3527138,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:0b87751de2d6"
+    },
+    {
+      "at": 1793300755.4393196,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:067fa4e94201"
+    },
+    {
+      "at": 1793300755.473248,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:067fa4e94201"
+    },
+    {
+      "at": 1793300755.5030107,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:13fcf4fc6a20"
+    },
+    {
+      "at": 1793300755.5792696,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:30c326dbe069"
+    },
+    {
+      "at": 1793300755.633729,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:21a3e141808b"
+    },
+    {
+      "at": 1793300755.667805,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:461da96210fd"
+    },
+    {
+      "at": 1793300755.7039962,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:461da96210fd"
+    },
+    {
+      "at": 1793300755.7226415,
+      "decision": "tool used",
+      "tool": "design_comments",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:461da96210fd"
+    },
+    {
+      "at": 1793300755.733153,
+      "decision": "tool used",
+      "tool": "design_comments",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:461da96210fd"
+    },
+    {
+      "at": 1793300755.7720082,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:6fde856ebdd9"
+    },
+    {
+      "at": 1793300755.8052037,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:65e9fce02ea2"
+    },
+    {
+      "at": 1793300755.8385162,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:b0bd00132e33"
+    },
+    {
+      "at": 1793300755.8865175,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:c661b2256ee1"
+    },
+    {
+      "at": 1793300755.979277,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:47f469207526"
+    },
+    {
+      "at": 1793300756.2759094,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:d2af8270ea41"
+    },
+    {
+      "at": 1793300756.297327,
+      "decision": "tool used",
+      "tool": "design_tokens",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:d2af8270ea41"
+    },
+    {
+      "at": 1793300756.3193295,
+      "decision": "tool used",
+      "tool": "design_tokens",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:d2af8270ea41"
+    },
+    {
+      "at": 1793300756.3544686,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.381973,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.414605,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.4383695,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.4611092,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.4849355,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.5083992,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.5346625,
+      "decision": "tool used",
+      "tool": "design_boards",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:e382a7160fee"
+    },
+    {
+      "at": 1793300756.5596838,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:9f176c129e3c"
+    },
+    {
+      "at": 1793300756.5927722,
+      "decision": "tool used",
+      "tool": "design_add_board",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:9f176c129e3c"
+    },
+    {
+      "at": 1793300756.6093223,
+      "decision": "tool refused",
+      "tool": "design_add_board",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:9f176c129e3c"
+    },
+    {
+      "at": 1793300756.6213222,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:9f176c129e3c"
+    },
+    {
+      "at": 1793300756.651072,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.683616,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.714279,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.745685,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.7785852,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.811883,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.8446052,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.8784704,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.9106948,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:136e2a13ec43"
+    },
+    {
+      "at": 1793300756.9432325,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:8958885fccd1"
+    },
+    {
+      "at": 1793300756.962326,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:8958885fccd1"
+    },
+    {
+      "at": 1793300757.0117242,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:d4b491223c33"
+    },
+    {
+      "at": 1793300757.0247254,
+      "decision": "tool refused",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:42215dde5e49"
+    },
+    {
+      "at": 1793300757.0790472,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "codex chat:a3d51403b9f3"
+    },
+    {
+      "at": 1793300757.1957772,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:df71401fe419"
+    },
+    {
+      "at": 1793300757.2926633,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "claude chat:11f7fd2c2fb7"
+    },
+    {
+      "at": 1793300757.325178,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "claude chat:11f7fd2c2fb7"
+    },
+    {
+      "at": 1793300757.3600194,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "codex chat:c69607a064e4"
+    },
+    {
+      "at": 1793300757.3934238,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "codex chat:c69607a064e4"
+    },
+    {
+      "at": 1793300757.430673,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:1ca67f52cfe8"
+    },
+    {
+      "at": 1793300757.4648705,
+      "decision": "tool used",
+      "tool": "design_edit",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:1ca67f52cfe8"
+    },
+    {
+      "at": 1793300757.555386,
+      "decision": "tool used",
+      "tool": "design_create",
+      "effect": "write",
+      "content": null,
+      "by": "openai chat:1149990e0a6c"
+    }
+  ],
+  "seeded": [
+    "run_shell"
+  ]
+}

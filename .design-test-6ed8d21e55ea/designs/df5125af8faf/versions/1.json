@@ -1,0 +1,42 @@
+{
+  "n": 1,
+  "at": 1793300754.869,
+  "by": "Model",
+  "tool": "design_create",
+  "summary": "Created with 1 board",
+  "boards_changed": [
+    "phone"
+  ],
+  "changed_ids": {
+    "phone": []
+  },
+  "files": [
+    "phone"
+  ],
+  "manifest": {
+    "title": "Habit onboarding",
+    "boards": {
+      "phone": {
+        "title": "Phone",
+        "x": 12,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 1,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": "549b16a1143f",
+  "user_edit": false,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

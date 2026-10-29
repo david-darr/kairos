@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "id": "449e19a1662a",
+  "title": "Blank",
+  "owner": "local",
+  "chat_ids": [
+    "3183963213e9"
+  ],
+  "visible_to": [],
+  "design_system": "kairos",
+  "token_overrides": {
+    "--ds-accent": "#123456"
+  },
+  "boards": {
+    "screen-1": {
+      "title": "Screen 1",
+      "x": 12,
+      "y": 70,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 1,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait"
+    }
+  },
+  "notes": [],
+  "version": 5,
+  "created": 1793300756.085,
+  "updated": 1793300756.166,
+  "source": null,
+  "layout": "auto"
+}

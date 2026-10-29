@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "id": "5e29cf61abf9",
+  "title": "Habit onboarding",
+  "owner": "local",
+  "chat_ids": [
+    "65e9fce02ea2"
+  ],
+  "visible_to": [],
+  "design_system": "kairos",
+  "token_overrides": {},
+  "boards": {
+    "evil": {
+      "title": "Evil",
+      "x": 12,
+      "y": 70,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 1,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait"
+    }
+  },
+  "notes": [],
+  "version": 1,
+  "created": 1793300755.781,
+  "updated": 1793300755.788,
+  "source": null,
+  "layout": "auto"
+}

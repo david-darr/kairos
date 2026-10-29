@@ -1,0 +1,35 @@
+[
+  {
+    "id": "988a21cc",
+    "board": "welcome",
+    "element_ids": [
+      "btn1"
+    ],
+    "point": {
+      "x": 0.5,
+      "y": 0.9
+    },
+    "text": "wider",
+    "author": "local",
+    "status": "addressed",
+    "made_on_version": 1,
+    "addressed_in": 2,
+    "created": 1793300755.674,
+    "note": null
+  },
+  {
+    "id": "427023a4",
+    "board": "welcome",
+    "element_ids": [
+      "h1"
+    ],
+    "point": null,
+    "text": "bigger",
+    "author": "local",
+    "status": "resolved",
+    "made_on_version": 1,
+    "addressed_in": null,
+    "created": 1793300755.675,
+    "note": null
+  }
+]

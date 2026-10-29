@@ -1,0 +1,66 @@
+{
+  "n": 3,
+  "at": 1793300755.09,
+  "by": "You",
+  "tool": "design_boards",
+  "summary": "Fitted home to Website \u00b7 Desktop, features to Website \u00b7 Desktop, home-phone to Website \u00b7 Mobile",
+  "boards_changed": [],
+  "changed_ids": {},
+  "files": [],
+  "manifest": {
+    "title": "Old site, renamed",
+    "boards": {
+      "home": {
+        "title": "Home",
+        "x": 0,
+        "y": 74,
+        "w": 1440,
+        "h": 900,
+        "frame": "browser",
+        "order": 1,
+        "format": "website",
+        "size": "desktop",
+        "orientation": null,
+        "min_h": 900,
+        "content_h": null
+      },
+      "features": {
+        "title": "Features",
+        "x": 1560,
+        "y": 74,
+        "w": 1440,
+        "h": 900,
+        "frame": "browser",
+        "order": 2,
+        "format": "website",
+        "size": "desktop",
+        "orientation": null,
+        "min_h": 900,
+        "content_h": null
+      },
+      "home-phone": {
+        "title": "Home (phone)",
+        "x": 12,
+        "y": 1364,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 3,
+        "format": "website",
+        "size": "mobile",
+        "orientation": null,
+        "min_h": 844,
+        "content_h": null
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": null,
+  "user_edit": true,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

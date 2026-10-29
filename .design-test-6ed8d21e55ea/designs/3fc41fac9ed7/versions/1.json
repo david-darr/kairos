@@ -1,0 +1,42 @@
+{
+  "n": 1,
+  "at": 1793300755.824,
+  "by": "Model",
+  "tool": "design_create",
+  "summary": "Created with 1 board",
+  "boards_changed": [
+    "evil"
+  ],
+  "changed_ids": {
+    "evil": []
+  },
+  "files": [
+    "evil"
+  ],
+  "manifest": {
+    "title": "Habit onboarding",
+    "boards": {
+      "evil": {
+        "title": "Evil",
+        "x": 12,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 1,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": "b0bd00132e33",
+  "user_edit": false,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

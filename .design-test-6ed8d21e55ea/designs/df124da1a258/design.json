@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "id": "df124da1a258",
+  "title": "Habit onboarding",
+  "owner": "local",
+  "chat_ids": [
+    "510259369733"
+  ],
+  "visible_to": [],
+  "design_system": "kairos",
+  "token_overrides": {},
+  "boards": {
+    "welcome": {
+      "title": "Welcome",
+      "x": 12,
+      "y": 70,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 1,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait"
+    },
+    "pick-a-habit": {
+      "title": "Pick a habit",
+      "x": 546,
+      "y": 70,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 2,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait"
+    },
+    "reminders": {
+      "title": "Reminders",
+      "x": 1080,
+      "y": 70,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 3,
+      "format": "app",
+      "size": "phone",
+      "orientation": "portrait"
+    }
+  },
+  "notes": [],
+  "version": 1,
+  "created": 1793300754.606,
+  "updated": 1793300754.613,
+  "source": null,
+  "layout": "auto"
+}

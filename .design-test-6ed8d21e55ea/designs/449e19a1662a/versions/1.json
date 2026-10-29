@@ -1,0 +1,42 @@
+{
+  "n": 1,
+  "at": 1793300756.091,
+  "by": "You",
+  "tool": "design_create",
+  "summary": "Created with 1 board",
+  "boards_changed": [
+    "screen-1"
+  ],
+  "changed_ids": {
+    "screen-1": []
+  },
+  "files": [
+    "screen-1"
+  ],
+  "manifest": {
+    "title": "Blank",
+    "boards": {
+      "screen-1": {
+        "title": "Screen 1",
+        "x": 12,
+        "y": 70,
+        "w": 390,
+        "h": 844,
+        "frame": "phone",
+        "order": 1,
+        "format": "app",
+        "size": "phone",
+        "orientation": "portrait"
+      }
+    },
+    "notes": [],
+    "design_system": "kairos",
+    "token_overrides": {},
+    "layout": "auto"
+  },
+  "session_id": null,
+  "user_edit": false,
+  "name": null,
+  "pinned": false,
+  "exported": false
+}

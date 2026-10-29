@@ -1,0 +1,47 @@
+{
+  "v": 1,
+  "id": "ea13b3938c3e",
+  "title": "Habit onboarding",
+  "owner": "local",
+  "chat_ids": [
+    "20942acc6a2e"
+  ],
+  "visible_to": [],
+  "design_system": "kairos",
+  "token_overrides": {},
+  "boards": {
+    "home": {
+      "title": "Home",
+      "x": 0,
+      "y": 74,
+      "w": 1440,
+      "h": 2600,
+      "frame": "browser",
+      "order": 1,
+      "format": "website",
+      "size": "desktop",
+      "orientation": null,
+      "min_h": 900,
+      "content_h": 2600
+    },
+    "home-mobile": {
+      "title": "Home (mobile)",
+      "x": 12,
+      "y": 3064,
+      "w": 390,
+      "h": 844,
+      "frame": "phone",
+      "order": 2,
+      "format": "website",
+      "size": "mobile",
+      "orientation": null,
+      "min_h": 844
+    }
+  },
+  "notes": [],
+  "version": 1,
+  "created": 1793300754.295,
+  "updated": 1793300754.303,
+  "source": null,
+  "layout": "auto"
+}
