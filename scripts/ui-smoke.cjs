@@ -2489,7 +2489,7 @@ app.whenReady().then(async () => {
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await js("document.querySelector('#rd-all-tabs-btn').click()");
     try { await waitFor("!document.querySelector('#rd-all-tabs').hidden && document.querySelector('#rd-all-tabs-btn').getAttribute('aria-expanded') === 'true'"); }
-    catch (error) {  // TEMPORARY diagnostics (2026-10-29): what stands in the way of All tabs
+    catch (error) {  // Diagnostics (2026-10-29): this step failed now and then when Escape left Settings open; say what was in the way
       console.log('ALLTABS', JSON.stringify(await js(`(() => { const b = document.querySelector('#rd-all-tabs-btn'); const r = b.getBoundingClientRect();
         const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
         return { rect: [r.x, r.y, r.width, r.height], size: [innerWidth, innerHeight], hidden: document.querySelector('#rd-all-tabs').hidden, expanded: b.getAttribute('aria-expanded'),
