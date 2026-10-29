@@ -74,7 +74,10 @@ module.exports = async ({ js, waitFor, win, demoState, base }) => {
     emit('room.chunk', { thread_id: tid, turn_id: 'ui-stream-turn', bot_id: botIds[0], revision: 1, chunk: 'duplicate' });
     await waitFor(`window.__roomUI.stream.cursor()>=${demoState.botsRooms.cursor}`);
     assert.equal(await js("document.querySelector('.bots-room .bots-live')?.textContent.includes('duplicate')"), false);
-    await send('First queued'); await send('Second queued');
+    // The composer takes one send at a time; the second goes once the first is in the queue.
+    await send('First queued');
+    await waitFor("document.querySelectorAll('.bots-room-queue li').length===1");
+    await send('Second queued');
     await waitFor("document.querySelectorAll('.bots-room-queue li').length===2");
     await button('.bots-room-header button', 'Members');
     await waitFor("document.querySelector('.bots-room-members')?.textContent.includes('when it is idle')");

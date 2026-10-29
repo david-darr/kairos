@@ -84,7 +84,8 @@ export async function openBotMenu(anchor, agent, { onChanged, onClose } = {}) {
     { label: isAdvanced() ? 'Simple view' : 'Advanced view', iconName: 'sliders-horizontal', onSelect: () => setAdvanced(!isAdvanced()) },
     { separator: true },
     { label: 'Archive', iconName: 'archive', onSelect: () => archiveBotWithNotice(agent, { onDone: onChanged }) },
-    { label: 'Delete', iconName: 'trash-2', danger: true, disabled: !!agent.builtin, meta: agent.builtin ? 'built in' : '', onSelect: () => deleteBotWithConfirm(agent, { onDone: () => { onChanged?.(); onClose?.(); } }) },
+    // A built-in bot (the front desk, Phase 5) is never deleted, so it has no Delete at all; it can be archived.
+    ...(agent.builtin ? [] : [{ label: 'Delete', iconName: 'trash-2', danger: true, onSelect: () => deleteBotWithConfirm(agent, { onDone: () => { onChanged?.(); onClose?.(); } }) }]),
   ], { align: 'end' });
 }
 

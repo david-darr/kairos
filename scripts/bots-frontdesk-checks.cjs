@@ -17,7 +17,9 @@ module.exports = async ({ js, waitFor, delay, win, capture, demoState, base }) =
     await waitFor("!!document.querySelector('.dashboard-core')");
     const made = await call('/api/agents', 'POST', { name: `Front desk check ${Date.now()}`, role: 'Front desk', soul: 'Be brief.' });
     assert.equal(made.status, 200); botId = made.body.id; assert.ok(botId);
-    const threads = await call(`/api/agents/${botId}/threads`); const sid = threads.body.main_id; assert.ok(sid);
+    // A new bot has no conversation until one is opened; open its first one.
+    const threads = await call(`/api/agents/${botId}/threads`);
+    const sid = threads.body.main_id || (await call(`/api/agents/${botId}/threads`, 'POST', { title: 'Front desk check' })).body.id; assert.ok(sid);
     // Fixture records use returned bot and session IDs throughout.
     demoState.botsFdFront = {
       items: [{ id: 'design:abcdef123456', kind: 'design', title: 'Our design', updated_at: 2, thumb_url: null, open: { tab: 'design', id: 'abcdef123456', session_id: sid } },

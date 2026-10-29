@@ -92,7 +92,13 @@ export async function render(container, tabId, options = {}) {
   const back = h('button', { type: 'button', class: 'bots-head-back', 'aria-label': 'All bots', title: 'All bots', onclick: () => go('botsHome') }, [icon('arrow-left', { size: 18 })]);
   const convoButton = h('button', { type: 'button', class: 'bots-icon-btn bots-head-convos', 'aria-label': 'Conversations', title: 'Conversations',
     'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'bots-convos' }, [icon('messages-square', { size: 18 })]);
-  const header = h('header', { class: 'bots-shell-header' }, [back, pill, statusEl, h('span', { class: 'bots-head-fill' }), convoButton]);
+  // The workbench (Phase 6): the bot's computer, browser, data and files, opened beside the conversation.
+  const monitorButton = h('button', { type: 'button', class: 'bots-icon-btn bots-monitor', 'aria-label': 'Computer', title: 'Computer',
+    'aria-haspopup': 'dialog' }, [icon('monitor', { size: 18 })]);
+  monitorButton.addEventListener('click', () => import('../botsWorkbenchHost.js')
+    .then(m => m.openWorkbench(agent.id, { threadId: currentId, tab: 'computer', opener: monitorButton }))
+    .catch(problem => toast(problem.message || 'The workbench could not open.', 'error')));
+  const header = h('header', { class: 'bots-shell-header' }, [back, pill, statusEl, h('span', { class: 'bots-head-fill' }), monitorButton, convoButton]);
 
   // -- Conversations popover ---------------------------------------------------------------------
   const convos = h('div', { id: 'bots-convos', class: 'bots-convos', role: 'dialog', 'aria-label': `Conversations with ${agent.name}`, hidden: true });
