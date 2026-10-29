@@ -88,6 +88,7 @@ module.exports = ({ state, now }) => {
       }
       return { hits: hits.reverse().slice(0, Number(query.limit) || 100) };
     }
+    if (!owned(m[1])) return undefined;   // another fixture (the runtime's) may own this conversation
     const s = store(m[1]);
     if (m[2] === 'state') return { active_leaf_id: s.leaf, branch_revision: s.revision, last_read_message_id: s.read, pinned_message_id: s.pinned, queue: queueView(s), goal: s.goal,
       model: { label: 'Fixture model' }, capabilities: { steer: false, queueing: true, images: true, speech: false }, turn: s.turn ? { id: s.turn.id } : null, context: { percent: s.context } };
@@ -113,7 +114,11 @@ module.exports = ({ state, now }) => {
     let m;
     if (route === '/api/bot-chat/presence' && method === 'POST') { r.log.push(['presence', body]); return { ok: true }; }
     if (!(m = route.match(/^\/api\/bot-chat\/([^/]+)\/(send|interrupt|regenerate|active-branch|pin|read|compact|queue\/resume|queue\/([^/]+)(?:\/(edit|steer))?|messages\/([^/]+)\/(edit|reaction))$/))) return undefined;
+<<<<<<< HEAD
     if (state.botsRuntime?.convs?.[m[1]]) return undefined;   // the runtime fixture owns its own conversations
+=======
+    if (!owned(m[1])) return undefined;   // not ours: fall through to the next fixture
+>>>>>>> bots/phase1
     const sid = m[1], s = store(sid), what = m[2];
     if (what === 'send' && method === 'POST') {
       const plan = r.failNext; r.failNext = null;

@@ -8,8 +8,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   const size = async (w, h) => { win.setContentSize(w, h); await delay(400); };
   const clickText = (selector, text) => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.textContent.trim() === ${JSON.stringify(text)}).click()`);
   const refreshBadge = () => js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed')), true");
-  const navBadge = "document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent || ''";
-  const tabBadge = "(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-tabbar [data-badge=agents] .ms-tabbar-badge'))";
+  const navBadge = "document.querySelector('#nav .nav-item[data-tab=botsHome] .nav-badge')?.textContent || ''";  // Agents became the Bots mode: its nav item carries the count
+  const tabBadge = "(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-tabbar [data-badge=bots] .ms-tabbar-badge'))";
   const escape = () => press('Escape', 'Escape', 27);
 
   // -- badges ----------------------------------------------------------------
@@ -17,24 +17,25 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   const saved = inbox.splice(0), savedReview = demoState.agentReview;
   try {
     demoState.agentReview = false;
-    await size(1440, 900); await navigate('home'); await refreshBadge();
+    await size(1440, 900); await navigate('botsHome'); await waitFor("!!document.querySelector('#nav .nav-item[data-tab=botsHome]')"); await refreshBadge();
     await waitFor(`${navBadge} === ''`);
-    assert.equal(await js("document.querySelector('#nav .nav-item[data-tab=agents]').getAttribute('aria-label')"), 'Agents', 'an empty inbox clears the badge and its label');
+    assert.equal(await js("document.querySelector('#nav .nav-item[data-tab=botsHome]').getAttribute('aria-label')"), 'Bots', 'an empty inbox clears the badge and its label');
     inbox.push(...saved); await refreshBadge();
     await waitFor(`${navBadge} === ${JSON.stringify(String(saved.length))}`);
     inbox.push(...Array.from({ length: 100 }, (_, i) => ({ ...saved[0], id: `bulk-${i}` }))); await refreshBadge();
     // Badge and label are written together; wait for both so an earlier refresh still in flight cannot interleave.
-    await waitFor(`${navBadge} === '99+' && document.querySelector('#nav .nav-item[data-tab=agents]').getAttribute('aria-label') === ${JSON.stringify(`Agents, ${saved.length + 100} waiting on you`)}`)
-      .catch(async () => assert.fail(`a large count caps the badge at 99+ but keeps the real number in its label: ${JSON.stringify(await js(`[${navBadge}, document.querySelector('#nav .nav-item[data-tab=agents]').getAttribute('aria-label')]`))}`));
-    await size(390, 844); await navigate('home');
+    await waitFor(`${navBadge} === '99+' && document.querySelector('#nav .nav-item[data-tab=botsHome]').getAttribute('aria-label') === ${JSON.stringify(`Bots, ${saved.length + 100} waiting on you`)}`)
+      .catch(async () => assert.fail(`a large count caps the badge at 99+ but keeps the real number in its label: ${JSON.stringify(await js(`[${navBadge}, document.querySelector('#nav .nav-item[data-tab=botsHome]').getAttribute('aria-label')]`))}`));
+    await size(390, 844); await navigate('botsHome');
     await waitFor(`${tabBadge} === '99+'`);
     inbox.splice(0); await refreshBadge();
     await waitFor(`${tabBadge} === ''`);
-    assert.equal(await js("document.querySelector('.ms-tabbar [data-badge=agents]').getAttribute('aria-label')"), 'Agents', 'the phone tab bar clears its badge and label too');
+    assert.equal(await js("document.querySelector('.ms-tabbar [data-badge=bots]').getAttribute('aria-label')"), 'Bots', 'the phone tab bar clears its badge and label too');
   } finally {
     inbox.splice(0, inbox.length, ...saved); demoState.agentReview = savedReview; await refreshBadge();
   }
   await waitFor(`${tabBadge} === ${JSON.stringify(String(saved.length + (savedReview ? 1 : 0)))}`);
+  await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
   console.log('PASS: badges clear at zero, cap at 99+, desktop and phone agree');
 
   // -- phone notifications sheet --------------------------------------------
@@ -52,8 +53,15 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   assert.equal(await js("document.activeElement?.classList.contains('hm-phone-notifications')"), true, 'closing the notifications sheet returns focus to its button');
   await js("document.querySelector('.hm-phone-notifications').click()");
   await waitFor("!!document.querySelector('dialog.ms-notifications-sheet[open] .ms-notification-row')");
+  // A row opens the bot it is about (Bots mode), which the in-memory Bots backend answers.
+  const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention };
+  demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
   await js("document.querySelector('.ms-notifications-sheet .ms-notification-row').click()");
   await waitFor("!document.querySelector('dialog.ms-notifications-sheet')");
+  await waitFor("document.documentElement.dataset.appMode === 'bots' && (!!document.querySelector('.bots-composer-input') || !!document.querySelector('.bots-home .bots-grid'))");
+  await delay(800);
+  await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+  // botsLive stays on for the rest of this file (a bot page's late polls must still be answered); restored at the end.
   console.log('PASS: phone notifications sheet lists, closes, returns focus and opens a row');
 
   // -- phone background-tasks sheet ------------------------------------------
@@ -172,4 +180,5 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
     await js("window.fetch = window.__roleFetch, window.__roleStatus = null, true");
   }
   console.log('PASS: Profile shows Admin and Member with accounts on, Permissions only for admins');
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
 };
