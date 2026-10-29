@@ -220,7 +220,10 @@ const server = http.createServer(async (req, res) => {
       const attentionIdle = botsRead === undefined && url.pathname === '/api/bot-attention/inbox' ? { rows: [], counts: { 'needs-you': 0, news: 0, done: 0 }, count: 0 }
         : botsRead === undefined && url.pathname === '/api/bot-attention/notifications' ? { rows: [], unread: 0 }
         : botsRead === undefined && url.pathname === '/api/bot-automations' ? { items: [] }
-        : botsRead === undefined && url.pathname === '/api/bot-limit-resets' ? { endpoints: [] } : undefined;
+        : botsRead === undefined && url.pathname === '/api/bot-limit-resets' ? { endpoints: [] }
+        // The rail's team map and the templates page can still be reading when a check leaves Bots mode (Phases 4 and 6).
+        : botsRead === undefined && url.pathname === '/api/bot-team/map' ? { departments: [], members: [], bots: [], rooms: [], handoffs: [] }
+        : botsRead === undefined && url.pathname === '/api/bot-lifecycle/templates' ? { teams: [], ready: [] } : undefined;
       res.end(JSON.stringify(botsRead !== undefined ? botsRead : attentionIdle !== undefined ? attentionIdle : g4Read !== undefined ? g4Read : fixture(url)));
     }
     catch (error) { errors.push(error.message); res.writeHead(404); res.end('{"detail":"Missing fixture"}'); }

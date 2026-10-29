@@ -27,7 +27,7 @@ module.exports = async ({ js, waitFor, win, capture, demoState, base }) => {
       window.__usageAbort = new AbortController(); })()`);
     await js(`import('/static/js/botsSettingsUsage.js').then(m => Promise.all([
       m.mount(document.getElementById('usage-host'), { signal: window.__usageAbort.signal }),
-      m.mountHousekeeping(document.getElementById('housekeeping-host'), { signal: window.__usageAbort.signal })]))`);
+      m.mountHousekeeping(document.getElementById('housekeeping-host'), { signal: window.__usageAbort.signal })]).then(() => true))`);
 
     // Totals for the month, the cap reached, the price note, where it went and the runs.
     await waitFor("document.getElementById('bots-usage-scratch').textContent.includes('Where it went')");
