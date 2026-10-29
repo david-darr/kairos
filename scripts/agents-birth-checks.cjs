@@ -126,7 +126,7 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   demoState.failFirstRoutine = false;
 
   // 6-10. One bot session has agent_id. The registry keeps its run while the
-  // pane is absent; text is painted only at a terminal status, even on Stop.
+  // pane is absent; the reply streams into the bot body as it arrives (2026-10-28), and Stop keeps it.
   demoState.sessionFields = { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } };
   demoState.liveHoldIds = ['as1', 's1'];
   await navigate('agents', { agentId: 'a1' });
@@ -136,7 +136,8 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   liveEvent('as1', 'tool_step', { id: 'read-1', phase: 'started', name: 'read_file', summary: 'Read notes', ok: true });
   await waitFor(`${botCard}?.querySelector('.agent-turn-verb')?.textContent === 'Reading'`);
   assert.ok(await js(`${botCard}?.querySelector('.agent-dot-avatar')`));
-  assert.equal(await js(`${botBody}?.textContent.includes('A partial finding')`), false);
+  await waitFor(`${botBody}?.textContent.includes('A partial finding')`);  // visible while processing
+  assert.ok(await js(`!!${botBody}?.querySelector('.msg-cursor')`), 'cursor trails the streaming text');
   const firstTime = await js(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent`);
   await waitFor(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent !== ${JSON.stringify(firstTime)}`);
   assert.ok(true, 'elapsed time ticks');
@@ -148,9 +149,9 @@ module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agent
   liveChunk('as1', ' with a conclusion.');
   await navigate('agents', { agentId: 'a1' });
   await waitFor(`${botCard}?.querySelector('.agent-turn-working:not([hidden])')`);
-  assert.equal(await js(`${botBody}?.textContent.includes('A partial finding')`), false);
+  await waitFor(`${botBody}?.textContent.includes('A partial finding with a conclusion.')`);  // visible after leaving and returning
   liveFinish('as1');
-  await waitFor(`${botBody}?.textContent.includes('A partial finding with a conclusion.')`);
+  await waitFor(`${botBody}?.textContent.includes('A partial finding with a conclusion.') && !${botBody}.querySelector('.msg-cursor')`);
   assert.deepEqual(await js(`[...${botCard}.querySelectorAll('.agent-turn-step')].map(n => n.open)`), [false, true]);
   await sendBot('Stop this turn');
   liveChunk('as1', 'Saved so far');
