@@ -100,6 +100,12 @@ function _packet(packet) {
     if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('kairos:design-changed', { detail: packet }));
     return;
   }
+  // Bots runtime frames (queue changes, turn lifecycle: U1's `bot.*` types) belong to the Bots conversation
+  // that is open on that session. They never touch a live turn's text, so they are only handed on.
+  if (typeof packet.type === 'string' && packet.type.startsWith('bot.')) {
+    if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent('kairos:bot-runtime', { detail: packet }));
+    return;
+  }
   const sessionId = packet.sessionId;
   if (packet.type === 'started') { _mergeRun(sessionId, packet.run); return; }
   const entry = _inflight.get(sessionId);
@@ -226,22 +232,39 @@ export function startTurn(sessionId, sessionTitle, text, attachmentIds, referenc
   return entry;
 }
 
-export function stopTurn(sessionId) {
+// Stop names the turn it means. A Stop that arrives late then cannot end the turn that started after it:
+// the server answers a stale one with "already-stopped" and changes nothing. Bots conversations stop through
+// their own guarded route (U1's POST /api/bot-chat/{sid}/interrupt); ordinary chats keep /api/chat/live/stop
+// and send the turn ID along for a server that checks it.
+export function stopTurn(sessionId, { bot = false } = {}) {
   const entry = _inflight.get(sessionId);
   if (!entry || entry.status !== 'processing' || entry.stopping) return false;
   entry.stopping = true;
   _notify(sessionId);
   Promise.resolve(entry.startPromise).then(() => {
     if (entry.status !== 'processing') return null;
+    const turnId = entry.turnId || null;
+    if (bot) {
+      // Without a turn ID there is nothing safe to name: read the server's state instead of guessing.
+      if (!turnId) return sync().then(() => null);
+      return fetch(`/api/bot-chat/${encodeURIComponent(sessionId)}/interrupt`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: turnId }),
+      });
+    }
     return fetch('/api/chat/live/stop', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ session_id: sessionId, turn_id: turnId }),
     });
   }).then(async res => {
     if (!res) return;
     if (!res.ok) throw new Error(`Couldn't stop reply (${res.status})`);
     const result = await res.json();
-    if (!result.stopping) await sync();
+    const stopping = bot ? (result.outcome || result.status) === 'stopping' || result.stopping === true : result.stopping;
+    if (!stopping) {
+      await sync();
+      // A stale Stop changed nothing: if this reply is somehow still the live one, it is not stopping.
+      if (_inflight.get(sessionId) === entry && entry.status === 'processing') { entry.stopping = false; _notify(sessionId); }
+    }
   }).catch(error => {
     if (entry.status === 'processing') { entry.stopping = false; entry.error = error.message; _notify(sessionId); }
   });

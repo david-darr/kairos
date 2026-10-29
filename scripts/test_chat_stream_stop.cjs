@@ -9,7 +9,7 @@ const path = require('node:path');
   const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(code).toString('base64');
   const viewers = [];
   const runs = {};
-  let stopRequests = 0;
+  let stopRequests = 0, lastStop = null;
   global.EventSource = class {
     constructor(url) { assert.equal(url, '/api/chat/live/events'); this.active = true; viewers.push(this); }
     send(packet) { if (this.active) this.onmessage?.({ data: JSON.stringify(packet) }); }
@@ -30,7 +30,8 @@ const path = require('node:path');
     }
     if (url === '/api/chat/live/stop') {
       stopRequests++;
-      const id = JSON.parse(options.body).session_id;
+      lastStop = JSON.parse(options.body);
+      const id = lastStop.session_id;
       runs[id].status = 'stopped';
       broadcast({ type: 'update', sessionId: id, turnId: runs[id].turnId,
         changes: { status: 'stopped', stopping: false, permission: null, error: null } });
@@ -62,6 +63,7 @@ const path = require('node:path');
   assert.equal(second.stopTurn('forge-test'), true);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(stopRequests, 1);
+  assert.equal(lastStop.turn_id, 'turn-1', 'Stop names the turn it means');
   assert.equal(second.getInFlight('forge-test').status, 'stopped');
   viewers[0].active = true;
   viewers[0].send({ type: 'snapshot', runs: structuredClone(runs) });
