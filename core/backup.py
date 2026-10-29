@@ -30,6 +30,9 @@ import sqlite3
 import tempfile
 import time
 import zipfile
+import stat
+import uuid
+from contextlib import contextmanager, closing
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -42,9 +45,12 @@ PENDING = "pending.zip"
 LAST = "last.json"
 # Never backed up: rebuilt or large history, and the restore area itself.
 SKIPPED_DIRS = {"logs", "file_checkpoints", RESTORE_DIR, "worktrees", "ui-review", "chat-review",
-                "browser-review", "usage-overlay-review", "swarm-codex-review", "__pycache__"}
+                "browser-review", "usage-overlay-review", "swarm-codex-review", "__pycache__",
+                "bot-secrets", "bot_lifecycle"}
 SKIPPED_SUFFIXES = ("-wal", "-shm", ".tmp")
-MAX_RESTORE_BYTES = 4 * 1024 ** 3
+MAX_RESTORE_BYTES = 10 * 1024 ** 3
+MAX_ENTRIES = 100_000
+PENDING_OPTIONS = "pending.json"
 
 
 def _data_dir() -> str:
@@ -66,6 +72,7 @@ def _files(data_dir: str):
     vault = _vault_inside(data_dir)
     for folder, dirs, files in os.walk(data_dir):
         dirs[:] = [d for d in dirs if d not in SKIPPED_DIRS and not d.startswith("pre-")
+                   and os.path.relpath(os.path.join(folder, d), data_dir).replace(os.sep, "/") != "computer/profiles"
                    and os.path.realpath(os.path.join(folder, d)) != vault
                    and not os.path.islink(os.path.join(folder, d))]
         for name in files:
@@ -105,13 +112,24 @@ def _is_sqlite(path: str) -> bool:
         return False
 
 
+@contextmanager
+def _scratch():
+    # Keep inherited Windows ACLs for the restricted desktop runtime token.
+    folder = os.path.join(tempfile.gettempdir(), "kairos-backup-" + uuid.uuid4().hex)
+    os.mkdir(folder, 0o777 if os.name == "nt" else 0o700)
+    try:
+        yield folder
+    finally:
+        shutil.rmtree(folder)
+
+
 def make_backup(target: str, include_keys: bool = False) -> dict:
     """Write the whole data folder to the zip at `target`. Returns its
     manifest."""
     from core import session_manager_store
     data_dir = _data_dir()
     count = 0
-    with tempfile.TemporaryDirectory(prefix="jarvis-backup-") as scratch, \
+    with _scratch() as scratch, \
             zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path, rel in _files(data_dir):
             if rel == KEY_FILE and not include_keys:
@@ -144,35 +162,50 @@ def check_backup(path: str) -> dict:
     try:
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
+            if len(names) > MAX_ENTRIES or len(names) != len(set(names)):
+                raise BackupRefused("the backup has too many or duplicate entries")
             if MANIFEST not in names:
                 raise BackupRefused("this is not a Kairos backup (no manifest)")
+            if archive.getinfo(MANIFEST).file_size > 65536:
+                raise BackupRefused("the backup manifest is too large")
             manifest = json.loads(archive.read(MANIFEST))
             if manifest.get("version") != VERSION:
                 raise BackupRefused("this backup was made by a version of Kairos this one can't read")
             total = 0
             for info in archive.infolist():
                 name = info.filename
+                normalized = name.replace("\\", "/").casefold()
                 if name.startswith(("/", "\\")) or ":" in name or ".." in name.replace("\\", "/").split("/"):
                     raise BackupRefused(f"the backup names a path outside the data folder: {name}")
                 if name.split("/", 1)[0] == RESTORE_DIR:
                     raise BackupRefused("the backup contains the restore area")
+                if (normalized.split("/", 1)[0] in {"bot-secrets", "bot_lifecycle", RESTORE_DIR}
+                        or normalized == "computer/profiles" or normalized.startswith("computer/profiles/")
+                        or stat.S_ISLNK(info.external_attr >> 16)):
+                    raise BackupRefused("the backup contains excluded sign-ins, temporary state or a link")
                 total += info.file_size
             if total > MAX_RESTORE_BYTES:
-                raise BackupRefused("the backup is larger than Kairos restores (4 GB)")
+                raise BackupRefused("the backup is larger than Kairos restores (10 GB)")
             bad = archive.testzip()
             if bad:
                 raise BackupRefused(f"the backup is damaged ({bad})")
             return manifest
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, json.JSONDecodeError, UnicodeError, TypeError, AttributeError):
         raise BackupRefused("this is not a zip file")
 
 
-def stage_restore(path: str) -> dict:
+def stage_restore(path: str, *, disable_automations: bool = False) -> dict:
     """Check a backup and put it in place to be swapped in at the next start."""
     manifest = check_backup(path)
     folder = os.path.join(_data_dir(), RESTORE_DIR)
     os.makedirs(folder, exist_ok=True)
-    shutil.copyfile(path, os.path.join(folder, PENDING))
+    from core.atomic_io import write_json_atomic
+    staging = os.path.join(folder, PENDING + ".tmp")
+    shutil.copyfile(path, staging)
+    # Write the policy before publishing the zip; a crash can only make the
+    # next legacy restore more restrictive, never bypass the encrypted gate.
+    write_json_atomic(os.path.join(folder, PENDING_OPTIONS), {"disable_automations": disable_automations})
+    os.replace(staging, os.path.join(folder, PENDING))
     return manifest
 
 
@@ -198,6 +231,9 @@ def cancel_restore() -> bool:
     path = os.path.join(_data_dir(), RESTORE_DIR, PENDING)
     if os.path.exists(path):
         os.remove(path)
+        options = os.path.join(_data_dir(), RESTORE_DIR, PENDING_OPTIONS)
+        if os.path.exists(options):
+            os.remove(options)
         return True
     return False
 
@@ -221,7 +257,7 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
     if not os.path.exists(pending):
         return None
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    safety = os.path.join(folder, f"before-restore-{stamp}")
+    safety = os.path.join(folder, f"before-restore-{stamp}-{uuid.uuid4().hex[:8]}")
     result = {"at": time.time(), "safety_copy": safety}
     try:
         manifest = check_backup(pending)
@@ -231,9 +267,13 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
         _write_last(folder, result)
         return result
     os.makedirs(safety)
-    for name in _entries(data_dir):
-        shutil.move(os.path.join(data_dir, name), os.path.join(safety, name))
+    moved = []
+    swapped = False
     try:
+        for name in _entries(data_dir):
+            shutil.move(os.path.join(data_dir, name), os.path.join(safety, name))
+            moved.append(name)
+        swapped = True
         with zipfile.ZipFile(pending) as archive:
             for info in archive.infolist():
                 if info.filename != MANIFEST:
@@ -247,13 +287,20 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
             source = os.path.join(safety, kept)
             if os.path.isdir(source) and not os.path.exists(os.path.join(data_dir, kept)):
                 shutil.copytree(source, os.path.join(data_dir, kept))
+        from core.atomic_io import read_json
+        options = read_json(os.path.join(folder, PENDING_OPTIONS), {})
+        if options.get("disable_automations"):
+            result["automations_disabled"] = disable_restored_automations(data_dir)
         os.remove(pending)
+        if os.path.exists(os.path.join(folder, PENDING_OPTIONS)):
+            os.remove(os.path.join(folder, PENDING_OPTIONS))
         result.update(ok=True, backup_created_at=manifest.get("created_at"), includes_keys=manifest.get("includes_keys"))
     except Exception as e:  # put the data back exactly as it was
-        for name in _entries(data_dir):
-            path = os.path.join(data_dir, name)
-            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
-        for name in os.listdir(safety):
+        if swapped:
+            for name in _entries(data_dir):
+                path = os.path.join(data_dir, name)
+                shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+        for name in moved:
             shutil.move(os.path.join(safety, name), os.path.join(data_dir, name))
         os.replace(pending, os.path.join(folder, f"failed-{stamp}.zip"))
         result.update(ok=False, error=f"{type(e).__name__}: {e}")
@@ -264,3 +311,64 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
 def _write_last(folder: str, result: dict) -> None:
     with open(os.path.join(folder, LAST), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
+
+
+def disable_restored_automations(data_dir: str) -> dict:
+    """Before stores are opened: disable scheduled goals, webhooks and app
+    subscriptions, and settle queued work. Any failure aborts the whole swap.
+    Work from files, never instantiate services holding the previous data.
+    """
+    from core.atomic_io import write_json_atomic
+    result = {"routines": 0, "triggers": 0, "app_triggers": 0, "queued": 0}
+    for filename in ("tasks.json", "triggers.json", "task_runs.json", "bot_app_triggers.json"):
+        path = os.path.join(data_dir, filename)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8-sig") as file:
+            value = json.load(file)
+
+        def visit(node):
+            if isinstance(node, list):
+                for row in node:
+                    visit(row)
+            elif isinstance(node, dict):
+                scheduled = filename == "tasks.json" and (node.get("schedule_kind") in ("once", "daily", "interval", "cron", "limit_reset") or bool(node.get("routine", {}).get("schedule")))
+                trigger = filename in ("triggers.json", "bot_app_triggers.json") and ("enabled" in node or "id" in node)
+                if scheduled or trigger:
+                    node["enabled"] = False
+                    node["next_run_at"] = None
+                    node["run_on_startup"] = False
+                    if isinstance(node.get("routine"), dict):
+                        node["routine"]["run_on_startup"] = False
+                    result["routines" if scheduled else "app_triggers" if filename == "bot_app_triggers.json" else "triggers"] += 1
+                for field in ("status", "automation_status", "state"):
+                    if node.get(field) in ("queued", "pending", "running", "waiting"):
+                        node[field] = "failed"
+                        node["error"] = "Stopped by workspace restore"
+                        result["queued"] += 1
+                for child in list(node.values()):
+                    if isinstance(child, (dict, list)):
+                        visit(child)
+        visit(value)
+        if filename == "triggers.json" and isinstance(value, dict):
+            value["pending"] = {}
+        write_json_atomic(path, value)
+    # Schema-aware SQL: identifiers come only from SQLite's own schema, quoted
+    # defensively. Future P3 tables use the same enabled/status columns.
+    for filename in ("sessions.db", "sessions.sqlite3", "bot_automation_events.sqlite3"):
+        path = os.path.join(data_dir, filename)
+        if not os.path.exists(path):
+            continue
+        with closing(sqlite3.connect(path)) as db, db:
+            for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+                quoted = '"' + table.replace('"', '""') + '"'
+                columns = {r[1] for r in db.execute(f"PRAGMA table_info({quoted})")}
+                if filename == "bot_automation_events.sqlite3" and "enabled" in columns:
+                    changed = db.execute(f"UPDATE {quoted} SET enabled=0").rowcount
+                    result["app_triggers"] += changed
+                for field in ("state", "status", "automation_status", "outcome"):
+                    if field in columns and (table in ("bot_followups", "runs", "deliveries") or filename == "bot_automation_events.sqlite3"):
+                        changed = db.execute(f'UPDATE {quoted} SET "{field}"=? WHERE "{field}" IN (?,?,?,?)',
+                                             ("failed", "queued", "pending", "running", "waiting")).rowcount
+                        result["queued"] += changed
+    return result
