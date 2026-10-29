@@ -163,6 +163,7 @@ export async function mountSessionChat(host, options = {}) {
     const bound = chatStream.getInFlight(id);
     liveTurnId = chatStream.getInFlight(id)?.turnId || null;
     let finished = false;
+    const cursor = el('span', { class: 'msg-cursor' });
     const agentTurn = !!session?.agent_id;
     const replyCard = replyBody.closest('.msg');
     let working = null, heading = null, verb = null, elapsed = null, steps = null;
@@ -221,10 +222,13 @@ export async function mountSessionChat(host, options = {}) {
       // A newer turn must never paint into this reply.
       if (bound && entry !== bound) return;
       if (!host.isConnected || sessionId !== id) return;
-      // Decision 3, 2026-10-13: only a session with agent_id buffers its
-      // visible reply. The stream entry still retains all text for Stop/error.
-      if (agentTurn && entry.status === 'processing') replyBody.replaceChildren();
-      else renderMessageBody(replyBody, entry.text || (entry.status === 'processing' ? '' : '(no reply)'), id, true);
+      // A bot's reply streams word by word like any chat (2026-10-28, David's
+      // decision; it reverses Decision 3 of 2026-10-13). The cursor trails the
+      // text while the turn runs and goes at every terminal status. Discord and
+      // other channels still get whole replies (core/channels/agent_routing.py).
+      renderMessageBody(replyBody, entry.text || (entry.status === 'processing' ? '' : '(no reply)'), id, true,
+        { live: entry.status === 'processing' });
+      if (entry.status === 'processing' && entry.text) replyBody.appendChild(cursor); else cursor.remove();
       if (working) {
         heading.hidden = entry.status !== 'processing';
         if (entry.status === 'processing') {
