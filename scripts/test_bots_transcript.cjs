@@ -146,7 +146,7 @@ const load = file => import(pathToFileURL(path.join(__dirname, '..', 'static', '
   // Message actions.
   const ids = (m, c) => A.actionList(m, c).map(a => a.id);
   assert.deepEqual(ids(msg('u', 'user', 1), {}), ['reply', 'react', 'copy', 'pin', 'edit', 'raw', 'copy-id']);
-  assert.deepEqual(ids(msg('a', 'assistant', 1), { lastAssistantId: 'a', canSpeak: true }), ['reply', 'react', 'copy', 'pin', 'regenerate', 'speak', 'raw', 'copy-id']);
+  assert.deepEqual(ids(msg('a', 'assistant', 1), { lastAssistantId: 'a', canSpeak: true }), ['reply', 'react', 'copy', 'pin', 'regenerate', 'speak', 'raw', 'copy-id', 'report']);
   assert.ok(!ids(msg('a', 'assistant', 1), { lastAssistantId: 'other' }).includes('regenerate'), 'only the last reply regenerates');
   assert.equal(A.actionList(msg('u', 'user', 1), { busy: true }).find(a => a.id === 'edit').disabled, true, 'edit waits for the turn');
   assert.equal(A.actionList(msg('u', 'user', 1), { pinnedId: 'u' }).find(a => a.id === 'pin').label, 'Unpin');

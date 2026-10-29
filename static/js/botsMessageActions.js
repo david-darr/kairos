@@ -52,6 +52,8 @@ export function actionList(message, ctx = {}) {
   if (bot && ctx.canSpeak) list.push({ id: 'speak', label: 'Speak', iconName: 'mic' });
   list.push({ id: 'raw', label: ctx.raw ? 'Show formatted' : 'Show raw Markdown', iconName: 'eye' });
   list.push({ id: 'copy-id', label: 'Copy message ID', iconName: 'copy' });
+  // Phase 6: a redacted problem report about this reply, drafted and kept on this computer (botsReport.js).
+  if (bot) list.push({ id: 'report', label: 'Report a problem', iconName: 'triangle-alert' });
   return list;
 }
 

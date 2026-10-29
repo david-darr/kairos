@@ -206,6 +206,13 @@ def merged_payload(items: list[dict]) -> dict:
                 if value not in joined:
                     joined.append(value)
         payload[key] = joined
+    # Phase 6: the newest open data result counts, and pointed app parts join up to five.
+    contexts = [item["payload"]["data_context"] for item in items if item["payload"].get("data_context")]
+    if contexts:
+        payload["data_context"] = contexts[-1]
+    pointed = [p for item in items for p in item["payload"].get("pointed") or []][:5]
+    if pointed:
+        payload["pointed"] = pointed
     return payload
 
 
