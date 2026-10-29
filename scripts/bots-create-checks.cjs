@@ -439,14 +439,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await commit(identityField(2), 'Finds remote roles');
     await delay(120);
     await commit(identityField(3, 'textarea'), 'Quiet and thorough.');
-    await delay(120);
-    await commit(identityField(4), 'Hiring');
+    // The group is the Team row since Phase 4 (botsSectionTeam.js): a pick from existing teams that saves at once,
+    // so it is not part of this batch.
     assert.equal(writesTo(start, '/api/agents/a1', 'PATCH').length, 0, 'nothing is sent while edits keep arriving');
     const merged = await waitWrite(start, '/api/agents/a1', 'PATCH');
-    assert.deepEqual(JSON.parse(merged.body), { role: 'Finds remote roles', blurb: 'Quiet and thorough.', section: 'Hiring' }, 'one PATCH carries all three edits');
+    assert.deepEqual(JSON.parse(merged.body), { role: 'Finds remote roles', blurb: 'Quiet and thorough.' }, 'one PATCH carries both edits');
     await delay(700);
     assert.equal(writesTo(start, '/api/agents/a1', 'PATCH').length, 1, 'and only one');
-    assert.deepEqual([(await botRow('a1')).role, (await botRow('a1')).section], ['Finds remote roles', 'Hiring']);
+    assert.equal((await botRow('a1')).role, 'Finds remote roles');
+    assert.ok(await js("!!document.querySelector('#bots-u4-host .bots-identity select[aria-label=Team]')"), 'the Team row offers the teams');
 
     // A rejected edit is rolled back, with the reason in a toast.
     await clearToasts();
