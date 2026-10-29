@@ -681,15 +681,16 @@
 @media (max-width: 768px) {
   .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 0 0 24px; }
   .kairos-redesign .ms-tab-sheet .ms-mode-switch {
-    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     padding: 4px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--rd-surface-2);
   }
   .kairos-redesign .ms-tab-sheet .ms-mode-thumb {
-    position: absolute; z-index: -1; inset: 4px auto 4px 4px; width: calc(50% - 4px); box-sizing: border-box;
+    position: absolute; z-index: -1; inset: 4px auto 4px 4px; width: calc((100% - 8px) / 3); box-sizing: border-box;
     border-radius: 999px; border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
     transition: transform 260ms cubic-bezier(.22, 1, .36, 1);
   }
   .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=forge] .ms-mode-thumb { transform: translateX(100%); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=bots] .ms-mode-thumb { transform: translateX(200%); }
   .kairos-redesign .ms-tab-sheet .ms-mode-option {
     display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; min-width: 0; padding: 0 12px;
     border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 15px; font-weight: 500;

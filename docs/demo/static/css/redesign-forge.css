@@ -466,13 +466,13 @@
     gap: 0; padding: 0; margin-bottom: 10px; border: 1px solid var(--rd-line-strong); background: transparent;
   }
   .kairos-redesign[data-app-mode="forge"]:not(.sidebar-collapsed) #sidebar .forge-mode-switch .segmented-tab {
-    display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; height: 30px; padding: 0 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; min-height: 36px; height: auto; padding: 3px 4px;
     background: transparent; box-shadow: none; color: var(--rd-ink-dim); font-size: 13px; font-weight: 400;
   }
   .kairos-redesign[data-app-mode="forge"]:not(.sidebar-collapsed) #sidebar .forge-mode-switch .segmented-tab.active {
     background: var(--rd-primary-bg); color: var(--rd-primary-fg); font-weight: 500;
   }
-  .kairos-redesign[data-app-mode="forge"]:not(.sidebar-collapsed) #sidebar .forge-mode-switch small { display: inline; margin: 0; font-size: 10px; color: inherit; opacity: .75; }
+  .kairos-redesign[data-app-mode="forge"]:not(.sidebar-collapsed) #sidebar .forge-mode-switch small { display: block; margin: 0; font-size: 9px; line-height: 1.1; color: inherit; opacity: .75; }
   .kairos-redesign[data-app-mode="forge"]:not(.sidebar-collapsed) #sidebar .nav-item { height: 36px; min-height: 36px; gap: 10px; padding: 0 10px; font-size: 14px; color: var(--rd-ink); }
   .kairos-redesign[data-app-mode="forge"] #sidebar .nav-item svg { width: 17px; height: 17px; }
   .kairos-redesign[data-app-mode="forge"] #sidebar .nav-item:hover { background: var(--rdf-tint); }

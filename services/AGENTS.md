@@ -9,7 +9,9 @@ Domain logic behind the routes. Routes stay thin and call these; these call
   (server-owned turns, broadcast to every open client), `chat_background.py`,
   `chat_summary.py`, `background_tasks.py`.
 - **Agents:** `agent_service.py`, `agent_handoff.py`, `agent_calls.py`,
-  `agent_memory_upkeep.py`, `swarm_service.py`.
+  `agent_memory_upkeep.py`, `swarm_service.py`. Bots mode (2026-10-28): `bot_record.py`
+  (fields, upgrade, defaults, presets, configured create), `bot_threads.py` (thread
+  fields on sessions), `bot_names.py`.
 - **Scheduled work:** `task_service.py` (tasks and board cards),
   `trigger_service.py` (webhooks), `hook_service.py` (lifecycle hooks).
 - **Forge:** `forge_sessions.py`, `forge_projects.py`, `forge_git.py`,

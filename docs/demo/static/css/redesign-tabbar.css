@@ -376,7 +376,7 @@
   .kairos-redesign .ms-more-sheet .ms-sheet-heading { font-size: 34px; }
   .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 2px 0 0; }
   .kairos-redesign .ms-tab-sheet .ms-mode-switch { padding: 5px; border: 0; background: var(--rd-surface-2); }
-  .kairos-redesign .ms-tab-sheet .ms-mode-thumb { inset: 5px auto 5px 5px; width: calc(50% - 5px); border: 0; background: var(--rd-surface-solid); }
+  .kairos-redesign .ms-tab-sheet .ms-mode-thumb { inset: 5px auto 5px 5px; width: calc((100% - 10px) / 3); border: 0; background: var(--rd-surface-solid); }
   .kairos-redesign .ms-tab-sheet .ms-mode-option { height: 50px; min-height: 50px; font-weight: 500; }
   .kairos-redesign .ms-mode-option svg, .kairos-redesign .ms-mode-name small, .kairos-redesign .ms-mode-caption { display: none; }
   .kairos-redesign .ms-tab-tile { border-color: var(--rd-line); gap: 8px; }

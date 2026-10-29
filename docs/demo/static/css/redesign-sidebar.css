@@ -204,3 +204,6 @@
 .rd-history-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .rd-history-name-line .rd-history-name { min-width: 0; }
 .kairos-redesign .dashboard-row.is-forge .rd-forge-tag { margin-left: 6px; margin-right: auto; }
+
+/* The Kairos / Forge / Bots switch (app.js): three equal segments, in every mode. */
+.kairos-redesign #sidebar .forge-mode-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }

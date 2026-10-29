@@ -9,6 +9,8 @@ per tab (`views/chat.js`, `views/settings.js`, `views/tool-store.js` and so on).
 - `chat*`: the chat surface; `chatStream.js` mirrors live turns from the
   server, `chatActivity.js` draws the activity chip.
 - `mobile*` and `phone*`: the phone layout. `redesign*`: the desktop redesign.
+- `bots*` and `views/botsHome.js`, `views/botsShell.js`: the Bots mode (2026-10-28):
+  `appModes.js` holds the three modes; `botsUi.js` the row kit; `static/css/bots.css` its tokens.
 - `forge*`, `agent*`, `vault*`, `design*`, `call*`, `notch*`, `swarm*`: one
   feature each.
 - `browserPane.js`: the side browser. In the desktop app its page is a native
