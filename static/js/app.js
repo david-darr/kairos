@@ -20,6 +20,8 @@ import { phoneRoute, initMobileShell, isPhoneShell } from './mobileShell.js';
 import { hasLeaveGuard, canLeaveView } from './leaveGuard.js';
 
 import { mountForgeRail } from './forgeRail.js';
+import { mountBotsRail } from './botsRail.js';
+import { MODES, FORGE_NAV, BOTS_NAV, MODE_SWITCH, MODE_BADGES, TAB_LABELS, restoreMode, modeForTab, homeTabFor, railLabel, nextRailMode } from './appModes.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
 import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
 import { mascotPng } from './mascot.js';
@@ -27,6 +29,7 @@ import { avatarSpec } from './agentAvatar.js';
 import { notchNavigation, whenReady } from './notchNavigate.js';
 
 let forgeRailCleanup = () => {};
+let botsRailCleanup = () => {};
 let forgeSearchCleanup = null;
 restoreSidebar();
 if (window.jarvis?.browser) document.documentElement.classList.add("electron-shell");
@@ -61,15 +64,13 @@ const NAV = [
 // still the honest place a future genuinely-deferred tab would go, matching
 // the project's "no fake UI" rule.
 const STUB_TABS = new Set();
-const FORGE_NAV = [
-  { id: 'forgeHome', label: 'Home', icon: 'home' },
-];
 // Tabs either mode may open without switching mode (none since the Design tab
 // moved into Library, David 2026-10-22).
 const SHARED_TABS = new Set();
 let forgeAdmin = false;
 let appMode = 'kairos';
-try { appMode = localStorage.getItem('kairos:app-mode') === 'forge' ? 'forge' : 'kairos'; } catch { /* Device storage is optional. */ }
+// Whether this person is an admin is not known yet; buildSidebar() puts a non-admin back in Kairos.
+try { appMode = restoreMode(localStorage.getItem('kairos:app-mode'), true); } catch { /* Device storage is optional. */ }
 // The marker must match a mode restored at startup, not only one switched to.
 document.documentElement.dataset.appMode = appMode;
 function rememberMode(mode) {
@@ -78,10 +79,10 @@ function rememberMode(mode) {
   try { localStorage.setItem('kairos:app-mode', mode); } catch { /* Device storage is optional. */ }
 }
 export async function switchMode(mode) {
-  if (mode === 'forge' && !forgeAdmin) return;
-  rememberMode(mode === 'forge' ? 'forge' : 'kairos');
+  if (mode !== 'kairos' && !forgeAdmin) return;
+  rememberMode(MODES.includes(mode) ? mode : 'kairos');
   await buildSidebar();
-  return switchTab(appMode === 'forge' ? 'forgeHome' : 'home');
+  return switchTab(homeTabFor(appMode));
 }
 
 const modules = {};
@@ -170,8 +171,8 @@ function switchTabNow(tabId, options) {
 }
 
 async function performSwitch(tabId, options = {}) {
-  const mode = SHARED_TABS.has(tabId) ? appMode : tabId === 'forgeShell' || FORGE_NAV.some(item => item.id === tabId) ? 'forge' : 'kairos';
-  if (mode === 'forge' && !forgeAdmin) return;
+  const mode = SHARED_TABS.has(tabId) ? appMode : modeForTab(tabId);
+  if (mode !== 'kairos' && !forgeAdmin) return;
   if (mode !== appMode) { rememberMode(mode); await buildSidebar(); }
   const version = ++navigationVersion;
   // The side browser's chrome lives in the Chat view's DOM, but in the
@@ -188,11 +189,13 @@ async function performSwitch(tabId, options = {}) {
   if (activeUnmount) { activeUnmount(); activeUnmount = null; }
 
   activeTab = tabId;
-  activeAgentId = tabId === 'agents' ? (options.agentId || null) : null;
+  activeAgentId = tabId === 'agents' || tabId === 'botsShell' ? (options.agentId || null) : null;
   document.documentElement.dataset.view = tabId;
   const titlebarTab = document.getElementById("titlebar-tab");
-  if (titlebarTab) titlebarTab.textContent = tabId === 'forgeShell' ? 'Forge' : NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
+  if (titlebarTab) titlebarTab.textContent = TAB_LABELS[tabId] || NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
   document.querySelectorAll(".nav-item").forEach((item) => {
+    // The Bots rail marks its own rows: they all share one tab id (botsRail.js).
+    if (item.dataset.agentId !== undefined) return;
     const selected = item.dataset.tab === (tabId === 'mobileLaunch' ? 'chat' : tabId);
     item.classList.toggle("active", selected);
     if (selected) item.setAttribute("aria-current", "page");
@@ -301,12 +304,14 @@ async function refreshAgentBadge() {
   if (inbox) botInboxWatcher(inbox).catch(() => {});
   if (!inbox) return;
   // The sidebar's Agents button, and on desktop its pin and its All tabs row.
-  for (const item of document.querySelectorAll('#nav .nav-item[data-tab="agents"], #rd-all-tabs .nav-item[data-tab="agents"]')) {
+  // In Bots mode the Bots home button carries the same count.
+  for (const item of document.querySelectorAll('#nav .nav-item[data-tab="agents"], #rd-all-tabs .nav-item[data-tab="agents"], #nav .nav-item[data-tab="botsHome"]')) {
+    const name = item.dataset.tab === 'botsHome' ? 'Bots' : 'Agents';
     let badge = item.querySelector(".nav-badge");
-    if (!inbox.count) { badge?.remove(); item.setAttribute("aria-label", "Agents"); continue; }
+    if (!inbox.count) { badge?.remove(); item.setAttribute("aria-label", name); continue; }
     if (!badge) item.append(badge = Object.assign(document.createElement("span"), { className: "nav-badge" }));
     badge.textContent = inbox.count > 99 ? "99+" : String(inbox.count);
-    item.setAttribute("aria-label", `Agents, ${inbox.count} waiting on you`);
+    item.setAttribute("aria-label", `${name}, ${inbox.count} waiting on you`);
   }
 }
 document.addEventListener("jarvis:agents-changed", refreshAgentBadge);
@@ -325,19 +330,19 @@ async function buildSidebar() {
     control.className = 'forge-mode-switch';
     control.setAttribute('role', 'group');
     control.setAttribute('aria-label', 'App mode');
-    for (const [mode, label] of [['kairos', 'Kairos'], ['forge', 'Forge']]) {
+    for (const [mode, label] of MODE_SWITCH) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'segmented-tab'; button.dataset.mode = mode;
       button.setAttribute('aria-pressed', String(appMode === mode));
       button.classList.toggle('active', appMode === mode); button.textContent = label;
-      if (mode === 'forge') { const badge = document.createElement('small'); badge.textContent = 'Preview'; button.append(badge); }
+      if (MODE_BADGES[mode]) { const badge = document.createElement('small'); badge.textContent = MODE_BADGES[mode]; button.append(badge); }
       button.onclick = () => switchMode(mode);
       control.append(button);
     }
     const rail = document.createElement('button'); rail.type = 'button'; rail.className = 'forge-mode-rail';
-    rail.setAttribute('aria-label', appMode === 'forge' ? 'Switch to Kairos' : 'Switch to Forge Preview');
+    rail.setAttribute('aria-label', railLabel(appMode));
     rail.title = rail.getAttribute('aria-label'); rail.innerHTML = KAIROS_MARK; // The Kairos circle mark (David, 2026-10-09).
-    rail.onclick = () => switchMode(appMode === 'forge' ? 'kairos' : 'forge'); control.append(rail);
+    rail.onclick = () => switchMode(nextRailMode(appMode)); control.append(rail);
     document.querySelector('.sidebar-header').after(control);
   }
   const brand = document.getElementById("brand");
@@ -365,6 +370,7 @@ async function buildSidebar() {
   }).catch(() => {});
 
   forgeRailCleanup();
+  botsRailCleanup();
   const nav = document.getElementById("nav");
   nav.classList.toggle('rd-stagger', !matchMedia('(max-width: 768px)').matches);
   // Cleared before rebuilding — buildSidebar() now also runs whenever
@@ -381,19 +387,20 @@ async function buildSidebar() {
   }
   setKnownTabs([...items.values()]);
   // Groups, order and hidden tabs: Settings > Layout (layout.js).
-  const groups = appMode === 'forge' ? [{ ids: FORGE_NAV.map(item => item.id) }] : sidebarLayout([...items.keys()]);
-  if (appMode === 'forge') for (const item of FORGE_NAV) items.set(item.id, { ...item, svg: ICONS[item.icon] });
+  const modeNav = appMode === 'forge' ? FORGE_NAV : appMode === 'bots' ? BOTS_NAV : null;
+  const groups = modeNav ? [{ ids: modeNav.map(item => item.id) }] : sidebarLayout([...items.keys()]);
+  if (modeNav) for (const item of modeNav) items.set(item.id, { ...item, svg: ICONS[item.icon] });
   // Desktop Kairos: the redesigned sidebar and rail (sidebarNav.js).
   let desktopNav = null;
   const openSearch = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }));
   forgeSearchCleanup?.(); forgeSearchCleanup = null;
-  if (appMode !== 'forge' && desktopSidebar.matches) {
+  if (appMode === 'kairos' && desktopSidebar.matches) {
     desktopNav = renderDesktopNav({ nav, items, groups, pinned: pinnedTabs([...items.keys()]), switchTab, openSearch,
       openHistory: () => import('./chatHistoryPopout.js').then(module => module.openChatHistory({ switchTab })),
       editPins: () => openSettings({ section: 'layout' }) });
   } else clearDesktopNav();
-  // Forge on a desktop keeps its own nav but has Search and collapse where Kairos has them.
-  if (appMode === 'forge' && desktopSidebar.matches) forgeSearchCleanup = mountSearchRow(openSearch);
+  // Forge and Bots on a desktop keep their own nav but have Search and collapse where Kairos has them.
+  if (appMode !== 'kairos' && desktopSidebar.matches) forgeSearchCleanup = mountSearchRow(openSearch);
   for (const group of desktopNav ? [] : groups) {
     if (!group.ids.length) continue;
     if (group.label || group.id === 'main') {
@@ -417,9 +424,11 @@ async function buildSidebar() {
     }
   }
   if (appMode === 'forge') forgeRailCleanup = mountForgeRail(nav);
+  if (appMode === 'bots' && desktopSidebar.matches) botsRailCleanup = mountBotsRail(nav);
   refreshAgentBadge();
 
   document.querySelectorAll("#sidebar .nav-item[data-tab], #rd-all-tabs .nav-item").forEach((item) => {
+    if (item.dataset.agentId !== undefined) return;
     item.classList.toggle("active", item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab));
     if (item.dataset.tab === (activeTab === 'mobileLaunch' ? 'chat' : activeTab)) item.setAttribute("aria-current", "page");
   });
@@ -623,7 +632,7 @@ async function startApp() {
   document.addEventListener("jarvis:tabs-changed", async () => {
     for (const id of Object.keys(customViewUrls)) delete modules[id];
     const tabs = await buildSidebar();
-    if (activeTab && activeTab !== 'forgeShell' && activeTab !== 'mobileLaunch' && ![...NAV, ...FORGE_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
+    if (activeTab && activeTab !== 'forgeShell' && activeTab !== 'botsShell' && activeTab !== 'mobileLaunch' && ![...NAV, ...FORGE_NAV, ...BOTS_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
   });
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });
@@ -696,7 +705,7 @@ async function startApp() {
     const launch = new URL(location.href).searchParams;
     const target = launch.get('newchat') === '1' ? 'chat' : launch.get('view');
     await switchTab(['chat', 'home', 'library', 'notes', 'tasks', 'calendar'].includes(target)
-      ? target : appMode === 'forge' ? 'forgeHome' : 'home', { mobileNew: launch.get('newchat') === '1' });
+      ? target : homeTabFor(appMode), { mobileNew: launch.get('newchat') === '1' });
     // A chat or bot link that could not open falls back here; drop it too, or every reload retries it.
     if (['newchat', 'view', 'chat', 'agent'].some(key => launch.has(key))) history.replaceState(null, '', '/');
   }

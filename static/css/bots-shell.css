@@ -1,0 +1,213 @@
+/* Bots mode shell (Agents 3.0 Phase 0, unit U3): the Bots sidebar and rail, Bots
+   home, one bot's page and the bot panel's frame. Scope: [data-app-mode="bots"]
+   only, so Kairos and Forge never see a rule here. Everything reads the --bots-*
+   tokens from bots.css, which derive from the working tokens, so Appearance
+   changes carry through and scripts/test_kairos_theme.py finds no raw colour.
+   Loaded by the Bots modules with loadBotsCss(); the panel's sections are styled by
+   bots-panel.css (unit U4). */
+
+/* -- Sidebar: the rail --------------------------------------------------------- */
+
+[data-app-mode="bots"] #sidebar nav#nav { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 6px; }
+
+[data-app-mode="bots"] .bots-rail { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 2px; padding-top: 8px; }
+[data-app-mode="bots"] .bots-rail-head { padding: 6px 10px 2px; }
+[data-app-mode="bots"] .bots-rail-list { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+[data-app-mode="bots"] #sidebar .bots-rail :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived) {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin: 0; padding: 6px 10px;
+  font: 400 var(--bots-text-row)/1.2 var(--bots-font-sans); color: var(--bots-ink); text-align: left;
+  background: transparent; border: 0; border-radius: 10px; cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] #sidebar .bots-rail :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived):hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] #sidebar .bots-rail .bots-rail-row.active { background: var(--bots-menu-active); box-shadow: none; font-weight: 500; }
+[data-app-mode="bots"] #sidebar .bots-rail :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: -2px; }
+[data-app-mode="bots"] #sidebar .bots-rail :is(.bots-rail-new, .bots-rail-archived) { color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-rail-row > .agent-avatar { flex: none; }
+[data-app-mode="bots"] .bots-rail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-rail-empty { margin: 4px 10px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-rail-foot { flex: none; display: flex; justify-content: center; padding: 8px 4px 4px; border-top: 1px solid var(--bots-hairline-dense); margin-top: 4px; }
+[data-app-mode="bots"] .bots-rail-foot .bots-segmented { width: 100%; }
+[data-app-mode="bots"] .bots-rail-foot .bots-segmented button { flex: 1; padding: 0 8px; }
+
+/* The status dot: working pulses (not under reduced motion), needs you is the warm one. */
+[data-app-mode="bots"] .bots-status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-status-dot[data-state="working"] { background: var(--bots-success); animation: bots-dot-pulse 1.4s ease-in-out infinite; }
+[data-app-mode="bots"] .bots-status-dot[data-state="needs_you"] { background: var(--bots-warning); }
+[data-app-mode="bots"] .bots-status-dot[data-state="teammate"], [data-app-mode="bots"] .bots-status-dot[data-state="queued"] { background: var(--bots-accent); }
+[data-app-mode="bots"] .bots-status-dot[data-state="off"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--bots-ink-tertiary); }
+@keyframes bots-dot-pulse { 50% { opacity: .35; } }
+
+[data-app-mode="bots"] .bots-rail-count {
+  flex: none; min-width: 18px; height: 18px; padding: 0 6px; display: inline-grid; place-items: center;
+  font: 600 11px/1 var(--bots-font-sans); color: var(--bots-accent-ink); background: var(--bots-warning); border-radius: var(--bots-radius-pill);
+}
+
+/* The Bots home button above the rail keeps the working sidebar look; only the count is ours. */
+[data-app-mode="bots"] #sidebar nav#nav > .nav-item { flex: none; }
+/* Outweighs redesign-shell.css, which hides nav icons in the expanded sidebar. */
+.kairos-redesign[data-app-mode="bots"] #sidebar nav#nav > .nav-item > svg, .kairos-redesign[data-app-mode="bots"] #sidebar .bots-rail .nav-item > svg.bots-icon { display: block; width: 17px; height: 17px; flex: none; }
+
+/* The collapsed 56 px rail: faces only. */
+@media (min-width: 769px) {
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-head, .sidebar-collapsed[data-app-mode="bots"] .bots-rail-foot,
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-name, .sidebar-collapsed[data-app-mode="bots"] .bots-rail-count,
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-new > span, .sidebar-collapsed[data-app-mode="bots"] .bots-rail-archived > span { display: none; }
+  .sidebar-collapsed[data-app-mode="bots"] #sidebar .bots-rail :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived) { justify-content: center; padding: 6px 0; }
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-row .bots-status-dot { position: absolute; margin: 18px 0 0 18px; }
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-row { position: relative; }
+  /* style.css fades every span in a collapsed nav item; the face is a span too. */
+  .sidebar-collapsed[data-app-mode="bots"] .bots-rail-row > .agent-avatar { opacity: 1; }
+}
+
+/* -- Pages ---------------------------------------------------------------------- */
+
+[data-app-mode="bots"] .view.bots-home-view { padding: 28px 32px 36px; overflow-y: auto; background: var(--bots-app); }
+[data-app-mode="bots"] .view.bots-shell-view { padding: 0; overflow: hidden; animation: none; background: var(--bots-app); }
+
+/* -- Bots home ------------------------------------------------------------------ */
+
+[data-app-mode="bots"] .bots-home { width: 100%; max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; color: var(--bots-ink); font-family: var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-home-header { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-home-title { margin: 0; font: 600 24px/1.2 var(--bots-font-sans); letter-spacing: -.01em; }
+[data-app-mode="bots"] .bots-home-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-home-actions .bots-btn[hidden] { display: none; }
+
+[data-app-mode="bots"] .bots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+[data-app-mode="bots"] .bots-bot-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 148px; padding: 16px; text-align: left;
+  font-family: var(--bots-font-sans); color: var(--bots-ink); background: var(--bots-card);
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), border-color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-bot-card:hover { background: var(--bots-raised); border-color: var(--bots-accent-border); }
+[data-app-mode="bots"] .bots-bot-card:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-bot-card-top { display: flex; align-items: flex-start; justify-content: space-between; width: 100%; margin-bottom: 6px; }
+[data-app-mode="bots"] .bots-bot-card-name { font-size: 15px; font-weight: 600; }
+[data-app-mode="bots"] .bots-bot-card-job { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+[data-app-mode="bots"] .bots-bot-card-status { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 8px; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-new-card { align-items: center; justify-content: center; gap: 10px; background: transparent; border-style: dashed; border-color: var(--bots-control-line); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-new-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--bots-inset); }
+
+[data-app-mode="bots"] .bots-home-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 56px 16px; text-align: center; }
+[data-app-mode="bots"] .bots-home-empty h2 { margin: 8px 0 0; font: 600 20px/1.3 var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-home-empty p { max-width: 380px; margin: 0 0 8px; font-size: var(--bots-text-row); line-height: 1.5; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-home-message, [data-app-mode="bots"] .bots-home-message-page { color: var(--bots-ink-secondary); font-size: var(--bots-text-row); }
+[data-app-mode="bots"] .bots-home-message-page { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; padding: 24px; text-align: center; font-family: var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-home-message-page p { margin: 0; }
+[data-app-mode="bots"] .bots-home-message-page .bots-btn { margin-top: 0; }
+
+/* -- One bot's page ---------------------------------------------------------------- */
+
+[data-app-mode="bots"] .bots-shell { display: flex; flex: 1; width: 100%; min-width: 0; height: 100%; min-height: 0; color: var(--bots-ink); font-family: var(--bots-font-sans); background: var(--bots-app); }
+[data-app-mode="bots"] .bots-shell-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+
+[data-app-mode="bots"] .bots-shell-header { display: flex; align-items: center; gap: 8px; flex: none; min-height: 52px; padding: 8px 16px; }
+[data-app-mode="bots"] .bots-head-fill { flex: 1; }
+[data-app-mode="bots"] .bots-head-pill {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 4px 12px 4px 8px;
+  font: 600 var(--bots-text-row)/1.2 var(--bots-font-sans); color: var(--bots-ink); background: var(--bots-card);
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-pill); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-head-pill:hover, [data-app-mode="bots"] .bots-head-pill[aria-expanded="true"] { background: var(--bots-raised); }
+[data-app-mode="bots"] .bots-head-pill:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-head-pill .bots-icon { color: var(--bots-ink-tertiary); opacity: 0; transition: opacity var(--bots-dur-tap) var(--bots-ease); }
+[data-app-mode="bots"] .bots-head-pill:is(:hover, :focus-visible, [aria-expanded="true"]) .bots-icon { opacity: 1; }
+@media (pointer: coarse) { [data-app-mode="bots"] .bots-head-pill .bots-icon { opacity: 1; } }
+[data-app-mode="bots"] .bots-head-pill .bots-kip { flex: none; }
+[data-app-mode="bots"] .bots-head-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-head-thread { min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-head-thread[hidden] { display: none; }
+[data-app-mode="bots"] .bots-head-role { display: none; font-weight: 400; color: var(--bots-ink-secondary); }
+[data-bots-interface="advanced"][data-app-mode="bots"] .bots-head-role:not(:empty) { display: inline; }
+[data-app-mode="bots"] .bots-head-status { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+[data-app-mode="bots"] .bots-head-back { display: none; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--bots-ink-secondary); background: transparent; border: 0; border-radius: var(--bots-radius-pill); cursor: pointer; }
+
+/* The conversation list: a popover under the header, the list agentChat.js draws. */
+[data-app-mode="bots"] .bots-convos {
+  position: absolute; z-index: 30; top: 52px; right: 16px; width: min(340px, calc(100% - 32px)); max-height: min(70%, 520px); overflow-y: auto;
+  padding: 8px; background: var(--bots-menu); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu);
+  box-shadow: var(--bots-shadow-float); animation: bots-pop-in var(--bots-dur-pop) var(--bots-ease); transform-origin: top right;
+}
+[data-app-mode="bots"] .bots-convos[hidden] { display: none; }
+[data-app-mode="bots"] .bots-convos .agent-chat-side { display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: transparent; }
+[data-app-mode="bots"] .bots-convos .agent-chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; }
+[data-app-mode="bots"] .bots-convos .agent-chat-side-head h3 { margin: 0; font: 600 var(--bots-text-row)/1.2 var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-convos .agent-chat-new { min-height: 32px; padding: 0 12px; font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); border-radius: var(--bots-radius-pill); }
+[data-app-mode="bots"] .bots-convos .agent-search-scope { display: none; }
+[data-app-mode="bots"] .bots-convos .agent-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; }
+[data-app-mode="bots"] .bots-convos .agent-chat-item { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
+[data-app-mode="bots"] .bots-convos .agent-chat-item[hidden] { display: none; }
+[data-app-mode="bots"] .bots-convos .agent-chat-item:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-convos .agent-chat-item.active { background: var(--bots-menu-active); }
+[data-app-mode="bots"] .bots-convos .agent-chat-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; }
+[data-app-mode="bots"] .bots-convos .agent-chat-title { font-size: var(--bots-text-row); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-convos .meta, [data-app-mode="bots"] .bots-convos .agent-chat-none { font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-convos .agent-chat-delete { flex: none; width: 28px; height: 28px; color: var(--bots-ink-tertiary); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+[data-app-mode="bots"] .bots-convos .agent-chat-delete:hover { color: var(--bots-danger); background: var(--bots-raised-hover); }
+
+/* The conversation: the real one (sessionChat.js), in the Bots look. */
+[data-app-mode="bots"] .bots-chat-host { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
+[data-app-mode="bots"] .bots-chat-host .agent-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
+[data-app-mode="bots"] .bots-chat-host .agent-chat-main { flex: 1; min-height: 0; border: 0; background: transparent; }
+[data-app-mode="bots"] .bots-chat-host .agent-chat-honesty { margin: 0 16px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-chat-host .session-chat { height: 100%; }
+[data-app-mode="bots"] .bots-chat-host .side-messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 16px; gap: 14px; }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg { width: auto; max-width: 100%; display: flex; flex-direction: column; gap: 6px; font-size: var(--bots-text-bubble); line-height: var(--bots-leading-bubble); }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.user { align-self: flex-end; max-width: min(560px, calc(100% - 82px)); }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.assistant { align-self: flex-start; max-width: min(560px, 100%); }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg > .msg-body { padding: 10px 14px; border-radius: var(--bots-radius-bubble); font-family: var(--bots-font-prose); overflow-wrap: anywhere; min-width: 0; }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.user > .msg-body { background: var(--bots-bubble-user); color: var(--bots-bubble-user-ink); }
+[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.assistant > .msg-body { background: var(--bots-bubble-bot); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-chat-host .agent-composer-row { width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 16px; gap: 10px; box-sizing: border-box; }
+[data-app-mode="bots"] .bots-chat-host .side-chat-composer {
+  flex: 1 1 auto; min-width: 0; margin: 0; padding: 10px 12px;
+  background: var(--bots-composer); border-radius: 22px; box-shadow: var(--bots-composer-ring); border: 0;
+}
+[data-app-mode="bots"] .bots-chat-host .side-chat-input { font: 400 var(--bots-text-bubble)/1.5 var(--bots-font-prose); }
+[data-app-mode="bots"] .bots-chat-host .side-chat-send { border-radius: var(--bots-radius-pill); }
+
+/* -- The panel frame (the sections are botsPanel.js, unit U4) ----------------------------- */
+
+[data-app-mode="bots"] .bots-panel-aside {
+  display: flex; flex-direction: column; flex: none; width: var(--bots-panel-w); min-height: 0; height: 100%;
+  background: var(--bots-app); border-left: 1px solid var(--bots-hairline); outline: none;
+}
+[data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] { width: var(--bots-panel-w-advanced); background: var(--bots-panel); }
+[data-app-mode="bots"] .bots-panel-bar { display: flex; align-items: center; justify-content: flex-end; flex: none; height: 50px; padding: 0 8px; }
+[data-app-mode="bots"] .bots-panel-close { width: 34px; height: 34px; }
+[data-app-mode="bots"] .bots-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 20px; }
+[data-app-mode="bots"] .bots-panel-loading, [data-app-mode="bots"] .bots-panel-fallback p { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-panel-fallback { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 8px 4px; }
+
+/* -- Phone ------------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  [data-app-mode="bots"] .view.bots-home-view { padding: calc(20px + var(--mobile-safe-top, 0px)) 16px calc(24px + var(--ms-tabbar-space, 0px)); }
+  [data-app-mode="bots"] .bots-grid { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-bot-card { min-height: 0; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 14px; gap: 4px 12px; }
+  [data-app-mode="bots"] .bots-bot-card-top { width: auto; margin: 0; }
+  [data-app-mode="bots"] .bots-bot-card-name { flex: 1; min-width: 0; }
+  [data-app-mode="bots"] .bots-bot-card-job, [data-app-mode="bots"] .bots-bot-card-status { flex-basis: 100%; margin: 0; padding: 0; }
+  [data-app-mode="bots"] .bots-new-card { flex-direction: row; justify-content: center; }
+  [data-app-mode="bots"] .bots-home-actions { width: 100%; }
+  [data-app-mode="bots"] .bots-home-actions .bots-btn { flex: 1; min-height: 44px; }
+
+  [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
+  [data-app-mode="bots"] .bots-shell-header { padding: calc(8px + var(--mobile-safe-top, 0px)) 12px 8px; }
+  [data-app-mode="bots"] .bots-head-back { display: grid; width: 44px; height: 44px; margin-left: -8px; }
+  [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; }
+  [data-app-mode="bots"] .bots-head-status { display: none; }
+  [data-app-mode="bots"] .bots-head-convos { width: 44px; height: 44px; }
+  [data-app-mode="bots"] .bots-convos { top: calc(60px + var(--mobile-safe-top, 0px)); right: 12px; }
+  [data-app-mode="bots"] .bots-chat-host .side-messages { padding: 8px 12px 12px; }
+  [data-app-mode="bots"] .bots-chat-host .agent-composer-row { padding: 6px 12px 12px; }
+  /* The panel covers the page; the tab bar steps aside (mobileTabBar.js FULLSCREEN). */
+  [data-app-mode="bots"] .bots-panel-aside, [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] {
+    position: fixed; inset: 0; z-index: 60; width: auto; height: auto; border-left: 0; background: var(--bots-app);
+    padding-top: var(--mobile-safe-top, 0px);
+  }
+  [data-app-mode="bots"] .bots-panel-close { width: 44px; height: 44px; }
+}

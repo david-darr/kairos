@@ -433,8 +433,8 @@ async function run(ctx) {
   const openSheet = async () => { await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
   await navigate('home'); await delay(400); await openSheet();
   let modes = await modeState();
-  eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview'], ['true', 'false'], [0, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
-  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 0, 'Each mode keeps its one-line description for assistive technology; the MoreSheet board shows only the two names: ' + JSON.stringify(modes));
+  eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview', 'Bots Preview'], ['true', 'false', 'false'], [0, -1, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
+  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 0, 'Each mode keeps its one-line description for assistive technology; the MoreSheet board shows only the three names: ' + JSON.stringify(modes));
   ok(modes.sizes.every(Boolean) && modes.aboveTabs && modes.thumb, 'Mode options are 44px, sit at the top of the sheet, and the thumb marks Kairos: ' + JSON.stringify(modes));
   ok(!modes.readout, 'The temporary Safari readout is gone from the sheet');
   eq(await small('.ms-tab-sheet[open] .ms-mode-switch button'), [], 'Mode switch has no control under 44px');
@@ -447,15 +447,18 @@ async function run(ctx) {
   await press('ArrowLeft');
   ok(await js("document.activeElement.dataset.mode === 'kairos'"), 'ArrowLeft returns focus to Kairos');
   await press('End');
+  ok(await js("document.activeElement.dataset.mode === 'bots' && document.activeElement.tabIndex === 0 && document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.ms-tab-sheet[open]')"), 'End moves focus to Bots without switching');
+  await press('ArrowLeft');
+  ok(await js("document.activeElement.dataset.mode === 'forge'"), 'ArrowLeft from Bots returns focus to Forge');
   // Space activates the focused option (with its text, so the browser treats it as a real key press).
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
   await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
   await waitFor("document.documentElement.dataset.appMode === 'forge' && !document.querySelector('.ms-tab-sheet[open]') && !!document.querySelector('.mf-dashboard')");
-  ok(await js("document.getElementById('view-content').dataset.view === 'forgeHome' && !document.querySelector('.mf-project')"), 'End then Space on Forge switches modes and lands on the Forge Home overview');
+  ok(await js("document.getElementById('view-content').dataset.view === 'forgeHome' && !document.querySelector('.mf-project')"), 'Space on the focused Forge switches modes and lands on the Forge Home overview');
   await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
   await openSheet();
   modes = await modeState();
-  eq([modes.checked, modes.tabs, modes.mode], [['false', 'true'], [-1, 0], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
+  eq([modes.checked, modes.tabs, modes.mode], [['false', 'true', 'false'], [-1, 0, -1], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
   ok(modes.caption.length === 0 && modes.described[1].length > 10 && modes.thumb && modes.sizes.every(Boolean), 'Forge keeps its description for assistive technology and the thumb sits on Forge: ' + JSON.stringify(modes));
   await shot('sheet-mode-forge');
   await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");

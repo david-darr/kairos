@@ -136,7 +136,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await click('#mf-tab-0'); await delay(100);
   await barItem('more');
   await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
-  ok(await js("!!document.querySelector('.ms-sheet-projects') && document.querySelectorAll('.ms-mode-row button').length === 2 && !document.querySelector('.ms-tab-sheet .ms-tab-tile')"), 'More retains projects and both workspace modes, with no tab the bar already has');
+  ok(await js("!!document.querySelector('.ms-sheet-projects') && document.querySelectorAll('.ms-mode-row button').length === 3 && !document.querySelector('.ms-tab-sheet .ms-tab-tile')"), 'More retains projects and all three workspace modes, with no tab the bar already has');
   await js("document.querySelector('.ms-tab-sheet').close()");
   await barItem('forgeHome');
   await waitFor("!!document.querySelector('.mf-dashboard') && !document.querySelector('.mf-project')");

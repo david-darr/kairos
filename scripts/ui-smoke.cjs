@@ -718,7 +718,7 @@ app.whenReady().then(async () => {
         await navigate('home');
         await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
         await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
-        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview', 'phone keeps both mode controls');
+        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview,Bots Preview', 'phone keeps all three mode controls');
         await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
         demoState.isAdmin = false;
         await win.loadURL(base);
@@ -1058,6 +1058,10 @@ app.whenReady().then(async () => {
       await navigate('home');
       if (label === 'desktop') {
         await js("document.querySelector('#sidebar-toggle').click()"); await delay(350);
+        // The collapsed button steps Kairos, Bots, Forge, back to Kairos.
+        await js("document.querySelector('.forge-mode-rail').click()");
+        await waitFor("document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-home')");
+        assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Forge Preview');
         await js("document.querySelector('.forge-mode-rail').click()");
         await waitFor("!!document.querySelector('.forge-home') && document.querySelectorAll('#nav [data-tab]').length === 1");
         assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Kairos');
@@ -1068,7 +1072,7 @@ app.whenReady().then(async () => {
       } else {
         // Saved desktop collapse does not affect phone mode controls.
         await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await delay(300);
-        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview');
+        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview,Bots Preview');
         await capture('mobile-forge-switch-collapsed');
         await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('.ms-tab-sheet[open]')");
         await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");

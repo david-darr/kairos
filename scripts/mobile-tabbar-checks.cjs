@@ -193,7 +193,7 @@ module.exports = async function tabBarChecks(c) {
   const rest = more.nav.filter(t => !['home', 'chat', 'agents', 'calendar'].includes(t));
   eq(more.groups.flatMap(g => g[1]), rest, 'More holds every other tab, in sidebar order: ' + JSON.stringify(more.groups));
   eq(more.groups.map(g => g[0]), ['Workspace', 'Intelligence'], 'Grouped as the workspace sheet grouped them');
-  ok(more.mode && more.modeFirst, 'The Kairos / Forge switch sits at the top of More');
+  ok(more.mode && more.modeFirst, 'The Kairos / Forge / Bots switch sits at the top of More');
   ok(more.profile && more.profile.name === more.account && more.profile.initial === more.avatar && more.profile.popup === 'dialog', 'Profile shows the account initial and name and announces its dialog: ' + JSON.stringify(more.profile));
   eq(more.settings, 'Settings', 'Settings has its own row with its icon');
   ok(more.activity >= 1, 'Work in progress is listed in More');

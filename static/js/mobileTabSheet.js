@@ -12,7 +12,7 @@ import { ICON as KAIROS_MARK } from './brand.js';
 // the account and Settings. It replaced the avatar's workspace sheet.
 let sheet, opener;
 // The tabs the bar itself shows; More lists the rest.
-const ON_BAR = new Set(['home', 'chat', 'agents', 'calendar']);
+const ON_BAR = new Set(['home', 'chat', 'agents', 'calendar', 'botsHome']);
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
 const setExpanded = value => { if (opener?.dataset?.tabbar === 'more') opener.setAttribute('aria-expanded', String(value)); };
 export function closeMoreSheet() {
@@ -47,9 +47,9 @@ export function openMoreSheet(from) {
   const groups = document.createElement('nav'); groups.setAttribute('aria-label', 'Tabs');
   const sources = [...document.querySelectorAll('#nav .nav-item')];
   const grids = new Map();
-  // Kairos's bar tabs, and Forge's only tab (Forge Home), are on the bar already.
-  const forge = document.documentElement.dataset.appMode === 'forge';
-  const listed = sources.filter(n => !['design', 'designs'].includes(n.dataset.tab) && !(forge || ON_BAR.has(n.dataset.tab)));
+  // Kairos's bar tabs, and the only tab of Forge (Forge Home) and of Bots (Bots), are on the bar already.
+  const single = ['forge', 'bots'].includes(document.documentElement.dataset.appMode);
+  const listed = sources.filter(n => !['design', 'designs'].includes(n.dataset.tab) && !(single || ON_BAR.has(n.dataset.tab)));
   for (const group of sidebarLayout(listed.map(n => n.dataset.tab))) {
     if (!group.ids.length) continue;
     const section = document.createElement('section'); section.className = 'ms-tab-group'; section.dataset.group = group.id;
@@ -132,21 +132,22 @@ export function openMoreSheet(from) {
 }
 
 // The app mode switch at the top of the More sheet: one segmented radio group,
-// Kairos and Forge Preview, each with its mark and a one-line description.
-// It delegates to the sidebar's own mode buttons, so Kairos still lands on
-// the dashboard and Forge on the Forge Home overview. Arrow keys move focus
+// Kairos, Forge Preview and Bots Preview, each with its mark and a one-line
+// description. It delegates to the sidebar's own mode buttons, so Kairos still lands
+// on the dashboard, Forge on the Forge Home overview and Bots on the roster. Arrow keys move focus
 // only (manual activation): Space or Enter switches, because switching
 // closes the sheet and changes the whole app.
 const MODES = {
   kairos: { name: 'Kairos', mark: () => KAIROS_MARK, about: 'Your assistant, chats and everyday tabs' },
   forge: { name: 'Forge', badge: 'Preview', mark: () => ICONS.code, about: 'Coding agents working across your projects' },
+  bots: { name: 'Bots', badge: 'Preview', mark: () => ICONS.agents, about: 'Your bots, their chats and settings' },
 };
 function modeSwitch() {
   const row = document.createElement('section'); row.className = 'ms-mode-row';
   const sources = [...document.querySelectorAll('#forge-mode-switch [data-mode]')].filter(source => MODES[source.dataset.mode]);
   row.hidden = sources.length < 2;
   if (row.hidden) return row;
-  const active = document.documentElement.dataset.appMode === 'forge' ? 'forge' : 'kairos';
+  const active = MODES[document.documentElement.dataset.appMode] ? document.documentElement.dataset.appMode : 'kairos';
   const group = document.createElement('div'); group.className = 'ms-mode-switch';
   group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', 'App mode'); group.dataset.active = active;
   const thumb = document.createElement('span'); thumb.className = 'ms-mode-thumb'; thumb.setAttribute('aria-hidden', 'true'); group.append(thumb);

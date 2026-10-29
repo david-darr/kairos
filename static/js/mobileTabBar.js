@@ -15,14 +15,17 @@ import { badgeCounts } from './mobileActivity.js';
 // covers the page on a phone; the page is a stacking context, so it cannot
 // rise above the bar and the bar steps aside instead.
 const FULLSCREEN = [
-  '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel',
+  '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside',
 ].join(', ');
 const SUBPAGE = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',
-  '.agents-workspace.has-conversation', '.library-editor', '.vault-phone-detail',
+  '.agents-workspace.has-conversation', '.library-editor', '.vault-phone-detail', '.bots-shell',
 ].join(', ');
 const nav = id => document.querySelector(`#nav .nav-item[data-tab="${id}"]`);
 const forge = () => document.documentElement.dataset.appMode === 'forge';
+const bots = () => document.documentElement.dataset.appMode === 'bots';
+// The mode the bar is showing; each mode has its own items (Kairos, Forge, Bots).
+const modeKey = () => forge() ? 'forge' : bots() ? 'bots' : 'kairos';
 const pagerTab = index => document.getElementById(`mf-tab-${index}`);
 // Board glyphs are local to the phone shell; desktop and Classic keep their icons.
 const shellIcon = (name) => {
@@ -59,6 +62,11 @@ const FORGE = [
   { id: 'sessions', label: 'Sessions', icon: 'sessions', source: 'forgeHome',
     open: () => pagerTab(1)?.isConnected ? pagerTab(1).click() : go('forgeHome', { projectId: rememberedProject(), mobilePage: 1 }) },
 ];
+// Bots mode (Agents 3.0 Phase 0): one tab, the roster; a bot's page sits under it.
+const BOTS = [
+  { id: 'botsHome', label: 'Bots', icon: 'agents', source: 'botsHome', badge: 'bots' },
+];
+const ITEMS = { kairos: KAIROS, forge: FORGE, bots: BOTS };
 
 let bar, glass, more, current = 'home', frame = 0, signature = '';
 
@@ -72,6 +80,7 @@ function selection() {
     // A Forge view still loading keeps the item it was opened from.
     return view === 'forgeHome' ? current : 'more';
   }
+  if (bots()) return view === 'botsHome' || view === 'botsShell' ? 'botsHome' : 'more';
   return { home: 'home', mobileLaunch: 'chats', chat: 'chats', agents: 'agents', calendar: 'calendar' }[view] || 'more';
 }
 
@@ -82,7 +91,7 @@ function hiddenNow() {
 }
 
 function build() {
-  const items = (forge() ? FORGE : KAIROS).filter(item => nav(item.source));
+  const items = ITEMS[modeKey()].filter(item => nav(item.source));
   const nodes = items.map(item => {
     const node = document.createElement('button'); node.type = 'button'; node.className = 'ms-tabbar-item'; node.dataset.tabbar = item.id;
     node.innerHTML = `${shellIcon(item.icon)}<span class="ms-tabbar-label"></span>`;
@@ -125,6 +134,9 @@ function paintBadges() {
     } else if (node.dataset.badge === 'agents') {
       const text = nav('agents')?.querySelector('.nav-badge')?.textContent.trim() || '';
       count = text ? text : 0; spoken = text ? `${text} waiting on you` : '';
+    } else if (node.dataset.badge === 'bots') {
+      const text = nav('botsHome')?.querySelector('.nav-badge')?.textContent.trim() || '';
+      count = text ? text : 0; spoken = text ? `${text} waiting on you` : '';
     }
     let badge = node.querySelector(':scope > .ms-tabbar-badge');
     if (count && !badge) { badge = document.createElement('span'); badge.className = 'ms-tabbar-badge'; badge.setAttribute('aria-hidden', 'true'); node.append(badge); }
@@ -136,8 +148,8 @@ function paintBadges() {
 function update() {
   frame = 0;
   if (!bar) return;
-  const mode = forge() ? 'forge' : 'kairos';
-  const items = (forge() ? FORGE : KAIROS).filter(item => nav(item.source)).map(item => item.id).join();
+  const mode = modeKey();
+  const items = ITEMS[mode].filter(item => nav(item.source)).map(item => item.id).join();
   if (`${mode}:${items}` !== signature) { signature = `${mode}:${items}`; bar.dataset.mode = mode; build(); }
   const hide = hiddenNow();
   const on = mobileOn();
