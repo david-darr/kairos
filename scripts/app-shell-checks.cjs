@@ -173,7 +173,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
     ['?newchat=1', "document.querySelector('#rd-all-tabs .nav-item[data-tab=chat]')?.classList.contains('active')"],
     ['?view=not-a-tab', "document.querySelector('#sidebar .nav-item[data-tab=home]')?.classList.contains('active')"],
     // Notification links: a bot opens that bot, a chat opens that chat, anything malformed falls back to Home.
-    ['?agent=a1', "document.querySelector('#sidebar .nav-item[data-tab=agents]')?.classList.contains('active') && !!document.querySelector('.agent-memory')"],
+    ['?agent=a1', "document.documentElement.dataset.appMode === 'bots' && document.documentElement.dataset.botsAgent === 'a1' && !!document.querySelector('.bots-shell[data-agent-id=\"a1\"]')"],
     ['?chat=abcdef123456', "!!document.querySelector('#chat-messages[data-session-id=\"abcdef123456\"]')"],
     ['?chat=not-a-chat-id', "document.querySelector('#sidebar .nav-item[data-tab=home]')?.classList.contains('active')"],
   ]) {

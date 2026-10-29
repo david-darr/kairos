@@ -12,6 +12,7 @@ const check = (name, fn) => { fn(); passed.push(name); };
 
 (async () => {
   const M = await load('js/appModes.js');
+  const N = await load('js/botsNavigation.js');
 
   check('there are three modes, in the switch order', () => {
     assert.deepEqual(M.MODES, ['kairos', 'forge', 'bots']);
@@ -47,9 +48,19 @@ const check = (name, fn) => { fn(); passed.push(name); };
     }
   });
 
-  check('the legacy agents tab stays a Kairos tab (Phase 0 leaves it alone)', () => {
+  check('the retired agents tab is no Bots tab: app.js sends its links to Bots before the mode is worked out', () => {
+    // modeForTab never sees 'agents' in the app (botsNavigation.js maps it first); a stray one stays Kairos.
     assert.equal(M.modeForTab('agents'), 'kairos');
     assert.ok(!M.BOTS_NAV.some(item => item.id === 'agents'));
+    assert.ok(!M.BOTS_NAV.concat(M.FORGE_NAV).some(item => item.label === 'Agents'));
+    assert.ok(!Object.values(M.TAB_LABELS).includes('Agents'));
+  });
+
+  check('every Bots destination the navigation boundary can produce is a Bots tab', () => {
+    for (const target of [N.normalizeBotsTarget('agents'), N.normalizeBotsTarget('agents', { agentId: 'a1' }), N.sessionTarget({ id: 's1', agent_id: 'a1' })]) {
+      assert.equal(M.modeForTab(target.tab), 'bots', JSON.stringify(target));
+    }
+    assert.equal(M.modeForTab(N.normalizeBotsTarget('agents', { team: 's1' }).tab), 'kairos', 'Swarm is not Bots');
   });
 
   check('the nav lists: one item each, Bots on the agents glyph', () => {

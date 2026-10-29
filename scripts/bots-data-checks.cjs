@@ -1,5 +1,5 @@
-// Bots redesign, Phase 0 unit U1 (2026-10-28): the older Agents tab still works against records that carry the
-// new Bots fields. Run: node scripts/run-electron-test.cjs scripts/ui-smoke.cjs --bots-data-only
+// Bots redesign, Phase 0 unit U1 (2026-10-28), migrated for Phase 1: the API aliases keep working against records that
+// carry the new Bots fields, and the retired Agents tab's links land in Bots. Run: node scripts/run-electron-test.cjs scripts/ui-smoke.cjs --bots-data-only
 // The Bots fixture backend (scripts/fixtures/bots-core-backend.cjs) answers /api/agents* while demoState.botsLive is
 // set: a record with the new fields (section, place, hidden, thread data), an archived bot, and the real create route.
 const assert = require('node:assert/strict');
@@ -28,30 +28,29 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.ok(headers.length >= 2 && headers.every(h => h.thread && typeof h.thread === 'object'), 'the session listing carries the thread record');
     assert.equal(headers.filter(h => h.thread.main).length, 1, 'one main thread');
 
-    // The older Agents tab renders every bot, the archived one included, from those records.
+    // The retired Agents tab's link lands on the Bots roster, which shows every bot: the visible ones as cards,
+    // the archived one behind Archived (it is still returned, never lost).
     await navigate('agents');
-    await waitFor("[...document.querySelectorAll('.agents-rail-item')].some(n => n.dataset.search.includes('scout'))");
-    assert.ok(await js("[...document.querySelectorAll('.agents-rail-item')].some(n => n.dataset.search.includes('archivist'))"), 'the older tab loses no bot to Archive');
-    await capture?.('desktop-bots-data-legacy-agents');
+    await waitFor("document.getElementById('view-content').dataset.view === 'botsHome' && !!document.querySelector('.bots-bot-card[data-agent-id=a1]')");
+    assert.equal(await js("document.documentElement.dataset.appMode"), 'bots', 'the old link opens Bots');
+    assert.equal(await js("!!document.querySelector('.bots-bot-card[data-agent-id=a2]')"), false, 'the archived bot is not a card');
+    assert.equal(await js("document.querySelector('.bots-home-actions .bots-btn:nth-child(2)').hidden"), false, 'Archived is offered because a bot is archived');
+    await capture?.('desktop-bots-data-agents-link');
 
-    // Its create dialog still posts, and the route accepts it against the new record.
+    // The creation route still takes the older body (a name and standing text) and applies the new record's fields.
     const existingIds = new Set(listed.map(a => a.id));
     const before = writes.length;
-    await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
-    await waitFor("!!document.querySelector('.agent-create-dialog')");
-    await fill('.agent-create-dialog [aria-label="Bot name"]', 'Legacy Made');
-    await fill('.agent-create-dialog [aria-label=Soul]', 'Standing text from the older dialog');
-    await js("document.querySelector('.agent-create-footer .btn.primary').click()");
-    await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
-    for (let i = 0; i < 60 && !writes.slice(before).some(w => w.method === 'POST' && w.path === '/api/agents' && w.status); i++) await delay(50);
-    const post = writes.slice(before).find(w => w.method === 'POST' && w.path === '/api/agents');
-    assert.ok(post, 'the older dialog posts a new bot');
-    assert.equal(post.status, 200, 'and the route accepts it');
-    assert.equal(JSON.parse(post.body).name, 'Legacy Made');
+    const post = await call('/api/agents', 'POST', { name: 'Legacy Made', soul: 'Standing text from the older dialog' });
+    assert.equal(post.status, 200, 'the route accepts the older body');
     const made = (await call('/api/agents', 'GET')).body.find(a => !existingIds.has(a.id) && a.name === 'Legacy Made');
     assert.ok(made, 'the new bot is in the list');
+    assert.ok(writes.slice(before).some(w => w.method === 'POST' && w.path === '/api/agents' && w.status === 200));
     assert.deepEqual([made.hidden, made.approval_mode, made.thread_limit, made.soul], [false, 'full', 3, 'Standing text from the older dialog'], 'it gets the new fields and its standing instructions in one field');
-    assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'Legacy Made', 'its profile opens');
+    // An old profile link opens the panel on that bot.
+    assert.equal((await call(`/api/agents/${made.id}/threads`, 'POST', { title: 'First' })).status, 200, 'a bot opens on a conversation');
+    await navigate('agents', { agentId: made.id, profile: true });
+    await waitFor(`document.documentElement.dataset.botsAgent === ${JSON.stringify(made.id)} && !!document.querySelector('#bots-panel')`);
+    await js("import('/static/js/botsPanelHost.js').then(h => h.closeBotSettings())");
 
     // The older profile's way of saving "How it should work" now changes the field the model reads.
     const saved = await call('/api/agents/' + made.id, 'PATCH', { instructions: 'Edited the old way' });

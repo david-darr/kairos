@@ -19,7 +19,7 @@ const FULLSCREEN = [
 ].join(', ');
 const SUBPAGE = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',
-  '.agents-workspace.has-conversation', '.library-editor', '.vault-phone-detail', '.bots-shell',
+  '.library-editor', '.vault-phone-detail', '.bots-shell',
 ].join(', ');
 const nav = id => document.querySelector(`#nav .nav-item[data-tab="${id}"]`);
 const forge = () => document.documentElement.dataset.appMode === 'forge';
@@ -52,7 +52,6 @@ const KAIROS = [
       else if (document.getElementById('ms-tab-1')?.isConnected && document.documentElement.dataset.view === 'mobileLaunch') document.getElementById('ms-tab-1').click();
       else go('chat', { mobilePage: chatPage() });
     } },
-  { id: 'agents', label: 'Agents', icon: 'agents', source: 'agents', badge: 'agents' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar', source: 'calendar' },
 ];
 const FORGE = [
@@ -81,7 +80,7 @@ function selection() {
     return view === 'forgeHome' ? current : 'more';
   }
   if (bots()) return view === 'botsHome' || view === 'botsShell' ? 'botsHome' : 'more';
-  return { home: 'home', mobileLaunch: 'chats', chat: 'chats', agents: 'agents', calendar: 'calendar' }[view] || 'more';
+  return { home: 'home', mobileLaunch: 'chats', chat: 'chats', calendar: 'calendar' }[view] || 'more';
 }
 
 function hiddenNow() {
@@ -131,9 +130,6 @@ function paintBadges() {
     if (node.dataset.badge === 'activity') {
       count = need || live;
       spoken = need ? `${need} need you` : live ? `${live} working` : '';
-    } else if (node.dataset.badge === 'agents') {
-      const text = nav('agents')?.querySelector('.nav-badge')?.textContent.trim() || '';
-      count = text ? text : 0; spoken = text ? `${text} waiting on you` : '';
     } else if (node.dataset.badge === 'bots') {
       const text = nav('botsHome')?.querySelector('.nav-badge')?.textContent.trim() || '';
       count = text ? text : 0; spoken = text ? `${text} waiting on you` : '';

@@ -22,6 +22,7 @@ import { hasLeaveGuard, canLeaveView } from './leaveGuard.js';
 import { mountForgeRail } from './forgeRail.js';
 import { mountBotsRail } from './botsRail.js';
 import { MODES, FORGE_NAV, BOTS_NAV, MODE_SWITCH, MODE_BADGES, TAB_LABELS, restoreMode, modeForTab, homeTabFor, railLabel, nextRailMode } from './appModes.js';
+import { normalizeBotsTarget, notificationTarget, sessionTarget } from './botsNavigation.js';
 import { createWatcher as watchBotInbox, prefs as botNotifyPrefs } from './botNotifications.js';
 import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
 import { mascotPng } from './mascot.js';
@@ -43,12 +44,11 @@ if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform || "")) 
 // ask, 2026-08-31) — it's now the sidebar-footer user card instead of a
 // top-level nav item, matching the Odysseus screenshot's bottom-left
 // avatar+username+gear pattern.
-// The order and groups shown come from layout.js (Settings > Layout); Agents
-// sits in the top group with Home and Chats by default (David, 2026-10-07).
+// The order and groups shown come from layout.js (Settings > Layout). The old
+// Agents tab is retired: its links still work, but they open Bots (botsNavigation.js).
 const NAV = [
   { id: "home", label: "Home", icon: "home" },
   { id: "chat", label: "Chats", icon: "chats" },
-  { id: "agents", label: "Agents", icon: "agents" },
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "library", label: "Library", icon: "library" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
@@ -138,7 +138,18 @@ export function switchTab(tabId, options = {}) {
   return switchTabNow(tabId, options);
 }
 
+// Old Agents links, notifications and chips land on their Bots destination before
+// the mode and the phone route are worked out (Phase 1 design, section 7). The
+// normalizer keeps only the fields it knows; the panel page and card ride along.
+function routeLegacy(tabId, options = {}) {
+  if (tabId !== 'agents') return { tab: tabId, options };
+  const { tab, ...rest } = normalizeBotsTarget('agents', options);
+  for (const key of ['panelPage', 'panelCard']) if (tab === 'botsShell' && typeof options[key] === 'string') rest[key] = options[key];
+  return { tab, options: rest };
+}
+
 function switchTabNow(tabId, options) {
+  ({ tab: tabId, options } = routeLegacy(tabId, options));
   // Designs live in Library > Designs (David, 2026-10-22): the old Design tab and its links open there.
   if (tabId === 'design') { options = { ...options, section: 'designs' }; tabId = 'library'; }
   ({ tab: tabId, options } = phoneRoute(tabId, options));
@@ -189,7 +200,7 @@ async function performSwitch(tabId, options = {}) {
   if (activeUnmount) { activeUnmount(); activeUnmount = null; }
 
   activeTab = tabId;
-  activeAgentId = tabId === 'agents' || tabId === 'botsShell' ? (options.agentId || null) : null;
+  activeAgentId = tabId === 'botsShell' ? (options.agentId || null) : null;
   document.documentElement.dataset.view = tabId;
   const titlebarTab = document.getElementById("titlebar-tab");
   if (titlebarTab) titlebarTab.textContent = TAB_LABELS[tabId] || NAV.find((item) => item.id === tabId)?.label || document.querySelector(`.nav-item[data-tab="${tabId}"]`)?.textContent?.trim() || "";
@@ -261,8 +272,8 @@ function setupMobileMenu() {
   syncMobileMenu();
 }
 
-// How many agent inbox items and results wait on the person: a count on the
-// Agents nav item, refreshed every 30 seconds while the page is visible.
+// How many bot inbox items and results wait on the person: a count on the
+// Bots nav item, refreshed every 30 seconds while the page is visible.
 let agentBadgeTimer = null;
 // Native notifications for new bot items, one per bot per poll (botNotifications.js).
 // Electron and browsers both support the Notification API; in Electron no
@@ -274,8 +285,7 @@ const botInboxWatcher = watchBotInbox({
   names: async () => { notifiedAgents = await api('/api/agents').catch(() => []); return Object.fromEntries(notifiedAgents.map(agent => [agent.id, agent.name])); },
   focusedAgentId: () => {
     if (!document.hasFocus()) return null;
-    const messenger = document.querySelector('.agents-messenger');
-    return messenger ? messenger.dataset.agentId || null : activeAgentId;
+    return activeAgentId;
   },
   show: async ({ agentId, kind, title, body }) => {
     if (!('Notification' in window) || Notification.permission === 'denied') return;
@@ -285,7 +295,7 @@ const botInboxWatcher = watchBotInbox({
       const note = new Notification(title, { body, tag: `kairos-bot-${agentId}`, silent: false, ...(icon ? { icon } : {}) });
       note.onclick = () => {
         window.jarvis?.showWindow?.(); window.focus();
-        document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId } }));
+        document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'botsShell', agentId } }));
         note.close();
       };
     };
@@ -294,6 +304,15 @@ const botInboxWatcher = watchBotInbox({
   },
 });
 
+// The Bots attention host (botsAttentionHost.js, unit U5) owns notifications once it is mounted:
+// it is imported lazily, so a tree without it keeps the older inbox poll below.
+let attentionHost = null;
+async function mountAttention() {
+  if (attentionHost) return;
+  attentionHost = import('./botsAttentionHost.js').then(module => { module.mountAttentionHost({ notify: true }); return true; }).catch(() => false);
+  await attentionHost;
+}
+
 async function refreshAgentBadge() {
   clearTimeout(agentBadgeTimer);
   agentBadgeTimer = setTimeout(refreshAgentBadge, 30000);
@@ -301,12 +320,12 @@ async function refreshAgentBadge() {
   // keeps running then unless they are turned off (2026-10-14).
   if (document.hidden && !botNotifyPrefs().enabled) return;
   const inbox = await api("/api/agents/inbox").catch(() => null);
-  if (inbox) botInboxWatcher(inbox).catch(() => {});
+  // Once the attention host is notifying, the older watcher stays quiet so nothing alerts twice.
+  if (inbox && (!attentionHost || await attentionHost.catch(() => false) !== true)) botInboxWatcher(inbox).catch(() => {});
   if (!inbox) return;
-  // The sidebar's Agents button, and on desktop its pin and its All tabs row.
-  // In Bots mode the Bots home button carries the same count.
-  for (const item of document.querySelectorAll('#nav .nav-item[data-tab="agents"], #rd-all-tabs .nav-item[data-tab="agents"], #nav .nav-item[data-tab="botsHome"]')) {
-    const name = item.dataset.tab === 'botsHome' ? 'Bots' : 'Agents';
+  // In Bots mode the Bots home button carries the count of what waits on the person.
+  for (const item of document.querySelectorAll('#nav .nav-item[data-tab="botsHome"]')) {
+    const name = 'Bots';
     let badge = item.querySelector(".nav-badge");
     if (!inbox.count) { badge?.remove(); item.setAttribute("aria-label", name); continue; }
     if (!badge) item.append(badge = Object.assign(document.createElement("span"), { className: "nav-badge" }));
@@ -323,6 +342,7 @@ async function buildSidebar() {
   const identity = await api('/api/auth/status').catch(() => null);
   forgeAdmin = !!identity?.is_admin;
   if (!forgeAdmin) rememberMode('kairos');
+  else mountAttention();
   document.getElementById('forge-mode-switch')?.remove();
   if (forgeAdmin) {
     const control = document.createElement('div');
@@ -625,7 +645,7 @@ async function startApp() {
   // The notch's Open chat and its agent chips.
   window.jarvis?.usageOverlay?.onOpen?.(({ tab, id }) => {
     if (tab === 'chat') floatingProgress.openSession(id);
-    else document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId: id } }));
+    else document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'botsShell', agentId: id } }));
   });
   // Adding/removing a tab in the Tool Store rebuilds the nav so it
   // appears immediately instead of after a reload.
@@ -642,20 +662,24 @@ async function startApp() {
   await chatStream.connect();
   notificationRegistration().catch(() => {});
   const openNotificationChat = async url => {
-    const link = new URL(url, location.origin);
-    if (link.origin !== location.origin || link.pathname !== '/') return false;
-    // A bot notification opens that bot (2026-10-14).
-    const agentId = link.searchParams.get('agent');
-    if (/^[A-Za-z0-9_-]{1,64}$/.test(agentId || '')) {
-      await switchTab('agents', { agentId });
+    // A bot link opens that bot, and its conversation when it names one (2026-10-14);
+    // botsNavigation.js refuses another origin or a malformed id.
+    const target = notificationTarget(url, location.origin);
+    if (target && target.tab !== 'chat') {
+      const { tab, ...options } = target;
+      await switchTab(tab, options);
       history.replaceState(null, '', '/');
       return true;
     }
+    const link = new URL(url, location.origin);
+    if (link.origin !== location.origin || link.pathname !== '/') return false;
     const id = link.searchParams.get('chat');
     if (!/^[a-f0-9]{12}$/.test(id || '')) return false;
     try {
       const session = await api(`/api/sessions/${id}`);
-      await switchTab(session.forge ? 'forgeShell' : 'chat', { sessionId: id });
+      // A chat that belongs to a bot opens inside that bot, wherever the link came from.
+      const { tab, ...options } = session.agent_id || session.forge ? sessionTarget(session, id) : { tab: 'chat', sessionId: id };
+      await switchTab(tab, options);
       history.replaceState(null, '', '/');
       return true;
     } catch (_) { return false; }

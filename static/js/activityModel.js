@@ -1,5 +1,7 @@
 const initial = text => (String(text || "").trim()[0] || "K").toUpperCase();
 const clip = (text, max = 90) => { const t = String(text || "").replace(/\s+/g, " ").trim(); return t.length > max ? t.slice(0, max - 1) + "…" : t; };
+// Targets are Bots destinations (botsNavigation.js); this file stays import-free
+// because scripts/test_notch_shell.cjs evaluates it as plain text.
 export function collectActivity({ chats, remote, dismissed = new Set(), chatStream = {}, openSession = () => {}, go = () => {}, refresh = () => {} }) {
   const need = [], work = [];
   const names = new Map(remote.agents.map(agent => [agent.id, agent]));
@@ -24,13 +26,13 @@ export function collectActivity({ chats, remote, dismissed = new Set(), chatStre
     const name = agentName(item.agent_id), question = item.kind === "question";
     need.push({ key: `inbox:${item.id}`, kind: "agent", agent: names.get(item.agent_id), finished: !question, tint: agentTint(item.agent_id), initial: initial(name),
       title: question ? `${name} asked a question` : `${name} sent a report`, detail: clip(item.title),
-      action: question ? "Reply" : "Review", go: () => go({ tab: "agents", agentId: item.agent_id }) });
+      action: question ? "Reply" : "Review", go: () => go({ tab: "botsShell", agentId: item.agent_id, attention: "inbox", sourceId: item.id }) });
   }
   for (const card of remote.inbox.reviews) {
     const name = agentName(card.agent_id);
     need.push({ key: `review:${card.id}`, kind: "agent", agent: names.get(card.agent_id), finished: true, tint: agentTint(card.agent_id), initial: initial(name),
       title: `${name} has a result ready`, detail: clip(card.title || card.name || "Waiting for your review"),
-      action: "Review", go: () => go({ tab: "agents", agentId: card.agent_id }) });
+      action: "Review", go: () => go({ tab: "botsShell", agentId: card.agent_id, attention: "inbox", sourceId: card.id }) });
   }
   for (const pending of remote.pending) {
     need.push({ key: `pending:${pending.id}`, kind: "review", initial: initial(pending.trigger_name),
@@ -50,7 +52,7 @@ export function collectActivity({ chats, remote, dismissed = new Set(), chatStre
     work.push({ key: `working:${agent.id}`, kind: "agent", agent, agentId: agent.id, modelEndpointId: agent.endpoint_id,
       model: agent.model_override, needsYou: !!agent.activity?.waiting, tint: agent.color || "", initial: initial(agent.name),
       title: `${agent.name} is working`, detail: clip(agent.status_detail || "Working"), action: "View",
-      go: () => go({ tab: "agents", agentId: agent.id }) });
+      go: () => go({ tab: "botsShell", agentId: agent.id }) });
   }
   return { need, work };
 }

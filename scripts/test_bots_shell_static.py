@@ -3,8 +3,9 @@
 What these prove: every tab id the nav lists for Bots (and Forge) has a view
 module; every CSS `[data-app-mode=...]` value in the stylesheets is one of the
 three modes; Bots shell styles are scoped to Bots mode and use only tokens; the
-phone sheet and tab bar know all three modes; the legacy `agents` tab and its
-links are untouched (Phase 0 leaves them alone). No app or browser is started.
+phone sheet and tab bar know all three modes; the retired `agents` tab is out of
+navigation while its links still reach Bots (Phase 1, unit U4). No app or browser
+is started.
 Run: python scripts/test_bots_shell_static.py
 """
 import re
@@ -98,12 +99,35 @@ class BotsShellStaticTests(unittest.TestCase):
         self.assertIn("mountBotsRail", app)
         self.assertIn("botsRailCleanup", app)
 
-    def test_the_legacy_agents_tab_and_its_links_are_untouched(self):
+    def test_the_retired_agents_tab_is_out_of_navigation_but_its_links_still_arrive(self):
         app = text(JS / "app.js")
-        self.assertIn('{ id: "agents", label: "Agents", icon: "agents" }', app)
-        # Notification, notch and push links still open the legacy tab (Phase 0 design, 3.4).
-        self.assertGreaterEqual(app.count("tab: 'agents', agentId"), 2)
-        self.assertIn("switchTab('agents', { agentId })", app)
+        self.assertNotIn('{ id: "agents", label: "Agents", icon: "agents" }', app)
+        # One boundary maps every old link (botsNavigation.js); app.js applies it before the mode and phone route.
+        self.assertIn("normalizeBotsTarget('agents', options)", app)
+        self.assertIn("notificationTarget(url, location.origin)", app)
+        self.assertGreaterEqual(app.count("tab: 'botsShell', agentId"), 2, "desktop notification and notch chip open the bot directly")
+        self.assertNotIn("switchTab('agents'", app)
+
+    def test_bots_sidebar_styles_are_scoped_to_bots_mode_and_use_tokens(self):
+        css = strip_comments(text(CSS / "bots-sidebar.css"))
+        body = re.sub(r"@media[^{]*\{", "", css)
+        selectors = re.findall(r"(?:^|[};])\s*([^{};@][^{};]*)\{", body)
+        self.assertTrue(selectors)
+        for selector in selectors:
+            for part in re.split(r",(?![^(]*\))", selector):
+                self.assertIn('data-app-mode="bots"', part, f"unscoped selector {part.strip()!r}")
+        self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d", css), "a raw colour in bots-sidebar.css")
+        defined = set(re.findall(r"(--bots-[\w-]+)\s*:", text(CSS / "bots.css")))
+        used = set(re.findall(r"var\((--bots-[\w-]+)", css))
+        self.assertFalse(used - defined, f"undefined tokens: {sorted(used - defined)}")
+
+    def test_the_sidebar_loads_both_stylesheets_and_the_navigation_modules_are_pure(self):
+        rail = text(JS / "botsRail.js")
+        self.assertIn("/static/css/bots-sidebar.css", rail)
+        for name in ("botsNavigation.js", "botsSidebarModel.js"):
+            source = re.sub(r"^\s*//.*$", "", text(JS / name), flags=re.M)
+            self.assertIsNone(re.search(r"^import ", source, flags=re.M), f"{name} must stay import-free so Node and the notch can load it")
+            self.assertIsNone(re.search(r"\b(document|window|localStorage|fetch)\b", source), f"{name} touches the page")
 
     def test_phone_routing_needs_no_new_tab_id_rule(self):
         # phoneRoute leaves unknown tab ids alone, so botsHome and botsShell pass through unchanged.
@@ -112,7 +136,8 @@ class BotsShellStaticTests(unittest.TestCase):
         self.assertIn("return { tab, options };", route)
 
     def test_mode_copy_has_no_em_dash(self):
-        for name in ("appModes.js", "botsRail.js", "botsPanelHost.js", "views/botsHome.js", "views/botsShell.js"):
+        for name in ("appModes.js", "botsRail.js", "botsPanelHost.js", "views/botsHome.js", "views/botsShell.js",
+                     "botsNavigation.js", "botsSidebarModel.js", "botsThreadMenu.js", "views/agents.js", "agentCreation.js", "agentProfile.js"):
             self.assertNotIn("—", text(JS / name), name)
 
 

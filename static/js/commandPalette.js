@@ -92,6 +92,15 @@ async function buildCommands() {
     cmds.push({ label: `Go to ${item.label}`, hint: "tab", run: () => deps.switchTab(item.id) });
   }
   cmds.push({ label: "Open Settings", hint: "app", run: () => deps.openSettings() });
+  // Bots: the roster, then each visible bot (the list is admin-only and quietly empty otherwise).
+  const bots = await api("/api/agents").catch(() => []);
+  if (Array.isArray(bots) && bots.length) {
+    cmds.push({ label: "Go to Bots", hint: "tab", run: () => deps.switchTab("botsHome") });
+    for (const bot of bots.filter((b) => b && !b.hidden && b.id)) {
+      cmds.push({ label: `Open ${bot.name || "Bot"}`, hint: "bot", run: () => deps.switchTab("botsShell", { agentId: bot.id }) });
+      cmds.push({ label: `${bot.name || "Bot"} settings`, hint: "bot", run: () => deps.switchTab("botsShell", { agentId: bot.id, panel: "overview" }) });
+    }
+  }
 
   const tasks = await api("/api/tasks").catch(() => []);
   for (const t of tasks.filter((t) => t.enabled)) {
