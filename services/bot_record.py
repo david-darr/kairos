@@ -34,11 +34,10 @@ MAX_MEMORY_SEED_CHARS = 8000
 MAX_ROUTINE_TEMPLATES = 10
 MAX_FOLDERS = 100
 
-APPROVAL_MODES = ("ask", "auto", "full", "custom")
-# Phase 3 flips this one constant; until then the broker behaves as Full for
-# every bot surface and offering anything else would be a control that does
-# nothing (phase-0-design 2.5).
-ENFORCED_APPROVAL_MODES = ("full",)
+APPROVAL_MODES = ("ask", "edits", "auto", "full", "custom")
+# Phase 3 unit U1 flipped this constant: the broker now enforces every level (core/bot_policy.py), so a
+# choice is a control that works. Raising a level is not a plain write; see check_approval.
+ENFORCED_APPROVAL_MODES = APPROVAL_MODES
 CACHE_KEEP_WARM = ("follow", "on", "off")
 PLACES = ("auto", "computer", "browser", "off")
 OUTBOUND_POLICIES = ("ask", "allow")
@@ -70,7 +69,8 @@ class BotConflict(ValueError):
 
 
 class NotAvailableYet(BotConflict):
-    """A valid choice the app does not enforce yet (approval below Full)."""
+    """A valid choice the app cannot honour right now (for example a level that needs the desktop's
+    confirmation)."""
 
 
 class ConfiguredFailure(Exception):
@@ -190,11 +190,25 @@ def _choice(value, options: tuple, label: str) -> str:
 
 
 def check_approval(value, label: str = "approval_mode", allowed: tuple = APPROVAL_MODES) -> str:
-    """Known value, and one the app enforces today (Full only)."""
+    """A known level the app enforces. A new bot may start at any level except Custom, which needs the
+    desktop's confirmation; a conversation's level is checked against its bot when it is used (a
+    conversation may narrow its bot, and widens it only through a confirmed handshake)."""
     mode = _choice(value, allowed, label)
     if mode not in ENFORCED_APPROVAL_MODES:
-        raise NotAvailableYet(f"{label} {mode!r} is not available yet; bots run at Full for now")
+        raise NotAvailableYet(f"{label} {mode!r} is not available")
+    if label == "approval_mode":
+        _check_bot_level(None, mode)
     return mode
+
+
+def _check_bot_level(current: Optional[dict], mode: str) -> None:
+    """Refuse a plain write that would raise a bot's level (core/bot_policy.py): that takes the
+    desktop's confirmation. 409, like every refusal that is state rather than bad input."""
+    from core import bot_policy
+    try:
+        bot_policy.check_bot_change(current, mode)
+    except bot_policy.ElevationNeeded as error:
+        raise NotAvailableYet(str(error)) from error
 
 
 def _clean_section(value) -> Optional[str]:
@@ -335,7 +349,9 @@ def clean_field(key: str, value, current: Optional[dict] = None):
     if key == "thread_limit":
         return _whole(value, 1, 16, "thread_limit")
     if key == "approval_mode":
-        return check_approval(value)
+        mode = _choice(value, APPROVAL_MODES, "approval_mode")
+        _check_bot_level(current, mode)
+        return mode
     if key == "outbound":
         return _clean_outbound(value, (current or {}).get("outbound"))
     if key == "fallback":

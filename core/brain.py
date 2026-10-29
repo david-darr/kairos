@@ -199,6 +199,8 @@ class Brain:
         # A bot's third-party apps reach Claude only through a bot-scoped stdio proxy holding this
         # short-lived loopback capability, never upstream credentials (mcp_servers/bot_mcp_proxy.py).
         self._proxy_token: str | None = None
+        # tool_use_id -> (owner, invocation id) for calls that took a unit of the bot's send allowance.
+        self._allowances: dict = {}
         self._client: ClaudeSDKClient | None = None
         self.turn_taint = TurnTaint()
         self.pending_reference_taint = False
@@ -308,6 +310,10 @@ class Brain:
         # (or acceptEdits mode), Claude skips the callback entirely.
         allowed_tools = [tool for tool in allowed_tools
                          if tool in grants and tool not in disabled and tool not in ("Bash", "PowerShell")]
+        if self.agent_id:
+            # A bot's tools that change something are never pre-approved: the SDK skips can_use_tool for
+            # a pre-approved tool, and the approval level (core/bot_policy.py) must see every such call.
+            allowed_tools = [tool for tool in allowed_tools if tool_registry.read_tool(tool)]
         if self.read_only:
             disabled = [*disabled, 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']
             allowed_tools = [t for t in allowed_tools if tool_registry.read_tool(t)]
@@ -469,6 +475,12 @@ class Brain:
         return None if result.allowed else result.reason
 
     async def _hook_after_tool(self, input_data, tool_use_id, context):
+        held = self._allowances.pop(tool_use_id, None) if self.agent_id and tool_use_id else None
+        if self.agent_id:
+            from core import bot_policy
+            bot_policy.clear_inflight(self.agent_id)   # a finished call no longer covers a handler's inner check
+            if held is not None:
+                bot_policy.finish(held[0], self.agent_id, held[1], input_data.get("tool_response", ""))
         from services.hook_service import hook_service
         try:
             hook_service.after_tool(input_data.get("tool_name", ""), input_data.get("tool_input") or {},
@@ -516,6 +528,7 @@ class Brain:
         force_prompt = bool(self.turn_taint.tainted and (
             tool_name in ("Bash", "PowerShell") or user_tab_write
         ))
+        use_id = getattr(context, "tool_use_id", None)
         decision = await permissions.decide(
             surface=self.surface,
             tool=tool_name,
@@ -526,8 +539,13 @@ class Brain:
             title=getattr(context, "title", None) or getattr(context, "display_name", None) or tool_name,
             description=getattr(context, "description", None) or getattr(context, "decision_reason", None) or "",
             force_prompt=force_prompt,
+            bot_context=({"provider": "claude", "invocation_id": use_id, "cwd": self.cwd_override or self.vault_dir,
+                          "outer": tool_name.startswith(bot_tool_catalog.HIVE_PREFIX)} if self.agent_id else None),
         )
         if decision.behavior == "allow":
+            if decision.invocation_id and use_id:
+                # This call took a unit of the daily send allowance; the after-tool hook settles it.
+                self._allowances[use_id] = (decision.owner, decision.invocation_id)
             return PermissionResultAllow()
         # The reason goes into the transcript, so the model is told it was
         # refused and why rather than silently failing or trying again.

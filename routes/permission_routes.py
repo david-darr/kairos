@@ -54,8 +54,12 @@ async def answer(request_id: str, body: Answer, request: Request, user: str = De
         from core.auth import auth_manager
         if not auth_manager.is_admin(user):
             raise HTTPException(404, "request not found")
+    behavior = next((c["behavior"] for c in (pending.choices if pending else []) if c["id"] == body.choice), None)
     if not permissions.answer(request_id, body.choice, user):
         raise HTTPException(409, "That request is no longer waiting for an answer.")
+    if behavior:
+        permissions._card_settle(request_id, "allowed" if behavior == "allow" else "denied",
+                                 "Answered in another window.")
     chat_live.permission_answered(request_id)
     return {"status": "answered"}
 
@@ -91,5 +95,14 @@ async def respond(request_id: str, body: Response, user: str = Depends(require_u
     error = permissions.respond(request_id, answers=body.answers, skip=body.skip, user=user)
     if error:
         raise HTTPException(409, error)
+    permissions._card_settle(request_id, "skipped" if body.skip else "answered", "Answered in another window.")
     chat_live.permission_answered(request_id)
     return {"status": "skipped" if body.skip else "answered"}
+
+
+# -- bot approvals (Bots Phase 3 unit U1) -----------------------------------------------------------
+# The bot approval routes have complete absolute prefixes of their own. Their routes are added to this
+# router as they are, so nothing nests under /api/permissions.
+from routes import bot_approval_routes  # noqa: E402
+
+router.routes.extend(bot_approval_routes.router.routes)

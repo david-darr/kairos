@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld("jarvis", {
   // A desktop notification was clicked (Agents 2.0, 2026-10-14).
   showWindow: () => ipcRenderer.send("app:show"),
 
+  // Raising a bot's approval level: the desktop shell asks you in its own prompt (electron/bot-approvals.js).
+  botApprovals: { elevate: request => ipcRenderer.invoke("bot-approvals:elevate", request) },
+
   // Side browser (David's ask 2026-09-15). Controls only: nothing here can
   // read page content, and the main process re-validates every URL anyway
   // (electron/browser.js's safeUrl) rather than trusting this side.

@@ -201,12 +201,27 @@ class ExternalBrain:
                 return f"Tool arguments must be an object. Call {tool_search.DESCRIBE} to see its schema."
             if selected in self._mcp_tools:
                 return await self._call_mcp(selected, args["arguments"])
-            return await tool_registry.call(selected, args["arguments"], self._context(), tool_registry.OPENAI)
+            return await self._call_registry(selected, args["arguments"])
         if name in self._mcp_tools:
             return await self._call_mcp(name, args)
-        result = await tool_registry.call(name, args, self._context(), tool_registry.OPENAI)
+        result = await self._call_registry(name, args)
         if name == "design_create":
             self._offer_design_tools()
+        return result
+
+    async def _call_registry(self, name: str, args: dict):
+        """One of Kairos's own tools. A bot's call first passes its approval level (core/permissions.py's
+        gate): reads go straight through, anything that changes something asks or is allowed by the level,
+        and a send settles the daily allowance it took."""
+        context = self._context()
+        decision = None
+        if self.agent_id:
+            decision = await permissions.gate_bot_call(context, name, args, provider="openai")
+            if decision.behavior != "allow":
+                return f"Not run: {decision.reason}"
+        result = await tool_registry.call(name, args, context, tool_registry.OPENAI)
+        if decision is not None:
+            permissions.finish_bot_call(decision, self.agent_id, result.text if hasattr(result, "text") else result)
         return result
 
     def _offer_design_tools(self) -> None:

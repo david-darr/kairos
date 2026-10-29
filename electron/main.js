@@ -72,6 +72,9 @@ const UI_SECRET = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
 // process starts gets the token, and only this process can take its jobs.
 const designRender = require('./designRender');
 const RENDER_TOKEN = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
+// Raising a bot's approval level is confirmed here, never by the page (bot-approvals.js). Only a backend this
+// process starts is given the secret.
+const DESKTOP_SECRET = SHOULD_SPAWN_BACKEND ? createUiSecret() : null;
 
 let backendProcess = null;
 
@@ -227,7 +230,7 @@ function startBackend() {
       // JARVIS_INSTANCE tells the page which copy it is (the DEV badge).
       env: { ...process.env, JARVIS_DATA_DIR: path.join(app.getPath("userData"), "data"), JARVIS_UI_SECRET: UI_SECRET,
              APP_PORT: String(INSTANCE.port), JARVIS_INSTANCE: INSTANCE.name, KAIROS_VERSION: app.getVersion(),
-             KAIROS_RENDER_TOKEN: RENDER_TOKEN },
+             KAIROS_RENDER_TOKEN: RENDER_TOKEN, JARVIS_DESKTOP_SECRET: DESKTOP_SECRET },
     },
   );
   const proc = backendProcess;
@@ -550,6 +553,8 @@ async function createWindow() {
 // 2026-08-31) — same pattern as the skill-file picker above, just an
 // openDirectory dialog instead of openFile, and it returns a path rather
 // than file contents (core/vault.py reads the directory itself).
+require('./bot-approvals').install({ ipcMain, dialog, BrowserWindow, backendUrl: BACKEND_URL, secret: DESKTOP_SECRET, fromAppWindow });
+
 ipcMain.handle("pick-vault-folder", async () => {
   const result = await dialog.showOpenDialog({
     title: "Select Vault Folder",

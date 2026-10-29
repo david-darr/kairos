@@ -499,8 +499,12 @@ class CodexBrain:
         """Why this bot's tool limits cannot be held on this provider, or None (services/bot_grants.py)."""
         if not self.agent_id:
             return None
+        from core import bot_policy
         from services import bot_grants
-        return bot_grants.provider_refusal(bot_grants.Scope(self.agent_id, None, self.is_admin), self.GRANT_PROVIDER)
+        # The grants first, then the approval level: this provider runs its own shell and file tools,
+        # which cannot ask first, so a stricter level is refused before anything runs (never run as Full).
+        return (bot_grants.provider_refusal(bot_grants.Scope(self.agent_id, None, self.is_admin), self.GRANT_PROVIDER)
+                or bot_policy.provider_refusal(self.agent_id, self.session_id, self.GRANT_PROVIDER))
 
     async def _run_process(self, user_text: str):
         """One CLI invocation, shared by normal turns, answers and retries."""
