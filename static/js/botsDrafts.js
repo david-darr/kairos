@@ -22,10 +22,21 @@ const fields = value => {
   out.mode = out.mode === 'goal' ? 'goal' : 'chat';
   return out;
 };
+// What rides with a send but is not typed (Phase 6): the data result the person is looking at and up to five
+// parts of an app they pointed at. Frozen into the payload with the text, so a retry sends the same.
+const extrasOf = value => {
+  const out = {};
+  const context = value?.data_context;
+  if (context && typeof context === 'object' && !Array.isArray(context)) out.data_context = context;
+  if (Array.isArray(value?.pointed) && value.pointed.length) {
+    out.pointed = value.pointed.slice(0, 5).map(p => ({ tag: String(p?.tag || '').slice(0, 20), label: String(p?.label || '').slice(0, 40) }));
+  }
+  return out;
+};
 const payloadOf = value => {
   const p = value && typeof value === 'object' ? value : null;
   if (!p || typeof p.send_id !== 'string' || !p.send_id) return null;
-  return { send_id: p.send_id, ...fields(p), expected_leaf_id: p.expected_leaf_id ?? null };
+  return { send_id: p.send_id, ...fields(p), ...extrasOf(p), expected_leaf_id: p.expected_leaf_id ?? null };
 };
 const safe = value => {
   const out = { ...empty(), ...fields(value) };
@@ -54,9 +65,9 @@ export function createBotDraft(scope, { storage = globalThis.localStorage, uuid 
     update(patch) { value = { ...value, ...fields({ ...value, ...patch }), revision: value.revision + 1 }; schedule(); return read(); },
     // The exact payload is saved before transport, so a retry can never use
     // newer text, a newer leaf or a different send ID.
-    prepare(expectedLeaf) {
+    prepare(expectedLeaf, extras = {}) {
       if (value.pending) return structuredClone(value.pending);
-      const payload = { send_id: uuid(), ...structuredClone(fields(value)), expected_leaf_id: expectedLeaf ?? null };
+      const payload = { send_id: uuid(), ...structuredClone(fields(value)), ...structuredClone(extrasOf(extras)), expected_leaf_id: expectedLeaf ?? null };
       value = { ...value, ...blank(), revision: value.revision + 1, failed: null, pending: { payload, revision: value.revision + 1 } };
       flush();
       return structuredClone(value.pending);

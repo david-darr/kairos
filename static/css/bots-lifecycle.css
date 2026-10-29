@@ -17,3 +17,10 @@
   /* Phone: every control keeps a 44 px target. */
   .bots-lifecycle .bots-btn, .bots-lifecycle input:not([type=checkbox]):not([type=radio]), .bots-lifecycle select, .bots-lifecycle summary { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .bots-lifecycle *, .bots-lifecycle-dialog { animation: none; transition: none; } }
+/* Report a problem (botsReport.js) */
+.bots-report { display: grid; gap: 12px; }
+.bots-report-field { display: grid; gap: 4px; }
+.bots-report-field textarea { font: inherit; color: var(--bots-ink); background: var(--bots-inset); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu); padding: 8px; resize: vertical; max-width: 100%; box-sizing: border-box; }
+.bots-report-count, .bots-report-path { color: var(--bots-ink-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.bots-report-text { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--bots-font-mono); background: var(--bots-inset); padding: 10px; border-radius: var(--bots-radius-menu); margin: 0; }
+@media (max-width: 767px) { .bots-report .bots-btn { min-height: 44px; } }

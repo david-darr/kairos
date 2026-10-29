@@ -111,5 +111,22 @@ const timers = () => { const jobs = new Map(); let n = 0; return { jobs, setTime
   storage = store(); ({ draft } = make(storage));
   draft.update({ text: 'x' }); draft.flush(); assert.equal(storage.map.size, 1);
   draft.update({ text: '' }); draft.flush(); assert.equal(storage.map.size, 0);
+
+  // Extras (Phase 6): the open data result and pointed app parts are frozen into the payload, survive a reload,
+  // are bounded, and a retry keeps them even if the extras have changed since.
+  storage = store(); ({ draft } = make(storage));
+  draft.update({ text: 'why is this so high?' });
+  const pointed = Array.from({ length: 7 }, (_, i) => ({ tag: 'button-very-long-tag-name-here', label: `Label ${i} `.repeat(10), extra: 'dropped' }));
+  const withExtras = draft.prepare('leaf-1', { data_context: { cardId: 'c1', draftSql: 'select 1' }, pointed });
+  assert.deepEqual(withExtras.payload.data_context, { cardId: 'c1', draftSql: 'select 1' });
+  assert.equal(withExtras.payload.pointed.length, 5, 'at most five pointed parts');
+  assert.ok(withExtras.payload.pointed.every(p => Object.keys(p).join() === 'tag,label' && p.tag.length <= 20 && p.label.length <= 40), 'tag and label only, clipped');
+  assert.deepEqual(draft.prepare('leaf-2', { data_context: { cardId: 'other' } }).payload.data_context, { cardId: 'c1', draftSql: 'select 1' }, 'a retry sends what was first sent');
+  const reopened = make(storage).draft;
+  assert.deepEqual(reopened.outbox().payload.pointed, withExtras.payload.pointed, 'extras survive a reload with the pending send');
+  storage = store(); ({ draft } = make(storage));
+  draft.update({ text: 'plain' });
+  const plain = draft.prepare('leaf-1', { data_context: null, pointed: [] });
+  assert.ok(!('data_context' in plain.payload) && !('pointed' in plain.payload), 'nothing extra when there is nothing to send');
   console.log('PASS: bots drafts persist by person, bot and thread, keep one send ID, and never overwrite newer typing.');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -30,6 +30,9 @@ class SendBody(Body):
     citations: list[dict] = Field(default_factory=list, max_length=20)
     references: list[dict] = Field(default_factory=list, max_length=5)
     mode: str | None = Field(default=None, max_length=20)
+    # Phase 6: the data result the person has open ({cardId, draftSql}) and up to five app parts they pointed at.
+    data_context: dict | None = None
+    pointed: list[dict] = Field(default_factory=list, max_length=5)
 
 
 class EditBody(Body):

@@ -108,10 +108,16 @@ def _clean_payload(body: dict) -> dict:
         raise ValueError("Write a message or attach a file")
     if body.get("mode") not in MODES:
         raise ValueError("Unknown message mode")
-    return {"send_id": body["send_id"], "text": text, "expected_leaf_id": body.get("expected_leaf_id"),
-            "attachment_ids": attachment_ids, "reply_to_id": body.get("reply_to_id"),
-            "citations": list(body.get("citations") or []), "references": list(body.get("references") or []),
-            "mode": body.get("mode")}
+    payload = {"send_id": body["send_id"], "text": text, "expected_leaf_id": body.get("expected_leaf_id"),
+               "attachment_ids": attachment_ids, "reply_to_id": body.get("reply_to_id"),
+               "citations": list(body.get("citations") or []), "references": list(body.get("references") or []),
+               "mode": body.get("mode")}
+    # Phase 6 extras ride along only when present, so a plain send keeps its exact shape and retry fingerprint.
+    if isinstance(body.get("data_context"), dict) and body["data_context"]:
+        payload["data_context"] = body["data_context"]
+    if body.get("pointed"):
+        payload["pointed"] = list(body["pointed"])[:5]
+    return payload
 
 
 def _shown(payload: dict) -> dict:
@@ -175,7 +181,18 @@ async def send(owner: str, sid: str, body: dict) -> dict:
     except bot_spend.SpendCap as cap:
         raise HTTPException(409, cap.detail, headers={"X-Reason": cap.code}) from None
     context = await _context(owner, sid, payload["references"])
+    context += _phase6_context(bot["id"], sid, payload)
     return _admit(owner, sid, bot, payload, context)
+
+
+def _phase6_context(bot_id: str, sid: str, payload: dict) -> str:
+    """What the person was looking at, for the model's copy of this message only (Phase 6): the data result they
+    have open, the parts of an app they pointed at, and a state an app in this conversation reported. All of it is
+    fenced as untrusted data by the helpers that build it; none of it is saved into the transcript text."""
+    from services import bot_apps, bot_data
+    parts = [bot_data.data_context(bot_id, payload.get("data_context")),
+             bot_apps.pointed_note(payload.get("pointed")), bot_apps.pending_context_note(sid)]
+    return "".join("\n\n" + part.strip() for part in parts if part)
 
 
 def _admit(owner: str, sid: str, bot: dict, payload: dict, context: str, *, direct_only: bool = False,
@@ -374,6 +391,7 @@ async def _dispatch_group(group: list[dict], *, ignore_hold: bool = False) -> tu
             store.pause(sid)
             _announce(sid, owner, "references-changed")
             return False, "references"
+    context += _phase6_context(bot_id, sid, payload)
     with _ADMISSION:
         bot = agent_service.get(bot_id)
         if bot is None:

@@ -27,6 +27,8 @@ import { agentCall } from './agentCall.js';
 import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported } from './voiceInput.js';
 import { createSpeaker, isSpeechOutputSupported } from './voiceOutput.js';
 import { loadSkillCommands } from './botsSkillCommands.js';
+import { currentDataContext } from './botsDataModel.js';
+import { list as pointedList, clearPointed, mountPointChips } from './botsPoint.js';
 
 const CSS = ['/static/css/bots-chat.css', '/static/css/bots-composer.css'];
 const PAGE = 200, FIRST_PAGE = 50, PRESENCE_MS = 60000, QUEUE_POLL_MS = 5000, SEND_KEY = 'kairos:bots-send-key';
@@ -83,6 +85,11 @@ export async function mountBotsChat(host, options) {
   const limitHost = h('div', { class: 'bots-limit-host' });
   root.insertBefore(cardTranscript, goalHost);
   root.insertBefore(cardComposer, composerHost);
+  // Point mode's chips (Phase 6) sit just above the composer and leave with the next message.
+  const pointHost = h('div', { class: 'bots-point-host' });
+  root.insertBefore(pointHost, composerHost);
+  const pointChips = mountPointChips(pointHost);
+  offs.push(() => pointChips.destroy());
   toolbar.prepend(limitHost);
   const control = new AbortController();
   offs.push(() => control.abort());
@@ -140,6 +147,7 @@ export async function mountBotsChat(host, options) {
       regenerate: () => regenerate(),
       speak: m => speak(m),
       'copy-id': m => copyText(m.id),
+      report: m => import('./botsReport.js').then(mod => mod.openReport({ sessionId: sid, messageId: m.id, botName: agent.name })),
       react: (m, emoji, on) => react(m, emoji, on),
     },
   });
@@ -150,7 +158,10 @@ export async function mountBotsChat(host, options) {
       if (payload.attachment_ids?.length) await call('/api/chat/validate-attachments', { method: 'POST', body: { session_id: sid, attachment_ids: payload.attachment_ids } });
       return call(`/api/bot-chat/${enc(sid)}/send`, { method: 'POST', body: payload });
     },
+    // The data result the person has open and the parts of an app they pointed at (Phase 6) go with the message.
+    extras: () => ({ data_context: currentDataContext(agent.id), pointed: pointedList().map(({ tag, label }) => ({ tag, label })) }),
     onAccepted: async (result, ticket) => {
+      if (ticket.payload.pointed?.length) clearPointed();  // the chips went with this message
       if (result?.queued || result?.queue_id) { await refreshState(); transcript.announce('Queued. It sends when the reply finishes.'); return; }
       if (result?.message) { transcript.append(result.message); state.leaf = result.message.id; }
       if (result?.turn_id) beginLive(result.turn_id, ticket.payload.text);

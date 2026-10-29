@@ -99,7 +99,8 @@ export function redactForSupport(text) {
 // flushSettings must resolve {ok:true}. request(payload) throws an error with .status for an HTTP refusal.
 // A refusal frees the draft; a lost connection leaves the receipt so Retry reuses its send ID.
 export const isDefiniteRefusal = error => Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 && ![408, 425, 429].includes(error.status);
-export function createSendController({ draft, flushSettings, request, getLeaf, onAccepted = () => {} }) {
+// extras() adds what rides with a send but is not typed (botsDrafts.js prepare); it is read once, when a send is prepared.
+export function createSendController({ draft, flushSettings, request, getLeaf, onAccepted = () => {}, extras = () => ({}) }) {
   let running = null;
   return {
     busy: () => !!running,
@@ -109,7 +110,7 @@ export function createSendController({ draft, flushSettings, request, getLeaf, o
         // A failed settings save must not let a turn start with unintended settings; the draft is untouched.
         const saved = await flushSettings();
         if (saved?.ok !== true) throw new Error(saved?.error || 'Save the bot settings before sending.');
-        const ticket = draft.prepare(getLeaf());
+        const ticket = draft.prepare(getLeaf(), extras());
         let result;
         try { result = await request(ticket.payload); }
         catch (error) { if (isDefiniteRefusal(error)) draft.rejected(ticket); throw error; }

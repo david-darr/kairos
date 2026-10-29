@@ -21,6 +21,14 @@ class Body(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReportBody(Body):
+    session_id: str = Field(min_length=1, max_length=100)
+    message_id: str = Field(min_length=1, max_length=100)
+    went_wrong: str = Field(min_length=1, max_length=2000)
+    you_saw: str = Field(default="", max_length=3000)
+    steps: str = Field(default="", max_length=2000)
+
+
 class ExportOptions(Body):
     name: str = Field(default="Bot package", min_length=1, max_length=100)
     description: str = Field(default="", max_length=4000)
@@ -193,3 +201,34 @@ async def backup_restore(body: RestoreBody, user: str = Depends(require_admin)):
     from services import bot_backup
     with guard():
         return await asyncio.to_thread(bot_backup.restore, body.upload_id, body.password, body.confirm, owner_user=user)
+
+
+# -- problem reports (F101): drafted and kept on this computer, never sent ----------------------------------------
+@router.post("/reports")
+async def report_draft(body: ReportBody, user: str = Depends(require_admin)):
+    from services import bot_report
+    return await asyncio.to_thread(bot_report.draft, user, session_id=body.session_id, message_id=body.message_id,
+                                   went_wrong=body.went_wrong, you_saw=body.you_saw, steps=body.steps)
+
+
+@router.post("/reports/open-folder")
+async def report_folder(user: str = Depends(require_admin)):
+    """Show the reports folder. Fixed arguments, never a shell; the folder is Kairos's own."""
+    import os
+    import subprocess
+    import sys
+    from services import bot_report
+    os.makedirs(bot_report.ROOT, exist_ok=True)
+    if sys.platform.startswith("win"):
+        os.startfile(bot_report.ROOT)  # noqa: S606 - our own data folder
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", bot_report.ROOT], shell=False)
+    else:
+        subprocess.Popen(["xdg-open", bot_report.ROOT], shell=False)
+    return {"ok": True}
+
+
+@router.get("/reports/{ident}")
+async def report_get(ident: str, user: str = Depends(require_admin)):
+    from services import bot_report
+    return await asyncio.to_thread(bot_report.get, user, ident)
