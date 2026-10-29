@@ -1,0 +1,86 @@
+/* Bots skills (Phase 2, unit U3): the Skills section, the Skill library page and the learned-skill card.
+   Loaded through loadBotsCss() by botsSkillRequest.js. Scope: [data-app-mode="bots"]. Tokens only: --bots-* from bots.css. */
+
+[data-app-mode="bots"] .bots-skills { display: grid; gap: 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-skills :is(input, textarea, pre) { font-family: var(--bots-font-sans); }
+
+/* Status lines */
+[data-app-mode="bots"] .bots-skill-status { padding: 10px 12px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); background: var(--bots-inset); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-skill-status.error, [data-app-mode="bots"] .bots-skill-error { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-skill-error { padding: 4px 0; font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-skill-held { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-skill-empty { display: flex; align-items: center; gap: 12px; padding: 14px; color: var(--bots-ink-secondary); }
+
+/* Rows */
+[data-app-mode="bots"] .bots-skill-item { border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-skill-item:last-child { border-bottom: 0; }
+[data-app-mode="bots"] .bots-skill-row { gap: 8px; }
+[data-app-mode="bots"] .bots-skill-main {
+  flex: 1; min-width: 0; display: grid; gap: 2px; padding: 4px 0; text-align: left; color: inherit; background: transparent; border: 0; cursor: pointer; font: inherit;
+}
+[data-app-mode="bots"] .bots-skill-main.static { cursor: default; }
+[data-app-mode="bots"] .bots-skill-main .bots-row-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-skill-main:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; border-radius: 6px; }
+[data-app-mode="bots"] .bots-skill-chips, [data-app-mode="bots"] .bots-skill-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
+[data-app-mode="bots"] .bots-skill-tags { padding: 0; }
+
+/* Chips */
+[data-app-mode="bots"] .bots-skill-chip {
+  flex: none; padding: 2px 8px; font: 500 var(--bots-text-caps)/1.5 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: var(--bots-inset); border: 1px solid transparent; border-radius: var(--bots-radius-pill);
+}
+[data-app-mode="bots"] .bots-skill-chip.on { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-skill-chip.review, [data-app-mode="bots"] .bots-skill-chip.warn { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-skill-chip.changed { color: var(--bots-danger); }
+[data-app-mode="bots"] button.bots-skill-chip { cursor: pointer; }
+[data-app-mode="bots"] button.bots-skill-chip[aria-pressed="true"] { color: var(--bots-accent-ink); background: var(--bots-ink); }
+[data-app-mode="bots"] button.bots-skill-chip:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+
+/* Inspector and review text: plain text only, wrapped, scrollable, never styled by its content */
+[data-app-mode="bots"] .bots-skill-inspect, [data-app-mode="bots"] .bots-skill-assign { display: grid; gap: 10px; padding: 0 14px 14px; }
+[data-app-mode="bots"] .bots-skill-assign { padding: 0; }
+[data-app-mode="bots"] .bots-skill-review { display: grid; gap: 8px; min-width: 0; }
+[data-app-mode="bots"] .bots-skill-text {
+  max-height: 320px; margin: 0; padding: 10px 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 400 var(--bots-text-hint-lg)/1.5 var(--bots-font-mono); color: var(--bots-ink); background: var(--bots-inset); border-radius: var(--bots-radius-menu);
+}
+[data-app-mode="bots"] .bots-skill-text:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-skill-warning {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; font-size: var(--bots-text-hint-lg); color: var(--bots-warning);
+  background: var(--bots-inset); border-radius: var(--bots-radius-menu); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+[data-app-mode="bots"] .bots-skill-warning .bots-icon { flex: none; margin-top: 2px; }
+[data-app-mode="bots"] .bots-skill-skipped { margin: 6px 0 0; padding-left: 18px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-skill-details > summary { cursor: pointer; padding: 6px 0; font-size: var(--bots-text-hint-lg); font-weight: 500; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-skill-details > summary:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-skill-diff { max-height: 280px; overflow: auto; font: 400 var(--bots-text-hint-lg)/1.5 var(--bots-font-mono); background: var(--bots-inset); border-radius: var(--bots-radius-menu); }
+[data-app-mode="bots"] .bots-skill-diff-row { padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-skill-diff-row.add { color: var(--bots-success); background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-skill-diff-row.del { color: var(--bots-danger); background: var(--bots-raised-hover); }
+
+/* Learned-skill card */
+[data-app-mode="bots"] .bots-skill-cards { display: grid; gap: 10px; padding: 10px; }
+[data-app-mode="bots"] .bots-skill-card {
+  display: grid; gap: 8px; padding: 12px; min-width: 0; background: var(--bots-card); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-skill-card[data-phase="held"] { border-color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-skill-card-head { display: flex; align-items: center; gap: 8px; font-size: var(--bots-text-row); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-skill-card-gist { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-skill-card-body { display: grid; gap: 8px; min-width: 0; }
+[data-app-mode="bots"] .bots-skill-card-actions, [data-app-mode="bots"] .bots-skill-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-skill-actions { padding: 4px 14px 12px; }
+[data-app-mode="bots"] .bots-skill-outcome { display: grid; gap: 4px; padding: 0 14px 12px; }
+
+/* Library filter */
+[data-app-mode="bots"] .bots-skill-filter { display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-skill-search {
+  width: 100%; min-height: 34px; box-sizing: border-box; padding: 4px 12px; font: inherit; color: var(--bots-ink);
+  background: var(--bots-inset); border: 1px solid transparent; border-radius: var(--bots-radius-pill);
+}
+[data-app-mode="bots"] .bots-skill-search:focus { background: var(--bots-control); border-color: var(--bots-control-line); outline: none; }
+[data-app-mode="bots"] .bots-skill-search:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-skill-share-row { flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-skills * { transition: none; animation: none; }
+}
