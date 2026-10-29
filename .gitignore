@@ -68,3 +68,7 @@ scripts/.tab-test-*/
 
 # Electron test profiles
 .test-tmp/
+
+# Test suites' scratch folders when a cleanup is interrupted (test_computer.py, test_ask_any_model.py)
+.computer-test-*/
+.ask-any-model-*/
