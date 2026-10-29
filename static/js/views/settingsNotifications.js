@@ -76,7 +76,9 @@ async function botsGroup() {
     ['enabled', 'Bot notifications', 'Show a notification on this computer when a bot needs you or has results.'],
     ['needs_you', 'Needs you', 'A bot asked a question.'],
     ['results', 'Results', 'A bot sent a report, or has work ready for review.'],
-  ].map(([key, title, description]) => row({ title, description, control: toggle({ label: title, checked: current[key],
+    ['completions', 'Replies', 'A bot finished a reply while you were elsewhere.'],
+    ['failures', 'Problems', 'A reply or routine could not finish.'],
+  ].map(([key, title, description]) => row({ title, description, control: toggle({ label: title, checked: current[key] ?? true,
     onChange: value => { Object.assign(current, saveBotPrefs({ [key]: value })); } }) }));
   return group({ title: 'Bots on this computer' }, rows);
 }

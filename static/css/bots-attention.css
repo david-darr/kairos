@@ -1,0 +1,114 @@
+/* Bots attention panels (Agents 3.0 Phase 1, unit U5): the drawer that holds the
+   Inbox, Notifications, Activity and Inspector. Scope: [data-app-mode="bots"]
+   only. Reads the --bots-* tokens from bots.css, so Appearance changes carry
+   through and scripts/test_kairos_theme.py finds no raw colour here.
+   Widths follow OMB: Inbox 380, Notifications 300, Activity 400, Inspector
+   min(460px, 45vw). A phone gets an 85 dvh sheet from the bottom. */
+
+[data-app-mode="bots"] .bots-attn-scrim { position: fixed; inset: 0; z-index: 44; background: var(--scrim); }
+[data-app-mode="bots"] .bots-attn-scrim[hidden], [data-app-mode="bots"] .bots-attn[hidden] { display: none; }
+
+[data-app-mode="bots"] .bots-attn {
+  --bots-attn-w: 380px;
+  position: fixed; z-index: 45; top: 0; right: 0; bottom: 0; width: var(--bots-attn-w); max-width: 100vw;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--bots-panel); color: var(--bots-ink); font: 400 var(--bots-text-row)/1.4 var(--bots-font-sans);
+  border-left: 1px solid var(--bots-hairline); box-shadow: var(--bots-shadow-float);
+  animation: bots-attn-in var(--bots-dur-panel) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-attn[data-panel="notifications"] { --bots-attn-w: 300px; }
+[data-app-mode="bots"] .bots-attn[data-panel="activity"] { --bots-attn-w: 400px; }
+[data-app-mode="bots"] .bots-attn[data-panel="inspector"] { --bots-attn-w: min(460px, 45vw); }
+/* Beside the page, not over it, on a wide desktop: the scrim is only for phones. */
+@media (min-width: 768px) { [data-app-mode="bots"] .bots-attn-scrim { background: transparent; } }
+@keyframes bots-attn-in { from { transform: translateX(16px); opacity: 0; } }
+
+[data-app-mode="bots"] .bots-attn-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 52px; padding: 6px 10px 6px 16px; border-bottom: 1px solid var(--bots-hairline-dense);
+}
+[data-app-mode="bots"] .bots-attn-title { margin: 0; font-size: 16px; font-weight: 600; }
+[data-app-mode="bots"] .bots-attn-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+[data-app-mode="bots"] .bots-attn-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px 18px; overscroll-behavior: contain; }
+
+[data-app-mode="bots"] .bots-attn-tools { display: grid; gap: 8px; margin-bottom: 10px; }
+[data-app-mode="bots"] .bots-attn-tabs { width: 100%; }
+[data-app-mode="bots"] .bots-attn-tabs button { flex: 1; padding: 0 6px; white-space: nowrap; }
+[data-app-mode="bots"] .bots-attn-search {
+  width: 100%; min-height: 34px; padding: 4px 12px; box-sizing: border-box;
+  font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 10px;
+}
+[data-app-mode="bots"] .bots-attn-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+[data-app-mode="bots"] .bots-attn-count { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+
+[data-app-mode="bots"] .bots-attn-note { margin: 8px 4px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-attn-note.error { color: var(--bots-danger); }
+
+[data-app-mode="bots"] .bots-attn-rows { display: flex; flex-direction: column; gap: 2px; }
+[data-app-mode="bots"] .bots-attn-day { margin-bottom: 12px; }
+[data-app-mode="bots"] .bots-attn-day-label { margin: 8px 6px 4px; }
+
+[data-app-mode="bots"] .bots-attn-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 10px 10px; margin: 0;
+  text-align: left; color: var(--bots-ink); font: inherit; background: transparent;
+  border: 0; border-radius: 12px; cursor: pointer; transition: background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-attn-row:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-attn-row:focus-visible, [data-app-mode="bots"] .bots-attn-read:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: -2px; }
+[data-app-mode="bots"] .bots-attn-dot { flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: transparent; }
+[data-app-mode="bots"] .bots-attn-row.unread .bots-attn-dot { background: var(--bots-accent); }
+[data-app-mode="bots"] .bots-attn-row.unread .bots-attn-subject { font-weight: 600; }
+[data-app-mode="bots"] .bots-attn-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+[data-app-mode="bots"] .bots-attn-row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+[data-app-mode="bots"] .bots-attn-sender { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-attn-age { flex: none; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-attn-subject { font-weight: 500; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-attn-snippet { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-attn-kind { flex: none; align-self: center; font-size: var(--bots-text-caps); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-attn-source { font-size: var(--bots-text-caps); color: var(--bots-ink-tertiary); }
+
+[data-app-mode="bots"] .bots-attn-feed-row { display: flex; align-items: center; gap: 2px; }
+[data-app-mode="bots"] .bots-attn-feed-row > .bots-attn-row { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-attn-pin { flex: none; opacity: .5; }
+[data-app-mode="bots"] .bots-attn-pin.on, [data-app-mode="bots"] .bots-attn-feed-row:hover .bots-attn-pin { opacity: 1; }
+[data-app-mode="bots"] .bots-attn-pin.on { color: var(--bots-accent-text); }
+
+[data-app-mode="bots"] .bots-attn-entry { display: flex; align-items: flex-start; gap: 4px; padding: 8px 10px; border-radius: 12px; border-left: 3px solid transparent; }
+[data-app-mode="bots"] .bots-attn-entry.tone-bad { border-left-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-attn-entry:hover { background: var(--bots-raised-hover); }
+
+/* Reading one inbox item */
+[data-app-mode="bots"] .bots-attn-read { display: grid; gap: 12px; outline: none; }
+[data-app-mode="bots"] .bots-attn-read-head { display: grid; gap: 4px; }
+[data-app-mode="bots"] .bots-attn-read-title { margin: 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-attn-body-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--bots-text-bubble)/var(--bots-leading-bubble) var(--bots-font-prose); }
+[data-app-mode="bots"] .bots-attn-answer { margin: 0; padding: 8px 12px; background: var(--bots-inset); border-radius: 12px; font-size: var(--bots-text-hint-lg); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-attn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-attn-actions.secondary { padding-top: 8px; border-top: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-attn-replybox { display: grid; gap: 8px; justify-items: start; }
+[data-app-mode="bots"] .bots-attn-reply {
+  width: 100%; box-sizing: border-box; padding: 8px 12px; resize: vertical; min-height: 72px;
+  font: 400 var(--bots-text-row)/1.4 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 12px;
+}
+[data-app-mode="bots"] .bots-attn-questions { display: grid; gap: 12px; }
+[data-app-mode="bots"] .bots-attn-question { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
+[data-app-mode="bots"] .bots-attn-question legend { padding: 0 4px; font-weight: 500; }
+[data-app-mode="bots"] .bots-attn-option { display: flex; align-items: flex-start; gap: 8px; }
+[data-app-mode="bots"] .bots-attn-option small { display: block; color: var(--bots-ink-secondary); }
+
+@media (max-width: 767px) {
+  [data-app-mode="bots"] .bots-attn {
+    top: auto; left: 0; right: 0; width: 100%; height: 85dvh; max-height: 85dvh; padding-bottom: env(safe-area-inset-bottom);
+    border-left: 0; border-top: 1px solid var(--bots-hairline); border-radius: 20px 20px 0 0; animation: bots-attn-up var(--bots-dur-sheet) var(--bots-ease);
+  }
+  [data-app-mode="bots"] .bots-attn[data-panel] { --bots-attn-w: 100%; }
+  [data-app-mode="bots"] .bots-attn-row, [data-app-mode="bots"] .bots-attn-pin { min-height: 44px; }
+}
+@keyframes bots-attn-up { from { transform: translateY(24px); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-attn { animation: none; }
+  [data-app-mode="bots"] .bots-attn-row { transition: none; }
+}
