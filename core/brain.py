@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import time
 from typing import Optional
 
@@ -35,8 +36,10 @@ from claude_agent_sdk.types import StreamEvent
 
 from core import chat_tasks, claude_cli, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
 from core.constants import DATA_DIR, REPO_CODE_DIRS
+from core.middleware import local_api_base
 from core.vault import resolve_vault_dir
 from core.turn_taint import TurnTaint
+from core import bot_tool_catalog, tool_access
 
 # David's ask 2026-09-03: run_turn_stream() used to await the Claude Code CLI
 # subprocess with no timeout at all, so a hung/crashed subprocess (or a
@@ -45,6 +48,7 @@ from core.turn_taint import TurnTaint
 # turn, so a legitimately long tool-call chain that's still making progress
 # isn't cut off — only real silence trips it.
 logger = logging.getLogger(__name__)
+BOT_PROXY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_servers", "bot_mcp_proxy.py")
 
 TURN_MESSAGE_TIMEOUT_SECONDS = 180
 FOLLOWUP_GRACE_SECONDS = 15
@@ -192,6 +196,11 @@ class Brain:
         # Digest of the settings-derived tools this connection was built with;
         # see tool_config_changed().
         self.tool_fingerprint: str | None = None
+        # A bot's third-party apps reach Claude only through a bot-scoped stdio proxy holding this
+        # short-lived loopback capability, never upstream credentials (mcp_servers/bot_mcp_proxy.py).
+        self._proxy_token: str | None = None
+        # tool_use_id -> (owner, invocation id) for calls that took a unit of the bot's send allowance.
+        self._allowances: dict = {}
         self._client: ClaudeSDKClient | None = None
         self.turn_taint = TurnTaint()
         self.pending_reference_taint = False
@@ -220,6 +229,10 @@ class Brain:
         # widen the agent's real tool access, filtered to this session's
         # chosen subset.
         mcp_servers = integrations.list_mcp_servers_runtime(self.integration_ids)
+        if self.agent_id:
+            # The bot's apps come through the proxy, so the grants judge them; no direct servers.
+            mcp_servers = self._bot_proxy_servers(mcp_servers)
+            disabled = [*disabled, *self._bot_disallowed()]
         # An MCP tool that is new or changed since it was pinned waits for a
         # person's OK (core/integrations.py, roadmap phase 6). Claude Code
         # lists the server's tools itself, so the held ones are refused here
@@ -246,7 +259,8 @@ class Brain:
         # (roadmap phase 2, 2026-10-05: this was a hand-kept list of names, so
         # a new read tool silently prompted until someone added it here). Each
         # asks the person itself where it needs to.
-        allowed_tools = tool_registry.claude_preapproved(agent=bool(self.agent_id), session_id=self.session_id or '') + [
+        allowed_tools = tool_registry.claude_preapproved(agent=bool(self.agent_id), session_id=self.session_id or '',
+                                                         bot_id=self.agent_id) + ([] if self.agent_id else [
             # Canva image/design generation (David's ask 2026-09-10, "have
             # their claude code use Canva"). Pre-approves only the
             # generate-and-export surface actually needed for "create an
@@ -268,7 +282,7 @@ class Brain:
             "mcp__claude_ai_Canva__export-design",
             "mcp__claude_ai_Canva__list-brand-kits",
             "mcp__claude_ai_Canva__get-assets",
-        ]
+        ])
         # Escape hatch for whatever this hardcoded baseline doesn't cover —
         # see core/settings.py's extra_allowed_tools for why this exists.
         allowed_tools.extend(settings_store.get_setting("extra_allowed_tools") or [])
@@ -296,11 +310,35 @@ class Brain:
         # (or acceptEdits mode), Claude skips the callback entirely.
         allowed_tools = [tool for tool in allowed_tools
                          if tool in grants and tool not in disabled and tool not in ("Bash", "PowerShell")]
+        if self.agent_id:
+            # A bot's tools that change something are never pre-approved: the SDK skips can_use_tool for
+            # a pre-approved tool, and the approval level (core/bot_policy.py) must see every such call.
+            allowed_tools = [tool for tool in allowed_tools if tool_registry.read_tool(tool)]
         if self.read_only:
             disabled = [*disabled, 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']
             allowed_tools = [t for t in allowed_tools if tool_registry.read_tool(t)]
             mcp_servers = {}  # Unknown third-party tools have no proven read effect.
         return disabled, allowed_tools, mcp_servers
+
+    def _bot_scope(self):
+        from services import bot_grants
+        return bot_grants.Scope(self.agent_id, self._owner(), self.is_admin, self.session_id, "claude")
+
+    def _owner(self):
+        from core import task_scope
+        return task_scope.current_owner(self.agent_id)
+
+    def _bot_disallowed(self) -> list:
+        from services import bot_grants
+        return bot_grants.claude_disallowed(self._bot_scope())
+
+    def _bot_proxy_servers(self, servers: dict) -> dict:
+        """The proxy that stands in for a bot's MCP servers, or nothing when it has none to reach.
+        No token here: the fingerprint must not change every connection (see _options)."""
+        if not servers:
+            return {}
+        return {bot_tool_catalog.PROXY_SERVER: {"type": "stdio", "command": sys.executable,
+                                                "args": ["-I", BOT_PROXY_PATH]}}
 
     @staticmethod
     def _fingerprint(disabled: list[str], allowed_tools: list[str], mcp_servers: dict) -> str:
@@ -330,6 +368,13 @@ class Brain:
         # Claude already has native file-tool access to the vault (its own
         # cwd below) — the only real gap is cross-session search, added
         # in-process (no subprocess/network hop) here.
+        if self.agent_id and bot_tool_catalog.PROXY_SERVER in mcp_servers:
+            self._revoke_proxy()
+            self._proxy_token = tool_access.issue_proxy(self.session_id, self.is_admin, self.agent_id, self.model,
+                                                        self.integration_ids)
+            mcp_servers = {**mcp_servers, bot_tool_catalog.PROXY_SERVER: {
+                **mcp_servers[bot_tool_catalog.PROXY_SERVER],
+                "env": {"JARVIS_TOOL_TOKEN": self._proxy_token, "JARVIS_API_BASE": local_api_base()}}}
         mcp_servers = {**mcp_servers, "hive_mind": hive_mind_server.get_hive_mind_server(
             self.session_id, self.is_admin, self.turn_taint, self.agent_id)}
 
@@ -375,7 +420,7 @@ class Brain:
             permission_mode="plan" if self.read_only else "default",
             disallowed_tools=disabled,
             mcp_servers=mcp_servers,
-            strict_mcp_config=self.read_only,
+            strict_mcp_config=self.read_only or bool(self.agent_id),
             allowed_tools=allowed_tools,
             model=self.model,
             effort=self.effort,
@@ -404,6 +449,10 @@ class Brain:
         if self.read_only and not self._plan_tool(input_data.get('tool_name', '')):
             return {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
                     'permissionDecisionReason': 'Forge Plan mode is read-only.'}}
+        refusal = self._grant_refusal(input_data.get('tool_name', ''), input_data.get('tool_input') or {})
+        if refusal:
+            return {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                    'permissionDecisionReason': refusal}}
         from services.hook_service import hook_service
         try:
             reason = await hook_service.before_tool(input_data.get("tool_name", ""), input_data.get("tool_input") or {},
@@ -416,7 +465,22 @@ class Brain:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": f"Blocked by a hook: {reason}"}}
 
+    def _grant_refusal(self, tool_name: str, args: dict):
+        """A bot's grants judge every Claude tool call, pre-approved or not, native or Kairos's.
+        Proxy tools are judged by the bridge, which knows their server. Ordinary chats pass."""
+        if not self.agent_id:
+            return None
+        from services import bot_grants
+        result = bot_grants.verdict(self._bot_scope(), tool_name, args)
+        return None if result.allowed else result.reason
+
     async def _hook_after_tool(self, input_data, tool_use_id, context):
+        held = self._allowances.pop(tool_use_id, None) if self.agent_id and tool_use_id else None
+        if self.agent_id:
+            from core import bot_policy
+            bot_policy.clear_inflight(self.agent_id)   # a finished call no longer covers a handler's inner check
+            if held is not None:
+                bot_policy.finish(held[0], self.agent_id, held[1], input_data.get("tool_response", ""))
         from services.hook_service import hook_service
         try:
             hook_service.after_tool(input_data.get("tool_name", ""), input_data.get("tool_input") or {},
@@ -449,6 +513,11 @@ class Brain:
             if rule_content:
                 break
         args = arguments if isinstance(arguments, dict) else {}
+        refusal = self._grant_refusal(tool_name, args)
+        if refusal:
+            return PermissionResultDeny(message=refusal, interrupt=False)
+        if self.agent_id and tool_name.startswith(bot_tool_catalog.PROXY_PREFIX):
+            return PermissionResultAllow()   # the bridge asks the person, once, with the app's own title
         fenced = self._fence_refusal(tool_name, args)
         if fenced:
             return PermissionResultDeny(message=fenced, interrupt=False)
@@ -459,17 +528,24 @@ class Brain:
         force_prompt = bool(self.turn_taint.tainted and (
             tool_name in ("Bash", "PowerShell") or user_tab_write
         ))
+        use_id = getattr(context, "tool_use_id", None)
         decision = await permissions.decide(
             surface=self.surface,
             tool=tool_name,
             arguments=args,
             is_admin=self.is_admin,
             target=rule_content or permissions.derive_target(tool_name, arguments),
+            agent_id=self.agent_id,
             title=getattr(context, "title", None) or getattr(context, "display_name", None) or tool_name,
             description=getattr(context, "description", None) or getattr(context, "decision_reason", None) or "",
             force_prompt=force_prompt,
+            bot_context=({"provider": "claude", "invocation_id": use_id, "cwd": self.cwd_override or self.vault_dir,
+                          "outer": tool_name.startswith(bot_tool_catalog.HIVE_PREFIX)} if self.agent_id else None),
         )
         if decision.behavior == "allow":
+            if decision.invocation_id and use_id:
+                # This call took a unit of the daily send allowance; the after-tool hook settles it.
+                self._allowances[use_id] = (decision.owner, decision.invocation_id)
             return PermissionResultAllow()
         # The reason goes into the transcript, so the model is told it was
         # refused and why rather than silently failing or trying again.
@@ -770,7 +846,13 @@ class Brain:
                 pending_next.cancel()
                 await asyncio.gather(pending_next, return_exceptions=True)
 
+    def _revoke_proxy(self) -> None:
+        if self._proxy_token:
+            tool_access.revoke(self._proxy_token)
+            self._proxy_token = None
+
     async def disconnect(self) -> None:
+        self._revoke_proxy()
         if self._idle and self._idle is not asyncio.current_task():
             self._idle.cancel()
         await self.settle_background()

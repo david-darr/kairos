@@ -46,6 +46,8 @@ async def kill_tree(proc):
 
 
 class AntigravityBrain(CodexBrain):
+    GRANT_PROVIDER = "antigravity"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         session = session_manager.get_session(self.session_id) if self.session_id else None

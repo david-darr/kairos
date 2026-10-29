@@ -21,6 +21,7 @@ from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
+from services import bot_resource_fields
 
 BOT_DEFAULTS_FILE = os.path.join(DATA_DIR, "bot_defaults.json")
 BOT_PRESETS_FILE = os.path.join(DATA_DIR, "bot_presets.json")
@@ -33,11 +34,10 @@ MAX_MEMORY_SEED_CHARS = 8000
 MAX_ROUTINE_TEMPLATES = 10
 MAX_FOLDERS = 100
 
-APPROVAL_MODES = ("ask", "auto", "full", "custom")
-# Phase 3 flips this one constant; until then the broker behaves as Full for
-# every bot surface and offering anything else would be a control that does
-# nothing (phase-0-design 2.5).
-ENFORCED_APPROVAL_MODES = ("full",)
+APPROVAL_MODES = ("ask", "edits", "auto", "full", "custom")
+# Phase 3 unit U1 flipped this constant: the broker now enforces every level (core/bot_policy.py), so a
+# choice is a control that works. Raising a level is not a plain write; see check_approval.
+ENFORCED_APPROVAL_MODES = APPROVAL_MODES
 CACHE_KEEP_WARM = ("follow", "on", "off")
 PLACES = ("auto", "computer", "browser", "off")
 OUTBOUND_POLICIES = ("ask", "allow")
@@ -50,7 +50,7 @@ SELECTOR = re.compile(r"(native:\S+|mcp:[^:\s]+:\S+)")
 BOT_EDITABLE = ("section", "origin", "fallback", "cache_keep_warm", "place", "tool_scope", "connector_scopes",
                 "always_allow", "outbound", "approval_mode", "thread_limit", "hidden", "reply_style",
                 "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "avatar_image",
-                "mascot_expression")
+                "mascot_expression", *bot_resource_fields.RESOURCE_EDITABLE)
 # Changes to these do not bump the profile revision: they are not the profile,
 # and a bump would stale a pending setup Undo or SOUL.md apply.
 NO_REVISION = ("hidden", "hidden_at", "order", "folders")
@@ -59,7 +59,8 @@ NO_REVISION = ("hidden", "hidden_at", "order", "folders")
 # ids or execution state (OMB F2). Presets are narrower still.
 DEFAULT_FIELDS = ("role", "blurb", "soul", "color", "section", "daily_run_cap", "memory_upkeep", "keep_signed_in",
                   "cache_keep_warm", "place", "thread_limit", "memory_seed", "routines", "reply_style",
-                  "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "mascot_expression")
+                  "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "mascot_expression",
+                  *bot_resource_fields.RESOURCE_DEFAULT_FIELDS)
 PRESET_FIELDS = ("name", "role", "blurb", "soul", "avatar", "routines", "memory_seed")
 
 
@@ -68,7 +69,8 @@ class BotConflict(ValueError):
 
 
 class NotAvailableYet(BotConflict):
-    """A valid choice the app does not enforce yet (approval below Full)."""
+    """A valid choice the app cannot honour right now (for example a level that needs the desktop's
+    confirmation)."""
 
 
 class ConfiguredFailure(Exception):
@@ -90,10 +92,21 @@ def new_defaults() -> dict:
             "place": "auto", "tool_scope": {"allow": [], "deny": []}, "connector_scopes": {}, "always_allow": [],
             "builtin": None, "reply_style": "default", "notifications": True, "speak_replies": False,
             "voice_id": None, "call_mode": "turns", "skill_selection": {"mode": "all", "disabled": []},
-            "avatar_image": None, "mascot_expression": None}
+            "avatar_image": None, "mascot_expression": None, **bot_resource_fields.defaults()}
 
 
-def upgrade(record: dict, write_soul=None) -> bool:
+def _servers() -> list:
+    """The MCP servers as {id, name}, for translating old name selectors once. Never raises: a
+    record upgrades the same way with no integrations store."""
+    try:
+        from core import integrations
+        return [{"id": item["id"], "name": item["name"]} for item in integrations.list_integrations()
+                if item.get("kind") == "mcp_server"]
+    except Exception:
+        return []
+
+
+def upgrade(record: dict, write_soul=None, servers=None) -> bool:
     """Bring one stored record up to date, in place. True when it changed.
 
     Standing instructions end up in one field: `soul` is what the model has
@@ -106,6 +119,10 @@ def upgrade(record: dict, write_soul=None) -> bool:
         if key not in record:
             record[key] = value
             changed = True
+    # Phase 2 grants: server-name selectors become integration ids once, and explicit grants end the
+    # legacy reading. Narrowing only: an `off` scope is never dropped (services/bot_resource_fields.py).
+    if bot_resource_fields.translate_record(record, _servers() if servers is None else servers):
+        changed = True
     if "instructions" in record:
         legacy = record.pop("instructions")
         changed = True
@@ -128,12 +145,14 @@ def upgrade(record: dict, write_soul=None) -> bool:
 def pending(agents: dict) -> bool:
     """Would upgrade change any record? Decided on copies, so the caller can
     take its backup before the first write."""
-    return any(upgrade(copy.deepcopy(record)) for record in agents.values())
+    servers = _servers()
+    return any(upgrade(copy.deepcopy(record), servers=servers) for record in agents.values())
 
 
 def upgrade_all(agents: dict, write_soul=None) -> list[str]:
     """Upgrade every record; the ids that changed. Idempotent."""
-    return [agent_id for agent_id, record in agents.items() if upgrade(record, write_soul)]
+    servers = _servers()
+    return [agent_id for agent_id, record in agents.items() if upgrade(record, write_soul, servers)]
 
 
 def backup(path: str) -> Optional[str]:
@@ -171,11 +190,25 @@ def _choice(value, options: tuple, label: str) -> str:
 
 
 def check_approval(value, label: str = "approval_mode", allowed: tuple = APPROVAL_MODES) -> str:
-    """Known value, and one the app enforces today (Full only)."""
+    """A known level the app enforces. A new bot may start at any level except Custom, which needs the
+    desktop's confirmation; a conversation's level is checked against its bot when it is used (a
+    conversation may narrow its bot, and widens it only through a confirmed handshake)."""
     mode = _choice(value, allowed, label)
     if mode not in ENFORCED_APPROVAL_MODES:
-        raise NotAvailableYet(f"{label} {mode!r} is not available yet; bots run at Full for now")
+        raise NotAvailableYet(f"{label} {mode!r} is not available")
+    if label == "approval_mode":
+        _check_bot_level(None, mode)
     return mode
+
+
+def _check_bot_level(current: Optional[dict], mode: str) -> None:
+    """Refuse a plain write that would raise a bot's level (core/bot_policy.py): that takes the
+    desktop's confirmation. 409, like every refusal that is state rather than bad input."""
+    from core import bot_policy
+    try:
+        bot_policy.check_bot_change(current, mode)
+    except bot_policy.ElevationNeeded as error:
+        raise NotAvailableYet(str(error)) from error
 
 
 def _clean_section(value) -> Optional[str]:
@@ -303,6 +336,8 @@ def clean_field(key: str, value, current: Optional[dict] = None):
             if type(value[field]) not in (float, int) or not low <= value[field] <= high:
                 raise ValueError(f"avatar {field} must be from {low} to {high}")
         return dict(value)
+    if key == "connector_tools":
+        return bot_resource_fields.clean_connector_tools(value)
     if value is None:
         raise ValueError(f"{key} cannot be empty")
     if key == "origin":
@@ -314,7 +349,9 @@ def clean_field(key: str, value, current: Optional[dict] = None):
     if key == "thread_limit":
         return _whole(value, 1, 16, "thread_limit")
     if key == "approval_mode":
-        return check_approval(value)
+        mode = _choice(value, APPROVAL_MODES, "approval_mode")
+        _check_bot_level(current, mode)
+        return mode
     if key == "outbound":
         return _clean_outbound(value, (current or {}).get("outbound"))
     if key == "fallback":
@@ -329,6 +366,9 @@ def clean_field(key: str, value, current: Optional[dict] = None):
         return _clean_connector_scopes(value)
     if key == "always_allow":
         return _clean_always_allow(value)
+    if key in bot_resource_fields.RESOURCE_EDITABLE:
+        cleaned = bot_resource_fields.clean_field(key, value, current)
+        return cleaned
     raise ValueError(f"{key} cannot be changed")
 
 
@@ -599,7 +639,7 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
                                   else base.get("routines") or [])
         preference_keys = ("daily_run_cap", "memory_upkeep", "keep_signed_in", "cache_keep_warm", "place", "thread_limit",
                            "reply_style", "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection",
-                           "mascot_expression")
+                           "mascot_expression", *bot_resource_fields.RESOURCE_DEFAULT_FIELDS)
         extras = {key: base[key] for key in preference_keys if key in base}
         extras.update({key: profile[key] for key in preference_keys if key in profile})
         for key in ("keep_signed_in", "memory_upkeep"):
@@ -664,7 +704,7 @@ DUPLICATE_FIELDS = ("role", "blurb", "soul", "color", "avatar", "endpoint_id", "
                     "integration_ids", "daily_run_cap", "section", "approval_mode", "outbound", "fallback",
                     "cache_keep_warm", "place", "tool_scope", "connector_scopes", "always_allow", "thread_limit",
                     "memory_upkeep", "reply_style", "notifications", "speak_replies", "voice_id", "call_mode",
-                    "skill_selection", "mascot_expression")
+                    "skill_selection", "mascot_expression", "memory_enabled", "helper_model", "connector_tools")
 
 
 def duplicate_name(source_name: str, taken) -> str:
@@ -718,9 +758,11 @@ def overview(agent: dict) -> dict:
     if not agent.get("enabled", True):
         wont.append("It is turned off, so it will not run until you turn it on.")
     wont.append(f"It stops after {agent.get('daily_run_cap')} runs a day.")
-    wont.extend(f"Saved, not enforced yet: avoid {selector}." for selector in scope.get("deny", []))
-    wont.extend(f"Saved, not enforced yet: turn off {app_id}." for app_id, level in (agent.get("connector_scopes") or {}).items()
+    wont.extend(f"It will not use {selector}." for selector in scope.get("deny", []))
+    wont.extend(f"It will not use {app_id}." for app_id, level in (agent.get("connector_scopes") or {}).items()
                 if level == "off")
+    if isinstance(agent.get("connector_tools"), dict) and not agent["connector_tools"]:
+        wont.append("It has no connected app tools.")
     integrations = agent.get("integration_ids")
     setup = [
         {"id": "identity", "done": bool((agent.get("role") or "").strip()), "label": "Give it a name and a job",

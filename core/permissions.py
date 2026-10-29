@@ -54,6 +54,8 @@ class Request:
     questions: list | None = None
     expires_at: float = field(default_factory=lambda: time.time() + DEFAULT_TIMEOUT_SECONDS)
     answer: asyncio.Future = field(default_factory=asyncio.Future)
+    # Set for a bot's request (core/bot_policy.py): bot_id, thread_id, run_id, owner, command, cwd, provider.
+    bot: dict | None = None
 
     def payload(self) -> dict:
         """What the surface shows. Text only - never markup, never executed."""
@@ -72,6 +74,9 @@ class Decision:
     behavior: str            # "allow" or "deny"
     reason: str = ""
     rule: dict | None = None
+    # Set when this allow took a unit of a bot's daily send allowance: settle it with finish_bot_call().
+    invocation_id: str | None = None
+    owner: str | None = None
 
 
 def _clip(value, limit=4000):
@@ -279,9 +284,15 @@ def _remember(rule: dict, surface: str) -> None:
     _save(data)
 
 
-def stored_decision(surface: str, tool: str, target: str | None, is_admin: bool = False) -> Decision | None:
-    """An answer that needs no one, or None if this has to be asked."""
-    for rule in _session_rules.get(surface, []) + _load()["rules"]:
+def stored_decision(surface: str, tool: str, target: str | None, is_admin: bool = False,
+                    bot_id: str | None = None) -> Decision | None:
+    """An answer that needs no one, or None if this has to be asked. For a bot, only rules made by
+    answering that bot's own requests count: the app's built-in grants, and another bot's, never
+    stand in for the approval level."""
+    saved = _load()["rules"]
+    if bot_id:
+        saved = [rule for rule in saved if rule.get("bot_id") == bot_id]
+    for rule in _session_rules.get(surface, []) + saved:
         if _matches(rule, tool, target, is_admin):
             return Decision(rule["behavior"], "A saved rule covers this.", rule)
     return None
@@ -298,6 +309,7 @@ def close_channel(surface: str) -> None:
     _channels.pop(surface, None)
     for request in [item for item in _pending.values() if item.surface == surface]:
         if not request.answer.done():
+            _card_settle(request.id, "unavailable", "The window asking for this closed, so the action did not run.")
             request.answer.set_result(QuestionOutcome("skipped", reason="The window asking for this closed.")
                                       if request.kind == "question" else
                                       Decision("deny", "The window asking for this closed."))
@@ -307,11 +319,123 @@ def drop_session(surface: str) -> None:
     _session_rules.pop(surface, None)
 
 
+# -- the bot grant ceiling (Bots Phase 2 U4) --------------------------------------------------------
+# Kept apart from decide() so the approval work that follows can extend decide() without touching it.
+
+def _surface_bot(surface: str) -> str | None:
+    """The bot behind a surface: an agent's own, or the bot a chat belongs to."""
+    if surface.startswith("agent:"):
+        return surface.removeprefix("agent:") or None
+    if surface.startswith("chat:"):
+        from core.session_manager import session_manager
+        return ((session_manager.get_session(surface.removeprefix("chat:")) or {}).get("agent_id")) or None
+    return None
+
+
+def ceiling_denial(surface: str, tool: str, arguments: dict, agent_id: str | None = None,
+                   mcp: tuple | None = None, is_admin: bool = False) -> "Decision | None":
+    """A deny when the bot's grants forbid this call, however the approval level would answer."""
+    bot = agent_id or _surface_bot(surface)
+    if not bot:
+        return None
+    from services import bot_grants
+    # Execution rights (admin-only tools) are judged at each call site from the trusted context; the
+    # `is_admin` argument here is whatever the asking code passed, so it is not used to narrow the ceiling.
+    reason = bot_grants.ceiling_denial(bot, tool, arguments, is_admin=True, mcp=mcp)
+    if reason is None:
+        return None
+    try:
+        data = _load()
+        _record(data, {"decision": "deny", "source": "grant_ceiling", "surface": surface, "tool": tool})
+        _save(data)
+    except Exception:
+        pass
+    return Decision("deny", reason)
+
+
+EXPLICIT_REVIEW_TOOLS = frozenset({"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install",
+                                   "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app",
+                                   "creative_tools", "folder_access"})
+
+
+def _bot_log(outcome, decision: str, source: str, actor: str, scope: str | None = None,
+             target: str | None = None) -> None:
+    from core import bot_policy
+    bot_policy.record_decision(bot_id=outcome.bot_id, thread_id=outcome.thread_id,
+                               tool=outcome.op.tool if outcome.op else "", op=outcome.op, mode=outcome.mode,
+                               outcome=decision, source=source, actor=actor, owner=outcome.owner,
+                               unattended=outcome.unattended, invocation_id=outcome.invocation_id, scope=scope,
+                               target=target, reason=outcome.reason)
+
+
+def _card_open(request: "Request", outcome) -> None:
+    """The durable card for a bot's live request (services/bot_cards.py), when that service is there."""
+    from core import bot_policy
+    store = bot_policy.cards()
+    if store is None:
+        return
+    try:
+        run = outcome.run or {}
+        store.open_from_payload(request.payload(), owner=outcome.owner, bot_id=outcome.bot_id,
+                                thread_id=outcome.thread_id, run_id=run.get("run_id"),
+                                generation=bot_policy.generation(outcome.thread_id))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("could not open the approval card")
+
+
+def _card_settle(request_id: str, status: str, reason: str = "") -> None:
+    try:
+        from core import bot_policy
+        store = bot_policy.cards()
+        if store is not None:
+            store.settle_for_request(request_id, status, reason=reason)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("could not settle the approval card")
+
+
+def _bot_choices(outcome, target: str | None) -> list[dict]:
+    """What a person is offered for a bot's request. A send or a deletion is only ever allowed once; a
+    command can be remembered, but only as that exact command in that folder."""
+    from core import bot_policy
+    once = {"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"}
+    reject = {"id": "reject", "label": "Deny", "behavior": "deny", "scope": "once"}
+    op = outcome.op
+    if op is not None and op.kind in (bot_policy.OUTBOUND, bot_policy.DESTRUCTIVE, bot_policy.OPAQUE):
+        return [once, reject]
+    if op is not None and op.kind == bot_policy.EXECUTE and op.scope == "shell" and op.command and outcome.cwd:
+        return [once, {"id": "command", "label": "Always allow this exact command here", "behavior": "allow",
+                       "scope": "command"}, reject]
+    return [dict(item, label="Deny") if item["id"] == "reject" else item for item in _default_choices("", target)]
+
+
+def cancel_pending(match, reason: str) -> int:
+    """Deny every waiting request whose metadata `match` accepts (a downgrade, a run that ended) and
+    settle its card. Returns how many it closed."""
+    closed = 0
+    for request in list(_pending.values()):
+        meta = {"surface": request.surface, **(request.bot or {})}
+        if request.answer.done() or not match(meta):
+            continue
+        _card_settle(request.id, "cancelled", reason)
+        request.answer.set_result(QuestionOutcome("skipped", reason=reason) if request.kind == "question"
+                                  else Decision("deny", reason))
+        closed += 1
+    return closed
+
+
 async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", description: str = "",
                  target: str | None = None, choices: list[dict] | None = None,
                  timeout: float = DEFAULT_TIMEOUT_SECONDS, is_admin: bool = False,
-                 force_prompt: bool = False) -> Decision:
-    """Answer from a rule, or ask the person and wait."""
+                 force_prompt: bool = False, agent_id: str | None = None,
+                 mcp: tuple | None = None, bot_context: dict | None = None) -> Decision:
+    """Answer from a rule, or ask the person and wait. A bot's grant ceiling is judged first (Auto and
+    Full cannot lift it); then its approval level (core/bot_policy.py), which can only narrow what the
+    ceiling allows. `bot_context` is trusted caller state: provider, invocation_id, cwd, outer."""
+    denied = ceiling_denial(surface, tool, arguments, agent_id, mcp, is_admin)
+    if denied is not None:
+        return denied
     target = target if target is not None else derive_target(tool, arguments)
     # Builder imports/connections and first-run app commands need explicit
     # review when requested, even on an Auto surface.
@@ -327,11 +451,30 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     # after reading a web page when there is nobody to ask.
     # 2026-10-16: local preview grants always belong to the person, including Auto.
     # 2026-10-25: so does a folder dropped on the notch (core/notch_folders.py).
-    explicit_review = force_prompt and tool in {"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install", "forge_git_push", "forge_git_merge", "hand_to_agent", "computer_local_app", "creative_tools", "folder_access"}
+    explicit_review = force_prompt and tool in EXPLICIT_REVIEW_TOOLS
+    bot_id = agent_id or _surface_bot(surface)
+    outcome = None
+    if bot_id:
+        # A bot's own approval level answers here. Bot chats no longer ride the chat's legacy Auto
+        # switch, and an agent's own surface is no longer Auto by definition (Bots Phase 3).
+        from core import bot_policy
+        context = bot_context or {}
+        outcome = bot_policy.authorize_operation(
+            bot_id=bot_id, tool=tool, arguments=arguments, mcp=mcp, surface=surface, provider=context.get("provider"),
+            force_prompt=force_prompt, explicit_review=explicit_review, invocation_id=context.get("invocation_id"),
+            outer=bool(context.get("outer")), cwd=context.get("cwd"), is_admin=is_admin)
+        if outcome.action == "deny":
+            _bot_log(outcome, "deny", outcome.source, "policy", target=target)
+            return Decision("deny", outcome.reason)
+        if outcome.action == "allow":
+            _bot_log(outcome, "allow", outcome.source, "policy", target=target)
+            reserved = bool(outcome.reservation and not outcome.reservation.get("reused"))
+            return Decision("allow", outcome.reason, outcome.rule, outcome.invocation_id if reserved else None,
+                            outcome.owner if reserved else None)
     # Auto is an explicit, per-chat admin choice. It answers broker requests
     # for this chat only, including requests from a tainted turn; it does not
     # add a standing grant or change the policy for other chats/tasks.
-    if is_admin and surface.startswith("chat:") and not explicit_review:
+    elif is_admin and surface.startswith("chat:") and not explicit_review:
         from core.session_manager import session_manager
         session_id = surface.removeprefix("chat:")
         session = session_manager.get_session(session_id)
@@ -341,43 +484,123 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
                            "tool": tool, "content": target})
             _save(data)
             return Decision("allow", "Allowed by this chat's Auto mode.")
-    # Agents always run in Auto (David, 2026-10-05), on every model: an
-    # agent's own runs are approved like an Auto chat's, tainted turns
-    # included, and every one is audited. Only admins can create and direct
-    # agents (routes/agent_routes.py).
-    if surface.startswith("agent:") and not explicit_review:
-        data = _load()
-        _record(data, {"decision": "allow", "source": "agent_auto", "surface": surface,
-                       "tool": tool, "content": target})
-        _save(data)
-        return Decision("allow", "Allowed: agents run in Auto mode.")
     # A tainted turn can force a fresh decision without revoking the person's
     # standing grant for future clean turns.
-    saved = None if force_prompt else stored_decision(surface, tool, target, is_admin)
+    saved = None if force_prompt else stored_decision(surface, tool, target, is_admin, bot_id)
     if saved:
+        if outcome is not None:
+            _bot_log(outcome, saved.behavior, "saved-rule", "rule", target=target)
         return saved
     queue = _channels.get(surface)
-    if queue is None:
+    run = outcome.run if outcome is not None else None
+    if queue is None and not (run and _card_service_ready()):
         # Nobody is watching this surface - a scheduled task, a chat in a
         # channel with no prompt, a closed window. Denying is the only honest
         # answer, and it says where to grant it instead.
+        if outcome is not None:
+            _bot_log(outcome, "deny", "nobody-to-ask", "policy", target=target)
         return Decision("deny", f"{tool} needs permission and this surface cannot ask. "
                                 "Grant it in Settings > Permissions, then try again.")
+    if outcome is not None and run and queue is None:
+        timeout = max(timeout, _unattended_wait())
     request = Request(id=uuid.uuid4().hex, surface=surface, tool=tool, target=target,
                       arguments=arguments if isinstance(arguments, dict) else {},
-                      title=title or tool, description=description,
-                      choices=choices or _default_choices(tool, target), expires_at=time.time() + timeout)
+                      title=title or tool, description=description or (outcome.reason if outcome else ""),
+                      choices=choices or (_bot_choices(outcome, target) if outcome is not None
+                                          else _default_choices(tool, target)),
+                      expires_at=time.time() + timeout)
+    if outcome is not None:
+        op = outcome.op
+        request.bot = {"bot_id": outcome.bot_id, "thread_id": outcome.thread_id, "owner": outcome.owner,
+                       "run_id": (run or {}).get("run_id"), "provider": outcome.provider, "cwd": outcome.cwd,
+                       "command": op.command if op else None, "tool_kind": op.kind if op else None}
     _pending[request.id] = request
-    await queue.put(request.payload())
+    if queue is not None:
+        await queue.put(request.payload())
+    waiting_task = (run or {}).get("routine_id") or (run or {}).get("task_id")
+    if outcome is not None:
+        _card_open(request, outcome)
+        if waiting_task:
+            _routine_wait(waiting_task, True, f"Waiting for you: {request.title}")
+    ended = "answered"
     try:
-        return await asyncio.wait_for(asyncio.shield(request.answer), timeout=timeout)
+        decision = await asyncio.wait_for(asyncio.shield(request.answer), timeout=timeout)
+        if outcome is not None and decision.behavior == "allow":
+            # Execute only after revalidating live scope: the grants, the run and the bot may have changed.
+            again = ceiling_denial(surface, tool, arguments, agent_id, mcp, is_admin)
+            if again is not None:
+                return again
+            from core import bot_policy
+            stale = bot_policy.live_denial(outcome.bot_id, outcome.thread_id, outcome)
+            if stale:
+                return Decision("deny", stale)
+            if (bot_context or {}).get("outer"):
+                bot_policy.mark_inflight(outcome)
+        return decision
     except asyncio.TimeoutError:
+        ended = "expired"
         return Decision("deny", f"Nobody answered the request to use {tool} within "
                                 f"{int(timeout)} seconds, so it was not allowed.")
     finally:
         _pending.pop(request.id, None)
-        if _channels.get(surface) is queue:
+        if outcome is not None:
+            if not request.answer.done():
+                _card_settle(request.id, "expired" if ended == "expired" else "cancelled")
+            if waiting_task:
+                _routine_wait(waiting_task, False)
+            answered = request.answer.done() and not request.answer.cancelled()
+            result = request.answer.result() if answered else None
+            _bot_log(outcome, getattr(result, "behavior", "deny") if answered else "expired",
+                     "asked" if answered else "timeout", "owner" if answered else "timeout", target=target,
+                     scope=((result.rule or {}).get("scope") if answered and getattr(result, "rule", None) else None))
+        if _channels.get(surface) is queue and queue is not None:
             queue.put_nowait({"permission_closed": request.id})
+
+
+def _card_service_ready() -> bool:
+    from core import bot_policy
+    return bot_policy.cards() is not None
+
+
+def _unattended_wait() -> float:
+    from core import bot_policy
+    return bot_policy.UNATTENDED_WAIT_SECONDS
+
+
+def _routine_wait(task_id: str, waiting: bool, reason: str = "") -> None:
+    try:
+        from core import bot_routine_runner
+        if waiting:
+            bot_routine_runner.mark_waiting(task_id, reason)
+        else:
+            bot_routine_runner.clear_waiting(task_id)
+    except Exception:
+        pass
+
+
+async def gate_bot_call(ctx, name: str, args: dict | None, provider: str | None = None) -> Decision:
+    """The pre-execution gate for a bot's registry call (core/tool_registry.py), before its handler runs.
+    Reads and ordinary chats pass. Everything else gets the approval level's answer through decide(),
+    so there is one gate. A handler's own check inside the call is covered by this approval."""
+    if not getattr(ctx, "agent_id", None):
+        return Decision("allow", "")
+    from core import bot_policy
+    arguments = args if isinstance(args, dict) else {}
+    if bot_policy.classify(name, arguments).kind == bot_policy.READ:
+        return Decision("allow", "")
+    return await decide(surface=ctx.permission_surface, tool=name, arguments=arguments,
+                        title=f"Let this bot use {name}", description="", is_admin=ctx.is_admin, agent_id=ctx.agent_id,
+                        bot_context={"outer": True, "invocation_id": getattr(ctx, "invocation_id", None),
+                                     "provider": provider})
+
+
+def finish_bot_call(decision: "Decision | None", bot_id: str | None, result) -> None:
+    """A gated call has run: settle the allowance unit it took, if any."""
+    if decision is not None and bot_id:
+        from core import bot_policy
+        bot_policy.clear_inflight(bot_id)       # the call is over: its cover for inner checks ends with it
+        if decision.invocation_id:
+            bot_policy.finish(decision.owner, bot_id, decision.invocation_id, result)
 
 
 def pending_request(request_id: str):
@@ -412,10 +635,21 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
     if choice is None:
         return False
     rule = None
-    if choice["scope"] in ("session", "forever"):
+    bot = request.bot or {}
+    if choice["scope"] == "command":
+        # Only the exact command, in the folder and on the AI the person was shown.
+        from core import bot_policy
+        try:
+            bot_policy.add_command_rule(bot.get("bot_id"), bot.get("command"), bot.get("cwd"), bot.get("provider"),
+                                        by=user, request_id=request_id)
+        except bot_policy.PolicyError:
+            return False
+    elif choice["scope"] in ("session", "forever"):
         rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": request.target,
                 "behavior": choice["behavior"], "scope": choice["scope"], "granted_at": time.time(),
                 "granted_by": user, "source": "asked"}
+        if bot.get("bot_id"):
+            rule["bot_id"] = bot["bot_id"]
         _remember(rule, request.surface)
     data = _load()
     _record(data, {"decision": choice["behavior"], "tool": request.tool, "content": request.target,
@@ -476,11 +710,34 @@ def _open_question(*, surface, tool, questions, timeout):
                       kind="question", questions=questions, expires_at=time.time() + timeout)
     _pending[request.id] = request
     queue.put_nowait(request.payload())
+    _question_card(request)
     return request, queue
+
+
+def _question_card(request) -> None:
+    """A bot's question gets a durable card too, so a reload shows it (services/bot_cards.py)."""
+    try:
+        bot = _surface_bot(request.surface)
+        if not bot:
+            return
+        from core import bot_policy
+        store = bot_policy.cards()
+        if store is None:
+            return
+        session_id = request.surface.removeprefix("chat:") if request.surface.startswith("chat:") else None
+        session = bot_policy._session(session_id) or {}
+        store.open_from_payload(request.payload(), owner=session.get("owner_user"), bot_id=bot, thread_id=session_id,
+                                generation=bot_policy.generation(session_id))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("could not open the question card")
 
 
 def _close_question(request, queue):
     if request and _pending.pop(request.id, None) is not None:
+        done = request.answer.done() and not request.answer.cancelled()
+        status = getattr(request.answer.result(), "status", "") if done else ""
+        _card_settle(request.id, status if status in ("answered", "skipped") else "cancelled")
         if _channels.get(request.surface) is queue:
             queue.put_nowait({"permission_closed": request.id})
 

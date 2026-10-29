@@ -13,6 +13,7 @@ every Codex process held whoever was chatting, and a separate Google-only
 chat token.
 """
 import asyncio
+import dataclasses
 import secrets
 import re
 import shutil
@@ -68,6 +69,15 @@ def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = N
                            TurnTaint(), folder, context.run_id if context else None, active.get("card_id"),
                            tuple(integration_ids) if integration_ids is not None else None, read_only,
                            owner_user=task_scope.current_owner(agent_id))
+    return token
+
+
+def issue_proxy(session_id, is_admin: bool, agent_id: str, model, integration_ids, lifetime: float = 1800) -> str:
+    """A short-lived loopback capability for a bot's Claude MCP proxy (mcp_servers/bot_mcp_proxy.py).
+    It carries no upstream credential: every call is judged afresh against the bot's current grants."""
+    token = issue(session_id, is_admin, agent_id, model, integration_ids)
+    grant = _grants[token]
+    _grants[token] = dataclasses.replace(grant, expires_at=time.time() + lifetime)
     return token
 
 

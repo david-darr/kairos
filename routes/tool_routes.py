@@ -10,7 +10,8 @@ admin or not, agent - comes from that token, never from the request.
 from fastapi import APIRouter, Body, HTTPException, Request
 import uuid
 
-from core import mcp_bridge, tool_access, tool_registry, tool_search
+from core import bot_tool_catalog, mcp_bridge, tool_access, tool_registry, tool_search
+from services import bot_grants
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -35,11 +36,12 @@ async def _mcp_tool(name, arguments, request, ctx):
         raise HTTPException(403, "This tool access has expired; it lasts one turn")
     async with grant.mcp_lock:
         if "tools" not in grant.mcp_catalog:
-            catalog, _ = await mcp_bridge.discover(grant.integration_ids)
+            catalog, _ = await mcp_bridge.discover(grant.integration_ids)  # unfiltered; see below
             if tool_access.resolve(token) is not grant:
                 raise HTTPException(403, "This tool access has expired; it lasts one turn")
             grant.mcp_catalog["tools"] = catalog
-        catalog = grant.mcp_catalog["tools"]
+        # Filtered on every read, not when the catalog was cached: a revoked grant takes effect at once.
+        catalog = bot_grants.filter_mcp_catalog(ctx, grant.mcp_catalog["tools"])
     if name == tool_search.SEARCH:
         result = tool_search.search(catalog, arguments.get("query", ""), arguments.get("limit", 5))
         if result.startswith("["):
@@ -69,6 +71,83 @@ async def _mcp_tool(name, arguments, request, ctx):
                                           authorized=lambda: tool_access.resolve(token) is grant)
 
     return await hook_service.around_tool(selected, args, run, **ctx.hook_context())
+
+
+PROXY_TOKEN_SECONDS = 1800
+
+
+async def _proxy_catalog(request: Request, ctx) -> tuple:
+    """(grant, {proxy name: (function name, spec)}) for the bot behind this capability."""
+    token = request.headers.get("X-JARVIS-Tool-Token", "")
+    grant = tool_access.resolve(token)
+    if grant is None or not grant.agent_id:
+        raise HTTPException(403, "This tool access has expired; it lasts one turn")
+    async with grant.mcp_lock:
+        if "tools" not in grant.mcp_catalog:
+            catalog, _ = await mcp_bridge.discover(grant.integration_ids)
+            if tool_access.resolve(token) is not grant:
+                raise HTTPException(403, "This tool access has expired; it lasts one turn")
+            grant.mcp_catalog["tools"] = catalog
+    allowed = bot_grants.filter_mcp_catalog(ctx, grant.mcp_catalog["tools"])
+    names, table = set(), {}
+    for function, spec in allowed.items():
+        proxy = bot_tool_catalog.proxy_name(spec["server"], spec["name"], names)
+        names.add(proxy)
+        table[proxy] = (function, spec)
+    return grant, table
+
+
+def _expires_in(grant) -> int:
+    return max(0, int(grant.expires_at - __import__("time").time()))
+
+
+@router.post("/_mcp/list")
+async def proxy_list(request: Request) -> dict:
+    """The Claude proxy's tool list: only what this bot's grants allow, under short proxy names."""
+    ctx = _context(request)
+    grant, table = await _proxy_catalog(request, ctx)
+    if any(spec["server"] == "REA" for _, spec in table.values()):
+        table = {k: v for k, v in table.items() if v[1]["server"] != "REA"}
+    if table:
+        grant.turn_taint.mark("MCP tool catalog")
+    return {"tools": [{"name": proxy, "description": spec["description"][:1000], "schema": spec["schema"]}
+                      for proxy, (_, spec) in sorted(table.items())], "expires_in": _expires_in(grant)}
+
+
+@router.post("/_mcp/call")
+async def proxy_call(request: Request, body: dict = Body(default={})) -> dict:
+    """A Claude proxy call, through the same bridge, grants, permission broker, hooks and audit."""
+    ctx = _context(request)
+    grant, table = await _proxy_catalog(request, ctx)
+    name, args = body.get("name"), body.get("arguments")
+    if not isinstance(name, str) or name not in table or not isinstance(args, dict):
+        return {"result": "Tool not available for this bot.", "expires_in": _expires_in(grant)}
+    function, spec = table[name]
+    if spec["server"] == "REA":
+        return {"result": "Not run: REA is not available here.", "expires_in": _expires_in(grant)}
+    token = request.headers.get("X-JARVIS-Tool-Token", "")
+    from services.hook_service import hook_service
+
+    async def run():
+        if tool_access.resolve(token) is not grant:
+            return "Not run: this tool access has expired; it lasts one turn."
+        return await mcp_bridge.call_tool(function, args, spec, grant.integration_ids, ctx,
+                                          authorized=lambda: tool_access.resolve(token) is grant)
+
+    result = await hook_service.around_tool(function, args, run, **ctx.hook_context())
+    return {"result": result, "expires_in": _expires_in(grant)}
+
+
+@router.post("/_mcp/renew")
+async def proxy_renew(request: Request) -> dict:
+    """A fresh capability for the same bot, so a long chat keeps working. The old one is not extended."""
+    ctx = _context(request)
+    old = tool_access.resolve(request.headers.get("X-JARVIS-Tool-Token", ""))
+    if old is None or not old.agent_id:
+        raise HTTPException(403, "This tool access has expired; it lasts one turn")
+    token = tool_access.issue_proxy(old.session_id, old.is_admin, old.agent_id, old.model, old.integration_ids,
+                                    PROXY_TOKEN_SECONDS)
+    return {"token": token, "expires_in": PROXY_TOKEN_SECONDS}
 
 
 @router.post("/{name}")
