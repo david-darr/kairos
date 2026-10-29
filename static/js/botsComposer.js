@@ -58,7 +58,7 @@ export function slashItems(text, skills = []) {
   const q = m[1].toLowerCase();
   const builtins = [
     { id: 'goal', label: '/goal', hint: 'Work until done', kind: 'command' },
-    { id: 'learn', label: '/learn', hint: 'Teach a task (arrives with skills)', kind: 'command' },
+    { id: 'learn', label: '/learn', hint: 'Teach this bot a new skill', kind: 'command' },
     { id: 'setup', label: '/setup', hint: 'Set this bot up', kind: 'command' },
   ];
   const extra = skills.filter(s => s?.name && !RESERVED.includes(s.name)).map(s => ({ id: s.name, label: `/${s.name}`, hint: s.description || 'Skill', kind: 'skill' }));
@@ -180,7 +180,6 @@ export function mountBotsComposer(host, o) {
     const slash = slashItems(text, o.skills?.() || []);
     if (slash.length) { menuAt = 0; openList('slash', slash, item => {
       if (item.id === 'goal') { input.value = ''; draft.update({ text: '', mode: 'goal' }); }
-      else if (item.id === 'learn') { input.value = ''; draft.update({ text: '' }); say('Teaching a task arrives with the skills update. For now, tell the bot what to remember in plain words.'); }
       else { input.value = `/${item.id} `; draft.update({ text: input.value }); }
       paint();
     }); return; }
@@ -195,7 +194,7 @@ export function mountBotsComposer(host, o) {
   plus.addEventListener('click', () => openMenu(plus, [
     { label: 'Attach files', iconName: 'paperclip', onSelect: () => picker.click() },
     { label: draft.read().mode === 'goal' ? 'Stop working until done' : 'Work until done', iconName: 'zap', onSelect: toggleGoal },
-    { label: 'Teach a task', iconName: 'sparkles', meta: 'Soon', onSelect: () => say('Teaching a task arrives with the skills update.') },
+    { label: 'Teach a task', iconName: 'sparkles', onSelect: () => { draft.update({ text: '/learn ' }); paint(); input.focus(); } },
   ]));
 
   // -- Painting ------------------------------------------------------------------------

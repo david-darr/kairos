@@ -33,6 +33,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["bot-events"])
 
 
+def automation_summaries(owner: str, is_admin: bool) -> list[dict]:
+    """Adapt owned event sources to the unified Automations list."""
+    rows = []
+    for sub in bot_app_triggers.list_subscriptions(owner):
+        shown = bot_app_triggers.public(sub)
+        needs = bool(shown.get("last_error") or shown.get("poisoned"))
+        rows.append({"id": sub["id"], "kind": "app", "bot_id": sub.get("agent_id"), "name": sub["name"],
+                     "enabled": sub["enabled"], "state": "needs_you" if needs else "working" if sub["enabled"] else "paused",
+                     "reason": shown.get("last_error") or "", "trigger": shown,
+                     "fix": {"kind": "reconnect", "label": "Reconnect"} if needs else None})
+    for trigger in trigger_service.triggers():
+        if (trigger.get("owner_user") or owner) != owner or not trigger.get("agent_id"):
+            continue
+        rows.append({"id": trigger["id"], "kind": "webhook", "bot_id": trigger["agent_id"], "name": trigger["name"],
+                     "enabled": trigger["enabled"], "state": "working" if trigger["enabled"] else "paused",
+                     "trigger": _shown(trigger)})
+    return rows
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -241,7 +260,13 @@ async def _ingest(trigger_id: str, request: Request, path_credential: str = "") 
             await bot_app_events.hand_off(work["receipt_id"])  # a failure leaves the receipt durable and retried
         except Exception:
             logger.exception("webhook %s: hand-off failed; the receipt stays queued", trigger_id)
-        if any(p["trigger_id"] == trigger_id and p["delivery"] == work["delivery"] for p in trigger_service.pending()):
+        waiting = any(p["trigger_id"] == trigger_id and p["delivery"] == work["delivery"] for p in trigger_service.pending())
+        if not waiting:   # the run engine parks a delivery as a Backlog card until the person moves it to Ready
+            from services.task_service import task_service
+            ref = str((receipts_module.store().get(work["receipt_id"]) or {}).get("run_ref") or "")
+            card = task_service.get_task(ref[5:]) if ref.startswith("card:") else None
+            waiting = bool(card and card.get("status") == "backlog")
+        if waiting:
             content = {**content, "waiting_for_approval": True}
     return JSONResponse(content, status_code=status)
 

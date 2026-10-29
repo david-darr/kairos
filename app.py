@@ -158,6 +158,23 @@ async def lifespan(_app: FastAPI):
     from services import background_tasks; background_tasks.start()
     # Bot conversations: reconcile uncertain dispatches and restart waiting queues.
     from services import bot_chat_service; await bot_chat_service.startup()
+    from services import bot_skill_library
+    bot_skill_library.migrate_global()
+    from routes import bot_memory_routes
+    from services import bot_memory_upkeep
+    async def tidy_notebook(bot_id):
+        return await bot_memory_upkeep.tidy(bot_id, force=True) or {"passes": []}
+    bot_memory_routes.tidy_runner = tidy_notebook
+    from core import bot_app_events
+    bot_app_events.start()
+    from services import bot_cards, bot_automation_changes, chat_live
+    def publish_bot_resource(packet):
+        record = packet.get("card") or packet.get("receipt") or {}
+        thread = record.get("thread_id")
+        if thread:
+            chat_live.broadcast_owner({**packet, "sessionId": thread})
+    remove_card_listener = bot_cards.store().add_listener(publish_bot_resource)
+    bot_automation_changes.store().add_listener(publish_bot_resource)
     task_scheduler.start()
     # Tool-result search text for old chats: batched in a daemon thread so it never holds the
     # store lock against startup (core/session_manager_store.py).
@@ -181,6 +198,8 @@ async def lifespan(_app: FastAPI):
         await agent_calls.recover()
         yield
     finally:
+        remove_card_listener()
+        bot_automation_changes.store()._listeners.remove(publish_bot_resource)
         from services.forge_apps import forge_apps
         from services.forge_terminals import forge_terminals
         try:
@@ -198,6 +217,10 @@ async def lifespan(_app: FastAPI):
             await background_tasks.stop()
             session_manager_store.stop_background_migration()
             task_scheduler.stop()
+            bot_app_events.stop()
+            from services import bot_memory_upkeep, bot_turn_context
+            await bot_memory_upkeep.shutdown()
+            await bot_turn_context.shutdown()
             await discord_channel.stop()
             await connector_hub.stop_all()
             await tab_hooks.stop_all()

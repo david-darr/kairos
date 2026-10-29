@@ -375,7 +375,7 @@ function buildRoutineDialog({ draft, bots, editing, onSaved, opener }) {
   async function loadEndpoints() {
     try {
       const data = await api('/api/bot-limit-resets', { toast: false });
-      state.endpoints = (data?.endpoints || []).map(e => ({ value: e.endpoint_id, label: e.name || e.endpoint_id }));
+      state.endpoints = (data?.endpoints || data?.limits || []).map(e => ({ value: e.endpoint_id, label: e.name || e.endpoint_id }));
     } catch { state.endpoints = []; }
     const options = state.endpoints.length ? state.endpoints : [{ value: '', label: 'No limits found' }];
     endpoint.replaceChildren(...options.map(o => el('option', { value: o.value, text: o.label })));
@@ -547,8 +547,8 @@ export function openAppEventEditor({ id = '', agentId = '', onSaved, opener = do
 
 function buildAppDialog({ bots, existing, botId, catalog: first, onSaved, opener }) {
   const state = { catalog: first, saving: false };
-  const draft = { botId, name: existing?.name || '', prompt: existing?.prompt_template || existing?.instructions || '', app: existing?.app || '', event: existing?.event || '',
-    account: existing?.account_id || '', filters: { ...(existing?.filters || {}) }, config: { ...(existing?.config || {}) } };
+  const draft = { botId, name: existing?.name || '', prompt: existing?.prompt_template || existing?.instructions || '', app: existing?.adapter || existing?.app || '', event: existing?.events?.[0] || existing?.event || '',
+    account: existing?.config?.account_id || existing?.account_id || '', filters: { text: existing?.conditions?.find(c => c.path === 'summary')?.equals || existing?.filters?.text || '' }, config: { ...(existing?.config || {}) } };
   const fields = {};
   const bot = select(bots.map(b => ({ value: b.id, label: b.name })), draft.botId, { name: 'bot' });
   const appSelect = select([{ value: '', label: 'Choose an app' }], draft.app, { name: 'app' });
@@ -563,7 +563,7 @@ function buildAppDialog({ bots, existing, botId, catalog: first, onSaved, opener
   fields.app = field({ label: 'App', control: appSelect, name: 'app' });
   fields.event = field({ label: 'When this happens', control: eventSelect, name: 'event' });
   fields.account = field({ label: 'Account', control: account, name: 'account' });
-  fields.filter = field({ label: 'Only when it contains', control: filter, name: 'filter', hint: 'Up to 200 characters.' });
+  fields.filter = field({ label: 'Only when the summary equals', control: filter, name: 'filter', hint: 'Up to 200 characters.' });
   fields.name = field({ label: 'Name (optional)', control: name, name: 'name' });
   fields.prompt = field({ label: 'Instructions', control: prompt, name: 'prompt', wide: true });
   const empty = el('div', { class: 'bots-ed-empty', hidden: '' }, [
@@ -581,7 +581,10 @@ function buildAppDialog({ bots, existing, botId, catalog: first, onSaved, opener
   cancel.addEventListener('click', () => dialog.close());
   submit.addEventListener('click', event => { event.preventDefault(); save(); });
 
-  const apps = () => (state.catalog?.apps || []).filter(a => a.connected !== false);
+  const apps = () => state.catalog?.capabilities
+    ? state.catalog.capabilities.filter(a => a.available).map(a => ({ ...a, app: a.id, name: a.label, accounts: a.accounts,
+        events: a.events.map(e => ({ ...e, event: e.type, name: e.label, delivery: a.delivery, config_fields: a.fields.filter(f => f.kind !== 'account') })) }))
+    : (state.catalog?.apps || []).filter(a => a.connected !== false);
   const currentApp = () => apps().find(a => a.app === draft.app);
   const currentEvent = () => currentApp()?.events?.find(e => e.event === draft.event);
 
@@ -599,7 +602,8 @@ function buildAppDialog({ bots, existing, botId, catalog: first, onSaved, opener
     const accounts = app?.accounts || [];
     fields.account.hidden = accounts.length < 2;
     account.replaceChildren(...[{ value: '', label: 'Any connected account' }, ...accounts.map(a => ({ value: a.id, label: a.label || a.id }))].map(o => el('option', { value: o.value, text: o.label })));
-    account.value = accounts.some(a => a.id === draft.account) ? draft.account : '';
+    if (!accounts.some(a => a.id === draft.account)) draft.account = accounts.length === 1 ? accounts[0].id : '';
+    account.value = draft.account;
     const event = currentEvent();
     configHost.replaceChildren(...(event?.config_fields || []).map(f => {
       const control = input({ name: `config-${f.key}`, maxlength: '200' }); control.value = draft.config[f.key] || '';
@@ -634,9 +638,10 @@ function buildAppDialog({ bots, existing, botId, catalog: first, onSaved, opener
     for (const node of configHost.children) node.setError?.(bad[node.dataset.field] || '');
     if (Object.keys(bad).length) { form.querySelector('[aria-invalid="true"]')?.focus(); return; }
     state.saving = true; submit.disabled = true; problem.hidden = true;
-    const body = { agent_id: draft.botId, name: draft.name.trim() || undefined, app: draft.app, event: draft.event, account_id: draft.account || undefined,
-      filters: draft.filters, config: draft.config, prompt_template: draft.prompt.trim() };
-    if (existing) body.expected_revision = existing.revision;
+    const body = { ...(existing ? {} : { bot_id: draft.botId }), name: draft.name.trim() || 'App automation', events: [draft.event],
+      conditions: draft.filters.text ? [{ path: 'summary', equals: draft.filters.text }] : [],
+      config: { ...draft.config, ...(draft.account ? { account_id: draft.account } : {}) }, prompt_template: draft.prompt.trim() };
+    if (existing) body.expected_revision = String(existing.revision);
     try {
       const saved = existing
         ? await api(`/api/bot-app-triggers/${encodeURIComponent(existing.id)}`, { method: 'PATCH', body: JSON.stringify(body), toast: false })

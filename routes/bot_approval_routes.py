@@ -117,10 +117,9 @@ def _desktop_only(request: Request) -> None:
         raise HTTPException(404, "Not found.")
 
 
-@router.post("/api/internal/bots-approvals/{step}")
+@router.post("/api/internal/bots-approvals/{step}", dependencies=[Depends(_desktop_only)])
 async def desktop_step(step: Literal["confirm", "activate", "commit", "revoke"], body: StepBody,
                        request: Request) -> dict:
-    _desktop_only(request)
     try:
         if step == "revoke":
             return {"revoked": bot_policy.revoke_elevation(body.request_id)}

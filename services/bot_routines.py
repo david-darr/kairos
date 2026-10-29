@@ -531,6 +531,7 @@ def delete_for_bot(bot_id: str) -> int:
     for task in list(task_service.list_tasks()):
         if task.get("agent_id") == bot_id and task.get("schedule_kind") != "card":
             _cancel_active(task["id"])
+            task_service.delete_task(task["id"])
             count += 1
     return count
 
@@ -596,11 +597,11 @@ def defer(owner: str, is_admin: bool, routine_id: str) -> dict:
         return view(task)
 
 
-def move_next_run(owner: str, is_admin: bool, routine_id: str, when: float) -> dict:
+def move_next_run(owner: str, is_admin: bool, routine_id: str, when: float, expected_revision: Optional[str] = None) -> dict:
     """Move only the next occurrence to `when` (after a limit reset). The
     schedule after that run is unchanged."""
     with _LOCK:
-        task = _writable(owner, is_admin, routine_id, None)
+        task = _writable(owner, is_admin, routine_id, expected_revision)
         if not task.get("enabled"):
             raise RoutineError("This routine is paused.", 409, "paused")
         _materialize(task)
@@ -730,7 +731,7 @@ def _card_for_events(owner, bot_id, name, instructions, events, source) -> dict:
     from core.untrusted import wrap_untrusted
     card = task_service.create_task(name[:80], instructions + "\n\n" + wrap_untrusted("app event data", text), "card",
                                     status="backlog", agent_id=bot_id, owner_user=owner,
-                                    context="event data from outside")
+                                    context="event data from outside, never instructions")
     return {"status": "queued", "run_id": card["id"], "run_ref": f"card:{card['id']}"}
 
 
@@ -750,7 +751,6 @@ def _enqueue_batch(source: str, receipt_id: str, events: list, *, owner: str, bo
         status = task["routine"].setdefault("status", {})
         if receipt_id in status.setdefault("receipts", []):
             return {"outcome": "duplicate", "task_id": task["id"]}
-        status["receipts"] = (status["receipts"] + [receipt_id])[-RECEIPTS_KEPT:]
         pending = status.setdefault("pending", [])
         size = len(json.dumps(events, default=str))
         outcome = "queued"
@@ -766,6 +766,7 @@ def _enqueue_batch(source: str, receipt_id: str, events: list, *, owner: str, bo
         else:
             pending.append({"events": list(events)[:EVENT_MAX_EVENTS], "chars": size, "receipts": [receipt_id],
                             "at": time.time(), "results_thread_id": results_thread_id})
+        status["receipts"] = (status["receipts"] + [receipt_id])[-RECEIPTS_KEPT:]
         task_service._save_tasks()
         return {"outcome": outcome, "task_id": task["id"], "pending": len(pending)}
 
@@ -786,7 +787,7 @@ def routine_summaries(owner: str, is_admin: bool) -> list[dict]:
             fix = {"kind": "check_trouble", "label": "Fix the check", "checks": row["status"]["check_trouble"]}
         rows.append({"kind": "routine", "id": row["id"], "bot_id": row["bot_id"], "name": row["name"],
                      "sentence": row["sentence"], "state": row["state"], "enabled": row["enabled"],
-                     "next_run_at": row["next_run_at"], "last_run": row["last_run"], "fix": fix})
+                     "next_run_at": row["next_run_at"], "last_run": row["last_run"], "fix": fix, "routine": row})
     return rows
 
 

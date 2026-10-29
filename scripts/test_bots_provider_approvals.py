@@ -5,6 +5,7 @@ native approval requests, the desktop-only routes and the HTTP surface. Models a
 bots and stores are real. Run: python scripts/test_bots_provider_approvals.py
 """
 import json
+import dataclasses
 import os
 import sys
 import types
@@ -63,20 +64,23 @@ class Claude(ApprovalCase):
         permissions.answer(payload["id"], "reject", "local")
         self.assertEqual(type(await task).__name__, "PermissionResultDeny")
 
-    async def test_a_send_that_took_an_allowance_unit_is_settled_by_the_after_tool_hook(self):
+    async def test_a_hive_send_is_gated_and_its_allowance_settled_by_the_registry(self):
         bot = make_bot("Hook")
         agent_service.update(bot, outbound={"policy": "allow", "daily_cap": 1}, approval_mode="ask")
         sid = make_thread(bot)
         brain = self.brain(bot, sid)
         result = await brain._permission("mcp__hive_mind__send_email", {"to": "a"}, context("use-9"))
         self.assertEqual(type(result).__name__, "PermissionResultAllow")
-        self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 1)
-        await brain._hook_after_tool({"tool_name": "mcp__hive_mind__send_email", "tool_input": {},
-                                      "tool_response": "Not sent: signed out"}, "use-9", None)
         self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 0)
-        again = await brain._permission("mcp__hive_mind__send_email", {"to": "a"}, context("use-10"))
-        self.assertEqual(type(again).__name__, "PermissionResultAllow")
-        await brain._hook_after_tool({"tool_name": "x", "tool_input": {}, "tool_response": "Sent."}, "use-10", None)
+        replies = iter(["Not sent: signed out", "Sent."])
+        async def send(args, ctx):
+            self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 1, "reserved before the send")
+            return next(replies)
+        ctx = tool_registry.ToolContext(agent_id=bot, session_id=sid, is_admin=True)
+        with patch.dict(tool_registry._REGISTRY, {"send_email": dataclasses.replace(tool_registry._REGISTRY["send_email"], handler=send)}):
+            self.assertEqual(await tool_registry.call("send_email", {"to": "a"}, ctx, tool_registry.CLAUDE), "Not sent: signed out")
+            self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 0)
+            self.assertEqual(await tool_registry.call("send_email", {"to": "a"}, ctx, tool_registry.CLAUDE), "Sent.")
         self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 1)
 
     async def test_the_grant_ceiling_is_asked_before_the_level_and_ordinary_chats_are_untouched(self):
@@ -98,10 +102,13 @@ class ApiModels(ApprovalCase):
         brain = ExternalBrain("http://x", "m", None, agent_id=bot, is_admin=True, session_id=sid)
         ran = []
 
-        async def handler(name, args, ctx, surface):
-            ran.append(name)
-            return "done"
-        with patch.object(tool_registry, "call", handler):
+        def handler(name):
+            async def run(args, ctx):
+                ran.append(name)
+                return "done"
+            return run
+        with patch.dict(tool_registry._REGISTRY, {name: dataclasses.replace(tool_registry._REGISTRY[name], handler=handler(name))
+                                                  for name in ("list_contacts", "agent_remember")}):
             self.assertEqual(await brain._call_registry("list_contacts", {}), "done", "reads go straight through")
             refused = await brain._call_registry("agent_remember", {"text": "x"})
             self.assertTrue(refused.startswith("Not run:"))
@@ -116,9 +123,9 @@ class ApiModels(ApprovalCase):
         brain = ExternalBrain("http://x", "m", None, agent_id=bot, is_admin=True, session_id=sid)
         replies = iter(["Not sent: no account", "Sent."])
 
-        async def handler(name, args, ctx, surface):
+        async def handler(args, ctx):
             return next(replies)
-        with patch.object(tool_registry, "call", handler):
+        with patch.dict(tool_registry._REGISTRY, {"send_email": dataclasses.replace(tool_registry._REGISTRY["send_email"], handler=handler)}):
             self.assertEqual(await brain._call_registry("send_email", {"to": "a"}), "Not sent: no account")
             self.assertEqual(bot_outbound.usage("local", bot, 1)["used"], 0)
             self.assertEqual(await brain._call_registry("send_email", {"to": "a"}), "Sent.")

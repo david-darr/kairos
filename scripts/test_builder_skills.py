@@ -331,8 +331,11 @@ class BuilderToolTests(unittest.TestCase):
         accept.assert_not_called()
 
     def test_actual_broker_prompts_in_auto_for_both_tools(self):
+        from services.agent_service import agent_service
+        bot = agent_service.create("Builder review fixture")
+        self.addCleanup(agent_service.delete, bot["id"])
         async def exercise():
-            for surface in ("chat:auto-builder", "agent:auto-builder"):
+            for surface in ("chat:auto-builder", f"agent:{bot['id']}"):
                 queue = asyncio.Queue()
                 with patch.dict(permissions._channels, {surface: queue}), \
                      patch("core.session_manager.session_manager.get_session", return_value={"permission_mode": "auto"}):

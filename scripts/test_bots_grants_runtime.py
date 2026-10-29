@@ -373,6 +373,12 @@ class OtherProviders(Base):
 
 
 class GuardedRegistration(Base):
+    def setUp(self):
+        super().setUp()
+        names = ("skill_stage", "skill_read", "skill_index", "skill_share", "schedule_routine", "manage_routine")
+        original = {name: tool_registry._REGISTRY.pop(name) for name in names if name in tool_registry._REGISTRY}
+        self.addCleanup(tool_registry._REGISTRY.update, original)
+
     def tearDown(self):
         for name in ("skill_stage", "skill_read", "skill_index", "skill_share", "schedule_routine", "manage_routine"):
             tool_registry._REGISTRY.pop(name, None)
@@ -382,7 +388,7 @@ class GuardedRegistration(Base):
     def test_nothing_registers_without_the_modules(self):
         sys.modules["services.bot_skills"] = None   # an import raises ImportError
         sys.modules["core.bot_automation_tools"] = None
-        self.assertEqual(tool_registry.register_resource_tools(), {"skills": [], "automation": []})
+        self.assertEqual(tool_registry.register_resource_tools(), {"skills": [], "automation": [], "notebook": [], "connections": []})
 
     def test_skill_tools_call_the_skill_service_with_a_trusted_scope(self):
         calls = []

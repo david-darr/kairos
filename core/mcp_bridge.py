@@ -43,27 +43,37 @@ async def call_tool(name, args, spec, integration_ids, ctx, *, rea_client=None, 
         tool=name, arguments=args if isinstance(args, dict) else {},
         title=f"{spec['server']}: {spec['name']}", description=spec["description"][:300],
         is_admin=ctx.is_admin, agent_id=ctx.agent_id, mcp=bot_grants.mcp_ident(spec) if ctx.agent_id else None,
+        bot_context={"invocation_id": getattr(ctx, "invocation_id", None)},
     )
     if decision.behavior != "allow":
         return f"Not run: {decision.reason}"
-    # 2026-10-15: refresh and re-check after the person's permission decision.
-    await mcp_oauth.refresh_due(integration_ids)
-    config = integrations.list_mcp_servers_runtime(integration_ids).get(spec["server"])
-    if not same_endpoint(spec["config"], config):
-        return "Not run: this integration is no longer enabled for the chat."
-    if authorized is not None and not authorized():
-        return "Not run: this tool access has expired; it lasts one turn."
-    refusal = bot_grants.mcp_refusal(ctx, spec, name, args)
-    if refusal:
-        return refusal
+    result = "Not run: call cancelled before execution."
     try:
+        # 2026-10-15: refresh and re-check after the person's permission decision.
+        await mcp_oauth.refresh_due(integration_ids)
+        config = integrations.list_mcp_servers_runtime(integration_ids).get(spec["server"])
+        if not same_endpoint(spec["config"], config):
+            return "Not run: this integration is no longer enabled for the chat."
+        if authorized is not None and not authorized():
+            return "Not run: this tool access has expired; it lasts one turn."
+        refusal = bot_grants.mcp_refusal(ctx, spec, name, args)
+        if refusal:
+            return refusal
         if spec["server"] == "REA":
             if rea_client is None:
                 return "Tool error: REA's investigation session has closed. Reconnect this chat."
             result = await rea_client.call_tool(spec["name"], args)
         else:
-            result = await mcp_client.call_tool(config, spec["name"], args)
+            if ctx.agent_id:
+                scope = tool_registry._bot_scope(ctx)
+                result = await mcp_client.call_and_hold(spec["server"], config, spec["name"], args,
+                                                       (scope["owner"], ctx.agent_id, ctx.session_id or ""))
+            else:
+                result = await mcp_client.call_tool(config, spec["name"], args)
         ctx.turn_taint.mark(f"MCP result: {name}")
         return result
     except Exception as e:
-        return f"Tool error: {e}"
+        result = f"Tool error: {e}"
+        return result
+    finally:
+        permissions.finish_bot_call(decision, ctx.agent_id, locals().get("result", "Stopped: tool cancelled"))

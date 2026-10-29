@@ -29,8 +29,10 @@ OWN = ("MCP_API_KEY", "REA_MCP_INPUT_SCHEMA_PROFILE")
 
 
 def clean_environment(environ) -> dict:
+    # Names explicitly selected by the connection config, never the parent's entire environment.
+    passed = set(environ.get("KAIROS_MCP_PASS_ENV", "").split(","))
     return {k: v for k, v in environ.items()
-            if k.upper() in SAFE or k.upper().startswith(("LC_", "XDG_")) or k in OWN}
+            if k.upper() in SAFE or k.upper().startswith(("LC_", "XDG_")) or k in OWN or k in passed}
 
 
 def main(argv: list[str]) -> int:

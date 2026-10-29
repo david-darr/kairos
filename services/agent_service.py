@@ -1182,7 +1182,7 @@ class AgentService:
             return {"text": text, "revision": agent.get("revision", 0)}
 
     def recent_work(self, agent_id: str, current_session_id: Optional[str] = None,
-                    now: Optional[float] = None) -> str:
+                    now: Optional[float] = None, owner_user: Optional[str] = None) -> str:
         """The agent's own newest complete statements in other Kairos threads."""
         from core.session_manager import session_manager
 
@@ -1195,7 +1195,12 @@ class AgentService:
             session = session_manager.get_session(header["id"])
             if not session:
                 continue
-            for message in session.get("messages", []):
+            if owner_user is not None:
+                from services.bot_turn_context import owner_of
+                if owner_of(session) != owner_user:
+                    continue
+            from core import bot_message_tree
+            for message in bot_message_tree.ancestry(session):
                 stamp = message.get("ts")
                 if (message.get("role") != "assistant" or message.get("status", "complete") != "complete"
                         or not isinstance(stamp, (int, float)) or not cutoff <= stamp <= now):
@@ -1359,3 +1364,16 @@ def _memory_template(agent: dict) -> str:
 
 
 agent_service = AgentService()
+
+# Resolve stores only at deletion time: several of them depend on this singleton.
+def _resource_cleanup(module, name):
+    def cleanup(bot_id):
+        from importlib import import_module
+        getattr(import_module(f"services.{module}"), name)(bot_id)
+    return cleanup
+
+
+for _module, _cleanup in (("bot_skills", "remove_bot"), ("bot_grants", "remove_bot"),
+                          ("bot_logins", "forget_bot"), ("bot_routines", "delete_for_bot"),
+                          ("bot_app_triggers", "on_bot_deleted"), ("bot_turn_context", "remove_bot")):
+    agent_service.on_delete(_resource_cleanup(_module, _cleanup))

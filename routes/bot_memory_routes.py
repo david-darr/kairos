@@ -216,7 +216,9 @@ async def memory_tidy(bot_id: str, user: str = Depends(require_admin)) -> dict:
     if not agent.get("memory_upkeep"):
         raise HTTPException(status_code=409, detail="turn on keeping its notes tidy first")
     try:
-        result = await run_in_threadpool(tidy_runner, bot_id)
+        import inspect
+        result = (await tidy_runner(bot_id) if inspect.iscoroutinefunction(tidy_runner)
+                  else await run_in_threadpool(tidy_runner, bot_id))
     except store.NotebookError as error:
         raise _fail(error)
     return {"queued": True, **(result or {})}

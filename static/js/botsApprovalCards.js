@@ -391,6 +391,7 @@ export async function mount(host, ctx = {}) {
     const hadFocus = active && root.contains(active) ? { id: active.closest('[data-card-id]')?.dataset.cardId, action: active.dataset.action || '',
       tab: active.getAttribute('role') === 'tab', option: active.matches('.bots-cards-option input') ? active.value : null } : null;
     const { pending, settled } = splitCards(view.cards);
+    ctx.onPending?.(pending.length > 0);
     const nodes = [];
     if (slot === 'composer') {
       if (pending[0]) nodes.push(panelFor(pending[0]));

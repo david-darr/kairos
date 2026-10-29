@@ -125,49 +125,16 @@
 [data-app-mode="bots"] .bots-head-status { font-size: var(--bots-text-hint-lg); color: var(--bots-ink-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 [data-app-mode="bots"] .bots-head-back { display: none; place-items: center; width: 36px; height: 36px; padding: 0; color: var(--bots-ink-secondary); background: transparent; border: 0; border-radius: var(--bots-radius-pill); cursor: pointer; }
 
-/* The conversation list: a popover under the header, the list agentChat.js draws. */
+/* The conversation list: a popover under the header (its rows are styled by bots-chat.css). */
 [data-app-mode="bots"] .bots-convos {
   position: absolute; z-index: 30; top: 52px; right: 16px; width: min(340px, calc(100% - 32px)); max-height: min(70%, 520px); overflow-y: auto;
   padding: 8px; background: var(--bots-menu); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu);
   box-shadow: var(--bots-shadow-float); animation: bots-pop-in var(--bots-dur-pop) var(--bots-ease); transform-origin: top right;
 }
 [data-app-mode="bots"] .bots-convos[hidden] { display: none; }
-[data-app-mode="bots"] .bots-convos .agent-chat-side { display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: transparent; }
-[data-app-mode="bots"] .bots-convos .agent-chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; }
-[data-app-mode="bots"] .bots-convos .agent-chat-side-head h3 { margin: 0; font: 600 var(--bots-text-row)/1.2 var(--bots-font-sans); }
-[data-app-mode="bots"] .bots-convos .agent-chat-new { min-height: 32px; padding: 0 12px; font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); border-radius: var(--bots-radius-pill); }
-[data-app-mode="bots"] .bots-convos .agent-search-scope { display: none; }
-[data-app-mode="bots"] .bots-convos .agent-chat-list { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; }
-[data-app-mode="bots"] .bots-convos .agent-chat-item { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
-[data-app-mode="bots"] .bots-convos .agent-chat-item[hidden] { display: none; }
-[data-app-mode="bots"] .bots-convos .agent-chat-item:hover { background: var(--bots-raised-hover); }
-[data-app-mode="bots"] .bots-convos .agent-chat-item.active { background: var(--bots-menu-active); }
-[data-app-mode="bots"] .bots-convos .agent-chat-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; }
-[data-app-mode="bots"] .bots-convos .agent-chat-title { font-size: var(--bots-text-row); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-[data-app-mode="bots"] .bots-convos .meta, [data-app-mode="bots"] .bots-convos .agent-chat-none { font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
-[data-app-mode="bots"] .bots-convos .agent-chat-delete { flex: none; width: 28px; height: 28px; color: var(--bots-ink-tertiary); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
-[data-app-mode="bots"] .bots-convos .agent-chat-delete:hover { color: var(--bots-danger); background: var(--bots-raised-hover); }
 
-/* The conversation: the real one (sessionChat.js), in the Bots look. */
+/* The conversation host; the chat itself is styled by bots-chat.css and bots-composer.css (unit U3). */
 [data-app-mode="bots"] .bots-chat-host { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
-[data-app-mode="bots"] .bots-chat-host .agent-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
-[data-app-mode="bots"] .bots-chat-host .agent-chat-main { flex: 1; min-height: 0; border: 0; background: transparent; }
-[data-app-mode="bots"] .bots-chat-host .agent-chat-honesty { margin: 0 16px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
-[data-app-mode="bots"] .bots-chat-host .session-chat { height: 100%; }
-[data-app-mode="bots"] .bots-chat-host .side-messages { width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 16px; gap: 14px; }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg { width: auto; max-width: 100%; display: flex; flex-direction: column; gap: 6px; font-size: var(--bots-text-bubble); line-height: var(--bots-leading-bubble); }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.user { align-self: flex-end; max-width: min(560px, calc(100% - 82px)); }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.assistant { align-self: flex-start; max-width: min(560px, 100%); }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg > .msg-body { padding: 10px 14px; border-radius: var(--bots-radius-bubble); font-family: var(--bots-font-prose); overflow-wrap: anywhere; min-width: 0; }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.user > .msg-body { background: var(--bots-bubble-user); color: var(--bots-bubble-user-ink); }
-[data-app-mode="bots"] .bots-chat-host .side-messages > .msg.assistant > .msg-body { background: var(--bots-bubble-bot); color: var(--bots-ink); }
-[data-app-mode="bots"] .bots-chat-host .agent-composer-row { width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 16px; gap: 10px; box-sizing: border-box; }
-[data-app-mode="bots"] .bots-chat-host .side-chat-composer {
-  flex: 1 1 auto; min-width: 0; margin: 0; padding: 10px 12px;
-  background: var(--bots-composer); border-radius: 22px; box-shadow: var(--bots-composer-ring); border: 0;
-}
-[data-app-mode="bots"] .bots-chat-host .side-chat-input { font: 400 var(--bots-text-bubble)/1.5 var(--bots-font-prose); }
-[data-app-mode="bots"] .bots-chat-host .side-chat-send { border-radius: var(--bots-radius-pill); }
 
 /* -- The panel frame (the sections are botsPanel.js, unit U4) ----------------------------- */
 
@@ -197,13 +164,13 @@
 
   [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
   [data-app-mode="bots"] .bots-shell-header { padding: calc(8px + var(--mobile-safe-top, 0px)) 12px 8px; }
-  [data-app-mode="bots"] .bots-head-back { display: grid; width: 44px; height: 44px; margin-left: -8px; }
-  [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; }
+  [data-app-mode="bots"] .bots-head-back { display: grid; flex: none; width: 44px; height: 44px; margin-left: -8px; }
+  [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+  /* The job is Advanced-only and long; on a phone it would push the Conversations button off screen. */
+  [data-bots-interface="advanced"][data-app-mode="bots"] .bots-head-role:not(:empty) { display: none; }
   [data-app-mode="bots"] .bots-head-status { display: none; }
   [data-app-mode="bots"] .bots-head-convos { width: 44px; height: 44px; }
   [data-app-mode="bots"] .bots-convos { top: calc(60px + var(--mobile-safe-top, 0px)); right: 12px; }
-  [data-app-mode="bots"] .bots-chat-host .side-messages { padding: 8px 12px 12px; }
-  [data-app-mode="bots"] .bots-chat-host .agent-composer-row { padding: 6px 12px 12px; }
   /* The panel covers the page; the tab bar steps aside (mobileTabBar.js FULLSCREEN). */
   [data-app-mode="bots"] .bots-panel-aside, [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] {
     position: fixed; inset: 0; z-index: 60; width: auto; height: auto; border-left: 0; background: var(--bots-app);

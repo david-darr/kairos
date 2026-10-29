@@ -147,7 +147,7 @@ const approval = (extra = {}) => ({ id: 'c1', kind: 'approval', status: 'pending
   });
 
   await check('Pause goes to the routine or trigger route, and a stale Undo is explained', () => {
-    assert.deepEqual(M.pauseRequest({ kind: 'routine', target_id: 't9' }, false), { path: '/api/tasks/t9', method: 'PATCH', body: { enabled: false } });
+    assert.deepEqual(M.pauseRequest({ kind: 'routine', target_id: 't9' }, false), { path: '/api/bot-routines/t9', method: 'PATCH', body: { enabled: false } });
     assert.deepEqual(M.pauseRequest({ kind: 'trigger', target_id: 'g2' }, true), { path: '/api/triggers/g2', method: 'PATCH', body: { enabled: true } });
     assert.match(M.undoRefusalText({ code: 'stale', detail: 'It was changed after this, so Undo left it alone.' }), /left it alone/);
     assert.match(M.undoRefusalText({ code: 'stale' }), /changed after this/);

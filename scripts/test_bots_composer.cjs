@@ -222,8 +222,8 @@ global.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventL
     assert.equal(menu.hidden, false); assert.equal(menu.children.length, 3);
     input.emit('keydown', key('Escape')); assert.equal(menu.hidden, true, 'Escape closes the menu first');
     type('/'); input.emit('keydown', key('ArrowDown')); input.emit('keydown', key('Enter'));
-    assert.equal(input.value, '', 'Enter chose /learn, which clears the field');
-    assert.match(root.querySelector('.bots-send-error').textContent, /skills update/, 'and says what is coming');
+    assert.equal(input.value, '/learn ', 'Enter chooses the live skill authoring command');
+    assert.equal(draft.read().text, '/learn ');
     type('/g'); input.emit('keydown', key('Enter')); assert.equal(draft.read().mode, 'goal', '/goal switches to goal mode'); assert.equal(input.value, '');
     type('@arc'); assert.equal(menu.children.length, 1); input.emit('keydown', key('Tab')); assert.equal(input.value, '@Archivist ');
     type('x'); uploads.busy = true; comp.paint();

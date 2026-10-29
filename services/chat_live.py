@@ -292,6 +292,12 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
            "waitingSince": time.time(), "providerDetail": None, "_ollama": _ollama_target(session_id),
            "_agent_id": session.get("agent_id"), "_owner": user, "_filter": chunk_filter}
     _runs[session_id] = run
+    if run.get("_agent_id"):
+        from core import bot_policy
+        run["_card_generation"] = bot_policy._bump_generation(session_id)
+        store = bot_policy.cards()
+        if store is not None:
+            store.set_generation(session_id, run["_card_generation"])
     try:
         mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint)
         task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references,
@@ -320,6 +326,13 @@ def _task_done(session_id: str, run: dict, task: asyncio.Task) -> None:
         logger.error("live chat task failed for %s", session_id, exc_info=task.exception())
     run["_settled"] = True
     if run.get("_agent_id"):
+        from core import bot_policy
+        if bot_policy.generation(session_id) == run.get("_card_generation"):
+            permissions.cancel_pending(lambda meta: meta.get("surface") == f"chat:{session_id}",
+                                       "The turn ended, so the action did not run.")
+            store = bot_policy.cards()
+            if store is not None:
+                store.close_thread(session_id)
         # The slot and the claim are free now. Only this turn's own record is
         # touched: a newer turn of the session is never modified from here.
         try:
@@ -332,6 +345,18 @@ def _task_done(session_id: str, run: dict, task: asyncio.Task) -> None:
 async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: bool,
                reference_context: str, references: list[dict], accepted_index: int | None = None,
                turn_note: str = "") -> None:
+    from core import bot_policy
+    endpoint = chat_service._resolve_endpoint(session_id) or {}
+    with bot_policy.bind_turn({"bot_id": run.get("_agent_id"), "owner": run.get("_owner"),
+                               "session_id": session_id, "provider": endpoint.get("provider"),
+                               "unattended": False, "run_id": run.get("runId")}):
+        await _run_stream(session_id, run, attachment_ids, is_admin, reference_context, references,
+                          accepted_index, turn_note)
+
+
+async def _run_stream(session_id: str, run: dict, attachment_ids: list[str], is_admin: bool,
+                      reference_context: str, references: list[dict], accepted_index: int | None = None,
+                      turn_note: str = "") -> None:
     run["_started"] = True
     chat_service.LIVE_STEPS.set(True)  # this task's own context only
     try:
@@ -366,6 +391,9 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                         if key == "permission":
                             _update(session_id, run, permission=value)
                         elif key == "permission_closed":
+                            if run.get("_agent_id"):
+                                from services import bot_cards
+                                bot_cards.store().settle_for_request(value, "expired")
                             permission_answered(value)
                         elif key == "handoffs":
                             _update(session_id, run, handoffs=value)

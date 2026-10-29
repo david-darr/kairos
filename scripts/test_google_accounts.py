@@ -528,6 +528,9 @@ class AccountsTests(GoogleFixture):
 
 class SendToolTests(GoogleFixture):
     async def asyncSetUp(self):
+        from services.agent_service import agent_service
+        self.bot = agent_service.create("Mail fixture bot")
+        self.addCleanup(agent_service.delete, self.bot["id"])
         await self.sign_in("chris.coach@gmail.com")
         self.smtp = []
         for change in (patch.object(email_service, "list_accounts",
@@ -618,7 +621,7 @@ class SendToolTests(GoogleFixture):
     async def test_real_agent_owner_scopes_listing_validation_and_send(self):
         from core import auth
         await self.sign_in("alice@example.com", user="alice")
-        ctx = tool_registry.ToolContext(agent_id="scout", owner_user="fixture", is_admin=True)
+        ctx = tool_registry.ToolContext(agent_id=self.bot["id"], owner_user="fixture", is_admin=True)
         decide = AsyncMock(return_value=SimpleNamespace(behavior="allow"))
         async def call(name, args):
             return await tool_registry.call(name, args, ctx, tool_registry.CODEX)
@@ -629,12 +632,12 @@ class SendToolTests(GoogleFixture):
             args = {"from_account": "alice@example.com", "to": "to@example.com", "subject": "Hi", "body": "Body", "owner": "alice"}
             before = len(self.calls)
             self.assertIn("not a connected account", await call("send_email", args))
-            decide.assert_not_awaited()
+            self.assertEqual(decide.await_count, 1, "the outer policy gate runs before account validation")
             self.assertEqual(len(self.calls), before)
             self.assertIn("Sent from chris.coach@gmail.com", await call("send_email", {**args, "from_account": "chris.coach@gmail.com"}))
-            self.assertEqual(decide.await_args.kwargs["surface"], "agent:scout")
+            self.assertEqual(decide.await_args.kwargs["surface"], f"agent:{self.bot['id']}")
             self.assertEqual(decide.await_args.kwargs["target"], "chris.coach@gmail.com")
-            unknown = tool_registry.ToolContext(agent_id="scout", is_admin=True)
+            unknown = tool_registry.ToolContext(agent_id=self.bot["id"], is_admin=True)
             self.assertIn("must belong", await tool_registry.call("send_email", args, unknown, tool_registry.CODEX))
             self.assertNotIn("chris.coach@gmail.com", await tool_registry.call("list_email_accounts", {}, unknown, tool_registry.CODEX))
 
@@ -649,18 +652,19 @@ class SendToolTests(GoogleFixture):
     async def test_send_rechecks_ownership_after_approval_and_preserves_taint_gate(self):
         from core import auth
         from core.turn_taint import TurnTaint
-        ctx = tool_registry.ToolContext(agent_id="scout", owner_user="fixture", is_admin=True, turn_taint=TurnTaint())
+        ctx = tool_registry.ToolContext(agent_id=self.bot["id"], owner_user="fixture", is_admin=True, turn_taint=TurnTaint())
         ctx.turn_taint.mark("Untrusted email")
         async def approve(**kwargs):
             self.assertTrue(kwargs["force_prompt"])
-            self.assertEqual(kwargs["surface"], "agent:scout")
+            self.assertEqual(kwargs["surface"], f"agent:{self.bot['id']}")
             account = next(a for a in self.data["accounts"].values() if a["email"] == "chris.coach@gmail.com")
             account["owner"] = "alice"
             return SimpleNamespace(behavior="allow")
         before = len(self.calls)
         with patch.object(auth, "auth_enabled", return_value=True), patch.object(permissions, "decide", side_effect=approve):
             text = await tool_registry.call("send_email", {"from_account": "chris.coach@gmail.com", "to": "to@example.com", "subject": "Hi", "body": "Body"}, ctx, tool_registry.CODEX)
-        self.assertIn("Not sent: Unknown Google account", text)
+        self.assertTrue(text.startswith("Not sent:"), text)
+        self.assertIn("not a connected account", text)
         self.assertEqual(len(self.calls), before)
 
     async def test_new_agent_chat_records_the_request_owner(self):

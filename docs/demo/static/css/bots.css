@@ -308,3 +308,12 @@
     transition: none !important;
   }
 }
+
+/* Phone: every control in the panel, the conversation list and the dialogs is a 44 px target (the old Agents
+   phone audit, kept for Bots; scripts/agents-phone-checks.cjs measures it). */
+@media (max-width: 767px) {
+  html[data-app-mode="bots"][data-app-mode="bots"][data-app-mode="bots"] body :is(.bots-btn, .bots-segmented button, .custom-select-btn) { min-height: 44px; }
+  html[data-app-mode="bots"][data-app-mode="bots"][data-app-mode="bots"] body :is(.bots-panel-aside, .bots-convos) .bots-icon-btn { width: 44px; height: 44px; }
+  html[data-app-mode="bots"][data-app-mode="bots"][data-app-mode="bots"] body :is(.bots-hero-name, .bots-hero-job, .bots-search, .bots-panel select, .bots-dialog select) { min-height: 44px; }
+  html[data-app-mode="bots"][data-app-mode="bots"][data-app-mode="bots"] body .bots-create-nav { flex-wrap: wrap; overflow-x: visible; }
+}

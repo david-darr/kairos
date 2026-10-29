@@ -19,7 +19,11 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-ROUTERS = ("bot_connections_routes", "bot_skills_routes", "bot_recall_routes", "bot_access_routes", "bot_memory_routes")
+ROUTERS = ("bot_connections_routes", "bot_skills_routes", "bot_recall_routes", "bot_access_routes", "bot_memory_routes",
+           "bot_card_routes", "bot_automation_change_routes",
+           "bot_event_routes")
+# Approval and routine routes are already mounted by permission_routes and task_routes respectively.
+# Keep their existing hosts and never include them a second time here.
 included: list = []
 
 for _name in ROUTERS:
@@ -31,3 +35,6 @@ for _name in ROUTERS:
         continue
     router.include_router(_module.router)
     included.append(_name)
+
+from routes import bot_event_routes, bot_routine_routes
+bot_routine_routes.register_summary_source(bot_event_routes.automation_summaries)

@@ -115,7 +115,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     mark = writes.length;
     await click('.bots-auto-row[data-key="routine:r5"] .bots-switch');
     const enabled = bodyOf(await waitWrite(mark, 'PATCH', '/api/bot-routines/r5'));
-    assert.deepEqual([enabled.enabled, enabled.expected_revision], [true, 1], 'the switch writes with the revision it saw');
+    assert.deepEqual([enabled.enabled, enabled.expected_revision], [true, '1'], 'the switch writes with the revision it saw');
     await waitFor("document.querySelector('.bots-auto-row[data-key=\"routine:r5\"]').dataset.status === 'working'");
     await click('.bots-auto-row[data-key="routine:r1"] .bots-auto-row-main');
     await waitSel('.bots-auto-details:not([hidden]) .bots-auto-next li');
@@ -177,7 +177,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     await js("document.querySelector('.confirm-panel .btn.danger').click()");
     const removed = await waitWrite(mark, 'DELETE', '/api/bot-routines/r5');
     assert.equal(removed.status, 200);
-    assert.ok(Number.isInteger(Number(removed.query.expected_revision)), 'a delete names the revision it saw');
+    assert.ok(Number.isInteger(Number(bodyOf(removed).expected_revision)), 'a delete names the revision it saw');
     await waitFor("!document.querySelector('.bots-auto-row[data-key=\"routine:r5\"]')");
     await waitSel('.bots-auto-banner:not([hidden]) [data-action="restore"]');
     assert.match(await textOf('.bots-auto-banner span'), /Deleted "Paused digest"/);
@@ -227,7 +227,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     mark = writes.length;
     await click('.bots-ed-dialog .bots-btn.primary');
     const cron = bodyOf(await waitWrite(mark, 'PATCH', '/api/bot-routines/r3'));
-    assert.deepEqual([cron.schedule.kind, cron.schedule.expression, !!cron.schedule.time_zone, cron.expected_revision], ['cron', '0 9 L * *', true, 1], 'cron saves with a named zone and the revision it opened');
+    assert.deepEqual([cron.schedule.kind, cron.schedule.expression, !!cron.schedule.time_zone, cron.expected_revision], ['cron', '0 9 L * *', true, '1'], 'cron saves with a named zone and the revision it opened');
     await gone('.bots-ed-dialog');
     assert.equal(await js("document.activeElement?.dataset?.action"), 'edit', 'saving also returns focus');
     await waitFor("document.querySelector('.bots-auto-row[data-key=\"routine:r3\"] .bots-auto-row-sentence').textContent.includes('0 9 L * *')");
@@ -339,7 +339,8 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     mark = writes.length;
     await click('.bots-ed-dialog .bots-btn.primary');
     const appBody = bodyOf(await waitWrite(mark, 'POST', '/api/bot-app-triggers'));
-    assert.deepEqual([appBody.app, appBody.event, appBody.prompt_template], ['gmail', 'new_email', 'Tell me what matters.']);
+    assert.deepEqual([appBody.bot_id, appBody.events, appBody.prompt_template], [appBody.bot_id, ['new_email'], 'Tell me what matters.']);
+    assert.ok(appBody.bot_id, 'a create names its bot');
     await gone('.bots-ed-dialog');
 
     // -- Usage limits: the banner, the pill, continue ---------------------------------------------
@@ -407,7 +408,11 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.equal(await has('.bots-cal-day[data-today]'), true, 'today has its ring');
     // The engine's occurrences (cron) are drawn; paused ones are marked.
     assert.ok(await count('.bots-cal-event[data-routine-id="r3"]') >= 1, 'the cron routine is drawn at the engine\'s own occurrences');
-    assert.ok(await count('.bots-cal-event[data-routine-id="r1"]') >= 6, 'a daily routine is drawn on each day');
+    {   // r1 was paused above, and a paused routine is drawn only from now on (past days show runs, not plans): count what the clock allows.
+      const drawn = await count('.bots-cal-event[data-routine-id="r1"]');
+      const comingDays = await js("(() => { const t = new Date(); const monday = new Date(t.getFullYear(), t.getMonth(), t.getDate() - ((t.getDay() + 6) % 7)); let n = 0; for (let i = 0; i < 7; i++) { const at = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i, 9, 0).getTime(); if (at >= Date.now() - 60000) n++; } return n; })()");
+      assert.ok(drawn >= Math.max(1, comingDays), `a daily routine is drawn on each coming day (drawn ${drawn}, expected at least ${comingDays})`);
+    }
     // Pick the week that holds a future block of each routine the drag tests need.
     const ensure = async selector => {
       for (let i = 0; i < 2 && !await has(selector); i++) { await click('.bots-cal-nav [aria-label="Next week"]'); await delay(400); }
@@ -448,7 +453,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     const moved = bodyOf(await waitWrite(mark, 'PATCH', '/api/bot-routines/r6'));
     const expectMinute = Math.round((startMinute + delta) / 5) * 5;   // the drop snaps to five minutes
     assert.equal(moved.schedule.time, `${String(Math.floor(expectMinute / 60)).padStart(2, '0')}:${String(expectMinute % 60).padStart(2, '0')}`, 'snapped to five minutes and moved by the drag');
-    assert.equal(moved.expected_revision, standup.revision, 'a drag writes with the revision it saw');
+    assert.equal(moved.expected_revision, String(standup.revision), 'a drag writes with the revision it saw');
     await gone('.bots-choose-dialog');
     // Cancelling the question writes nothing.
     await waitFor(`document.querySelector('.bots-cal-event[data-routine-id="r6"][data-draggable]') && !document.querySelector('.bots-cal-event[data-dragging]')`);
@@ -485,7 +490,8 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.equal(await count('.bots-choose-dialog [data-choice]'), 4, 'move the next run, once, every reset, or cancel');
     await click('.bots-choose-dialog [data-choice="move"]');
     const after = bodyOf(await waitWrite(mark, 'POST', '/api/bot-limit-resets/after-reset'));
-    assert.deepEqual([after.routine_id, after.endpoint_id], ['r1', 'claude'], 'only that routine\'s next run moves');
+    assert.deepEqual(Object.keys(after), ['routine_id'], 'the server takes only the routine');
+    assert.equal(after.routine_id, 'r1', 'only that routine moves');
     await gone('.bots-choose-dialog');
     // An empty slot opens the editor on that day and time.
     await click('.bots-cal-nav [aria-label="Next week"]');

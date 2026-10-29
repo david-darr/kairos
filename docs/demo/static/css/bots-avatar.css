@@ -1,0 +1,50 @@
+/* The avatar editor and a bot's picture beside its Kip (Phase 1, unit U2). Loaded by botsAvatarEditor.js
+   users (the panel and the new-bot dialog). Tokens only: --bots-* from bots.css, no raw colours. */
+
+/* The picture shapes, wherever a bot's face is drawn (agentAvatar.js). The box is the avatar's own size. */
+.agent-avatar-picture { display: inline-block; position: relative; overflow: hidden; background: var(--bots-inset, transparent); }
+.agent-avatar-picture > img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+.agent-avatar-picture[data-shape="circle"] { border-radius: 50%; }
+.agent-avatar-picture[data-shape="rounded"] { border-radius: 24%; }
+.agent-avatar-picture[data-shape="square"] { border-radius: 0; }
+.agent-avatar-picture[data-shape="kip"] {
+  background: transparent; border-radius: 0;
+  -webkit-mask: var(--avatar-mask) center / contain no-repeat; mask: var(--avatar-mask) center / contain no-repeat;
+}
+
+[data-app-mode="bots"] .bots-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The editor */
+[data-app-mode="bots"] .bots-avatar-editor { display: grid; gap: 12px; padding: 12px 14px 14px; }
+[data-app-mode="bots"] .bots-avatar-top { display: grid; justify-items: center; }
+[data-app-mode="bots"] .bots-avatar-preview {
+  display: grid; place-items: center; width: 148px; height: 148px; border-radius: var(--bots-radius-card);
+  background: var(--bots-inset); touch-action: none;
+}
+[data-app-mode="bots"] .bots-avatar-preview[tabindex] { cursor: grab; }
+[data-app-mode="bots"] .bots-avatar-preview:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-avatar-preview .agent-avatar { pointer-events: none; }
+[data-app-mode="bots"] .bots-avatar-expression, [data-app-mode="bots"] .bots-avatar-slider { display: grid; gap: 4px; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-avatar-slider input[type="range"] { width: 100%; accent-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-avatar-picture-tools { display: grid; gap: 10px; }
+[data-app-mode="bots"] .bots-avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-avatar-make > summary { cursor: pointer; font-size: var(--bots-text-row); padding: 6px 0; }
+[data-app-mode="bots"] .bots-avatar-make > summary:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; border-radius: 6px; }
+[data-app-mode="bots"] .bots-avatar-generate, [data-app-mode="bots"] .bots-avatar-provider { display: grid; gap: 8px; padding-top: 6px; }
+[data-app-mode="bots"] .bots-avatar-editor :is(input[type="text"], input[type="password"], select) {
+  box-sizing: border-box; width: 100%; min-height: 36px; padding: 6px 10px; color: var(--bots-ink); background: var(--bots-control);
+  border: 1px solid var(--bots-control-line); border-radius: 8px; font: inherit;
+}
+[data-app-mode="bots"] .bots-avatar-editor :is(input, select, button):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-error { margin: 0; color: var(--bots-danger-ink); font-size: var(--bots-text-hint); }
+
+/* A diff (botsProfileDiff.js): added and removed lines, never colour alone (a sign and a hidden word). */
+[data-app-mode="bots"] .bots-diff-lines { margin: 0; padding: 8px 10px; max-height: 260px; overflow: auto; font: 12px/1.5 var(--bots-font-mono); background: var(--bots-inset); border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+[data-app-mode="bots"] .bots-diff-line { display: block; }
+[data-app-mode="bots"] .bots-diff-line.add { background: var(--bots-success-ink); color: var(--bots-app); }
+[data-app-mode="bots"] .bots-diff-line.del { background: var(--bots-danger-ink); color: var(--bots-app); text-decoration: line-through; }
+[data-app-mode="bots"] .bots-diff-sign { display: inline-block; width: 1.4ch; user-select: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-avatar-editor * { transition: none !important; animation: none !important; }
+}

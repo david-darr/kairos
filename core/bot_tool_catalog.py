@@ -56,6 +56,10 @@ READ_NATIVE = frozenset({"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", 
 NATIVE_APPS = {"google_drive": "google", "google_sheets": "google", "google_forms": "google",
                "google_calendar": "google", "send_email": "email", "list_email_accounts": "email"}
 APP_LABELS = {"google": "Google", "email": "Email"}
+from services import bot_highlevel, bot_x_research
+NATIVE_APPS.update({name: "highlevel" for name in bot_highlevel.TOOLS})
+NATIVE_APPS.update({name: "x" for name in bot_x_research.TOOLS})
+APP_LABELS.update({"highlevel": "HighLevel", "x": "X research"})
 READ_ACTIONS = {"google_drive": {"list", "info", "permissions", "revisions"},
                 "google_sheets": {"get", "values"}, "google_forms": {"get", "responses"},
                 "google_calendar": {"list_calendars", "list_events"}}
@@ -198,6 +202,9 @@ def declared_effect(server_id: str, tool_name: str) -> Optional[str]:
         pass
     from core import integrations
     item = integrations.get_integration(server_id) or {}
+    claims = item.get("tool_read_only") or {}
+    if tool_name in claims and type(claims[tool_name]) is bool:
+        return READ if claims[tool_name] else WRITE
     hints = ((item.get("discovered_tools") or {}).get(tool_name) or {}).get("annotations") or {}
     if hints.get("readOnlyHint") is True:
         return READ
@@ -211,7 +218,8 @@ def mcp_effect(server_id: str, tool_name: str) -> tuple[str, str]:
     declared = declared_effect(server_id, tool_name)
     if declared:
         return declared, "declared"
-    guessed = classify_name(tool_name)
+    from services import bot_connection_catalog
+    guessed = bot_connection_catalog.effect_of(tool_name)
     return guessed, "name" if guessed != UNKNOWN else "unknown"
 
 
@@ -239,11 +247,10 @@ def held_names(server_id: str) -> list[str]:
 def accounts(app_id: str, owner: Optional[str]) -> list[dict]:
     """The accounts an app has, from the connections unit when it is merged. Never raises."""
     try:
-        from services import bot_connection_catalog
-        hook = getattr(bot_connection_catalog, "app_accounts", None)
-        if callable(hook):
-            return [{"id": str(a.get("id")), "label": str(a.get("label") or a.get("id"))}
-                    for a in hook(app_id, owner) if isinstance(a, dict) and a.get("id")]
+        from services.bot_app_adapters import GoogleAdapter, EmailAdapter, McpAdapter
+        rows = (GoogleAdapter().accounts(owner) if app_id == "google" else
+                EmailAdapter().accounts(owner) if app_id == "email" else McpAdapter().accounts(app_id))
+        return [{"id": str(a["id"]), "label": str(a.get("label") or a["id"])} for a in rows]
     except Exception:
         pass
     return []
@@ -267,6 +274,8 @@ def catalogue(owner: Optional[str], is_admin: bool, agent_surface: bool = True) 
     {"native": {name: entry + available + reason}, "servers": [row + tools], "apps": [...],
      "revision": a short digest that changes whenever availability does}."""
     from core import addons
+    from services import bot_connections
+    connections = {entry["app_id"]: entry for entry in bot_connections.catalogue_entries(owner or "")}
     native = {}
     for name, entry in native_entries().items():
         reason = None
@@ -296,7 +305,7 @@ def catalogue(owner: Optional[str], is_admin: bool, agent_surface: bool = True) 
         apps.append({"id": row["id"], "name": row["name"], "kind": "mcp", "available": row["available"],
                      "reason": row["reason"], "rea": row["rea"],
                      "tools": [{**tool, "available": row["available"], "reason": row["reason"]} for tool in row["tools"]],
-                     "accounts": accounts(row["id"], owner)})
+                     "accounts": connections.get(row["id"], {}).get("accounts", accounts(row["id"], owner))})
     blob = json.dumps([{n: [e["available"], e["effect"]] for n, e in sorted(native.items())},
                        [[r["id"], r["available"], [[t["name"], t["effect"]] for t in r["tools"]], r["held"]] for r in rows]],
                       sort_keys=True)

@@ -6,7 +6,7 @@
 // The statuses and keys follow routes/agent_routes.py and services/bot_record.py; scripts/test_bots_fixtures.cjs
 // holds this file to them. Not part of the site demo: demo/fixtures.js is not edited.
 const MAX_BOTS = 100, MAX_PRESETS = 200, MAX_FOLDERS = 100, MAX_ROUTINES = 10, MAX_SEED = 8000;
-const APPROVAL = ['ask', 'auto', 'full', 'custom'], ENFORCED = ['full'];
+const APPROVAL = ['ask', 'edits', 'auto', 'full', 'custom'], ENFORCED = APPROVAL;
 const THREAD_APPROVAL = ['ask', 'edits', 'auto', 'full', 'custom'];
 const PLACES = ['auto', 'computer', 'browser', 'off'], KEEP_WARM = ['follow', 'on', 'off'];
 const SECTIONS = ['About this work', 'Preferences', 'Corrections', 'Notes'];
@@ -14,7 +14,7 @@ const COLORS = ['#d9b260', '#b9d2e3', '#e8c39e', '#d99a92', '#b5c7a5', '#cdbfd9'
 const NAMES = ['Juniper', 'Maple', 'Pebble', 'Tansy', 'Wren', 'Sorrel', 'Fennel', 'Cricket'];
 const BOT_EDITABLE = ['section', 'origin', 'fallback', 'cache_keep_warm', 'place', 'tool_scope', 'connector_scopes',
   'always_allow', 'outbound', 'approval_mode', 'thread_limit', 'hidden', 'reply_style', 'notifications', 'speak_replies', 'voice_id',
-  'call_mode', 'skill_selection', 'avatar_image', 'mascot_expression'];
+  'call_mode', 'skill_selection', 'avatar_image', 'mascot_expression', 'memory_enabled', 'helper_model', 'connector_tools', 'grants_version'];
 const EXPRESSIONS = ['sleeping', 'idle', 'listening', 'thinking', 'speaking', 'success', 'needs', 'error', 'carry'];
 // Routes other units or lanes own under /api/agents: the generic bot-id matcher must never answer them.
 const RESERVED = ['inbox', 'section-modules', 'avatar-provider', 'avatar-drafts'];
@@ -26,7 +26,8 @@ const DEFAULTS = () => ({ section: null, origin: { kind: 'blank' }, hidden: fals
   folders: [], thread_limit: 3, approval_mode: 'full', outbound: { policy: 'ask', daily_cap: 25 }, fallback: [],
   cache_keep_warm: 'follow', place: 'auto', tool_scope: { allow: [], deny: [] }, connector_scopes: {},
   always_allow: [], builtin: null, reply_style: 'default', notifications: true, speak_replies: false, voice_id: null, call_mode: 'turns',
-  skill_selection: { mode: 'all', disabled: [] }, avatar_image: null, mascot_expression: null });
+  skill_selection: { mode: 'all', disabled: [] }, avatar_image: null, mascot_expression: null,
+  memory_enabled: true, helper_model: true, connector_tools: null, grants_version: 0 });
 
 class Refusal extends Error { constructor(status, detail, extra = {}) { super(detail); this.status = status; this.extra = extra; } }
 const bad = (detail) => new Refusal(400, detail);
@@ -40,12 +41,21 @@ const selectors = (v, label) => {
 };
 const approval = (v, label = 'approval_mode', allowed = APPROVAL) => {
   const mode = choice(v, allowed, label);
-  if (!ENFORCED.includes(mode)) throw new Refusal(409, `${label} '${mode}' is not available yet; bots run at Full for now`);
   return mode;
 };
 
 let seeded0 = () => ({});
 function clean(key, value, current) {
+  if (['memory_enabled', 'helper_model'].includes(key)) { if (typeof value !== 'boolean') throw bad(`${key} is true or false`); return value; }
+  if (key === 'grants_version') { const next = whole(value, 0, 1000, key); if (next < (current?.grants_version || 0)) throw bad('grants_version can only go up'); return next; }
+  if (key === 'connector_tools') {
+    if (value === null) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw bad('connector_tools is an app selection');
+    for (const grant of Object.values(value)) {
+      if (!grant || typeof grant !== 'object' || Object.keys(grant).some(k => !['tools', 'accounts'].includes(k)) || (grant.tools !== '*' && !Array.isArray(grant.tools)) || (grant.accounts !== undefined && !Array.isArray(grant.accounts))) throw bad('Each app grant needs tools and optional accounts');
+    }
+    return JSON.parse(JSON.stringify(value));
+  }
   if (key === 'section') {
     if (value === null) return null;
     if (typeof value !== 'string') throw bad('section must be text');
@@ -277,7 +287,7 @@ module.exports = ({ state, data, now }) => {
       reaches: { endpoint_id: a.endpoint_id, model_override: a.model_override || null, model_effort: a.model_effort || null,
         integrations: a.integration_ids === null ? 'all' : a.integration_ids, place: a.place, keep_signed_in: !!a.keep_signed_in, deliver_to_channel: a.deliver_to_channel },
       wont: [...(a.enabled === false ? ['It is turned off, so it will not run until you turn it on.'] : []), `It stops after ${a.daily_run_cap} runs a day.`,
-        ...a.tool_scope.deny.map(s => `Saved, not enforced yet: avoid ${s}.`)],
+        ...a.tool_scope.deny.map(s => `Blocked by tool selection: ${s}.`)],
       recent: [], grants: { approval_mode: a.approval_mode, outbound: a.outbound, always_allow: a.always_allow, tool_scope: a.tool_scope, connector_scopes: a.connector_scopes },
       setup: [{ id: 'identity', done: !!(a.role || '').trim(), label: 'Give it a name and a job', section: 'identity' },
         { id: 'soul', done: !!(a.soul || '').trim(), label: 'Write its standing instructions', section: 'soul' },

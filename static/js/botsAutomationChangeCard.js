@@ -45,7 +45,9 @@ export function changeModel(receipt, local = {}) {
 
 // Which request the Pause or Resume button sends. Routines are tasks; triggers have their own route.
 export function pauseRequest(receipt, resume) {
-  const path = receipt.kind === 'trigger' ? `/api/triggers/${receipt.target_id}` : `/api/tasks/${receipt.target_id}`;
+  const path = receipt.kind === 'trigger'
+    ? receipt.source === 'app' ? `/api/bot-app-triggers/${receipt.target_id}` : `/api/triggers/${receipt.target_id}`
+    : `/api/bot-routines/${receipt.target_id}`;
   return { path, method: 'PATCH', body: { enabled: !!resume } };
 }
 
@@ -155,7 +157,7 @@ export async function mount(host, ctx = {}) {
   async function edit(receipt) {
     try {
       const editor = await import('./botsAutomationEditor.js');
-      const open = receipt.kind === 'trigger' ? editor.openWebhookEditor || editor.openTriggerEditor : editor.openRoutineEditor;
+      const open = receipt.kind === 'trigger' ? receipt.source === 'app' ? editor.openAppEventEditor : editor.openWebhookEditor || editor.openTriggerEditor : editor.openRoutineEditor;
       if (typeof open === 'function') {
         await open({ id: receipt.target_id, agentId: receipt.bot_id, onSaved: () => refresh() });
         return;

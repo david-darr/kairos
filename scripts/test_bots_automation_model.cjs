@@ -139,9 +139,9 @@ const row = (raw, kind = 'routine') => ({ kind, id: raw.id, bot_id: raw.agent_id
   check('the save body carries the revision on an edit and the bot on a create', () => {
     const draft = { ...M.emptyDraft('a1', NOW), name: ' Name ', prompt: ' Do it ', repeat: 'daily', time: '08:00', timeZone: 'UTC', durationMinutes: 45, timeoutMinutes: '' };
     const created = M.bodyFromDraft(draft);
-    assert.deepEqual([created.bot_id, created.expected_revision, created.name, created.prompt, created.timeout_minutes, created.duration_minutes], ['a1', undefined, 'Name', 'Do it', null, 45]);
+    assert.deepEqual([created.bot_id, created.expected_revision, created.name, created.instructions, created.timeout_minutes, created.duration_minutes], ['a1', undefined, 'Name', 'Do it', null, 45]);
     const edited = M.bodyFromDraft({ ...draft, id: 'r9', revision: 6, timeoutMinutes: 20 });
-    assert.deepEqual([edited.bot_id, edited.expected_revision, edited.timeout_minutes], [undefined, 6, 20]);
+    assert.deepEqual([edited.bot_id, edited.expected_revision, edited.timeout_minutes], [undefined, '6', 20]);
   });
 
   check('validation names the field and ignores nothing it should catch', () => {

@@ -4,7 +4,7 @@
 // mutate(path, method, body, query) answer a route or return undefined to let someone else have it.
 //
 // This backend answers only its own namespaces: /api/bot-cards and /api/bot-automation-changes. The one exception is
-// PATCH /api/tasks/<id> for the routines this fixture itself made (ids start with "bcc-"), because the change card's
+// PATCH /api/bot-routines/<id> for the routines this fixture itself made (ids start with "bcc-"), because the change card's
 // Pause button uses the existing task route; every other task id falls through. State lives in state.botsCards.
 //
 // Test controls (fixture only, not routes of the real backend):
@@ -161,6 +161,11 @@ module.exports = ({ state, now }) => {
             && (!query.status || (query.status === 'pending' ? c.status === 'pending' : c.status === query.status)));
           return { cards: list.map(publicCard), pending: list.filter(c => c.status === 'pending').length };
         }
+        // The routine editor looks a routine up in the list; answer only for the routines this fixture itself made.
+        if (route === '/api/bot-routines' && seeded().routines.length) {
+          return { routines: seeded().routines.filter(r => !query.bot_id || r.bot_id === query.bot_id).map(r => ({ id: r.id, agent_id: r.bot_id, name: r.name,
+            instructions: r.prompt, enabled: r.enabled, revision: `rev${r.rev}`, schedule: { kind: 'daily', time: r.run_time, time_zone: 'UTC' }, recent_runs: [] })), occurrences: null, runs: [] };
+        }
         if (route === '/api/bot-automation-changes') {
           const list = seeded().changes.filter(r => (!query.thread_id || r.thread_id === query.thread_id) && (!query.bot_id || r.bot_id === query.bot_id));
           return { changes: list.map(publicChange) };
@@ -195,7 +200,7 @@ module.exports = ({ state, now }) => {
           return { ok: true, card: publicCard(c), message: '' };
         }
         if ((m = route.match(/^\/api\/bot-automation-changes\/([^/]+)\/undo$/)) && method === 'POST') return undo(m[1]);
-        if ((m = route.match(/^\/api\/tasks\/(bcc-[^/]+)$/)) && method === 'PATCH') {
+        if ((m = route.match(/^\/api\/bot-routines\/(bcc-[^/]+)$/)) && method === 'PATCH') {
           const target = routine(m[1]);
           if (!target) throw new Refusal(404, 'task not found');
           for (const key of ['enabled', 'name', 'prompt']) if (key in body) target[key] = body[key];

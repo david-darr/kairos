@@ -195,10 +195,18 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, wr
 
     // -- A permission question shows and blocks the field --------------------------------------------------------
     liveChange(sid, { permission: { id: 'perm-chat-1', tool: 'run_command', title: 'Run a command', description: 'List the folder', target: 'ls' } });
-    await waitFor("!!document.querySelector('.permission-dialog, .question-prompt')");
-    await waitFor(`document.querySelector(${q(INPUT)}).disabled === true`);
+    // The question itself is an approval card (services/bot_cards.py); the chat mounts the card host in its composer slot.
+    const asked = (await call('/api/bot-cards/__fixture/open', 'POST', { kind: 'approval', thread_id: sid, bot_id: botId, title: 'Run a command',
+      details: { summary: 'List the folder', target: 'ls', tool: 'run_command', lines: [] } })).body;
+    assert.ok(asked.id, 'a card for the question');
+    await js("document.dispatchEvent(new CustomEvent('kairos:bot-card')); true");
+    await waitFor("document.querySelector('.bots-card-composer')?.textContent.includes('Run a command')");
+    await waitFor("document.querySelector('.bots-composer-host').hidden === true");
     assert.equal(await js("document.querySelector('.bots-live').dataset.state"), 'needs');
     liveChange(sid, { permission: null });
+    await call(`/api/bot-cards/__fixture/expire/${asked.id}`, 'POST', {});
+    await js("document.dispatchEvent(new CustomEvent('kairos:bot-card')); true");
+    await waitFor("document.querySelector('.bots-composer-host').hidden === false");
     await waitFor(`document.querySelector(${q(INPUT)}).disabled === false`);
     reply(sid, 'Next turn answer.');
     await waitFor("!document.querySelector('.bots-live')");

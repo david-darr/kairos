@@ -23,3 +23,9 @@ Chat: `chat_routes.py`, `session_routes.py`, `background_task_routes.py`,
 - A route that reads or changes per-person records checks that the caller owns
   them; an admin flag alone is not ownership.
 - New request bodies are pydantic models with bounds; never trust a client path.
+
+## Bots redesign, Phases 1 to 3
+
+- `bot_access_routes.py`, `bot_approval_routes.py`, `bot_attention_routes.py`, `bot_automation_change_routes.py`, `bot_card_routes.py`.
+- `bot_chat_routes.py`, `bot_connections_routes.py`, `bot_event_routes.py`, `bot_memory_routes.py`, `bot_recall_routes.py`.
+- `bot_resources_routes.py`, `bot_routine_routes.py`, `bot_skills_routes.py`.

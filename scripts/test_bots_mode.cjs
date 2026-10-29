@@ -78,7 +78,8 @@ const check = (name, fn) => { fn(); passed.push(name); };
   });
 
   check('title-bar labels', () => {
-    assert.deepEqual(M.TAB_LABELS, { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots' });
+    assert.deepEqual(M.TAB_LABELS, { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations' });
+    assert.equal(M.modeForTab('botsAutomations'), 'bots');
   });
 
   check('the collapsed rail steps Kairos, Bots, Forge and back, and names where it goes', () => {

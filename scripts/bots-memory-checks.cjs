@@ -83,8 +83,6 @@ ${shown.slice(0, 300)}`;
     demoState.botsLive = true;
     delete demoState.botsMemory;
     demoState.botsSectionModules = ['Memory'];
-    const seededAttention = !demoState.botsAttention;
-    if (seededAttention) demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {} };   // the app polls the attention feed; an empty one answers it
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
     await js(`(() => { window.__prior = document.documentElement.dataset.appMode || ''; document.documentElement.dataset.appMode = 'bots';
@@ -367,7 +365,7 @@ ${shown.slice(0, 300)}`;
       await js(`localStorage.setItem('kairos:bots-interface', ${q(savedInterface)}); if (!${q(savedInterface)}) localStorage.removeItem('kairos:bots-interface'); true`);
       if (phone) win.setContentSize(1440, 900);
     } finally {
-      delete demoState.botsMemory; delete demoState.botsSectionModules; if (seededAttention) delete demoState.botsAttention;
+      delete demoState.botsMemory; delete demoState.botsSectionModules;
       await restore();
     }
   }

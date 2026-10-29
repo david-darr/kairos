@@ -498,6 +498,11 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
     # instructions, the transcript keeps the command (Agents 2.0, 2026-10-14).
     # Everywhere else /setup is handled in the browser and never arrives here.
     model_text = text
+    agent_id = (session_manager.get_session(session_id) or {}).get("agent_id")
+    if agent_id:
+        from services import bot_skills, bot_skill_learning, bot_turn_context
+        scope = bot_turn_context.scope_for_session(session_id)
+        model_text = bot_skill_learning.expand_learn(text) or bot_skills.expand_command(scope, text) or text
     if text.strip().lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
         model_text = BOT_SETUP_INSTRUCTIONS
     sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, model_text, attachment_ids) + reference_context)

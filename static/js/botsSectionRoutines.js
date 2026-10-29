@@ -62,7 +62,7 @@ export async function mount(host, ctx = {}) {
 
   async function setEnabled(routine, enabled, control) {
     try {
-      await api(`/api/bot-routines/${encodeURIComponent(routine.id)}`, { method: 'PATCH', body: JSON.stringify({ enabled, expected_revision: routine.revision }), toast: false });
+      await api(`/api/bot-routines/${encodeURIComponent(routine.id)}`, { method: 'PATCH', body: JSON.stringify({ enabled, expected_revision: String(routine.revision) }), toast: false });
     } catch (error) {
       control.setChecked?.(!enabled);
       toast(refusalOf(error).status === 409 ? 'That changed somewhere else. Reloaded.' : refusalOf(error).message, 'error');

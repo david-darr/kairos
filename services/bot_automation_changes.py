@@ -289,13 +289,18 @@ def normalize_routine(raw, *, partial: bool = False) -> dict:
 def normalize_trigger(raw, *, partial: bool = False) -> dict:
     if not isinstance(raw, dict):
         raise ChangeRefused("The trigger needs details.", "invalid", 400)
-    allowed = ("name", "instructions", "title", "events", "conditions", "enabled", "source")
+    allowed = ("name", "instructions", "title", "events", "conditions", "enabled", "source", "config")
     unknown = [k for k in raw if k not in allowed]
     if unknown:
         hint = (" Whether it runs straight away, its address and its secret are the person's to set."
                 if any(k in unknown for k in ("auto_run", "run_straight_away", "secret", "address", "url")) else "")
         raise ChangeRefused(f"Unknown trigger setting: {', '.join(sorted(unknown))}.{hint}", "invalid", 400)
     spec: dict = {}
+    if "config" in raw:
+        config = raw["config"]
+        if not isinstance(config, dict) or len(json.dumps(config)) > 2000:
+            raise ChangeRefused("config is a small object of event-source settings.", "invalid", 400)
+        spec["config"] = copy.deepcopy(config)
     if "name" in raw or not partial:
         name = " ".join(str(raw.get("name") or "").split())
         if not name or len(name) > MAX_NAME:

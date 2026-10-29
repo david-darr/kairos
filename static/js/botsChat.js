@@ -25,6 +25,7 @@ import { mountFindBar, landOnHit, searchUrl, downloadExport } from './botsChatSe
 import { agentCall } from './agentCall.js';
 import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported } from './voiceInput.js';
 import { createSpeaker, isSpeechOutputSupported } from './voiceOutput.js';
+import { loadSkillCommands } from './botsSkillCommands.js';
 
 const CSS = ['/static/css/bots-chat.css', '/static/css/bots-composer.css'];
 const PAGE = 200, FIRST_PAGE = 50, PRESENCE_MS = 60000, QUEUE_POLL_MS = 5000, SEND_KEY = 'kairos:bots-send-key';
@@ -64,7 +65,7 @@ export async function mountBotsChat(host, options) {
   const later = (fn, ms) => { const t = setTimeout(() => { timers.delete(t); if (!disposed) fn(); }, ms); timers.add(t); return t; };
   const phone = typeof matchMedia === 'function' ? matchMedia('(max-width: 768px)') : { matches: false };
 
-  const root = h('div', { class: 'bots-chat', 'data-session-id': sid });
+  const root = h('div', { class: 'bots-chat', 'data-session-id': sid, 'data-bots-agent-id': agent.id, 'data-bots-session-id': sid });
   host.replaceChildren(root);
   const scheduled = agent.enabled === false || agent.status === 'off' || agent.status === 'capped' || (Number.isFinite(agent.daily_run_cap) && agent.runs_today >= agent.daily_run_cap);
   if (scheduled) root.append(h('p', { class: 'bots-chat-honesty', text: `${agent.name} will answer here, but will not pick up scheduled work while turned off or capped.` }));
@@ -76,6 +77,25 @@ export async function mountBotsChat(host, options) {
   const composerHost = h('div', { class: 'bots-composer-host' });
   const transcriptHost = h('div', { class: 'bots-transcript-host' });
   root.append(toolbar, transcriptHost, goalHost, composerHost);
+  const cardTranscript = h('div', { class: 'bots-card-transcript' });
+  const cardComposer = h('div', { class: 'bots-card-composer' });
+  const limitHost = h('div', { class: 'bots-limit-host' });
+  root.insertBefore(cardTranscript, goalHost);
+  root.insertBefore(cardComposer, composerHost);
+  toolbar.prepend(limitHost);
+  const control = new AbortController();
+  offs.push(() => control.abort());
+  const mountPiece = async (path, host, extra = {}) => {
+    const module = await import(path);
+    if (disposed) return;
+    const piece = await module.mount(host, { agentId: agent.id, threadId: sid, signal: control.signal, ...extra });
+    if (disposed) piece?.dispose?.(); else offs.push(() => piece?.dispose?.());
+  };
+  mountPiece('./botsApprovalCards.js', cardTranscript, { slot: 'transcript' }).catch(error => console.warn('Bots cards could not load', error));
+  mountPiece('./botsApprovalCards.js', cardComposer, { slot: 'composer', onPending: waiting => { composerHost.hidden = waiting; } }).catch(error => console.warn('Bots cards could not load', error));
+  mountPiece('./botsLimitReset.js', limitHost, { stoppedByLimit: () => /limit|quota|usage/i.test(chatStream.getInFlight(sid)?.error || '') }).catch(error => console.warn('Bots limits could not load', error));
+  let skillCommands = [];
+  loadSkillCommands(agent.id, path => api(path, { toast: false })).then(commands => { skillCommands = commands; }).catch(error => console.warn('Bots skill commands could not load', error));
 
   // -- Person, draft, uploads ---------------------------------------------------------
   let person = options.person || '';
@@ -138,7 +158,7 @@ export async function mountBotsChat(host, options) {
     },
     stop: () => stopTurn(), steer: () => steerQueue(), openCall: () => call_.adapter?.button.click(), modelLabel: () => (isAdvanced() ? state.model : ''),
     queue: { edit: item => editQueued(item), remove: item => deleteQueued(item), steer: item => steerQueue(item), resume: () => resumeQueue() },
-    mentions: () => options.mentions?.() || [], skills: () => options.skills?.() || [], onSupport: () => openSupportDraft(),
+    mentions: () => options.mentions?.() || [], skills: () => options.skills?.() || skillCommands, onSupport: () => openSupportDraft(),
     onNotice: text => composer.notice(text), pasteAsFile: shouldChipPaste, replyLabel: id => (transcript.get(id)?.role === 'user' ? 'you' : agent.name),
     onEditLast: () => { const last = transcript.lastUserMessage(); if (last && !isBusy()) { transcript.scrollToMessage(last.id, { flash: false }); transcript.startEdit(last.id); } },
     onEscape: () => { if (dictation.recorder) { dictation.recorder.cancel(); dictation.recorder = null; return true; } return false; },
@@ -269,7 +289,6 @@ export async function mountBotsChat(host, options) {
       transcript.setLive(entry);
       if (entry.permission && entry.permission.id !== shownPermission) {
         shownPermission = entry.permission.id;
-        showPermissionPrompt(entry.permission, () => { entry.permission = null; paintState(); }, { mount: transcript.liveMount(), inline: true });
       } else if (!entry.permission && shownPermission) { dismissPermissionPrompt(shownPermission); shownPermission = null; }
       const said = announcementFor(entry, agent.name, announced); if (said) transcript.announce(said);
       syncBusy(); ensurePoll();

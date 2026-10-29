@@ -34,9 +34,11 @@ const check = async (name, fn) => { await fn(); passed.push(name); };
     assert.equal(D.clipToBytes('abc', 10), 'abc');
   });
 
-  await check('only Full is effective; later levels are listed but not available', () => {
-    assert.deepEqual(S.APPROVAL_LEVELS.filter(l => l.now).map(l => l.value), ['full']);
-    assert.equal(S.APPROVAL_LEVELS.length, 4);
+  await check('all five levels are available and Full remains the default', () => {
+    assert.deepEqual(S.APPROVAL_LEVELS.filter(l => l.now).map(l => l.value), ['full', 'auto', 'ask', 'edits', 'custom']);
+    assert.equal(S.APPROVAL_LEVELS.length, 5);
+    assert.equal(S.permissionFacts({}).effective, 'full');
+    assert.equal(S.permissionFacts({ approval_mode: 'ask' }).effective, 'ask');
     const f = S.permissionFacts({ approval_mode: 'full', outbound: { policy: 'allow', daily_cap: 7 }, always_allow: ['x'], daily_run_cap: 30 });
     assert.deepEqual([f.effective, f.outboundPolicy, f.outboundCap, f.alwaysAllow, f.runCap], ['full', 'allow', 7, ['x'], 30]);
     assert.equal(S.permissionFacts({}).runCap, 12);

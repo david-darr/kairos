@@ -77,6 +77,7 @@ module.exports = ({ state, now }) => {
   function read(route, query) {
     let m;
     if (!(m = route.match(/^\/api\/bot-chat\/([^/]+)\/(state|messages|queue|export)$/)) && route !== '/api/bot-chat/search') return undefined;
+    if (m && state.botsRuntime?.convs?.[m[1]]) return undefined;   // the runtime fixture owns its own conversations
     if (route === '/api/bot-chat/search') {
       const q = String(query.q || '').toLowerCase(); need(q, 400, 'q is required');
       const hits = [];
@@ -112,6 +113,7 @@ module.exports = ({ state, now }) => {
     let m;
     if (route === '/api/bot-chat/presence' && method === 'POST') { r.log.push(['presence', body]); return { ok: true }; }
     if (!(m = route.match(/^\/api\/bot-chat\/([^/]+)\/(send|interrupt|regenerate|active-branch|pin|read|compact|queue\/resume|queue\/([^/]+)(?:\/(edit|steer))?|messages\/([^/]+)\/(edit|reaction))$/))) return undefined;
+    if (state.botsRuntime?.convs?.[m[1]]) return undefined;   // the runtime fixture owns its own conversations
     const sid = m[1], s = store(sid), what = m[2];
     if (what === 'send' && method === 'POST') {
       const plan = r.failNext; r.failNext = null;

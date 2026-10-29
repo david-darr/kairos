@@ -312,6 +312,13 @@ async function mountAttention() {
   attentionHost = import('./botsAttentionHost.js').then(module => { module.mountAttentionHost({ notify: true }); return true; }).catch(() => false);
   await attentionHost;
 }
+// Outside Bots mode (or for a non-admin) the host stops polling; the older inbox watcher covers notices.
+function unmountAttention() {
+  if (!attentionHost) return;
+  const pending = attentionHost;
+  attentionHost = null;
+  pending.then(ok => ok && import('./botsAttentionHost.js').then(module => module.attentionHost()?.dispose())).catch(() => {});
+}
 
 async function refreshAgentBadge() {
   clearTimeout(agentBadgeTimer);
@@ -342,7 +349,7 @@ async function buildSidebar() {
   const identity = await api('/api/auth/status').catch(() => null);
   forgeAdmin = !!identity?.is_admin;
   if (!forgeAdmin) rememberMode('kairos');
-  else mountAttention();
+  if (forgeAdmin && appMode === 'bots') mountAttention(); else unmountAttention();
   document.getElementById('forge-mode-switch')?.remove();
   if (forgeAdmin) {
     const control = document.createElement('div');
@@ -652,7 +659,7 @@ async function startApp() {
   document.addEventListener("jarvis:tabs-changed", async () => {
     for (const id of Object.keys(customViewUrls)) delete modules[id];
     const tabs = await buildSidebar();
-    if (activeTab && activeTab !== 'forgeShell' && activeTab !== 'botsShell' && activeTab !== 'mobileLaunch' && ![...NAV, ...FORGE_NAV, ...BOTS_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
+    if (activeTab && activeTab !== 'forgeShell' && activeTab !== 'botsShell' && activeTab !== 'botsAutomations' && activeTab !== 'mobileLaunch' && ![...NAV, ...FORGE_NAV, ...BOTS_NAV].some((item) => item.id === activeTab) && !tabs.some((item) => item.id === activeTab)) switchTab("home");
   });
   document.addEventListener("kairos:layout", () => { buildSidebar(); });
   commandPalette.init({ nav: NAV, customTabs: customTabs || [], switchTab, openSettings });

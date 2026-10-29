@@ -1,0 +1,115 @@
+/* Bots mode: the automations calendar (Agents 3.0 Phase 3, unit U3). Loaded by views/botsAutomations.js.
+   Scope: [data-app-mode="bots"]. Colours come only from the --bots-* tokens (a bot's colour is --bots-bot-color, set through
+   data-bot-color), so scripts/test_kairos_theme.py finds no raw colour here. Geometry follows the design: 64 px an hour,
+   a 320 px mini-month rail, a 310 px details drawer (the page's panel), a 3 px bot-coloured event border.
+   The pixel values below must match HOUR_PX and RAIL_PX in botsAutomationCalendar.js (checked by scripts/test_bots_automation_calendar.cjs). */
+
+[data-app-mode="bots"] .bots-cal { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; }
+[data-app-mode="bots"] .bots-cal[data-view="day"] { grid-template-columns: 320px minmax(0, 1fr); }
+[data-app-mode="bots"] .bots-cal-rail { min-height: 0; overflow-y: auto; display: grid; gap: 16px; align-content: start; padding-bottom: 16px; }
+[data-app-mode="bots"] .bots-cal-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+[data-app-mode="bots"] .bots-cal-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-cal-nav { display: flex; align-items: center; gap: 4px; min-width: 0; }
+[data-app-mode="bots"] .bots-cal-title { margin: 0 0 0 8px; font: 600 16px/1.3 var(--bots-font-sans); color: var(--bots-ink); }
+
+/* -- The mini-month and the bots list -- */
+[data-app-mode="bots"] .bots-cal-month { padding: 10px; background: var(--bots-card); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
+[data-app-mode="bots"] .bots-cal-month-head { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+[data-app-mode="bots"] .bots-cal-month-title { flex: 1; font-weight: 600; font-size: var(--bots-text-row); }
+[data-app-mode="bots"] .bots-cal-month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+[data-app-mode="bots"] .bots-cal-dow { font-size: var(--bots-text-caps); color: var(--bots-ink-tertiary); padding: 2px 0; }
+[data-app-mode="bots"] .bots-cal-day {
+  aspect-ratio: 1; min-height: 32px; padding: 0; font: 400 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-ink);
+  background: transparent; border: 0; border-radius: 50%; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-cal-day:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-cal-day[data-out] { color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-day[data-today] { box-shadow: inset 0 0 0 1.5px var(--bots-accent); }
+[data-app-mode="bots"] .bots-cal-day[aria-pressed="true"] { color: var(--bots-accent-ink); background: var(--bots-ink); box-shadow: none; }
+[data-app-mode="bots"] .bots-cal :is(.bots-cal-day, .bots-cal-event, .bots-cal-scroll):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-cal-bots { display: grid; gap: 4px; }
+[data-app-mode="bots"] .bots-cal-bot { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 8px; }
+[data-app-mode="bots"] .bots-cal-bot-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--bots-text-row); }
+
+/* -- The grid -- */
+[data-app-mode="bots"] .bots-cal-scroll {
+  flex: 1; min-height: 0; overflow: auto; position: relative; background: var(--bots-card);
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-cal-head {
+  position: sticky; top: 0; z-index: 3; display: grid; min-width: 560px; background: var(--bots-card);
+  border-bottom: 1px solid var(--bots-hairline-dense);
+}
+[data-app-mode="bots"] .bots-cal[data-view="day"] .bots-cal-head, [data-app-mode="bots"] .bots-cal[data-view="day"] .bots-cal-body { min-width: 0; }
+[data-app-mode="bots"] .bots-cal-gmt { align-self: end; padding: 0 6px 6px; font-size: var(--bots-text-caps); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-dayhead { display: grid; justify-items: center; gap: 2px; padding: 6px 0; border-left: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-cal-dayname { font-size: var(--bots-text-caps); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-daynum { min-width: 28px; height: 28px; display: inline-grid; place-items: center; font-size: var(--bots-text-row); border-radius: 50%; }
+[data-app-mode="bots"] .bots-cal-dayhead[data-today] .bots-cal-daynum { color: var(--bots-accent-ink); background: var(--bots-accent); }
+[data-app-mode="bots"] .bots-cal-body { position: relative; display: grid; min-width: 560px; }
+[data-app-mode="bots"] .bots-cal-hours { position: relative; }
+[data-app-mode="bots"] .bots-cal-hour { position: absolute; right: 6px; transform: translateY(-50%); font-size: var(--bots-text-caps); color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-col {
+  position: relative; border-left: 1px solid var(--bots-hairline-dense);
+  background-image:
+    linear-gradient(var(--bots-hairline-dense) 1px, transparent 1px),
+    linear-gradient(var(--bots-hairline) 1px, transparent 1px);
+  background-size: 100% 64px, 100% 32px;
+}
+[data-app-mode="bots"] .bots-cal-col[data-today] { background-color: var(--bots-inset); }
+[data-app-mode="bots"] .bots-cal-empty { position: absolute; top: 120px; left: 56px; right: 0; margin: 0; text-align: center; color: var(--bots-ink-tertiary); pointer-events: none; }
+[data-app-mode="bots"] .bots-cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--bots-danger); z-index: 2; pointer-events: none; }
+[data-app-mode="bots"] .bots-cal-now::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--bots-danger); }
+
+/* -- Events -- */
+[data-app-mode="bots"] .bots-cal-event {
+  position: absolute; box-sizing: border-box; display: flex; align-items: flex-start; gap: 6px; overflow: hidden; z-index: 1;
+  padding: 3px 6px; text-align: left; font: inherit; font-size: var(--bots-text-hint); color: var(--bots-ink);
+  background: color-mix(in srgb, var(--bots-bot-color) 24%, var(--bots-card));
+  border: 0; border-left: 3px solid var(--bots-bot-color); border-radius: 6px; cursor: pointer; touch-action: none;
+}
+[data-app-mode="bots"] .bots-cal-event[data-draggable] { cursor: grab; }
+[data-app-mode="bots"] .bots-cal-event[data-dragging] { cursor: grabbing; z-index: 4; box-shadow: var(--bots-shadow-float); opacity: .92; }
+[data-app-mode="bots"] .bots-cal-event[data-dragging]::after {
+  content: attr(data-drop); position: absolute; right: 6px; top: 2px; font-size: var(--bots-text-caps); font-weight: 600; color: var(--bots-ink-secondary);
+}
+[data-app-mode="bots"] .bots-cal-event[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bots-focus); }
+[data-app-mode="bots"] .bots-cal-event[data-status="paused"] { border: 1px dashed var(--bots-control-line); border-left: 3px solid var(--bots-bot-color); opacity: .7; }
+[data-app-mode="bots"] .bots-cal-event[data-status="failed"], [data-app-mode="bots"] .bots-cal-event[data-status="missed"] { outline: 1px solid var(--bots-danger); outline-offset: -1px; }
+[data-app-mode="bots"] .bots-cal-event[data-kind="run"] { opacity: .85; }
+[data-app-mode="bots"] .bots-cal-event[data-one-line] { align-items: center; padding-top: 0; padding-bottom: 0; }
+[data-app-mode="bots"] .bots-cal-event-face { flex: none; display: inline-flex; }
+[data-app-mode="bots"] .bots-cal-event-text { min-width: 0; flex: 1; display: grid; gap: 1px; }
+[data-app-mode="bots"] .bots-cal-event-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-cal-event-time { color: var(--bots-ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-cal-dot { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-dot[data-state="working"] { background: var(--bots-success); }
+[data-app-mode="bots"] .bots-cal-dot[data-state="needs_you"] { background: var(--bots-warning); }
+[data-app-mode="bots"] .bots-cal-dot[data-state="paused"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-cal-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; }
+[data-app-mode="bots"] .bots-cal-resize::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 24px; height: 3px; margin-left: -12px; border-radius: 2px; background: var(--bots-ink-tertiary); }
+
+/* -- Usage-limit markers -- */
+[data-app-mode="bots"] .bots-cal-reset { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px dashed var(--bots-warning); z-index: 2; }
+[data-app-mode="bots"] .bots-cal-reset[data-hot] { border-top-width: 3px; }
+[data-app-mode="bots"] .bots-cal-reset-label {
+  position: absolute; right: 4px; top: 2px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+  font-size: var(--bots-text-caps); color: var(--bots-warning); background: var(--bots-card); border-radius: var(--bots-radius-pill);
+}
+
+/* With the drawer open on a mid-size window the grid needs the room: the rail steps aside. */
+@media (max-width: 1599px) {
+  [data-app-mode="bots"] .bots-auto-body:has(.bots-auto-details:not([hidden])) .bots-cal,
+  [data-app-mode="bots"] .bots-auto-body:has(.bots-auto-details:not([hidden])) .bots-cal[data-view="day"] { grid-template-columns: minmax(0, 1fr); }
+  [data-app-mode="bots"] .bots-auto-body:has(.bots-auto-details:not([hidden])) .bots-cal-rail { display: none; }
+}
+
+/* -- Narrower windows and phones: the rail goes, a phone shows one day -- */
+@media (max-width: 1100px) {
+  [data-app-mode="bots"] .bots-cal, [data-app-mode="bots"] .bots-cal[data-view="day"] { grid-template-columns: minmax(0, 1fr); }
+  [data-app-mode="bots"] .bots-cal-rail { display: none; }
+}
+@media (max-width: 767px) {
+  [data-app-mode="bots"] .bots-cal-head, [data-app-mode="bots"] .bots-cal-body { min-width: 0; }
+  [data-app-mode="bots"] .bots-cal-bar .bots-segmented { display: none; }
+}

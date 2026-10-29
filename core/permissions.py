@@ -590,6 +590,7 @@ async def gate_bot_call(ctx, name: str, args: dict | None, provider: str | None 
         return Decision("allow", "")
     return await decide(surface=ctx.permission_surface, tool=name, arguments=arguments,
                         title=f"Let this bot use {name}", description="", is_admin=ctx.is_admin, agent_id=ctx.agent_id,
+                        force_prompt=bool(getattr(getattr(ctx, "turn_taint", None), "tainted", False)),
                         bot_context={"outer": True, "invocation_id": getattr(ctx, "invocation_id", None),
                                      "provider": provider})
 
@@ -599,7 +600,7 @@ def finish_bot_call(decision: "Decision | None", bot_id: str | None, result) -> 
     if decision is not None and bot_id:
         from core import bot_policy
         bot_policy.clear_inflight(bot_id)       # the call is over: its cover for inner checks ends with it
-        if decision.invocation_id:
+        if getattr(decision, "invocation_id", None):
             bot_policy.finish(decision.owner, bot_id, decision.invocation_id, result)
 
 

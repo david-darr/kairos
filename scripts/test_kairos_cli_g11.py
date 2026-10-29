@@ -257,7 +257,8 @@ class Restart(unittest.IsolatedAsyncioTestCase):
         raise RuntimeError("backend did not start")
 
     def kill(self, b):
-        subprocess.run(["taskkill", "/PID", str(b.process.pid), "/T", "/F"], capture_output=True)
+        if b.process.poll() is None:
+            b.process.kill()  # this owned, scripted backend has no process children
         b.process.wait(timeout=20)
 
     async def asyncSetUp(self):

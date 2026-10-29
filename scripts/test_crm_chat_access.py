@@ -177,12 +177,15 @@ class ChatTaskAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("complete_tab_task", names)
 
     async def test_scheduled_routine_owner_can_complete_its_task(self):
+        from services.agent_service import agent_service
+        bot = agent_service.create("CRM routine fixture")
+        self.addCleanup(agent_service.delete, bot["id"])
         with patch("core.auth.auth_enabled", return_value=True):
-            ctx = tool_registry.ToolContext(agent_id="crm-agent", owner_user="local")
+            ctx = tool_registry.ToolContext(agent_id=bot["id"], owner_user="local")
             text = await self.call("complete_tab_task",
                 {"tab": "crm", "task_id": self.task["id"], "summary": "Created the PDF"}, ctx)
         self.assertIn("Marked CRM task done", text)
-        self.assertEqual(self.store.task("local", self.task["id"])["completion"]["agent_id"], "crm-agent")
+        self.assertEqual(self.store.task("local", self.task["id"])["completion"]["agent_id"], bot["id"])
 
     def test_codex_cli_backend_route_uses_turn_token_and_can_read_task(self):
         app = FastAPI()

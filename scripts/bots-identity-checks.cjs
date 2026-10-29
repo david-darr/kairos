@@ -101,7 +101,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
 
     await openSection('skills');
     await waitFor(`!!document.querySelector('${card('skills')} .bots-switch-row') || /no skills/i.test(document.querySelector('${card('skills')}').textContent)`);
-    assert.match(await text(card('skills')), /every bot can use every skill/i, 'Skills: the effective scope is stated');
+    assert.match(await text(card('skills')), /only reviewed skills switched on for this bot/i, 'Skills: the effective scope is stated');
 
     await openSection('memory');
     await waitFor(`!!document.querySelector('${card('memory')} textarea')`);
@@ -120,10 +120,11 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.match(await text(card('model')), /If this model fails/);
 
     await openSection('permissions');
-    assert.equal(await js(`document.querySelectorAll('${card('permissions')} [aria-label=Approval] [role=radio]').length`), 4, 'Permissions: all four levels are shown');
-    assert.equal(await js(`document.querySelectorAll('${card('permissions')} [aria-label=Approval] [role=radio]:not([disabled])').length`), 1, 'only Full can be picked');
+    assert.equal(await js(`document.querySelectorAll('${card('permissions')} [aria-label=Approval] [role=radio]').length`), 5, 'Permissions: all five levels are shown');
+    assert.equal(await js(`document.querySelectorAll('${card('permissions')} [aria-label=Approval] [role=radio]:not([disabled])').length`), 5, 'every level can be picked');
     assert.equal(await js(`document.querySelector('${card('permissions')} [aria-label=Approval] [role=radio][data-value=full]').getAttribute('aria-checked')`), 'true');
-    assert.match(await text(card('permissions')), /saved choices for later/i, 'later levels are not claimed as active');
+    assert.match(await text(card('permissions')), /Tool and account grants still limit what it can reach/i, 'Full is described as limited by grants');
+    assert.doesNotMatch(await text(card('permissions')), /saved choices for later|not available yet/i, 'no level is described as inactive');
 
     await openSection('voice');
     await waitFor(`!!document.querySelector('${card('voice')} .bots-switch-row ~ *') && /Call mode|Turns/.test(document.querySelector('${card('voice')}').textContent)`);

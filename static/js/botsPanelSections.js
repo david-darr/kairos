@@ -21,7 +21,7 @@ import { icon } from './botsIcons.js';
 import { byteLength, clipToBytes, describeRow, canRestore, driftState, profileDiff, actorLabel, fieldLabel, shortValue } from './botsProfileDiff.js';
 
 export const SOUL_BYTES = 24000;
-export const MEMORY_CHARS = 8000;
+export const MEMORY_CHARS = 24576;
 export const MAX_FALLBACKS = 5;
 const OUTCOME = { succeeded: 'Done', failed: 'Failed', lost: 'Did not finish', skipped: 'Skipped', stopped: 'Stopped' };
 
@@ -76,16 +76,17 @@ export function fallbackAfter(list, change) {
   return next;
 }
 
-// Permissions: what is in effect and what is only stored. Only Full is enforced today.
+// Permissions follow the bot and conversation's effective policy.
 export const APPROVAL_LEVELS = [
   { value: 'full', title: 'Full access', hint: 'It acts without asking. You can stop it at any time.', now: true },
-  { value: 'auto', title: 'Auto', hint: 'Not available yet. Every bot runs at Full for now.', now: false },
-  { value: 'ask', title: 'Ask first', hint: 'Not available yet. Every bot runs at Full for now.', now: false },
-  { value: 'custom', title: 'Custom', hint: 'Not available yet. Every bot runs at Full for now.', now: false },
+  { value: 'auto', title: 'Auto', hint: 'Reviews eligible actions and asks when unsure.', now: true },
+  { value: 'ask', title: 'Ask first', hint: 'Asks before changing anything.', now: true },
+  { value: 'edits', title: 'Edits', hint: 'Allows edits within its granted folders and Kairos data.', now: true },
+  { value: 'custom', title: 'Custom', hint: 'Asks unless an exact rule allows the action.', now: true },
 ];
 export function permissionFacts(agent) {
   const outbound = agent.outbound || { policy: 'ask', daily_cap: 25 };
-  return { effective: 'full', storedApproval: agent.approval_mode || 'full', outboundPolicy: outbound.policy, outboundCap: outbound.daily_cap,
+  return { effective: agent.approval_mode || 'full', storedApproval: agent.approval_mode || 'full', outboundPolicy: outbound.policy, outboundCap: outbound.daily_cap,
     alwaysAllow: agent.always_allow || [], runCap: agent.daily_run_cap ?? 12 };
 }
 
@@ -367,7 +368,7 @@ function skillsBasics(ctx) {
     };
     draw();
     const off = rows.filter(r => !r.on).length;
-    return h('div', {}, [note(`Right now every bot can use every skill. ${off ? `${off} you switched off ${off === 1 ? 'is' : 'are'} saved, and will apply` : 'Your choices here are saved, and will apply'} when skills are set per bot.`),
+    return h('div', {}, [note('Only reviewed skills switched on for this bot are available.'),
       h('div', { class: 'bots-card' }, [caps(`Skills (${rows.length})`), list])]);
   }, 'Skills');
 }
@@ -377,7 +378,7 @@ const skillsSection = ctx => h('div', { 'data-panel-card': 'skills' }, [modular(
 function memoryBasics(ctx) {
   const { agent, detail } = ctx.state;
   const state = { text: detail?.memory || '', saved: detail?.memory || '', busy: false };
-  const editor = longText({ value: state.text, limit: MEMORY_CHARS, rows: 12, label: 'Memory', id: 'memory', onChange: v => { state.text = v; sync(); } });
+  const editor = longText({ value: state.text, limit: MEMORY_CHARS, bytes: true, rows: 12, label: 'Memory', id: 'memory', onChange: v => { state.text = v; sync(); } });
   const save = Button({ label: 'Save memory', variant: 'primary', disabled: true, onClick: async () => {
     state.busy = true; sync();
     try {
@@ -509,7 +510,7 @@ function accessBasics(ctx) {
             if (!(await ctx.ui.confirmDialog({ title: 'Forget all logins?', message: 'This bot will have to sign in again.', confirmLabel: 'Forget' }))) return;
             try { await ctx.ui.api(`/api/agents/${ctx.agentId}/forget-logins`, { method: 'POST', toast: false }); ctx.ui.toast('Logins forgotten', 'success'); } catch (error) { ctx.ui.toast(messageOf(error), 'error'); }
           } })])] }),
-      Card({ label: 'Saved limits', children: stored.length ? [note('Saved, not enforced yet. They apply when tool limits are turned on.'), ...stored.map(text => fact(text, ''))] : [note('No limits are saved. It may use every tool it has.')] }),
+      Card({ label: 'Tool limits', children: stored.length ? [note('These limits apply at every approval level.'), ...stored.map(text => fact(text, ''))] : [note('It may use every tool available within its grants.')] }),
     ]);
   }, 'Access'));
   wrap.append(h('div', { class: 'bots-actions' }, [ctx.ui.creativeSelectionButton(() => ({ agentId: ctx.agentId }), wrap)]));
@@ -578,11 +579,11 @@ function permissionsBasics(ctx) {
     Button({ label: 'Remove', iconName: 'x', onClick: () => { ctx.update({ always_allow: facts.alwaysAllow.filter((_, at) => at !== i) }); ctx.rerender(); } })])) : [note('Nothing is always allowed.')];
   return h('div', {}, [
     caps('Before it acts'),
-    RadioGroup({ label: 'Approval', value: 'full', options: APPROVAL_LEVELS.map(l => ({ value: l.value, title: l.title, hint: l.hint, disabled: !l.now })), onChange: v => ctx.update({ approval_mode: v }) }),
-    note('Every bot runs at Full today. The other levels are saved choices for later, and are not available to pick yet.'),
+    RadioGroup({ label: 'Approval', value: facts.effective, options: APPROVAL_LEVELS.map(l => ({ value: l.value, title: l.title, hint: l.hint, disabled: !l.now })), onChange: v => ctx.update({ approval_mode: v }) }),
+    note('Full acts without asking. Tool and account grants still limit what it can reach.'),
     Card({ label: 'Limits', children: [SwitchRow({ title: 'This bot is on', hint: 'Off, it takes no new work and its routines do not run.', checked: agent.enabled !== false, onChange: v => ctx.update({ enabled: v }) }), capRow] }),
-    Card({ label: 'Messages outside the app', children: [h('div', { class: 'bots-row bots-stack-row' }, [outbound, h('span', { class: 'bots-row-hint', text: 'Saved. Asking before it sends outside the app starts with a later update.' })]), outCap] }),
-    Card({ label: 'Always allowed', children: [...allowed, note('Saved. This list starts to apply with a later update.')] }),
+    Card({ label: 'Messages outside the app', children: [h('div', { class: 'bots-row bots-stack-row' }, [outbound, h('span', { class: 'bots-row-hint', text: 'Below Full, sending asks or uses this daily allowance.' })]), outCap] }),
+    Card({ label: 'Always allowed', children: [...allowed, note('Exact rules apply within the bot\'s grants.')] }),
   ]);
 }
 

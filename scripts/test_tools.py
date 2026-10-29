@@ -45,25 +45,16 @@ from services.notes_service import notes_service  # noqa: E402
 CLI_PATH = Path(__file__).resolve().parents[1] / "mcp_servers" / "hive_mind_cli.py"
 # Claude's pre-approved JARVIS tools on 2026-10-05, when core/brain.py still
 # listed them by hand, plus the explicitly reviewed additions below.
+# Bots only pre-approve reads; every mutation reaches the shared broker.
 CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
-    "search_sessions list_skills search_skills read_skill list_notes list_tasks list_upcoming_events list_specs "
-    "list_tab_tasks read_tab_task complete_tab_task "
-    "read_spec list_documents read_document list_contacts list_task_runs create_note update_note delete_note "
-    "create_task update_task delete_task create_event update_event delete_event save_generated_image run_code "
-    "browse save_generated_file google_drive google_sheets google_forms google_calendar agent_remember agent_ask "
-    # Reviewed 2026-10-23: send_email asks through the broker itself, like google_*.
-    "list_email_accounts send_email "
-    # Helpers (roadmap phase 5, 2026-10-06): delegate and collect.
-    "delegate helper_results computer "
-    # Agent mentions (2026-10-08): hand work to a named agent from a chat.
-    "hand_to_agent save_skill add_mcp_server forge_app_logs "
-    # Reviewed 2026-10-15: own-topic reads (decb912); peer-scoped, capped
-    # assignments and requester-owned question answers (5421f76).
-    "agent_read_topic agent_assign agent_answer_assignment roblox_studio creative_tools roblox_style roblox_assets ui_design "
-    # The Design canvas (2026-10-22): writes to Kairos's own design store, audited;
-    # design_system_save still asks through the broker itself.
-    "design_create design_outline design_read design_add_board design_edit design_boards design_tokens "
-    "design_snapshot design_comments design_export design_system_save").split()}
+    'forge_app_logs search_sessions list_skills ui_design read_skill search_skills list_notes '
+    'list_tasks list_tab_tasks read_tab_task list_upcoming_events list_specs read_spec list_documents '
+    'read_document list_contacts list_task_runs list_email_accounts helper_results agent_read_topic design_outline '
+    'design_read design_snapshot skill_read skill_index notebook_read recall_search recall_read '
+    'query_tool_result highlevel_search_contacts highlevel_get_contact highlevel_get_contact_notes highlevel_list_contact_tasks highlevel_list_calendars highlevel_get_free_slots '
+    'highlevel_get_contact_appointments highlevel_list_pipelines highlevel_search_opportunities highlevel_get_opportunity x_search_recent x_count_recent x_user '
+    'x_user_posts x_post trigger_info '
+).split()}
 
 
 def load_cli():
@@ -110,8 +101,9 @@ class SurfaceTests(unittest.TestCase):
         for name in ("create_note", "save_generated_file", "agent_remember", "google_drive", "search_sessions"):
             self.assertIn(name, codex)
 
-    def test_claudes_pre_approvals_are_exactly_the_old_list(self):
+    def test_claudes_bot_preapprovals_are_exactly_the_reviewed_reads(self):
         self.assertEqual(set(tool_registry.claude_preapproved(agent=True)), CLAUDE_APPROVED_BEFORE)
+        self.assertTrue(all(tool_registry.read_tool(name) for name in tool_registry.claude_preapproved(agent=True)))
         self.assertNotIn("mcp__hive_mind__agent_ask", tool_registry.claude_preapproved(agent=False))
         for name in ("agent_configure_self", "agent_setup_undo"):
             self.assertNotIn(f"mcp__hive_mind__{name}", tool_registry.claude_preapproved(agent=True))

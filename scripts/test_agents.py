@@ -920,9 +920,10 @@ class AutoModeTests(AgentTestCase):
         self.dispatch()
         self.assertTrue(task_service.get_task(card["id"])["comments"][-1]["text"].startswith("allow"))
         self.assertEqual(agent_service.inbox(self.agent["id"]), [], "nothing waits on the person")
-        entry = permissions.audit()[-1]
-        self.assertEqual((entry["source"], entry["surface"], entry["tool"]),
-                         ("agent_auto", f"agent:{self.agent['id']}", "send_email"), "every decision is audited")
+        from core import bot_policy
+        entry = bot_policy.decisions("local", bot_id=self.agent["id"])[0]
+        self.assertEqual((entry["source"], entry["mode"], entry["tool"]),
+                         ("full", "full", "send_email"), "every decision is audited")
 
     def test_auto_covers_a_tainted_turn_but_nothing_outside_agents(self):
         tainted = asyncio.run(permissions.decide(surface=f"agent:{self.agent['id']}", tool="WebFetch",
@@ -1346,13 +1347,12 @@ class ToolTests(AgentTestCase):
         self.assertIn("agent_remember", names)
         self.assertNotIn("run_shell", names, "agents are never admin")
 
-    def test_claude_agent_runs_pre_approve_only_their_own_agent_tools(self):
-        """Found live: without pre-approval Claude sent agent_remember to the
-        inbox as an approval request instead of running it."""
+    def test_claude_agent_runs_never_preapprove_non_read_tools(self):
+        """Bot writes reach the shared permission gate at every approval level."""
         from core.brain import Brain
         agent_run = Brain(agent_id=self.agent["id"])._tool_config()[1]
-        self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_read_topic",
-                         "mcp__hive_mind__agent_ask"} <= set(agent_run))
+        self.assertIn("mcp__hive_mind__agent_read_topic", agent_run)
+        self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_ask"}.isdisjoint(agent_run))
         self.assertTrue({"mcp__hive_mind__agent_remember", "mcp__hive_mind__agent_ask"}.isdisjoint(Brain()._tool_config()[1]))
         self.assertEqual(Brain(agent_id=self.agent["id"]).surface, f"agent:{self.agent['id']}")
 

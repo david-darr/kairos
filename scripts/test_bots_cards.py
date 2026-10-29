@@ -168,10 +168,11 @@ class ApprovalCards(CardCase):
         card = self.card_for(payload)
         permissions.close_channel(self.surface)  # the window closed: the broker denies it
         self.assertEqual((await asyncio.wait_for(task, 2)).behavior, "deny")
-        result = self.store.respond(card["id"], "david", action="allow")
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["card"]["status"], "unavailable")
-        self.assertIn("did not run", result["message"])
+        with self.assertRaises(bot_cards.CardConflict):
+            self.store.respond(card["id"], "david", action="allow")
+        settled = self.store.get(card["id"], "david")
+        self.assertIn(settled["status"], ("unavailable", "cancelled"))
+        self.assertIn("did not run", settled["outcome"]["reason"])
 
     async def test_an_old_generation_cannot_be_answered_and_its_request_is_denied(self):
         task, payload = await self.ask_permission()
@@ -295,9 +296,9 @@ class QuestionCards(CardCase):
         card = self.card_for(payload)
         permissions.close_channel(self.surface)
         await asyncio.wait_for(task, 2)
-        result = self.store.respond(card["id"], "david", action="answer", answers={"q1": "A"})
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["card"]["status"], "unavailable")
+        with self.assertRaises(bot_cards.CardConflict):
+            self.store.respond(card["id"], "david", action="answer", answers={"q1": "A"})
+        self.assertIn(self.store.get(card["id"], "david")["status"], ("unavailable", "cancelled"))
 
     def test_six_questions_twelve_options_and_the_bounds(self):
         six = [{"question": f"Question {i}?", "options": [{"label": f"o{j}"} for j in range(12)]} for i in range(6)]

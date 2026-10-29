@@ -41,7 +41,7 @@ async function fetchReading(refresh = false) {
   if (inflight && !refresh) return inflight;
   const query = refresh ? '?refresh=1' : '';
   inflight = api(`/api/bot-limit-resets${query}`, { toast: false })
-    .then(data => { reading = { endpoints: Array.isArray(data?.endpoints) ? data.endpoints : [], loaded: true }; })
+    .then(data => { reading = { endpoints: (data?.endpoints || data?.limits || []).map(e => ({ ...e, used_percent: e.used_percent ?? Math.max(0, ...(e.windows || []).map(w => Number(w.used_percent) || 0)) })), loaded: true }; })
     .catch(() => { reading = { ...reading, loaded: true }; })
     .finally(() => { inflight = null; for (const fn of listeners) fn(reading); });
   return inflight;
@@ -111,7 +111,7 @@ export async function mountWarnings(host, ctx = {}) {
 
   async function move(entry) {
     try {
-      await api('/api/bot-limit-resets/after-reset', { method: 'POST', body: JSON.stringify({ routine_id: entry.routine.id, endpoint_id: entry.endpoint.endpoint_id }), toast: false });
+      await api('/api/bot-limit-resets/after-reset', { method: 'POST', body: JSON.stringify({ routine_id: entry.routine.id }), toast: false });
       toast('Moved to after the reset', 'success');
       ctx.onChanged?.();
     } catch (error) { toast(refusalOf(error).message || 'That did not move.', 'error'); }

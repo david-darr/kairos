@@ -434,7 +434,8 @@ def _profile_section(owner: Optional[str], learned: bool) -> str:
 
 def _skills_section(scope: dict, taint: list) -> str:
     try:
-        from services import bot_skills
+        from importlib import import_module
+        bot_skills = import_module("services.bot_skills")
     except ImportError:
         return ""
     holder = type("Taint", (), {"mark": lambda self, source: taint.append(source)})()
@@ -460,9 +461,13 @@ def build_resources(scope: dict, *, kind: str = "chat", now: Optional[float] = N
     skills = _skills_section(scope, taint)
     if skills:
         sections.append(skills)
+    from services import bot_logins
+    logins = bot_logins.prompt_lines(scope["bot_id"])
+    if logins:
+        sections.append("Saved logins available to you:\n" + "\n".join(logins))
     if flags["memory"] and kind == "chat":
         try:
-            recent = agent_service.recent_work(scope["bot_id"], scope.get("session_id"))
+            recent = agent_service.recent_work(scope["bot_id"], scope.get("session_id"), owner_user=scope.get("owner"))
         except Exception:
             recent = ""
         if recent:
@@ -594,7 +599,8 @@ def run_finished(context, tool_calls: int) -> Optional[dict]:
         from core.session_manager import session_manager
         if not owner_conversation(session_manager.get_session(session_id)):
             return None
-        from services import bot_skills
+        from importlib import import_module
+        bot_skills = import_module("services.bot_skills")
     except ImportError:
         return None
     try:

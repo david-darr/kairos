@@ -381,7 +381,10 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
 
 class LocalPreviewPermissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_chat_and_agent_still_prompt(self):
-        for surface in ("chat:preview-auto", "agent:preview-auto"):
+        from services.agent_service import agent_service
+        bot = agent_service.create("Computer review fixture")
+        self.addCleanup(agent_service.delete, bot["id"])
+        for surface in ("chat:preview-auto", f"agent:{bot['id']}"):
             queue = permissions.open_channel(surface)
             try:
                 with patch("core.session_manager.session_manager.get_session", return_value={"permission_mode": "auto"}):

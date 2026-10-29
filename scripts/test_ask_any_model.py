@@ -139,9 +139,13 @@ class AskAnyTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(permissions, 'ask', short):
             self.assertIn('Nobody answered within 30 minutes', await registry.call(
                 'ask_user', {'questions': QUESTIONS}, registry.ToolContext(session_id='refusal'), registry.OPENAI))
-        agent_queue = permissions.open_channel('agent:a')
-        self.addCleanup(permissions.close_channel, 'agent:a')
-        result = await registry.call('ask_user', {'questions': QUESTIONS}, registry.ToolContext(agent_id='a'), registry.CODEX)
+        from services.agent_service import agent_service
+        bot = agent_service.create('Question test bot')
+        self.addCleanup(agent_service.delete, bot['id'])
+        agent_surface = f"agent:{bot['id']}"
+        agent_queue = permissions.open_channel(agent_surface)
+        self.addCleanup(permissions.close_channel, agent_surface)
+        result = await registry.call('ask_user', {'questions': QUESTIONS}, registry.ToolContext(agent_id=bot['id']), registry.CODEX)
         self.assertTrue(agent_queue.empty())
         self.assertIn('agent_ask', result)
         self.assertFalse(codex_questions._pending)

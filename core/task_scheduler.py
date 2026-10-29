@@ -343,6 +343,8 @@ async def _run_goal(task: dict, agent: dict) -> None:
     try:
         brain = _task_brain(task)
         await brain.connect()
+        if task.get("taint") and hasattr(brain, "pending_reference_taint"):
+            brain.pending_reference_taint = task["taint"]
         async with file_checkpoints.around_turn(f"task:{task['id']}"):
             output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
         task_service.record_run(task["id"], output=output)
@@ -386,6 +388,8 @@ async def _run_task_tagged(task: dict, source: str) -> None:
     try:
         brain = _task_brain(task)
         await brain.connect()
+        if task.get("taint") and hasattr(brain, "pending_reference_taint"):
+            brain.pending_reference_taint = task["taint"]
         async with file_checkpoints.around_turn(f"task:{task['id']}"):
             output = await complete(brain, task["prompt"], task, "task")
         delivery_id = _deliver(task, output)

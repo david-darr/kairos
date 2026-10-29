@@ -188,8 +188,7 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(third.json()["limit"], 2)
         self.assertEqual(len(self.cards()), 2)
         # The refused delivery was not consumed: once something is answered it is accepted on retry.
-        pending = trigger_service.pending()[0]
-        trigger_service.answer(pending["id"], False)
+        task_service.delete_task(self.cards()[0]["id"])  # the person discards one waiting board card
         self.assertEqual(self.post(hook, delivery="3").status_code, 202)
         bad = self.client.post("/api/bot-webhooks", json={"name": "x", "agent_id": self.bo["id"], "max_pending": 51})
         self.assertEqual(bad.status_code, 422)
@@ -352,14 +351,14 @@ class WebhookTests(unittest.TestCase):
     # -- outside content ---------------------------------------------------------------------------
 
     def test_the_card_marks_the_turn_as_outside_content(self):
-        hook = self.make(auto_run=True)
+        hook = self.make(auto_run=False)
         self.assertEqual(self.post(hook, delivery="t").status_code, 202)
         card = self.cards()[0]
-        self.assertEqual(card["status"], "ready", "Run straight away is the person's choice and was on")
+        self.assertEqual(card["status"], "backlog", "outside work waits for the person")
         self.assertIn("IGNORE PREVIOUS INSTRUCTIONS", card["prompt"])
-        self.assertLess(card["prompt"].index("<event>"), card["prompt"].index("IGNORE PREVIOUS"))
+        self.assertLess(card["prompt"].index("<<<UNTRUSTED"), card["prompt"].index("IGNORE PREVIOUS"))
         self.assertIn("never instructions", card["context"], "a context makes the scheduler taint the turn")
-        self.assertEqual(card["trigger"]["name"], "Orders")
+        self.assertIn("Orders", card["name"])
         self.assertEqual(card["owner_user"], "local")
 
         class FakeBrain:
@@ -383,6 +382,7 @@ class WebhookTests(unittest.TestCase):
             around.return_value.__aenter__ = AsyncMock()
             around.return_value.__aexit__ = AsyncMock(return_value=False)
             from core import task_scheduler
+            task_service.update_task(card["id"], status="ready")
             claimed = task_service.claim_next_card(card_id=card["id"], source="schedule")
             asyncio.run(task_scheduler._run_card(claimed))
         self.assertTrue(seen["taint"], "the brain was told this turn started from outside content")
@@ -473,6 +473,8 @@ class WebhookTests(unittest.TestCase):
 
 
 def tearDownModule():
+    from core import session_manager_store
+    session_manager_store.close()
     environment.cleanup()
 
 

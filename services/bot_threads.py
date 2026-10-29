@@ -264,6 +264,10 @@ def update_thread(agent: dict, session_id: str, fields: dict) -> dict:
             raise ValueError(f"{key} cannot be changed")
     if rename is not None:
         session_manager.rename_session(session_id, rename)
+    if "approval_mode" in changes:
+        from core import bot_policy
+        bot_policy.change_mode(agent["id"], changes.pop("approval_mode"), scope="thread", thread_id=session_id,
+                               user=session.get("owner_user"))
     if changes:
         session_manager.set_thread(session_id, **changes)
     return _row(session_manager.get_session(session_id), agent)

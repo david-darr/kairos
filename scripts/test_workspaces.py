@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 _DATA = tempfile.TemporaryDirectory(prefix="jarvis-workspaces-test-", ignore_cleanup_errors=True)
 os.environ["JARVIS_DATA_DIR"] = _DATA.name
@@ -89,7 +89,10 @@ class ClaudeFenceTests(unittest.TestCase):
         self.assertIsNone(self.refused(self.brain(is_admin=True), "Write", {"file_path": SECRET}))
 
     def test_a_fenced_call_is_refused_without_asking_anyone(self):
-        brain = self.brain(is_admin=False, agent_id="aaaaaaaaaa")
+        from services.agent_service import agent_service
+        bot = agent_service.create("Workspace fence fixture")
+        self.addCleanup(agent_service.delete, bot["id"])
+        brain = self.brain(is_admin=False, agent_id=bot["id"])
         with patch.object(permissions, "decide") as decide:
             result = asyncio.run(brain._permission("Write", {"file_path": SECRET, "content": "x"}, Context()))
         self.assertIsInstance(result, PermissionResultDeny)
@@ -142,13 +145,17 @@ class AuditTests(unittest.TestCase):
             return outcome
 
         writers = [s for s in tool_registry._REGISTRY.values() if s.effect != tool_registry.READ]
+        from services.agent_service import agent_service
+        bot = agent_service.create("Audit fixture")
+        self.addCleanup(agent_service.delete, bot["id"])
         self.assertGreater(len(writers), 15)
         for spec in writers:
             outcomes = iter(["done", "Not run: no", "boom"])
-            ctx = tool_registry.ToolContext(session_id="chat-7", is_admin=True, agent_id="aaaaaaaaaa")
+            ctx = tool_registry.ToolContext(session_id="chat-7", is_admin=True, agent_id=bot["id"])
             surface = next(iter(spec.surfaces))
             with patch.dict(tool_registry._REGISTRY, {spec.name: dataclasses.replace(spec, handler=handler)}), \
-                 patch("core.addons.tool_available", return_value=True):
+                   patch("core.addons.tool_available", return_value=True), \
+                   patch.object(permissions, "gate_bot_call", AsyncMock(return_value=permissions.Decision("allow"))):
                 before = len(permissions.audit())
                 for _ in range(3):
                     asyncio.run(tool_registry.call(spec.name, {"path": "a.txt", "title": "t"}, ctx, surface))

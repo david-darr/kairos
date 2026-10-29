@@ -131,3 +131,27 @@
 [data-app-mode="bots"] .bots-conv-open .bots-row-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--bots-text-hint); }
 [data-app-mode="bots"] .bots-tag { flex: none; padding: 1px 7px; font-size: var(--bots-text-caps); font-weight: 600; color: var(--bots-ink-secondary); background: var(--bots-inset); border-radius: var(--bots-radius-pill); }
 [data-app-mode="bots"] .bots-conv-foot, [data-app-mode="bots"] .bots-conv-bulk { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* Phase 1: the Simple tabs and the new sections */
+[data-app-mode="bots"] .bots-tabs { display: flex; gap: 2px; margin: 0 14px 6px; padding: 3px; background: var(--bots-inset); border-radius: var(--bots-radius-pill); }
+[data-app-mode="bots"] .bots-tab {
+  flex: 1; min-height: 32px; padding: 4px 8px; color: var(--bots-ink-secondary); background: transparent; border: 0; border-radius: var(--bots-radius-pill);
+  font: 500 var(--bots-text-hint-lg) var(--bots-font-sans); cursor: pointer;
+}
+[data-app-mode="bots"] .bots-tab[aria-selected="true"] { color: var(--bots-ink); background: var(--bots-raised); }
+[data-app-mode="bots"] .bots-tab:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-drift { padding: 12px 14px; display: grid; gap: 8px; border: 1px solid var(--bots-warning); }
+[data-app-mode="bots"] .bots-routine { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-routine-actions, [data-app-mode="bots"] .bots-history-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+[data-app-mode="bots"] .bots-history-row { border-top: 1px solid var(--bots-hairline); padding-bottom: 6px; }
+[data-app-mode="bots"] .bots-history-row:first-child { border-top: 0; }
+[data-app-mode="bots"] .bots-history-actions, [data-app-mode="bots"] .bots-history-detail { padding: 0 14px 6px; }
+[data-app-mode="bots"] .bots-days { display: flex; flex-wrap: wrap; gap: 6px; }
+[data-app-mode="bots"] .bots-day { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+[data-app-mode="bots"] .bots-form { display: grid; gap: 10px; }
+[data-app-mode="bots"] .bots-form label { display: grid; gap: 4px; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-module { display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-count.over { color: var(--bots-danger-ink); }
+@media (max-width: 720px) { [data-app-mode="bots"] .bots-panel-scroll { padding-bottom: max(24px, env(safe-area-inset-bottom)); } }
+/* On a phone every tab is a 44 px target. */
+@media (max-width: 720px) { [data-app-mode="bots"] .bots-tab { min-height: 44px; } }

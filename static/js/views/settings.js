@@ -79,6 +79,8 @@ const NAV_ICONS = {
   "computer-use": I('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 20v2M16 20v2M8 10h8M8 14h5"/>'),
   "bot-apps": I('<path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 01-4 4h-4a4 4 0 01-4-4V8z"/>'),
   "bot-keys": I('<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2M16 7l3 3M14 9l2 2"/>'),
+  "bot-about-you": I('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),
+  "bot-skill-library": I('<path d="M4 5a2 2 0 012-2h12v16H6a2 2 0 00-2 2V5z"/><path d="M8 7h6"/>'),
   "bot-logins": I('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
@@ -108,6 +110,10 @@ const SECTION_GROUPS = [
       { id: "bot-logins", label: "Signed-in sites", render: (body) => renderBotResource(body, () => import("../botsSectionLogins.js")),
         description: "Saved logins a bot's computer can fill in for you, and 1Password. A bot never sees a password and filling never presses the sign-in button.",
         keywords: ["login", "logins", "password", "1password", "totp", "two factor", "sign in", "saved logins", "signed in sites", "bots"] },
+      { id: "bot-about-you", label: "About you", render: (body) => renderBotResource(body, () => import("../botsSectionAboutYou.js")),
+        description: "What your bots know about you, including facts you can review and remove.", keywords: ["bots", "profile", "about you", "memory"] },
+      { id: "bot-skill-library", label: "Skill library", render: (body) => renderBotResource(body, () => import("../botsSectionSkillLibrary.js")),
+        description: "Reviewed procedures you can share with your bots.", keywords: ["bots", "skills", "library", "reviewed"] },
       { id: "channels", label: "Channels", render: renderChannelsPanel,
         description: "Reach Kairos and your agents from Discord, Telegram, Slack and other apps, and choose where task results and notifications go.",
         keywords: ["discord", "bot", "token", "telegram", "slack", "signal", "imessage", "email", "sms", "whatsapp", "matrix",
@@ -563,7 +569,7 @@ function visibleSections() {
   }
   return [
     ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library']],
     ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
     ['access', 'Access', ['account', 'users']],
     ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],

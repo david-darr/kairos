@@ -253,7 +253,11 @@ class AppEventTests(unittest.TestCase):
         self.poll(trigger)
         self.inbox.add(mail(91))
         self.poll(trigger)
-        self.assertEqual(self.cards()[0]["status"], "ready")
+        self.assertFalse(self.cards(), "the merged routine engine owns automatic event work")
+        receipt = self.store.list_receipts(trigger["id"])[0]
+        self.assertEqual(receipt["status"], "enqueued")
+        task = task_service.get_task(receipt["run_ref"])
+        self.assertEqual(task["routine"]["status"]["pending"][0]["receipts"], [receipt["id"]])
 
     def test_a_filter_keeps_other_mail_out(self):
         trigger = self.make(conditions=[{"path": "data.from", "equals": "Boss <boss@example.com>"}])
@@ -582,7 +586,7 @@ class AppEventTests(unittest.TestCase):
         agent_service.delete(self.bo["id"])
         due = bot_app_triggers.due_subscriptions(time.time() + 99999)
         self.assertEqual([s["id"] for s in due], [second["id"]])
-        self.assertFalse(bot_app_triggers.get_subscription(trigger["id"])["enabled"])
+        self.assertIsNone(bot_app_triggers.get_subscription(trigger["id"]), "the registered delete hook removes subscriptions")
         self.assertEqual(bot_app_triggers.on_bot_deleted(other["id"]), 1)
         self.assertIsNone(bot_app_triggers.get_subscription(second["id"]))
 
@@ -636,6 +640,8 @@ class AppEventTests(unittest.TestCase):
 
 
 def tearDownModule():
+    from core import session_manager_store
+    session_manager_store.close()
     environment.cleanup()
 
 

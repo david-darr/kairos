@@ -211,16 +211,17 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     // Pause the one we will make stale; the routine really changes.
     start = writes.length;
     await click(`${card(stalePlan.id)} [data-action="pause"]`);
-    const paused = await waitWrite(start, `/api/tasks/${stalePlan.target_id}`, 'PATCH');
+    const paused = await waitWrite(start, `/api/bot-routines/${stalePlan.target_id}`, 'PATCH');
     assert.deepEqual(body(paused), { enabled: false });
     await waitFor(`document.querySelector(${q(card(stalePlan.id) + ' [data-action=pause]')}).textContent === 'Resume'`);
     assert.equal(demoState.botsCards.routines.find(r => r.id === stalePlan.target_id).enabled, false);
 
     // Edit opens the editor, or the Automations page when the editor is not built yet.
     await click(`${card(plain.id)} [data-action="edit"]`);
-    await waitFor("window.__navs.some(a => a[0] === 'botsAutomations') || !!document.querySelector('.modal-backdrop')", 6000);
+    await waitFor("window.__navs.some(a => a[0] === 'botsAutomations') || !!document.querySelector('.modal-backdrop, .bots-ed-dialog')", 6000);
     await js(`(() => { for (let i = 0; i < 4; i++) { const b = document.querySelector('.modal-backdrop .modal-close-btn'); if (!b) break; b.click(); }
-      document.querySelectorAll('.modal-backdrop').forEach(n => n.remove()); return true; })()`);
+      document.querySelectorAll('.modal-backdrop').forEach(n => n.remove());
+      document.querySelectorAll('.bots-ed-dialog').forEach(n => { try { n.close(); } catch { /* not open */ } n.remove(); }); return true; })()`);
 
     // Undo works while nothing else changed it.
     start = writes.length;

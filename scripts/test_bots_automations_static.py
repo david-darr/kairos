@@ -31,7 +31,7 @@ COLOR = re.compile(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d|\bhsla?\(\s*\d")
 # Section 6 of the design, plus the routes this unit reuses (agents, threads, the existing triggers, the chat start).
 ROUTE_PATTERNS = [
     r"^/api/bot-automations$",
-    r"^/api/bot-routines(/\{\}(/(run|defer))?|/preview)?$",
+    r"^/api/bot-routines(/\{\}(/(run|defer|restore))?|/preview)?$",
     r"^/api/bot-routine-runs/(\{\}/(cancel|seen)|seen-all)$",
     r"^/api/bot-limit-resets(/(after-reset|continue))?$",
     r"^/api/bot-app-triggers(/events|/\{\}(/(test|restore|sync))?)?$",
@@ -185,7 +185,7 @@ class AutomationsStaticTests(unittest.TestCase):
     def test_the_view_is_a_bots_mode_view_and_the_page_is_not_registered_here(self):
         # Registering the page in the Bots nav and appModes belongs to Phase 1 unit U4: the hook is reported, not made.
         modes = text(JS / "appModes.js")
-        self.assertNotIn("botsAutomations", modes, "this unit does not edit appModes.js; the orchestrator lists the hook")
+        self.assertIn("botsAutomations", modes, "integration registers the Automations page in Bots mode")
 
 
 if __name__ == "__main__":

@@ -315,7 +315,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual((row["total_tokens"], row["cache_read_tokens"]), (500, 100))
                 for name, _ in store.RUN_V8_COLUMNS:
                     self.assertIsNone(row[name], f"{name} is not back-filled")
-                self.assertEqual(conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0], "8")
+                self.assertEqual(conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0], "9")
                 self.assertTrue(os.path.exists(path + ".pre-v7"), "the old database is kept first")
                 store.close()
                 conn = store.connection()       # a second start changes nothing

@@ -23,3 +23,7 @@ the page a narrow bridge.
   ports. Never drive the installed app or a person's own instance.
 - Electron test runs take `data/electron.lock` one at a time; see
   `scripts/AGENTS.md`.
+
+## Bots redesign, Phases 1 to 3
+
+- `bot-approvals.js`.

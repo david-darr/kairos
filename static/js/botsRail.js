@@ -30,6 +30,7 @@ import {
   clampSidebarWidth, searchMatches, searchReady, attentionBots, canMoveThread, afterDelete, threadAttention,
 } from './botsSidebarModel.js';
 import { botsThreadApi, threadMenuItems, folderMenuItems, botMenuItems, movedFolderIds, copyableLink } from './botsThreadMenu.js';
+import { buildItems, needsYouCount } from './botsAutomationModel.js';
 
 const SHELL_CSS = '/static/css/bots-shell.css';
 const SIDEBAR_CSS = '/static/css/bots-sidebar.css';
@@ -132,7 +133,9 @@ export function mountBotsRail(nav) {
     [icon('archive', { size: 16 }), h('span', { class: 'bots-rail-archived-label' })]);
   const view = Segmented({ label: 'Interface', value: interfaceNow(), options: [{ value: 'simple', label: 'Simple' }, { value: 'advanced', label: 'Advanced' }],
     onChange: value => setAdvanced(value === 'advanced') });
-  const foot = h('div', { class: 'bots-rail-foot' }, [view]);
+  const automationBadge = h('span', { class: 'bots-status-dot', 'data-state': 'needs_you', hidden: true, 'aria-hidden': 'true' });
+  const automations = h('button', { type: 'button', class: 'nav-item', 'data-tab': 'botsAutomations', onclick: () => go({ tab: 'botsAutomations' }) }, [icon('calendar-clock', { size: 16 }), h('span', { text: 'Automations' }), automationBadge]);
+  const foot = h('div', { class: 'bots-rail-foot' }, [automations, view]);
   const head = h('div', { class: 'bots-rail-head' }, [h('span', { class: 'bots-caps', text: 'Your bots' }), density]);
   // Inbox, Notifications, Activity and Inspector (unit U5's drawer). The row shows only when that module loads.
   const attention = h('div', { class: 'bots-rail-attention', role: 'group', 'aria-label': 'Attention', hidden: true },
@@ -598,6 +601,11 @@ export function mountBotsRail(nav) {
       const [next, convos] = await Promise.all([request('/api/agents'), request('/api/agents/conversations').catch(() => null)]);
       if (disposed || at !== version || !Array.isArray(next)) return;
       agents = next;
+      const automationData = await request('/api/bot-automations').catch(() => ({ items: [] }));  // a missing count never stops the roster refresh
+      if (disposed || at !== version) return;
+      const needs = needsYouCount(buildItems(automationData.items || automationData.automations || []));
+      automationBadge.hidden = needs === 0;
+      automations.setAttribute('aria-label', needs ? `Automations, ${needs} need you` : 'Automations');
       if (convos?.agents) pinnedIds = new Set(convos.agents.filter(item => item.pinned).map(item => item.id));
       // A bot's folders ride on the bot record; keep each loaded list in step with it.
       for (const [id, data] of threads) { const bot = botById(id); if (bot && Array.isArray(bot.folders)) data.folders = bot.folders; }

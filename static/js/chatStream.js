@@ -102,7 +102,11 @@ function _packet(packet) {
   }
   // Bots runtime frames (queue changes, turn lifecycle: U1's `bot.*` types) belong to the Bots conversation
   // that is open on that session. They never touch a live turn's text, so they are only handed on.
-  if (typeof packet.type === 'string' && packet.type.startsWith('bot.')) {
+  if (['bot_card', 'bot_automation_change'].includes(packet.type)) {
+    if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent(packet.type === 'bot_card' ? 'kairos:bot-card' : 'kairos:bot-automation-change', { detail: packet }));
+    return;
+  }
+  if (typeof packet.type === 'string' && (packet.type.startsWith('bot.') || ['bot_queue', 'bot_goal', 'bot_branch'].includes(packet.type))) {
     if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent('kairos:bot-runtime', { detail: packet }));
     return;
   }

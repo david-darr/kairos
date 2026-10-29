@@ -80,8 +80,10 @@ class Backend:
             raise RuntimeError("test backend did not start")
 
     def stop(self):
-        subprocess.run(["taskkill", "/PID", str(self.process.pid), "/T", "/F"], capture_output=True) \
-            if sys.platform == "win32" else self.process.kill()
+        # The scripted uvicorn fixture has no child processes. Kill its owned handle directly;
+        # taskkill's process enumeration is denied to restricted Windows test tokens.
+        if self.process.poll() is None:
+            self.process.kill()
         self.process.wait(timeout=20)
         self.log.close()
         remove_tree(self.data)

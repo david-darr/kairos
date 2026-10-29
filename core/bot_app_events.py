@@ -166,7 +166,8 @@ def _fallback_enqueue(source: dict, receipt_id: str, events: list[dict]) -> dict
 
 async def _enqueue(source: dict, receipt_id: str, events: list[dict]) -> dict:
     try:
-        from services import bot_routines
+        from importlib import import_module
+        bot_routines = import_module("services.bot_routines")
         engine = getattr(bot_routines, "enqueue_event", None)
     except ImportError:
         engine = None
@@ -176,17 +177,19 @@ async def _enqueue(source: dict, receipt_id: str, events: list[dict]) -> dict:
     if inspect.isawaitable(result):
         result = await result
     if isinstance(result, dict):
-        if result.get("status") in ("refused", "rejected", "error"):
+        status = result.get("status") or result.get("outcome")
+        if status in ("refused", "rejected", "error", "skipped"):
             raise RuntimeError(str(result.get("reason") or result.get("error") or "the run engine refused it")[:200])
-        ref = result.get("run_ref") or result.get("run_id")
-        return {"status": result.get("status") or "queued", "run_ref": str(ref) if ref else None}
+        ref = result.get("run_ref") or result.get("run_id") or result.get("task_id")
+        return {"status": status or "queued", "run_ref": str(ref) if ref else None}
     return {"status": "queued", "run_ref": None}
 
 
 def engine_available() -> bool:
     """True once U2's routine engine supplies enqueue_event."""
     try:
-        from services import bot_routines
+        from importlib import import_module
+        bot_routines = import_module("services.bot_routines")
         return callable(getattr(bot_routines, "enqueue_event", None))
     except ImportError:
         return False

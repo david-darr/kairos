@@ -91,6 +91,11 @@ class PreviewBody(Strict):
     count: int = Field(default=3, ge=1, le=20)
 
 
+class DeferBody(Strict):
+    until: str = Field(max_length=80)
+    expected_revision: str = Field(max_length=40)
+
+
 class AfterResetBody(Strict):
     routine_id: str = Field(min_length=1, max_length=80)
 
@@ -187,8 +192,18 @@ async def run_routine(routine_id: str, body: Optional[RunBody] = None, user: str
 
 
 @router.post("/api/bot-routines/{routine_id}/defer")
-async def defer_routine(routine_id: str, user: str = Depends(require_admin)):
+async def defer_routine(routine_id: str, body: Optional[DeferBody] = None, user: str = Depends(require_admin)):
     try:
+        if body is not None:
+            from datetime import datetime
+            import time
+            try:
+                date = datetime.fromisoformat(body.until.replace("Z", "+00:00"))
+                if date.tzinfo is None or date.timestamp() <= time.time():
+                    raise ValueError()
+            except ValueError:
+                raise RoutineError("Choose a future time with a timezone.", field="until")
+            return bot_routines.move_next_run(user, _is_admin(user), routine_id, date.timestamp(), body.expected_revision)
         return bot_routines.defer(user, _is_admin(user), routine_id)
     except RoutineError as error:
         return _fail(error)

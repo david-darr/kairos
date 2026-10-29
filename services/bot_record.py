@@ -642,8 +642,8 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
                            "mascot_expression", *bot_resource_fields.RESOURCE_DEFAULT_FIELDS)
         extras = {key: base[key] for key in preference_keys if key in base}
         extras.update({key: profile[key] for key in preference_keys if key in profile})
-        for key in ("keep_signed_in", "memory_upkeep"):
-            if payload.get(key) is not None:
+        for key in ("keep_signed_in", "memory_upkeep", *bot_resource_fields.RESOURCE_FIELDS):
+            if key in payload:
                 extras[key] = payload[key]
         if payload.get("origin") is not None:
             extras["origin"] = _clean_origin(payload["origin"])

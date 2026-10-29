@@ -67,6 +67,9 @@ class ChangeCase(unittest.IsolatedAsyncioTestCase):
         self.path = os.path.join(_DATA.name, f"changes-{time.time_ns()}.json")
         self.store = changes.reset_for_test(self.path)
         changes.set_backend("routine", None)
+        # These fault injections exercise the legacy backend's write boundaries.
+        changes.set_backend("routine", changes.TaskRoutineBackend())
+        self.addCleanup(lambda: changes.set_backend("routine", None))
         changes.set_backend("trigger", None)
         self.bot = agent_service.create("Scout", role="Watches postings")
         self.other_bot = agent_service.create("Archivist")
@@ -546,7 +549,8 @@ class TriggerChanges(ChangeCase):
         self.assertIsNotNone(trigger_service.get(trigger_id))
 
     async def test_app_events_say_plainly_when_they_are_not_there(self):
-        text = await self.call("create_trigger", {"name": "New mail", "instructions": "Triage it.", "source": "app"})
+        with patch.dict(sys.modules, {"services.bot_app_triggers": None}):
+            text = await self.call("create_trigger", {"name": "New mail", "instructions": "Triage it.", "source": "app"})
         self.assertTrue(text.startswith("Not run:") and "not available" in text, text)
 
 

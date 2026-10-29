@@ -1,0 +1,71 @@
+/* The Memory section (Bots Phase 2, unit U1). Loaded by static/js/botsSectionMemory.js through
+   loadBotsCss(). Reads only the --bots-* tokens from bots.css, so scripts/test_kairos_theme.py finds no
+   raw colour and Appearance carries through. Rows keep the 46 px height, titles 14 px. */
+
+[data-app-mode="bots"] .bots-mem { display: grid; gap: 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-mem [hidden] { display: none !important; }
+[data-app-mode="bots"] .bots-mem-part { display: grid; gap: 14px; min-width: 0; }
+[data-app-mode="bots"] .bots-mem-part:empty { display: none; }
+[data-app-mode="bots"] .bots-mem-banner .bots-note-line { background: var(--bots-inset); border-radius: var(--bots-radius-card); border: 1px solid var(--bots-accent-border); }
+
+/* Notes */
+[data-app-mode="bots"] .bots-mem-note { min-height: var(--bots-row-h); align-items: center; }
+[data-app-mode="bots"] .bots-mem-note-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--bots-text-row); }
+[data-app-mode="bots"] .bots-mem-add { gap: 8px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-mem-add-input, [data-app-mode="bots"] .bots-mem-topic-name, [data-app-mode="bots"] .bots-mem-topic-desc {
+  flex: 1 1 160px; min-width: 0; min-height: 34px; box-sizing: border-box; padding: 0 10px;
+  font: 400 var(--bots-text-row)/1.3 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-mem-add-input:focus-visible, [data-app-mode="bots"] .bots-mem-topic-name:focus-visible,
+[data-app-mode="bots"] .bots-mem-topic-desc:focus-visible, [data-app-mode="bots"] .bots-mem-area:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-mem-new-topic { flex-wrap: wrap; gap: 8px; }
+
+/* Capacity */
+[data-app-mode="bots"] .bots-mem-capacity { align-items: stretch; }
+[data-app-mode="bots"] .bots-mem-meter { height: 8px; margin: 8px 0 4px; background: var(--bots-inset); border-radius: var(--bots-radius-pill); overflow: hidden; }
+[data-app-mode="bots"] .bots-mem-meter-fill { display: block; height: 100%; background: var(--bots-accent); border-radius: var(--bots-radius-pill); }
+[data-app-mode="bots"] .bots-mem-capacity[data-level="near"] .bots-mem-meter-fill { background: var(--bots-warning); }
+[data-app-mode="bots"] .bots-mem-capacity[data-level="over"] .bots-mem-meter-fill { background: var(--bots-danger); }
+[data-app-mode="bots"] .bots-mem-warning { color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-mem-capacity[data-level="over"] .bots-mem-warning { color: var(--bots-danger); }
+
+/* Editors */
+[data-app-mode="bots"] .bots-mem-editor { display: grid; gap: 6px; min-width: 0; }
+[data-app-mode="bots"] .bots-mem-area {
+  width: 100%; box-sizing: border-box; min-height: 180px; padding: 8px 10px; resize: vertical;
+  font: 400 var(--bots-text-hint-lg)/1.5 var(--bots-font-mono); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-mem-area[readonly] { background: var(--bots-inset); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-mem-editor-foot { display: flex; justify-content: flex-end; }
+[data-app-mode="bots"] .bots-mem-status { min-height: 1em; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-mem-conflict { display: grid; gap: 6px; padding: 10px 12px; background: var(--bots-inset); border: 1px solid var(--bots-danger); border-radius: 10px; font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-mem-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-mem-editor .bots-actions { margin: 2px 0 0; }
+
+/* Topics, archive, logs */
+[data-app-mode="bots"] .bots-mem-doc-row { text-align: left; }
+
+/* Change history */
+[data-app-mode="bots"] .bots-mem-change { border-top: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-mem-change:first-child { border-top: 0; }
+[data-app-mode="bots"] .bots-mem-change .bots-row { flex-wrap: wrap; gap: 6px 8px; }
+[data-app-mode="bots"] .bots-mem-change[data-reverted="true"] .bots-row-title { color: var(--bots-ink-secondary); text-decoration: line-through; }
+[data-app-mode="bots"] .bots-mem-diff {
+  margin: 0 14px 10px; padding: 8px 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 400 var(--bots-text-hint) / 1.5 var(--bots-font-mono); color: var(--bots-ink-secondary);
+  background: var(--bots-inset); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-mem-diff-add { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-mem-diff-del { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-mem-diff-meta { color: var(--bots-ink-tertiary); }
+
+/* A narrow screen: buttons wrap under their text and nothing scrolls sideways. */
+@media (max-width: 520px) {
+  [data-app-mode="bots"] .bots-mem .bots-row { flex-wrap: wrap; }
+  [data-app-mode="bots"] .bots-mem-add-input, [data-app-mode="bots"] .bots-mem-topic-name, [data-app-mode="bots"] .bots-mem-topic-desc { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-mem * { transition: none !important; animation: none !important; }
+}

@@ -92,7 +92,9 @@ const status = (answer) => answer?._status ?? 200;
   assert.equal(made.name, 'Fresh'); assert.equal(made.section, 'Work'); assert.equal(made.hidden, false);
   assert.equal(status(send('/api/agents', 'POST', { name: 'fresh' })), 400);
   assert.equal(status(send('/api/agents', 'POST', { name: '' })), 400);
-  assert.equal(status(send('/api/agents', 'POST', { name: 'Careful', approval_mode: 'ask' })), 409);
+  assert.equal(status(send('/api/agents', 'POST', { name: 'Careful', approval_mode: 'ask' })), 200);
+  const careful = get('/api/agents').find(bot => bot.name === 'Careful');
+  send(`/api/agents/${careful.id}`, 'DELETE');
   assert.equal(status(send('/api/agents', 'POST', { name: 'Hidden', hidden: true })), 400);
   assert.equal(status(send('/api/agents', 'POST', { name: 'Many', thread_limit: 17 })), 400);
   state.botsCore.maxBots = 4;
@@ -121,7 +123,7 @@ const status = (answer) => answer?._status ?? 200;
   assert.deepEqual(patch('a1', { outbound: { daily_cap: 1000, policy: 'allow' } }).outbound, { policy: 'allow', daily_cap: 1000 });
   assert.deepEqual(patch('a1', { outbound: { daily_cap: 1 } }).outbound, { policy: 'allow', daily_cap: 1 }, 'a partial outbound merges');
   assert.equal(patch('a1', { section: null }).section, null);
-  for (const mode of ['ask', 'auto', 'custom']) assert.equal(status(patch('a1', { approval_mode: mode })), 409, mode);
+  for (const mode of ['ask', 'edits', 'auto', 'full', 'custom']) assert.equal(patch('a1', { approval_mode: mode }).approval_mode, mode);
   assert.equal(status(patch('a1', { approval_mode: 'nope' })), 400);
   assert.equal(patch('a1', { approval_mode: 'full' }).approval_mode, 'full');
   const before = get('/api/agents/a2').agent.revision;
@@ -176,7 +178,7 @@ const status = (answer) => answer?._status ?? 200;
   delete state.botsConfiguredWarnings;
   for (const [expected, extra] of [[400, { profile: { name: '' } }], [400, { routines: [{ name: 'x', prompt: 'y', schedule_kind: 'weekly' }] }],
     [400, { memory_seed: [{ section: 'Secrets', text: 'x' }] }], [400, { memory_seed: [{ section: 'Notes', text: 'x'.repeat(8001) }] }],
-    [400, { routines: Array(11).fill(body.routines[0]) }], [409, { approval_mode: 'auto' }]])
+    [400, { routines: Array(11).fill(body.routines[0]) }], [400, { approval_mode: 'sometimes' }]])
     assert.equal(status(send('/api/agents/configured', 'POST', { ...body, profile: { name: 'Bad' }, ...extra })), expected, JSON.stringify(extra).slice(0, 50));
   state.botsCore.maxBots = get('/api/agents').length;
   assert.equal(status(send('/api/agents/configured', 'POST', { ...body, profile: { name: 'Capped' } })), 409);
@@ -226,7 +228,9 @@ const status = (answer) => answer?._status ?? 200;
   const made = send('/api/agents/a1/threads', 'POST', { title: 'Plan' });
   assert.equal(made.thread.main, false); assert.equal(made.agent_id, 'a1'); assert.equal(made.thread.title_source, 'person');
   assert.equal(status(send('/api/agents/a1/threads', 'POST', { folder_id: 'nope' })), 400);
-  assert.equal(status(send('/api/agents/a1/threads', 'POST', { approval_mode: 'ask' })), 409);
+  const carefulThread = send('/api/agents/a1/threads', 'POST', { approval_mode: 'ask' });
+  assert.equal(carefulThread.thread.approval_mode, 'ask');
+  send('/api/agents/a1/threads/delete', 'POST', { thread_ids: [carefulThread.id] });
   const fresh2 = send('/api/agents', 'POST', { name: 'Newcomer' });
   assert.equal(send('/api/agents/' + fresh2.id + '/threads', 'POST', {}).thread.main, true, 'the first chat is the main thread');
   const patch = (sid, body, agent = 'a1') => send(`/api/agents/${agent}/threads/${sid}`, 'PATCH', body);
@@ -235,7 +239,7 @@ const status = (answer) => answer?._status ?? 200;
   assert.equal(patch('bots-t2', { snooze: 'activity' }).thread.snoozed_until, 0);
   assert.equal(patch('bots-t2', { snooze: 'stop' }).thread.snoozed_until, null);
   assert.equal(patch('bots-t2', { snooze: 'later' })._status, 400);
-  assert.equal(patch('bots-t2', { approval_mode: 'edits' })._status, 409);
+  assert.equal(patch('bots-t2', { approval_mode: 'edits' }).thread.approval_mode, 'edits');
   assert.equal(patch('bots-t2', { place: 'moon' })._status, 400);
   assert.equal(patch('bots-t1', { archived: true })._status, 409, 'the main thread cannot be archived');
   assert.ok(patch('bots-t2', { archived: true }).thread.archived_at);

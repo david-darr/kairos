@@ -416,7 +416,8 @@ class BackgroundToolIndexTests(unittest.TestCase):
 
     def test_runs_in_batches_one_transaction_each(self):
         commits = []
-        self.conn.set_trace_callback(lambda q: commits.append(q) if q.startswith("COMMIT") else None)
+        # The receipt-safe store composes writes with outermost savepoints.
+        self.conn.set_trace_callback(lambda q: commits.append(q) if q.startswith("RELEASE write_") else None)
         try:
             self.store.migrate_tool_text_index(batch=5)
         finally:

@@ -428,7 +428,8 @@ async def _review_job(bot_id: str, thread_id: str) -> None:
     except ImportError:
         return
     session = session_manager.get_session(thread_id) or {}
-    lines = [f"{m['role']}: {m.get('content') or ''}" for m in (session.get("messages") or [])
+    from core import bot_message_tree
+    lines = [f"{m['role']}: {m.get('content') or ''}" for m in bot_message_tree.ancestry(session)
              if m.get("role") in ("user", "assistant") and m.get("content") and not m.get("display_only")]
     transcript = "\n".join(lines)[-24000:]
     approval = bot_threads.thread_view(session).get("approval_mode")
@@ -454,11 +455,12 @@ async def tick(now: Optional[float] = None) -> dict:
     try:
         from services.agent_service import agent_service
         quiet = settings()["capture_quiet_seconds"]
-        bots = [b for b in agent_service.list_agents() if b.get("memory_upkeep") and b.get("memory_enabled", True) is not False]
+        all_bots = agent_service.list_agents()
+        bots = [b for b in all_bots if b.get("memory_upkeep") and b.get("memory_enabled", True) is not False]
         from services import bot_memory_capture
-        for bot in bots:
+        for bot in all_bots:
             key = f"capture:{bot['id']}"
-            if not _busy(key) and bot_memory_capture.due_threads(bot["id"], now, quiet):
+            if bot in bots and not _busy(key) and bot_memory_capture.due_threads(bot["id"], now, quiet):
                 _start(key, _capture_job(bot["id"], now, quiet))
                 started["capture"].append(bot["id"])
             try:

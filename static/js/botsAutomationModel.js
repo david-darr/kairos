@@ -239,7 +239,7 @@ export function normalizeRoutine(raw) {
     prompt: text(r.prompt ?? r.instructions),
     enabled,
     schedule: normalizeSchedule(r.schedule, r),
-    revision: Number.isInteger(r.revision) ? r.revision : (Number.isInteger(raw.revision) ? raw.revision : 0),
+    revision: r.revision ?? raw.revision ?? 0,
     durationMinutes: Number(r.duration_minutes) || 30,
     timeoutMinutes: Number(r.timeout_minutes) || null,
     overlap: r.overlap === 'queue' ? 'queue' : 'skip',
@@ -325,7 +325,7 @@ export function statusOf(item) {
 // {kind:'routine'|'webhook'|'app', id, bot_id, name, sentence?, enabled, status?, reason?, fix?, routine?|trigger?, ...}
 export function automationItem(raw, { botName = () => '', now = Date.now() } = {}) {
   if (!isObject(raw)) return null;
-  const kind = ['webhook', 'app'].includes(raw.kind) ? raw.kind : 'routine';
+  const kind = raw.kind === 'app_event' ? 'app' : ['webhook', 'app'].includes(raw.kind) ? raw.kind : 'routine';
   const routine = kind === 'routine' ? normalizeRoutine(raw.routine ? { ...raw.routine, id: raw.id ?? raw.routine.id, agent_id: raw.bot_id ?? raw.agent_id ?? raw.routine.agent_id, enabled: raw.enabled ?? raw.routine.enabled, name: raw.name ?? raw.routine.name } : raw) : null;
   const trigger = kind === 'routine' ? null : (isObject(raw.trigger) ? raw.trigger : isObject(raw.webhook) ? raw.webhook : raw);
   const item = {
@@ -335,7 +335,7 @@ export function automationItem(raw, { botName = () => '', now = Date.now() } = {
     botId: text(raw.bot_id ?? raw.agent_id ?? trigger?.agent_id),
     name: text(raw.name) || routine?.name || text(trigger?.name) || 'Untitled automation',
     enabled: (raw.enabled ?? routine?.enabled ?? trigger?.enabled) !== false,
-    status: text(raw.status),
+    status: text(raw.state ?? raw.status),
     reason: text(raw.reason),
     fix: isObject(raw.fix) ? raw.fix : null,
     problem: text(raw.problem ?? trigger?.problem),
@@ -573,7 +573,7 @@ export function validateDraft(draft, now = Date.now()) {
 export function bodyFromDraft(draft) {
   const body = {
     name: String(draft.name || '').trim(),
-    prompt: String(draft.prompt || '').trim(),
+    instructions: String(draft.prompt || '').trim(),
     schedule: scheduleFromDraft(draft),
     enabled: draft.enabled !== false,
     duration_minutes: Number(draft.durationMinutes) || 30,
@@ -585,14 +585,13 @@ export function bodyFromDraft(draft) {
     access: draft.access === 'read-and-draft' ? 'read-and-draft' : 'normal',
     call: !!draft.call,
   };
-  if (draft.id) body.expected_revision = draft.revision;
+  if (draft.id) body.expected_revision = String(draft.revision);
   else body.bot_id = draft.botId;
   return body;
 }
 
 export function previewBody(draft) {
-  const body = { bot_id: draft.botId || undefined, schedule: scheduleFromDraft(draft) };
-  if (draft.id) body.routine_id = draft.id;
+  const body = { schedule: scheduleFromDraft(draft) };
   return body;
 }
 

@@ -214,15 +214,7 @@ class ExternalBrain:
         gate): reads go straight through, anything that changes something asks or is allowed by the level,
         and a send settles the daily allowance it took."""
         context = self._context()
-        decision = None
-        if self.agent_id:
-            decision = await permissions.gate_bot_call(context, name, args, provider="openai")
-            if decision.behavior != "allow":
-                return f"Not run: {decision.reason}"
-        result = await tool_registry.call(name, args, context, tool_registry.OPENAI)
-        if decision is not None:
-            permissions.finish_bot_call(decision, self.agent_id, result.text if hasattr(result, "text") else result)
-        return result
+        return await tool_registry.call(name, args, context, tool_registry.OPENAI)
 
     def _offer_design_tools(self) -> None:
         """A design now linked to this chat: its editing tools join the list

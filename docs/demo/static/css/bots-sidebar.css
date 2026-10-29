@@ -1,0 +1,138 @@
+/* The Bots sidebar, Phase 1 (unit U4): pinned circles, the Advanced bot, folder and
+   conversation tree, search, density, the resize separator and the selection bar.
+   Scope: [data-app-mode="bots"] only. Every colour comes from the --bots-* tokens
+   in bots.css, so Appearance carries through and scripts/test_kairos_theme.py finds
+   no raw colour. Loaded with bots-shell.css by botsRail.js. */
+
+/* -- Frame ------------------------------------------------------------------------ */
+
+[data-app-mode="bots"] .bots-rail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+[data-app-mode="bots"] .bots-rail-density, [data-app-mode="bots"] .bots-rail-more, [data-app-mode="bots"] .bots-rail-toggle {
+  flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--bots-ink-tertiary);
+  background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-rail-density:hover, [data-app-mode="bots"] .bots-rail-more:hover, [data-app-mode="bots"] .bots-rail-toggle:hover { color: var(--bots-ink); background: var(--bots-raised-hover); }
+[data-app-mode="bots"] :is(.bots-rail-density, .bots-rail-more, .bots-rail-toggle, .bots-section-head, .bots-folder-head, .bots-thread-row, .bots-pin-circle, .bots-rail-newthread, .bots-rail-showall, .bots-search-thread):focus-visible {
+  outline: 2px solid var(--bots-focus); outline-offset: -2px;
+}
+[data-app-mode="bots"] .bots-rail-search {
+  flex: none; width: calc(100% - 20px); height: 32px; margin: 4px 10px 6px; padding: 0 10px; box-sizing: border-box;
+  font: 400 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-ink); background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 10px;
+}
+[data-app-mode="bots"] .bots-rail-search::placeholder { color: var(--bots-ink-tertiary); }
+[data-app-mode="bots"] .bots-rail-search:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-rail-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* A row is a line: [toggle] [row button] [more]. The more button shows on hover and focus. */
+[data-app-mode="bots"] :is(.bots-rail-line, .bots-thread-line, .bots-folder-line) { display: flex; align-items: center; gap: 2px; min-width: 0; }
+[data-app-mode="bots"] :is(.bots-rail-line, .bots-thread-line, .bots-folder-line) > :is(.bots-rail-row, .bots-thread-row, .bots-folder-head) { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-rail-more { opacity: 0; }
+[data-app-mode="bots"] :is(.bots-rail-line, .bots-thread-line, .bots-folder-line):is(:hover, :focus-within) .bots-rail-more { opacity: 1; }
+@media (hover: none) { [data-app-mode="bots"] .bots-rail-more { opacity: 1; } }
+
+/* -- Pinned circles (Simple) ---------------------------------------------------------- */
+
+[data-app-mode="bots"] .bots-pins { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 10px 8px; }
+[data-app-mode="bots"] .bots-pin-circle {
+  position: relative; display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; background: var(--bots-raised);
+  border: 2px solid transparent; border-radius: 50%; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-pin-circle:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-pin-circle.active { border-color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-pin-circle[data-state="needs_you"] { border-color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-pin-count {
+  position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; display: inline-grid; place-items: center;
+  font: 600 10px/1 var(--bots-font-sans); color: var(--bots-accent-ink); background: var(--bots-warning); border-radius: var(--bots-radius-pill);
+}
+
+/* -- Sections, bots, folders, conversations (Advanced) ---------------------------------- */
+
+[data-app-mode="bots"] .bots-rail-section { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+[data-app-mode="bots"] .bots-section-head, [data-app-mode="bots"] .bots-folder-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 2px 10px; text-align: left; color: var(--bots-ink-secondary);
+  font: 500 var(--bots-text-hint-lg)/1.2 var(--bots-font-sans); background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-section-head:hover, [data-app-mode="bots"] .bots-folder-head:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-folder-count { flex: none; color: var(--bots-ink-tertiary); font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-rail-group { display: flex; flex-direction: column; gap: 2px; }
+[data-app-mode="bots"] .bots-rail-children { display: flex; flex-direction: column; gap: 1px; margin: 0 0 6px 18px; padding-left: 8px; border-left: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-folder { display: flex; flex-direction: column; gap: 1px; border-radius: 8px; }
+[data-app-mode="bots"] .bots-folder.drop { background: var(--bots-menu-active); outline: 1px dashed var(--bots-accent-border); }
+
+[data-app-mode="bots"] .bots-thread-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; text-align: left; color: var(--bots-ink);
+  font: 400 var(--bots-text-hint-lg)/1.2 var(--bots-font-sans); background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-thread-row:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-thread-row.active { background: var(--bots-menu-active); font-weight: 500; }
+[data-app-mode="bots"] .bots-thread-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-thread-unread { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--bots-accent); }
+[data-app-mode="bots"] .bots-thread-line[data-state="idle"] .bots-status-dot { visibility: hidden; }
+[data-app-mode="bots"] .bots-thread-line[draggable="true"] { cursor: grab; }
+[data-app-mode="bots"] .bots-thread-check { flex: none; width: 16px; height: 16px; margin: 0 4px; accent-color: var(--bots-accent); }
+
+[data-app-mode="bots"] :is(.bots-rail-newthread, .bots-rail-showall) {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 2px 8px; text-align: left; color: var(--bots-ink-tertiary);
+  font: 400 var(--bots-text-hint-lg)/1.2 var(--bots-font-sans); background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+[data-app-mode="bots"] :is(.bots-rail-newthread, .bots-rail-showall):hover { color: var(--bots-ink); background: var(--bots-raised-hover); }
+
+[data-app-mode="bots"] .bots-rail-name-input {
+  flex: 1; min-width: 0; height: 28px; margin: 2px 8px; padding: 0 8px; box-sizing: border-box; color: var(--bots-ink);
+  font: 400 var(--bots-text-hint-lg)/1 var(--bots-font-sans); background: var(--bots-control); border: 1px solid var(--bots-focus); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-rail-ask { display: flex; padding: 0 2px 6px; }
+
+[data-app-mode="bots"] .bots-selection-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; margin-top: 4px; background: var(--bots-raised); border-radius: 10px; }
+[data-app-mode="bots"] .bots-selection-count { flex: 1 0 100%; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-selection-bar .bots-btn.small { min-height: 28px; padding: 0 10px; font-size: var(--bots-text-hint-lg); }
+
+[data-app-mode="bots"] .bots-rail-results { display: flex; flex-direction: column; gap: 6px; }
+[data-app-mode="bots"] .bots-search-thread { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 10px; text-align: left; color: var(--bots-ink); background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
+[data-app-mode="bots"] .bots-search-thread:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-search-owner { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+
+/* -- Resize separator -------------------------------------------------------------------- */
+
+[data-app-mode="bots"] #sidebar { position: relative; }
+[data-app-mode="bots"] .bots-rail-resize { position: absolute; top: 0; right: -4px; bottom: 0; width: 8px; z-index: 5; cursor: col-resize; touch-action: none; }
+[data-app-mode="bots"] .bots-rail-resize[hidden] { display: none; }
+[data-app-mode="bots"] .bots-rail-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; border-radius: 1px; transition: background var(--bots-dur-tap) var(--bots-ease); }
+[data-app-mode="bots"] .bots-rail-resize:hover::after, [data-app-mode="bots"] .bots-rail-resize.dragging::after, [data-app-mode="bots"] .bots-rail-resize:focus-visible::after { background: var(--bots-focus); }
+[data-app-mode="bots"] .bots-rail-resize:focus-visible { outline: none; }
+
+/* -- Density ------------------------------------------------------------------------------ */
+
+[data-app-mode="bots"] .bots-rail[data-density="compact"] :is(.bots-rail-row, .bots-thread-row, .bots-rail-new, .bots-rail-archived) { min-height: 32px; padding-top: 3px; padding-bottom: 3px; }
+[data-app-mode="bots"] .bots-rail[data-density="compact"] .bots-pins { gap: 6px; }
+
+/* Icons: faces only, like the collapsed rail, but at the sidebar's own 92 / 80 px width. */
+@media (min-width: 769px) {
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] :is(.bots-rail-head > .bots-caps, .bots-rail-search, .bots-rail-foot, .bots-rail-name, .bots-rail-count, .bots-rail-new > span, .bots-rail-archived > span,
+    .bots-rail-children, .bots-rail-toggle, .bots-rail-more, .bots-section-head, .bots-folder-count) { display: none; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-head { justify-content: center; }
+  [data-app-mode="bots"] #sidebar .bots-rail[data-density="icons"] :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived) { justify-content: center; padding: 6px 0; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-line { justify-content: center; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-row { position: relative; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-row .bots-status-dot { position: absolute; margin: 18px 0 0 18px; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-pins { justify-content: center; padding-left: 0; padding-right: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-rail-resize::after { transition: none; }
+}
+
+/* -- Attention buttons (the drawer itself is bots-attention.css) --------------------------- */
+
+[data-app-mode="bots"] .bots-rail-attention { display: flex; gap: 2px; padding: 0 6px 4px; }
+[data-app-mode="bots"] .bots-rail-attention[hidden] { display: none; }
+[data-app-mode="bots"] .bots-rail-attention-btn {
+  flex: 1; display: inline-grid; place-items: center; height: 32px; padding: 0; color: var(--bots-ink-tertiary);
+  background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-rail-attention-btn:hover { color: var(--bots-ink); background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-rail-attention-btn:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: -2px; }
+@media (min-width: 769px) {
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-attention { flex-direction: column; align-items: center; }
+}

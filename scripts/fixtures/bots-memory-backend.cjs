@@ -236,7 +236,7 @@ module.exports = ({ state, data, now }) => {
       }
     }
     if (tail === '/entries' && method === 'POST') return entryAction(b, body);
-    if (tail === '/tidy' && method === 'POST') return tidy(b, id);
+    if (tail === '/tidy' && method === 'POST') return state.botsMemoryRuntime?.bots?.[id] ? undefined : tidy(b, id);   // the activity lane owns tidy for a bot it is driving
     if (tail === '/open' && method === 'POST') {
       if (lane().remote) throw new Refusal(403, 'the notebook can only be opened on the computer it is stored on');
       if (!['folder', 'obsidian'].includes(body.target || 'folder')) throw bad('open the folder or Obsidian');

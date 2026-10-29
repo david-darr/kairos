@@ -166,19 +166,24 @@ class NewFieldsTests(BotTestCase):
             self.assertEqual(self.api_patch(bot["id"], fallback=six).status_code, 200)
             self.assertEqual(self.api_patch(bot["id"], fallback=six + six[:1]).status_code, 400)
 
-    def test_only_full_approval_is_accepted_until_phase_3(self):
-        self.assertEqual(bot_record.ENFORCED_APPROVAL_MODES, ("full",))
+    def test_all_five_approval_levels_are_valid_and_full_remains_the_default(self):
+        self.assertEqual(bot_record.ENFORCED_APPROVAL_MODES, ("ask", "edits", "auto", "full", "custom"))
         bot = self.make()
-        self.assertEqual(self.api_patch(bot["id"], approval_mode="full").status_code, 200)
-        for mode in ("ask", "auto", "custom"):
-            refused = self.api_patch(bot["id"], approval_mode=mode)
-            self.assertEqual(refused.status_code, 409, mode)
-            self.assertIn("not available yet", refused.json()["detail"])
+        self.assertEqual(bot["approval_mode"], "full")
+        for mode in bot_record.ENFORCED_APPROVAL_MODES:
+            bot = self.make("Level " + mode)
+            changed = self.api_patch(bot["id"], approval_mode=mode)
+            if mode == "custom":   # Custom is always a deliberate step: a plain write needs the desktop handshake
+                self.assertEqual(changed.status_code, 409, changed.text)
+                self.assertIn("needs your confirmation", changed.json()["detail"])
+                self.assertEqual(agent_service.get(bot["id"])["approval_mode"], "full")
+                continue
+            self.assertEqual(changed.status_code, 200, changed.text)
+            self.assertEqual(changed.json()["approval_mode"], mode)
         self.assertEqual(self.api_patch(bot["id"], approval_mode="sometimes").status_code, 400)
-        self.assertEqual(web.post("/api/agents", json={"name": "Careful", "approval_mode": "ask"}).status_code, 409)
-        self.assertEqual(agent_service.get(bot["id"])["approval_mode"], "full")
-        with patch.object(bot_record, "ENFORCED_APPROVAL_MODES", ("full", "ask")):
-            self.assertEqual(self.api_patch(bot["id"], approval_mode="ask").status_code, 200)
+        made = web.post("/api/agents", json={"name": "Careful", "approval_mode": "ask"})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["approval_mode"], "ask")
 
     def test_the_hundred_bot_cap_is_a_409(self):
         with patch.object(bot_record, "MAX_BOTS", 2):
@@ -443,7 +448,7 @@ class ConfiguredTests(BotTestCase):
                  (400, self.body(memory_seed=[{"section": "Secrets", "text": "x"}])),
                  (400, self.body(memory_seed=[{"section": "Notes", "text": "x" * 8001}])),
                  (400, self.body(routines=[self.ROUTINES[0]] * 11)),
-                 (409, self.body(approval_mode="auto"))]
+                 (400, self.body(approval_mode="sometimes"))]
         for status, body in cases:
             with self.subTest(body=body):
                 failed = web.post("/api/agents/configured", json=body)

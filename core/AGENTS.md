@@ -43,3 +43,10 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
 - Tool results that carry outside text are wrapped and taint the turn.
 - Tests: `scripts/test_tools.py`, `scripts/test_chat.py`,
   `scripts/test_permissions.py`, `scripts/test_owner_isolation.py`.
+
+## Bots redesign, Phases 1 to 3
+
+- `bot_app_event_adapters.py`, `bot_app_events.py`, `bot_attention_store.py`, `bot_automation_tools.py`, `bot_chat_store.py`.
+- `bot_codex_transport.py`, `bot_event_receipts.py`, `bot_held_secrets.py`, `bot_message_tree.py`, `bot_outbound.py`.
+- `bot_policy.py`, `bot_routine_checks.py`, `bot_routine_runner.py`, `bot_schedules.py`, `bot_tool_catalog.py`.
+- `bot_tool_results.py`.

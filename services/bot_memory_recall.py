@@ -113,6 +113,12 @@ def message_ref(session: dict, index: int) -> str:
 
 # -- keeping the index current -------------------------------------------------------------------------------
 
+def _session_stamp(session: dict) -> str:
+    thread = session.get("thread") or {}
+    count = session.get("message_count", len(session.get("messages") or []))
+    return f"{session.get('updated_at')}:{count}:{thread.get('branch_revision')}:{thread.get('active_leaf_id')}"
+
+
 def _index_session(conn, bot_id: str, owner: str, session: dict) -> None:
     from services.bot_turn_context import owner_conversation
     sid = session["id"]
@@ -120,7 +126,12 @@ def _index_session(conn, bot_id: str, owner: str, session: dict) -> None:
     if not owner_conversation(session):
         return
     title = " ".join((session.get("title") or "Conversation").split())[:80]
+    from core import bot_message_tree
+    path = bot_message_tree.ancestry(session)
+    active = {m.get("bot_message_id") for m in path}
     for index, message in enumerate(session.get("messages") or []):
+        if message.get("bot_message_id") not in active:
+            continue
         if message.get("display_only") or message.get("role") not in ("user", "assistant"):
             continue
         if message.get("role") == "assistant" and message.get("status", "complete") != "complete":
@@ -129,14 +140,15 @@ def _index_session(conn, bot_id: str, owner: str, session: dict) -> None:
         if text:
             _add(conn, bot_id, owner, "conversation", sid, message_ref(session, index), message.get("ts"),
                  message["role"], title, text[:20000])
-    digests = [(session.get("chat_summary") or {}).get("text")]
-    compactions = session.get("compactions") or []
+    # A legacy unbound summary cannot safely be replayed after branching.
+    digests = [(session.get("chat_summary") or {}).get("text")] if not (session.get("thread") or {}).get("branch_revision") else []
+    compactions = bot_message_tree.checkpoints(session, path) if any(m.get("bot_message_id") for m in path) else session.get("compactions") or []
     digests.append(compactions[-1].get("summary") if compactions else None)
     for number, digest in enumerate(d for d in digests if d):
         _add(conn, bot_id, owner, "conversation", sid, f"digest:{sid}:{number}", session.get("updated_at"),
              "digest", title, digest[:8000])
     conn.execute("INSERT OR REPLACE INTO sources(bot_id, owner, kind, ref, stamp) VALUES(?,?,?,?,?)",
-                 (bot_id, owner, "session", sid, f"{session.get('updated_at')}:{len(session.get('messages') or [])}"))
+                 (bot_id, owner, "session", sid, _session_stamp(session)))
 
 
 def _topic_blocks(text: str) -> list[str]:
@@ -175,7 +187,7 @@ def sync(bot_id: str, owner: str) -> dict:
         for header in headers:
             sid = header["id"]
             live.add(sid)
-            stamp = f"{header.get('updated_at')}:{header.get('message_count')}"
+            stamp = _session_stamp(header)
             if known.get(sid) == stamp or foreign.get(sid) == stamp:
                 continue
             session = session_manager.get_session(sid)

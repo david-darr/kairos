@@ -57,6 +57,10 @@ class AgentBody(BaseModel):
     skill_selection: Optional[dict] = None
     avatar_image: Optional[dict] = None
     mascot_expression: Optional[str] = None
+    memory_enabled: Optional[StrictBool] = None
+    helper_model: Optional[StrictBool] = None
+    connector_tools: Optional[dict] = None
+    grants_version: Optional[int] = None
     # Conflict-sensitive clients send the profile revision they last read.
     expected_revision: Optional[int] = None
 
@@ -72,6 +76,10 @@ class ConfiguredBody(BaseModel):
     routines: Optional[list[dict]] = None
     use_defaults: bool = False
     origin: Optional[dict] = None
+    memory_enabled: Optional[StrictBool] = None
+    helper_model: Optional[StrictBool] = None
+    connector_tools: Optional[dict] = None
+    grants_version: Optional[int] = None
 
 
 class DuplicateBody(BaseModel):
@@ -106,6 +114,9 @@ class ThreadPatchBody(BaseModel):
     approval_mode: Optional[str] = None
     place: Optional[str] = None
     unread: Optional[bool] = None
+    timezone: Optional[str] = None
+    main: Optional[bool] = None
+    link: Optional[str] = None
 
 
 class ThreadDeleteBody(BaseModel):

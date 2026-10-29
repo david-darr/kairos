@@ -30,3 +30,14 @@ Domain logic behind the routes. Routes stay thin and call these; these call
 - Every read of per-person data is scoped to its owner.
 - Live turn state belongs to `chat_live.py`; the UI only mirrors it.
 - Forge never runs a shell for git; it uses the fixed recipes in `forge_git.py`.
+
+## Bots redesign, Phases 1 to 3
+
+- `bot_app_adapters.py`, `bot_app_triggers.py`, `bot_attention.py`, `bot_automation_changes.py`, `bot_avatar_service.py`.
+- `bot_cards.py`, `bot_chat_service.py`, `bot_connection_catalog.py`, `bot_connections.py`, `bot_goal_runs.py`.
+- `bot_grants.py`, `bot_highlevel.py`, `bot_keys.py`, `bot_limit_resets.py`, `bot_logins.py`.
+- `bot_mcp_config.py`, `bot_memory.py`, `bot_memory_capture.py`, `bot_memory_dream.py`, `bot_memory_entries.py`.
+- `bot_memory_journal.py`, `bot_memory_recall.py`, `bot_memory_store.py`, `bot_memory_upkeep.py`, `bot_onepassword.py`.
+- `bot_profile.py`, `bot_profile_history.py`, `bot_resource_fields.py`, `bot_routines.py`, `bot_setup_import.py`.
+- `bot_side_jobs.py`, `bot_skill_import.py`, `bot_skill_learning.py`, `bot_skill_library.py`, `bot_skill_review.py`.
+- `bot_skill_sharing.py`, `bot_skills.py`, `bot_turn_context.py`, `bot_x_research.py`.

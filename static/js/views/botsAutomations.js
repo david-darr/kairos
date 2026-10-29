@@ -174,7 +174,7 @@ export async function render(container, tabId, options = {}) {
     const next = sw.getAttribute('aria-checked') !== 'true';
     sw.setAttribute('aria-checked', next ? 'true' : 'false');
     try {
-      if (item.kind === 'routine') await send(`/api/bot-routines/${encodeURIComponent(item.id)}`, 'PATCH', { enabled: next, expected_revision: item.routine.revision });
+      if (item.kind === 'routine') await send(`/api/bot-routines/${encodeURIComponent(item.id)}`, 'PATCH', { enabled: next, expected_revision: String(item.routine.revision) });
       else if (item.kind === 'webhook') await send(`/api/triggers/${encodeURIComponent(item.id)}`, 'PATCH', { enabled: next });
       else await send(`/api/bot-app-triggers/${encodeURIComponent(item.id)}`, 'PATCH', { enabled: next });
     } catch (error) {
@@ -251,7 +251,7 @@ export async function render(container, tabId, options = {}) {
     let times = state.previewCache.get(key);
     if (!times) {
       try {
-        const result = await send('/api/bot-routines/preview', 'POST', { routine_id: r.id, bot_id: r.botId });
+        const result = await send('/api/bot-routines/preview', 'POST', { schedule: r.schedule });
         times = (result.next || result.next_runs || []).map(toMs).filter(v => v !== null).slice(0, 3);
         state.previewCache.set(key, times);
       } catch { times = r.nextRunAt ? [r.nextRunAt] : []; }
@@ -312,7 +312,7 @@ export async function render(container, tabId, options = {}) {
 
   async function setEnabled(item, enabled) {
     try {
-      if (item.kind === 'routine') await send(`/api/bot-routines/${encodeURIComponent(item.id)}`, 'PATCH', { enabled, expected_revision: item.routine.revision });
+      if (item.kind === 'routine') await send(`/api/bot-routines/${encodeURIComponent(item.id)}`, 'PATCH', { enabled, expected_revision: String(item.routine.revision) });
       else if (item.kind === 'webhook') await send(`/api/triggers/${encodeURIComponent(item.id)}`, 'PATCH', { enabled });
       else await send(`/api/bot-app-triggers/${encodeURIComponent(item.id)}`, 'PATCH', { enabled });
     } catch (error) { toast(refusalOf(error).status === 409 ? 'That changed somewhere else. Reloaded.' : refusalOf(error).message, 'error'); }
@@ -332,9 +332,9 @@ export async function render(container, tabId, options = {}) {
     const opener = document.activeElement;
     if (!await confirmDialog({ title: `Delete this ${noun}?`, message: `"${item.name}" will stop. You can bring it back for a little while.`, confirmLabel: 'Delete' })) { opener?.focus?.(); return; }
     try {
-      const path = item.kind === 'routine' ? `/api/bot-routines/${encodeURIComponent(item.id)}?expected_revision=${item.routine.revision}`
+      const path = item.kind === 'routine' ? `/api/bot-routines/${encodeURIComponent(item.id)}`
         : item.kind === 'webhook' ? `/api/triggers/${encodeURIComponent(item.id)}` : `/api/bot-app-triggers/${encodeURIComponent(item.id)}`;
-      const result = await send(path, 'DELETE');
+      const result = await send(path, 'DELETE', item.kind === 'routine' ? { expected_revision: String(item.routine.revision) } : undefined);
       state.selected = '';
       showRestore({ item, receiptId: result?.receipt_id || '' });
     } catch (error) { toast(refusalOf(error).message, 'error'); }
@@ -354,6 +354,7 @@ export async function render(container, tabId, options = {}) {
     if (!item) return;
     try {
       if (item.kind === 'routine' && receiptId) await send(`/api/bot-automation-changes/${encodeURIComponent(receiptId)}/undo`, 'POST');
+      else if (item.kind === 'routine') await send(`/api/bot-routines/${encodeURIComponent(item.id)}/restore`, 'POST');
       else if (item.kind === 'app') await send(`/api/bot-app-triggers/${encodeURIComponent(item.id)}/restore`, 'POST');
       else if (item.kind === 'webhook') await send(`/api/bot-webhooks/${encodeURIComponent(item.id)}/restore`, 'POST');
       else throw new Error('There is nothing to bring back.');
@@ -434,22 +435,22 @@ export async function render(container, tabId, options = {}) {
   }
 
   async function fetchRange(from, to, botId) {
-    const query = `from=${encodeURIComponent(new Date(from).toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}${botId ? `&bot_id=${encodeURIComponent(botId)}` : ''}`;
+    const query = `start=${from / 1000}&end=${to / 1000}${botId ? `&bot_id=${encodeURIComponent(botId)}` : ''}`;
     const data = await api(`/api/bot-routines?${query}`, { signal: control.signal, toast: false });
     const list = (Array.isArray(data) ? data : data?.routines || []).map(normalizeRoutine).filter(Boolean);
     const runs = [...(data?.runs || []).map(normalizeRun), ...list.flatMap(r => r.runs.map(run => ({ ...run, routineId: run.routineId || r.id })))].filter(Boolean);
     const seen = new Set();
     const unique = runs.filter(run => { const key = run.id || `${run.routineId}:${run.startedAt}`; if (seen.has(key)) return false; seen.add(key); return true; });
-    return { routines: list, occurrences: Array.isArray(data?.occurrences) ? data.occurrences : null, runs: unique };
+    return { routines: list, occurrences: Array.isArray(data?.occurrences) ? data.occurrences : (data?.routines || []).flatMap(r => (r.occurrences || []).map(o => ({ ...(typeof o === 'string' ? { at: o } : o), routine_id: r.id }))), runs: unique };
   }
 
   async function patchRoutine(routine, patch) {
-    try { await send(`/api/bot-routines/${encodeURIComponent(routine.id)}`, 'PATCH', { ...patch, expected_revision: routine.revision }); }
+    try { await send(`/api/bot-routines/${encodeURIComponent(routine.id)}`, 'PATCH', { ...patch, expected_revision: String(routine.revision) }); }
     catch (error) { toast(refusalOf(error).status === 409 ? 'That changed somewhere else. Reloaded.' : refusalOf(error).message, 'error'); throw error; }
     await load();
   }
   async function deferRoutine(routine, until) {
-    try { await send(`/api/bot-routines/${encodeURIComponent(routine.id)}/defer`, 'POST', { until, expected_revision: routine.revision }); }
+    try { await send(`/api/bot-routines/${encodeURIComponent(routine.id)}/defer`, 'POST', { until, expected_revision: String(routine.revision) }); }
     catch (error) { toast(refusalOf(error).message, 'error'); throw error; }
     await load();
   }
@@ -476,8 +477,8 @@ export async function render(container, tabId, options = {}) {
       choices: [{ value: 'move', label: 'Move the next run to after it', primary: true }, { value: 'once', label: 'Run once after the next reset' }, { value: 'every', label: 'Run after every reset' }] });
     if (!pick) return;
     try {
-      if (pick === 'move') await send('/api/bot-limit-resets/after-reset', 'POST', { routine_id: routine.id, endpoint_id: marker.endpoint_id });
-      else await send(`/api/bot-routines/${encodeURIComponent(routine.id)}`, 'PATCH', { schedule: { kind: 'limit_reset', endpoint_id: marker.endpoint_id, repeat: pick === 'every' ? 'every_reset' : 'once' }, expected_revision: routine.revision });
+      if (pick === 'move') await send('/api/bot-limit-resets/after-reset', 'POST', { routine_id: routine.id });
+      else await send(`/api/bot-routines/${encodeURIComponent(routine.id)}`, 'PATCH', { schedule: { kind: 'limit_reset', endpoint_id: marker.endpoint_id, repeat: pick === 'every' ? 'every_reset' : 'once' }, expected_revision: String(routine.revision) });
       toast('Updated', 'success');
     } catch (error) { toast(refusalOf(error).message, 'error'); }
     await refreshAll();

@@ -171,7 +171,7 @@ module.exports = ({ state }) => {
   }
 
   const requireRevision = (record, body) => {
-    if (body.expected_revision !== undefined && body.expected_revision !== record.revision) throw new Refusal(409, 'This changed since you opened it.', { code: 'stale' });
+    if (body.expected_revision !== undefined && String(body.expected_revision) !== String(record.revision)) throw new Refusal(409, 'This changed since you opened it.', { code: 'stale' });
   };
 
   function handle(route, method, body, query) {
@@ -185,7 +185,7 @@ module.exports = ({ state }) => {
       return { sentence: sentence(schedule), next: nextTimes(schedule, 3).map(iso), warnings: [] };
     }
     if (route === '/api/bot-routines' && method === 'POST') {
-      const name = String(body.name || '').trim(), prompt = String(body.prompt || '').trim();
+      const name = String(body.name || '').trim(), prompt = String(body.instructions ?? body.prompt ?? '').trim();
       if (!name) throw bad('A routine needs a name.'); if (!prompt) throw bad('A routine needs instructions.');
       validateSchedule(body.schedule);
       const r = refresh({ id: `r${++s.counter}`, agent_id: body.bot_id, name, prompt, enabled: body.enabled !== false, revision: 1, schedule: body.schedule, duration_minutes: body.duration_minutes || 30,
@@ -197,13 +197,14 @@ module.exports = ({ state }) => {
     if ((m = route.match(/^\/api\/bot-routines\/([^/]+)$/)) && ['PATCH', 'DELETE'].includes(method)) {
       const r = need(s.routines, m[1], 'routine');
       if (method === 'DELETE') {
-        requireRevision(r, { expected_revision: query.expected_revision === undefined ? undefined : Number(query.expected_revision) });
+        requireRevision(r, { expected_revision: body.expected_revision ?? query.expected_revision });
         const receipt = `rc${++s.counter}`;
         s.routines = s.routines.filter(x => x.id !== r.id);
         s.receipts[receipt] = r;
         return { ok: true, receipt_id: receipt };
       }
       requireRevision(r, body);
+      if (body.instructions !== undefined) r.prompt = body.instructions;
       for (const key of ['name', 'prompt', 'enabled', 'duration_minutes', 'timeout_minutes', 'overlap', 'continuity', 'run_on_startup', 'results_thread_id', 'access', 'call']) if (body[key] !== undefined) r[key] = body[key];
       if (body.schedule) { validateSchedule(body.schedule); r.schedule = body.schedule; }
       if (!String(r.name).trim()) throw bad('A routine needs a name.');
@@ -232,7 +233,7 @@ module.exports = ({ state }) => {
       return { ok: true };
     }
     if (route === '/api/bot-limit-resets/after-reset' && method === 'POST') {
-      const r = need(s.routines, body.routine_id, 'routine'), e = s.limit.find(x => x.endpoint_id === body.endpoint_id);
+      const r = need(s.routines, body.routine_id, 'routine'), e = s.limit.find(x => x.endpoint_id === body.endpoint_id) || s.limit[0];   // the real route takes only routine_id
       if (!e) throw new Refusal(404, 'limit not found');
       r.next_run_at = iso(Date.parse(e.resets_at) + 60000); return { ok: true };
     }
@@ -248,17 +249,20 @@ module.exports = ({ state }) => {
     }
     if ((m = route.match(/^\/api\/bot-webhooks\/([^/]+)\/(test|capture|rotate)$/)) && method === 'POST') { need(s.webhooks, m[1], 'webhook'); return { ok: true }; }
     if (route === '/api/bot-app-triggers' && method === 'POST') {
-      if (!body.app || !body.event) throw bad('app and event are required');
+      // The real route (routes/bot_event_routes.py): bot_id, events[], conditions[], config{account_id?}, prompt_template.
+      const event = body.events?.[0];
+      const app = (s.catalog.apps.find(a => (a.events || []).some(e => e.event === event)) || {}).app;
+      if (!app || !event) throw bad('events must name an event of a connected app');
       if (!String(body.prompt_template || '').trim()) throw bad('instructions are required');
-      const p = { id: `p${++s.counter}`, agent_id: body.agent_id, name: body.name || 'App automation', enabled: true, app: body.app, app_name: body.app, event: body.event, delivery: 'poll', interval_minutes: 15,
-        filters: body.filters || {}, config: body.config || {}, prompt_template: body.prompt_template, account_id: body.account_id || null, revision: 1, attempts: [] };
+      const p = { id: `p${++s.counter}`, agent_id: body.bot_id, name: body.name || 'App automation', enabled: true, app, app_name: app, adapter: app, event, events: body.events, delivery: 'poll', interval_minutes: 15,
+        conditions: body.conditions || [], filters: {}, config: body.config || {}, prompt_template: body.prompt_template, account_id: body.config?.account_id || null, revision: 1, attempts: [] };
       s.app.push(p); return p;
     }
     if ((m = route.match(/^\/api\/bot-app-triggers\/([^/]+)$/)) && ['PATCH', 'DELETE'].includes(method)) {
       const p = need(s.app, m[1], 'app automation');
       if (method === 'DELETE') { s.app = s.app.filter(x => x.id !== p.id); s.deleted.push({ kind: 'app', record: p }); return { ok: true }; }
       requireRevision(p, body);
-      for (const key of ['enabled', 'name', 'prompt_template', 'filters', 'config', 'account_id']) if (body[key] !== undefined) p[key] = body[key];
+      for (const key of ['enabled', 'name', 'prompt_template', 'conditions', 'filters', 'config', 'account_id']) if (body[key] !== undefined) p[key] = body[key];
       p.revision += 1; return p;
     }
     if ((m = route.match(/^\/api\/bot-app-triggers\/([^/]+)\/(test|sync|restore)$/)) && method === 'POST') {

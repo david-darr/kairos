@@ -370,8 +370,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.match(await text('#bots-u4-host .bots-back'), /Details/);
     assert.ok(await exists('#bots-u4-host [data-panel-card="soul"] textarea'), 'instructions on the Settings page');
     assert.ok(await exists('#bots-u4-host [data-panel-card="permissions"]'));
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host [aria-label=Approval] [role=radio]:not([disabled])').length"), 1, 'approval offers only Full');
-    assert.match(await js("document.querySelector('#bots-u4-host [aria-label=Approval] [role=radio]').textContent"), /Full access/);
+    assert.equal(await js("document.querySelectorAll('#bots-u4-host [aria-label=Approval] [role=radio]:not([disabled])').length"), 5, 'approval offers all five levels');
+    assert.match(await js("document.querySelector('#bots-u4-host [aria-label=Approval] [role=radio][aria-checked=true]').textContent"), /Full/, 'a new bot stays on Full');
     const more = await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row .bots-row-title')].map(n => n.textContent)");
     assert.deepEqual(more, ['Overview', 'Skills', 'Memory', 'Routines', 'Access', 'Voice and alerts', 'Who can see it', 'History', 'Usage'], 'every section that is not on Details or Settings');
     await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row')].find(n => n.textContent.includes('Access')).click()");
@@ -479,7 +479,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.ok(Array.isArray(picked.integration_ids), 'turning off "every server" sends a list');
     await js("[...document.querySelectorAll('#bots-u4-host .bots-acc-head')].find(n => n.dataset.section === 'permissions').click()");
     await waitFor("!!document.querySelector('#bots-u4-host [data-panel-card=permissions]')");
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host [data-panel-card=permissions] [aria-label=Approval] [role=radio]:not([disabled])').length"), 1, 'approval offers only Full');
+    await waitFor("document.querySelectorAll('#bots-u4-host [data-panel-card=permissions] [aria-label=Approval] [role=radio]').length > 0");
+    assert.equal(await js("document.querySelectorAll('#bots-u4-host [data-panel-card=permissions] [aria-label=Approval] [role=radio]:not([disabled])').length"), 5, 'approval offers all five levels');
     await clearToasts();
     await commit('#bots-u4-host [data-panel-card=permissions] .bots-text-row input', '500');
     assert.match((await errorToasts()).join(' '), /1 to 200/, 'a bad run cap is refused before sending');

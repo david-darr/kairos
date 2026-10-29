@@ -25,3 +25,22 @@ per tab (`views/chat.js`, `views/settings.js`, `views/tool-store.js` and so on).
 - Follow `specs/frontend-style.md`; colours and type come from the shared
   tokens in `static/css`.
 - UI checks run against the mocked backend `demo/fixtures.js`.
+
+## Bots redesign, Phases 1 to 3
+
+- `botsActivity.js`, `botsApprovalCards.js`, `botsApprovalModel.js`, `botsArchived.js`, `botsAttentionHost.js`.
+- `botsAutomationCalendar.js`, `botsAutomationChangeCard.js`, `botsAutomationEditor.js`, `botsAutomationEvents.js`, `botsAutomationModel.js`.
+- `botsAvatarEditor.js`, `botsChat.js`, `botsChatAttachments.js`, `botsChatSearch.js`, `botsComposer.js`.
+- `botsConnectionsModel.js`, `botsCreate.js`, `botsCreateModel.js`, `botsDrafts.js`, `botsGallery.js`.
+- `botsGrantsModel.js`, `botsIcons.js`, `botsInbox.js`, `botsInspector.js`, `botsKip.js`.
+- `botsLimitReset.js`, `botsMcpPaste.js`, `botsMemoryActivityModel.js`, `botsMemoryModel.js`, `botsMessageActions.js`.
+- `botsNavigation.js`, `botsNotifications.js`, `botsPanel.js`, `botsPanelHost.js`, `botsPanelSections.js`.
+- `botsPatchQueue.js`, `botsProfileDiff.js`, `botsRail.js`, `botsSectionAboutYou.js`, `botsSectionConnections.js`.
+- `botsSectionGrants.js`, `botsSectionKeys.js`, `botsSectionLogins.js`, `botsSectionMemory.js`, `botsSectionMemoryActivity.js`.
+- `botsSectionPermissions.js`, `botsSectionRoutines.js`, `botsSectionSkillLibrary.js`, `botsSectionSkills.js`, `botsSidebarModel.js`.
+- `botsSkillCommands.js`, `botsSkillRequest.js`, `botsSkillsModel.js`, `botStatus.js`, `botsThreadMenu.js`.
+- `botsTranscript.js`, `views/botsAutomations.js`, `../css/bots-attention.css`, `../css/bots-automation-calendar.css`, `../css/bots-automations.css`.
+- `../css/bots-avatar.css`, `../css/bots-cards.css`, `../css/bots-chat.css`, `../css/bots-composer.css`, `../css/bots-connections.css`.
+- `../css/bots-create.css`, `../css/bots-grants.css`, `../css/bots-kip.css`, `../css/bots-memory-activity.css`, `../css/bots-memory.css`.
+- `../css/bots-panel.css`, `../css/bots-permissions.css`, `../css/bots-shell.css`, `../css/bots-sidebar.css`, `../css/bots-skills.css`.
+- `../css/bots.css`.

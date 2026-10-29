@@ -518,6 +518,10 @@ class Brain:
             return PermissionResultDeny(message=refusal, interrupt=False)
         if self.agent_id and tool_name.startswith(bot_tool_catalog.PROXY_PREFIX):
             return PermissionResultAllow()   # the bridge asks the person, once, with the app's own title
+        if self.agent_id and tool_name.startswith(bot_tool_catalog.HIVE_PREFIX):
+            # This only admits the in-process handler. The registry rechecks grants and asks through
+            # permissions.gate_bot_call before executing it, for every provider including Claude.
+            return PermissionResultAllow()
         fenced = self._fence_refusal(tool_name, args)
         if fenced:
             return PermissionResultDeny(message=fenced, interrupt=False)
@@ -571,6 +575,8 @@ class Brain:
         if self.agent_id:
             from services.agent_service import AGENTS_DIR
             roots.append(os.path.join(AGENTS_DIR, self.agent_id))
+            from services import bot_memory_store
+            roots.append(str(bot_memory_store.workspace(self.agent_id)))
         return roots
 
     def _fence_refusal(self, tool_name: str, args: dict) -> Optional[str]:

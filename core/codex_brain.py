@@ -393,6 +393,8 @@ class CodexBrain:
         roots = [image_gen.GENERATED_FILES_DIR]
         if self.agent_id:
             roots.append(os.path.join(AGENTS_DIR, self.agent_id))
+            from services import bot_memory_store
+            roots.append(str(bot_memory_store.workspace(self.agent_id)))
         for root in roots:
             os.makedirs(root, exist_ok=True)
         return roots

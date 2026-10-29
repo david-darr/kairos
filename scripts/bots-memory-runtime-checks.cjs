@@ -106,7 +106,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.match(await text('#mr-host .bots-mact-cite'), /^You in Trip, \d{4}-\d{2}-\d{2}$/, 'the result names its conversation');
     assert.equal(await js("document.querySelector('#mr-host .bots-mact-result').dataset.ref"), 'msg-1', 'with a stable message reference');
     await click('#mr-host .bots-mact-result .bots-btn');
-    await waitFor("!!document.querySelector('#mr-host .bots-mact-opened')");
+    await waitFor("!!document.querySelector('#mr-host .bots-mact-opened') && document.querySelector('#mr-host .bots-mact-opened').textContent !== 'Loading.'");
     assert.match(await text('#mr-host .bots-mact-opened'), /<img src=x/, 'imported text is shown as text');
     assert.equal(await exists('#mr-host .bots-mact-opened img, #mr-host .bots-mact-opened script'), false, 'and never becomes markup');
     await delay(100);

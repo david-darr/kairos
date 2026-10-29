@@ -273,6 +273,10 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
     refusal = _grant_refusal(ctx, name, args)
     if refusal:
         return refusal
+    from core import permissions
+    gate = await permissions.gate_bot_call(ctx, name, args)
+    if gate.behavior != "allow":
+        return f"Not run: {gate.reason}"
     computer_detail = None
     if name == "computer":
         from core import computer, runs, system_prompt
@@ -285,6 +289,8 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
         result = await spec.handler(dict(args or {}), ctx)
     except Exception as e:
         result = f"Tool error: {e}"
+    finally:
+        permissions.finish_bot_call(gate, ctx.agent_id, locals().get("result", "Stopped: tool cancelled"))
     if spec.effect != READ:
         _audit(spec, args, ctx, result)
     if computer_detail is not None:
@@ -307,6 +313,10 @@ def _grant_refusal(ctx: ToolContext, name: str, args: dict) -> str | None:
     if not ctx.agent_id:
         return None
     from services import bot_grants
+    if name in {"agent_remember", "notebook_action", "recall_search", "recall_read"}:
+        from services import bot_turn_context
+        if not bot_turn_context.bot_flags(ctx.agent_id).get("memory", False):
+            return "Not allowed: Memory is switched off for this bot."
     return bot_grants.native_refusal(ctx, name, args)
 
 
@@ -352,7 +362,7 @@ def claude_preapproved(agent: bool = False, session_id: str | None = None, bot_i
     # chat's identity; retain Claude's approval for those writes (2026-10-15).
     return [f"mcp__hive_mind__{s.name}" for s in specs(CLAUDE, is_admin=True, agent=agent, session_id=session_id,
                                                          bot_id=bot_id)
-            if s.name not in CLAUDE_REVIEW_TOOLS]
+            if s.name not in CLAUDE_REVIEW_TOOLS and (not agent or s.effect == READ)]
 
 
 def _flag(name: str, schema: dict) -> str:
@@ -1857,8 +1867,15 @@ from core import design_tools  # noqa: E402,F401
 # A tool's owner, bot and conversation come from the trusted ToolContext, never from its arguments.
 
 def _bot_scope(ctx: ToolContext) -> dict:
-    return {"agent_id": ctx.agent_id, "owner_user": ctx.owner_user, "session_id": ctx.session_id,
-            "is_admin": ctx.is_admin, "thread_id": ctx.session_id}
+    from core.auth import SINGLE_USER
+    from core.session_manager import session_manager
+    from core import task_scope
+    session = session_manager.get_session(ctx.session_id) if ctx.session_id else None
+    if session and session.get("agent_id") != ctx.agent_id:
+        raise ValueError("This conversation belongs to another bot.")
+    owner = (session or {}).get("owner_user") or ctx.owner_user or task_scope.current_owner(ctx.agent_id) or SINGLE_USER
+    return {"agent_id": ctx.agent_id, "bot_id": ctx.agent_id, "owner_user": owner, "owner": owner,
+            "session_id": ctx.session_id, "is_admin": ctx.is_admin, "thread_id": ctx.session_id}
 
 
 def _refused(error: Exception) -> str:
@@ -1869,7 +1886,8 @@ def register_skill_tools() -> list[str]:
     """skill_stage, skill_read, skill_index and skill_share over services/bot_skills.py (Phase 2 U3).
     Applying and undoing stay the person's: a model could otherwise supply its own review hash."""
     try:
-        from services import bot_skills
+        from importlib import import_module
+        bot_skills = import_module("services.bot_skills")
     except ImportError:
         return []
     done = []
@@ -1926,13 +1944,120 @@ def register_skill_tools() -> list[str]:
 
 def register_resource_tools() -> dict:
     """Every guarded group: automation (Phase 3 U5) and skills (Phase 2 U3). Safe to call twice."""
-    found = {"skills": register_skill_tools()}
+    found = {"skills": register_skill_tools(), "notebook": register_notebook_tools(),
+             "connections": register_connection_tools()}
     try:
-        from core import bot_automation_tools
+        from importlib import import_module
+        bot_automation_tools = import_module("core.bot_automation_tools")
         found["automation"] = bot_automation_tools.register_tools()
     except ImportError:
         found["automation"] = []
     return found
+
+
+def register_notebook_tools() -> list[str]:
+    from services import bot_memory, bot_turn_context
+
+    async def read(args, ctx):
+        try:
+            from core.untrusted import wrap_untrusted
+            return wrap_untrusted("your own notebook", json.dumps(bot_memory.read_file(_bot_scope(ctx)["bot_id"], args.get("path", "MEMORY.md")), ensure_ascii=False))
+        except (ValueError, KeyError) as error:
+            return _refused(error)
+
+    async def action(args, ctx):
+        try:
+            scope = _bot_scope(ctx)
+            from services.agent_service import agent_service
+            if not agent_service.get(scope["bot_id"]).get("memory_enabled", True):
+                return "Not run: Memory is switched off for this bot."
+            result = bot_memory.apply_entry(scope["bot_id"], args["action"], args["path"], args["expected_hash"],
+                                            **{k: args[k] for k in ("section", "body", "until", "description", "target") if k in args},
+                                            actor="bot", source="tool", thread_id=ctx.session_id)
+            return json.dumps(result, ensure_ascii=False)
+        except (ValueError, KeyError) as error:
+            return _refused(error)
+
+    async def search(args, ctx):
+        try:
+            result = bot_turn_context.search(_bot_scope(ctx), **{k: args[k] for k in ("q", "since", "until", "kind", "limit") if k in args})
+            from core.untrusted import wrap_untrusted
+            if ctx.turn_taint is not None:
+                ctx.turn_taint.mark("recall")
+            return wrap_untrusted("recalled from your own history", json.dumps(result, ensure_ascii=False))
+        except (ValueError, KeyError) as error:
+            return _refused(error)
+
+    async def message(args, ctx):
+        try:
+            result = bot_turn_context.read_message(_bot_scope(ctx), args["message_ref"])
+            from core.untrusted import wrap_untrusted
+            if ctx.turn_taint is not None:
+                ctx.turn_taint.mark("recall")
+            return wrap_untrusted("message from your own history", json.dumps(result, ensure_ascii=False))
+        except (ValueError, KeyError) as error:
+            return _refused(error)
+
+    definitions = [
+        ("notebook_read", "Read a file in your own notebook, including its hash for a guarded change.",
+         _object({"path": _str("MEMORY.md or memory/<topic>.md")}), READ, read),
+        ("notebook_action", "Append, replace, remove or supersede a note in your notebook using the hash you read.",
+         _object({k: _str() for k in ("action", "path", "expected_hash", "section", "body", "until", "description", "target")},
+                 ("action", "path", "expected_hash")), WRITE, action),
+        ("recall_search", "Search your own notebook and conversations with this person by words or date.",
+         _object({"q": _str(), "since": _str(), "until": _str(), "kind": _str(), "limit": {"type": "integer"}}), READ, search),
+        ("recall_read", "Read a message reference returned by your own recall search.",
+         _object({"message_ref": _str()}, ("message_ref",)), READ, message),
+    ]
+    return _register_bot_group(definitions)
+
+
+def _register_bot_group(definitions) -> list[str]:
+    done = []
+    for name, description, schema, effect, handler in definitions:
+        if name not in _REGISTRY:
+            register(name, description, schema, agent_only=True, effect=effect)(handler)
+            done.append(name)
+    return done
+
+
+def register_connection_tools() -> list[str]:
+    async def query(args, ctx):
+        from core import bot_tool_results
+        scope = _bot_scope(ctx)
+        return bot_tool_results.run_query_tool(scope["owner"], scope["bot_id"], scope["thread_id"] or "",
+                                               args["result_id"], args["query"], args.get("max_chars", 16000))
+
+    async def fill(args, ctx):
+        from core import computer
+        scope = _bot_scope(ctx)
+        return json.dumps(await computer.manager.fill_login(f"agent:{scope['bot_id']}", scope["bot_id"], args["login_id"], ctx))
+
+    definitions = [
+        ("query_tool_result", "Query the full result of an earlier tool call in this conversation.",
+         _object({"result_id": _str(), "query": _str(), "max_chars": {"type": "integer"}}, ("result_id", "query")), READ, query),
+        ("fill_login", "Fill a saved login this bot may use into its open browser. Secrets stay out of the conversation.",
+         _object({"login_id": _str()}, ("login_id",)), WRITE, fill),
+    ]
+    from services import bot_highlevel, bot_x_research
+    import re
+    for module, app in ((bot_highlevel, "highlevel"), (bot_x_research, "x")):
+        for name, metadata in module.TOOLS.items():
+            async def connected(args, ctx, module=module, name=name, app=app):
+                if ctx.turn_taint is not None:
+                    ctx.turn_taint.mark(app + " result")
+                if app == "highlevel":
+                    return await module.call(name, args, bot_id=ctx.agent_id, allowed_tools={name})
+                return await module.call(name, args, allowed_tools={name})
+            keys = set(metadata.get("query", [])) | set(metadata.get("body", [])) | set(re.findall(r"\{(\w+)\}", metadata.get("path", "")))
+            if app == "x":
+                keys = {"query", "max_results", "granularity", "username", "user_id", "post_id", "id"}
+            properties = {key: ({"type": "array", "items": _str()} if key == "tags" else
+                                {"type": "boolean"} if key == "completed" else
+                                {"type": "integer"} if key in ("limit", "max_results") else _str()) for key in keys}
+            definitions.append((name, metadata.get("description") or name.replace("_", " ").capitalize() + ".",
+                                _object(properties), READ if metadata["effect"] == "read" else EXTERNAL, connected))
+    return _register_bot_group(definitions)
 
 
 register_resource_tools()

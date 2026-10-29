@@ -64,6 +64,7 @@ export function buildRows(messages, { now = Date.now() / 1000, readId = null, qu
   const after = Math.max(readId ? messages.findIndex(m => m.id === readId) : -1, messages.map(m => m.role).lastIndexOf('user'));
   if (after >= 0) unreadFrom = messages.findIndex((m, i) => i > after && m.role !== 'user' && !m.kind);
   messages.forEach((message, index) => {
+    if (message.goal_step && message.goal_root) return;
     const label = dayLabel(message.ts, now);
     let marker = false;
     if (label && label !== lastDay) { rows.push({ type: 'day', key: `day:${label}:${message.id}`, label }); lastDay = label; marker = true; }
@@ -288,7 +289,7 @@ export function mountTranscript(host, opts) {
     if (row.type === 'compaction') return h('details', { class: 'bots-chip-row', 'data-message-id': m.id }, [h('summary', { text: 'Earlier messages summarised' }), h('div', { class: 'bots-chip-detail' }, [bodyNode(m, m.summary || m.content || '')])]);
     if (row.type === 'digest') return h('details', { class: 'bots-chip-row digest', 'data-message-id': m.id }, [h('summary', { text: digestLabel(m.digest) }),
       m.digest?.tool_names?.length ? h('ul', { class: 'bots-chip-detail' }, m.digest.tool_names.slice(0, 8).map(t => h('li', { text: t }))) : null]);
-    if (row.type === 'stop') return h('div', { class: 'bots-quiet-row', 'data-message-id': m.id, text: m.content || 'You stopped this.' });
+    if (['stop', 'stopped', 'goal_digest'].includes(row.type)) return h('div', { class: 'bots-quiet-row', 'data-message-id': m.id, text: m.content || 'You stopped this.' });
     if (row.type === 'verify') return h('div', { class: 'bots-verify', 'data-message-id': m.id }, [h('div', { class: 'bots-verify-head', text: verifySummary(m.verify?.steps) }),
       h('ul', {}, (m.verify?.steps || []).map(s => h('li', { class: s.status, text: `${s.label} · ${s.status}` })))]);
     return messageNode({ ...row, type: 'message' });
