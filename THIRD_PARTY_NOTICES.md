@@ -30,3 +30,35 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Geist and Geist Mono
+
+Source: https://github.com/vercel/geist-font
+Release: Geist v1.7.2. Copyright 2024 The Geist Project Authors.
+License: SIL Open Font License 1.1. Unmodified variable woff2 files static/fonts/Geist-Variable.woff2 and static/fonts/GeistMono-Variable.woff2, with the licence text in static/fonts/Geist-OFL.txt. Bots mode uses Geist for the interface and Geist Mono for code, loaded from the app's own files (static/css/bots.css).
+
+## Inter
+
+Source: https://github.com/rsms/inter
+Release: Inter v4.1. Copyright (c) 2016 The Inter Project Authors.
+License: SIL Open Font License 1.1. The unmodified variable woff2 file static/fonts/Inter-Variable.woff2 (upstream InterVariable.woff2), with the licence text in static/fonts/Inter-OFL.txt. Bots mode uses Inter for chat prose (static/css/bots.css).
+
+## Lucide
+
+Source: https://github.com/lucide-icons/lucide
+Release: Lucide 1.57.0. Copyright (c) 2026 Lucide Icons and Contributors.
+License: ISC (a few drawings derived from Feather are MIT, Copyright (c) 2013-present Cole Bemis). The full notice is static/vendor/lucide-LICENSE.txt. Bots mode inlines the path data of about fifty icons in static/js/botsIcons.js; nothing is loaded from a CDN.
+
+ISC License
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
