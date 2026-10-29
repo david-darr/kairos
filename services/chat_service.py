@@ -498,8 +498,13 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
     # instructions, the transcript keeps the command (Agents 2.0, 2026-10-14).
     # Everywhere else /setup is handled in the browser and never arrives here.
     model_text = text
-    if text.strip().lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
-        model_text = BOT_SETUP_INSTRUCTIONS
+    command, _, job = text.strip().partition(" ")
+    if command.lower() == "/setup" and (session_manager.get_session(session_id) or {}).get("agent_id"):
+        from services import bot_setup
+        from services.agent_service import agent_service
+        agent = agent_service.get(session_manager.get_session(session_id)["agent_id"])
+        if agent:
+            model_text = bot_setup.brief(agent, job.strip())
     sent = _apply_open_mic_discipline(session_id, _apply_attachments(session_id, model_text, attachment_ids) + reference_context)
     sent += turn_note  # a private instruction for this turn only (goal mode), kept with the message
     if (session_manager.get_session(session_id) or {}).get('forge'):
