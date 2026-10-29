@@ -46,6 +46,19 @@ class HelpWiringTests(unittest.IsolatedAsyncioTestCase):
             refused = await tool_registry.call("request_help", {"reason": "x", "site": "evil.com/path"}, ctx, tool_registry.OPENAI)
         self.assertTrue(refused.startswith("Not run:"), refused)
 
+    def test_asking_publishes_one_sign_in_notification(self):
+        from services import bot_attention
+        admin = patch("core.auth.auth_manager.is_admin", return_value=True)  # notifications are for an admin owner
+        admin.start(); self.addCleanup(admin.stop)
+        with patch("core.events.emit") as emit:
+            item = bot_help.raise_help(self.bot["id"], "Please sign in", "example.com", self.sid)
+        event_type, message = emit.call_args.args[:2]
+        self.assertEqual((event_type, message), ("bot.help", "Sign in to example.com"))
+        event = {"type": event_type, "message": message, **emit.call_args.kwargs}
+        rows = bot_attention.ingest_event(event)
+        self.assertEqual([(r["kind"], r["title"], r["inbox_id"]) for r in rows], [("sign-in", "Sign in to example.com", "help:" + item["id"])])
+        self.assertEqual(bot_attention.ingest_event(event), [], "the same request notifies once")
+
     async def test_a_reply_here_settles_it_and_a_reply_elsewhere_does_not(self):
         bot_help.raise_help(self.bot["id"], "Take over please", None, self.sid)
         await self.h.send(self.other, "unrelated")

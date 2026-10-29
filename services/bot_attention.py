@@ -325,6 +325,9 @@ def ingest_event(event):
         notification_kind = "done"
     elif kind in ("bot.turn.failed", "bot.failed", "bot.turn_failed"):
         notification_kind = "turn-failed"
+    elif kind == "bot.help" and event.get("help_id"):
+        # A bot asks the person to sign in or take over its computer (services/bot_help.py, Phase 6).
+        notification_kind, inbox_id = "sign-in", "help:" + str(event["help_id"])
     elif kind == "bot.runtime":
         terminal = runtime.get("type") or runtime.get("kind")
         notification_kind = {"turn.completed": "done", "turn.failed": "turn-failed", "runtime.error": "turn-failed"}.get(terminal)
