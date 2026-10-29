@@ -15,6 +15,9 @@ import os
 import re
 import time
 import uuid
+import socket
+import ipaddress
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -135,6 +138,7 @@ class Computer:
     snapshot_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     stderr_task: asyncio.Task | None = None
     taken_over: bool = False
+    lease_id: str | None = None
     waiting_model: bool = False
     handback: asyncio.Event = field(default_factory=asyncio.Event)
     last_snapshot: float = -1.0
@@ -169,6 +173,23 @@ class ComputerManager:
         self._closed: dict[str, tuple[float, dict]] = {}
         self._lock = asyncio.Lock()
         self._idle_task: asyncio.Task | None = None
+        self.starting: set[str] = set()
+        self.errors: dict[str, str] = {}
+        self._waiters: list[str] = []
+
+    def wait_position(self, owner: str) -> int:
+        return self._waiters.index(owner) + 1 if owner in self._waiters else 0
+
+    @staticmethod
+    def _protected(c: Computer) -> bool:
+        return c.taken_over or c.waiting_model or c.recording or c.lock.locked()
+
+    def _place(self, owner, thread_id=None):
+        from services.bot_workbench import effective_place
+        place = effective_place(owner, thread_id)["effective"]
+        if place == "off":
+            raise ComputerRefusal("Computer use is off for this bot or conversation", "place_off")
+        return place
 
     def _desktop_wanted(self) -> bool:
         return _desktop_enabled() if self.desktop is None else self.desktop
@@ -176,7 +197,7 @@ class ComputerManager:
     def running(self) -> list[dict]:
         return [{"owner": c.owner, "url": c.url, "title": c.title, "last_action": c.last_action_at,
                  "taken_over": c.taken_over, "waiting_model": c.waiting_model, "desktop": c.desktop,
-                 "recording": c.recording, "started_at": c.started_at, "steps": c.steps[-20:]}
+                 "recording": c.recording, "lease_id": c.lease_id, "started_at": c.started_at, "steps": c.steps[-20:]}
                 for c in self._computers.values()]
 
     def screenshot(self, owner: str) -> bytes | None:
@@ -204,7 +225,7 @@ class ComputerManager:
             logger.debug("computer driver: %s", line.decode(errors="replace").rstrip())
 
     async def _start(self, owner: str, is_admin: bool = True) -> Computer:
-        desktop = is_admin and self._desktop_wanted()
+        desktop = is_admin and self._desktop_wanted() and self._place(owner) != "browser"
         ok, why = await sandbox.available()
         if not ok:
             raise sandbox.SandboxUnavailable(why)
@@ -218,16 +239,12 @@ class ComputerManager:
             from services.agent_service import agent_service
             agent_id = owner.removeprefix("agent:")
             agent = agent_service.get(agent_id)
-            if agent and agent.get("keep_signed_in"):
-                if not re.fullmatch(r"[0-9a-f]{10}", agent_id):
-                    raise ValueError("bad agent id")
-                root = PROFILES.resolve()
-                if Path(DATA_DIR).resolve() not in root.parents:
-                    raise ValueError("profile path is outside Kairos data")
-                profile = PROFILES / agent_id
+            from services.bot_browser_profiles import resolve
+            profile = resolve(agent) if agent else None
+            if profile is not None:
                 profile.mkdir(parents=True, exist_ok=True)
                 target = profile.resolve()
-                if root not in target.parents:
+                if PROFILES.resolve() not in target.parents:
                     raise ValueError("profile path is outside Kairos data")
                 profile_args = ["--mount", f"type=bind,src={target},dst=/profile"]
         name = "jarvis-computer-" + uuid.uuid4().hex[:12]
@@ -288,18 +305,57 @@ class ComputerManager:
             if self._computers.get(c.owner) is c:
                 asyncio.create_task(self.stop(c.owner))
 
-    async def _get(self, owner: str, is_admin: bool = True) -> Computer:
-        async with self._lock:
-            await self._close_idle()
-            if owner not in self._computers:
-                if len(self._computers) >= MAX_RUNNING:
-                    oldest = min(self._computers.values(), key=lambda c: c.last_action)
-                    await self._stop(oldest.owner)
-                self._computers[owner] = await self._start(owner, is_admin=is_admin)
-                self.forget(owner)
-                if self._idle_task is None or self._idle_task.done():
-                    self._idle_task = asyncio.create_task(self._idle_loop())
-            return self._computers[owner]
+    async def _get(self, owner: str, is_admin: bool = True, thread_id=None) -> Computer:
+        from services.bot_workbench import computer_settings
+        # A per-thread pin is scoped to this task, not mutable manager state.
+        from core import runs
+        token = None
+        if thread_id:
+            agent_id = owner[6:] if owner.startswith("agent:") else None
+            token = runs.CURRENT.set(runs.RunContext(surface="chat", agent_id=agent_id, session_id=thread_id))
+        try:
+            while True:
+                place = self._place(owner, thread_id)
+                async with self._lock:
+                    await self._close_idle()
+                    current = self._computers.get(owner)
+                    if current and place == "browser" and current.desktop:
+                        if self._protected(current):
+                            raise ComputerRefusal("Hand back the computer before changing its place", "person_in_control")
+                        await self._stop(owner)
+                    if owner in self._computers:
+                        return self._computers[owner]
+                    cap = computer_settings()["max_running"]
+                    turn = not self._waiters or self._waiters[0] == owner
+                    if turn and len(self._computers) >= cap:
+                        idle = [c for c in self._computers.values() if not self._protected(c)]
+                        if idle:
+                            await self._stop(min(idle, key=lambda c: c.last_action).owner)
+                    if turn and len(self._computers) < cap:
+                        if owner in self._waiters:
+                            self._waiters.remove(owner)
+                        self.starting.add(owner)
+                        self.errors.pop(owner, None)
+                        try:
+                            self._computers[owner] = await self._start(owner, is_admin=is_admin)
+                        except Exception as error:
+                            self.errors[owner] = str(error)[:280]
+                            raise
+                        finally:
+                            self.starting.discard(owner)
+                        self.forget(owner)
+                        if self._idle_task is None or self._idle_task.done():
+                            self._idle_task = asyncio.create_task(self._idle_loop())
+                        return self._computers[owner]
+                    if owner not in self._waiters:
+                        self._waiters.append(owner)
+                # No lock is held while waiting. Stop/hand-back/settings stay usable.
+                await asyncio.sleep(0.25)
+        finally:
+            if owner in self._waiters:
+                self._waiters.remove(owner)
+            if token is not None:
+                runs.CURRENT.reset(token)
 
     async def _command(self, c: Computer, action: str, **kwargs) -> dict:
         if action.startswith(("watch_", "record_")):
@@ -378,8 +434,9 @@ class ComputerManager:
         self._closed.clear()
 
     async def _close_idle(self):
+        from services.bot_workbench import computer_settings
         for c in list(self._computers.values()):
-            if not c.waiting_model and self.clock() - c.last_action >= IDLE_SECONDS:
+            if not self._protected(c) and self.clock() - c.last_action >= computer_settings()["idle_minutes"] * 60:
                 await self._stop(c.owner)
 
     async def _idle_loop(self):
@@ -467,6 +524,13 @@ class ComputerManager:
     async def act(self, owner: str, action: str, args: dict, ctx) -> dict:
         """One model action, or a batch (`steps`). A refusal's reply gains a
         `code`; a driver refusal raises ComputerRefusal with its code."""
+        try:
+            place = self._place(owner, getattr(ctx, "session_id", None))
+        except ComputerRefusal as error:
+            return {"text": f"Not run: {error}", "images": [], "code": error.code}
+        if place == "browser" and (args.get("desktop") or action in ("launch", "windows")
+                                    or re.fullmatch(r"d\d+:\d+", str(args.get("ref") or ""))):
+            return {"text": "Not run: this conversation uses the browser only", "images": [], "code": "needs_desktop"}
         run_id = _trajectory_run(owner, ctx) if action not in ("steps", "done") else None
         before, not_before = (await self._before(owner, action, args)) if run_id and action in TRACED_ACTIONS else (None, "")
         try:
@@ -592,7 +656,7 @@ class ComputerManager:
                          or action in ("click", "type") and re.fullmatch(r"d\d+:\d+", str(args.get("ref") or "")) is not None)
         if wants_desktop and not (existing.desktop if existing else self._desktop_wanted() and ctx.is_admin):
             return {"text": "Not run: the agent desktop is off. An admin can switch it on in Settings > Computer use; the change applies at the next start.", "images": []}
-        c = await self._get(owner, is_admin=ctx.is_admin)
+        c = await self._get(owner, is_admin=ctx.is_admin, thread_id=getattr(ctx, "session_id", None) if owner.startswith("agent:") else None)
         if c.desktop and not ctx.is_admin:
             return {"text": "Not run: the agent desktop is limited to admins.", "images": []}
         desktop_action = wants_desktop or action == "screenshot" and c.desktop and args.get("desktop") is not False
@@ -929,6 +993,7 @@ class ComputerManager:
         if not c:
             return False
         c.taken_over = True
+        c.lease_id = uuid.uuid4().hex
         c.handback.clear()
         c.last_action = self.clock()
         c.last_action_at = time.time()
@@ -947,6 +1012,7 @@ class ComputerManager:
         if not c:
             return False
         c.taken_over = False
+        c.lease_id = None
         self._discard_recording(c)
         c.handback.set()
         c.last_action = self.clock()
@@ -996,15 +1062,33 @@ class ComputerManager:
             c.steps.clear()
             return steps
 
-    async def person_input(self, owner: str, kind: str, values: dict) -> None:
+    async def person_input(self, owner: str, kind: str, values: dict, ctx=None) -> None:
         """Forward human input without model inspection, tool output or audit."""
         c = self._computers.get(owner)
         if not c or not c.taken_over:
             raise ValueError("take over the computer first")
+        browser_action = kind in ("navigate", "back", "forward", "reload")
+        if browser_action:
+            ctx = ctx or SimpleNamespace(permission_surface=owner, is_admin=owner.startswith("agent:"))
+            if kind == "navigate":
+                url = await _person_url(values.get("url", ""))
+                allowed, reason = await self._site(c, urlsplit(url).hostname.lower(), ctx, url=url)
+                if not allowed:
+                    raise ValueError(reason)
+                values = {"url": url}
         async with c.lock:
             if not c.taken_over or self._computers.get(owner) is not c:
                 raise ValueError("take over the computer first")
-            reply = await self._send(c, "desktop_input", kind=kind, person=True, recording_id=c.recording_id, **values) if c.desktop else await self._send(c, "person_" + kind, recording_id=c.recording_id, **values)
+            reply = await self._send(c, "desktop_input", kind=kind, person=True, recording_id=c.recording_id, **values) if c.desktop and not browser_action else await self._send(c, "person_" + kind, recording_id=c.recording_id, **values)
+        if browser_action and reply.get("url") and reply["url"] != "about:blank":
+            try:
+                url = await _person_url(reply["url"])
+                allowed, reason = await self._site(c, urlsplit(url).hostname.lower(), ctx, url=url)
+                if not allowed:
+                    raise ValueError(reason)
+            except ValueError:
+                await self._retreat(c)
+                raise
         c.url, c.title = reply.get("url") or c.url, reply.get("title") or c.title
         if reply.get("screenshot"):
             c.screenshot = base64.b64decode(reply["screenshot"])
@@ -1320,10 +1404,42 @@ def _read_text(reply: dict) -> str:
         "page content from the contained computer", body)
 
 
+async def _person_url(url):
+    url = sandbox_browser._check_url(url)
+    parsed = urlsplit(url)
+    if len(url) > 2048 or parsed.username or parsed.password:
+        raise ValueError("Use a web address without sign-in details")
+    host = parsed.hostname.lower()
+    if host in LOCAL_HOSTS or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("Private and local sites are not available here")
+    try:
+        addresses = await asyncio.get_running_loop().getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except (OSError, ValueError) as error:
+        raise ValueError("This site could not be found") from error
+    def public(raw):
+        address = ipaddress.ip_address(raw.split('%')[0])
+        if address.version == 6 and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        return address.is_global and not address.is_multicast
+    if not addresses or any(not public(row[4][0]) for row in addresses):
+        raise ValueError("Private and local sites are not available here")
+    return url
+
+
+def _help(owner, reason, site=None):
+    if owner.startswith("agent:"):
+        from core import runs
+        from services import bot_help
+        run = runs.CURRENT.get()
+        thread_id = run.session_id if run and run.agent_id == owner[6:] else None
+        bot_help.raise_help(owner[6:], reason, site, thread_id)
+
+
 def _needs_person(owner: str, url: str):
     if owner.startswith("agent:"):
         from services.agent_service import agent_service
         host = urlsplit(url).hostname or "this site"
+        _help(owner, f"Sign in at {host}", host)
         agent_service.add_item(owner.removeprefix("agent:"), kind="question",
             title=f"Needs you: sign in at {host}", body=f"The contained computer is waiting at {url}. Take over to enter private details.")
 
@@ -1336,6 +1452,7 @@ def _needs_frame_person(owner: str, url: str):
     if owner.startswith("agent:"):
         from services.agent_service import agent_service
         host = urlsplit(url).hostname or "this site"
+        _help(owner, f"Use the embedded frame at {host}")
         agent_service.add_item(owner.removeprefix("agent:"), kind="question",
             title=f"Needs you: embedded frame at {host}", body=f"The contained computer is waiting at {url}. Take over to use this frame.")
 

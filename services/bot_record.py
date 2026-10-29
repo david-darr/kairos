@@ -50,7 +50,7 @@ SELECTOR = re.compile(r"(native:\S+|mcp:[^:\s]+:\S+)")
 BOT_EDITABLE = ("section", "origin", "fallback", "cache_keep_warm", "place", "tool_scope", "connector_scopes",
                 "always_allow", "outbound", "approval_mode", "thread_limit", "hidden", "reply_style",
                 "notifications", "speak_replies", "voice_id", "call_mode", "skill_selection", "avatar_image",
-                "mascot_expression", *bot_resource_fields.RESOURCE_EDITABLE)
+                "mascot_expression", "browser_enabled", "browser_profile", *bot_resource_fields.RESOURCE_EDITABLE)
 # Changes to these do not bump the profile revision: they are not the profile,
 # and a bump would stale a pending setup Undo or SOUL.md apply.
 NO_REVISION = ("hidden", "hidden_at", "order", "folders")
@@ -92,7 +92,7 @@ def new_defaults() -> dict:
             "place": "auto", "tool_scope": {"allow": [], "deny": []}, "connector_scopes": {}, "always_allow": [],
             "builtin": None, "reply_style": "default", "notifications": True, "speak_replies": False,
             "voice_id": None, "call_mode": "turns", "skill_selection": {"mode": "all", "disabled": []},
-            "avatar_image": None, "mascot_expression": None, **bot_resource_fields.defaults()}
+            "avatar_image": None, "mascot_expression": None, "browser_enabled": True, "browser_profile": "own", **bot_resource_fields.defaults()}
 
 
 def _servers() -> list:
@@ -298,9 +298,13 @@ def clean_field(key: str, value, current: Optional[dict] = None):
     BotConflict (NotAvailableYet) for a refusal that is state."""
     if key == "section":
         return _clean_section(value)
-    if key in ("notifications", "speak_replies"):
+    if key in ("notifications", "speak_replies", "browser_enabled"):
         if type(value) is not bool:
             raise ValueError(f"{key} is true or false")
+        return value
+    if key == "browser_profile":
+        if not isinstance(value, str) or not re.fullmatch(r"own|guest|shared:[0-9a-f]{12}", value):
+            raise ValueError("Choose own, guest or a saved shared browser profile")
         return value
     if key == "reply_style":
         return _choice(value, ("default", "conversational"), key)
@@ -704,7 +708,7 @@ DUPLICATE_FIELDS = ("role", "blurb", "soul", "color", "avatar", "endpoint_id", "
                     "integration_ids", "daily_run_cap", "section", "approval_mode", "outbound", "fallback",
                     "cache_keep_warm", "place", "tool_scope", "connector_scopes", "always_allow", "thread_limit",
                     "memory_upkeep", "reply_style", "notifications", "speak_replies", "voice_id", "call_mode",
-                    "skill_selection", "mascot_expression", "memory_enabled", "helper_model", "connector_tools")
+                    "skill_selection", "mascot_expression", "memory_enabled", "helper_model", "connector_tools", "browser_enabled")
 
 
 def duplicate_name(source_name: str, taken) -> str:

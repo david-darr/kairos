@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from core import computer, computer_image, computer_trajectory, sandbox, session_manager_store as store
 from core.auth import auth_manager
@@ -237,7 +237,9 @@ async def record_stop(owner: str, user: str = Depends(require_user)) -> dict:
 
 
 class PersonInput(BaseModel):
-    kind: Literal["click", "type", "key", "scroll"]
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["click", "type", "key", "scroll", "navigate", "back", "forward", "reload"]
+    url: str | None = Field(default=None, max_length=2048)
     x: int | None = None
     y: int | None = None
     text: str | None = None
@@ -262,8 +264,14 @@ async def person_input(owner: str, body: PersonInput, user: str = Depends(requir
         if not body.key or len(body.key) > 80:
             raise HTTPException(422, "give a key")
         values = {"key": body.key}
-    else:
+    elif body.kind == "scroll":
         values = {"dx": body.dx or 0, "dy": body.dy or 0}
+    elif body.kind == "navigate":
+        if not body.url:
+            raise HTTPException(422, "Give a web address")
+        values = {"url": body.url}
+    else:
+        values = {}
     try:
         await computer.manager.person_input(owner, body.kind, values)
     except ValueError as error:

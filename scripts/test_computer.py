@@ -963,6 +963,30 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             agent_service.delete(agent["id"])
 
 
+    async def test_bot_place_pin_is_enforced_with_real_manager_and_fake_driver(self):
+        from core.session_manager import session_manager
+        agent = agent_service.create("Place test")
+        session = session_manager.create_session("Browser pin")
+        session_manager.set_agent(session["id"], agent["id"], "")
+        session_manager.set_thread(session["id"], place="browser")
+        ctx = tool_registry.ToolContext(agent_id=agent["id"], session_id=session["id"], is_admin=True)
+        self.manager.desktop = True
+        owner = "agent:" + agent["id"]
+        try:
+            result = await self.manager.act(owner, "open", {"url": "https://example.com/"}, ctx)
+            self.assertIn("open completed", result["text"])
+            self.assertFalse(self.manager._computers[owner].desktop)
+            self.assertIn("KAIROS_COMPUTER_DESKTOP=0", self.argv[-1])
+            session_manager.set_thread(session["id"], place="off")
+            count = len(self.procs[0].calls)
+            result = await self.manager.act(owner, "click", {"x": 1, "y": 2}, ctx)
+            self.assertEqual(result["code"], "place_off")
+            self.assertEqual(len(self.procs[0].calls), count)
+        finally:
+            await self.manager.stop(owner)
+            agent_service.delete(agent["id"])
+
+
 class RouteTests(unittest.TestCase):
     def test_desktop_setting_round_trips_and_defaults_off(self):
         from core import settings
