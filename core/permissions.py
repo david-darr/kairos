@@ -307,11 +307,50 @@ def drop_session(surface: str) -> None:
     _session_rules.pop(surface, None)
 
 
+# -- the bot grant ceiling (Bots Phase 2 U4) --------------------------------------------------------
+# Kept apart from decide() so the approval work that follows can extend decide() without touching it.
+
+def _surface_bot(surface: str) -> str | None:
+    """The bot behind a surface: an agent's own, or the bot a chat belongs to."""
+    if surface.startswith("agent:"):
+        return surface.removeprefix("agent:") or None
+    if surface.startswith("chat:"):
+        from core.session_manager import session_manager
+        return ((session_manager.get_session(surface.removeprefix("chat:")) or {}).get("agent_id")) or None
+    return None
+
+
+def ceiling_denial(surface: str, tool: str, arguments: dict, agent_id: str | None = None,
+                   mcp: tuple | None = None, is_admin: bool = False) -> "Decision | None":
+    """A deny when the bot's grants forbid this call, however the approval level would answer."""
+    bot = agent_id or _surface_bot(surface)
+    if not bot:
+        return None
+    from services import bot_grants
+    # Execution rights (admin-only tools) are judged at each call site from the trusted context; the
+    # `is_admin` argument here is whatever the asking code passed, so it is not used to narrow the ceiling.
+    reason = bot_grants.ceiling_denial(bot, tool, arguments, is_admin=True, mcp=mcp)
+    if reason is None:
+        return None
+    try:
+        data = _load()
+        _record(data, {"decision": "deny", "source": "grant_ceiling", "surface": surface, "tool": tool})
+        _save(data)
+    except Exception:
+        pass
+    return Decision("deny", reason)
+
+
 async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", description: str = "",
                  target: str | None = None, choices: list[dict] | None = None,
                  timeout: float = DEFAULT_TIMEOUT_SECONDS, is_admin: bool = False,
-                 force_prompt: bool = False) -> Decision:
-    """Answer from a rule, or ask the person and wait."""
+                 force_prompt: bool = False, agent_id: str | None = None,
+                 mcp: tuple | None = None) -> Decision:
+    """Answer from a rule, or ask the person and wait. A bot's grant ceiling is judged first:
+    Auto and Full allowances cannot lift it."""
+    denied = ceiling_denial(surface, tool, arguments, agent_id, mcp, is_admin)
+    if denied is not None:
+        return denied
     target = target if target is not None else derive_target(tool, arguments)
     # Builder imports/connections and first-run app commands need explicit
     # review when requested, even on an Auto surface.

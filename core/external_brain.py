@@ -74,7 +74,8 @@ class ExternalBrain:
             if self.defer_tools else {}
         if self.defer_tools and not self.small_window:
             direct = [tool for tool in tool_registry.openai_tools(is_admin, agent=bool(agent_id), helper=helper,
-                                                                  read_only=read_only, session_id=session_id or '')
+                                                                  read_only=read_only, session_id=session_id or '',
+                                                                  bot_id=agent_id)
                       if tool["function"]["name"] in tool_registry.DIRECT_ON_LARGE]
             self.tools = self.tools + direct
             for tool in direct:
@@ -216,7 +217,7 @@ class ExternalBrain:
         have = {tool["function"]["name"] for tool in self.tools if tool.get("type") == "function"}
         self.tools.extend(tool for tool in tool_registry.openai_tools(
             self.is_admin, agent=bool(self.agent_id), helper=self.helper, read_only=self.read_only,
-            session_id=self.session_id or '') if tool["function"]["name"] not in have)
+            session_id=self.session_id or '', bot_id=self.agent_id) if tool["function"]["name"] not in have)
 
     def _context(self) -> tool_registry.ToolContext:
         from core import task_scope
@@ -240,7 +241,8 @@ class ExternalBrain:
         connection, so the tool list - part of the cached prompt - is stable."""
         if self.read_only or (not self.session_id and not self.agent_id):
             return
-        self._mcp_tools, rea_config = await mcp_bridge.discover(self.integration_ids)
+        self._mcp_tools, rea_config = await mcp_bridge.discover(
+            self.integration_ids, self._context() if self.agent_id else None)
         if rea_config:
             self._rea_client = mcp_client.PersistentClient(rea_config)
             try:
@@ -253,6 +255,9 @@ class ExternalBrain:
                         continue
                     name = mcp_client.function_name("REA", tool["name"], set(self._mcp_tools))
                     self._mcp_tools[name] = {"server": "REA", "config": rea_config, **tool}
+                if self.agent_id:
+                    from services import bot_grants
+                    self._mcp_tools = bot_grants.filter_mcp_catalog(self._context(), self._mcp_tools)
             except Exception as exc:
                 logger.warning("REA MCP connection unavailable: %s", exc)
                 integrations.record_check(name="REA", error=f"{type(exc).__name__}: {exc}")

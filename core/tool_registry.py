@@ -90,6 +90,8 @@ class ToolContext:
     source_card_id: Optional[str] = None
     # Captured from an admitted routine, never model-supplied tool arguments.
     owner_user: Optional[str] = None
+    # One id per model request, so a tool can tell a repeated call from a new one (Bots Phase 3).
+    invocation_id: Optional[str] = None
 
     @property
     def permission_surface(self) -> str:
@@ -205,17 +207,27 @@ def helper_tool(spec: ToolSpec) -> bool:
 
 
 def specs(surface: str, is_admin: bool = False, agent: bool = False, helper: bool = False,
-          read_only: bool = False, session_id: str | None = None) -> list[ToolSpec]:
+          read_only: bool = False, session_id: str | None = None, bot_id: str | None = None) -> list[ToolSpec]:
     """The tools one surface offers, in registration order (stable, so the
     tool list - part of the cached prompt prefix - never reorders). Agent-only
     tools appear only for an agent's runs and chats; a helper gets only
     helper_tool()'s."""
     from core import addons
+    hidden = _bot_hidden(bot_id, [s.name for s in _REGISTRY.values()], is_admin)
     return [s for s in _REGISTRY.values() if addons.tool_available(s.name) and surface in s.surfaces and (is_admin or not s.admin_only)
+            and s.name not in hidden
             and (agent or not s.agent_only) and (not helper or helper_tool(s))
             and (not read_only or s.effect == READ)
             and (s.name != 'forge_app_logs' or session_id is None or forge_session(session_id))
             and (surface != CODEX or design_gate(s, session_id))]
+
+
+def _bot_hidden(bot_id: str | None, names: list, is_admin: bool = False) -> set:
+    """Tools a bot's grants leave out of what it is shown (services/bot_grants.py)."""
+    if not bot_id:
+        return set()
+    from services import bot_grants
+    return bot_grants.native_hidden(bot_grants.Scope(bot_id, None, is_admin), names)
 
 
 def design_gate(spec: ToolSpec, session_id: str | None) -> bool:
@@ -258,6 +270,9 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
             or (spec.agent_only and not ctx.agent_id) or (ctx.helper and not helper_tool(spec))):
         return f"Unknown tool: {name}"
     ctx = dataclasses.replace(ctx, surface=surface)
+    refusal = _grant_refusal(ctx, name, args)
+    if refusal:
+        return refusal
     computer_detail = None
     if name == "computer":
         from core import computer, runs, system_prompt
@@ -284,6 +299,15 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
                 detail["image"] = image
         runs.computer_event(ctx.session_id, "tool_finished", detail, ok=not text.startswith(("Not ", "Stopped", "Tool error:")))
     return result
+
+
+def _grant_refusal(ctx: ToolContext, name: str, args: dict) -> str | None:
+    """A bot's grants are a ceiling on every provider: judged here for every registry call, before
+    the tool runs. Ordinary chats have no agent id and pass."""
+    if not ctx.agent_id:
+        return None
+    from services import bot_grants
+    return bot_grants.native_refusal(ctx, name, args)
 
 
 def _audit(spec: ToolSpec, args: dict, ctx: ToolContext, result: str | ToolResult) -> None:
@@ -320,13 +344,14 @@ async def dispatch(name: str, args: dict, ctx: ToolContext, surface: str) -> str
     return await hook_service.around_tool(name, args, lambda: call(name, args, ctx, surface), **ctx.hook_context())
 
 
-def claude_preapproved(agent: bool = False, session_id: str | None = None) -> list[str]:
+def claude_preapproved(agent: bool = False, session_id: str | None = None, bot_id: str | None = None) -> list[str]:
     """Claude's pre-approved Kairos tools, except self-setup writes.
     The remaining tools enforce their own boundaries (Google changes,
     run_code with the internet, or the person's configured Peers list)."""
     # Self-setup says the person must agree, but its handlers only check the
     # chat's identity; retain Claude's approval for those writes (2026-10-15).
-    return [f"mcp__hive_mind__{s.name}" for s in specs(CLAUDE, is_admin=True, agent=agent, session_id=session_id)
+    return [f"mcp__hive_mind__{s.name}" for s in specs(CLAUDE, is_admin=True, agent=agent, session_id=session_id,
+                                                         bot_id=bot_id)
             if s.name not in CLAUDE_REVIEW_TOOLS]
 
 
@@ -357,19 +382,20 @@ def _shown(spec: ToolSpec, small_window: bool, session_id: str | None = None) ->
 
 
 def openai_tools(is_admin: bool = False, agent: bool = False, small_window: bool = False,
-                 helper: bool = False, read_only: bool = False, session_id: str | None = None) -> list[dict]:
+                 helper: bool = False, read_only: bool = False, session_id: str | None = None,
+                 bot_id: str | None = None) -> list[dict]:
     """The OpenAI function-calling list for one session: every tool, or on a
     small window only the core ones (the rest: deferred_tools)."""
     return [{"type": "function", "function": {"name": s.name, "description": s.description, "parameters": s.schema}}
-            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id)
+            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id, bot_id)
             if _shown(s, small_window, session_id) and (small_window or design_gate(s, session_id))]
 
 
 def deferred_tools(is_admin: bool = False, agent: bool = False, helper: bool = False,
-                   read_only: bool = False, session_id: str | None = None) -> dict[str, dict]:
+                   read_only: bool = False, session_id: str | None = None, bot_id: str | None = None) -> dict[str, dict]:
     """A small window's hidden tools, as core/tool_search.py catalog entries."""
     return {s.name: {"server": "kairos", "name": s.name, "description": s.description, "schema": s.schema}
-            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id) if not _shown(s, True, session_id)}
+            for s in specs(OPENAI, is_admin, agent, helper, read_only, session_id, bot_id) if not _shown(s, True, session_id)}
 
 
 def _fields(args: dict, key: str) -> tuple[str, dict]:
@@ -1824,3 +1850,89 @@ async def _roblox_assets(args, ctx):
 
 # The Design canvas's tools register themselves into this table.
 from core import design_tools  # noqa: E402,F401
+
+
+# -- Bots resource tools, registered through guarded imports (Bots Phase 2 U4) ------------------
+# Each group appears only when the unit that owns it is merged, so this file works before and after.
+# A tool's owner, bot and conversation come from the trusted ToolContext, never from its arguments.
+
+def _bot_scope(ctx: ToolContext) -> dict:
+    return {"agent_id": ctx.agent_id, "owner_user": ctx.owner_user, "session_id": ctx.session_id,
+            "is_admin": ctx.is_admin, "thread_id": ctx.session_id}
+
+
+def _refused(error: Exception) -> str:
+    return f"Not run: {error}"
+
+
+def register_skill_tools() -> list[str]:
+    """skill_stage, skill_read, skill_index and skill_share over services/bot_skills.py (Phase 2 U3).
+    Applying and undoing stay the person's: a model could otherwise supply its own review hash."""
+    try:
+        from services import bot_skills
+    except ImportError:
+        return []
+    done = []
+
+    def add(name, description, schema, effect, handler):
+        if name not in _REGISTRY:
+            register(name, description, schema, agent_only=True, effect=effect)(handler)
+            done.append(name)
+
+    async def stage(args, ctx):
+        try:
+            card = bot_skills.stage(_bot_scope(ctx), str(args.get("skill_name") or ""), str(args.get("skill_md") or ""),
+                                    references=args.get("references"), gist=str(args.get("gist") or ""),
+                                    thread_id=ctx.session_id, actor="model", source="learned")
+        except Exception as error:
+            return _refused(error)
+        return (f"Staged skill {card['name']} for the person to review (request {card['id']}, "
+                f"{card['sha_prefix']}). It is not saved until they approve it.")
+
+    async def read(args, ctx):
+        try:
+            return bot_skills.read_reviewed(_bot_scope(ctx), str(args.get("name") or ""),
+                                            str(args.get("path") or "SKILL.md"), taint=ctx.turn_taint)
+        except Exception as error:
+            return _refused(error)
+
+    async def index(args, ctx):
+        try:
+            return bot_skills.prompt_index(_bot_scope(ctx), ctx.turn_taint) or "No skills are switched on for you."
+        except Exception as error:
+            return _refused(error)
+
+    async def share(args, ctx):
+        try:
+            result = bot_skills.share(_bot_scope(ctx), str(args.get("name") or ""), actor="model",
+                                      note=str(args.get("note") or ""))
+        except Exception as error:
+            return _refused(error)
+        return ("Sent to the person to approve before it is shared." if result.get("status") == "pending"
+                else "Published to the shared library.")
+
+    add("skill_stage", "Stage a skill (a reusable procedure) for the person to review. Give skill_name, skill_md (a SKILL.md "
+        "with name and description frontmatter) and optional references (up to eight, each {path, text}). A skill never "
+        "grants tools or access.",
+        _object({"skill_name": _str(), "skill_md": _str(), "references": {"type": "array", "items": {"type": "object"}},
+                 "gist": _str("One line on what it was learned from")}, ("skill_name", "skill_md")), WRITE, stage)
+    add("skill_read", "Read one of your reviewed skills, or one of its references.",
+        _object({"name": _str(), "path": _str("SKILL.md or references/<topic>.md")}, ("name",)), READ, read)
+    add("skill_index", "List the skills switched on for you.", _object(), READ, index)
+    add("skill_share", "Offer one of your reviewed skills to the shared library, as the person's sharing setting allows.",
+        _object({"name": _str(), "note": _str()}, ("name",)), WRITE, share)
+    return done
+
+
+def register_resource_tools() -> dict:
+    """Every guarded group: automation (Phase 3 U5) and skills (Phase 2 U3). Safe to call twice."""
+    found = {"skills": register_skill_tools()}
+    try:
+        from core import bot_automation_tools
+        found["automation"] = bot_automation_tools.register_tools()
+    except ImportError:
+        found["automation"] = []
+    return found
+
+
+register_resource_tools()
