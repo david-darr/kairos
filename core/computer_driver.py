@@ -1053,11 +1053,16 @@ async def main():
                            or autocomplete.startswith('cc-'))
                 if private and (action == 'type' or action == 'key' and cmd.get('key','').lower() not in ('tab','shift+tab','escape')):
                     raise ValueError('private fields need the person to take over')
-            if action.startswith('person_'): await record_input(cmd, action.removeprefix('person_'))
+            if action in ('person_click', 'person_type', 'person_key', 'person_scroll'): await record_input(cmd, action.removeprefix('person_'))
             if action == 'person_click': await page.mouse.click(cmd['x'], cmd['y'])
             elif action == 'person_type': await page.keyboard.insert_text(cmd['text'])
             elif action == 'person_key': await page.keyboard.press(cmd['key'])
             elif action == 'person_scroll': await page.mouse.wheel(cmd.get('dx',0), cmd.get('dy',0))
+            elif action == 'person_navigate':
+                await page.goto(cmd['url'], wait_until='domcontentloaded', timeout=30000)
+            elif action == 'person_back': await page.go_back(wait_until='domcontentloaded', timeout=30000)
+            elif action == 'person_forward': await page.go_forward(wait_until='domcontentloaded', timeout=30000)
+            elif action == 'person_reload': await page.reload(wait_until='domcontentloaded', timeout=30000)
             elif action == 'open':
                 cast['snap_quality'] = FRAME_QUALITIES[0]
                 response = await page.goto(cmd['url'], wait_until='domcontentloaded', timeout=30000)
