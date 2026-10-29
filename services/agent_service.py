@@ -883,6 +883,12 @@ class AgentService:
         enforcing entry point; can_run is an informative snapshot.
         Attribute inbox items during the run; on exit, fill its questions.
         """
+        # The monthly spend cap (Bots Phase 6) refuses every background start, whoever asks for it.
+        from services import bot_spend
+        try:
+            bot_spend.check(agent_id)
+        except bot_spend.SpendCap as cap:
+            raise AdmissionDenied(cap.detail) from None
         with self._admission_lock:
             may_run, reason = self._can_run(agent_id, claimed_work_id=card_id or task_id)
             if not may_run:

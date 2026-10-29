@@ -168,6 +168,12 @@ async def send(owner: str, sid: str, body: dict) -> dict:
     session, bot = require(owner, sid)
     payload = _clean_payload(body)
     _check_send(sid, payload)
+    # The monthly spend cap (Bots Phase 6) stops a new turn at this door too, not only background work.
+    from services import bot_spend
+    try:
+        bot_spend.check(bot["id"])
+    except bot_spend.SpendCap as cap:
+        raise HTTPException(409, cap.detail, headers={"X-Reason": cap.code}) from None
     context = await _context(owner, sid, payload["references"])
     return _admit(owner, sid, bot, payload, context)
 
