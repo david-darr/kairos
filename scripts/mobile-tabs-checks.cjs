@@ -57,9 +57,11 @@ async function run(ctx) {
     // With the avatar gone, nothing in a page header is drawn under the tab bar either.
     if (current !== 'hidden') ok(await js("(() => { const a = document.querySelector('.ms-tabbar').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, button, input')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => n.getBoundingClientRect().bottom <= a.top + 0.5); })()"), tab + ' header controls sit clear of the tab bar');
   };
-  for (const [tab, current] of [['home', 'home'], ['agents', 'agents'], ['tool-store', 'more'], ['school', 'more']]) {
+  // Agents became the Bots mode (2026-10-29): its roster is the Bots item on the bar.
+  for (const [tab, current] of [['home', 'home'], ['tool-store', 'more'], ['school', 'more'], ['botsHome', 'botsHome']]) {
     await navigate(tab); await delay(500); await checkChrome(tab, current);
   }
+  await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
   const centeredComposer = async (selector, expanded = false) => {
     await delay(450); // the composer morph settles before its geometry is read
     await waitFor(`document.querySelector('${selector}').classList.contains('ms-composer-expanded') === ${expanded}`);
@@ -405,17 +407,22 @@ async function run(ctx) {
   await waitFor("!document.querySelector('.ts-sheet')");
   eq(await docks(), 0, 'Still no dock after the sheet closes');
 
-  // ---- F. Agents keep their messenger; no dock collides with it -----------------------------
+  // ---- F. A bot's page keeps its composer; no dock collides with it -----------------------------
+  const priorBots = { live: ctx.demoState.botsLive, attention: ctx.demoState.botsAttention };
+  ctx.demoState.botsLive = true; ctx.demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
   await navigate('agents', { agentId: 'a1' });
-  await waitFor("!!document.querySelector('.side-chat-input')");
-  eq(await docks(), 0, 'Agents mount no dock');
-  const composer = await rect('.side-chat-input'), apill = await rect('.ms-activity-floating');
-  ok(composer && composer.b <= 844 && composer.h >= 40, 'The messenger composer is on screen');
-  ok(!apill || !hit(apill, composer), 'The activity pill does not cover the messenger composer');
-  await js("document.querySelector('.agents-chats-open')?.click()");
+  await waitFor("!!document.querySelector('.bots-composer-input')");
+  eq(await docks(), 0, 'Bots pages mount no dock');
+  const composer = await rect('.bots-composer-input'), apill = await rect('.ms-activity-floating');
+  ok(composer && composer.b <= 844 && composer.h >= 20, 'The bot composer is on screen');
+  ok(!apill || !hit(apill, composer), 'The activity pill does not cover the bot composer');
+  await js("document.querySelector('.bots-head-convos')?.click()");
   await delay(400);
-  ok(await js("!!document.querySelector('.agents-chat-rail input[type=search], .agents-chat-rail input')"), 'The rail keeps its own search');
-  eq(await docks(), 0, 'No dock over the rail');
+  ok(await js("!!document.querySelector('#bots-convos:not([hidden]) .bots-convo-new')"), 'The conversation list opens with its own New conversation control');
+  eq(await docks(), 0, 'No dock over the conversation list');
+  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete ctx.demoState[key]; else ctx.demoState[key] = value; }
 
   // ---- G. Forge project pager, pushed tools, Changes and commit sheet ---------------------
   const forgeResult = await require('./mobile-forge-checks.cjs')(ctx);
@@ -809,7 +816,7 @@ async function run(ctx) {
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
     if (!nudge) continue;
     // Titles and first content on every tab, Settings and one of its pages included.
-    for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'agents', 'forgeHome']) {
+    for (const tab of ['home', 'notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'forgeHome']) {
       await navigate(tab); await delay(500); await titleRow(`${name}: ${tab}`, top + nudge + (['notes', 'library', 'calendar', 'email', 'tasks', 'cookbook', 'school', 'tool-store', 'forgeHome'].includes(tab) ? 18 : 6));
       ok(await noAvatar(), `${name}: ${tab} has no avatar`);
       if (tab === 'forgeHome') {
@@ -933,7 +940,7 @@ async function run(ctx) {
     }
     return found;
   })()`);
-  const roundTabs = [['home', {}], ['chat', {}], ['agents', {}], ['calendar', {}], ['notes', {}], ['library', { section: 'documents' }], ['tasks', {}], ['tool-store', {}], ['cookbook', {}], ['email', {}], ['school', {}]];
+  const roundTabs = [['home', {}], ['chat', {}], ['calendar', {}], ['notes', {}], ['library', { section: 'documents' }], ['tasks', {}], ['tool-store', {}], ['cookbook', {}], ['email', {}], ['school', {}]];
   for (const [tab, opts] of roundTabs) {
     await navigate(tab, opts); await delay(700);
     eq(await roundOffenders(), [], tab + ' round buttons centre their icons');

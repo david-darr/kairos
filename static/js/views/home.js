@@ -191,7 +191,7 @@ export function render(container, tabId, options = {}) {
   const activity = section("Activity", "Tasks", "tasks", ICONS.tasks);
   const system = section("Systems", "Settings", "settings", ICONS.settings);
   const models = section("Models", "Manage models", "settings", ICONS.brain);
-  const agents = section("Agents", "Agents", "agents", ICONS.agents);
+  const agents = section("Bots", "Bots", "botsHome", ICONS.agents);
   const store = section("Tool Store", "Tool Store", "tool-store", ICONS.store);
   agents.panel.hidden = store.panel.hidden = true;
   system.panel.classList.add("dashboard-wide");

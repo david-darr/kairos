@@ -182,16 +182,20 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     const empty = (await finishes('.empty-state-mascot kairos-mascot'))[0];
     assert.equal(empty.finish, expected('pixel', empty.px), 'the empty state Kip follows the style');
     demoState.empty = false;
+    // A bot's page now lives in Bots mode: its header carries the live Kip, the sidebar row a static face.
+    demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
     await navigate('agents', { agentId: 'a1' });
-    await waitFor("!!document.querySelector('.agent-profile-face kairos-mascot svg')");
-    const bot = async () => js("document.querySelector('.agent-profile-face kairos-mascot svg.ajar').dataset.finish + '|' + document.querySelector('.agents-rail-item[data-key=\"agent:a1\"] .agent-mascot img')?.src.length");
+    await waitFor("!!document.querySelector('.bots-head-pill kairos-mascot svg') && !!document.querySelector('.bots-rail-row[data-agent-id=\"a1\"] .agent-mascot img')");
+    const bot = async () => js("document.querySelector('.bots-head-pill kairos-mascot svg.ajar').dataset.finish + '|' + document.querySelector('.bots-rail-row[data-agent-id=\"a1\"] .agent-mascot img')?.src.length");
     const botPixel = await bot();
     await appearance({ kip: 'flat' }); await delay(300);
     const botFlat = await bot();
     await appearance({ kip: 'hidden' }); await delay(300);
     assert.equal(await bot(), botFlat, 'a bot keeps its own face when Kip is hidden');
     assert.equal(botFlat, botPixel, 'a bot keeps its own face across Kip styles');
-    assert.equal(await js("getComputedStyle(document.querySelector('.agent-profile-face kairos-mascot')).display !== 'none'"), true, 'bot faces stay visible with Kip hidden');
+    assert.equal(await js("getComputedStyle(document.querySelector('.bots-head-pill kairos-mascot')).display !== 'none'"), true, 'bot faces stay visible with Kip hidden');
+    await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+    delete demoState.botsLive; delete demoState.botsAttention;
     // The call screen shows the bot (not Kip) and does not depend on the style.
     assert.ok(await js("import('/static/js/agentCall.js').then(m => typeof m === 'object')"), 'the call module loads');
     await restore();
@@ -400,6 +404,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
 
   await section('home', async () => {
     demoState.isAdmin = true;
+    // The Bots rows below open Bots pages, which the in-memory Bots backend answers.
+    demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
     await homeReady();
     await showEveryCard();
     await navigate('home'); await homeReady();
@@ -413,7 +419,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
       }
     };
     const goesInner = async (label, selector, destination, expectSection) => {
-      await navigate('home'); await homeReady();
+      await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'"); await homeReady();
       await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'}); document.querySelector(${JSON.stringify(selector)}).click()`);
       if (destination === 'settings') {
         await waitFor("!!document.querySelector('.settings-window')?.getClientRects().length && !!document.querySelector('.settings-nav-item.active')");
@@ -424,7 +430,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
         await delay(400);
         return;
       }
-      await waitFor(`document.getElementById('view-content').dataset.view === ${JSON.stringify(destination)}`);
+      await waitFor(`${JSON.stringify(destination.split('|'))}.includes(document.getElementById('view-content').dataset.view)`);
     };
     await goes('Systems chip', '.dashboard-system-chip[data-system=vault]', 'settings');
     await goes('Systems chip (models)', '.dashboard-system-chip[data-system=models]', 'settings');
@@ -435,10 +441,12 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
     await js("document.querySelector('.settings-titlebar-btn[title=Close]').click()"); await delay(400);
     await goes('Model usage link (after Settings was last on Appearance)', '[data-home-section=models] .dashboard-section-header button', 'settings', 'added-models|add-models');
     await goes('Tool Store row', '[data-home-section=store] .dashboard-row', 'tool-store');
-    await goes('Needs you action', '[data-home-section=needs] .hm-live-row .hm-live-copy', 'agents');
+    await goes('Needs you action', '[data-home-section=needs] .hm-live-row .hm-live-copy', 'botsHome|botsShell');
     await goes('Calendar row', '[data-home-section=schedule] .dashboard-row', 'calendar');
     await goes('All chats link', '[data-home-section=chats] .dashboard-section-header button', 'chat');
-    await goes('Agents row', '[data-home-section=agents] .dashboard-row', 'agents');
+    await goes('Bots row', '[data-home-section=agents] .dashboard-row', 'botsShell');
+    await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+    delete demoState.botsLive; delete demoState.botsAttention;
     await restore();
   });
 

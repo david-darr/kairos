@@ -1,183 +1,214 @@
+// Bot birth and first turns, migrated to Bots (Phase 1 check migration; flag --agents-birth-only).
+// Same intent as the old Agents check: one creation dialog behind both entry points, a draft that asks
+// before it is discarded, a name that gates creation, starting roles that fill editable fields, the exact
+// connection/version/effort and look saved at creation, a partly failed creation that keeps the bot, and a
+// first conversation that streams, survives leaving the page, and keeps its text on Stop. Everything runs in
+// Bots mode against the in-memory Bots backend (demoState.botsLive); the check makes its own bot for the
+// conversation and restores its preferences in `finally`.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
+const chatBackend = require('./fixtures/bots-chat-backend.cjs');
 
-module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, liveChunk, liveEvent, liveFinish, liveRuns, capture }) => {
-  // Unit 4-iii, 2026-10-14: drive the real modal and stream registry through
-  // the isolated renderer. These fixtures never send work to the real app.
-  const pressEscape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))");
-  const modal = ".agent-create-dialog";
-  const botBody = "[...document.querySelectorAll('.agent-chat-main .msg.assistant .msg-body')].at(-1)";
-  const botCard = "[...document.querySelectorAll('.agent-chat-main .msg.assistant')].at(-1)";
-  const fill = (selector, value) => js(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); n.value=${JSON.stringify(value)}; n.dispatchEvent(new Event('input',{bubbles:true})); })()`);
-  const sendBot = async text => {
-    await fill('.agent-chat-main .side-chat-input', text);
-    await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
-    await waitFor(`${botCard}?.getAttribute('aria-busy') === 'true'`);
-    // The card turns busy before the start request reaches the test server,
-    // and a chunk sent before then is dropped; wait for the server's run so a
-    // test's next liveChunk always lands (2026-10-14, seen once in ui-smoke).
-    for (let tries = 0; liveRuns && liveRuns.as1?.status !== 'processing'; tries++) {
-      if (tries > 100) throw new Error('The bot turn never reached the test server');
+module.exports = async ({ js, waitFor, delay, navigate, win, base, writes, demoState, capture, liveChunk, liveFinish, liveRuns, liveBroadcast }) => {
+  const q = JSON.stringify;
+  const call = (path, method, body) => js(`fetch(${q(path)}, { method: ${q(method)}, headers: { 'Content-Type': 'application/json' },
+    body: ${body === undefined ? 'undefined' : q(JSON.stringify(body))} }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  const click = selector => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)}); n.click(); return true; })()`);
+  const fill = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)}); n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const select = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); n.value = ${q(value)}; n.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const pressEscape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  const creates = from => writes.slice(from).filter(w => w.path === '/api/agents/configured' && w.method === 'POST');
+  const waitCreate = async from => {
+    for (let i = 0; i < 100; i++) { const hit = creates(from).find(w => w.status); if (hit) return hit; await delay(50); }
+    throw new Error('Timed out waiting for the creation request');
+  };
+  const dialog = '.panel-dialog.bots-create-dialog';
+  const setAdvanced = on => js(`import('/static/js/botsUi.js').then(m => { m.setAdvanced(${on}); return true; })`);
+  const store = () => chatBackend.latest;
+
+  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined, liveHoldIds: undefined });
+  const botsToRemove = [];
+  try {
+    demoState.botsLive = true;
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
+    await js("fetch('/api/agents').then(r => r.json()).then(() => true)");
+    await navigate('botsHome');
+    await waitFor("!!document.querySelector('.bots-home .bots-grid')");
+
+    // 1. Both entry points open one dialog. An untouched dialog closes on Escape and writes nothing.
+    await setAdvanced(false);
+    let mark = writes.length;
+    await click('.bots-home-actions .bots-btn.primary');
+    await waitFor(`!!document.querySelector('${dialog}.simple')`);
+    await capture?.('desktop-bots-birth-dialog');
+    assert.equal(await js(`document.querySelectorAll('${dialog} .bots-swatch').length`), 6, 'creation leads with the six Kip colours');
+    assert.ok(await js(`!!document.querySelector('${dialog} .bots-avatar-face img, ${dialog} img')`), 'creation shows a Kip face');
+    await pressEscape();
+    await waitFor(`!document.querySelector('${dialog}')`);
+    assert.equal(creates(mark).length, 0, 'an untouched Escape creates nothing');
+    await click('.bots-rail-new');
+    await waitFor(`!!document.querySelector('${dialog}.simple')`);
+    await pressEscape();
+    await waitFor(`!document.querySelector('${dialog}')`);
+
+    // 2. In Advanced, a typed draft asks before Escape can discard it; Keep editing keeps it; phone fills the screen.
+    await setAdvanced(true);
+    await click('.bots-home-actions .bots-btn.primary');
+    await waitFor(`!!document.querySelector('${dialog}.advanced .bots-start-list')`);
+    assert.ok(await js(`document.querySelectorAll('${dialog} .bots-text-row, ${dialog} .bots-card-body > *').length >= 8`), 'Advanced creation uses the Bots rows');
+    await fill(`${dialog} input[aria-label=Name]`, 'Temporary');
+    await pressEscape();
+    await waitFor("!!document.querySelector('.confirm-panel')");
+    assert.ok(await js(`!!document.querySelector('${dialog}')`));
+    await click('.confirm-panel .modal-footer .btn:first-child');
+    await waitFor("!document.querySelector('.confirm-panel')");
+    assert.equal(await js(`document.querySelector('${dialog} input[aria-label=Name]').value`), 'Temporary', 'keeping the draft keeps the text');
+    win.setContentSize(390, 844);
+    await delay(300);
+    assert.ok(await js(`(() => { const r = document.querySelector('${dialog}').getBoundingClientRect(); return r.width >= innerWidth - 2 && r.height >= innerHeight * 0.85; })()`), 'creation fills a phone');
+    win.setContentSize(1440, 900);
+    await delay(300);
+    await pressEscape();
+    await waitFor("!!document.querySelector('.confirm-panel')");
+    await click('.confirm-panel .modal-footer .btn:last-child');
+    await waitFor(`!document.querySelector('${dialog}')`);
+    assert.equal(creates(mark).length, 0, 'a discarded draft creates nothing');
+
+    // 3. A name gates creation; a starting role fills editable fields; the exact connection, version, effort and look are saved.
+    await click('.bots-home-actions .bots-btn.primary');
+    await waitFor(`!!document.querySelector('${dialog}.advanced .bots-start-list')`);
+    await fill(`${dialog} input[aria-label=Name]`, '');
+    assert.equal(await js(`document.querySelector('${dialog} .bots-btn.primary').disabled`), true, 'no name, no Create');
+    assert.match(await js(`document.querySelector('${dialog} .bots-validity').textContent`), /name/);
+    await click(`${dialog} .bots-start-row[data-start="starter-researcher"] .bots-start-pick`);
+    const job = await js(`document.querySelector('${dialog} input[aria-label=Job]').value`);
+    assert.match(job, /questions and checks the sources/, 'the Researcher role fills the job');
+    assert.match(await js("document.querySelector('#bots-create-soul textarea').value"), /sources/, 'and the standing instructions');
+    await fill('#bots-create-soul textarea', 'Custom standing text');
+    const botName = `Birth Researcher ${Date.now() % 100000}`;
+    await fill(`${dialog} input[aria-label=Name]`, botName);
+    assert.equal(await js(`document.querySelector('${dialog} .bots-btn.primary').disabled`), false);
+    await select(`${dialog} select[aria-label="Connection"]`, 'm1');
+    await waitFor(`[...document.querySelector('${dialog} select[aria-label="Model version"]').options].some(o => o.value === 'workspace-large')`);
+    assert.ok(await js(`[...document.querySelector('${dialog} select[aria-label="Model version"]').options].some(o => o.textContent === 'Workspace Large')`), 'versions show the catalog names');
+    await select(`${dialog} select[aria-label="Model version"]`, 'workspace-large');
+    await select(`${dialog} select[aria-label="Reasoning"]`, 'high');
+    assert.ok(await js(`document.querySelector('${dialog} .agent-model-summary').textContent.includes('Claude · Workspace Large · high')`), 'the summary shows connection, version and effort');
+    const firstFace = await js(`document.querySelector('${dialog} .agent-avatar-picker-preview img').src`);
+    for (const [key, value] of [['shape', 'tall'], ['body', '#D99A92'], ['accessory', 'scarf']]) await click(`${dialog} [aria-label="Kip ${key}"] [data-value="${value}"]`);
+    assert.notEqual(await js(`document.querySelector('${dialog} .agent-avatar-picker-preview img').src`), firstFace, 'the picker updates the live preview');
+    assert.equal(await js(`document.querySelectorAll('${dialog} [aria-label="Kip body"] [role=radio]').length`), 6, 'the six pastels');
+    await js(`(() => { const pick = document.querySelector('${dialog} [aria-label="Kip shape"] [aria-checked=true]'); pick.focus(); pick.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })); })()`);
+    assert.equal(await js(`document.querySelector('${dialog} [aria-label="Kip shape"] [aria-checked=true]').dataset.value`), 'squircle', 'arrow keys move the radio choice');
+    const before = await js(`document.querySelector('${dialog} .agent-avatar-picker-preview img').src`);
+    await click(`${dialog} .agent-avatar-shuffle`);
+    assert.notEqual(await js(`document.querySelector('${dialog} .agent-avatar-picker-preview img').src`), before, 'Shuffle changes the face');
+    mark = writes.length;
+    await click(`${dialog} .bots-btn.primary`);
+    const made = await waitCreate(mark);
+    const body = JSON.parse(made.body);
+    assert.equal(body.profile.name, botName);
+    assert.equal(body.profile.soul, 'Custom standing text', 'the edited text, not the preset, is saved');
+    assert.deepEqual(body.model, { endpoint_id: 'm1', model_override: 'workspace-large', model_effort: 'high' }, 'creation saves connection, version and reasoning');
+    assert.ok(body.profile.avatar && body.profile.avatar.character, 'creation persists the picker look');
+    await waitFor(`!document.querySelector('${dialog}')`);
+    const bot = demoState.botsCore.agents.find(a => a.name === botName);
+    assert.ok(bot, 'the bot exists');
+    botsToRemove.push(bot.id);
+    assert.equal(bot.endpoint_id, 'm1', 'the stored bot follows the chosen connection');
+    await waitFor(`document.documentElement.dataset.botsAgent === ${q(bot.id)}`);
+
+    // 4. A second write failing is explicit: the warning names it and the bot stays.
+    demoState.botsConfiguredWarnings = ['The routine Daily watch was made but could not be turned on: Routine service unavailable'];
+    await click('.bots-rail-new');
+    await waitFor(`!!document.querySelector('${dialog}.advanced .bots-start-list')`);
+    const survivor = `Routine Survivor ${Date.now() % 100000}`;
+    await fill(`${dialog} input[aria-label=Name]`, survivor);
+    await click('#bots-create-routines .bots-start-more .bots-btn');
+    await fill('#bots-create-routines .bots-routine-card input[aria-label="Routine 1 name"]', 'Daily watch');
+    await fill('#bots-create-routines .bots-routine-card textarea', 'Check for changes');
+    await click(`${dialog} .bots-btn.primary`);
+    await waitFor(`!document.querySelector('${dialog}')`);
+    const survivorBot = demoState.botsCore.agents.find(a => a.name === survivor);
+    assert.ok(survivorBot, 'the bot remains after the routine failed');
+    botsToRemove.push(survivorBot.id);
+    await waitFor("[...document.querySelectorAll('#toast-host .toast.error')].some(n => n.textContent.includes('could not be turned on'))");
+    assert.ok(await js("[...document.querySelectorAll('#toast-host .toast.error')].some(n => n.textContent.includes('Routine Survivor') && n.textContent.includes('was created'))"), 'the notice says the bot was created');
+    await js("document.querySelectorAll('#toast-host .toast').forEach(n => n.remove())");
+    delete demoState.botsConfiguredWarnings;
+
+    // 5-8. A conversation streams, keeps its text across leaving the page, and keeps it on Stop.
+    chatBackend.hooks.live = {
+      start(sid, turnId, prompt) {
+        liveRuns[sid] = { turnId, sessionTitle: 'Chat', prompt, text: '', startedAt: Date.now() / 1000, status: 'processing', stopping: false, permission: null, toolEvents: [], toolSteps: [], handoffs: null, runId: null, error: null, revision: 1 };
+        liveBroadcast({ type: 'started', sessionId: sid, run: structuredClone(liveRuns[sid]) });
+      },
+      finish(sid, status) { liveFinish(sid, status); },
+      text: sid => liveRuns[sid]?.text || '',
+    };
+    const sid = (await call(`/api/agents/${bot.id}/threads`, 'POST', { title: 'Main' })).body.id;
+    store().root();
+    const open = () => navigate('botsShell', { agentId: bot.id, sessionId: sid });
+    const live = '.bots-live', liveBody = `${live} .bots-msg-body`;
+    const send = async text => {
+      await fill('.bots-composer-input', text);
+      await js("document.querySelector('.bots-composer-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))");
+      await waitFor(`!!document.querySelector('${live}')`);
+    };
+    await open();
+    await waitFor("!!document.querySelector('.bots-composer-input')");
+    await send('What changed today?');
+    liveChunk(sid, 'A partial finding');
+    await waitFor(`document.querySelector('${liveBody}')?.textContent.includes('A partial finding')`);
+    assert.ok(await js(`!!document.querySelector('${live} .msg-cursor')`), 'a cursor trails the streaming text');
+    assert.match(await js(`document.querySelector('${live} .bots-live-line')?.textContent || ''`), /\d+s/, 'the working line shows elapsed time');
+    await navigate('home');
+    liveChunk(sid, ' with a conclusion.');
+    await open();
+    await waitFor(`document.querySelector('${liveBody}')?.textContent.includes('A partial finding with a conclusion.')`);
+    store().complete(sid, 'done', liveRuns[sid].text);
+    await waitFor(`!document.querySelector('${live}') && [...document.querySelectorAll('.bots-msg.bot')].some(n => n.textContent.includes('A partial finding with a conclusion.'))`);
+    await send('Stop this turn');
+    liveChunk(sid, 'Saved so far');
+    await waitFor(`document.querySelector('${liveBody}')?.textContent.includes('Saved so far')`);
+    await click('.bots-composer-primary');
+    await waitFor(`!document.querySelector('${live}') && !!document.querySelector('.bots-quiet-row')`);
+    assert.ok(await js("[...document.querySelectorAll('.bots-msg.bot')].some(n => n.textContent.includes('Saved so far'))"), 'Stop keeps what streamed');
+    assert.equal(await js("!!document.querySelector('.msg-cursor')"), false);
+    chatBackend.hooks.live = null;
+
+    // 9. A disabled bot can still be spoken to.
+    demoState.botsCore.agents.find(a => a.id === bot.id).enabled = false;
+    await navigate('home'); await open();
+    await waitFor("!!document.querySelector('.bots-composer-input')");
+    assert.equal(await js("document.querySelector('.bots-composer-input').disabled"), false, 'a switched-off bot can still be talked to');
+    demoState.botsCore.agents.find(a => a.id === bot.id).enabled = true;
+
+    // 10. Ordinary Chats keep their own renderer: each chunk paints at once.
+    demoState.sessionFields = { ...(demoState.sessionFields || {}), s1: { agent_id: null } };
+    demoState.liveHoldIds = ['s1'];
+    await js("localStorage.setItem('kairos:app-mode', 'kairos'); true");
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
+    await navigate('chat');
+    await js("import('/static/js/views/chat.js').then(m => m.openSessionById('s1'))");
+    await waitFor("!!document.querySelector('#chat-input')");
+    await fill('#chat-input', 'Ordinary stream check');
+    const previousTurn = liveRuns.s1?.turnId;
+    await click('#chat-send');
+    for (let tries = 0; liveRuns.s1?.status !== 'processing' || liveRuns.s1.turnId === previousTurn; tries++) {
+      if (tries > 100) throw new Error('The ordinary chat turn never reached the test server');
       await delay(50);
     }
-  };
-
-  // 1-2. Both entry points use one dialog. An untouched Escape writes nothing;
-  // a typed draft asks before Escape can discard it.
-  await navigate('agents');
-  const before = writes.length;
-  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
-  await waitFor(`!!document.querySelector('${modal}')`);
-  await capture?.('desktop-agent-create');
-  assert.ok(await js("!!document.querySelector('.agent-create-dialog .agent-dot-avatar') && !document.querySelector('.agent-create-dialog .agent-portrait')"), 'creation leads with a dot face');
-  assert.ok(await js("document.querySelectorAll('.agent-create-dialog .set-group .set-row').length >= 8"), 'creation uses Settings groups and rows');
-  assert.ok(await js("document.querySelector('.agent-create-dialog [aria-label=\"Bot name\"]')"));
-  await pressEscape();
-  await waitFor(`!document.querySelector('${modal}')`);
-  assert.equal(writes.slice(before).filter(w => w.path === '/api/agents').length, 0);
-  // 2026-10-14: the sidebar's New bot button went with its bot sections;
-  // the Agents tab's own button opens the same modal.
-  await navigate('agents');
-  await waitFor("!!document.querySelector('.agents-welcome-actions .primary')");
-  await js("document.querySelector('.agents-welcome-actions .primary').click()");
-  await waitFor(`!!document.querySelector('${modal}')`);
-  await fill('[aria-label="Bot name"]', 'Temporary');
-  await pressEscape();
-  await waitFor("!!document.querySelector('.confirm-panel')");
-  assert.ok(await js(`!!document.querySelector('${modal}')`));
-  await js("document.querySelector('.confirm-panel .modal-footer .btn').click()");
-  await waitFor("!document.querySelector('.confirm-panel')");
-  assert.ok(await js(`!!document.querySelector('${modal}')`));
-  await win.setSize(390, 844);
-  await delay(250);
-  assert.ok(await js("(() => { const r=document.querySelector('.agent-create-dialog').getBoundingClientRect(); return r.width === innerWidth && r.height === innerHeight; })()"), 'creation fills phone');
-  await win.setSize(1440, 900);
-  await js("document.querySelector('.agent-create-footer .btn:not(.primary)').click()");
-  assert.equal(writes.slice(before).filter(w => w.path === '/api/agents').length, 0);
-
-  // 3-4. Name gates creation. Presets fill editable, visible fields and a
-  // successful create opens the new profile sheet.
-  await navigate('agents');
-  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
-  await waitFor(`!!document.querySelector('${modal}')`);
-  assert.ok(await js("document.querySelector('.agent-create-footer .btn.primary').disabled && document.querySelector('.agent-create-validity').textContent.includes('name')"));
-  await js("[...document.querySelectorAll('.agent-create-presets button')].find(n => n.querySelector('strong')?.textContent === 'Researcher').click()");
-  assert.ok(await js("document.querySelector('.agent-create-preset[aria-pressed=true] strong')?.textContent === 'Researcher'"), 'preset is marked as a choice');
-  assert.ok(await js("document.querySelector('[aria-label=Job]').value.includes('Research') && document.querySelector('.agent-create-dialog [aria-label=Soul]').value.includes('sources')"));
-  await fill('.agent-create-dialog [aria-label=Soul]', 'Custom standing text');
-  await fill('.agent-create-dialog [aria-label="Bot name"]', 'New Researcher');
-  assert.equal(await js("document.querySelector('.agent-create-footer .btn.primary').disabled"), false);
-  // 2026-10-14: both bot editors read versions and effort from the selected
-  // connection's catalog, then submit the exact ID rather than display text.
-  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Connection"]'); n.value='m1'; n.dispatchEvent(new Event('change')); })()`);
-  await waitFor("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-large')");
-  assert.ok(await js("[...document.querySelector('.agent-create-dialog [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Large')"));
-  await js(`(() => { const n=document.querySelector('.agent-create-dialog [aria-label="Model version"]'); n.value='workspace-large'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-create-dialog [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
-  assert.ok(await js("document.querySelector('.agent-create-dialog .agent-model-summary').textContent.includes('Claude · Workspace Large · high')"));
-  // 2026-10-14: every picker dimension changes the live face; the saved spec
-  // is the last previewed combination, including a custom hex color.
-  const originalFace = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
-  for (const [key, value] of [['shape', 'tall'], ['body', '#D99A92'], ['accessory', 'scarf']]) {
-    await js(`document.querySelector('.agent-create-dialog [aria-label="Kip ${key}"] [data-value="${value}"]').click()`);
+    liveChunk('s1', 'Visible before completion');
+    await waitFor("[...document.querySelectorAll('#chat-messages .msg.assistant')].at(-1)?.textContent.includes('Visible before completion')");
+    liveFinish('s1');
+    console.log('PASS: bot birth and first turns in Bots (10 cases).');
+  } finally {
+    chatBackend.hooks.live = null;
+    delete demoState.botsConfiguredWarnings;
+    win.setContentSize(1440, 900);
+    await restore();
   }
-  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), originalFace, 'picker updates live preview');
-  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Kip body\"] [role=radio]').length"), 6, 'the six pastels, no free colour');
-  assert.equal(await js("document.querySelectorAll('.agent-create-dialog [aria-label=\"Kip accessory\"] [role=radio]').length"), 6, 'none and five accessories');
-  assert.equal(await js("!!document.querySelector('.agent-create-dialog [aria-label^=\"Avatar \"]')"), false, 'the dot-face picker is gone');
-  await js("(() => { const pick=document.querySelector('.agent-create-dialog [aria-label=\"Kip shape\"] [aria-checked=true]'); pick.focus(); pick.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
-  assert.equal(await js("document.querySelector('.agent-create-dialog [aria-label=\"Kip shape\"] [aria-checked=true]').dataset.value"), 'squircle', 'arrow moves radio selection');
-  const beforeShuffle = await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src");
-  await js("document.querySelector('.agent-create-dialog .agent-avatar-shuffle').click()");
-  assert.notEqual(await js("document.querySelector('.agent-create-dialog .agent-avatar-picker-preview img').src"), beforeShuffle, 'Shuffle changes the face');
-  const expectedAvatar = await js("JSON.parse(document.querySelector('.agent-create-dialog .agent-dot-avatar').dataset.avatarSpec)");
-  const createStart = writes.length;
-  await js("document.querySelector('.agent-create-footer .btn.primary').click()");
-  await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
-  assert.ok(writes.slice(createStart).some(w => w.path === '/api/agents' && JSON.parse(w.body).soul === 'Custom standing text'));
-  assert.deepEqual(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body).avatar, expectedAvatar, 'creation persists the picker spec');
-  assert.deepEqual((({endpoint_id, model_override, model_effort}) => ({endpoint_id, model_override, model_effort}))(JSON.parse(writes.slice(createStart).find(w => w.path === '/api/agents').body)),
-    {endpoint_id:'m1', model_override:'workspace-large', model_effort:'high'}, 'creation saves connection, version and reasoning');
-  assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'New Researcher');
-  assert.ok(await js("!!document.querySelector('.agent-profile-sheet .agent-dot-avatar')"), 'profile uses the dot component');
-  await capture?.('desktop-agent-profile');
-
-  // 5. Failure of the second write is explicit while the bot remains in the
-  // list and its profile opens. The fixture deliberately does not roll back.
-  demoState.failFirstRoutine = true;
-  await navigate('agents');
-  await js("document.querySelector('.agents-rail-create [aria-label=\"New agent\"]').click()");
-  await waitFor(`!!document.querySelector('${modal}')`);
-  await fill('.agent-create-dialog [aria-label="Bot name"]', 'Routine Survivor');
-  await fill('.agent-create-dialog [aria-label="Routine name"]', 'Daily watch');
-  await fill('.agent-create-dialog [aria-label="What to check"]', 'Check for changes');
-  const routineStart = writes.length;
-  await js("document.querySelector('.agent-create-footer .btn.primary').click()");
-  await waitFor("!!document.querySelector('.agent-create-notice')");
-  assert.ok(agents.some(a => a.name === 'Routine Survivor'));
-  assert.ok(await js("document.querySelector('.agent-create-notice').textContent.includes('not created')"));
-  assert.ok(await js("document.querySelector('.agent-profile-sheet:not([hidden]) .agent-create-notice')"));
-  assert.ok(writes.slice(routineStart).some(w => /\/api\/agents\/a\d+\/goals/.test(w.path)));
-  assert.equal(await js("document.querySelector('.agent-profile-titlebar h2').textContent"), 'Routine Survivor');
-  const expectedRoutineErrors = ['Routine service unavailable', 'Routine Survivor was created, but the first routine was not: 500: Routine service unavailable'];
-  const routineErrors = "[...document.querySelectorAll('#toast-host .toast.error')]";
-  await waitFor(`${routineErrors}.length === 2`);
-  assert.deepEqual(await js(`${routineErrors}.map(n => n.textContent).sort()`), [...expectedRoutineErrors].sort(), 'routine failure shows both expected errors');
-  await js(`${routineErrors}.forEach(n => n.click())`);
-  await waitFor(`!${routineErrors}.some(n => ${JSON.stringify(expectedRoutineErrors)}.includes(n.textContent))`);
-  demoState.failFirstRoutine = false;
-
-  // 6-10. One bot session has agent_id. The registry keeps its run while the
-  // pane is absent; the reply streams into the bot body as it arrives (2026-10-28), and Stop keeps it.
-  demoState.sessionFields = { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } };
-  demoState.liveHoldIds = ['as1', 's1'];
-  await navigate('agents', { agentId: 'a1' });
-  await waitFor("!!document.querySelector('.agent-chat-main .side-chat-input')");
-  await sendBot('What changed today?');
-  liveChunk('as1', 'A partial finding');
-  liveEvent('as1', 'tool_step', { id: 'read-1', phase: 'started', name: 'read_file', summary: 'Read notes', ok: true });
-  await waitFor(`${botCard}?.querySelector('.agent-turn-verb')?.textContent === 'Reading'`);
-  assert.ok(await js(`${botCard}?.querySelector('.agent-dot-avatar')`));
-  await waitFor(`${botBody}?.textContent.includes('A partial finding')`);  // visible while processing
-  assert.ok(await js(`!!${botBody}?.querySelector('.msg-cursor')`), 'cursor trails the streaming text');
-  const firstTime = await js(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent`);
-  await waitFor(`${botCard}?.querySelector('.agent-turn-elapsed')?.textContent !== ${JSON.stringify(firstTime)}`);
-  assert.ok(true, 'elapsed time ticks');
-  liveEvent('as1', 'tool_step', { id: 'read-1', phase: 'finished', name: 'read_file', summary: 'Read notes', ok: true, output: 'Done reading' });
-  liveEvent('as1', 'tool_step', { id: 'search-2', phase: 'finished', name: 'search', summary: 'Search failed', ok: false, output: 'Unavailable' });
-  await waitFor(`${botCard}?.querySelectorAll('.agent-turn-step').length === 2`);
-  assert.deepEqual(await js(`[...${botCard}.querySelectorAll('.agent-turn-step')].map(n => n.open)`), [false, true]);
-  await navigate('home');
-  liveChunk('as1', ' with a conclusion.');
-  await navigate('agents', { agentId: 'a1' });
-  await waitFor(`${botCard}?.querySelector('.agent-turn-working:not([hidden])')`);
-  await waitFor(`${botBody}?.textContent.includes('A partial finding with a conclusion.')`);  // visible after leaving and returning
-  liveFinish('as1');
-  await waitFor(`${botBody}?.textContent.includes('A partial finding with a conclusion.') && !${botBody}.querySelector('.msg-cursor')`);
-  assert.deepEqual(await js(`[...${botCard}.querySelectorAll('.agent-turn-step')].map(n => n.open)`), [false, true]);
-  await sendBot('Stop this turn');
-  liveChunk('as1', 'Saved so far');
-  await js("document.querySelector('.agent-chat-main .side-chat-send').click()");
-  await waitFor(`${botCard}?.textContent.includes('Stopped')`);
-  await waitFor(`${botBody}?.textContent.includes('Saved so far')`);
-
-  // 7. The main Chats view still paints each chunk immediately.
-  await navigate('chat');
-  await js("import('/static/js/views/chat.js').then(m => m.openSessionById('s1'))");
-  await waitFor("!!document.querySelector('#chat-input')");
-  await fill('#chat-input', 'Ordinary stream check');
-  await js("document.querySelector('#chat-send').click()");
-  await waitFor("!![...document.querySelectorAll('#chat-messages .msg.user')].find(n => n.textContent.includes('Ordinary stream check'))");
-  liveChunk('s1', 'Visible before completion');
-  await waitFor("[...document.querySelectorAll('#chat-messages .msg.assistant')].at(-1)?.textContent.includes('Visible before completion')");
-  liveFinish('s1');
-
-  // 11. Direct conversation remains available with a quiet scheduling line.
-  agents[0].enabled = false; agents[0].status = 'off';
-  await navigate('agents', { agentId: 'a1' });
-  await waitFor("!!document.querySelector('.agent-chat-honesty')");
-  assert.ok(await js("document.querySelector('.agent-chat-honesty').textContent.includes('answer here')"));
-  agents[0].enabled = true; agents[0].status = 'needs_you';
-  await navigate('home'); await navigate('agents', { agentId: 'a1' });
-  assert.equal(await js("!!document.querySelector('.agent-chat-honesty')"), false);
-  delete demoState.liveHoldIds;
-  console.log('PASS: agent birth and turns (12 cases).');
 };

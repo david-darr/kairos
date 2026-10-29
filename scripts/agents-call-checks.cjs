@@ -1,8 +1,28 @@
+// Calls through Bots (migrated from the Agents call check, Phase 1; flag --agents-call-only). The call dialog,
+// microphone, recognition, voices and summaries are the existing call behaviour, now reached from the Bots conversation
+// composer. Paid-call consent and the summary-only transcript assertions are kept: raw call dialogue never enters the
+// bot's conversation transport (/api/bot-chat), only the saved summary appears in the conversation. The "first chat
+// creation" race of the old check became the same race on the call record's creation, because a Bots conversation
+// already exists when a call starts. The check makes its own bot and conversation and restores everything in `finally`.
 const assert = require('node:assert/strict');
-module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,liveChange}) => {
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
+module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,liveChange,base}) => {
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
-  await navigate('agents',{agentId:'a1'});
-  await waitFor("!!document.querySelector('.agent-call-open') && !!document.querySelector('.side-chat-input')");
+  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined });
+  const callApi = (path, method, body) => js(`fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body))} }).then(r => r.json())`);
+  let BOT = '', SID = '';
+  const openBot = () => navigate('agents',{agentId:BOT,sessionId:SID});
+  try {
+  demoState.botsLive = true;
+  await win.loadURL(base);
+  await waitFor("!!document.querySelector('.dashboard-core')");
+  await js("fetch('/api/agents').then(r => r.json()).then(() => true)");
+  BOT = (await callApi('/api/agents', 'POST', { name: `Call Probe ${Date.now() % 100000}` })).id;
+  SID = (await callApi(`/api/agents/${BOT}/threads`, 'POST', { title: 'Main' })).id;
+  require('./fixtures/bots-chat-backend.cjs').latest.root();
+  await openBot();
+  await waitFor("!!document.querySelector('.agent-call-open') && !!document.querySelector('.bots-composer-input')");
+  await js(`window.__callBot = ${JSON.stringify(BOT)}; window.__callSid = ${JSON.stringify(SID)}; true`);
   await js(String.raw`(async()=>{
     window.__callTest={level:0,opened:0,closed:0,played:0,calls:{},callTurns:[],callEnds:[],callStops:[],callCounter:0,paused:0,urls:[],transcripts:0,wavBodies:[],fetch:window.fetch,utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia};
     const ctx=window.__callTest.inputContext=new AudioContext({sampleRate:16000});
@@ -22,7 +42,11 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       if(path==='/api/agent-calls/live-choices')return json([]);
       if(path==='/api/agent-calls/voices')return json({url:'',protocol:'voicestudio',models:[],voices:[]});
       if(path.startsWith('/api/agent-calls/pending/'))return json([]);
-      if(path==='/api/agent-calls') {const id=String(++t.callCounter).padStart(32,'0');const value={id,parent_id:JSON.parse(options.body).parent_id,ended:false,summary_state:'open',jobs:[]};t.calls[id]=value;return json(value);}
+      if(path==='/api/agent-calls') {
+        const make=()=>{const id=String(++t.callCounter).padStart(32,'0');const value={id,parent_id:JSON.parse(options.body).parent_id,ended:false,summary_state:'open',jobs:[]};t.calls[id]=value;return json(value);};
+        if(t.holdCreation){t.creationPending=true;return new Promise(resolve=>t.releaseCreation=()=>resolve(make()));}
+        return make();
+      }
       const match=path.match(/^\/api\/agent-calls\/([0-9]+)(?:\/(.*))?$/);
       if(match){const call=t.calls[match[1]], action=match[2];
         if(!action)return json(call);
@@ -43,25 +67,21 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       if(String(url)==='/api/speech/status') return new Response(JSON.stringify({engine_available:true,active_model:window.__callTest.missingModel?null:'base.en',call_model:'small.en',acceleration:{supported:true,configured:false},models:[{name:'base.en',label:'Base',size_mb:142,downloaded:!window.__callTest.missingModel},{name:'small.en',label:'Small',size_mb:466,downloaded:!window.__callTest.missingModel}]}),{headers:{'Content-Type':'application/json'}});
       if(String(url)==='/api/speech/prepare') {window.__callTest.prepared=JSON.parse(options.body).model;return new Response(JSON.stringify({model:window.__callTest.prepared,engine:'cpu',prepare_ms:12}),{headers:{'Content-Type':'application/json'}});}
       if(String(url).endsWith('/progress')&&String(url).startsWith('/api/speech/models/')) {window.__callTest.missingModel=false;return new Response(JSON.stringify({done:true}),{headers:{'Content-Type':'application/json'}});}
-      if(String(url).endsWith('/api/agents/a1/chat') && window.__callTest.holdCreation) {
-        window.__callTest.creationPending=true;
-        return new Promise(resolve=>window.__callTest.releaseCreation=()=>resolve(window.__callTest.fetch.call(window,url,options)));
-      }
       if(String(url)==='/api/speech/transcribe') {
         const bytes=new Uint8Array(await options.body.get('audio').arrayBuffer());window.__callTest.wavHeader=String.fromCharCode(...bytes.slice(0,4));window.__callTest.wavRate=new DataView(bytes.buffer).getUint32(24,true);window.__callTest.transcribedModel=options.body.get('model');window.__callTest.wavBodies.push(Array.from(bytes));window.__callTest.transcripts++;
         const recognized=window.__callTest.nextText||'Please explain the new layout.';
         if(window.__callTest.holdTranscription)await new Promise(resolve=>window.__callTest.releaseTranscription=resolve);
         return new Response(JSON.stringify({text:recognized,timings:{recognition_ms:14,queue_ms:0}}),{headers:{'Content-Type':'application/json'}});
       }
-      if(path.startsWith('/api/sessions/')&&(!options||!options.method||options.method==='GET')){
+      if(path.startsWith('/api/bot-chat/')&&path.includes('/messages')&&(!options||!options.method||options.method==='GET')&&!/[?&](before|around)=/.test(path)){
         const response=await t.fetch.call(window,url,options), data=await response.json();
-        if(Array.isArray(data.messages))for(const call of Object.values(t.calls))if(call.ended&&path==='/api/sessions/'+call.parent_id)data.messages.push({role:'assistant',content:call.summary,call_summary_id:call.id,ts:Date.now()/1000});
+        if(Array.isArray(data.messages))for(const call of Object.values(t.calls))if(call.ended&&path.startsWith('/api/bot-chat/'+call.parent_id+'/messages'))data.messages.push({id:'call-summary-'+call.id,role:'assistant',content:call.summary,call_summary_id:call.id,ts:Date.now()/1000,attachments:[],citations:[]});
         return json(data);
       }
       return window.__callTest.fetch.call(window,url,options);
     };
-    localStorage.setItem('kairos:call-conversation:a1',JSON.stringify({endpoint:'fast',model:'llama3.2'}));
-    document.querySelector('.side-chat-input').value='My typed draft stays';
+    localStorage.setItem('kairos:call-conversation:'+window.__callBot,JSON.stringify({endpoint:'fast',model:'llama3.2'}));
+    const input=document.querySelector('.bots-composer-input');input.value='My typed draft stays';input.dispatchEvent(new Event('input',{bubbles:true}));
   })()`);
   await click('.agent-call-open'); await waitFor("document.querySelector('.agent-call').open");
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
@@ -114,10 +134,10 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js('window.__callTest.transcripts'),2,'Continued speech is retained during transcription');
   assert.ok(await js("window.__callTest.callTurns.some(t=>t.text==='Please explain the new layout. And keep the rest of my sentence.')"),'Sentence continuations become one call-owned turn');
   assert.ok(await js("(()=>{const bytes=Uint8Array.from(window.__callTest.wavBodies[0]);const v=new DataView(bytes.buffer);let quiet=0;for(let at=44;at<bytes.length;at+=2){const s=Math.abs(v.getInt16(at,true))/32768;if(s>.01)break;if(s>.0005&&s<.003)quiet++;}return quiet>1000})()"),'Actual browser capture retains the quiet word beginning');
-  assert.equal(writes.filter(w=>w.path==='/api/chat/live').length,0,'Call dialogue never enters the ordinary agent chat transport');
-  assert.ok(await js("!document.querySelector('.session-chat-messages').textContent.includes('Please explain the new layout.')"),'Raw call dialogue is absent from the main DM');
+  assert.equal(writes.filter(w=>w.path==='/api/chat/live'||w.path==='/api/bot-chat/'+SID+'/send').length,0,'Call dialogue never enters the ordinary bot chat transport');
+  assert.ok(await js("!document.querySelector('.bots-log').textContent.includes('Please explain the new layout.')"),'Raw call dialogue is absent from the conversation');
   assert.ok(await js("JSON.parse(document.querySelector('.agent-call').dataset.callTimings).end_to_audio_ms>=0"),'Speech end to first playback is measured');
-  assert.equal(await js("document.querySelector('.side-chat-input').value"),'My typed draft stays','Voice leaves typed drafts intact');
+  assert.equal(await js("document.querySelector('.bots-composer-input').value"),'My typed draft stays','Voice leaves typed drafts intact');
   await waitFor('window.__callTest.played>=1');
   assert.equal(await js('window.__callTest.wavHeader'),'RIFF','Native recognition receives WAV rather than browser WebM');
   assert.equal(await js('window.__callTest.wavRate'),16000,'The actual AudioWorklet captures directly at 16 kHz');
@@ -150,14 +170,15 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   win.setContentSize(375,812);await delay(100);
   await click('.agent-call .is-end');
   assert.ok(await js("!document.querySelector('.agent-call').open && window.__callTest.closed===2"),'End call releases the microphone');
-  await waitFor("document.querySelectorAll('[data-call-summary]').length===1");
-  assert.ok(await js("document.querySelector('[data-call-summary]').textContent.includes('Discussed the new layout.')"),'Only the final summary appears in the main DM');
+  const summaries="[...document.querySelectorAll('.bots-log .bots-msg.bot')].filter(n=>n.textContent.includes('Call summary'))";
+  await waitFor(`${summaries}.length===1`);
+  assert.ok(await js(`${summaries}[0].textContent.includes('Discussed the new layout.')`),'Only the final summary appears in the conversation');
   await js("Object.values(window.__callTest.calls)[0].summary='**Call summary** Updated verified work result.';true;");
   // The saved card is updated through the same callback used by the live
   // work watcher, without repainting the chat or replacing typed drafts.
   await js("document.querySelector('.agent-call-open').click();true;");
   await click('.agent-call .agent-call-header button:last-child');
-  assert.equal(await js("document.querySelectorAll('[data-call-summary]').length"),1,'Reopening setup does not duplicate a summary card');
+  assert.equal(await js(`${summaries}.length`),1,'Reopening setup does not duplicate a summary card');
   await js('window.__callTest.holdReply=true');
   await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
@@ -168,14 +189,14 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await click('.agent-call-controls button:nth-child(4)');
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
   assert.ok(await js('window.__callTest.callStops.length>0'),'Interrupt targets the call-owned reply');
-  assert.equal(writes.filter(w=>w.path==='/api/chat/live/stop').length,0,'Interrupt leaves ordinary typed agent work alone');
+  assert.equal(writes.filter(w=>w.path==='/api/chat/live/stop'||w.path==='/api/bot-chat/'+SID+'/interrupt').length,0,'Interrupt leaves ordinary typed bot work alone');
   await js('window.__callTest.holdReply=false');
   await click('.agent-call .is-end');
   await click('.agent-call-open'); await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
   await navigate('home');
-  assert.ok(await js("!document.querySelector('.agent-call') && window.__callTest.opened===window.__callTest.closed"),'Leaving agents tears down dialog and every microphone track');
-  await navigate('agents',{agentId:'a1'});await waitFor("!!document.querySelector('.agent-call-open')");
+  assert.ok(await js("!document.querySelector('.agent-call') && window.__callTest.opened===window.__callTest.closed"),'Leaving the bot tears down dialog and every microphone track');
+  await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await js("window.__callTest.holdCreation=false;window.__callTest.holdTranscription=true;window.__callTest.nextText='Discard this interrupted sentence.';true;");
   await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
@@ -188,7 +209,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js('window.__callTest.callTurns.length'),interruptedTurns,'An interrupted transcription cannot submit late text');
   assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'listening','Interrupt resumes microphone capture');
   await navigate('home');
-  await navigate('agents',{agentId:'a1'});await waitFor("!!document.querySelector('.agent-call-open')");
+  await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   await js("document.querySelector('[aria-label=\"Call input mode\"]').value='hold';window.__callTest.nextText='Keep my complete sentence with its pause.';document.querySelector('.agent-call-setup').requestSubmit();true;");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
@@ -212,8 +233,8 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   win.setContentSize(812,375);await delay(150);await capture('agents-call-hold-landscape');
   assert.ok(await js("(()=>{const r=document.querySelector('.agent-call-hold').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()"),'Hold button stays visible in landscape');
   await navigate('home');
-  await js("window.localStorage.removeItem('kairos:call-input:a1');true;");
-  await js('window.__callTest.missingModel=true');await navigate('agents',{agentId:'a1'});await waitFor("!!document.querySelector('.agent-call-open')");
+  await js("window.localStorage.removeItem('kairos:call-input:'+window.__callBot);true;");
+  await js('window.__callTest.missingModel=true');await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await click('.agent-call-open');await waitFor("document.querySelector('.agent-call-readiness').textContent.includes('Download the selected')");
   assert.ok(await js("document.querySelector('.agent-call-setup button[type=submit]').disabled"),'Missing model has an honest setup state');
   const downloadsBefore=writes.filter(w=>w.path.includes('/speech/models/')&&w.path.endsWith('/download')).length;
@@ -222,8 +243,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   assert.equal(writes.filter(w=>w.path.includes('/speech/models/')&&w.path.endsWith('/download')).length,downloadsBefore+1,'User can set up native speech inside the call screen');
   await navigate('home');
-  demoState.sidebarBotSessions={a1:[]};
-  await navigate('agents',{agentId:'a1'});await waitFor("!!document.querySelector('.agent-call-open')");
+  await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await js('window.__callTest.holdCreation=true;window.__callTest.creationPending=false;true;');
   const lateTurns=await js('window.__callTest.callTurns.length');
   const lateOpened=await js('window.__callTest.opened');
@@ -231,10 +251,10 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await waitFor('window.__callTest.creationPending');
   await click('.agent-call .agent-call-header button:last-child');
   await js('window.__callTest.releaseCreation();window.__callTest.holdCreation=false;true;');await delay(350);
-  assert.equal(await js('window.__callTest.callTurns.length'),lateTurns,'Hangup during first-chat creation cannot submit a late voice turn');
-  assert.equal(await js('window.__callTest.opened'),lateOpened,'Late session creation cannot reopen the microphone');
+  assert.equal(await js('window.__callTest.callTurns.length'),lateTurns,'Hangup during call creation cannot submit a late voice turn');
+  assert.equal(await js('window.__callTest.opened'),lateOpened,'Late call creation cannot reopen the microphone');
   assert.ok(await js('Object.values(window.__callTest.calls).every(c=>c.ended)'),'Every call record is finalized after cancellation or navigation');
-  await navigate('home');delete demoState.sidebarBotSessions;
+  await navigate('home');
   await js(String.raw`(async()=>{
     const {neuralSpeaker}=await import('/static/js/callVoice.js');
     const original=window.fetch;window.__neural={started:0,ended:0,errors:[],requests:[]};
@@ -272,4 +292,9 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js(`navigator.mediaDevices.getUserMedia=window.__callTest.getUserMedia;window.__callTest.destination.stream.getTracks().forEach(t=>t.stop());window.__callTest.inputContext.close();window.SpeechSynthesisUtterance=window.__callTest.utterance;if(window.__callTest.synthesis)Object.defineProperty(window,'speechSynthesis',window.__callTest.synthesis);else delete window.speechSynthesis;window.fetch=window.__callTest.fetch;true;`);
   win.setContentSize(1440,900);
   console.log('PASS Agent calls: actual AudioWorklet/PCM, quiet pre-roll, transcription/thinking continuations, selected model/warmup, call-owned streaming/draft controls, echo gate, phone/themes/reduced motion and cancellation (synthetic microphone; mocked recognition/voice).');
+  } finally {
+    win.setContentSize(1440,900);
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]}).catch(()=>{});
+    await restore();
+  }
 };

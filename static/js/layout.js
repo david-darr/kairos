@@ -13,7 +13,7 @@ export const HOME_SECTIONS = [
   { id: "stats", label: "Summary numbers" },
   { id: "chats", label: "Recent chats" },
   { id: "schedule", label: "Upcoming" },
-  { id: "agents", label: "Agents" },
+  { id: "agents", label: "Bots" },
   { id: "models", label: "Models" },
   { id: "store", label: "Tool Store" },
   { id: "projects", label: "Projects" },
@@ -26,13 +26,13 @@ export const HOME_SECTIONS = [
 export const ALWAYS_SHOWN = "home";
 
 const DEFAULT_GROUPS = {
-  main: ["home", "chat", "agents"],
+  main: ["home", "chat"],
   workspace: ["notes", "library", "calendar", "email", "tasks"],  // Designs live in Library (2026-10-22).
   intelligence: ["tool-store", "cookbook"],
 };
 // The desktop sidebar's pinned strip (desktop redesign, 2026-10-28): tab
 // icons under Search, chosen in Settings > Layout or the strip's Edit.
-export const DEFAULT_PINS = ["agents", "notes", "library", "calendar", "email", "tasks"];
+export const DEFAULT_PINS = ["notes", "library", "calendar", "email", "tasks"];
 const defaults = () => ({
   groups: structuredClone(DEFAULT_GROUPS), hiddenTabs: [], pinned: DEFAULT_PINS.slice(),
   home: HOME_SECTIONS.map((s) => s.id), hiddenHome: ["needs", "working"],

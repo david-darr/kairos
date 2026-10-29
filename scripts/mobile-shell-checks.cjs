@@ -216,15 +216,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.querySelector('.ms-tabbar [data-tabbar=more]').focus(); document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
   await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   await delay(400);
-  const onBar = ['home', 'chat', 'agents', 'calendar'];
+  const onBar = ['home', 'chat', 'calendar'];
   const navTabs = (await js("[...document.querySelectorAll('#nav .nav-item')].map(n => n.dataset.tab)")).filter(t => !onBar.includes(t));
   const tiles = await js("[...document.querySelectorAll('.ms-tab-sheet .ms-tab-tile')].map(n => n.dataset.tab || n.textContent.trim())");
   assert.deepEqual(tiles, navTabs, 'Tiles follow the sidebar order, less the tabs on the bar');
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-tab-grid')].map(n => getComputedStyle(n).gridTemplateColumns.split(' ').length)"), [4, 4], 'Workspace and Intelligence each use the MoreSheet board\'s four columns');
   assert.equal(await js("document.querySelector('.ms-tab-sheet').getAttribute('aria-modal')"), 'true');
   assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=more]').getAttribute('aria-expanded')"), 'true', 'More announces the open sheet');
-  // The bar's Agents mirrors the sidebar badge, whatever count earlier checks left in the inbox.
-  assert.equal(await js("(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-tabbar [data-tabbar=agents] .ms-tabbar-badge'))"), await js("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent.trim() || ''"), 'The Agents item on the bar shows the sidebar badge');
+  // Agents became the Bots mode: neither the bar nor the sidebar carries an Agents item or badge.
+  assert.equal(await js("!!document.querySelector('.ms-tabbar [data-tabbar=agents]') || !!document.querySelector('#nav .nav-item[data-tab=agents]')"), false, 'There is no Agents item on the bar or in the sidebar');
   assert.ok(await js("[...document.querySelectorAll('.ms-tab-sheet .ms-account-row')].some(n => n.textContent.trim() === 'Settings')"), 'Settings row is present');
   assert.deepEqual(await small(), [], 'Tab sheet targets are at least 44px');
   assert.deepEqual(await overflow(), []);

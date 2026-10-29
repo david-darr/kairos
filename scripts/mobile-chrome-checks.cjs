@@ -1,7 +1,10 @@
 // Run through ui-smoke.cjs --mobile-chrome-only. Uses the isolated fixture API,
 // real layout and native-like insets; no live chat/account is contacted.
 const assert = require('node:assert/strict');
-module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }) => {
+module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow, demoState }) => {
+  // Agents became the Bots mode (2026-10-29): the Bots roster and a bot's page take the Agents tab's place below.
+  const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention };
+  demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
   const visibleBelow = async (selector, top, label) => {
     assert.equal(await js(`(() => {const n=document.querySelector(${JSON.stringify(selector)});
       if (!n) return false; const r=n.getBoundingClientRect();
@@ -21,12 +24,21 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await js(`['top','bottom','left','right'].forEach((s,i)=>document.documentElement.style.setProperty('--native-safe-'+s, [${top},${bottom},${side},${side}][i]+'px'))`);
     await delay(350);
     assert.equal(await js("document.querySelector('.ms-global-frost').getBoundingClientRect().top === 0 && getComputedStyle(document.querySelector('.ms-global-frost i')).backgroundColor === 'rgba(0, 0, 0, 0)'"), true, name + ' untinted frost begins at y=0');
-    for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'agents']) {
+    for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'botsHome']) {
       await navigate(tab); await delay(300);
       await visibleBelow('.ms-tabbar', top + 5, tab + ' tab bar sits on screen, clear of the status area');
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
+    await navigate('agents', { agentId: 'a1' });
+    await waitFor("document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-composer-input')");
+    await delay(300);
+    await visibleBelow('.bots-head-back', top + 5, name + ' bot back clears status area');
+    await visibleBelow('.bots-head-pill', top + 5, name + ' bot name card clears status area');
+    await visibleBelow('.bots-composer', 0, name + ' bot composer is on screen');
+    assert.equal(await js(`document.querySelector('.bots-composer').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' bot composer clears the home indicator inset');
+    assert.deepEqual(await overflow(), [], name + ' bot page fits');
+    await capture(name + '-bot-safe-area');
     await navigate('library', { section: 'documents' });
     await waitFor("!!document.querySelector('.library-document-card')");
     await js("document.querySelector('.library-document-card').click()");
@@ -95,6 +107,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
   // Hiding the scrollbar must not disable scrolling or hold a page below the scrim.
   await navigate('home'); await delay(300);
   assert.equal(await js("!document.querySelector('.ms-your-day')"), true, 'Dashboard has no Your day toggle');
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
   assert.equal(await js(`(() => {const v=document.getElementById('view-content');
     const spacer=document.createElement('div');spacer.style.cssText='height:1600px;flex:none';v.append(spacer);
     v.scrollTop=0;const heading=v.querySelector('.hm-heading, .dashboard-header'), before=heading.getBoundingClientRect().top;

@@ -230,9 +230,16 @@ export function mountAttentionHost({ parent = hasDom ? document.body : null, pol
         names: async () => { try { return Object.fromEntries((await get('/api/agents')).map(a => [a.id, a.name])); } catch { return {}; } },
         focusedAgentId: () => (document.hasFocus() ? document.querySelector('[data-bots-agent-id]')?.dataset.botsAgentId || null : null),
         focusedSessionId: () => (document.hasFocus() ? document.querySelector('[data-bots-session-id]')?.dataset.botsSessionId || null : null),
-        show: note => {
+        show: async note => {
           if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-          const shown = new Notification(note.title, { body: note.body, tag: `kairos-bot-${note.agentId}` });
+          // The icon is the bot's own face in its needs-you pose (Kairos Mascot build spec), rasterized once per look.
+          let face = null;
+          try {
+            const [{ mascotPng }, { avatarSpec }, agents] = await Promise.all([import('./mascot.js'), import('./agentAvatar.js'), get('/api/agents')]);
+            const agent = (Array.isArray(agents) ? agents : []).find(a => a.id === note.agentId);
+            face = await mascotPng(avatarSpec(agent || { id: note.agentId }), note.kind === 'needs_you' ? 'needs' : 'success', 64);
+          } catch { /* A notification without its face is still a notification. */ }
+          const shown = new Notification(note.title, { body: note.body, tag: `kairos-bot-${note.agentId}`, ...(face ? { icon: face } : {}) });
           shown.onclick = () => { window.focus?.(); openTarget(note.target) || openTarget({ tab: 'botsShell', agentId: note.agentId }); shown.close(); };
         },
       });

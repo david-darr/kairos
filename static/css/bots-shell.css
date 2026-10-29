@@ -164,8 +164,10 @@
 
   [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
   [data-app-mode="bots"] .bots-shell-header { padding: calc(8px + var(--mobile-safe-top, 0px)) 12px 8px; }
-  [data-app-mode="bots"] .bots-head-back { display: grid; width: 44px; height: 44px; margin-left: -8px; }
-  [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; }
+  [data-app-mode="bots"] .bots-head-back { display: grid; flex: none; width: 44px; height: 44px; margin-left: -8px; }
+  [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+  /* The job is Advanced-only and long; on a phone it would push the Conversations button off screen. */
+  [data-bots-interface="advanced"][data-app-mode="bots"] .bots-head-role:not(:empty) { display: none; }
   [data-app-mode="bots"] .bots-head-status { display: none; }
   [data-app-mode="bots"] .bots-head-convos { width: 44px; height: 44px; }
   [data-app-mode="bots"] .bots-convos { top: calc(60px + var(--mobile-safe-top, 0px)); right: 12px; }

@@ -1,162 +1,177 @@
+// Bot profile and draft retention, migrated to the Bots panel (Phase 1 check migration; flag --agents-profile-only).
+// The old check drove the Agents profile sheet; the same intents now run in the real Bots page and panel
+// (navigate('agents', { agentId, profile: true }) lands in the panel): a Memory draft that survives a real poll,
+// keeps focus and its caret and is saved by choice; the exact connection, version and reasoning saved by the Model
+// section; the look saved from Identity; the peer allow-list saved by id; field limits; the standing instructions
+// counted in UTF-8 bytes; settings search; SOUL.md drift with a stale apply refused; Escape and phone behaviour; and a
+// default look that does not change between reloads. The inbox answer and review approval the old check also covered
+// belong to the Bots inbox and are asserted in bots-attention-checks.cjs. It makes its own bots and removes nothing it
+// did not make; preferences are restored in `finally`.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
-module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, agents, win, capture }) => {
-  // 2026-10-13: use the real ten-second poll. The old Work redraw replaced
-  // this textarea, so a slow draft vanished without any click from the user.
-  await navigate('agents', { agentId: 'a2', agentTab: 'memory' });
-  await waitFor("!!document.querySelector('.agent-memory')");
-  await js(`(() => { const area = document.querySelector('.agent-memory'); area.focus(); area.value = 'Half-typed memory draft'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await delay(10600);
-  assert.equal(await js("document.querySelector('.agent-memory').value"), 'Half-typed memory draft', 'memory draft survives a real poll');
-  assert.ok(await js("document.activeElement === document.querySelector('.agent-memory')"), 'memory keeps focus');
+module.exports = async ({ js, waitFor, delay, navigate, writes, demoState, win, capture, base }) => {
+  const q = JSON.stringify;
+  const call = (path, method = 'GET', body) => js(`fetch(${q(path)}, { method: ${q(method)}, headers: { 'Content-Type': 'application/json' },
+    body: ${body === undefined ? 'undefined' : q(JSON.stringify(body))} }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  const exists = selector => js(`!!document.querySelector(${q(selector)})`);
+  const click = selector => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)}); n.click(); return true; })()`);
+  const type = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)}); n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const choose = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); n.value = ${q(value)}; n.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const pressEscape = () => js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  const panel = '#bots-panel';
+  const card = id => `${panel} [data-panel-card=${id}]`;
+  // The panel draws once when it loads and again when its overview arrives; open a section only after the body is shown.
+  const openSection = async id => {
+    const shown = `(() => { const b = document.querySelector('${panel} .bots-acc-item[data-section=${id}][data-open=true] .bots-acc-body'); return !!b && b.getClientRects().length > 0; })()`;
+    for (let i = 0; i < 40; i++) {
+      if (await js(shown)) return;
+      if (!(await exists(`${panel} .bots-acc-item[data-section=${id}][data-open=true]`))) await click(`${panel} .bots-acc-head[data-section=${id}]`);
+      await delay(150);
+    }
+    throw new Error('Could not open section ' + id + ' ' + await js(`[...document.querySelectorAll('${panel} .bots-acc-item')].map(n => n.dataset.section + ':' + n.dataset.open + ':' + n.querySelector('.bots-acc-body')?.hidden).join(' ')`));
+  };
+  const patches = (from, id) => writes.slice(from).filter(w => w.path === `/api/agents/${id}` && w.method === 'PATCH').map(w => JSON.parse(w.body || '{}'));
+  const waitPatch = async (from, id, test, what) => {
+    for (let i = 0; i < 100; i++) { if (patches(from, id).some(test)) return; await delay(50); }
+    throw new Error(`Timed out waiting for a saved change: ${what}. Saw ${JSON.stringify(patches(from, id))}`);
+  };
+  const record = async id => (await call(`/api/agents/${id}`)).body.agent;
+  const setAdvanced = on => js(`import('/static/js/botsUi.js').then(m => { m.setAdvanced(${on}); return true; })`);
+  const openPanelFor = async (id, extra = {}) => {
+    await navigate('agents', { agentId: id, profile: true, ...extra });
+    await waitFor(`document.documentElement.dataset.botsAgent === ${q(id)} && !!document.querySelector('${panel} .bots-acc-item, ${panel} .bots-tabs')`);
+  };
 
-  // Starting and finishing work both refresh the page while the draft lives.
-  agents[1].status = 'idle';
-  await js("[...document.querySelectorAll('.agent-header-actions .btn')].find(b => b.textContent.startsWith('Turn')).click()");
-  await waitFor("document.querySelector('.agent-status-line').textContent === 'Off'");
-  assert.equal(await js("document.querySelector('.agent-memory').value"), 'Half-typed memory draft');
-  agents[1].status = 'working';
-  await js("[...document.querySelectorAll('.agent-header-actions .btn')].find(b => b.textContent.startsWith('Turn')).click()");
-  await waitFor("document.querySelector('.agent-status-line').textContent.startsWith('Working')");
-  agents[1].status = 'idle';
-  await delay(10600);
-  assert.equal(await js("document.querySelector('.agent-memory').value"), 'Half-typed memory draft', 'draft survives finish');
-  await js("(() => { const a = document.querySelector('.agent-memory'); a.focus(); a.setSelectionRange(7, 7); })()");
-  const caret = await js("document.querySelector('.agent-memory').selectionStart");
-  agents[1].status = 'working';
-  await js("[...document.querySelectorAll('.agent-header-actions .btn')].find(b => b.textContent.startsWith('Turn')).click()");
-  await delay(10600);
-  assert.equal(await js("document.querySelector('.agent-memory').selectionStart"), caret, 'poll keeps caret position');
-  (demoState.agentMemories ||= {}).a2 = 'Updated by the bot';
-  await delay(10600);
-  assert.equal(await js("document.querySelector('.agent-memory').value"), 'Half-typed memory draft');
-  assert.ok(await js("!document.querySelector('.agent-memory + .agent-profile-conflict').hidden"), 'memory conflict is visible');
-
-  const saveStart = writes.length;
-  await js("[...document.querySelectorAll('.agent-memory-host button')].find(b => b.textContent === 'Save memory').click()");
-  await waitFor("document.querySelector('.agent-memory').dataset.draftBaseline === 'Half-typed memory draft'");
-  assert.ok(writes.slice(saveStart).some(w => w.path === '/api/agents/a2/memory' && JSON.parse(w.body).text === 'Half-typed memory draft'), 'memory saves');
-
-  await js("document.querySelector('.agent-profile-face').click()");
-  await waitFor("!!document.querySelector('.agent-profile-sheet:not([hidden])')");
-  await capture?.('desktop-agent-profile-settings');
-  assert.ok(await js("document.querySelector('.agent-profile-details:not([hidden])') && document.querySelector('.agent-profile-tab.active').textContent === 'Details'"));
-  assert.ok(await js("document.querySelector('.agent-profile-details .set-header') && document.querySelectorAll('.agent-profile-details .set-section .set-row').length >= 3"), 'profile uses settings groups and rows');
-  await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.focus(); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowRight', bubbles:true, cancelable:true })); })()");
-  assert.ok(await js("document.querySelector('.agent-profile-tabs').dataset.active === 'library' && document.querySelector('.agent-profile-tab.active').textContent === 'Library'"), 'segment arrow moves the tab indicator');
-  await js("(() => { const tab=document.querySelector('.agent-profile-tab.active'); tab.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true, cancelable:true })); })()");
-  const avatarStart = writes.length;
-  await js("document.querySelector('.agent-profile-sheet [aria-label=\"Kip accessory\"] [data-value=quill]').click()");
-  await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
-  await waitFor("document.querySelector('.agent-profile-titlebar .agent-dot-avatar')?.dataset.avatarSpec.includes('quill')");
-  assert.ok(writes.slice(avatarStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).avatar?.acc === 'quill'), 'profile saves the look');
-  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Connection"]'); n.value='m2'; n.dispatchEvent(new Event('change')); })()`);
-  await waitFor("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.value === 'workspace-fast')");
-  assert.ok(await js("[...document.querySelector('.agent-profile-details [aria-label=\"Model version\"]').options].some(o => o.textContent === 'Workspace Fast')"), 'profile shows catalog version names');
-  await js(`(() => { const n=document.querySelector('.agent-profile-details [aria-label="Model version"]'); n.value='workspace-fast'; n.dispatchEvent(new Event('change')); const e=document.querySelector('.agent-profile-details [aria-label="Reasoning"]'); e.value='high'; e.dispatchEvent(new Event('change')); })()`);
-  assert.ok(await js("document.querySelector('.agent-profile-details .agent-model-summary').textContent.includes('Codex · Workspace Fast · high')"), 'profile summary shows connection, version and effort');
-  await js("document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]').focus()");
-  await delay(10600);
-  assert.ok(await js("document.activeElement === document.querySelector('.agent-profile-details [aria-label=\"Reasoning\"]') && document.activeElement.value === 'high'"),
-    'profile poll keeps a focused model choice');
-  const modelStart = writes.length;
-  await js("document.querySelector('.agent-profile-details > .btn.primary').click()");
-  await waitFor("document.querySelector('.agent-model-panel .agent-model-summary')?.textContent.includes('Codex · Workspace Fast · high')");
-  assert.ok(writes.slice(modelStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).endpoint_id === 'm2' &&
-    JSON.parse(w.body).model_override === 'workspace-fast' && JSON.parse(w.body).model_effort === 'high'), 'profile saves full model selection');
-  await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
-  // Coordination, 2026-10-14: Access persists the peer allow-list by id.
-  await js("document.querySelector('.agent-profile-section[data-section=access] summary').click()");
-  await waitFor("!!document.querySelector('[aria-label=\"Peer Scout\"]')");
-  const peerStart = writes.length;
-  await js("document.querySelector('[aria-label=\"Peer Scout\"]').click()");
-  await js("document.querySelector('.agent-profile-section[data-section=access] .btn.primary').click()");
-  for (let i = 0; i < 80 && !writes.slice(peerStart).some(w => w.path === '/api/agents/a2' &&
-    JSON.parse(w.body).peers?.includes('a1')); i++) await delay(50);
-  assert.ok(writes.slice(peerStart).some(w => w.path === '/api/agents/a2' && JSON.parse(w.body).peers?.includes('a1')),
-    'Access saves the selected peer');
-  assert.deepEqual(agents[1].peers, ['a1'], 'peer id persisted in the profile');
-  await js("(() => { for (const [label, size] of [['Name', 101], ['Job', 201]]) { const field = document.querySelector(`[aria-label=\"${label}\"]`); field.value = 'x'.repeat(size); field.dispatchEvent(new Event('input')); } })()");
-  assert.equal(await js("document.querySelector('[aria-label=Name]').value.length"), 100, 'name limit');
-  assert.equal(await js("document.querySelector('[aria-label=Job]').value.length"), 200, 'job limit');
-  await js("document.querySelector('.agent-profile-section[data-section=overview] summary').click()");
-  await js("(() => { const a = document.querySelector('[aria-label=Blurb]'); a.value = 'Draft biography'; a.dispatchEvent(new Event('input', { bubbles:true })); })()");
-  await js("document.querySelector('.agent-profile-section[data-section=soul] summary').click()");
-  assert.equal(await js("document.querySelector('[aria-label=Blurb]').value"), 'Draft biography', 'accordion switch preserves draft');
-  await js("document.querySelector('.agent-profile-section[data-section=overview] summary').click()");
-  assert.equal(await js("document.querySelector('[aria-label=Blurb]').value"), 'Draft biography');
-
-  await js("(() => { const q = document.querySelector('.agent-profile-all [type=search]'); q.value = 'soul'; q.dispatchEvent(new Event('input')); })()");
-  assert.deepEqual(await js("[...document.querySelectorAll('.agent-profile-section:not([hidden])')].map(x => x.dataset.section)"), ['soul'], 'search filters sections');
-  await js("(() => { const q = document.querySelector('.agent-profile-all [type=search]'); q.value = ''; q.dispatchEvent(new Event('input')); })()");
-  await js("(() => { const a = document.querySelector('[aria-label=Blurb]'); a.value = 'x'.repeat(3001); a.dispatchEvent(new Event('input', { bubbles:true })); })()");
-  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('.set-row').querySelector('.agent-profile-counter').hidden"), 'blurb counter appears past 3000');
-  await js("(() => { const a = document.querySelector('[aria-label=Soul]'); a.value = '🙂'.repeat(7000); a.dispatchEvent(new Event('input', { bubbles:true })); })()");
-  assert.equal(await js("new TextEncoder().encode(document.querySelector('[aria-label=Soul]').value).length"), 24000, 'soul enforced in UTF-8 bytes');
-  assert.equal(await js("document.querySelector('[aria-label=Soul]').value.length"), 12000, 'multi-byte characters are kept whole');
-  agents[1].blurb = 'Server biography';
-  await delay(10600);
-  assert.equal(await js("document.querySelector('[aria-label=Blurb]').value.length"), 3001, 'poll keeps conflicting profile draft');
-  assert.ok(await js("!document.querySelector('[aria-label=Blurb]').closest('.set-row').querySelector('.agent-profile-conflict').hidden"), 'server conflict is visible');
-
-  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true }))");
-  await waitFor("document.querySelector('.agent-profile-sheet').hidden");
-  assert.ok(await js("document.querySelector('.agent-profile-sheet').hidden"), 'Escape closes sheet');
-  win.setSize(390, 844);
-  await js("document.querySelector('.agent-profile-open').click()");
-  await waitFor("innerWidth <= 768 && !document.querySelector('.agent-profile-sheet').hidden");
-  await delay(300); // Measure after the profile opening transition settles.
-  assert.ok(await js("(() => { const r = document.querySelector('.agent-profile-sheet').getBoundingClientRect(); return r.width === innerWidth && r.left === 0; })()"), 'sheet covers phone content');
-  await js("document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true }))");
-  win.setSize(1440, 900);
-
-  agents[1].color = null;
-  delete agents[1].avatar;
-  await navigate('agents', { agentId:'a2', agentTab:'work' });
-  await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar')");
-  const firstAvatar = await js("document.querySelector('.agent-header .agent-dot-avatar').dataset.avatarSpec");
-  for (let reload = 0; reload < 2; reload++) {
-    await win.loadURL(win.webContents.getURL());
+  const restore = await isolateBotsCheck({ js, demoState });
+  try {
+    demoState.botsLive = true;
+    await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
-    await navigate('agents', { agentId:'a2', agentTab:'work' });
-    await waitFor("!!document.querySelector('.agent-header .agent-dot-avatar')");
-    assert.equal(await js("document.querySelector('.agent-header .agent-dot-avatar').dataset.avatarSpec"), firstAvatar,
-      'missing-avatar default is stable across reloads');
+    await js("fetch('/api/agents').then(r => r.json()).then(() => true)");
+    const stamp = Date.now() % 100000;
+    const bot = (await call('/api/agents', 'POST', { name: `Profile Probe ${stamp}`, role: 'Original job', soul: 'Be brief and kind.' })).body;
+    const friend = (await call('/api/agents', 'POST', { name: `Profile Friend ${stamp}` })).body;
+    assert.ok(bot.id && friend.id, 'the check made its own bots');
+    await setAdvanced(true);
+
+    // 1. The old profile link opens the panel on the bot's own page; Escape closes it and returns focus to the header.
+    await openPanelFor(bot.id);
+    assert.equal(await js(`document.querySelector('${panel}').getAttribute('role')`), 'dialog');
+    assert.equal(await js(`document.querySelectorAll('${panel} .bots-acc-item').length`), 14, 'the panel shows its fourteen sections');
+    await capture?.('desktop-bots-profile-panel');
+    await pressEscape();
+    await waitFor(`!document.querySelector('${panel}')`);
+    assert.ok(await js("document.activeElement?.classList.contains('bots-head-pill') || document.activeElement === document.body"), 'focus returns to the header when the panel closes');
+    await openPanelFor(bot.id);
+
+    // 2. A Memory draft survives a real poll, keeps focus and caret, and is saved only by choice.
+    await openSection('memory');
+    await waitFor(`!!document.querySelector('${card('memory')} textarea')`);
+    await delay(500);
+    await js(`(() => { const area = document.querySelector('${card('memory')} textarea'); area.focus(); area.value = 'Half-typed memory draft'; area.dispatchEvent(new Event('input', { bubbles: true })); area.setSelectionRange(7, 7); })()`);
+    assert.ok(await js(`document.activeElement === document.querySelector('${card('memory')} textarea')`), 'the memory draft has focus');
+    await delay(21500);   // the panel polls every 20 seconds
+    demoState.botsCore.memoryText = { ...(demoState.botsCore.memoryText || {}), [bot.id]: 'Updated by the bot' };
+    await delay(21500);
+    assert.equal(await js(`document.querySelector('${card('memory')} textarea').value`), 'Half-typed memory draft', 'a newer saved memory does not overwrite the draft');
+    let mark = writes.length;
+    await click(`${card('memory')} .bots-actions .bots-btn`);
+    for (let i = 0; i < 80 && !writes.slice(mark).some(w => w.path === `/api/agents/${bot.id}/memory` && w.method === 'PUT' && w.status); i++) await delay(50);
+    assert.ok(writes.slice(mark).some(w => w.path === `/api/agents/${bot.id}/memory` && JSON.parse(w.body).text === 'Half-typed memory draft'), 'memory saves by choice');
+
+    // 3. Model: connection, version and reasoning come from the catalog and are saved exactly.
+    await openSection('model');
+    await waitFor(`!!document.querySelector('${card('model')} select[aria-label="Connection"]')`);
+    mark = writes.length;
+    await choose(`${card('model')} select[aria-label="Connection"]`, 'm2');
+    await waitFor(`[...document.querySelector('${card('model')} select[aria-label="Model version"]').options].some(o => o.value === 'workspace-fast')`);
+    assert.ok(await js(`[...document.querySelector('${card('model')} select[aria-label="Model version"]').options].some(o => o.textContent === 'Workspace Fast')`), 'versions show the catalog names');
+    await choose(`${card('model')} select[aria-label="Model version"]`, 'workspace-fast');
+    await choose(`${card('model')} select[aria-label="Reasoning"]`, 'high');
+    assert.ok(await js(`document.querySelector('${card('model')} .agent-model-summary').textContent.includes('Codex · Workspace Fast · high')`), 'the summary shows connection, version and effort');
+    await waitPatch(mark, bot.id, p => p.endpoint_id === 'm2' && p.model_override === 'workspace-fast' && p.model_effort === 'high', 'the full model selection');
+    await js(`document.querySelector('${card('model')} select[aria-label="Reasoning"]').focus()`);
+
+    // 4. Identity: the look saves; field limits are in place.
+    await openSection('identity');
+    await waitFor(`!!document.querySelector('${card('identity')} .bots-avatar-editor')`);
+    mark = writes.length;
+    await click(`${card('identity')} [aria-label="Kip accessory"] [data-value=quill]`);
+    await waitPatch(mark, bot.id, p => p.avatar?.acc === 'quill', 'the look');
+    assert.equal((await record(bot.id)).avatar.acc, 'quill', 'the profile saved the look');
+    assert.equal(await js(`document.querySelector('${card('identity')} .bots-identity .bots-text-row:nth-child(1) input').maxLength`), 100, 'name limit');
+    assert.equal(await js(`document.querySelector('${card('identity')} .bots-identity .bots-text-row:nth-child(2) input').maxLength`), 200, 'job limit');
+
+    // 5. Access saves the selected peer by id.
+    await openSection('access');
+    await waitFor(`[...document.querySelectorAll('${card('access')} .bots-switch-row')].some(n => n.textContent.includes(${q(friend.name)}))`);
+    mark = writes.length;
+    await js(`[...document.querySelectorAll('${card('access')} .bots-switch-row')].find(n => n.textContent.includes(${q(friend.name)})).click()`);
+    await waitPatch(mark, bot.id, p => Array.isArray(p.peers) && p.peers.includes(friend.id), 'the peer');
+    assert.deepEqual((await record(bot.id)).peers, [friend.id], 'the peer id persisted in the profile');
+
+    // 6. Standing instructions are counted in UTF-8 bytes and multi-byte characters stay whole.
+    await openSection('soul');
+    await type(`${card('soul')} textarea`, '🙂'.repeat(7000));
+    assert.ok(await js(`new TextEncoder().encode(document.querySelector('${card('soul')} textarea').value).length`) <= 24000, 'soul is held to 24,000 UTF-8 bytes');
+    assert.ok(await js(`/24,000 bytes/.test(document.querySelector('${card('soul')} .bots-count').textContent)`), 'the byte counter is shown');
+    assert.equal(await js(`document.querySelector('${card('soul')} textarea').value.length % 2`), 0, 'multi-byte characters are kept whole');
+    await type(`${card('soul')} textarea`, 'Be brief and kind.');
+    await js(`document.querySelector('${card('soul')} textarea').blur()`);
+
+    // 7. Search filters the sections; clearing brings them back.
+    await type(`${panel} .bots-search`, 'soul');
+    const shown = () => js(`[...document.querySelectorAll('${panel} .bots-acc-item')].filter(n => !n.hidden && n.getClientRects().length).map(n => n.dataset.section)`);
+    await waitFor(`[...document.querySelectorAll('${panel} .bots-acc-item')].filter(n => !n.hidden && n.getClientRects().length).length < 14`);
+    assert.ok((await shown()).includes('soul'), 'search keeps the matching section');
+    await type(`${panel} .bots-search`, '');
+    await waitFor(`[...document.querySelectorAll('${panel} .bots-acc-item')].filter(n => !n.hidden && n.getClientRects().length).length === 14`);
+
+    // 8. SOUL.md drift is shown, a stale apply is refused with its reason, and a later apply is by choice.
+    demoState.botsCore.soulFiles = { ...(demoState.botsCore.soulFiles || {}), [bot.id]: 'External soul edit' };
+    await navigate('home'); await openPanelFor(bot.id);
+    await openSection('soul');
+    await waitFor(`!!document.querySelector('${card('soul')} .bots-drift')`);
+    assert.ok(await js(`document.querySelector('${card('soul')} .bots-drift').textContent.includes('External soul edit')`), 'file drift is shown');
+    demoState.botsCore.soulFiles[bot.id] = 'Changed once more outside Kairos';
+    await js("document.querySelectorAll('#toast-host .toast').forEach(n => n.remove())");
+    const useFile = () => js(`[...document.querySelectorAll('${card('soul')} .bots-drift .bots-btn')].find(n => /Use the file/.test(n.textContent)).click()`);
+    await useFile();
+    await waitFor("[...document.querySelectorAll('#toast-host .toast.error')].length > 0");
+    assert.equal((await record(bot.id)).soul, 'Be brief and kind.', 'a stale apply changed nothing');
+    await js("document.querySelectorAll('#toast-host .toast').forEach(n => n.remove())");
+    await waitFor(`/Changed once more outside Kairos/.test(document.querySelector('${card('soul')} .bots-drift')?.textContent || '')`);
+    await useFile();
+    await waitFor(`!document.querySelector('${card('soul')} .bots-drift')`);
+    assert.equal((await record(bot.id)).soul, 'Changed once more outside Kairos', 'the external file is applied by choice');
+
+    // 9. On a phone the panel covers the page and Escape closes it.
+    win.setContentSize(390, 844);
+    await delay(400);
+    assert.ok(await js(`(() => { const r = document.querySelector('${panel}').getBoundingClientRect(); return r.width >= innerWidth - 2 && r.left <= 1; })()`), 'the panel covers phone content');
+    await capture?.('phone-bots-profile-panel');
+    await pressEscape();
+    await waitFor(`!document.querySelector('${panel}')`);
+    win.setContentSize(1440, 900);
+    await delay(300);
+
+    // 10. A bot with no saved look gets the same default every time it is drawn, across reloads.
+    const bare = demoState.botsCore.agents.find(a => a.id === friend.id);
+    bare.color = null; delete bare.avatar;
+    const face = () => js(`document.querySelector('.bots-rail-row[data-agent-id=${friend.id}] img')?.src || ''`);
+    // (The page remembers a look it already drew, so measure from a fresh load.)
+    const loaded = async () => {
+      await win.loadURL(base);
+      await waitFor(`document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-rail-row[data-agent-id=${friend.id}] img')`);
+      return face();
+    };
+    const firstFace = await loaded();
+    assert.ok(firstFace, 'the bot has a face');
+    for (let reload = 0; reload < 2; reload++) assert.equal(await loaded(), firstFace, 'the missing-look default is stable across reloads');
+  } finally {
+    win.setContentSize(1440, 900);
+    await restore();
   }
-
-  await navigate('agents');
-  await js("document.querySelector('.agents-rail-inbox').click()");
-  await waitFor("!!document.querySelector('.agent-inbox-question')");
-  const answerStart = writes.length;
-  await js("(() => { const item = document.querySelector('.agent-inbox-question'); [...item.querySelectorAll('button')].find(b => b.textContent === 'Reply').click(); item.querySelector('input').value = 'Go ahead'; [...item.querySelectorAll('button')].find(b => b.textContent === 'Send').click(); })()");
-  await waitFor("!document.querySelector('.agent-inbox-question')");
-  assert.ok(writes.slice(answerStart).some(w => w.path === '/api/agents/inbox/i1/answer' && JSON.parse(w.body).text === 'Go ahead'), 'inbox answer works');
-  demoState.agentReview = true;
-  await navigate('agents', { agentId:'a1', agentTab:'work' });
-  await waitFor("!![...document.querySelectorAll('.agent-inbox-review button')].find(b => b.textContent === 'Approve')");
-  const reviewStart = writes.length;
-  await js("[...document.querySelectorAll('.agent-inbox-review button')].find(b => b.textContent === 'Approve').click()");
-  await waitFor("!document.querySelector('.agent-inbox-review')");
-  assert.ok(writes.slice(reviewStart).some(w => w.path === '/api/tasks/c9/status' && JSON.parse(w.body).status === 'done'), 'review approval works');
-
-  demoState.agentSoulFile = 'External soul edit';
-  await navigate('agents', { agentId:'a1', agentTab:'work' });
-  await js("document.querySelector('.agent-profile-open').click()");
-  await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
-  await js("document.querySelector('.agent-profile-section[data-section=soul] summary').click()");
-  assert.ok(await js("!document.querySelector('.agent-profile-drift').hidden && document.querySelector('.agent-profile-drift .agent-profile-file-text').textContent === 'External soul edit'"), 'file drift is shown');
-  demoState.agentSoulFile = 'Changed once more outside Kairos';
-  const applyStart = writes.length;
-  await js("document.querySelector('.agent-profile-drift button').click()");
-  await waitFor("!document.querySelector('.agent-profile-drift [role=alert]').hidden");
-  assert.ok(await js("document.querySelector('.agent-profile-drift [role=alert]').textContent.includes('409')"), 'stale apply reason is visible');
-  assert.deepEqual(JSON.parse(writes.slice(applyStart).find(w => w.path === '/api/agents/a1/soul/apply').body),
-    { expected_file_text:'External soul edit', expected_revision:agents[0].revision }, 'apply sends exact file text and held revision');
-  await navigate('agents', { agentId:'a1', agentTab:'work' });
-  await js("document.querySelector('.agent-profile-open').click()");
-  await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
-  await js("document.querySelector('.agent-profile-section[data-section=soul] summary').click()");
-  await js("document.querySelector('.agent-profile-drift button').click()");
-  await waitFor("document.querySelector('.agent-profile-drift').hidden");
-  assert.equal(agents[0].soul, 'Changed once more outside Kairos', 'external file applied by choice');
+  console.log('PASS: Bots profile panel (drafts, model, look, peers, limits, drift, phone, stable default).');
 };

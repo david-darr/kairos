@@ -270,6 +270,7 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     resetKept: id => { state.kept.delete(id); },
     go: id => openSection(id),
     track: handle => { if (handle) bucket.add(handle); return handle; },
+    bindTrack: () => { const into = bucket; return handle => { if (handle) into.add(handle); return handle; }; },
     // The later-phase section modules that exist (listed by the server, so none is requested blind).
     sectionModules() {
       if (!modules) modules = api('/api/agents/section-modules', { toast: false }).then(r => new Set(r.modules || [])).catch(() => new Set());
@@ -425,7 +426,7 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
         [icon(s.iconName || 'settings', { size: 18 }), el('span', { class: 'bots-acc-label', text: s.label }), icon(isOpen ? 'chevron-down' : 'chevron-right', { size: 16 })]);
       const item = el('section', { class: 'bots-acc-item', 'data-open': String(isOpen), 'data-section': s.id }, [head]);
       if (isOpen || (s.keepMounted && state.kept.has(s.id))) {
-        const body = el('div', { class: 'bots-acc-body', hidden: !isOpen || undefined }, [bodyOf(s)]);
+        const body = el('div', { class: 'bots-acc-body', hidden: !isOpen }, [bodyOf(s)]);
         item.append(body);
       }
       wrap.append(item);

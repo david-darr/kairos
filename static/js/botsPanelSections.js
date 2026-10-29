@@ -179,13 +179,14 @@ function longText({ value, limit, bytes = false, rows = 8, label, onChange, disa
 // extra page such as the skill library has no basics of its own). A module that fails says so.
 export function mountModule(ctx, name) {
   const host = h('div', { class: 'bots-module', 'data-module': name });
+  const track = ctx.bindTrack ? ctx.bindTrack() : ctx.track;
   ctx.sectionModules().then(async installed => {
     if (!installed.has(name)) return;
     try {
       const mod = await ctx.loadModule(name);
       if (typeof mod?.mount !== 'function') throw new Error('it has no mount');
       const handle = await mod.mount(host, ctx);
-      if (handle) ctx.track(handle);
+      if (handle) track(handle);
     } catch (error) { host.replaceChildren(note('This part could not load. Try again in a moment.')); }
   });
   return host;
@@ -195,6 +196,9 @@ export function mountModule(ctx, name) {
 function modular(ctx, name, basics, { what }) {
   const host = h('div', { class: 'bots-module', 'data-module': name });
   const basic = (why) => { host.replaceChildren(...(why ? [note(why)] : []), basics()); };
+  // Bind now: the mount resolves later, after the panel has moved its tracking bucket back,
+  // and a kept section's handle must stay with the kept ones or each redraw destroys it.
+  const track = ctx.bindTrack ? ctx.bindTrack() : ctx.track;
   ctx.sectionModules().then(async installed => {
     if (!installed.has(name)) return basic('');
     try {
@@ -202,7 +206,7 @@ function modular(ctx, name, basics, { what }) {
       if (typeof mod?.mount !== 'function') throw new Error('it has no mount');
       host.replaceChildren();
       const handle = await mod.mount(host, ctx);
-      if (handle) ctx.track(handle);
+      if (handle) track(handle);
     } catch (error) { basic(`${what} could not load its full view. Showing the basics.`); }
   });
   return host;

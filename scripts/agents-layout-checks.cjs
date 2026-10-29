@@ -1,202 +1,178 @@
+// The old UI-3 conversation layout check, migrated to the Bots page (Phase 1 check migration; flags
+// --agents-layout-only and --agents-layout-captures / --agents-layout-before for the screenshots).
+// Same intents on the real Bots page and panel: a round Back control, the old tab links landing on the bot, live status,
+// what needs the person shown with its count, the routine and its cadence shown in the panel, user and bot messages told apart
+// (and kept apart in dark), the composer's face-side actions, the conversation list, the panel starting below the desktop
+// title bar in a short window, the phone layout (Back, card, 44 px targets, messages aligned), surfaces that are token
+// derived and readable, and no animation under reduced motion. Waiting items and approvals now live in the Bots inbox and
+// the conversation's permission cards; they are asserted in bots-attention-checks.cjs and bots-chat-checks.cjs.
+// The check makes its own bot and conversation and restores everything in `finally`.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
+const chatBackend = require('./fixtures/bots-chat-backend.cjs');
 
-// UI-3, 2026-10-14: exercise the real bot controls with isolated API fixtures.
-module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox, capturesOnly = false, stage = 'after' }) => {
-  const appearance = await js("import('/static/js/appearance.js').then(m => { const a=m.getAppearance(); return {mode:a.mode,color:a.color}; })");
+module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, demoState, base, capturesOnly = false, stage = 'after' }) => {
+  const q = JSON.stringify;
+  const call = (path, method = 'GET', body) => js(`fetch(${q(path)}, { method: ${q(method)}, headers: { 'Content-Type': 'application/json' },
+    body: ${body === undefined ? 'undefined' : q(JSON.stringify(body))} }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  const exists = selector => js(`!!document.querySelector(${q(selector)})`);
+  const click = selector => js(`(() => { const n = document.querySelector(${q(selector)}); if (!n) throw new Error('missing ' + ${q(selector)}); n.click(); return true; })()`);
+  const type = (selector, value) => js(`(() => { const n = document.querySelector(${q(selector)}); n.focus(); n.value = ${q(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const pressEscape = () => js("(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  const setAdvanced = on => js(`import('/static/js/botsUi.js').then(m => { m.setAdvanced(${on}); return true; })`);
   let checks = 0;
   const ok = (value, message) => { assert.ok(value, message); checks++; };
-  const savedInbox = [...inbox], savedReview = demoState.agentReview;
+  const appearance = await js("import('/static/js/appearance.js').then(m => { const a = m.getAppearance(); return { mode: a.mode, color: a.color }; })");
+  const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined });
   try {
-    // Earlier full-suite checks answer their fixtures. Own these waiting rows
-    // and restore the prior state so this unit has the same intent in isolation.
-    inbox.splice(0, inbox.length,
-      { id:'i1', agent_id:'a1', kind:'question', title:'Which area should I focus on?', body:'Choose the next area to investigate.', created_at:Date.now()/1000 },
-      { id:'i2', agent_id:'a1', kind:'report', title:'New findings', body:'Two results are ready to look through.', created_at:Date.now()/1000 });
-    demoState.agentReview = false;
-    // Captures run against HEAD with --agents-layout-before, or the working
-    // tree otherwise. No files are checked out or temporarily overwritten.
+    demoState.botsLive = true;
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
+    await js("fetch('/api/agents').then(r => r.json()).then(() => true)");
+    const name = `Layout Probe ${Date.now() % 100000}`;
+    const bot = (await call('/api/agents', 'POST', { name, role: 'Keeps the layout honest' })).body;
+    const sid = (await call(`/api/agents/${bot.id}/threads`, 'POST', { title: 'Main' })).body.id;
+    chatBackend.latest.root();
+    chatBackend.latest.seed(sid, [
+      { role: 'user', content: 'What changed in the layout today?' },
+      { role: 'assistant', content: 'The header, the composer and the panel were rebuilt. Nothing else moved.' },
+      { role: 'user', content: 'Good. Keep it that way.' },
+    ]);
+    Object.assign(demoState.botsCore.agents.find(a => a.id === bot.id), { status: 'needs_you', needs_you: 3, status_detail: '' });
+    const open = (extra = {}) => navigate('agents', { agentId: bot.id, sessionId: sid, ...extra });
+    const ready = () => waitFor("document.querySelectorAll('.bots-log .bots-msg').length >= 3 && !!document.querySelector('.bots-composer-input')");
+
+    // Screenshots: desktop and phone, light and dark (the "before" stage is a capture-only pass against another tree).
     for (const [device, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
       win.setContentSize(width, height);
       for (const [tone, color] of [['light', '#f3eadb'], ['dark', '#1f1d24']]) {
-        await js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode:'color', color:${JSON.stringify(color)} }))`);
-        await navigate('agents', { agentId: 'a1', agentTab: 'chat' });
-        await waitFor("!!document.querySelector('.agent-chat-main .msg.assistant .msg-body')");
-        await delay(300);
+        await js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: ${q(color)} }))`);
+        await open(); await ready(); await delay(300);
         await capture(`ui3-${stage}-${device}-${tone}`);
       }
     }
     if (capturesOnly) return { checks, stage };
+
+    // 1. Desktop header: round Back, the bot's own name card and a Conversations button; the old tab links land on the page.
     win.setContentSize(1440, 900);
-    await navigate('agents', { agentId: 'a1', agentTab: 'chat' });
-    await waitFor("!!document.querySelector('.agent-composer-orb .agent-dot-avatar')");
-    ok(await js("document.querySelector('.agent-back').getAttribute('aria-label') === 'All agents'"), 'round back button');
+    await setAdvanced(false);
+    await open(); await ready();
+    ok(await js("document.querySelector('.bots-head-back').getAttribute('aria-label') === 'All bots'"), 'Back is labelled All bots');
+    ok(await js("document.querySelector('.bots-head-pill').textContent.includes(" + q(name) + ")"), 'the name card shows the bot');
     for (const tab of ['chat', 'work', 'routines', 'memory']) {
-      await js(`[...document.querySelectorAll('.agent-tab')].find(b => b.textContent.toLowerCase().startsWith('${tab}')).click()`);
-      ok(await js(`document.querySelector('.agent-${tab}-host').hidden === false && document.querySelector('.agent-conversation-page').dataset.agentTab === '${tab}'`), `segment opens ${tab}`);
-      await navigate('agents', { agentId: 'a1', agentTab: tab });
-      await waitFor(`!!document.querySelector('.agent-${tab}-host:not([hidden])')`);
-      ok(await js(`document.querySelector('.agent-tab[aria-selected=true]').textContent.toLowerCase().startsWith('${tab}')`), `${tab} deep link`);
+      await navigate('agents', { agentId: bot.id, agentTab: tab });
+      await waitFor(`document.documentElement.dataset.botsAgent === ${q(bot.id)} && !!document.querySelector('.bots-composer-input')`);
+      ok(await js("document.getElementById('view-content').dataset.view === 'botsShell'"), `the old ${tab} link opens the bot's page`);
     }
-    await navigate('agents', { agentId: 'a1' });
-    await waitFor("!!document.querySelector('.agent-composer-orb')");
-    ok(await js("!!document.querySelector('.agent-live-panel .agent-status-line')"), 'live state uses bot status');
-    ok(await js("document.querySelectorAll('.agent-live-panels .agent-approval-card').length >= 2 && [...document.querySelectorAll('.agent-live-panels .agent-approval-card')].every(n => n.querySelector('.btn.primary'))"), 'each waiting item has its action');
-    ok(await js("document.querySelector('.agent-next-panel').textContent.includes('Every day at 08:00') && document.querySelector('.agent-routine-preview')"), 'next routines include cadence');
-    await js("document.querySelector('.agent-give-job').click()");
-    ok(await js("document.querySelector('.agent-job-flow').open && document.activeElement === document.querySelector('.agent-job-flow input')"), 'Give it a job opens and focuses existing flow');
-    await js("document.querySelector('.agent-tab').click()");
-    ok(await js("!!document.querySelector('.msg.user .msg-body') && !!document.querySelector('.msg.assistant .msg-body') && getComputedStyle(document.querySelector('.msg.user .msg-body')).backgroundColor !== getComputedStyle(document.querySelector('.msg.assistant .msg-body')).backgroundColor"), 'distinct bot/person bubbles');
-    ok(await js("!!document.querySelector('.agent-composer-orb .agent-dot-avatar') && !!document.querySelector('.agent-composer-add')"), 'composer face and reference action');
-    await js("(() => { const n=document.querySelector('.agent-thread-search'); n.value='no such thread ui3'; n.dispatchEvent(new Event('input')); })()");
-    ok(await js("[...document.querySelectorAll('.agent-chat-item')].every(n => n.hidden) && document.querySelector('.agent-search-scope').textContent.includes('loaded titles')"), 'search filters loaded titles and states its scope');
-    await js("(() => { const n=document.querySelector('.agent-thread-search'); n.value=''; n.dispatchEvent(new Event('input')); })()");
-    await js("[...document.querySelectorAll('.agent-tab')].find(b => b.textContent === 'Routines').click(); document.querySelector('.agent-routines-host .routine-details-open').click()");
-    ok(await js("!!document.querySelector('.agent-item-sheet[open]') && document.querySelector('.agent-item-sheet').textContent.includes('Every day at 08:00')"), 'routine opens details sheet with cadence');
-    await js("document.querySelector('.agent-item-secondary').click()");
-    ok(await js("!document.querySelector('.agent-routines-host .routine-editor').hidden && document.activeElement === document.querySelector('.agent-routines-host .routine-editor input')"), 'routine sheet links to existing editor');
-    await js("[...document.querySelectorAll('.agent-tab')].find(b => b.textContent.startsWith('Work')).click(); document.querySelector('.agent-assignment-card').click()");
-    ok(await js("!!document.querySelector('.agent-item-sheet[open]') && !!document.querySelector('.agent-item-primary') && !!document.querySelector('.agent-item-secondary')"), 'work item opens details with one primary and one secondary action');
-    await js("document.querySelector('.agent-item-close').click(); document.querySelector('.agent-tab').click()");
-    await js("document.querySelector('.agent-profile-open').click(); [...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click(); document.querySelector('.agent-profile-section[data-section=routines] summary').click()");
-    await delay(250);
-    await js("(() => { const n=document.querySelector('.agent-profile-section[data-section=routines] .routine-details-open'); n.focus(); n.click(); })()");
-    ok(await js("document.querySelector('.agent-item-portrait .agent-dot-avatar').dataset.avatarSpec === document.querySelector('.agent-profile-titlebar .agent-dot-avatar').dataset.avatarSpec"), 'profile routine sheet keeps the selected bot face');
-    await js("document.querySelector('.agent-item-sheet').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
-    await delay(250);
-    ok(await js("!document.querySelector('.agent-item-sheet') && !document.querySelector('.agent-profile-sheet').hidden && document.activeElement === document.querySelector('.agent-profile-section[data-section=routines] .routine-details-open')"), 'Escape closes only the nested sheet and restores profile focus');
-    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
-    // 2026-10-15 (David): Conversations left the chat column for the left
-    // panels, with its search beside the list it filters.
-    ok(await js("!!document.querySelector('.agents-rail-history .agent-conversations-home > .agent-chat-side .agent-thread-search') && !document.querySelector('.agent-chat .agent-chat-side') && !document.querySelector('.agent-chat-side summary')"), 'desktop conversations sit in the chat rail with their search');
-    // The profile sheet once began under the desktop title bar, hiding the
-    // face; in a short window its tabs were squeezed to a sliver.
+    await open(); await ready();
+
+    // 2. Live state uses the bot status, and what waits for the person shows as a count.
+    ok(await js("/Needs you/.test(document.querySelector('.bots-head-status').textContent) && document.querySelector('.bots-head-status').dataset.state === 'needs_you'"), 'the live state uses the bot status');
+    ok(await js(`document.querySelector('.bots-rail-row[data-agent-id=${bot.id}] .bots-rail-count')?.textContent === '3'`), 'the sidebar row counts what waits for the person');
+
+    // 3. Messages are told apart; the composer carries its face-side actions.
+    ok(await js("(() => { const u = getComputedStyle(document.querySelector('.bots-msg.user .bots-msg-bubble')), b = getComputedStyle(document.querySelector('.bots-msg.bot .bots-msg-bubble')); return u.backgroundColor !== b.backgroundColor; })()"), 'user and bot bubbles are told apart');
+    await setAdvanced(true);
+    await waitFor("document.querySelector('.bots-composer').dataset.form === 'advanced'");
+    ok(await exists('.bots-composer-clip') && await exists('.bots-composer-input'), 'the composer offers the reference action beside the input');
+    await setAdvanced(false);
+    await waitFor("document.querySelector('.bots-composer').dataset.form === 'simple'");
+
+    // 4. Conversations: the list sits in a popover from the header and names the conversation.
+    await click('.bots-head-convos');
+    await waitFor("!document.querySelector('#bots-convos').hidden");
+    ok(await js(`!!document.querySelector('#bots-convos [data-session="${sid}"]')`), 'the conversation list names this conversation');
+    await pressEscape();
+    await waitFor("document.querySelector('#bots-convos').hidden");
+
+    // 5. The panel shows the routine and its cadence, and Escape on a nested dialog leaves the panel open.
+    await setAdvanced(true);
+    await open({ panel: 'routines' });
+    const section = async id => {
+      for (let i = 0; i < 40; i++) {
+        if (await js(`(() => { const b = document.querySelector('#bots-panel .bots-acc-item[data-section=${id}][data-open=true] .bots-acc-body'); return !!b && b.getClientRects().length > 0; })()`)) return;
+        if (!(await exists(`#bots-panel .bots-acc-item[data-section=${id}][data-open=true]`))) await click(`#bots-panel .bots-acc-head[data-section=${id}]`);
+        await delay(150);
+      }
+      throw new Error('could not open ' + id);
+    };
+    await waitFor("!!document.querySelector('#bots-panel .bots-acc-item')");
+    await section('routines');
+    await waitFor("!!document.querySelector('#bots-panel [data-panel-card=routines] .bots-actions .bots-btn')");
+    await click('#bots-panel [data-panel-card=routines] .bots-actions .bots-btn');
+    await waitFor("!!document.querySelector('.panel-dialog [aria-label=\"Routine name\"]')");
+    await type('.panel-dialog [aria-label="Routine name"]', 'Morning sweep');
+    await type('.panel-dialog [aria-label="What to do"]', 'Look for new layout problems.');
+    await click('.panel-dialog .bots-dialog-footer .bots-btn.primary');
+    await waitFor("!!document.querySelector('#bots-panel [data-panel-card=routines] .bots-routine')");
+    ok(await js("document.querySelector('#bots-panel [data-panel-card=routines] .bots-routine').textContent.includes('At 08:00 every day')"), 'the routine shows its cadence');
+    await click('#bots-panel [data-panel-card=routines] .bots-actions .bots-btn');
+    await waitFor("!!document.querySelector('.panel-dialog')");
+    await pressEscape();
+    await waitFor("!document.querySelector('.panel-dialog')");
+    ok(await exists('#bots-panel'), 'Escape closes only the nested dialog and the panel stays');
+
+    // 6. In a short desktop window the panel starts below the title bar and keeps its face.
     win.setContentSize(1280, 600);
     await js("document.documentElement.classList.add('electron-shell')");
-    await delay(150);
-    await js("document.querySelector('.agent-profile-face').click()");
     await delay(300);
-    ok(await js("(() => { const bar=document.querySelector('.titlebar').getBoundingClientRect().bottom, sheet=document.querySelector('.agent-profile-sheet').getBoundingClientRect(), face=document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect(), tabs=document.querySelector('.agent-profile-tabs').getBoundingClientRect(); return bar > 0 && sheet.top >= bar - 1 && face.top >= bar && Math.abs(sheet.bottom - innerHeight) < 1 && tabs.height >= 40; })()"), 'desktop profile sheet starts below the title bar with full-height tabs');
-    await capture('agents-profile-titlebar');
-    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
+    ok(await js("(() => { const bar = document.querySelector('.titlebar')?.getBoundingClientRect().bottom || 0, sheet = document.querySelector('#bots-panel').getBoundingClientRect(), face = document.querySelector('#bots-panel .bots-adv-title img, #bots-panel .agent-avatar')?.getBoundingClientRect(); return sheet.top >= bar - 1 && !!face && face.top >= bar && face.bottom <= innerHeight; })()"), 'the panel starts below the title bar and its face is visible');
+    await capture('bots-profile-titlebar');
     await js("document.documentElement.classList.remove('electron-shell')");
     win.setContentSize(1440, 900);
-    // Use a plain question to cover Reply/Dismiss separately from Open computer.
-    inbox.push({ id:'i3', agent_id:'a1', kind:'question', title:'Which direction?', body:'Tell me which option to use.', created_at:Date.now()/1000 });
-    demoState.agentReview = true;
+    await click('#bots-panel .bots-panel-close');
+    await waitFor("!document.querySelector('#bots-panel')");
+
+    // 7. Phone: Back, the card and the composer are real targets; user messages sit to the right; the panel fills the screen.
+    await setAdvanced(false);
     win.setContentSize(390, 844);
-    await navigate('agents', { agentId:'a1' });
-    await waitFor("document.querySelectorAll('.agent-conversation-stream .agent-approval-card').length >= 4");
-    // 2026-10-20: the phone thread is the Agents messenger's Messages-style
-    // top bar (David approved). The face and name sit at the left and open the
-    // profile; Call, Info and More sit on the right. The old Settings gear is
-    // hidden there: All settings is reached from the profile sheet.
-    // The live mascot in the header loops by design (Kairos Mascot, 2026-10-22); the wait is for layout.
-    await waitFor("!!document.querySelector('.agent-profile-face h2') && document.getAnimations().filter(a => a.effect?.target?.closest?.('.agent-conversation-topbar') && !a.effect.target.closest('kairos-mascot')).length === 0");
-    // 2026-10-23 (Kairos Mobile v2 AgentDM board): the face and name become the bot card under the
-    // top bar (still the button that opens the profile); the top bar is Back, Call, More. Info moved into More.
-    ok(await js("(() => { const n=document.querySelector('.agent-profile-face').getBoundingClientRect(), c=document.querySelector('.agent-dm-card').getBoundingClientRect(); return !!document.querySelector('.agent-dm-card .agent-profile-face') && n.left >= c.left && n.width >= 43.5 && n.height >= 43.5 && !!document.querySelector('.agent-profile-face h2') && document.querySelectorAll('.agent-dm-pill').length >= 1 && getComputedStyle(document.querySelector('.agent-profile-open')).display === 'none'; })()"), 'phone bot card holds the face, name, role and pills, opening the profile; the gear is hidden');
-    ok(await js("getComputedStyle(document.querySelector('.agent-tabs')).display === 'none' && getComputedStyle(document.querySelector('.agent-info-toggle')).display === 'none' && getComputedStyle(document.querySelector('.agent-call-open')).display !== 'none' && getComputedStyle(document.querySelector('.agent-more')).display !== 'none' && getComputedStyle(document.querySelector('.agents-conversation-back')).display !== 'none'"), 'phone top bar is Back, Call and More');
-    ok(await js("(() => { const c=document.querySelector('.agent-call-open').getBoundingClientRect(), m=document.querySelector('.agent-more').getBoundingClientRect(), b=document.querySelector('.agents-conversation-back').getBoundingClientRect(); return b.right <= c.left && c.right <= m.left + 1 && innerWidth - m.right <= 21 && c.width >= 45.5 && m.width >= 45.5 && c.height >= 45.5 && m.height >= 45.5 && Math.abs(c.top - m.top) < 1 && Math.abs(b.top - c.top) < 1; })()"), 'Back left, Call then More at the right edge, round 46px, one row');
-    await js("document.querySelector('.agent-more').click()");
-    ok(await js("JSON.stringify([...document.querySelectorAll('.agent-more-item')].map(n => n.textContent.replace(/ \\(\\d+\\)$/, ''))) === JSON.stringify(['Chat and conversations','Work','Routines','Memory','Status and info']) && document.querySelector('.agent-more').getAttribute('aria-expanded') === 'true' && document.activeElement === document.querySelector('.agent-more-item[aria-checked=true]')"), 'More lists the four places and focuses the current one');
-    await capture('agents-phone-more');
-    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
-    ok(await js("document.activeElement.dataset.place === 'work'"), 'arrow keys move through More');
-    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
-    ok(await js("document.querySelector('.agent-more-menu').hidden && document.activeElement === document.querySelector('.agent-more')"), 'Escape closes More and returns focus');
-    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=routines]').click()");
-    ok(await js("document.querySelector('.agent-conversation-page').dataset.agentTab === 'routines' && !document.querySelector('.agent-routines-host').hidden"), 'More opens Routines');
-    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
-    await delay(320); // the sheet rises over 240ms; measure it settled
-    ok(await js("(() => { const n=document.querySelector('.is-rail-open .agents-chat-rail'); if (!n) return false; const r=n.getBoundingClientRect(); return document.querySelector('.agent-conversation-page').dataset.agentTab === 'chat' && r.top >= 0 && r.bottom <= innerHeight && n.contains(document.activeElement) && n.getAttribute('aria-modal') === 'true'; })()"), 'Chat and conversations opens the chat rail drawer');
-    await capture('agents-phone-conversations');
-    await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
-    ok(await js("!document.querySelector('.is-rail-open') && document.activeElement === document.querySelector('.agent-more')"), 'Escape closes the rail drawer and restores focus to the visible More button that opened it (the phone top bar has no Chats button)');
-    await js("document.querySelector('.agent-more').click(); document.querySelector('.agent-more-item[data-place=chat]').click()");
-    await js("document.querySelector('.agent-conversations-home .agent-chat-open').click()");
-    await waitFor("!document.querySelector('.is-rail-open')");
-    ok(await js("[...document.querySelectorAll('.agent-chat-main .side-chat-composer .btn:is(.agent-composer-add, .side-chat-send)')].every(b => { const r=b.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; }) && document.querySelector('.agent-chat-main .side-chat-send').textContent === 'Send'"), 'picking a conversation returns to the thread; composer targets stay 44px');
-    ok(await js("(() => { const u=getComputedStyle(document.querySelector('.msg.user .msg-body')), a=getComputedStyle(document.querySelector('.msg.assistant .msg-body')); return u.backgroundColor !== a.backgroundColor && document.querySelector('.msg.user .msg-body').getBoundingClientRect().right > document.querySelector('.agent-conversation-stream').getBoundingClientRect().right - 12; })()"), 'phone bubbles: the person on the right, a distinct fill');
-    // 2026-10-15 (David): the face opens the bot's profile; 2026-10-20: All
-    // settings is reached from there (the messenger hides the gear).
-    await js("document.querySelector('.agent-profile-face').click()");
+    await open(); await ready();
+    await waitFor("document.getAnimations().filter(a => a.effect?.target?.closest?.('.bots-shell-header') && !a.effect.target.closest('kairos-mascot')).length === 0");
+    ok(await js("(() => { const p = document.querySelector('.bots-head-pill').getBoundingClientRect(), b = document.querySelector('.bots-head-back').getBoundingClientRect(), c = document.querySelector('.bots-head-convos').getBoundingClientRect(); return p.height >= 43.5 && b.width >= 43.5 && b.height >= 43.5 && b.right <= p.left + 12 && c.right <= innerWidth && p.right <= c.left; })()"), 'Back, the name card and Conversations are 44 px targets in one row');
+    ok(await js("[...document.querySelectorAll('.bots-composer button')].filter(b => b.getClientRects().length).every(b => { const r = b.getBoundingClientRect(); return r.width >= 43.5 && r.height >= 43.5; })"), 'composer buttons are 44 px targets');
+    ok(await js("(() => { const u = document.querySelector('.bots-msg.user .bots-msg-bubble').getBoundingClientRect(); return u.right > innerWidth / 2 && u.right <= innerWidth; })()"), 'user messages sit on the right and inside the window');
+    await capture('bots-phone-conversation');
+    await click('.bots-head-pill');
+    await waitFor("!!document.querySelector('#bots-panel')");
+    await delay(400);
+    ok(await js("(() => { const r = document.querySelector('#bots-panel').getBoundingClientRect(); return r.width >= innerWidth - 2 && r.top >= 0; })()"), 'the phone panel fills the screen from the top');
+    ok(await js("[...document.querySelectorAll('#bots-panel .bots-tabs [role=tab]')].length === 3 && [...document.querySelectorAll('#bots-panel .bots-tabs [role=tab]')].every(t => { const r = t.getBoundingClientRect(); return r.height >= 43.5 && r.bottom <= innerHeight; })"), 'the phone panel keeps its three tabs as 44 px targets');
+    await capture('bots-phone-panel');
+    await click('#bots-panel .bots-panel-close');
+    await waitFor("!document.querySelector('#bots-panel')");
+
+    // 8. Surfaces are token derived and readable in light and dark.
+    win.setContentSize(1440, 900);
+    for (const [tone, color] of [['light', '#f3eadb'], ['dark', '#1f1d24']]) {
+      await js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: ${q(color)} }))`);
+      await open(); await ready(); await delay(300);
+      const rows = await js(`(() => {
+        const parse = value => { const n = (value.match(/[\\d.]+/g) || []).map(Number); return { c: n.slice(0, 3).map(v => value.startsWith('color(srgb') ? v : v / 255), a: n.length > 3 ? n[3] : 1 }; };
+        const effective = el => { const stack = []; for (let n = el; n; n = n.parentElement) { const p = parse(getComputedStyle(n).backgroundColor); stack.push(p); if (p.a >= 1) break; }
+          return stack.reduceRight((under, p) => under.map((u, i) => p.c[i] * p.a + u * (1 - p.a)), [1, 1, 1]); };
+        const light = rgb => rgb.map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
+        return ['.bots-msg.bot .bots-msg-bubble', '.bots-msg.user .bots-msg-bubble', '.bots-composer'].map(selector => {
+          const node = document.querySelector(selector), b = light(effective(node)), f = light(parse(getComputedStyle(node).color).c);
+          return { selector, ratio: (Math.max(b, f) + .05) / (Math.min(b, f) + .05) };
+        });
+      })()`);
+      for (const row of rows) ok(row.ratio >= 4.5, `${tone}: ${row.selector} contrast ${row.ratio}`);
+    }
+
+    // 9. Reduced motion removes the page's animations, including the panel's entrance.
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await open({ panel: true }); await ready();
+    await waitFor("!!document.querySelector('#bots-panel')");
     await delay(300);
-    await js("[...document.querySelectorAll('.agent-profile-sheet button')].find(b => b.textContent === 'All settings').click()");
-    await delay(300);
-    ok(await js("!document.querySelector('.agent-profile-all').hidden && document.querySelector('.agent-profile-details').hidden && !!document.querySelector('.agent-profile-section[data-section=model]')"), 'phone profile opens All settings');
-    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
-    await delay(300);
-    await js("document.querySelector('.agent-profile-face').click()");
-    await delay(300);
-    ok(await js("!document.querySelector('.agent-profile-details').hidden && document.querySelector('.agent-profile-tabs').getBoundingClientRect().height >= 40 && document.querySelector('.agent-profile-titlebar .agent-dot-avatar').getBoundingClientRect().top >= 0"), 'phone profile keeps its face and full-height tabs on screen');
-    await capture('agents-phone-profile');
-    await js("document.querySelector('.agent-profile-sheet [aria-label=\"Close profile\"]').click()");
-    const question = "[...document.querySelectorAll('.agent-inline-activity .agent-inbox-question')].find(n => n.textContent.includes('Which direction?'))";
-    await js(`${question}.scrollIntoView({block:'center'});`);
-    await capture('ui3-after-mobile-approvals');
-    await js(`${question}.querySelector('.agent-waiting-details').click()`);
-    await waitFor("!!document.querySelector('.agent-item-sheet[open]')");
-    ok(await js("document.activeElement === document.querySelector('.agent-item-close')"), 'sheet focuses close');
-    await js("document.querySelector('.agent-item-close').dispatchEvent(new KeyboardEvent('keydown', {key:'Tab',shiftKey:true,bubbles:true,cancelable:true}))");
-    ok(await js("document.activeElement === document.querySelector('.agent-item-secondary')"), 'sheet traps reverse Tab');
-    await js("document.querySelector('.agent-item-secondary').dispatchEvent(new KeyboardEvent('keydown', {key:'Tab',bubbles:true,cancelable:true}))");
-    ok(await js("document.activeElement === document.querySelector('.agent-item-close')"), 'sheet traps forward Tab');
-    await capture('ui3-after-mobile-sheet');
-    await js("document.querySelector('.agent-item-close').click()");
-    ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by button');
-    await js(`${question}.querySelector('.agent-waiting-details').click(); document.querySelector('.agent-item-sheet').dispatchEvent(new KeyboardEvent('keydown', { key:'Escape',bubbles:true,cancelable:true }))`);
-    ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by Escape');
-    await js(`${question}.querySelector('.agent-waiting-details').click(); (() => { const n=document.querySelector('.agent-item-portrait'); for (const [type, y] of [['pointerdown', 100], ['pointermove', 140], ['pointermove', 500], ['pointerup', 500]]) n.dispatchEvent(new PointerEvent(type,{pointerId:1,clientY:y,bubbles:true,cancelable:true})); })()`);
-    await waitFor("!document.querySelector('.agent-item-sheet')");
-    ok(await js("!document.querySelector('.agent-item-sheet')"), 'sheet closes by downward swipe');
-    let start = writes.length;
-    await js(`${question}.querySelector('.btn.primary').click(); (() => { const n=${question}.querySelector('input'); n.value='Use the first option'; n.focus(); n.setSelectionRange(7,7); window.__ui3Draft=n; })()`);
-    await js("document.querySelector('.agent-inline-activity .agent-inbox-report .btn.primary').click()");
-    await waitFor("!document.querySelector('.agent-inline-activity .agent-inbox-report')");
-    ok(writes.slice(start).some(w => w.path === '/api/agents/inbox/i2/answer' && JSON.parse(w.body).choice === 'dismiss'), 'dismiss uses existing answer route');
-    ok(await js(`${question}.querySelector('input') === window.__ui3Draft && document.activeElement === window.__ui3Draft && window.__ui3Draft.value === 'Use the first option' && window.__ui3Draft.selectionStart === 7`), 'refreshing a neighbour preserves the answer node, draft, focus and caret');
-    start = writes.length;
-    await js(`[...${question}.querySelectorAll('button')].find(b => b.textContent === 'Send').click(); delete window.__ui3Draft`);
-    await waitFor(`!${question}`);
-    ok(writes.slice(start).some(w => w.path === '/api/agents/inbox/i3/answer' && JSON.parse(w.body).choice === 'reply'), 'question uses existing answer route');
-    start = writes.length;
-    await js("document.querySelector('.agent-inline-activity .agent-inbox-review .btn.primary').click()");
-    await delay(150);
-    ok(writes.slice(start).some(w => w.path === '/api/tasks/c9/status' && JSON.parse(w.body).status === 'done'), 'review uses existing approval route');
-    start = writes.length;
-    await js(`import('/static/js/permissionPrompt.js').then(m => m.showPermissionPrompt({id:'ui3-permission',tool:'Browser',title:'Open this page',description:'This action needs your permission.',choices:[{id:'deny',label:'Deny',behavior:'deny'},{id:'once',label:'Allow'}]}, null, {mount:document.querySelector('.agent-conversation-stream'),inline:true}))`);
-    ok(await js("!!document.querySelector('.agent-inline-permission .agent-blocked-status') && document.querySelector('.agent-inline-permission').querySelectorAll('.permission-choices button').length === 2"), 'inline permission has status and both choices');
-    await js("document.querySelector('.agent-inline-permission [data-choice=once]').click()");
-    await delay(150);
-    ok(writes.slice(start).some(w => w.path === '/api/permissions/ui3-permission/answer' && JSON.parse(w.body).choice === 'once'), 'permission uses existing route');
-    // Paint is token-derived: check the computed surfaces (translucent ones composited over what sits behind
-    // them) and contrast. The classic look is a dark conversation; the redesign is a light one, so the
-    // dark-surface rule applies to the classic look only and the contrast rule to both.
-    const contrast = await js(`(() => {
-      const parse = value => { const n = (value.match(/[\\d.]+/g)||[]).map(Number); return { c: n.slice(0,3).map(v => value.startsWith('color(srgb') ? v : v/255), a: n.length > 3 ? n[3] : 1 }; };
-      const effective = el => { const stack = []; for (let n = el; n; n = n.parentElement) { const p = parse(getComputedStyle(n).backgroundColor); stack.push(p); if (p.a >= 1) break; }
-        return stack.reduceRight((under, p) => under.map((u, i) => p.c[i] * p.a + u * (1 - p.a)), [1, 1, 1]); };
-      const light = rgb => rgb.map(n => n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((sum,n,i)=>sum+n*[.2126,.7152,.0722][i],0);
-      return ['.msg.assistant .msg-body','.msg.user .msg-body','.agent-live-panel','.agent-approval-card'].map(selector => {
-        const node = document.querySelector(selector), b = light(effective(node)), f = light(parse(getComputedStyle(node).color).c);
-        return {selector,dark:b<.22,ratio:(Math.max(b,f)+.05)/(Math.min(b,f)+.05)};
-      });
-    })()`);
-    const classic = await js("!document.documentElement.classList.contains('kairos-redesign')");
-    for (const c of contrast) ok((c.dark || !classic) && c.ratio >= 4.5, `${c.selector} ${classic ? 'dark surface, ' : ''}contrast ${c.ratio}`);
-    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-    await navigate('agents', {agentId:'a1'});
-    await waitFor("!!document.querySelector('.agent-composer-orb')");
-    await js("document.querySelector('.agent-inline-activity .agent-waiting-details').click()");
-    const motion = await js("[...document.querySelector('.agent-conversation-page').getAnimations({subtree:true}), ...document.querySelector('.agent-item-sheet').getAnimations({subtree:true})].map(a => ({ target:a.effect?.target?.className, name:a.animationName || a.transitionProperty, state:a.playState }))");
-    ok(motion.length === 0, 'reduced motion disables all new animations: ' + JSON.stringify(motion));
-    await js("document.querySelector('.agent-item-close').click()");
-    console.log(`PASS: UI-3 conversation layout: ${checks} assertions.`);
+    const motion = await js("[...document.querySelector('.bots-shell').getAnimations({ subtree: true })].filter(a => !a.effect?.target?.closest?.('kairos-mascot') && !a.effect?.target?.closest?.('.bots-kip') && (!a.transitionProperty || /^(transform|translate|scale|rotate|top|left|right|bottom|inset|width|height|margin.*)$/.test(a.transitionProperty))).map(a => ({ target: String(a.effect?.target?.className || '').slice(0, 40), name: a.animationName || a.transitionProperty }))");
+    ok(motion.length === 0, 'reduced motion disables the page animations: ' + JSON.stringify(motion));
+    console.log(`PASS: Bots conversation layout: ${checks} assertions.`);
     return { checks };
   } finally {
-    inbox.splice(0, inbox.length, ...savedInbox); demoState.agentReview = savedReview;
-    await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${JSON.stringify(appearance)}))`);
-    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }).catch(() => {});
+    await js(`import('/static/js/appearance.js').then(m => m.updateAppearance(${q(appearance)}))`).catch(() => {});
+    await js("document.documentElement.classList.remove('electron-shell')").catch(() => {});
     win.setContentSize(1440, 900);
+    await restore();
   }
 };

@@ -55,7 +55,7 @@ export function openKipMenu(opener, { needs } = {}) {
   const choices = kipChoices({ size: mobileOn() ? 64 : 48 });
   const body = el('div', { class: 'kip-menu-body' }, [choices.node]);
   const finish = () => sheet ? sheet.close() : closePopover?.();
-  if (needs) body.append(el('button', { type: 'button', class: 'kip-menu-needs', text: 'Kip needs you. Open Agents', onclick: () => { finish(); needs(); } }));
+  if (needs) body.append(el('button', { type: 'button', class: 'kip-menu-needs', text: 'Kip needs you. Open Bots', onclick: () => { finish(); needs(); } }));
   let sheet = null;
   if (mobileOn()) {
     sheet = openMobileSheet({ title: 'Kip', content: body, opener });

@@ -1,5 +1,5 @@
 // Phone tab bar checks (2026-10-22, David: "a bottom of the screen ios-liquid
-// glass card showcasing Home, Chats, Agents, Calendar, and More, with more
+// glass card showcasing Home, Chats, Calendar, and More (Agents became the Bots mode, 2026-10-29), with more
 // producing a popup with the rest of the other tabs"). Run from
 // mobile-tabs-checks.cjs, which passes its harness, ok/eq counters and helpers;
 // uses only the smoke harness's synthetic backend.
@@ -11,7 +11,7 @@
 // the 393x852 (59/34) and 375x667 (20/0) iPhone classes and a non-iPhone,
 // reduced motion, desktop, and that the avatar is gone. Screenshots: tabbar-*.
 module.exports = async function tabBarChecks(c) {
-  const { js, waitFor, delay, navigate, ok, eq, rect, hit, small, noSideways, barState, barCurrent, barShown, barGone, noAvatar, MORE, shot, resize, cdp, overflow } = c;
+  const { demoState, js, waitFor, delay, navigate, ok, eq, rect, hit, small, noSideways, barState, barCurrent, barShown, barGone, noAvatar, MORE, shot, resize, cdp, overflow } = c;
   const W = 390, H = 844;
   await resize(W, H);
   const items = () => js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)");
@@ -38,7 +38,7 @@ module.exports = async function tabBarChecks(c) {
       }
       return n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).position !== 'fixed' && !n.closest('.ms-background, .ms-blur, .dither-canvas, [inert], .ms-activity');
     };
-    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .agents-messenger, .forge-panel, .ms-history-search, .ms-launch-composer')));
+    const nodes = [...v.querySelectorAll('*')].filter(n => shown(n) && (!n.children.length || n.matches('button, input, textarea, select, img, svg, canvas, .bots-shell, .forge-panel, .ms-history-search, .ms-launch-composer')));
     const bottoms = nodes.map(n => ({ b: clip(n), n: String(n.className || n.tagName).slice(0, 40) })).filter(x => x.b !== null).sort((a, b) => b.b - a.b);
     v.scrollTo?.(0, 0); for (const n of v.querySelectorAll('*')) if (n.scrollTop) n.scrollTop = 0;
     return { last: bottoms[0], barTop };
@@ -87,7 +87,13 @@ module.exports = async function tabBarChecks(c) {
     await waitFor("!!document.querySelector('.ms-live-chat')");
   };
   const conversationPage = { back: '.ms-chat-back', composer: '.ms-conversation .ms-composer', current: 'chats' };
-  const agentPage = { back: '.agents-conversation-back', composer: '.side-chat-composer', current: 'agents', composerGap: 'atMost' };
+  const agentPage = { back: '.bots-head-back', composer: '.bots-composer', current: 'botsHome', composerGap: 'atMost' };
+  // A bot's page lives in Bots mode; this opens one and waits for its composer.
+  // Bots pages are answered by the in-memory Bots backend while botsLive is set (restored at the end).
+  const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention };
+  demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
+  const openBotPage = async () => { await navigate('agents', { agentId: 'a1' }); await waitFor("document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-composer-input')"); };
+  const backToKairos = async () => { await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'"); await barShown(); };
   const forgePage = { back: '.mf-session .mf-back', composer: '.mf-session .forge-transcript-composer', current: 'sessions' };
   const geometry = async (label, screen, gap, width) => {
     const bar = await rect('.ms-tabbar');
@@ -99,11 +105,11 @@ module.exports = async function tabBarChecks(c) {
   // ---- 1. The bar itself: items, icons, labels, glass ------------------------------------------
   await navigate('home'); await barShown();
   ok(await noAvatar(), 'The top-left avatar and the hamburger are gone');
-  eq(await items(), ['home', 'chats', 'agents', 'calendar', 'more'], 'Kairos bar items');
-  eq(await labels(), ['Home', 'Chats', 'Agents', 'Calendar', 'More'], 'Each item carries its label');
+  eq(await items(), ['home', 'chats', 'calendar', 'more'], 'Kairos bar items (no Agents)');
+  eq(await labels(), ['Home', 'Chats', 'Calendar', 'More'], 'Each item carries its label');
   ok(await js("[...document.querySelectorAll('.ms-tabbar-item')].every(n => n.querySelector(':scope > svg')?.getAttribute('aria-hidden') === 'true')"), 'Each item has a decorative SVG icon');
   eq(await js("[...document.querySelectorAll('.ms-tabbar-item > svg')].map(n => n.firstElementChild.tagName + ':' + (n.firstElementChild.getAttribute('d') || n.firstElementChild.getAttribute('cx') || n.firstElementChild.getAttribute('x')))"),
-    ['path:M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z', 'path:M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'circle:9', 'rect:4', 'rect:4'], 'The icons are the TabBar board glyphs (home, chat, agents, calendar, grid)');
+    ['path:M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z', 'path:M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'rect:4', 'rect:4'], 'The icons are the TabBar board glyphs (home, chat, calendar, grid)');
   eq(await js("[document.querySelector('.ms-tabbar').tagName, document.querySelector('.ms-tabbar').getAttribute('aria-label')]"), ['NAV', 'Tabs'], 'The bar is a navigation landmark');
   eq(await js("[...document.querySelectorAll('.ms-tabbar-item')].filter(n => n.getAttribute('aria-current') === 'page').map(n => n.dataset.tabbar)"), ['home'], 'Exactly one item is current');
   eq(await small('.ms-tabbar-item'), [], 'Bar items are 44px targets');
@@ -122,7 +128,7 @@ module.exports = async function tabBarChecks(c) {
   ok(await js("![...document.querySelectorAll('.ms-tabbar *')].some(n => n.childElementCount === 0 && n.textContent.includes(String.fromCharCode(8212)))"), 'Bar copy has no em dash');
 
   // ---- 2. Every tab: the bar shows, marks the right item, and content clears it ------------------
-  for (const [tab, options, want] of [['home', {}, 'home'], ['chat', {}, 'chats'], ['agents', {}, 'agents'], ['calendar', {}, 'calendar'], ['notes', {}, 'more'], ['library', {}, 'more'],
+  for (const [tab, options, want] of [['home', {}, 'home'], ['chat', {}, 'chats'], ['calendar', {}, 'calendar'], ['notes', {}, 'more'], ['library', {}, 'more'],
     ['email', {}, 'more'], ['tasks', {}, 'more'], ['cookbook', {}, 'more'], ['tool-store', {}, 'more'], ['school', {}, 'more']]) {
     await navigate(tab, options); await delay(400); await barShown();
     eq(await barCurrent(), want, `${tab}: the bar marks ${want}`);
@@ -156,8 +162,12 @@ module.exports = async function tabBarChecks(c) {
   await js("document.getElementById('ms-tab-0').click()"); await delay(300);
   await tap('chats'); await waitFor("document.getElementById('ms-tab-1').getAttribute('aria-selected') === 'true'");
   ok(true, 'Chats again, on the workspace, shows the list of chats');
-  await tap('agents'); await waitFor("document.documentElement.dataset.view === 'agents'"); await barShown();
-  eq(await barCurrent(), 'agents', 'Agents opens Agents');
+  ok(await js("!document.querySelector('.ms-tabbar [data-tabbar=agents]') && !document.querySelector('#nav .nav-item[data-tab=agents]')"), 'There is no Agents item on the bar or in the sidebar');
+  // The old Agents link opens Bots: the bar then shows the Bots item, current on the roster.
+  await navigate('agents'); await waitFor("document.documentElement.dataset.appMode === 'bots' && document.documentElement.dataset.view === 'botsHome'"); await barShown();
+  eq(await items(), ['botsHome', 'more'], 'An old Agents link opens Bots, whose bar is Bots and More');
+  eq(await barCurrent(), 'botsHome', 'Bots opens the roster');
+  await backToKairos();
   await tap('calendar'); await waitFor("document.documentElement.dataset.view === 'calendar'"); await barShown();
   eq(await barCurrent(), 'calendar', 'Calendar opens Calendar');
   await tap('chats'); await waitFor("document.documentElement.dataset.view === 'mobileLaunch'"); await delay(300);
@@ -171,10 +181,9 @@ module.exports = async function tabBarChecks(c) {
   // ---- 4. Badges carried over from the avatar ----------------------------------------------
   const badges = await js(`(async () => { const { badgeCounts } = await import('/static/js/mobileActivity.js'); const counts = badgeCounts();
     const read = id => { const n = document.querySelector('.ms-tabbar [data-tabbar=' + id + ']'), b = n.querySelector('.ms-tabbar-badge'); return { badge: b && !b.hidden ? b.textContent : '', label: n.getAttribute('aria-label') }; };
-    return { counts, home: read('home'), agents: read('agents'), nav: document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent.trim() || '' }; })()`);
+    return { counts, home: read('home') }; })()`);
   const homeCount = badges.counts.need || badges.counts.live;
   ok(homeCount > 0 && badges.home.badge === String(homeCount) && badges.home.label === `Home, ${homeCount} ${badges.counts.need ? 'need you' : 'working'}`, 'Home carries the needs-you badge the avatar had, and says it: ' + JSON.stringify(badges));
-  ok(badges.nav && badges.agents.badge === badges.nav && badges.agents.label === `Agents, ${badges.nav} waiting on you`, 'Agents carries the sidebar inbox badge, and says it: ' + JSON.stringify(badges));
   eq(await js("[...document.querySelectorAll('.ms-tabbar [data-tabbar=chats] .ms-tabbar-badge:not([hidden]), .ms-tabbar [data-tabbar=calendar] .ms-tabbar-badge:not([hidden])')].length"), 0, 'Items without news carry no badge');
   await shot('tabbar-badges');
 
@@ -190,7 +199,7 @@ module.exports = async function tabBarChecks(c) {
       settings: !!s.querySelector('.ms-settings-row svg') && s.querySelector('.ms-settings-row').textContent.trim(),
       activity: s.querySelectorAll('.ms-sheet-activity-row').length, focus: s.contains(document.activeElement) }; })()`);
   eq([more.label, more.heading, more.modal, more.expanded, more.focus], ['More', 'More', 'true', 'true', true], 'More opens a modal sheet named More, with focus inside');
-  const rest = more.nav.filter(t => !['home', 'chat', 'agents', 'calendar'].includes(t));
+  const rest = more.nav.filter(t => !['home', 'chat', 'calendar'].includes(t));
   eq(more.groups.flatMap(g => g[1]), rest, 'More holds every other tab, in sidebar order: ' + JSON.stringify(more.groups));
   eq(more.groups.map(g => g[0]), ['Workspace', 'Intelligence'], 'Grouped as the workspace sheet grouped them');
   ok(more.mode && more.modeFirst, 'The Kairos / Forge / Bots switch sits at the top of More');
@@ -241,28 +250,28 @@ module.exports = async function tabBarChecks(c) {
   await tap('chats'); await waitFor("!document.querySelector('.ms-live-chat') && document.querySelector('#ms-tab-1[aria-selected=true]')");
   ok(true, 'Current Chats pops live launch chat to the Chats list');
   for (const action of ['tab', 'back']) {
-    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')");
-    await pushedPage('Agent DM', agentPage);
-    if (action === 'tab') await tap('agents'); else await js("document.querySelector('.agents-conversation-back').click()");
-    await waitFor("!!document.querySelector('.agents-messenger-welcome') && !document.querySelector('.agents-workspace.has-conversation')");
-    ok(true, `${action}: returns the agent DM to Agents welcome`);
+    await openBotPage();
+    await pushedPage('Bot page', agentPage);
+    if (action === 'tab') await tap('botsHome'); else await js("document.querySelector('.bots-head-back').click()");
+    await waitFor("!!document.querySelector('.bots-home .bots-grid') && !document.querySelector('.bots-shell')");
+    ok(true, `${action}: returns the bot page to the Bots roster`);
   }
-  // Team and inbox use the same back control as direct messages.
+  await backToKairos();
+  // A team opens the Swarm view (a Kairos page, under More); the Bots inbox is a drawer beside the roster.
   const teamId = await js("(async () => { const r = await fetch('/api/swarm/systems'); return (await r.json()).items?.[0]?.id || null; })()");
   if (teamId) {
-    await navigate('agents', { team: teamId }); await waitFor("!!document.querySelector('.swarm-composer')");
-  } else {
-    await js("[...document.querySelectorAll('.agents-welcome-actions button')].find(b => b.textContent === 'New team').click()");
-    await waitFor("!!document.querySelector('dialog[open] .swarm-setup')");
-    await js("document.querySelector('dialog[open] .swarm-dialog-header button').click()");
+    await navigate('agents', { team: teamId }); await waitFor("!!document.querySelector('.swarm-composer')"); await barShown();
+    eq(await barCurrent(), 'more', 'A team link opens Swarm, which sits under More');
+    ok(await js("document.documentElement.dataset.appMode === 'kairos'"), 'Swarm stays a Kairos page');
   }
-  await pushedPage('Team', { back: '.agents-conversation-back', current: 'agents' });
-  eq(await js("[...document.querySelectorAll('.agents-messenger button')].filter(b => /All agents/.test(b.textContent) && b.getClientRects().length).length"), 0, 'Team has no duplicate All agents back');
-  await js("document.querySelector('.agents-conversation-back').click()"); await waitFor("!!document.querySelector('.agents-messenger-welcome')");
-  await js("document.querySelector('.agents-chats-open').click()");
-  await js("document.querySelector('.agents-rail-inbox').click()"); await waitFor("!!document.querySelector('.agents-inbox-view')");
-  await pushedPage('Inbox', { back: '.agents-conversation-back', current: 'agents' });
-  await js("document.querySelector('.agents-conversation-back').click()"); await waitFor("!!document.querySelector('.agents-messenger-welcome')");
+  await navigate('botsHome'); await waitFor("!!document.querySelector('.bots-home .bots-grid')"); await barShown();
+  await js("import('/static/js/botsAttentionHost.js').then(m => { (m.attentionHost() || m.mountAttentionHost({ pollMs: 600000 })); return m.openAttention('inbox', {}); })");
+  await waitFor("!!document.querySelector('.bots-attn:not([hidden])')");
+  await delay(400);
+  ok(await js("(() => { const r = document.querySelector('.bots-attn').getBoundingClientRect(); return r.width >= innerWidth - 2 && r.right <= innerWidth + 1; })()"), 'The Bots inbox covers the phone width');
+  await js("(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  await waitFor("!document.querySelector('.bots-attn:not([hidden])')");
+  await backToKairos();
   await openSettings(); await pushedPage('Settings list', { back: '.settings-mobile-back', current: 'more' });
   await js("document.querySelector('.settings-nav-item').click()"); await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'");
   await pushedPage('Settings page', { back: '.settings-mobile-back', current: 'more' });
@@ -334,7 +343,7 @@ module.exports = async function tabBarChecks(c) {
   await shot('tabbar-forge-more');
   await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
   await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.documentElement.dataset.view === 'home'"); await barShown();
-  eq(await items(), ['home', 'chats', 'agents', 'calendar', 'more'], 'Back in Kairos the bar returns to the Kairos items');
+  eq(await items(), ['home', 'chats', 'calendar', 'more'], 'Back in Kairos the bar returns to the Kairos items');
 
   // ---- 8. Device classes: iPhone 393x852 (59/34), iPhone 375x667 (20/0), and a non-iPhone ---------
   // As in mobile-tabs-checks: the window is the layout viewport, --ms-page-height the true screen.
@@ -348,7 +357,7 @@ module.exports = async function tabBarChecks(c) {
     await resize(w, layout);
     await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '${nudge}px'); })()`);
     const gap = Math.max(28, bottom);
-    for (const [tab, options, want] of [['home', {}, 'home'], ['chat', {}, 'chats'], ['agents', {}, 'agents'], ['calendar', {}, 'calendar']]) {
+    for (const [tab, options, want] of [['home', {}, 'home'], ['chat', {}, 'chats'], ['calendar', {}, 'calendar']]) {
       await navigate(tab, options); await delay(500); await barShown();
       eq(await barCurrent(), want, `${name} ${tab}: ${want} is current`);
       const bar = await geometry(`${name} ${tab}`, screen, gap, w);
@@ -377,8 +386,9 @@ module.exports = async function tabBarChecks(c) {
     await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
     await pushedPage(`${name} conversation`, conversationPage);
     await geometry(`${name} conversation`, screen, gap, w);
-    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')");
-    await pushedPage(`${name} agent DM`, agentPage); await geometry(`${name} agent DM`, screen, gap, w);
+    await openBotPage();
+    await pushedPage(`${name} bot page`, agentPage); await geometry(`${name} bot page`, screen, gap, w);
+    await backToKairos();
     await openSettings(); await pushedPage(`${name} Settings list`, { back: '.settings-mobile-back', current: 'more' });
     await geometry(`${name} Settings list`, screen, gap, w);
     await openForgeSession(); await pushedPage(`${name} Forge session`, forgePage); await geometry(`${name} Forge session`, screen, gap, w);
@@ -395,7 +405,7 @@ module.exports = async function tabBarChecks(c) {
   for (const [name, w, screen, top, bottom] of [['iphone-393x852', 393, 852, 59, 34], ['iphone-375x667', 375, 667, 20, 0]]) {
     await resize(w, screen);
     await js(`(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '12px'); })()`);
-    for (const [tab, options] of [['home', {}], ['chat', {}], ['agents', {}], ['calendar', {}]]) {
+    for (const [tab, options] of [['home', {}], ['chat', {}], ['calendar', {}]]) {
       await navigate(tab, options); await delay(600); await barShown(); await pillOn();
       await geometry(`${name} ${tab} (picture)`, screen, Math.max(28, bottom), w);
       await shot(`tabbar-${name}-${tab === 'chat' ? 'chats' : tab}`);
@@ -409,8 +419,9 @@ module.exports = async function tabBarChecks(c) {
     await shot(`tabbar-${name}-forge-sessions`);
     await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await barShown(); await delay(300);
     await shot(`tabbar-${name}-conversation`);
-    await navigate('agents', { agentId: 'a1' }); await waitFor("!!document.querySelector('.side-chat-input')"); await barShown(); await delay(400);
-    await shot(`tabbar-${name}-agent-dm`);
+    await openBotPage(); await barShown(); await delay(400);
+    await shot(`tabbar-${name}-bot-page`);
+    await backToKairos();
     await openSettings(); await barShown(); await delay(400); await shot(`tabbar-${name}-settings`);
     await openForgeSession(); await barShown(); await delay(400); await shot(`tabbar-${name}-forge-session`);
     await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
@@ -436,4 +447,5 @@ module.exports = async function tabBarChecks(c) {
   await resize(W, H); await barShown();
   eq(await barCurrent(), 'home', 'Back at phone width the bar returns');
   eq(await overflow(), [], 'No overflow with the bar');
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
 };

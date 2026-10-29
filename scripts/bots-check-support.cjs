@@ -29,6 +29,8 @@ async function isolateBotsCheck({ js, demoState }, state = {}) {
   const restoreState = replace(demoState, {
     botsLive: true, botsCore: undefined, botsWorking: [],
     botsConfiguredFail: undefined, botsConfiguredWarnings: undefined,
+    // The attention host polls /api/bot-attention in Bots mode; an empty feed keeps those polls answered.
+    botsAttention: { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] },
     isAdmin: true, empty: false, homeClear: false, ...state,
   });
   return async () => {

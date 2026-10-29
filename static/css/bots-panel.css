@@ -153,3 +153,5 @@
 [data-app-mode="bots"] .bots-module { display: grid; gap: 8px; }
 [data-app-mode="bots"] .bots-count.over { color: var(--bots-danger-ink); }
 @media (max-width: 720px) { [data-app-mode="bots"] .bots-panel-scroll { padding-bottom: max(24px, env(safe-area-inset-bottom)); } }
+/* On a phone every tab is a 44 px target. */
+@media (max-width: 720px) { [data-app-mode="bots"] .bots-tab { min-height: 44px; } }

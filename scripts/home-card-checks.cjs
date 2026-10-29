@@ -44,8 +44,14 @@ module.exports = async ({js, win, waitFor, capture, navigate, demoState, delay})
   await js("document.querySelector('[data-home-section=projects] .dashboard-row').click()");
   await waitFor("document.getElementById('view-content').dataset.view==='chat'");
   await home();
+  // Agents became Bots: a Bots row opens that bot's page (the in-memory Bots backend answers it).
+  const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention };
+  demoState.botsLive = true; demoState.botsAttention = { items: [], feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
   await js("document.querySelector('[data-home-section=agents] .dashboard-row').click()");
-  await waitFor("document.getElementById('view-content').dataset.view==='agents'");
+  await waitFor("document.getElementById('view-content').dataset.view==='botsShell' && !!document.querySelector('.bots-composer-input')");
+  await js("import('/static/js/app.js').then(m => m.switchTab('home'))");
+  await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+  for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
   await home();
   win.setContentSize(390,844); await delay(200);
   await js("document.querySelector('.dashboard-grid').scrollIntoView({block:'start'})");

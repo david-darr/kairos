@@ -216,7 +216,10 @@ const server = http.createServer(async (req, res) => {
       const botsRead = botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
       if (botsRead?._status) res.statusCode = botsRead._status;
       const g4Read = botsRead === undefined && demoState.g4Live ? g4Backend.read(url.pathname) : undefined;
-      res.end(JSON.stringify(botsRead !== undefined ? botsRead : g4Read !== undefined ? g4Read : fixture(url)));
+      // The attention host (app.js) polls these on every page; the plain demo answers them empty. The Bots backend answers them for real.
+      const attentionIdle = botsRead === undefined && url.pathname === '/api/bot-attention/inbox' ? { rows: [], counts: { 'needs-you': 0, news: 0, done: 0 }, count: 0 }
+        : botsRead === undefined && url.pathname === '/api/bot-attention/notifications' ? { rows: [], unread: 0 } : undefined;
+      res.end(JSON.stringify(botsRead !== undefined ? botsRead : attentionIdle !== undefined ? attentionIdle : g4Read !== undefined ? g4Read : fixture(url)));
     }
     catch (error) { errors.push(error.message); res.writeHead(404); res.end('{"detail":"Missing fixture"}'); }
     return;
@@ -381,7 +384,7 @@ app.whenReady().then(async () => {
       console.log('PASS: g3 Agents phone audit, appearance, village benchmark.'); console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-call-only')) {
-      await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange });
+      await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange, base });
       assert.deepEqual(errors, [], 'Agents call renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, errors }, null, 2));
       console.log('Screenshots: ' + output); return;
@@ -393,27 +396,33 @@ app.whenReady().then(async () => {
       console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-messenger-only')) {
-      await require('./agents-messenger-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState });
+      await require('./agents-messenger-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, base });
       assert.deepEqual(errors, [], 'Agents messenger renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, errors }, null, 2));
       console.log('Screenshots: ' + output); return;
     }
     if (layoutBefore || process.argv.includes('--agents-layout-only') || process.argv.includes('--agents-layout-captures')) {
-      const result = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState,
+      const result = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, base,
         inbox: calendarFixtures.agentInbox, capturesOnly: layoutBefore || process.argv.includes('--agents-layout-captures'), stage: layoutBefore ? 'before' : 'after' });
       assert.deepEqual(errors, [], 'UI-3 renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed:true, ...result, errors }, null, 2));
       console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-birth-only')) {
-      await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-        win, liveChunk, liveEvent, liveFinish, liveRuns, capture });
+      await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, base,
+        win, liveChunk, liveEvent, liveFinish, liveRuns, liveBroadcast, capture });
       assert.deepEqual(errors, [], 'Agent birth renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agent birth and turns: 12 cases'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--agents-phone-only')) {
+      await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, demoState, base });
+      assert.deepEqual(errors, [], 'Bots phone renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['bots phone'], errors }, null, 2));
+      console.log('PASS: Bots surfaces on a phone.'); return;
+    }
     if (process.argv.includes('--agents-phone-report')) {
-      const found = await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, report: true });
+      const found = await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, demoState, base, report: true });
       console.log('PHONE AUDIT ' + found.length + ' problem(s)');
       for (const line of found) console.log('  ' + line);
       exitAfterFlush(0); return;
@@ -439,14 +448,14 @@ app.whenReady().then(async () => {
       console.log('PASS: Bots ' + botsFlag + ' checks.'); console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-profile-only')) {
-      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
+      await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture, base });
       assert.deepEqual(errors, []);
       console.log('PASS: Agents profile checks.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Agents profile and draft retention'], errors }, null, 2));
       return;
     }
     if (process.argv.includes('--interface-only') || process.argv.includes('--interface-details-only') || process.argv.includes('--mobile-chrome-only')) {
-      await require(process.argv.includes('--mobile-chrome-only') ? './mobile-chrome-checks.cjs' : process.argv.includes('--interface-details-only') ? './interface-detail-checks.cjs' : './interface-checks.cjs')({ js, win, waitFor, capture, delay, navigate, overflow });
+      await require(process.argv.includes('--mobile-chrome-only') ? './mobile-chrome-checks.cjs' : process.argv.includes('--interface-details-only') ? './interface-detail-checks.cjs' : './interface-checks.cjs')({ js, win, waitFor, capture, delay, navigate, overflow, demoState });
       assert.deepEqual(errors, []);
       console.log('PASS: shared interface on desktop, phone and small phone; chat model, tools, composer, drawers and Settings.');
       console.log('Screenshots: ' + output);
@@ -454,7 +463,7 @@ app.whenReady().then(async () => {
       return;
     }
     if (process.argv.includes('--agents-appearance-only')) {  // Agents themes and reduced motion (agents-appearance-checks.cjs).
-      await require('./agents-appearance-checks.cjs')({ js, win, waitFor, navigate, capture });
+      await require('./agents-appearance-checks.cjs')({ js, win, waitFor, navigate, capture, demoState, base, delay });
       assert.deepEqual(errors, []);
       console.log('PASS: Agents appearance checks.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents appearance'], errors }, null, 2));
@@ -1136,7 +1145,7 @@ app.whenReady().then(async () => {
     win.setContentSize(390, 844);
     await delay(100);
     await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'agents', 'calendar', 'more'], "The phone tab bar replaces the sidebar");
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'calendar', 'more'], "The phone tab bar replaces the sidebar (Agents became the Bots mode)");
     await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
     await delay(300);
     assert.equal(await railWidth(), 0, "Phone keeps old sidebar hidden despite desktop preference");
@@ -1196,10 +1205,12 @@ app.whenReady().then(async () => {
       await navigate("library", { section: "documents" });
       // 2026-10-20: Agents is the messenger (David approved), which fills the
       // content area on a wide window instead of sitting in a 1200px column.
+      // Agents became Bots: its home fills the content area beside the Bots sidebar instead of a 1200px column.
       await navigate("agents");
-      await waitFor("!!document.querySelector('#view-content .agents-messenger-welcome')");
-      assert.ok(await js("(() => { const m=document.querySelector('#view-content .agents-messenger').getBoundingClientRect(), c=document.getElementById('view-content').getBoundingClientRect(); return m.width > 1200 && Math.abs(m.width - c.width) < 40; })()"), "agents fill the wide content area");
-      assert.ok(await js("!document.querySelector('#view-content .view-constrained')"), "agents is not held in the 1200px column");
+      await waitFor("document.getElementById('view-content').dataset.view === 'botsHome' && !!document.querySelector('#view-content .bots-home')");
+      assert.ok(await js("(() => { const m=document.querySelector('#view-content .bots-home').getBoundingClientRect(), c=document.getElementById('view-content').getBoundingClientRect(); return m.width >= 1000 && m.width <= c.width; })()"), "Bots home uses its own wide column (1040px cap) in the wide content area");
+      assert.ok(await js("!document.querySelector('#view-content .view-constrained')"), "Bots home is not held in the 1200px column");
+      await navigate("home"); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
     } finally {
       win.setContentSize(...previousSize);
       await delay(100);
@@ -1209,7 +1220,7 @@ app.whenReady().then(async () => {
       demoState.takenOwners = [];
       win.setContentSize(width, height);
       await delay(100);
-      for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "agents", "cookbook", "school"]) {
+      for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "botsHome", "cookbook", "school"]) {
         await navigate(tab);
         if (tab === "chat") {
           // A new chat lands on the halftone figure (static/js/chatBackdrop.js). On a phone the plain
@@ -1387,96 +1398,75 @@ app.whenReady().then(async () => {
           assert.ok(writes.slice(schoolWrites).every(w => w.path.startsWith('/api/tab-school/assignments/a1/')), label + ' School writes only its own sync');
           writes.splice(schoolWrites);
         }
-        if (tab === "agents" && !demoState.empty) {
-          demoState.agentUpkeepUndone = false;
-          // Agents: the list, the cross-agent inbox with its answers, the badge.
-          // 2026-10-20: the list is the messenger's chat rail (on a phone the
-          // rail is the Chats drawer), with a welcome pane until a chat is picked.
-          const phoneRail = () => js("!document.querySelector('.agents-rail-inbox').getClientRects().length");
-          const showRail = async () => { if (await phoneRail()) await js("document.querySelector('.agents-chats-open').click()"); await delay(300); };
-          await waitFor("document.querySelectorAll('.agents-rail-item.agent-tile').length === 2");
-          assert.ok(await js("!!document.querySelector('.agents-messenger-welcome')"), label + ' welcome pane before a chat is picked');
-          await showRail();
-          assert.equal(await js("document.querySelectorAll('.agents-rail-item.agent-tile .agent-dot-avatar').length"), 2, label + ' roster faces use the dot component');
-          assert.ok(await js("[...document.querySelectorAll('.agents-rail-create button')].map(b => b.getAttribute('aria-label')).join() === 'New agent,New team' && !!document.querySelector('.agents-messenger-welcome button')"), label + ' creation entry points are in the rail and the welcome pane');
-          assert.ok(await js("document.querySelector('.agents-rail-item.team-tile')?.textContent.includes('Launch team')"), label + " teams listed with the agents");
-          await js("document.querySelector('.agents-rail-inbox').click()");
-          await waitFor("!!document.querySelector('.agent-inbox .agent-inbox-question')");
-          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-question button')].some(b => b.textContent === 'Reply')"), label + " a question can be answered");
-          assert.equal(await js("document.querySelectorAll('.agent-inbox-approval').length"), 0, label + " agents run in Auto: nothing to approve");
-          assert.ok(await js("document.querySelector('.agent-inbox-report').textContent.includes('Backend Engineer')"), label + " report body shown");
-          assert.ok(await js("[...document.querySelectorAll('.agent-inbox-item')].every(n => n.querySelector('.agent-dot-avatar') && n.querySelectorAll('.agent-inbox-actions .btn.primary').length === 1 && n.querySelector('.agent-inbox-compose[hidden]'))"), label + ' waiting rows have faces and one primary action');
-          await waitFor("document.querySelector('#nav .nav-item[data-tab=agents] .nav-badge')?.textContent === '2'");
-          assert.deepEqual(await overflow(), [], label + " overflow in agents list");
-          await capture(label + "-agents-inbox");
-          // The state line lives in the open agent's live panel (Info on a
-          // desktop), checked on the agent page below.
-          await navigate("agents", { agentId: "a1" });
-          await waitFor("!!document.querySelector('.agent-memory')");
-          // The agent page opens on its Chat tab: its own chats, the open
-          // conversation and a composer; Work holds everything else.
-          await waitFor("document.querySelectorAll('.agent-chat-item').length === 1");
-          assert.equal(await js("document.querySelector('.agent-tab.active').textContent"), "Chat", label + " opens on Chat");
-          assert.ok(await js("!!document.querySelector('.agent-profile-face .agent-dot-avatar') && !!document.querySelector('.agent-profile-face h2') && !!document.querySelector('.agent-info-toggle')"), label + ' top bar has the bot face (opens its profile) and Info');
-          assert.equal(await js("[...document.querySelectorAll('.agent-tab')][1].textContent"), "Work (2)", label + " work tab counts what waits");
-          // Messages paint before the chat mount finishes; the list marks the open chat only after it.
-          await waitFor("document.querySelectorAll('.agent-chat-main .session-chat-messages .msg').length > 0 && document.querySelector('.agent-chat-item.active')?.dataset.session === 'as1' && document.querySelector('.agent-chat-item.active')?.getAttribute('aria-current') === 'true'");
-          assert.ok(await js("document.querySelector('.agent-chat-item.active')?.textContent.includes('Chat with Scout')"), label + " last chat open");
-          assert.ok(await js("!!document.querySelector('.agent-chat-main .side-chat-input')"), label + " composer");
-          assert.ok(await js("document.querySelector('.agent-work-host').hidden"), label + " work hidden on chat tab");
-          assert.deepEqual(await overflow(), [], label + " overflow on agent chat");
-          await capture(label + "-agent-chat");
-          await js("[...document.querySelectorAll('.agent-tab')][1].click()");
-          await waitFor("!document.querySelector('.agent-work-host').hidden");
-          await waitFor("document.querySelector('.agent-computer-section .computer-frame')?.naturalWidth > 0");
-          const titles = await js("[...document.querySelectorAll('.agent-work-host > .glass > .title')].map(n => n.textContent)");
-          assert.deepEqual(titles, ["Inbox", "Computer", "Work", "History", "Teams", "Triggers"], label + " agent work sections");
-          assert.ok(await js("!!document.querySelector('.agent-assignment-card .agent-dot-avatar')"), label + ' assignment card has dot face');
-          assert.ok(await js("[...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Routines') && [...document.querySelectorAll('.agent-tab')].map(n => n.textContent).includes('Memory')"), label + ' routines and memory tabs');
-          assert.equal(await js("document.querySelector('.agent-work-host [aria-label=\"Keep this agent signed in\"]').getAttribute('aria-checked')"), 'true');
-          assert.ok(await js("document.querySelector('.agent-forget-logins').disabled"), label + ' logins cannot be forgotten while running');
-          await capture(label + '-agent-computer');
-          assert.ok(await js("document.querySelector('.agent-triggers-panel').textContent.includes('GitHub pushes · asks you first')"), label + " the triggers that start this agent's work");
-          assert.ok(await js("document.querySelector('.agent-teams-panel').textContent.includes('Launch team · teammate · Working')"), label + " the agent's teams");
-          assert.ok(await js("document.querySelector('.agent-memory').value.includes('remote roles only')"), label + " memory shown");
-          assert.ok(await js("document.querySelector('.agents-view').textContent.includes('Every day at 08:00')"), label + " goal cadence");
-          assert.deepEqual(await overflow(), [], label + " overflow on agent page");
-          await capture(label + "-agent-page");
-          await js("[...document.querySelectorAll('.agent-tab')].find(n => n.textContent === 'Memory').click()");
-          await waitFor("!document.querySelector('.agent-memory-host').hidden");
-          assert.ok(await js("document.querySelector('.agent-memory-journal')?.textContent.includes('1 changes')"), label + ' upkeep journal shown');
-          const undoStart = writes.length;
-          await js("[...document.querySelectorAll('.agent-memory-journal button')].find(n => n.textContent === 'Undo').click()");
-          await waitFor("document.querySelector('.agent-memory-journal')?.textContent.includes('undone')");
-          assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
-          await capture(label + '-agent-memory');
-          await navigate("agents");
-          await waitFor("document.querySelectorAll('.agents-rail-item.agent-tile').length === 2");
-          if (await phoneRail()) await js("document.querySelector('.agents-chats-open').click()");
-          await js("document.querySelector('.agents-rail-inbox').click()");
-          await waitFor("!!document.querySelector('.agent-inbox .agent-inbox-question')");
-          const writeSeen = async (start, test, timeout = 10000) => {
-            for (const end = Date.now() + timeout; Date.now() < end; await delay(50)) if (writes.slice(start).some(test)) return true;
-            return writes.slice(start).some(test);
-          };
-          const agentComputerStart = writes.length;
-          await js("[...document.querySelectorAll('.agent-inbox-question button')].find(b => b.textContent === 'Open computer').click()");
-          await waitFor("document.querySelector('.agent-work-host:not([hidden]) .computer-state')?.textContent.includes('You have control')");
-          await capture(label + '-agent-computer-takeover');
-          await js("document.querySelector('.agent-computer-section .computer-record').click()");
-          await waitFor("!!document.querySelector('.agent-computer-section .is-recording')");
-          await js("document.querySelector('.agent-computer-section .computer-record').click()");
-          await waitFor("document.querySelector('.recording-review')?.textContent.includes(\"Mention in Scout's instructions\")");
-          await capture(label + '-agent-recording-review');
-          await js("[...document.querySelectorAll('.recording-review button')].find(b => b.textContent === 'Discard').click()");
-          await waitFor("!document.querySelector('.recording-review')");
-          await js("[...document.querySelectorAll('.agent-computer-section .computer-actions button')].find(b => b.textContent === 'Hand back').click()");
-          assert.ok(await writeSeen(agentComputerStart, w => w.path === '/api/computer/agent%3Aa1/handback'), label + ' Hand back calls the computer route');
-          await waitFor("document.querySelector('.agent-computer-section .computer-state')?.textContent.includes('The model has control')");
-          writes.splice(agentComputerStart);
-          demoState.stoppedOwners = []; demoState.takenOwners = [];
-          demoState.recordingOwners = []; demoState.recordedSteps = {};
+        if (tab === "botsHome" && !demoState.empty) {
+          // Agents became the Bots mode (2026-10-29). The roster, the inbox with its answers, the badge, a bot's page, its Memory
+          // and its Computer page are checked here in Bots; the live computer view (takeover, recording, hand back), Triggers, Teams,
+          // History and Work cards of the old Work tab have no Bots home yet (see the migration report).
+          const priorBots = { live: demoState.botsLive, attention: demoState.botsAttention, memory: demoState.botsCore?.memoryText, journal: demoState.botsCore?.journal };
+          demoState.botsLive = true;
+          const at = Date.now() / 1000;
+          demoState.botsAttention = { items: [
+            { id: 'item:i1', kind: 'question', bot: 'a1', subject: 'Which area should I focus on?', body: 'Choose the next area to investigate.', at, status: 'open', actions: ['reply', 'close'] },
+            { id: 'item:i2', kind: 'report', bot: 'a1', subject: 'New findings', body: 'Backend Engineer roles, two results ready.', at: at - 5, status: 'open', actions: ['reply', 'open'] }],
+            feed: [], events: {}, runs: {}, prefs: {}, failNext: null, responses: [] };
           await navigate('agents');
+          await waitFor("document.getElementById('view-content').dataset.view === 'botsHome' && document.querySelectorAll('.bots-bot-card[data-agent-id]').length >= 2");
+          assert.ok(await js("['a1', 'a2'].every(id => !!document.querySelector('.bots-bot-card[data-agent-id=' + id + '] .agent-dot-avatar'))"), label + ' roster faces use the face component');
+          assert.ok(await js("!!document.querySelector('.bots-home-actions .bots-btn.primary') && !!document.querySelector('.bots-new-card')"), label + ' creation entry points are on the roster');
+          await js("import('/static/js/botsAttentionHost.js').then(m => { (m.attentionHost() || m.mountAttentionHost({ pollMs: 600000 })); return m.openAttention('inbox', {}); })");
+          await waitFor("!!document.querySelector('.bots-attn:not([hidden]) .bots-attn-row[data-id=\"item:i1\"]')");
+          assert.ok(await js("document.querySelector('.bots-attn').textContent.includes('Which area should I focus on?')"), label + ' a question is waiting for an answer');
+          assert.equal(await js("document.querySelectorAll('.bots-attn [data-action=approve]').length"), 0, label + ' bots run in Auto: nothing to approve');
+          await js("(document.querySelector('.bots-attn [data-value=news]') || document.querySelector('.bots-attn [data-value=\"news\"]')).click()");
+          await waitFor("document.querySelector('.bots-attn').textContent.includes('Backend Engineer')");
+          assert.ok(true, label + ' report body shown');
+          await waitFor("document.querySelector('#nav .nav-item[data-tab=botsHome] .nav-badge')?.textContent === '2' || window.innerWidth <= 768");
+          assert.deepEqual(await overflow(), [], label + " overflow with the Bots inbox open");
+          await capture(label + "-bots-inbox");
+          await js("import('/static/js/botsAttentionHost.js').then(m => m.closeAttention())");
+          // A bot's page: its face and name, a composer and its conversations.
+          await navigate("agents", { agentId: "a1" });
+          await waitFor("!!document.querySelector('.bots-composer-input') && !!document.querySelector('.bots-head-pill .bots-kip')");
+          assert.ok(await js("document.querySelector('.bots-head-pill').textContent.includes('Scout')"), label + ' the header names the bot');
+          await js("document.querySelector('.bots-head-convos').click()");
+          await waitFor("!document.querySelector('#bots-convos').hidden && document.querySelectorAll('#bots-convos .bots-convo-item').length >= 1");
+          await js("document.querySelector('.bots-head-convos').click()");
+          assert.deepEqual(await overflow(), [], label + " overflow on a bot's page");
+          await capture(label + "-bot-page");
+          // Its Computer page (read only: viewing starts nothing).
+          await navigate("agents", { agentId: "a1", profile: true });
+          await waitFor("!!document.querySelector('#bots-panel .bots-panel-body *')");
+          await waitFor("!!document.querySelector('#bots-panel #bots-tab-computer') || !!document.querySelector('#bots-panel .bots-acc-item')");
+          if (await js("!!document.querySelector('#bots-panel #bots-tab-computer')")) {
+            await js("document.querySelector('#bots-panel #bots-tab-computer').click()");
+            await waitFor("!!document.querySelector('#bots-panel [data-panel-card=computer]') && document.querySelector('#bots-panel [data-panel-card=computer]').textContent.includes('Contained computer')");
+            assert.equal(writes.filter(w => w.path.startsWith('/api/computer/')).length, 0, label + ' viewing the computer page starts nothing');
+          }
+          // Memory and the tidy-up journal with its Undo, in Advanced.
+          demoState.botsCore.memoryText = { ...(demoState.botsCore.memoryText || {}), a1: 'Looking for remote roles only.' };
+          demoState.botsCore.journal = { ...(demoState.botsCore.journal || {}), a1: [{ id: 'upkeep-demo', summary: 'Tidied 1 change', status: 'committed', ts: at }] };
+          await js("import('/static/js/botsUi.js').then(m => { m.setAdvanced(true); return true; })");
+          await navigate("agents", { agentId: "a1" });
+          await navigate("agents", { agentId: "a1", profile: true });
+          await waitFor("!!document.querySelector('#bots-panel .bots-acc-head[data-section=memory]')");
+          for (let k = 0; k < 40 && !(await js("(() => { const b = document.querySelector('#bots-panel .bots-acc-item[data-section=memory][data-open=true] .bots-acc-body'); return !!b && b.getClientRects().length > 0; })()")); k++) {
+            if (!(await js("!!document.querySelector('#bots-panel .bots-acc-item[data-section=memory][data-open=true]')"))) await js("document.querySelector('#bots-panel .bots-acc-head[data-section=memory]').click()");
+            await delay(150);
+          }
+          await waitFor("document.querySelector('#bots-panel [data-panel-card=memory] textarea')?.value.includes('remote roles only')");
+          assert.ok(true, label + ' memory shown');
+          await waitFor("[...document.querySelectorAll('#bots-panel [data-panel-card=memory] .bots-row button')].some(b => b.textContent === 'Undo')");
+          const undoStart = writes.length;
+          await js("[...document.querySelectorAll('#bots-panel [data-panel-card=memory] .bots-row button')].find(b => b.textContent === 'Undo').click()");
+          await waitFor("[...document.querySelectorAll('#bots-panel [data-panel-card=memory] .bots-row button')].some(b => b.textContent === 'Undone')");
+          assert.ok(writes.slice(undoStart).some(w => w.path === '/api/agents/a1/memory/upkeep/upkeep-demo/undo'), label + ' upkeep Undo uses the existing route');
+          await capture(label + '-bot-memory');
+          await js("import('/static/js/botsUi.js').then(m => { m.setAdvanced(false); return true; })");
+          demoState.botsCore.memoryText = priorBots.memory; demoState.botsCore.journal = priorBots.journal;
+          if (demoState.botsCore.memoryText === undefined) delete demoState.botsCore.memoryText;
+          if (demoState.botsCore.journal === undefined) delete demoState.botsCore.journal;
+          await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+          for (const [key, value] of [['botsLive', priorBots.live], ['botsAttention', priorBots.attention]]) { if (value === undefined) delete demoState[key]; else demoState[key] = value; }
         }
         if (tab === "tool-store" && !demoState.empty) {
           const headerButton = text => `[...document.querySelectorAll('.tool-store-manage button')].find(b => b.textContent === ${JSON.stringify(text)})`;
@@ -2415,7 +2405,7 @@ app.whenReady().then(async () => {
     const catalogReads = reads.filter(r => r.path === '/api/store/catalog');
     assert.ok(catalogReads.some(r => r.query.cache_only === 'true'), "Home reads the store catalog from cache only");
     await js("document.querySelector('.dashboard-stat[data-stat=waiting]').click()");
-    await waitFor("document.getElementById('view-content').dataset.view === 'agents'");
+    await waitFor("document.getElementById('view-content').dataset.view === 'botsHome'");
     demoState.isAdmin = false;
     await navigate("home");
     await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
@@ -2436,17 +2426,17 @@ app.whenReady().then(async () => {
     // tab, and Home's order, apply live and survive a reload; resets restore.
     // Desktop redesign: the groups and order show in All tabs (#rd-all-tabs); #nav is the pinned strip.
     const navOrder = () => js("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].map(n => n.dataset.tab)");
-    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['agents', 'notes', 'library', 'calendar', 'email', 'tasks'], 'The default pinned strip');
+    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['notes', 'library', 'calendar', 'email', 'tasks'], 'The default pinned strip');
     assert.deepEqual(await js("[...document.querySelectorAll('#rd-primary .nav-item')].map(n => n.getAttribute('aria-label'))"), ['Home', 'New chat', 'Chat history'], 'Start rows: Home, New chat, Chat history');
     assert.ok(await js("(() => { const row = document.querySelector('#sidebar > #rd-search-row'); const s = row?.querySelector('#rd-search'); const f = document.querySelector('#sidebar-footer'); return !!s && row.nextElementSibling === f && s.getAttribute('aria-label') === 'Search' && row.contains(document.querySelector('#sidebar-toggle')) && row.getBoundingClientRect().bottom <= f.getBoundingClientRect().top + 1; })()"), 'Search, with the collapse button beside it, sits just above the line over All tabs');
     assert.ok(await js("[...document.querySelectorAll('#sidebar kbd')].every(k => !k.getClientRects().length) && getComputedStyle(document.querySelector('#rd-jump')).display === 'none' && !/Ctrl|⌘/.test(document.querySelector('#sidebar').innerText)"), 'No shortcut text shows in the desktop sidebar');
-    assert.deepEqual((await navOrder()).slice(0, 3), ["home", "chat", "agents"], "Agents sits with Home and Chats");
-    await js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); l.groups.main = ['home', 'notes', 'chat', 'agents']; l.groups.workspace = l.groups.workspace.filter(t => t !== 'notes'); l.hiddenTabs = ['cookbook']; l.home = ['models', 'stats', 'chats', 'schedule', 'projects', 'activity', 'system']; l.hiddenHome = ['projects']; m.saveLayout(l); })`);
+    assert.deepEqual((await navOrder()).slice(0, 3), ["home", "chat", "notes"], "Chats follows Home (Agents is the Bots mode now)");
+    await js(`import('/static/js/layout.js').then(m => { const l = m.getLayout(); l.groups.main = ['home', 'notes', 'chat']; l.groups.workspace = l.groups.workspace.filter(t => t !== 'notes'); l.hiddenTabs = ['cookbook']; l.home = ['models', 'stats', 'chats', 'schedule', 'projects', 'activity', 'system']; l.hiddenHome = ['projects']; m.saveLayout(l); })`);
     await waitFor("document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')[1]?.dataset.tab === 'notes'");
     assert.ok(await js("!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8 && document.querySelector('.dashboard-grid > [data-home-section=store]') === document.querySelector('.dashboard-grid').lastElementChild"), "Layout changes apply live; sections added later join at the end");
     await win.loadURL(base);
     await waitFor("document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]').length >= 9");
-    assert.deepEqual((await navOrder()).slice(0, 4), ["home", "notes", "chat", "agents"], "The sidebar layout survives a reload");
+    assert.deepEqual((await navOrder()).slice(0, 4), ["home", "notes", "chat", "library"], "The sidebar layout survives a reload");
     await waitFor("document.querySelectorAll('.dashboard-grid > [data-home-section]').length === 8");
     assert.ok(await js("!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]') && document.querySelector('.dashboard-grid > [data-home-section]').dataset.homeSection === 'models' && document.querySelector('[data-home-section=models] h2').textContent === 'Model usage'"), "Home's layout survives a reload");
     // The Layout page lists every tab, with Home's switch locked on.
@@ -2467,9 +2457,9 @@ app.whenReady().then(async () => {
     await js("document.querySelector('#layout-pins [data-id=tool-store] .layout-move').click()");
     await waitFor("[...document.querySelectorAll('#nav .rd-pin')].at(-2)?.dataset.tab === 'tool-store'");
     await js("[...document.querySelectorAll('.set-section .btn')].filter(b => /^Reset (sidebar|Home)$/.test(b.textContent)).forEach(b => b.click())");
-    await waitFor("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,agents'");
+    await waitFor("[...document.querySelectorAll('#rd-all-tabs .nav-item[data-tab]')].slice(0, 3).map(n => n.dataset.tab).join() === 'home,chat,notes'");
     assert.ok(await js("!!document.querySelector('#rd-all-tabs .nav-item[data-tab=cookbook]')"), "Reset shows hidden tabs again");
-    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['agents', 'notes', 'library', 'calendar', 'email', 'tasks'], 'Reset sidebar restores the default pins');
+    assert.deepEqual(await js("[...document.querySelectorAll('#nav .rd-pin')].map(n => n.dataset.tab)"), ['notes', 'library', 'calendar', 'email', 'tasks'], 'Reset sidebar restores the default pins');
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     // The strip's Edit opens Settings > Layout; All tabs opens over the footer and closes on Escape.
     await js("document.querySelector('.rd-pins-edit').click()");
@@ -2588,7 +2578,7 @@ app.whenReady().then(async () => {
     await win.loadURL(base);
     await waitFor("document.querySelector('#brand .instance-badge')?.textContent === 'DEV'");
     assert.equal(await js("document.title"), "Kairos (dev)");
-    for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "agents", "cookbook", "school"]) {
+    for (const tab of ["home", "chat", "notes", "library", "calendar", "tasks", "email", "tool-store", "botsHome", "cookbook", "school"]) {
       await navigate(tab);
       if (tab === "home") await waitFor("!!document.querySelector('.dashboard-content.is-filled') && !document.querySelector('[data-home-section=chats], [data-home-section=schedule]')");
       assert.deepEqual(await overflow(), [], "empty " + tab);
@@ -2707,11 +2697,21 @@ app.whenReady().then(async () => {
         await js("document.querySelector('.side-chat-close').click()");
       }
       delete demoState.handoffSessions.as1;
+      // A bot's own conversation (Bots mode) offers the other bots on @ and keeps its draft; the one-shot handoff itself is the
+      // main Chats feature checked above (Bots conversations send through /api/bot-chat, see bots-chat-checks.cjs).
+      const priorBotsLive = demoState.botsLive;
+      demoState.botsLive = true;
       await navigate('agents', { agentId: 'a1' });
-      await waitFor("!!document.querySelector('.agent-chat-main .side-chat-input')");
-      await mentionAgent('.agent-chat-main', '.agent-chat-main .side-chat-input', '.agent-chat-main .side-chat-send', 'as1', 'Find roles from agent chat ' + label);
-      await expectAgentReply('.agent-chat-main');
-      await capture(label + '-agent-chat-handoff-reply');
+      await waitFor("!!document.querySelector('.bots-composer-input')");
+      await js("(() => { const input = document.querySelector('.bots-composer-input'); input.focus(); input.value = '@Arch'; input.setSelectionRange(5, 5); input.dispatchEvent(new Event('input', { bubbles: true })); })()");
+      await waitFor("[...document.querySelectorAll('.bots-composer-option')].some(n => n.textContent.includes('Archivist'))");
+      await js("[...document.querySelectorAll('.bots-composer-option')].find(n => n.textContent.includes('Archivist')).click()");
+      assert.ok(await js("document.querySelector('.bots-composer-input').value.startsWith('@Archivist')"), label + ' a bot is mentioned from a bot conversation');
+      await js("(() => { const input = document.querySelector('.bots-composer-input'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()");
+      assert.deepEqual(await overflow(), [], label + ' bot conversation fits');
+      await capture(label + '-bot-chat-mention');
+      await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+      if (priorBotsLive === undefined) delete demoState.botsLive; else demoState.botsLive = priorBotsLive;
     }
     demoState.handoffSessions = {}; delete demoState.handoffStatus; delete demoState.handoffAnswered;
     demoState.empty = emptyBeforeMentions;
@@ -2771,7 +2771,7 @@ app.whenReady().then(async () => {
       await js("document.getElementById('demo-frame').loading = 'eager'");
       await waitDemo("d && d.querySelectorAll('.nav-item[data-tab]').length >= 10 && !!d.querySelector('.dashboard-core')", "Home loads in the demo");
       assert.ok(await inDemo("!!d.querySelector('.demo-badge')"), label + " the demo says it is a demo");
-      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "agents", "cookbook", "school", "home"]) {
+      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "botsHome", "cookbook", "school", "home"]) {
         await inDemo("d.querySelector('.nav-item[data-tab=" + tab + "]').click()");
         // On a phone the Chat tab is the mobile launch page, owned by Chats.
         const shown = label === "mobile" && tab === "chat" ? "mobileLaunch" : tab;
@@ -2863,48 +2863,57 @@ app.whenReady().then(async () => {
     await waitFor("!!document.querySelector('.dashboard-core')");
     demoState.empty = false;
     calendarFixtures.agentsFixture[1].status = 'working';
-    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture });
+    await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture, base });
     // 2026-10-14: David removed the sidebar's Bots, Teams and Pinned sections. The
     // precedence they showed is tested in scripts/test_bot_status.cjs.
     assert.equal(await js("document.querySelectorAll('#nav [data-section], #nav .sidebar-bot, #nav .sidebar-bot-create').length"), 0,
       'The sidebar has no bot, team or pinned sections');
-    assert.ok(await js("!!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item remains');
-    await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture,
-      win, liveChunk, liveEvent, liveFinish, liveRuns, capture });
-    // 2026-10-14 (unit 6-ii): routines, not goals, wherever a person looks;
-    // pause and edit go through the existing task route.
-    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
-    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
-    for (const view of [{ agentId: 'a1', agentTab: 'routines' }, { agentId: 'a1', agentTab: 'work' }, {}]) {
-      await navigate('agents', view);
-      await delay(300);
-      assert.equal(await js("/\\bgoals?\\b/i.test(document.querySelector('#content').innerText)"), false, 'No visible goal wording: ' + JSON.stringify(view));
+    assert.ok(await js("!document.querySelector('#nav .nav-item[data-tab=\"agents\"]')"), 'The Agents nav item is gone (Bots is its own mode)');
+    await require('./agents-birth-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, base,
+      win, liveChunk, liveEvent, liveFinish, liveRuns, liveBroadcast, capture });
+    // 2026-10-14 (unit 6-ii): routines, not goals, wherever a person looks; migrated to Bots (2026-10-29): the roster, the
+    // sidebar and the panel say routines, and a routine can be made and paused from the panel without an error.
+    {
+      const restoreBots = await require('./bots-check-support.cjs').isolateBotsCheck({ js, demoState });
+      try {
+        demoState.botsLive = true;
+        await js("import('/static/js/botsUi.js').then(m => { m.setAdvanced(true); return true; })");
+        for (const view of [{ agentId: 'a1', panel: 'routines' }, { agentId: 'a1', panel: 'overview' }, {}]) {
+          await navigate('agents', view);
+          await delay(400);
+          assert.equal(await js("/\\bgoals?\\b/i.test([...document.querySelectorAll('.bots-home, #bots-panel, .bots-rail')].map(n => n.innerText).join(' '))"), false, 'No visible goal wording: ' + JSON.stringify(view));
+        }
+        await navigate('agents', { agentId: 'a1', panel: 'routines' });
+        for (let k = 0; k < 40 && !(await js("(() => { const b = document.querySelector('#bots-panel .bots-acc-item[data-section=routines][data-open=true] .bots-acc-body'); return !!b && b.getClientRects().length > 0; })()")); k++) {
+          if (!(await js("!!document.querySelector('#bots-panel .bots-acc-item[data-section=routines][data-open=true]')"))) await js("document.querySelector('#bots-panel .bots-acc-head[data-section=routines]')?.click()");
+          await delay(150);
+        }
+        await waitFor("!!document.querySelector('#bots-panel [data-panel-card=routines] .bots-actions .bots-btn')");
+        await js("document.querySelector('#bots-panel [data-panel-card=routines] .bots-actions .bots-btn').click()");
+        await waitFor("!!document.querySelector('.panel-dialog [aria-label=\"Routine name\"]')");
+        await js("(() => { for (const [label, value] of [['Routine name', 'New postings'], ['What to do', 'Look for new postings.']]) { const n = document.querySelector('.panel-dialog [aria-label=\"' + label + '\"]'); n.value = value; n.dispatchEvent(new Event('input', { bubbles: true })); } })()");
+        await js("document.querySelector('.panel-dialog .bots-dialog-footer .bots-btn.primary').click()");
+        await waitFor("!!document.querySelector('#bots-panel [data-panel-card=routines] .bots-routine')");
+        await js("[...document.querySelectorAll('#bots-panel [data-panel-card=routines] .bots-routine .bots-btn')].find(b => /Pause/.test(b.textContent)).click()");
+        await waitFor("/paused/.test(document.querySelector('#bots-panel [data-panel-card=routines] .bots-routine')?.textContent || '')");
+        assert.deepEqual(await js("[...document.querySelectorAll('#toast-host .toast.error')].map(t => t.textContent)"), [], 'routine Pause raises no error');
+        await js("[...document.querySelectorAll('#bots-panel [data-panel-card=routines] .bots-routine .bots-btn')].find(b => /Remove/.test(b.textContent)).click()");
+        await waitFor("!!document.querySelector('.confirm-panel')");
+        await js("document.querySelector('.confirm-panel .modal-footer .btn:last-child').click()");
+        await waitFor("!document.querySelector('#bots-panel [data-panel-card=routines] .bots-routine')");
+        await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
+      } finally { delete demoState.botsIdentity; await restoreBots(); }
     }
-    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
-    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
-    const routineStart = writes.length;
-    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Pause').click()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && w.status); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && /\/api\/tasks\/g1$/.test(w.path) && JSON.parse(w.body).enabled === false && w.status === 200), 'Pause sends enabled false and succeeds');
-    await navigate('agents', { agentId: 'a1', agentTab: 'routines' });
-    await waitFor("!!document.querySelector('.routines-panel .routine-row')");
-    await js("[...document.querySelectorAll('.routines-panel .routine-row button')].find(b => b.textContent === 'Edit').click()");
-    await js("(() => { const row = document.querySelector('.routines-panel .routine-row'); const input = row.querySelector('.routine-editor input'); input.value = 'Morning postings'; input.dispatchEvent(new Event('input', { bubbles: true })); [...row.querySelectorAll('.routine-editor button')].find(b => b.textContent === 'Save').click(); })()");
-    for (let i = 0; i < 40 && !writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status); i++) await delay(50);
-    assert.ok(writes.slice(routineStart).some(w => w.method === 'PATCH' && JSON.parse(w.body || '{}').name === 'Morning postings' && w.status === 200), 'Edit saves the new name and succeeds');
-    assert.deepEqual(await js("[...document.querySelectorAll('#toast-host .toast.error')].map(t => t.textContent)"), [], 'routine Pause and Edit raise no error');
-    // Pause and Edit now really change the routine: put it back for the checks that follow.
-    assert.equal(await js("fetch('/api/tasks/g1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, name: 'New postings' }) }).then(r => r.status)"), 200);
     // Every bot surface on a phone: no sideways scroll, 44px targets.
     await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow, liveRuns, liveFinish, writes });
     console.log('PASS: design canvas.');
-    const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, inbox:calendarFixtures.agentInbox });
+    const agentLayout = await require('./agents-layout-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, base, inbox:calendarFixtures.agentInbox });
     await require('./mobile-shell-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, overflow, demoState });
     console.log('PASS: phone shell.');
     await require('./mobile-tabs-checks.cjs').run({ js, win, waitFor, capture, delay, navigate, reads, writes, overflow, demoState, liveRuns, liveChunk, liveEvent, liveFinish, liveChange, calendarFixtures });
     console.log('PASS: phone tabs.');
-    await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
-    await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
+    await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, demoState, base });
+    await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win, demoState, base, delay });
     console.log('PASS: Agents appearance checks');
     await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base, demoState, fixtures: calendarFixtures });
     // Every Bots check (scripts/bots-*-checks.cjs), each from a fresh page and the plain demo, leaving it as it found it.
