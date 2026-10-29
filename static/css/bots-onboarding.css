@@ -26,7 +26,7 @@
 @keyframes bots-welcome-enter { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .bots-welcome-pane { animation: none; } }
 @media (max-width: 767px) {
-  .bots-welcome :is(button, input, select, summary, a), .bots-setup :is(button, input, select, summary, a), .bots-notices :is(button, input, select, summary, a), .bots-spotlight :is(button, input, select, summary, a) { min-height: 44px; }
+  [data-app-mode="bots"] :is(.bots-welcome, .bots-setup, .bots-notices, .bots-spotlight) :is(button:not(.bots-switch), input, select, summary, a) { min-height: 44px; }
   .bots-welcome { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   .bots-welcome-pane { padding: 16px; }
 }

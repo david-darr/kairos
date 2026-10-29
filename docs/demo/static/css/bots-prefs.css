@@ -15,7 +15,9 @@ html[data-bots-chat-font="serif"] .bots-msg-body { font-family: Georgia, serif; 
 html[data-bots-threads="false"] .bots-thread-line, html[data-bots-threads="false"] .bots-rail-newthread { display: none; }
 html[data-bots-pins="false"] .bots-pins { display: none; }
 @media (max-width: 767px) {
-  [data-bots-settings] :is(button, input, select, summary, a) { min-height: 44px; }
+  [data-app-mode="bots"] [data-bots-settings] :is(button:not(.bots-switch), input, select, summary, a) { min-height: 44px; }
+  /* A switch keeps its size; an invisible area around it makes the 44px target. */
+  [data-app-mode="bots"] [data-bots-settings] .bots-switch::before { content: ""; position: absolute; top: -11px; right: -4px; bottom: -11px; left: -4px; }
 }
 
 

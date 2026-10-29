@@ -11,7 +11,7 @@
 @keyframes bots-call-pulse { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .bots-call-dot { animation: none; } }
 @media (max-width: 767px) {
-  .bots-voice-note :is(button, input, select, summary, a), .bots-call-bar :is(button, input, select, summary, a), .bots-live-settings :is(button, input, select, summary, a) { min-height: 44px; }
+  [data-app-mode="bots"] :is(.bots-voice-note, .bots-call-bar, .bots-live-settings) :is(button, input, select, summary, a) { min-height: 44px; }
   .bots-call-bar[data-floating] { bottom: 12px; left: 12px; max-width: calc(100vw - 24px); }
 }
 

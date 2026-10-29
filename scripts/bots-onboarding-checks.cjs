@@ -45,7 +45,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     assert.equal(await js(`document.querySelector('[aria-label="Chat width"]').value`), 'wide');
     await clickText('[data-bots-settings] button', 'Check setup'); await waitFor("document.querySelectorAll('[data-bots-settings] .bots-setup-row').length===6");
     await win.setContentSize(390, 844); await delay(150);
-    assert.ok(await js("[...document.querySelectorAll('[data-bots-settings] button,[data-bots-settings] input,[data-bots-settings] select,[data-bots-settings] a')].filter(n=>n.getBoundingClientRect().width).every(n=>n.getBoundingClientRect().height>=44)"));
+    // Switches keep their size and get a 44px target from an invisible area around them (bots-prefs.css).
+    assert.ok(await js("[...document.querySelectorAll('[data-bots-settings] button:not(.bots-switch),[data-bots-settings] input,[data-bots-settings] select,[data-bots-settings] a')].filter(n=>n.getBoundingClientRect().width).every(n=>n.getBoundingClientRect().height>=44)"));
     await capture?.('phone-bots-onboarding');
     // The public notice and hint lanes: wait for a dialog to close, then show one at a time.
     await js("document.dispatchEvent(new CustomEvent('kairos:bots-notice',{detail:{id:'fixture-notice',text:'A check notice'}}))");
