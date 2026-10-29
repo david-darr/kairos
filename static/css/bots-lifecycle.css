@@ -1,0 +1,17 @@
+.bots-lifecycle-dialog { width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+.bots-lifecycle, .bots-package-preview { color: var(--bots-ink); font-family: var(--bots-font-ui); font-size: 14px; }
+.bots-lifecycle-tabs { display: flex; gap: 4px; padding: 4px; border-radius: var(--bots-radius-pill); background: var(--bots-inset); flex-wrap: wrap; }
+.bots-lifecycle-tabs [aria-selected="true"] { background: var(--bots-raised); }
+.bots-lifecycle-content { padding: 20px 0; overflow-wrap: anywhere; }
+.bots-lifecycle-card, .bots-package-preview { padding: 16px; margin: 12px 0; background: var(--bots-card); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
+.bots-lifecycle-row { display: flex; align-items: center; gap: 12px; min-height: 46px; border-bottom: 1px solid var(--bots-hairline); }
+.bots-lifecycle-row small { color: var(--bots-ink-secondary); margin-left: auto; }
+.bots-lifecycle-note { color: var(--bots-ink-secondary); font-size: 13px; }
+.bots-lifecycle-warning { color: var(--bots-danger); }
+.bots-package-drop { border: 1px dashed var(--bots-control-line); padding: 28px; border-radius: var(--bots-radius-card); }
+.bots-lifecycle input:not([type="checkbox"]), .bots-lifecycle textarea { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu); background: var(--bots-control); color: var(--bots-ink); }
+.bots-lifecycle textarea { min-height: 120px; resize: vertical; }
+.bots-lifecycle pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--bots-font-mono); }
+.bots-lifecycle button:focus-visible, .bots-lifecycle input:focus-visible, .bots-lifecycle textarea:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+@media (max-width: 767px) { .bots-lifecycle-dialog { width: 100vw; max-height: 100dvh; margin: 0; } .bots-lifecycle-tabs { border-radius: var(--bots-radius-menu); } }
+@media (prefers-reduced-motion: reduce) { .bots-lifecycle *, .bots-lifecycle-dialog { animation: none; transition: none; } }
