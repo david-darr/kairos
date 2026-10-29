@@ -240,6 +240,8 @@ async def retry_with_model(session_id: str, body: FallbackRequest, user: str = D
     endpoint = model_endpoints.get_endpoint(body.model_endpoint_id)
     if endpoint is None:
         raise HTTPException(400, "model endpoint not found")
+    if session.get("agent_id"):
+        raise HTTPException(409, "Change the model, then use Redo on the bot conversation; it keeps every version")
     messages = session.get("messages", [])
     index = body.failed_index
     if index != len(messages) - 1 or index < 1 or messages[index]["role"] != "assistant" or \
@@ -379,6 +381,10 @@ async def rewind_session(session_id: str, body: RewindRequest, user: str = Depen
     `keep` messages. Refused while a reply is running (idle_session). The
     live connection is closed so the next turn starts from the trimmed
     transcript; see SessionManager.rewind for what that costs."""
+    if (session_manager.get_session(session_id) or {}).get("agent_id"):
+        # A bot's conversation is a tree. Editing and redoing add versions
+        # (routes/bot_chat_routes.py); cutting the transcript would delete one.
+        raise HTTPException(status_code=409, detail="Use the bot conversation's edit and redo; they keep every version")
     try:
         session = session_manager.rewind(session_id, body.keep)
     except ValueError as e:

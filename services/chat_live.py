@@ -267,7 +267,13 @@ def _client_error(error: Exception) -> str:
 
 def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
           reference_context: str, references: list[dict], *, user: str = SINGLE_USER,
-          request_id: str | None = None) -> dict:
+          request_id: str | None = None, turn_id: str | None = None, accepted_index: int | None = None,
+          claimed: bool = False, turn_note: str = "", chunk_filter=None) -> dict:
+    """Begin a server-owned turn. The Bots admission door (services/bot_chat_service.py)
+    passes the pieces it already settled: `turn_id` (its generation), the saved
+    message's `accepted_index` (so the turn does not append it again), `claimed`
+    (it holds the session claim) and, for goal mode, a private `turn_note` and
+    a `chunk_filter` that keeps the control envelope out of the live text."""
     _prune()
     session = require_session(session_id, user)
     fingerprint = hashlib.sha256(json.dumps([text, attachment_ids, references], sort_keys=True).encode()).hexdigest()
@@ -276,17 +282,20 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
         if existing["fingerprint"] != fingerprint:
             raise HTTPException(409, "This request ID was already used for a different message")
         return {"turn_id": existing["id"]}
-    chat_service.claim_session(session_id)
-    run = {"turnId": uuid.uuid4().hex, "sessionTitle": session.get("title") or "Chat",
+    if not claimed:
+        chat_service.claim_session(session_id)
+    run = {"turnId": turn_id or uuid.uuid4().hex, "sessionTitle": session.get("title") or "Chat",
            "prompt": text, "text": "", "startedAt": time.time(), "status": "processing",
            "stopping": False, "permission": None, "toolEvents": [], "toolSteps": [],
            "handoffs": None, "runId": None, "error": None, "revision": 1,
            "provider": (chat_service._resolve_endpoint(session_id) or {}).get("name") or "",
-           "waitingSince": time.time(), "providerDetail": None, "_ollama": _ollama_target(session_id)}
+           "waitingSince": time.time(), "providerDetail": None, "_ollama": _ollama_target(session_id),
+           "_agent_id": session.get("agent_id"), "_owner": user, "_filter": chunk_filter}
     _runs[session_id] = run
     try:
         mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint)
-        task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references))
+        task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references,
+                                        accepted_index, turn_note))
     except Exception:
         chat_service.release_session(session_id)
         _runs.pop(session_id, None)
@@ -309,15 +318,26 @@ def _task_done(session_id: str, run: dict, task: asyncio.Task) -> None:
                 None if task.cancelled() else "The reply ended unexpectedly.")
     if not task.cancelled() and task.exception():
         logger.error("live chat task failed for %s", session_id, exc_info=task.exception())
+    run["_settled"] = True
+    if run.get("_agent_id"):
+        # The slot and the claim are free now. Only this turn's own record is
+        # touched: a newer turn of the session is never modified from here.
+        try:
+            from services import bot_chat_service
+            bot_chat_service.turn_ended(session_id, run)
+        except Exception:
+            logger.exception("bot turn bookkeeping failed for %s", session_id)
 
 
 async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: bool,
-               reference_context: str, references: list[dict]) -> None:
+               reference_context: str, references: list[dict], accepted_index: int | None = None,
+               turn_note: str = "") -> None:
     run["_started"] = True
     chat_service.LIVE_STEPS.set(True)  # this task's own context only
     try:
         stream = chat_service.stream_message(session_id, run["prompt"], attachment_ids, is_admin,
-                                             reference_context, references, claimed=True)
+                                             reference_context, references, claimed=True,
+                                             accepted_index=accepted_index, turn_note=turn_note)
         async with contextlib.aclosing(stream):
             async for item in stream:
                 # Output after a request used to mean it was settled. A Codex
@@ -332,10 +352,13 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                     _update(session_id, run, runId=context.run_id)
                 if isinstance(item, str):
                     _responded(run)
-                    run["text"] += item
+                    visible = run["_filter"].feed(item) if run.get("_filter") else item
+                    if not visible:
+                        continue
+                    run["text"] += visible
                     run["revision"] += 1
                     _broadcast({"type": "chunk", "sessionId": session_id,
-                                "turnId": run["turnId"], "revision": run["revision"], "chunk": item})
+                                "turnId": run["turnId"], "revision": run["revision"], "chunk": visible})
                 elif isinstance(item, dict):
                     if item.get("run_id") and run["runId"] != item["run_id"]:
                         _update(session_id, run, runId=item["run_id"])
@@ -358,6 +381,13 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
                             run["revision"] += 1
                             _broadcast({"type": "tool_step", "sessionId": session_id,
                                         "turnId": run["turnId"], "revision": run["revision"], "value": value})
+        if run.get("_filter"):
+            held = run["_filter"].flush()
+            if held:
+                run["text"] += held
+                run["revision"] += 1
+                _broadcast({"type": "chunk", "sessionId": session_id,
+                            "turnId": run["turnId"], "revision": run["revision"], "chunk": held})
         from core import session_manager_store
         failed = (session_manager_store.get_run(run["runId"]) or {}).get("outcome") == "failed" if run["runId"] else False
         _finish(session_id, run, "failed" if failed else "done")
@@ -371,15 +401,58 @@ async def _run(session_id: str, run: dict, attachment_ids: list[str], is_admin: 
         chat_service.release_session(session_id)
 
 
-def stop(session_id: str) -> bool:
+def stop(session_id: str, turn_id: str | None = None, reason: str = "person") -> bool:
+    """Stop the running turn. With `turn_id` the stop applies only to that turn:
+    a late request for a finished one never reaches the next (False).
+    `reason` is "person" (a Stop press: the thread's queue pauses and a quiet
+    note is saved) or "steer" (an interruption the caller is about to follow)."""
     run = _runs.get(session_id)
     task = _tasks.get(session_id)
     if not run or not task or run["status"] != "processing":
         return False
+    if turn_id is not None and run["turnId"] != turn_id:
+        return False
     if not run["stopping"]:
+        run["_stop_reason"] = reason
         _update(session_id, run, stopping=True)
         task.cancel()
     return True
+
+
+def stop_turn(session_id: str, turn_id: str, reason: str = "person") -> str:
+    """"stopping" while the named turn is being stopped, "already-stopped" when
+    it is over or was replaced. Repeats are harmless."""
+    run = _runs.get(session_id)
+    if not run or run["turnId"] != turn_id or run["status"] != "processing":
+        return "already-stopped"
+    stop(session_id, turn_id, reason)
+    return "stopping"
+
+
+def current_turn(session_id: str) -> dict | None:
+    """The newest turn of a session, as a small public record, or None."""
+    run = _runs.get(session_id)
+    if not run:
+        return None
+    return {"turn_id": run["turnId"], "status": run["status"], "stopping": run["stopping"],
+            "started_at": run["startedAt"], "permission": bool(run.get("permission")),
+            "text": run.get("text", "")}
+
+
+def running_threads(agent_id: str) -> list[str]:
+    """Sessions of one bot with a turn running right now."""
+    return [sid for sid, run in _runs.items() if run["status"] == "processing" and run.get("_agent_id") == agent_id]
+
+
+async def wait_settled(session_id: str, turn_id: str, timeout: float = 20.0) -> bool:
+    """Wait until the named turn has ended and released its claim; False on timeout."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = _runs.get(session_id)
+        if run is None or run["turnId"] != turn_id or (run.get("_settled") and not chat_service.is_busy(session_id)):
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 def permission_answered(request_id: str) -> None:

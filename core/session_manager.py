@@ -211,6 +211,11 @@ class SessionManager:
 
     def append_message(self, session_id: str, role: str, content: str, status: str = "complete",
                        extra: Optional[dict] = None) -> int:
+        with store.transaction():
+            return self._append_message(session_id, role, content, status, extra)
+
+    def _append_message(self, session_id: str, role: str, content: str, status: str,
+                        extra: Optional[dict]) -> int:
         """Add one turn to a conversation.
 
         Deliberately never loads the transcript to do it: the store hands
@@ -230,6 +235,22 @@ class SessionManager:
             raise KeyError(f"no such session: {session_id}")
         session, count = header
 
+        if session.get("agent_id"):
+            from core import bot_message_tree as tree
+            if "active_leaf_id" not in (session.get("thread") or {}):
+                tree.ensure(session_id)
+                session, count = store.get_session_header(session_id)
+            extra = dict(extra or {})
+            extra.setdefault("bot_message_id", uuid.uuid4().hex)
+            if "parent_id" not in extra:
+                extra["parent_id"] = session["thread"]["active_leaf_id"]
+            session["thread"]["active_leaf_id"] = extra["bot_message_id"]
+            session["thread"]["branch_revision"] += 1
+            if role == "assistant" and not extra.get("display_only"):
+                session["thread"]["unread"] = True
+                if session["thread"].get("snoozed_until") == 0:
+                    session["thread"]["snoozed_until"] = None
+
         now = time.time()
         message = {**(extra or {}), "role": role, "content": content, "ts": now, "status": status}
         session["updated_at"] = now
@@ -242,6 +263,18 @@ class SessionManager:
 
         store.append_message(session_id, count, message, session)
         return count
+
+    def edit_message_content(self, session_id: str, index: int, content: str) -> dict:
+        """Rewrite one saved message's text in place (the goal runner strips its
+        private control envelope this way). Rows after it are untouched; the
+        provider's own copy of the conversation is forgotten."""
+        session = self._require(session_id)
+        messages = session.get("messages", [])
+        if not 0 <= index < len(messages):
+            raise IndexError(index)
+        messages[index]["content"] = content
+        _clear_claude_session(session)
+        return store.save_session(session, rebuild_messages_from=index)
 
     def upsert_call_summary(self, session_id: str, call_id: str, content: str) -> None:
         """One call note, updated in place when its delegated work finishes."""
@@ -463,6 +496,11 @@ class SessionManager:
             return []
         messages = session.get("messages", [])
         compactions = session.get("compactions") or []
+        if session.get("agent_id"):
+            from core import bot_message_tree as tree
+            session = tree.ensure(session_id)
+            messages = tree.ancestry(session)
+            compactions = tree.checkpoints(session, messages)
         if compactions:
             latest = compactions[-1]
             summary_note = {
@@ -477,7 +515,10 @@ class SessionManager:
                     "(--this_chat for the command-line tool).]"
                 ),
             }
-            result = [summary_note] + messages[latest["through_index"]:]
+            boundary = latest["through_index"]
+            if session.get("agent_id"):
+                boundary = tree.boundary(messages, latest)
+            result = [summary_note] + messages[boundary:]
         else:
             result = list(messages)
         # The stored "Conversation compacted" notice is for the person reading
@@ -499,11 +540,21 @@ class SessionManager:
         entry is ever read back."""
         session = self._require(session_id)
         messages = session.get("messages", [])
+        folded_id = None
+        if session.get("agent_id"):
+            # A bot's compaction belongs to the selected branch: the index counts
+            # that branch only, and the checkpoint is bound to its last folded message.
+            from core import bot_message_tree as tree
+            session = tree.ensure(session_id)
+            messages = tree.ancestry(session)
+            through_index = max(0, min(through_index, len(messages)))
+            folded_id = messages[through_index - 1]["bot_message_id"] if through_index else None
         through_index = max(0, min(through_index, len(messages)))
         for m in messages[:through_index]:
             m["archived"] = True
         compactions = session.setdefault("compactions", [])
-        compactions.append({"through_index": through_index, "summary": summary, "created_at": time.time()})
+        compactions.append({"through_index": through_index, "summary": summary, "created_at": time.time(),
+                            **({"folded_through_id": folded_id} if session.get("agent_id") else {})})
         # The CLI's session still holds the uncompacted history; resuming it
         # would undo the compaction. The next turn starts fresh from the
         # summary instead.
@@ -607,6 +658,18 @@ class SessionManager:
         thread.update(fields)
         session["thread"] = thread
         return store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
+
+    def update_thread(self, session_id: str, mutate) -> dict:
+        """Edit this session's `thread` record through `mutate(thread)`, in the
+        session document only: no transcript read, no message row rewritten."""
+        def apply(doc):
+            thread = dict(doc.get("thread") or {})
+            mutate(thread)
+            doc["thread"] = thread
+        doc = store.update_document(session_id, apply)
+        if doc is None:
+            raise KeyError(f"no such session: {session_id}")
+        return doc["thread"]
 
     def release_agent_chats(self, agent_id: str) -> int:
         """An agent deleted: its chats move into the Chats list, unchanged

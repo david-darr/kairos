@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, UploadFile, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
-from core import attachments, chat_artifacts, chat_files, chat_references, cli_access, office_preview
+from core import bot_chat_store, attachments, chat_artifacts, chat_files, chat_references, cli_access, office_preview
 from core.auth import auth_manager
 from core.middleware import require_user, get_current_user
 from services import chat_live, chat_service
@@ -127,6 +127,7 @@ class ValidateAttachmentsRequest(BaseModel):
 
 class StopLiveRequest(BaseModel):
     session_id: str
+    turn_id: str | None = None  # names the turn to stop: a late request never reaches the next one
 
 
 @router.post("/validate-attachments")
@@ -230,7 +231,9 @@ async def live_chat_events(request: Request = None, user: str = Depends(require_
 @router.post("/live")
 async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) -> dict:
     is_admin = auth_manager.is_admin(user)
-    chat_live.require_session(body.session_id, user)
+    session = chat_live.require_session(body.session_id, user)
+    if session.get("agent_id"):
+        return await _start_bot_turn(body, session, user, is_admin)
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
@@ -240,10 +243,31 @@ async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) 
                            context, chat_references.metadata(body.references), user=user, request_id=body.request_id)
 
 
+async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin: bool) -> dict:
+    """A live send to a bot's conversation goes through the Bots admission door
+    (slot, queue, durable receipt), like every other send to a bot."""
+    import uuid
+    from core import bot_message_tree
+    from services import bot_chat_service
+    if not is_admin:
+        raise HTTPException(403, "admin privileges required")
+    leaf = bot_message_tree.ensure(body.session_id)["thread"]["active_leaf_id"]
+    send_id = body.request_id if body.request_id and len(body.request_id) >= 8 else uuid.uuid4().hex
+    try:
+        result = await bot_chat_service.send(user, body.session_id, {
+            "send_id": send_id, "text": body.message, "expected_leaf_id": leaf,
+            "attachment_ids": body.attachment_ids, "references": body.references})
+    except ValueError as error:
+        status = 409 if isinstance(error, bot_chat_store.Conflict) else 422
+        raise HTTPException(status, str(error))
+    return {"turn_id": result["turn_id"], "queued": result["queued"], "queue_id": result["queue_id"],
+            "reason": result["reason"], "message_id": result.get("message_id")}
+
+
 @router.post("/live/stop")
 async def stop_live_chat(body: StopLiveRequest, user: str = Depends(require_user)) -> dict:
     chat_live.require_session(body.session_id, user)
-    return {"stopping": chat_live.stop(body.session_id)}
+    return {"stopping": chat_live.stop(body.session_id, body.turn_id)}
 
 
 class CompactRequest(BaseModel):
