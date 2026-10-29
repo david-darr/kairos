@@ -442,7 +442,7 @@ class Surface {
   }
   assert.match(source('agentsMessenger.js'), /class: 'agents-conversation-back'/);
   assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, phoneActions, viewTabs\]/, 'The Agents bar keeps Back and Open chats, then the v2 phone actions, before the view tabs');
-  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'agents', 'calendar', 'botsHome'\]\)/, 'More lists the tabs the bar does not (Bots home is on the bar in Bots mode)');
+  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'calendar', 'botsHome'\]\)/, 'More lists the tabs the bar does not (Bots home is on the bar in Bots mode)');
   assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);
   assert.doesNotMatch(source('mobileShell.js'), /'Your workspace':/);

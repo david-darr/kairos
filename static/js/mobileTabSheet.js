@@ -12,7 +12,7 @@ import { ICON as KAIROS_MARK } from './brand.js';
 // the account and Settings. It replaced the avatar's workspace sheet.
 let sheet, opener;
 // The tabs the bar itself shows; More lists the rest.
-const ON_BAR = new Set(['home', 'chat', 'agents', 'calendar', 'botsHome']);
+const ON_BAR = new Set(['home', 'chat', 'calendar', 'botsHome']);
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
 const setExpanded = value => { if (opener?.dataset?.tabbar === 'more') opener.setAttribute('aria-expanded', String(value)); };
 export function closeMoreSheet() {

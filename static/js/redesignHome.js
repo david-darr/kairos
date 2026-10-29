@@ -23,7 +23,7 @@ const META = {
   system: { label: "Systems", sub: "Vault, scheduler, Discord, computer use", span: 12 },
   stats: { label: "At a glance", sub: "Counts for chats, notes, automations", span: 12 },
   projects: { label: "Projects", sub: "Project shelf with document counts", span: 4 },
-  agents: { label: "Agents", sub: "Who is working and who needs you", span: 4 },
+  agents: { label: "Bots", sub: "Who is working and who needs you", span: 4 },
   activity: { label: "Activity", sub: "Recent events", span: 8 },
   store: { label: "Tool Store", sub: "Installed items and updates", span: 4 },
 };
@@ -128,7 +128,7 @@ export function mountRedesignHome({ container, content, hero, grid, parts, data,
     ]);
     return { panel, body };
   };
-  const needs = makeSection('Needs you', 'needs', 'See all', () => navigate('agents'));
+  const needs = makeSection('Needs you', 'needs', 'See all', () => navigate('botsHome'));
   const working = makeSection('Working now', 'working', 'All tasks', () => navigate('tasks'));
   const models = makeSection('Model usage', 'models', 'Models', () => navigate('settings', { section: 'added-models' }));
   let glance = null;

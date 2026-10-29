@@ -11,7 +11,7 @@ import { collectActivity } from "./activityModel.js";
 // Sources, all existing ones (nothing new on the backend):
 //   chatStream            running turns, finished turns, permission prompts
 //   /api/agents/inbox     agent questions, reports, results to review
-//                         (the same call that drives the Agents nav badge and
+//                         (the same call that drives the Bots nav badge and
 //                         Home's "waiting on you" stat)
 //   /api/agents           agent names, and which agents are working
 //   /api/triggers         pending approvals ("GitHub push is waiting")

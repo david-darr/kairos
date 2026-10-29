@@ -141,7 +141,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
 
     // -- The rail opens a bot -------------------------------------------------------------
     await js("document.querySelector('.bots-rail-row[data-agent-id=a1]').click()");
-    await waitFor("document.documentElement.dataset.view === 'botsShell' && !!document.querySelector('.bots-shell[data-agent-id=a1] .side-chat-input')");
+    await waitFor("document.documentElement.dataset.view === 'botsShell' && !!document.querySelector('.bots-shell[data-agent-id=a1] .bots-composer-input')");
     assert.equal(await mode(), 'bots');
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a1]').classList.contains('active') && document.querySelector('.bots-rail-row[data-agent-id=a1]').getAttribute('aria-current') === 'page'"), true, 'the open bot is marked in the rail');
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id=a2]').classList.contains('active')"), false, 'and only that one');
@@ -150,15 +150,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     assert.equal(await js("document.querySelectorAll('.bots-head-pill kairos-mascot').length"), 1, 'the header has one live Kip');
     assert.equal(await js("document.querySelector('.bots-head-pill .bots-kip').offsetWidth"), 24, 'the Kip is 24 px');
     assert.equal(await js("document.querySelector('.bots-head-pill').getAttribute('aria-expanded')"), 'false');
-    assert.equal(await js("!!document.querySelector('.bots-shell .agent-chat-main .side-chat-send')"), true, 'the chat is the real conversation');
-    assert.equal(await js("document.querySelectorAll('.bots-shell .agent-chat-side').length"), 1, 'its conversation list is in the popover');
+    assert.equal(await js("!!document.querySelector('.bots-shell .bots-log') && !!document.querySelector('.bots-shell .bots-composer-input')"), true, 'the chat is the real conversation');
+    assert.equal(await js("document.querySelectorAll('.bots-convos .bots-convo-list').length"), 1, 'its conversation list is in the popover');
     assert.equal(await js("document.querySelector('.bots-convos').hidden"), true);
     await capture('desktop-bots-shell');
 
     // The conversations popover opens, closes on Escape and returns focus.
     await js("document.querySelector('.bots-head-convos').click()");
     assert.equal(await js("!document.querySelector('.bots-convos').hidden && document.querySelector('.bots-head-convos').getAttribute('aria-expanded')"), 'true');
-    assert.equal(await js("document.querySelectorAll('.bots-convos .agent-chat-item').length > 0 || !!document.querySelector('.bots-convos .agent-chat-new')"), true, 'it holds the conversation list');
+    assert.equal(await js("document.querySelectorAll('.bots-convos .bots-convo-item').length > 0 || !!document.querySelector('.bots-convos .bots-convo-new')"), true, 'it holds the conversation list');
     await capture('desktop-bots-conversations');
     await pressKey('Escape');
     assert.equal(await js("document.querySelector('.bots-convos').hidden"), true);
@@ -166,39 +166,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
 
     // Away from the main conversation the header says which one is open; on the main one it says nothing.
     await open('a1', { sessionId: 'bots-t2' });
-    await waitFor("document.querySelector('.bots-convos .agent-chat-item.active')?.dataset.session === 'bots-t2' && !document.querySelector('.bots-head-thread').hidden");
+    await waitFor("document.querySelector('.bots-convos .bots-convo-item.active')?.dataset.session === 'bots-t2' && !document.querySelector('.bots-head-thread').hidden");
     assert.equal(await js("document.querySelector('.bots-head-thread').textContent"), '> Weekly postings');
     assert.match(await js("document.querySelector('.bots-head-pill').getAttribute('aria-label')"), /^Scout, Weekly postings, /);
     await capture('desktop-bots-away-from-main');
     await open('a1', { sessionId: 'bots-t1' });
-    await waitFor("document.querySelector('.bots-convos .agent-chat-item.active')?.dataset.session === 'bots-t1'");
+    await waitFor("document.querySelector('.bots-convos .bots-convo-item.active')?.dataset.session === 'bots-t1'");
     assert.equal(await js("document.querySelector('.bots-head-thread').hidden"), true, 'the main conversation shows no thread title');
 
-    // A reply streams into the page (the stream check, bots-stream-checks.cjs, covers Stop and returning).
-    // The plain demo answers the bot's chat, as in that check; the fixture backend takes over again after.
-    delete demoState.botsLive;
-    await open('a1', { sessionId: 'as1' });
-    await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .side-chat-input')");
-    demoState.sessionFields = { ...(demoState.sessionFields || {}), as1: { agent_id: 'a1' } };
-    demoState.liveHoldIds = ['as1', 's1'];
-    const body = "[...document.querySelectorAll('.bots-shell .agent-chat-main .msg.assistant .msg-body')].at(-1)";
-    const previousTurn = liveRuns.as1?.turnId;
-    await fill('.bots-shell .side-chat-input', 'What changed today?');
-    await js("document.querySelector('.bots-shell .side-chat-send').click()");
-    for (let tries = 0; liveRuns.as1?.status !== 'processing' || liveRuns.as1.turnId === previousTurn; tries++) {
-      if (tries > 100) throw new Error('The bot turn never reached the test server');
-      await delay(50);
-    }
-    liveChunk('as1', 'A partial finding');
-    await waitFor(`${body}?.textContent.includes('A partial finding')`);
-    assert.equal(await js(`[...document.querySelectorAll('.bots-shell .agent-chat-main .msg.assistant')].at(-1).getAttribute('aria-busy')`), 'true', 'the turn is still running while its text shows');
-    await capture('desktop-bots-streaming');
-    liveFinish('as1');
-    await waitFor("[...document.querySelectorAll('.bots-shell .agent-chat-main .msg.assistant')].at(-1)?.getAttribute('aria-busy') === 'false'");
-    delete demoState.liveHoldIds;
-    demoState.botsLive = true;
+    // Streaming, Stop and returning to a running reply belong to bots-stream-checks.cjs (the conversation is unit U3's).
     await open('a1');
-    await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .side-chat-input')");
+    await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .bots-composer-input')");
 
     // -- The panel host (botsPanel.js stubbed) -----------------------------------------------
     await js("document.querySelector('.bots-head-pill').click()");
@@ -256,7 +234,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await waitFor("!!document.querySelector('#bots-panel .bots-panel-fallback')");
     assert.match(await js("document.querySelector('#bots-panel .bots-panel-fallback').textContent"), /could not load/);
     assert.equal(await js("document.querySelector('#bots-panel .bots-panel-fallback').getAttribute('role')"), 'alert');
-    assert.equal(await js("!!document.querySelector('.bots-shell .side-chat-input')"), true, 'the chat still works');
+    assert.equal(await js("!!document.querySelector('.bots-shell .bots-composer-input')"), true, 'the chat still works');
     await js(`window.__botsHost.stubBotsModule('panel', { mountBotPanel: (el) => { el.textContent = 'Back again'; } })`);
     await js("document.querySelector('#bots-panel .bots-panel-fallback button').click()");
     await waitFor("document.querySelector('#bots-panel .bots-panel-body')?.textContent === 'Back again'");
@@ -269,15 +247,12 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await js("document.querySelectorAll('#toast-host .toast').forEach(n => n.remove())");
     await stubs();
 
-    // -- The legacy Agents tab and its links are untouched --------------------------------------
+    // -- The retired Agents tab: its links land in Bots --------------------------------------------------
     await js("document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents', agentId: 'a1' } }))");
-    await waitFor("document.documentElement.dataset.view === 'agents' && !!document.querySelector('.agents-messenger')");
-    assert.equal(await mode(), 'kairos', 'a notification-style link opens the legacy tab in Kairos');
-    assert.equal(await js("document.querySelector('#forge-mode-switch [data-mode=kairos]').getAttribute('aria-pressed')"), 'true');
-    // The legacy list renders after its own fetch; after a long run it can trail the messenger shell.
-    await waitFor("[...document.querySelectorAll('.agents-rail-item')].some(n => (n.dataset.search || '').includes('scout'))");
-    assert.equal(await js("!!document.querySelector('.agents-rail-create [aria-label=\"New agent\"]')"), true, 'and its own New agent button');
-    assert.equal(await js("document.querySelector('#nav .nav-item[data-tab=agents], #rd-all-tabs .nav-item[data-tab=agents]') !== null"), true, 'the Agents tab is still in the Kairos nav');
+    await waitFor("document.documentElement.dataset.view === 'botsShell' && !!document.querySelector('.bots-shell[data-agent-id=a1]')");
+    assert.equal(await mode(), 'bots', 'a notification-style link opens the bot in Bots');
+    assert.equal(await js("document.querySelector('#forge-mode-switch [data-mode=bots]').getAttribute('aria-pressed')"), 'true');
+    assert.equal(await js("document.querySelector('#nav .nav-item[data-tab=agents], #rd-all-tabs .nav-item[data-tab=agents]') === null"), true, 'there is no Agents tab in any nav');
 
     // -- Mode survives a reload -----------------------------------------------------------------------
     await js("document.querySelector('#forge-mode-switch [data-mode=bots]').click()");
@@ -350,7 +325,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await capture('mobile-bots-home');
     // A bot's page: the header is a pill with a back button, the chat is in place, the Bots tab stays selected.
     await js("document.querySelector('.bots-bot-card[data-agent-id=a1]').click()");
-    await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .side-chat-input')");
+    await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .bots-composer-input')");
     assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').getAttribute('aria-current')"), 'page', 'the Bots tab stays current on a bot page');
     assert.equal(await js("getComputedStyle(document.querySelector('.bots-head-back')).display !== 'none'"), true, 'a phone gets a back button');
     assert.deepEqual(await overflow(), [], 'a bot page has no sideways scroll on a phone: ' + await js("[...document.querySelectorAll('#view-content *')].filter(n => n.getBoundingClientRect().right > innerWidth + 1 && n.getClientRects().length).slice(0, 8).map(n => n.tagName + '.' + n.className + ' ' + Math.round(n.getBoundingClientRect().right)).join(' | ') + ' CHAIN ' + (() => { const out = []; for (let n = document.querySelector('.side-chat-composer'); n && n.id !== 'app'; n = n.parentElement) { const r = n.getBoundingClientRect(); out.push(n.className.toString().slice(0, 30) + ':' + Math.round(r.left) + '-' + Math.round(r.right) + ' m' + getComputedStyle(n).marginLeft + '/' + getComputedStyle(n).marginRight); } return out.join(' > '); })()"));
@@ -377,10 +352,10 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
     await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.getElementById('view-content').dataset.view === 'home'");
     await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'agents', 'calendar', 'more'], 'back in Kairos the bar is the Kairos bar');
-    // The legacy Agents link still opens the legacy tab on a phone.
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'calendar', 'more'], 'back in Kairos the bar is the Kairos bar');
+    // The old Agents link opens the Bots roster on a phone.
     await js("document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'agents' } }))");
-    await waitFor("document.documentElement.dataset.view === 'agents' && document.documentElement.dataset.appMode === 'kairos'");
+    await waitFor("document.documentElement.dataset.view === 'botsHome' && document.documentElement.dataset.appMode === 'bots'");
 
     assert.deepEqual(await js(errorToasts), [], 'no error toast');
   } finally {

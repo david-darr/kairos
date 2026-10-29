@@ -4,7 +4,7 @@
 // which lists every shown tab by its Settings > Layout group. Collapsed, the
 // same items are a 56 px icon rail (redesign-sidebar.css). Phones and Forge
 // mode keep app.js's own nav; Forge on a desktop gets only the Search row. Every tab button stays a `.nav-item[data-tab]`,
-// so app.js marks the open tab and the Agents badge the same way as before.
+// so app.js marks the open tab the same way as before.
 import { api, el } from './api.js';
 import { ICONS } from './icons.js';
 import * as chatStream from './chatStream.js';

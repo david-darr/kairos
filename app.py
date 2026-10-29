@@ -1,4 +1,6 @@
 # app.py — slim orchestrator (Odysseus-style: wiring only, no business logic here)
+import importlib
+import importlib.util
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -246,6 +248,14 @@ app.include_router(permission_routes.router)
 from routes import notch_routes; app.include_router(notch_routes.router)
 app.include_router(sandbox_routes.router)
 app.include_router(checkpoint_routes.router)
+# Bots Phase 1 routers (U1 conversations at /api/bot-chat, U5 attention at /api/bot-attention).
+# Declared before the generic /api/agents routes, each under its own prefix so neither can
+# shadow the other; /api/notifications stays device enrollment (notification_routes).
+# A router whose module is not in this tree yet is skipped; one that is there but fails
+# to import stops the app, so a broken router is never hidden.
+for _bots_router in ("bot_chat_routes", "bot_attention_routes"):
+    if importlib.util.find_spec(f"routes.{_bots_router}") is not None:
+        app.include_router(importlib.import_module(f"routes.{_bots_router}").router)
 app.include_router(agent_routes.router)
 app.include_router(computer_routes.router)
 app.include_router(connector_routes.router)
