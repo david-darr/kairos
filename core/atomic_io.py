@@ -64,6 +64,20 @@ def read_json(path: str, default: Any) -> Any:
         return default
 
 
+def _replace(tmp_path: str, path: str, attempts: int = 10) -> None:
+    """os.replace, retried briefly: on Windows it fails with access denied while another
+    process (the background worker, a reader) has the target open for a moment. Found
+    2026-10-29 by scripts/test_background_any_model.py. At most about half a second."""
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
+
+
 def write_json_atomic(path: str, data: Any) -> None:
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
@@ -71,7 +85,7 @@ def write_json_atomic(path: str, data: Any) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        os.replace(tmp_path, path)
+        _replace(tmp_path, path)
     except Exception:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
