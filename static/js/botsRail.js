@@ -128,6 +128,9 @@ export function mountBotsRail(nav) {
   // -- Frame ---------------------------------------------------------------------
   const newBot = h('button', { type: 'button', class: 'nav-item bots-rail-new', 'aria-label': 'New bot', onclick: () => openNewBot() },
     [icon('plus', { size: 16 }), h('span', { text: 'New bot' })]);
+  // Team templates, packages and imports (Phase 6, botsTemplates.js).
+  const templates = h('button', { type: 'button', class: 'nav-item bots-rail-templates', 'aria-label': 'Templates',
+    onclick: () => import('./botsTemplates.js').then(m => m.openTemplates()) }, [icon('layout-grid', { size: 16 }), h('span', { text: 'Templates' })]);
   const teamMap = h('button', { type: 'button', class: 'nav-item bots-rail-team-map', 'data-tab': 'botsTeamMap', 'aria-label': 'Team map', onclick: () => teamNavigate('botsTeamMap') }, [icon('map'), h('span', { text: 'Team map' })]);
   const search = h('input', { type: 'search', class: 'bots-rail-search', placeholder: 'Search bots and conversations', 'aria-label': 'Search bots and conversations', autocomplete: 'off' });
   const density = h('button', { type: 'button', class: 'bots-rail-density', 'aria-label': 'Sidebar density', title: 'Sidebar density' }, [icon('sliders-horizontal', { size: 15 })]);
@@ -147,7 +150,7 @@ export function mountBotsRail(nav) {
         onclick: () => import('./botsAttentionHost.js').then(host => host.toggleAttention(name, { agentId: root.dataset.botsAgent || '', sessionId: root.dataset.botsSession || '' })).catch(() => {}) },
         [icon(glyph, { size: 15 })])));
   import('./botsAttentionHost.js').then(() => { if (!disposed) attention.hidden = false; }).catch(() => {});
-  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, search, list, archived, foot]);
+  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, templates, search, list, archived, foot]);
   section.style.visibility = 'hidden';
   styled.finally(() => { section.style.visibility = ''; });
   nav.append(section);

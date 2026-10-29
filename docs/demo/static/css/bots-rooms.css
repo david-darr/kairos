@@ -1,0 +1,67 @@
+/* Room surfaces use only Bots tokens, including native dialogs in the top layer. */
+[data-app-mode="bots"] .bots-room { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; color: var(--bots-ink); background: var(--bots-app); font: var(--bots-text-row)/1.5 var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-room-title { display: block; max-width: min(100%, 360px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-app-mode="bots"] .bots-room-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--bots-hairline); }
+[data-app-mode="bots"] .bots-room-advanced { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+[data-app-mode="bots"] .bots-room-advanced input { width: 70px; }
+[data-app-mode="bots"] .bots-room-faces { display: flex; gap: 4px; overflow: hidden; }
+[data-app-mode="bots"] .bots-room-face { position: relative; display: grid; place-items: center; padding: 2px; border: 2px solid var(--bots-hairline); border-radius: var(--bots-radius-pill); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-room-face[data-state="working"] { border-color: var(--bots-success); }
+[data-app-mode="bots"] .bots-room-face[data-state="queued"] { border-color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-room-face[data-state="held"], [data-app-mode="bots"] .bots-room-face[data-state="elsewhere"] { filter: grayscale(1); opacity: .6; }
+[data-app-mode="bots"] .bots-room-pause { position: absolute; bottom: 0; right: 0; font-size: 10px; background: var(--bots-card); border-radius: var(--bots-radius-pill); }
+[data-app-mode="bots"] .bots-room-banners { padding: 0 16px; max-height: 28vh; overflow: auto; flex-shrink: 0; }
+[data-app-mode="bots"] .bots-room-held, [data-app-mode="bots"] .bots-room-stops, [data-app-mode="bots"] .bots-room-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 0; }
+[data-app-mode="bots"] .bots-room-bulletin { padding: 8px 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-room-bulletin p { white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-room-queue { margin: 0; padding: 8px 0; list-style: none; }
+[data-app-mode="bots"] .bots-room-queue li { display: flex; gap: 8px; justify-content: space-between; align-items: center; font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-room-queue li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-app-mode="bots"] .bots-room-empty { text-align: center; padding: 36px 16px; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-room-empty-faces { display: flex; justify-content: center; margin-bottom: 14px; }
+[data-app-mode="bots"] .bots-room-empty-faces > * + * { margin-left: -10px; }
+[data-app-mode="bots"] .bots-room .bots-transcript-host { flex: 1; min-height: 80px; }
+[data-app-mode="bots"] .bots-room .bots-msg { position: relative; }
+[data-app-mode="bots"] .bots-room-speaker { font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); font-family: var(--bots-font-sans); margin: 0 0 5px; }
+[data-app-mode="bots"] .bots-room .bots-composer-host { flex-shrink: 0; }
+[data-app-mode="bots"] .bots-room-error { padding: 10px 16px; color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-room-find { display: flex; gap: 8px; align-items: center; padding: 8px 16px; }
+[data-app-mode="bots"] .bots-room-find input { min-width: 0; flex: 1; }
+[data-app-mode="bots"] .bots-room-dialog { box-sizing: border-box; width: min(340px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px; color: var(--bots-ink); background: var(--bots-panel); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); box-shadow: var(--bots-shadow-float); overflow: auto; font: var(--bots-text-row)/1.5 var(--bots-font-sans); }
+[data-app-mode="bots"].bots-room-dialog::backdrop { background: var(--bots-inset); }
+[data-app-mode="bots"] .bots-room-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+[data-app-mode="bots"] .bots-room-dialog h2, [data-app-mode="bots"] .bots-room-setup h2 { font-size: 17px; }
+[data-app-mode="bots"] .bots-room-dialog h3, [data-app-mode="bots"] .bots-room-setup h3 { font-size: var(--bots-text-row); }
+[data-app-mode="bots"] .bots-room-dialog label, [data-app-mode="bots"] .bots-room-setup label { display: grid; gap: 6px; margin: 12px 0; }
+[data-app-mode="bots"] .bots-room-dialog .bots-room-member-choice { display: flex; align-items: center; min-height: var(--bots-row-h); gap: 10px; margin: 0; border-bottom: 1px solid var(--bots-hairline); }
+[data-app-mode="bots"] .bots-room-dialog .bots-room-member-choice span:last-child { margin-left: auto; }
+[data-app-mode="bots"] .bots-room-member-choice span { min-width: 0; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-room-thread-row { padding: 10px 0; border-bottom: 1px solid var(--bots-hairline); }
+[data-app-mode="bots"] .bots-room-picker { max-height: 40vh; overflow: auto; }
+[data-app-mode="bots"] .bots-room input, [data-app-mode="bots"] .bots-room textarea, [data-app-mode="bots"] .bots-room select,
+[data-app-mode="bots"] .bots-room-dialog input:not([type="checkbox"]), [data-app-mode="bots"] .bots-room-dialog textarea, [data-app-mode="bots"] .bots-room-dialog select { box-sizing: border-box; max-width: 100%; min-height: 36px; padding: 7px 10px; color: var(--bots-ink); background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu); font: inherit; }
+[data-app-mode="bots"] .bots-room textarea, [data-app-mode="bots"] .bots-room-dialog textarea { width: 100%; resize: vertical; }
+[data-app-mode="bots"] .bots-room-setup-host { max-height: 65vh; overflow: auto; flex-shrink: 0; }
+[data-app-mode="bots"] .bots-room-setup { max-width: 540px; margin: 16px auto; padding: 16px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-room-goal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; margin: 8px 16px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-room-goal p { flex-basis: 100%; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-room-chip { border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); margin: 10px 0; padding: 10px 14px; font-size: var(--bots-text-hint-lg); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-room-chip.failed { border-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-room-chip summary { cursor: pointer; }
+[data-app-mode="bots"] .bots-room-chip-detail { white-space: pre-wrap; max-height: 320px; overflow: auto; }
+[data-app-mode="bots"] .bots-room [hidden], [data-app-mode="bots"] .bots-room-dialog [hidden] { display: none !important; }
+[data-app-mode="bots"] .bots-room :focus-visible, [data-app-mode="bots"] .bots-room-dialog :focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+@media (max-width: 768px) {
+  [data-app-mode="bots"] .bots-room-header { gap: 6px; padding: 8px; }
+  [data-app-mode="bots"] .bots-room-header > .bots-btn { min-height: 44px; }
+  [data-app-mode="bots"] .bots-room-header select { max-width: 130px; }
+  [data-app-mode="bots"] .bots-room-faces { display: none; }
+  [data-app-mode="bots"] .bots-room-advanced { width: 100%; }
+  [data-app-mode="bots"] .bots-room-dialog { position: fixed; inset: auto 0 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; box-sizing: border-box; border-radius: var(--bots-radius-card) var(--bots-radius-card) 0 0; }
+  [data-app-mode="bots"] .bots-room-find { padding: 8px; gap: 4px; }
+  [data-app-mode="bots"] .bots-room-find .bots-btn { padding: 0 8px; }
+  [data-app-mode="bots"] .bots-room-setup-host { max-height: 55dvh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-room *, [data-app-mode="bots"] .bots-room-dialog * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

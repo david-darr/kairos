@@ -84,6 +84,7 @@ const NAV_ICONS = {
   "bot-logins": I('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>'),
   "bot-usage": I('<path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1117.4 0"/>'),
   "bot-housekeeping": I('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'),
+  "bot-templates": I('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   "bot-computers": I('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
@@ -123,6 +124,9 @@ const SECTION_GROUPS = [
         keywords: ["bots", "usage", "spend", "cost", "budget", "cap", "tokens", "plan", "traces"] },
       { id: "bot-housekeeping", label: "Bot housekeeping", render: (body) => renderBotResource(body, () => import("../botsSettingsUsage.js"), "mountHousekeeping"),
         description: "How long your bots' run details are kept.", keywords: ["bots", "retention", "housekeeping", "runs", "prune"] },
+      { id: "bot-templates", label: "Bot templates", render: (body) => renderBotResource(body, () => import("../botsTemplates.js")),
+        description: "Team templates, sharing your bots as a package, and importing one.",
+        keywords: ["bots", "templates", "team", "package", "import", "export", "share", "backup"] },
       { id: "bot-computers", label: "Bot computers", render: (body) => renderBotResource(body, () => import("../botsSettingsComputers.js")),
         description: "Your bots' computers and the limits they run within.", keywords: ["bots", "computers", "desktop", "browser", "limits"] },
       { id: "channels", label: "Channels", render: renderChannelsPanel,
@@ -580,7 +584,7 @@ function visibleSections() {
   }
   return [
     ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-computers']],
+    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-templates', 'bot-computers']],
     ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
     ['access', 'Access', ['account', 'users']],
     ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],

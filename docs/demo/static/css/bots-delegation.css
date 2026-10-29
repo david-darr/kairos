@@ -1,0 +1,43 @@
+[data-app-mode="bots"] .bots-handoff,
+[data-app-mode="bots"] .bots-repeat-chip,
+[data-app-mode="bots"] .bots-reach {
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+  padding: 12px; background: var(--bots-card); color: var(--bots-ink);
+  font: var(--bots-text-row)/1.5 var(--bots-font-sans); overflow-wrap: anywhere;
+}
+[data-app-mode="bots"] .bots-handoff[data-tone="danger"] { border-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-handoff-heading { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-handoff-partner { display: inline-flex; align-items: center; gap: 6px; }
+[data-app-mode="bots"] .bots-handoff button,
+[data-app-mode="bots"] .bots-reach button,
+[data-app-mode="bots"] .bots-reach select {
+  font: inherit; color: var(--bots-ink); background: var(--bots-control);
+  border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-menu);
+  min-height: var(--bots-row-h); max-width: 100%; padding: 6px 10px; cursor: pointer;
+}
+[data-app-mode="bots"] .bots-reach button:disabled { opacity: .5; cursor: default; }
+[data-app-mode="bots"] .bots-handoff-status,
+[data-app-mode="bots"] .bots-handoff-done,
+[data-app-mode="bots"] .bots-handoff-reason,
+[data-app-mode="bots"] .bots-repeat-detail { color: var(--bots-ink-secondary); font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-handoff-result { max-height: 320px; overflow: auto; white-space: pre-wrap; padding-top: 8px; }
+[data-app-mode="bots"] .bots-handoff-reply summary { cursor: pointer; }
+[data-app-mode="bots"] .bots-handoff-answer,
+[data-app-mode="bots"] .bots-reach form { display: flex; flex-direction: column; gap: 8px; }
+[data-app-mode="bots"] .bots-handoff textarea { resize: vertical; max-width: 100%; box-sizing: border-box; background: var(--bots-inset); color: var(--bots-ink); border: 1px solid var(--bots-control-line); font: inherit; }
+[data-app-mode="bots"] .bots-reach label { display: flex; gap: 8px; align-items: center; min-height: var(--bots-row-h); }
+[data-app-mode="bots"] .bots-reach fieldset { border: 1px solid var(--bots-hairline); min-width: 0; }
+[data-app-mode="bots"] .bots-reach [hidden] { display: none; }
+[data-app-mode="bots"] .bots-reach-error { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-repeat-detail { display: block; }
+[data-app-mode="bots"] .bots-handoff :focus-visible,
+[data-app-mode="bots"] .bots-reach :focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+@media (max-width: 600px) {
+  [data-app-mode="bots"] .bots-handoff-heading { align-items: flex-start; }
+  [data-app-mode="bots"] .bots-handoff-partner { text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-handoff *,
+  [data-app-mode="bots"] .bots-reach * { animation: none; transition: none; }
+}

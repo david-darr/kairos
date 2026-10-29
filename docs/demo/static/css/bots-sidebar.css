@@ -6,6 +6,16 @@
 
 /* -- Frame ------------------------------------------------------------------------ */
 
+[data-app-mode="bots"] .bots-rail-room { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px; width: 100%; text-align: left; border: 1px solid transparent; border-radius: var(--bots-radius-menu); background: transparent; color: var(--bots-ink); font: inherit; cursor: pointer; }
+[data-app-mode="bots"] .bots-rail-room[data-working="true"] { border-color: var(--bots-accent-border); }
+[data-app-mode="bots"] .bots-rail-room:hover { background: var(--bots-raised-hover); }
+[data-app-mode="bots"] .bots-rail-room:focus-visible { outline: 2px solid var(--bots-focus); }
+[data-app-mode="bots"] .bots-rail-team { margin-top: 4px; }
+@media (min-width: 769px) {
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] :is(.bots-rail-room .bots-thread-title, .bots-rail-room .bots-rail-count, .bots-rail-team-map > span) { display: none; }
+  [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-room { justify-content: center; }
+}
+
 [data-app-mode="bots"] .bots-rail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 [data-app-mode="bots"] .bots-rail-density, [data-app-mode="bots"] .bots-rail-more, [data-app-mode="bots"] .bots-rail-toggle {
   flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--bots-ink-tertiary);
