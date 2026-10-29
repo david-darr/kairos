@@ -2493,7 +2493,9 @@ app.whenReady().then(async () => {
         return { rect: [r.x, r.y, r.width, r.height], size: [innerWidth, innerHeight], hidden: document.querySelector('#rd-all-tabs').hidden, expanded: b.getAttribute('aria-expanded'),
           top: top && (top.id || String(top.className) || top.tagName), mode: document.documentElement.dataset.appMode, view: document.getElementById('view-content')?.dataset.view,
           settings: !!document.querySelector('.settings-nav-item'), active: document.activeElement?.id || String(document.activeElement?.className),
-          dialogs: [...document.querySelectorAll('dialog[open], [aria-modal=true]')].map(d => String(d.className) || d.id), body: String(document.body.className) }; })()`)));
+          dialogs: [...document.querySelectorAll('dialog[open], [aria-modal=true]')].map(d => String(d.className) || d.id), body: String(document.body.className),
+          confirm: [...document.querySelectorAll('.confirm-panel')].map(n => (n.parentElement?.className || '') + ' > ' + n.textContent.slice(0, 80)),
+          menus: [...document.querySelectorAll('.custom-select-menu, .overflow-menu')].filter(m => !m.classList.contains('hidden')).map(m => String(m.className) + ' > ' + (m.parentElement?.className || '') + ' > ' + m.textContent.slice(0, 60)) }; })()`)));
       throw error;
     }
     await capture('desktop-all-tabs');

@@ -13,5 +13,7 @@
 .bots-lifecycle textarea { min-height: 120px; resize: vertical; }
 .bots-lifecycle pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--bots-font-mono); }
 .bots-lifecycle button:focus-visible, .bots-lifecycle input:focus-visible, .bots-lifecycle textarea:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
-@media (max-width: 767px) { .bots-lifecycle-dialog { width: 100vw; max-height: 100dvh; margin: 0; } .bots-lifecycle-tabs { border-radius: var(--bots-radius-menu); } }
+@media (max-width: 767px) { .bots-lifecycle-dialog { width: 100vw; max-height: 100dvh; margin: 0; } .bots-lifecycle-tabs { border-radius: var(--bots-radius-menu); }
+  /* Phone: every control keeps a 44 px target. */
+  .bots-lifecycle .bots-btn, .bots-lifecycle input:not([type=checkbox]):not([type=radio]), .bots-lifecycle select, .bots-lifecycle summary { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .bots-lifecycle *, .bots-lifecycle-dialog { animation: none; transition: none; } }
