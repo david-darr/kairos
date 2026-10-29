@@ -1033,12 +1033,12 @@ class AutoModeTests(AgentTestCase):
 
 class MemoryTests(AgentTestCase):
     def archive(self):
-        return Path(agent_service._memory_path(self.agent["id"])).with_name("memory-archive.md")
+        return Path(agent_service._memory_path(self.agent["id"])).parent / "memory" / "archive.md"
 
-    def fill(self, prefix):
+    def fill(self, prefix, slack=0):
         from services.agent_service import MEMORY_LIMIT
         memory = prefix + "Person's padding: "
-        memory += "p" * (MEMORY_LIMIT - len(memory) - 1) + "\n"
+        memory += "p" * (MEMORY_LIMIT - slack - len(memory) - 1) + "\n"
         agent_service.write_memory(self.agent["id"], memory)
         return memory
 
@@ -1053,8 +1053,7 @@ class MemoryTests(AgentTestCase):
         self.assertTrue('On "Draft summary": drop closed postings' in memory,
                         "review feedback was silently discarded from full memory")
         self.assertLessEqual(len(memory), MEMORY_LIMIT)
-        archive = Path(agent_service._memory_path(self.agent["id"])).with_name("memory-archive.md").read_text(
-            encoding="utf-8")
+        archive = self.archive().read_text(encoding="utf-8")
         self.assertIn(old, archive)
 
     def test_undated_person_text_and_headings_survive_pressure(self):
@@ -1086,7 +1085,8 @@ class MemoryTests(AgentTestCase):
         other = "- 2000-01-01: " + repeat
         expired = "- 2001-01-01 (until 2002-01-01): expired"
         repeated = "- 2020-01-01: " + repeat
-        self.fill("## Notes\n" + other + "\n" + expired + "\n## Preferences\n" + repeated + "\n")
+        # The new grammar's entry is a few bytes longer than the old repeat it replaces, so leave that room.
+        self.fill("## Notes\n" + other + "\n" + expired + "\n## Preferences\n" + repeated + "\n", slack=60)
         memory = agent_service.remember(self.agent["id"], "Preferences", repeat)
         self.assertIn(other, memory, "a repeat in another section is not superseded")
         self.assertIn(expired, memory)
@@ -1116,7 +1116,7 @@ class MemoryTests(AgentTestCase):
         agent_service.write_memory(self.agent["id"], legacy)
         self.assertEqual(agent_service.read_memory(self.agent["id"]), legacy)
         memory = agent_service.remember(self.agent["id"], "Preferences", "brief summaries")
-        entry = f"- {datetime.now().strftime('%Y-%m-%d')}: brief summaries\n"
+        entry = f"- {datetime.now().strftime('%Y-%m-%d')} \u00b7 from agent \u00b7 brief summaries\n"
         self.assertEqual(memory, legacy.replace("\n\n## Notes", "\n" + entry + "\n## Notes"))
         self.assertFalse(self.archive().exists())
 
@@ -1128,7 +1128,7 @@ class MemoryTests(AgentTestCase):
         result = asyncio.run(tool_registry.call("agent_remember", {"section": "Notes", "text": "temporary note",
                                                                   "until": "2999-11-01"}, ctx, tool_registry.OPENAI))
         self.assertTrue(result.startswith("Noted"), result)
-        self.assertIn("(until 2999-11-01): temporary note", agent_service.read_memory(self.agent["id"]))
+        self.assertIn("temporary note \u00b7 until 2999-11-01", agent_service.read_memory(self.agent["id"]))
         agent_service.remember(self.agent["id"], "Notes", "ends today", until=datetime.now().strftime("%Y-%m-%d"))
         prompt = agent_service.run_prompt(self.agent, "work")
         for text in ("typo expiry", "broken expiry", "person's note", "temporary note"):
@@ -1154,8 +1154,8 @@ class MemoryTests(AgentTestCase):
 
     def test_archive_write_failure_does_not_remove_active_entries(self):
         original = self.fill("## Notes\n- 2020-01-01: " + "x" * 150 + "\n")
-        self.archive().mkdir()  # Opening an archive directory must fail before active memory is replaced.
-        with self.assertRaises(OSError):
+        self.archive().mkdir(parents=True)  # An archive that cannot be written must fail before active memory is replaced.
+        with self.assertRaises(ValueError):
             agent_service.remember(self.agent["id"], "Notes", "new correction")
         self.assertEqual(agent_service.read_memory(self.agent["id"]), original)
 
@@ -1252,7 +1252,7 @@ class TopicAndRecallTests(AgentTestCase):
         memory = agent_service.remember(self.agent["id"], "Notes", "new detail", topic="hiring")
         self.assertIn("new detail", memory)
         self.assertLessEqual(len(memory), TOPIC_MEMORY_LIMIT)
-        archive = path.parent.parent / "memory-hiring-archive.md"
+        archive = path.parent / "archive.md"
         self.assertIn(old, archive.read_text(encoding="utf-8"))
 
     def test_recent_work_window_order_count_size_and_current_thread(self):
@@ -1367,9 +1367,9 @@ class ToolTests(AgentTestCase):
         self.assertTrue(bad.startswith("Tool error"))
 
     def test_memory_is_capped_rather_than_silently_trimmed(self):
-        with self.assertRaises(ValueError):
-            agent_service.write_memory(self.agent["id"], "x" * 8001)
-        agent_service.write_memory(self.agent["id"], "## Notes\n" + "y" * 7980)
+        with self.assertRaises(ValueError):   # 413 on the route: nothing is cut on disk
+            agent_service.write_memory(self.agent["id"], "x" * (512 * 1024 + 1))
+        agent_service.write_memory(self.agent["id"], "## Notes\n" + "y" * 24560)
         with self.assertRaises(ValueError):
             agent_service.remember(self.agent["id"], "Notes", "one more line that does not fit")
 
@@ -1704,6 +1704,9 @@ class MemoryUpkeepTests(AgentTestCase):
     def memory_file(self):
         return Path(agent_service._memory_path(self.agent["id"]))
 
+    def archive_file(self):
+        return self.memory_file().parent / "memory" / "archive.md"
+
     def put(self, text):
         self.memory_file().write_bytes(text.encode("utf-8"))
 
@@ -1730,10 +1733,10 @@ class MemoryUpkeepTests(AgentTestCase):
         original = b"## Notes\r\n  Person's note  \r\n- 2022-01-01: stable\r\n"
         self.memory_file().write_bytes(original)
         self.assertIsNone(self.pass_once())
-        journal = Path(agent_service._memory_path(self.agent["id"])).with_name("memory-upkeep.json")
-        first = journal.read_bytes()
+        from services import bot_memory_journal
+        first = bot_memory_journal.rows(self.agent["id"])
         self.assertIsNone(self.pass_once())
-        self.assertEqual(journal.read_bytes(), first)
+        self.assertEqual(bot_memory_journal.rows(self.agent["id"]), first, "a pass that changes nothing journals nothing")
         self.assertEqual(self.memory_file().read_bytes(), original)
 
     def test_merge_keeps_new_wording_and_earlier_date(self):
@@ -1742,7 +1745,7 @@ class MemoryUpkeepTests(AgentTestCase):
         result = self.pass_once()
         self.assertEqual(result["changes"][0]["reason"], "near-duplicate")
         self.assertIn("- 2020-01-01: Remote roles preferred\n", self.memory_file().read_text())
-        self.assertIn("- 2020-01-01: Likes remote roles.", self.memory_file().with_name("memory-archive.md").read_text())
+        self.assertIn("- 2020-01-01: Likes remote roles.", self.archive_file().read_text())
 
     def test_correction_supersedes_earlier_note(self):
         self.put("## Preferences\n- 2020-01-01: onsite roles\n- 2020-02-01: concise replies\n"
@@ -1765,7 +1768,7 @@ class MemoryUpkeepTests(AgentTestCase):
         self.put("## Notes\n" + "".join(lines) + "- 2022-01-01: newest\n")
         result = self.pass_once()
         self.assertLessEqual(len(result["changes"]), 2)
-        archive = self.memory_file().with_name("memory-archive.md").read_text()
+        archive = self.archive_file().read_text()
         for change in result["changes"]:
             self.assertIn(change["line"], archive)
         self.assertIn("newest", self.memory_file().read_text())
@@ -1775,19 +1778,8 @@ class MemoryUpkeepTests(AgentTestCase):
                  "- 2021-01-01: Project Atlas completed\n- 2022-01-01: newest fact\n")
         result = self.pass_once()
         self.assertEqual(result["changes"][0]["reason"], "finished project")
-        self.assertIn("Project Atlas uses an old board", self.memory_file().with_name("memory-archive.md").read_text())
+        self.assertIn("Project Atlas uses an old board", self.archive_file().read_text())
         self.assertIn("Project Atlas completed", self.memory_file().read_text())
-
-    def test_journal_limit_blocks_new_pass_without_dropping_undo(self):
-        from services import agent_memory_upkeep as upkeep
-        self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
-        journal_path = upkeep._journal_path(agent_service, self.agent["id"])
-        fake = {"id": "older", "status": "committed", "files": [], "changes": []}
-        upkeep._save(journal_path, {"entries": [fake], "checked": {}})
-        with patch.object(upkeep, "MAX_UNDOABLE", 1):
-            self.assertIsNone(self.pass_once())
-        self.assertEqual(upkeep.journal_entries(agent_service, self.agent["id"])[0]["id"], "older")
-        self.assertIn("expired", self.memory_file().read_text())
 
     def test_undo_restores_hand_edited_bytes(self):
         original = (b"## Notes\r\nPerson's spacing    \r\n"
@@ -1798,9 +1790,9 @@ class MemoryUpkeepTests(AgentTestCase):
         self.assertIsNotNone(result)
         self.assertTrue(agent_service.undo_memory_upkeep(self.agent["id"], result["id"])["undone"])
         self.assertEqual(self.memory_file().read_bytes(), original)
-        self.assertFalse(self.memory_file().with_name("memory-archive.md").exists())
+        self.assertFalse(self.archive_file().exists())
 
-    def test_older_unrelated_topic_pass_can_be_undone(self):
+    def test_topic_passes_share_one_archive_so_undo_goes_newest_first(self):
         first = Path(agent_service._topic_path(self.agent["id"], "first"))
         second = Path(agent_service._topic_path(self.agent["id"], "second"))
         first.parent.mkdir(exist_ok=True)
@@ -1808,43 +1800,53 @@ class MemoryUpkeepTests(AgentTestCase):
         first.write_bytes(body); second.write_bytes(body)
         one = self.pass_once("first")
         two = self.pass_once("second")
+        with self.assertRaisesRegex(ValueError, "changed"):
+            agent_service.undo_memory_upkeep(self.agent["id"], one["id"])   # the newer pass also changed the archive
+        self.assertNotEqual(first.read_bytes(), body)
+        agent_service.undo_memory_upkeep(self.agent["id"], two["id"])
         agent_service.undo_memory_upkeep(self.agent["id"], one["id"])
-        self.assertEqual(first.read_bytes(), body)
-        self.assertNotEqual(second.read_bytes(), body)
+        self.assertEqual((first.read_bytes(), second.read_bytes()), (body, body))
         self.assertEqual([e["id"] for e in agent_service.memory_upkeep_journal(self.agent["id"])
-                          if e["status"] == "committed"], [two["id"]])
+                          if e["status"] == "committed"], [])
 
-    def test_interrupted_pass_recovers_both_files(self):
-        from services import agent_memory_upkeep as upkeep
+    def test_interrupted_pass_is_finished_on_the_next_access_and_stays_undoable(self):
+        from services import bot_memory, bot_memory_store
         self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
         original = self.memory_file().read_bytes()
-        real_atomic = upkeep._atomic
+        real_write = bot_memory_store.write_bytes
         calls = []
 
-        def cut_after_archive(path, data):
-            calls.append(path.name)
-            if path.name == "memory.md":
-                raise RuntimeError("process exited")
-            return real_atomic(path, data)
+        class ProcessExited(BaseException):   # not an Exception: nothing in the process gets to clean up, as in a real crash
+            pass
 
-        with patch.object(upkeep, "_atomic", side_effect=cut_after_archive):
-            with self.assertRaisesRegex(RuntimeError, "process exited"):
+        def cut_after_the_first_file(bot_id, path, data):
+            calls.append(path)
+            if len(calls) == 2:
+                raise ProcessExited()
+            return real_write(bot_id, path, data)
+
+        with patch.object(bot_memory_store, "write_bytes", side_effect=cut_after_the_first_file):
+            with self.assertRaises(ProcessExited):
                 self.pass_once()
-        self.assertIn("memory-archive.md", calls)
-        upkeep.recover(agent_service, self.agent["id"])
+        self.assertEqual(len(calls), 2)
+        bot_memory.reset_caches()   # a restart: the next access rolls the written-ahead pass forward
+        self.assertNotIn("expired", agent_service.read_memory(self.agent["id"]))
+        self.assertIn("expired", self.archive_file().read_text())
+        [entry] = [e for e in agent_service.memory_upkeep_journal(self.agent["id"]) if e["status"] == "committed"]
+        self.assertTrue(agent_service.undo_memory_upkeep(self.agent["id"], entry["id"])["undone"])
         self.assertEqual(self.memory_file().read_bytes(), original)
-        self.assertFalse(self.memory_file().with_name("memory-archive.md").exists())
+        self.assertFalse(self.archive_file().exists())
 
     def test_unsafe_undo_refuses_without_partial_change(self):
         self.put("## Notes\n- 2020-01-01 (until 2021-01-01): expired\n- 2022-01-01: newest\n")
         result = self.pass_once()
         self.memory_file().write_bytes(self.memory_file().read_bytes() + b"Personal addition\n")
         before = self.memory_file().read_bytes()
-        archive = self.memory_file().with_name("memory-archive.md").read_bytes()
+        archive = self.archive_file().read_bytes()
         with self.assertRaisesRegex(ValueError, "changed"):
             agent_service.undo_memory_upkeep(self.agent["id"], result["id"])
         self.assertEqual(self.memory_file().read_bytes(), before)
-        self.assertEqual(self.memory_file().with_name("memory-archive.md").read_bytes(), archive)
+        self.assertEqual(self.archive_file().read_bytes(), archive)
 
     def test_opt_out(self):
         agent_service.update(self.agent["id"], memory_upkeep=False)
@@ -1889,7 +1891,7 @@ class SelfSetupTests(AgentTestCase):
 
     def test_undo_restores_the_exact_previous_values_and_routine(self):
         from pathlib import Path
-        soul_file = Path(agent_service._memory_path(self.agent["id"])).with_name("SOUL.md")
+        soul_file = Path(agent_service._soul_path(self.agent["id"]))
         self.assertEqual(soul_file.read_text(encoding="utf-8"), "Be brief.")  # the soul it was made with (2026-10-28)
         receipt = agent_service.configure_self(
             self.agent["id"], {"soul": "Check postings at 8.", "role": "Finds remote roles"},
@@ -1916,7 +1918,7 @@ class SelfSetupTests(AgentTestCase):
     def test_undo_refuses_over_a_hand_edited_soul(self):
         from pathlib import Path
         receipt = agent_service.configure_self(self.agent["id"], {"soul": "First draft"})
-        Path(agent_service._memory_path(self.agent["id"])).with_name("SOUL.md").write_bytes(b"Edited by hand")
+        Path(agent_service._soul_path(self.agent["id"])).write_bytes(b"Edited by hand")
         with self.assertRaisesRegex(ValueError, "edited by hand"):
             agent_service.undo_setup(self.agent["id"], receipt["id"])
 
