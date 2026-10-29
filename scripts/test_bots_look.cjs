@@ -81,8 +81,11 @@ function botsSources() {
       'sliders-horizontal', 'brain', 'wrench', 'plug', 'calendar-clock', 'shield', 'history', 'gauge', 'bell', 'sparkles', 'upload',
       'image', 'refresh-cw', 'arrow-left', 'arrow-down', 'chevron-down', 'chevron-right', 'chevron-left', 'external-link', 'lock',
       'clock', 'send', 'mic', 'paperclip', 'square', 'undo-2', 'share-2', 'download', 'panel-right',
-      'user', 'users', 'book-open', 'phone', 'repeat', 'monitor', 'rotate-ccw', 'play', 'pause'];
-    assert.deepEqual([...ICON_NAMES].sort(), [...set].sort());
+      'user', 'users', 'book-open', 'phone', 'repeat', 'monitor', 'rotate-ccw', 'play', 'pause',
+      // Phase 4 teams (phase-4-design.md section 7, botsIcons.js row).
+      'crown', 'user-plus', 'map', 'network', 'hash', 'hand', 'flag', 'target', 'route', 'shield-alert', 'layout-grid',
+      'zoom-in', 'zoom-out', 'maximize', 'move', 'megaphone'];
+    assert.deepEqual([...ICON_NAMES].sort(), [...new Set(set)].sort());
     for (const name of set) {
       const svg = iconSvg(name);
       assert.ok(svg.startsWith('<svg') && svg.includes('stroke="currentColor"') && svg.includes('viewBox="0 0 24 24"'), name);

@@ -20,19 +20,28 @@ def optional_service(name):
         return None
 
 
-def pending_cards(thread_id):
-    """P3 seam: list_for_thread(thread_id) -> durable redacted card rows.
+def _thread_cards(thread_id):
+    """P3 seam: the card store's rows for one conversation, read as that conversation's owner.
 
-    Missing P3 is an empty projection on this baseline. A present module with
-    a mismatched interface fails loudly, so integration cannot hide a gap.
+    Missing P3 is an empty projection. A present module with a mismatched
+    interface fails loudly, so integration cannot hide a gap.
     """
     cards = optional_service("bot_cards")
-    return [c for c in cards.list_for_thread(thread_id) if c.get("status") in ("pending", "open", "waiting")] if cards else []
+    if not cards:
+        return []
+    from core.session_manager import session_manager
+    owner = (session_manager.get_session(thread_id) or {}).get("owner_user")
+    return cards.store().list_cards(owner, thread_id=thread_id)
+
+
+def pending_cards(thread_id):
+    from services.bot_cards import OPEN_STATUSES
+    return [c for c in _thread_cards(thread_id) if c.get("status") in OPEN_STATUSES]
 
 
 def decisions(thread_id):
-    cards = optional_service("bot_cards")
-    return [c for c in cards.list_for_thread(thread_id) if c.get("status") not in ("pending", "open", "waiting")] if cards else []
+    from services.bot_cards import OPEN_STATUSES
+    return [c for c in _thread_cards(thread_id) if c.get("status") not in OPEN_STATUSES]
 
 
 def questions(bot_id):

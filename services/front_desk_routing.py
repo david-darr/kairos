@@ -109,7 +109,7 @@ def route(bot, task, constraints, good_answer, ctx):
         return result
     # Resolve the actual returned handoff card, not a model-chosen card id.
     import re
-    match = re.search(r"\(card ([A-Za-z0-9_-]+)\)", result)
+    match = re.search(r"\(card ([A-Za-z0-9_-]+)[,)]", result)  # "(card X)" or "(card X, assignment Y)"
     card = task_service.get_task(match[1]) if match else None
     if card:
         post_card(ctx.session_id, "route", {"bot_id": target["id"], "bot_name": target["name"], "card_id": card["id"]},

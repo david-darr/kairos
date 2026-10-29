@@ -153,6 +153,9 @@ def state():
             raise
         count = 0
     else:
-        count = work.needs_input_count()
+        try:
+            count = work.needs_input_count()
+        except ValueError:
+            count = 0  # the front desk is not there to have open questions
     return {"bot_id": bot_id(), "main_thread_id": main_thread_id(),
             "connected": connections(), "needs_input_count": count}

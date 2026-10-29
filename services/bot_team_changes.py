@@ -244,7 +244,7 @@ def unused(bot_id):
     from routes.bot_team_routes import optional
     assignments = optional("core.bot_assignments")
     if assignments and assignments.live_edges():
-        if any(e.get("assignee_bot_id") == bot_id or e.get("requester", {}).get("bot_id") == bot_id for e in assignments.live_edges()):
+        if any(bot_id in (e.get("source"), e.get("target")) for e in assignments.live_edges()):
             return False
     # Terminal assignments and standing routines also make deletion unsafe.
     from services.task_service import task_service

@@ -37,8 +37,12 @@ class ToolConfinement(Harness):
             return "saved" if decision.behavior == "allow" else "denied"
         additions = {name: registry.ToolSpec(name, "test local draft", {}, handler, agent_only=True, effect=registry.WRITE)
                      for name in ("fd_suggest", "fd_save_draft", "fd_chips", "fd_route")}
+        # Phase 3's registry gate refuses a call with no real bot behind it, so the drafts run as a real bot at Full.
+        from services.agent_service import agent_service
+        bot = agent_service.create("Watch drafts probe")
+        self.addCleanup(lambda: agent_service.get(bot["id"]) and agent_service.delete(bot["id"]))
         async def run():
-            ctx = registry.ToolContext(is_admin=True, agent_id="kip", read_only=True)
+            ctx = registry.ToolContext(is_admin=True, agent_id=bot["id"], read_only=True)
             with patch.dict(registry._REGISTRY, additions):
                 for name, spec in list(registry._REGISTRY.items()):
                     if spec.effect == registry.READ:

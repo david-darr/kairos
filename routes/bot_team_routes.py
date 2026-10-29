@@ -37,10 +37,13 @@ def team_map(user: str = Depends(require_admin)):
     assignments = optional("core.bot_assignments")
     edges = assignments.live_edges() if assignments else []
     # Never project an edge whose endpoints belong to another person.
-    edges = [e for e in edges if (e.get("assignee_bot_id") or e.get("target_bot_id")) in visible and
-             (e.get("requester", {}).get("bot_id") or e.get("source_bot_id")) in visible][:12]
+    names = {b["id"]: b.get("name") for b in bots}
+    # One edge shape for the map: core.bot_assignments.live_edges names the ends source and target.
+    edges = [{**e, "source_bot_id": e["source"], "target_bot_id": e["target"], "source_name": names[e["source"]],
+              "target_name": names[e["target"]]}
+             for e in edges if e.get("target") in visible and e.get("source") in visible][:12]
     rooms_module = optional("services.bot_rooms")
-    rooms = rooms_module.list(user) if rooms_module else []
+    rooms = rooms_module.list_rooms(user) if rooms_module else []
     return {"departments": departments, "members": bots, "bots": bots, "rooms": rooms, "handoffs": edges}
 
 

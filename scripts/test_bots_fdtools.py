@@ -74,7 +74,9 @@ class FrontDeskToolsCase(unittest.IsolatedAsyncioTestCase):
                     before = gate.call_count
                     result = await self.call(spec["name"])
                     self.assertFalse(result.startswith(("Not run:", "Tool error:", "Unknown tool:")), result)
-                    self.assertEqual(gate.call_count - before, int(spec["operation"] != "read"))
+                    # A changing tool passes the registry's outer gate (Phase 3) and its own check, which the
+                    # outer approval covers, so the person is asked once; a read passes neither.
+                    self.assertEqual(gate.call_count - before, 2 * int(spec["operation"] != "read"))
         self.assertTrue(self.start.called)
         self.assertTrue(self.draft.called)
         self.assertTrue(self.suggestions.called)

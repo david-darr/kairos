@@ -53,7 +53,8 @@ class CrudTests(RoomCase):
     def test_create_defaults_and_shape(self):
         made = self.room(context="Q4", description="Plans")
         self.assertEqual([m["name"] for m in made["members"]], ["Ada", "Bo"])
-        self.assertEqual(made["default_responder"], {"kind": "mentions"})  # no side-job engine in this build
+        # Auto when the side-job engine (Phase 2) can decide, otherwise mentions.
+        self.assertEqual(made["default_responder"], {"kind": "auto" if rooms.decider_available() else "mentions"})
         self.assertEqual(made["turn_timeout_minutes"], 5)
         self.assertEqual(len(made["threads"]), 1)
         self.assertEqual(made["setup_state"], "done")

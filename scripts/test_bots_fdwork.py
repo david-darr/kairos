@@ -197,7 +197,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_optional_card_adapter_contract(self):
         from types import SimpleNamespace
-        fake = SimpleNamespace(list_for_thread=lambda sid: [{"id": "p", "status": "pending"}, {"id": "d", "status": "allowed"}])
+        rows = [{"id": "p", "status": "pending"}, {"id": "d", "status": "allowed"}]
+        fake = SimpleNamespace(store=lambda: SimpleNamespace(list_cards=lambda owner, thread_id=None: rows))
         with patch.object(work, "optional_service", return_value=fake):
             self.assertEqual([c["id"] for c in work.pending_cards(self.main)], ["p"])
             self.assertEqual([c["id"] for c in work.decisions(self.main)], ["d"])

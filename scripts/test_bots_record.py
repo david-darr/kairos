@@ -316,7 +316,8 @@ class DuplicateTests(BotTestCase):
             self.assertEqual(made[key], source[key], key)
         self.assertNotEqual(made["id"], source["id"])
         self.assertEqual(made["origin"], {"kind": "duplicate", "from_agent_id": source["id"]})
-        self.assertEqual((made["peers"], made["keep_signed_in"], made["deliver_to_channel"]), ([], False, None))
+        # Phase 4: a new bot with no reach list reaches every visible bot (peers None); a duplicate is a new bot.
+        self.assertEqual((made["peers"], made["keep_signed_in"], made["deliver_to_channel"]), (None, False, None))
         self.assertNotIn("private fact", agent_service.read_memory(made["id"]))
         self.assertEqual([t for t in task_service.list_tasks() if t.get("agent_id") == made["id"]], [])
         self.assertEqual(web.post(f"/api/agents/{source['id']}/duplicate").json()["name"], "Scout copy 2")

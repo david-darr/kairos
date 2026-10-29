@@ -280,11 +280,13 @@ class AgentService:
         # Notebook migration (Bots Phase 2): copy each bot's old memory files into its workspace once.
         bot_memory.migrate_all(list(self._agents))
 
-    def on_delete(self, hook) -> None:
+    def on_delete(self, hook):
         """Register hook(agent_id), run when a bot is deleted: for resource stores that keep per-bot state
-        (skills assignments, grants, pending work). A hook never deletes shared library revisions or saved
-        credentials; it removes only what belonged to this bot."""
-        self._delete_hooks.append(hook)
+        (skills assignments, grants, pending work, assignments). A hook never deletes shared library revisions or
+        saved credentials; it removes only what belonged to this bot. Returns a function that unregisters it."""
+        if hook not in self._delete_hooks:
+            self._delete_hooks.append(hook)
+        return lambda: self._delete_hooks.remove(hook) if hook in self._delete_hooks else None
 
     # -- identities -------------------------------------------------------------
 

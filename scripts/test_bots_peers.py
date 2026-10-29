@@ -126,8 +126,9 @@ class PeersTests(unittest.TestCase):
         with patch.object(permissions, "decide", new=AsyncMock(return_value=permissions.Decision("deny", "Denied"))) as gate:
             text = asyncio.run(tool_registry.call("coordinate_bots", {"bot_ids": [target["id"]], "message": "Do work"}, ctx, tool_registry.CLAUDE))
         self.assertIn("Not run", text)
+        # Phase 3's registry gate asks first; a tainted turn forces the prompt, and a denial stops the handler.
+        self.assertEqual(gate.call_args.kwargs["tool"], "coordinate_bots")
         self.assertTrue(gate.call_args.kwargs["force_prompt"])
-        self.assertEqual(gate.call_args.kwargs["target"], "coordinate_bots:" + target["id"])
         source["approval_mode"] = "full"
 
     def test_api_static_routes_bounds_stale_and_ownership(self):

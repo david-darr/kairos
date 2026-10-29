@@ -278,6 +278,12 @@ def live_edges(limit=12):
             for n in tree() if n["status"] not in TERMINAL][:min(limit, 12)]
 
 
+def has_work(bot_id):
+    """True when the bot ever asked for or received delegated work, finished or not."""
+    with _db() as db:
+        return any(n["assignee_bot_id"] == bot_id or n["requester"].get("bot_id") == bot_id for n in _rows(db))
+
+
 def consume_wake(root_id):
     with _db() as db:
         row = db.execute("SELECT wakes FROM budgets WHERE root_id=?", (root_id,)).fetchone()
