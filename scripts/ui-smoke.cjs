@@ -2019,13 +2019,18 @@ app.whenReady().then(async () => {
       // pane. A page that throws leaves the header without content.
       // V2 rows also show saved values (Appearance + Parchment, for example);
       // only the row's label names the page, not its combined textContent.
+      // The Bots pages (bot-*) read /api/bots/*, which the Bots fixture lanes answer only while botsLive is on.
+      const botsLiveBefore = demoState.botsLive;
       for (const id of await js("[...document.querySelectorAll('.settings-nav-item')].map(i => i.dataset.section)")) {
+        demoState.botsLive = id.startsWith('bot-') ? true : botsLiveBefore;
         await js(`document.querySelector('[data-section="${id}"]').click()`);
         await waitFor(`document.querySelector('.set-page')?.dataset.page === '${id}' && document.querySelector('#settings-content .set-title')?.textContent === document.querySelector('[data-section="${id}"] .settings-nav-label').textContent
-          && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .set-note, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item')`);
+          && !!document.querySelector('#settings-content .set-body').querySelector('.set-row, .set-empty, .set-note, .appearance-panel, .layout-list, .log-entry, .logs-status, .sandbox-change, .run-item, .bots-settings-host > [data-section]:not(:empty)')`);
         assert.deepEqual(await overflow(), [], `${label} ${id} overflow`);
         await capture(`${label}-settings-${id}`);
+        if (id.startsWith('bot-')) await delay(300);  // let the page's /api/bots reads finish while their lanes answer
       }
+      demoState.botsLive = botsLiveBefore;
       // Long local/API chats compact themselves unless switched off (roadmap phase 3).
       await js("document.querySelector('[data-section=\"added-models\"]').click()");
       await waitFor("!!document.querySelector('.long-chats .set-switch')");
@@ -2783,7 +2788,8 @@ app.whenReady().then(async () => {
       await js("document.getElementById('demo-frame').loading = 'eager'");
       await waitDemo("d && d.querySelectorAll('.nav-item[data-tab]').length >= 10 && !!d.querySelector('.dashboard-core')", "Home loads in the demo");
       assert.ok(await inDemo("!!d.querySelector('.demo-badge')"), label + " the demo says it is a demo");
-      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "agents", "cookbook", "school", "home"]) {  // docs/demo is generated output (built from the app before Bots); when the integration owner rebuilds it, this entry becomes botsHome
+      // Bots is its own app mode, not a Kairos nav item, so the demo walk has no Agents entry (rebuilt demo, 2026-10-29).
+      for (const tab of ["chat", "notes", "library", "calendar", "email", "tasks", "tool-store", "cookbook", "school", "home"]) {
         await inDemo("d.querySelector('.nav-item[data-tab=" + tab + "]').click()");
         // On a phone the Chat tab is the mobile launch page, owned by Chats.
         const shown = label === "mobile" && tab === "chat" ? "mobileLaunch" : tab;

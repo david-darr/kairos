@@ -81,6 +81,14 @@
 [data-app-mode="bots"] .bots-skill-search:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
 [data-app-mode="bots"] .bots-skill-share-row { flex-wrap: wrap; }
 
+/* Phone: every control keeps a 44px target */
+@media (max-width: 640px) {
+  [data-app-mode="bots"] .bots-skills .bots-btn, [data-app-mode="bots"] .bots-skills .bots-segmented button,
+  [data-app-mode="bots"] .bots-skills input:not([type=checkbox]):not([type=radio]), [data-app-mode="bots"] .bots-skills select,
+  [data-app-mode="bots"] .bots-skills textarea, [data-app-mode="bots"] .bots-skills summary { min-height: 44px; }
+  [data-app-mode="bots"] .bots-skills .bots-icon-btn { min-height: 44px; min-width: 44px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-app-mode="bots"] .bots-skills * { transition: none; animation: none; }
 }

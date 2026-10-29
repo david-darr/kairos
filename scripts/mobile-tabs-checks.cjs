@@ -641,7 +641,10 @@ async function run(ctx) {
   await type('.settings-search', '');
   // Every section opens, fits, and backs out, with 44px controls (switches extend theirs).
   const smallSettings = () => js(`[...document.querySelectorAll('#settings-content button, #settings-content a[href], #settings-content input:not([type=hidden]):not([type=checkbox]):not([type=radio]), #settings-content select, #settings-content textarea, #settings-content summary')].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').filter(n => { const r = n.getBoundingClientRect(); if (r.width >= 43.5 && r.height >= 43.5) return false; { const b = getComputedStyle(n, '::before'); if (b.position !== 'absolute' || b.content === 'none') return true; return !(r.height + Math.abs(parseFloat(b.top)) * 2 >= 43.5 && r.width + Math.abs(parseFloat(b.left)) * 2 >= 43.5); } }).map(n => (n.getAttribute('aria-label') || n.textContent || n.className).trim().slice(0, 26) + ' ' + Math.round(n.getBoundingClientRect().width) + 'x' + Math.round(n.getBoundingClientRect().height))`);
+  // The Bots pages (bot-*) read /api/bots/*, which the Bots fixture lanes answer only while botsLive is on.
+  const botsLiveBefore = ctx.demoState.botsLive;
   for (const id of ids) {
+    ctx.demoState.botsLive = id.startsWith('bot-') ? true : botsLiveBefore;
     await js(`document.querySelector('.settings-nav-item[data-section="${id}"]').click()`);
     await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'");
     await delay(450);
@@ -651,6 +654,7 @@ async function run(ctx) {
     await backBtn();
     await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'list'");
   }
+  ctx.demoState.botsLive = botsLiveBefore;
   // A page's own sub-page backs out one level at a time.
   await js("document.querySelector('.settings-nav-item[data-section=\"add-models\"]').click()");
   await waitFor("document.querySelector('.settings-mobile-page').dataset.mobileView === 'page'");

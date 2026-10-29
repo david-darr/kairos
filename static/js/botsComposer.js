@@ -251,6 +251,7 @@ export function mountBotsComposer(host, o) {
     const d = draft.read(); if (!d.pending && !d.text.trim() && !d.attachment_ids.length) return;
     error.hidden = true; sending = true;
     const sentIds = o.uploader?.ids() || [];
+    input.value = '';  // clear at once; the draft keeps the text, and a failed send puts it back below
     try { await o.submit(); o.uploader?.removeIds(sentIds); if (!disposed) input.value = draft.read().text; }
     catch (problem) { if (!disposed) { showError(problem); input.value = draft.read().text; } }
     finally { sending = false; if (!disposed) paint(); }

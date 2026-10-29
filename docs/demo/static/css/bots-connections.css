@@ -107,7 +107,11 @@
   [data-app-mode="bots"] .bots-conn-key { grid-template-columns: 1fr; }
   [data-app-mode="bots"] .bots-conn-row .bots-conn-actions { width: 100%; }
   [data-app-mode="bots"] .bots-conn-account input { width: 100%; }
-  [data-app-mode="bots"] .bots-conn .bots-btn, [data-app-mode="bots"] .bots-conn .bots-icon-btn { min-height: 40px; }
+  [data-app-mode="bots"] .bots-conn .bots-btn, [data-app-mode="bots"] .bots-conn .bots-icon-btn,
+  [data-app-mode="bots"] .bots-conn input:not([type=checkbox]):not([type=radio]), [data-app-mode="bots"] .bots-conn select,
+  [data-app-mode="bots"] .bots-conn textarea { min-height: 44px; }
+  [data-app-mode="bots"] .bots-conn .bots-icon-btn { min-width: 44px; }
+  [data-app-mode="bots"] .bots-conn button.bots-conn-chip, [data-app-mode="bots"] .bots-conn .bots-segmented button { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
