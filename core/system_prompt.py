@@ -183,12 +183,14 @@ def for_external(is_admin: bool = False, allow_user_tab_source: bool = False, co
 def _codex_commands(is_admin: bool, agent: bool, session_id=None) -> str:
     """The tools this Codex chat may call, from core/tool_registry.py: one
     line each, the command and the first sentence of what it does. Roadmap
-    phase 2 (2026-10-05): this was a hand-kept list that had drifted."""
+    phase 2 (2026-10-05): this was a hand-kept list that had drifted.
+    2026-10-28: only the core tools carry their flags; the rest are named,
+    and `<command> --help` gives their arguments (about 3,700 characters less)."""
     from core import tool_registry
     lines = []
     for spec in tool_registry.specs(tool_registry.CODEX, is_admin, agent, session_id=session_id):
         first = spec.description.split(". ")[0].rstrip(".")
-        lines.append(f"  {tool_registry.cli_usage(spec)}\n      {first}.")
+        lines.append(f"  {tool_registry.cli_usage(spec) if spec.core else spec.name}\n      {first}.")
     return "\n".join(lines)
 
 
