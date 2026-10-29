@@ -803,7 +803,11 @@ def _map_calendar_event(item: dict, calendar: dict) -> dict:
             "calendar_name": calendar.get("name"), "editable": calendar.get("access_role") in ("owner", "writer"),
             "web_link": item.get("htmlLink"), "series_id": item.get("recurringEventId"),
             "original_start": item.get("originalStartTime"), "recurrence": repeat if repeat is not False else None,
-            "recurrence_supported": repeat is not False, "recurrence_raw": item.get("recurrence") or []}
+            "recurrence_supported": repeat is not False, "recurrence_raw": item.get("recurrence") or [],
+            "guests": sum(1 for guest in item.get("attendees", [])
+                          if not guest.get("self") and not guest.get("resource") and guest.get("responseStatus") != "declined"),
+            "meeting_url": next((entry.get("uri") for entry in (item.get("conferenceData") or {}).get("entryPoints", [])
+                                 if entry.get("entryPointType") == "video" and entry.get("uri")), None) or item.get("hangoutLink")}
 
 
 async def calendar_event(calendar_id: str, event_id: str) -> dict:
