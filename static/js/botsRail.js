@@ -25,8 +25,9 @@ import { icon } from './botsIcons.js';
 import { Segmented, isAdvanced, setAdvanced, onBotsInterface, loadBotsCss, openMenu } from './botsUi.js';
 import { openNewBot, openArchived, openBotSettings } from './botsPanelHost.js';
 import { targetId } from './botsNavigation.js';
+import { openNewRoom, openTeamDialog, openTeamInstructions, openTeamMemory, openTeamSettings, teamNavigate } from './botsTeamHost.js';
 import {
-  sidebarPreferenceKey, sidebarPreferences, reorder, orderedPins, botTree, railWidth, nextDensity, widthAfterKey, widthBounds,
+  sidebarPreferenceKey, teamSidebarPreferences as sidebarPreferences, teamGroups, roomRow, reorder, orderedPins, botTree, railWidth, nextDensity, widthAfterKey, widthBounds,
   clampSidebarWidth, searchMatches, searchReady, attentionBots, canMoveThread, afterDelete, threadAttention,
 } from './botsSidebarModel.js';
 import { botsThreadApi, threadMenuItems, folderMenuItems, botMenuItems, movedFolderIds, copyableLink } from './botsThreadMenu.js';
@@ -108,6 +109,7 @@ export function mountBotsRail(nav) {
   const api = botsThreadApi(lazyApi);
   const root = document.documentElement;
   let disposed = false, version = 0, agents = [], pinnedIds = new Set(), signature = '';
+  let departments = [], rooms = [];
   let prefs = sidebarPreferences(), user = 'local', query = '', searchTimer = 0, selection = null;
   const threads = new Map();   // agent id -> { rows, folders, main_id, at }
   const showAll = new Set();   // bots whose conversation list is not cut to the recent ones
@@ -126,6 +128,7 @@ export function mountBotsRail(nav) {
   // -- Frame ---------------------------------------------------------------------
   const newBot = h('button', { type: 'button', class: 'nav-item bots-rail-new', 'aria-label': 'New bot', onclick: () => openNewBot() },
     [icon('plus', { size: 16 }), h('span', { text: 'New bot' })]);
+  const teamMap = h('button', { type: 'button', class: 'nav-item bots-rail-team-map', 'data-tab': 'botsTeamMap', 'aria-label': 'Team map', onclick: () => teamNavigate('botsTeamMap') }, [icon('map'), h('span', { text: 'Team map' })]);
   const search = h('input', { type: 'search', class: 'bots-rail-search', placeholder: 'Search bots and conversations', 'aria-label': 'Search bots and conversations', autocomplete: 'off' });
   const density = h('button', { type: 'button', class: 'bots-rail-density', 'aria-label': 'Sidebar density', title: 'Sidebar density' }, [icon('sliders-horizontal', { size: 15 })]);
   const list = h('div', { class: 'bots-rail-list', role: 'list' });
@@ -144,7 +147,7 @@ export function mountBotsRail(nav) {
         onclick: () => import('./botsAttentionHost.js').then(host => host.toggleAttention(name, { agentId: root.dataset.botsAgent || '', sessionId: root.dataset.botsSession || '' })).catch(() => {}) },
         [icon(glyph, { size: 15 })])));
   import('./botsAttentionHost.js').then(() => { if (!disposed) attention.hidden = false; }).catch(() => {});
-  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, newBot, search, list, archived, foot]);
+  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, search, list, archived, foot]);
   section.style.visibility = 'hidden';
   styled.finally(() => { section.style.visibility = ''; });
   nav.append(section);
@@ -240,6 +243,7 @@ export function mountBotsRail(nav) {
       'data-state': fact.state, 'aria-label': fact.label, title: fact.text, onclick: () => openBot(bot.id) }, [
       agentAvatar(bot, 24),
       h('span', { class: 'bots-rail-name', text: fact.name }),
+      departments.some(t => t.chief_bot_id === bot.id) ? icon('crown', { size: 13, label: 'Chief of Staff' }) : null,
       h('span', { class: 'bots-status-dot', 'data-state': fact.state, 'aria-hidden': 'true' }),
       fact.needs ? h('span', { class: 'bots-rail-count', text: fact.needs > 99 ? '99+' : String(fact.needs) }) : null,
     ]);
@@ -422,7 +426,7 @@ export function mountBotsRail(nav) {
   }
 
   function botMenu(bot, anchor) {
-    openMenu(anchor, botMenuItems({ bot, pinned: pinnedIds.has(bot.id), handlers: {
+    const items = botMenuItems({ bot, pinned: pinnedIds.has(bot.id), handlers: {
       open: b => openBot(b.id),
       pin: async b => {
         const next = !pinnedIds.has(b.id);
@@ -432,7 +436,12 @@ export function mountBotsRail(nav) {
       newThread: b => newThread(b),
       newFolder: b => { savePrefs({ expanded: [...new Set([...prefs.expanded, b.id])] }); renaming = { kind: 'newfolder', id: b.id }; readThreads(b.id, true).then(() => draw(true)); },
       settings: b => { openBot(b.id); setTimeout(() => openBotSettings(b.id, { section: 'overview' }), 0); },
-    } }), { align: 'end' });
+    } });
+    items.push({ label: departments.some(t => t.chief_bot_id === bot.id) ? 'Remove chief' : 'Make chief', iconName: 'crown',
+      disabled: bot.tools_available === false || bot.can_use_tools === false || !bot.section,
+      meta: !bot.section ? 'Choose a team first' : bot.tools_available === false || bot.can_use_tools === false ? 'This model cannot use tools' : '',
+      onSelect: () => openTeamDialog({ departmentId: departments.find(t => t.name === bot.section)?.id, agentId: bot.id, mode: 'chief' }) });
+    openMenu(anchor, items, { align: 'end' });
   }
 
   async function newThread(bot) {
@@ -527,7 +536,7 @@ export function mountBotsRail(nav) {
     const hold = focusKey();
     const facts = roster.map(railRow);
     const rows = [...threads.entries()].map(([id, data]) => [id, data.rows.map(r => [r.id, r.title, r.status, r.updated_at, r.thread?.pinned, r.thread?.unread, r.thread?.folder_id, r.thread?.snoozed_until])]);
-    const next = JSON.stringify([advanced, prefs, facts, roster.map(b => [b.id, b.color, b.avatar, b.folders]), hidden.length, [...pinnedIds], query, rows, root.dataset.botsAgent, root.dataset.botsSession, [...showAll],
+    const next = JSON.stringify([advanced, prefs, departments, rooms, facts, roster.map(b => [b.id, b.color, b.avatar, b.folders, b.section]), hidden.length, [...pinnedIds], query, rows, root.dataset.botsAgent, root.dataset.botsSession, [...showAll],
       renaming, selection && [selection.agentId, [...selection.ids]]]);
     if (!force && next === signature) { markActive(); return; }
     signature = next;
@@ -550,7 +559,7 @@ export function mountBotsRail(nav) {
     const pinned = pinnedBotList();
     const out = [];
     if (pinned.length) out.push(h('div', { class: 'bots-pins', role: 'group', 'aria-label': 'Pinned bots' }, pinned.map(pinCircle)));
-    out.push(...roster.map(bot => botRow(bot)));
+    out.push(channelsBlock(), ...teamBlocks(roster, false));
     return out;
   }
 
@@ -558,12 +567,46 @@ export function mountBotsRail(nav) {
     const pinned = pinnedBotList();
     const needing = attentionBots(roster, stateOf);
     const blocks = {
+      channels: channelsBlock,
       pinned: () => pinned.length && sectionBlock('pinned', 'Pinned', h('div', { class: 'bots-rail-group', role: 'list' }, pinned.map(bot => botRow(bot, { section: 'pinned:' }))), pinned.length),
       attention: () => needing.length && sectionBlock('attention', 'Needs attention', h('div', { class: 'bots-rail-group', role: 'list' }, needing.map(bot => botRow(bot, { section: 'attention:' }))), needing.length),
-      bots: () => roster.length && sectionBlock('bots', 'Bots', h('div', { class: 'bots-rail-group', role: 'list' },
-        roster.flatMap(bot => [botRow(bot, { tree: true }), isOpen(bot.id) ? botChildren(bot) : null].filter(Boolean))), roster.length),
+      bots: () => roster.length && sectionBlock('bots', 'Bots', h('div', { class: 'bots-rail-group', role: 'list' }, teamBlocks(roster, true)), roster.length),
     };
     return prefs.sections.map(id => blocks[id]?.()).filter(Boolean);
+  }
+
+  function channelsBlock() {
+    const add = h('button', { type: 'button', class: 'bots-rail-newthread', onclick: () => openNewRoom() }, [icon('plus', { size: 13 }), h('span', { text: 'New room' })]);
+    return sectionBlock('channels', 'Channels', h('div', { class: 'bots-rail-group' }, [
+      ...rooms.filter(r => !r.archived_at).map(room => { const r = roomRow(room); return h('button', { type: 'button', class: 'bots-rail-room', 'data-room-id': r.id, 'data-working': String(r.working),
+        'aria-label': `${r.name}${r.working ? ', Working' : ''}${r.unread ? `, ${r.unread} unread` : ''}`, onclick: () => teamNavigate('botsRoom', { roomId: r.id }) }, [
+        icon('hash', { size: 16 }), h('span', { class: 'bots-thread-title', text: r.name }), r.working ? h('span', { class: 'bots-status-dot', 'data-state': 'working' }) : null,
+        r.unread ? h('span', { class: 'bots-rail-count', text: String(Math.min(99, r.unread)) }) : null]); }), add,
+    ]), rooms.length);
+  }
+  function teamBlocks(roster, tree) {
+    return teamGroups(roster, departments, prefs.teamOrder).map(team => {
+      if (team.ungrouped) return h('div', { class: 'bots-rail-group' }, team.members.flatMap(bot => [botRow(bot, { tree }), tree && isOpen(bot.id) ? botChildren(bot) : null].filter(Boolean)));
+      const closed = prefs.closedTeams.includes(team.id);
+      const toggle = h('button', { type: 'button', class: 'bots-section-head', 'aria-expanded': String(!closed), 'data-key': `team:${team.id}`, onclick: () => {
+        savePrefs({ closedTeams: closed ? prefs.closedTeams.filter(id => id !== team.id) : [...prefs.closedTeams, team.id] }); draw(true);
+      } }, [icon(closed ? 'chevron-right' : 'chevron-down', { size: 12 }), h('span', { class: 'bots-folder-name', text: team.name }), team.chief_bot_id ? icon('crown', { size: 13, label: 'Chief of Staff' }) : null]);
+      toggle.addEventListener('keydown', e => {
+        if (!e.altKey || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        e.preventDefault(); savePrefs({ teamOrder: reorder(teamGroups(roster, departments, prefs.teamOrder).map(t => t.id), team.id, e.key === 'ArrowUp' ? -1 : 1) }); draw(true);
+        list.querySelector(`[data-key="${CSS.escape(`team:${team.id}`)}"]`)?.focus();
+      });
+      const more = h('button', { type: 'button', class: 'bots-rail-more', 'aria-label': `Options for ${team.name}`, onclick: () => openMenu(more, [
+        { label: 'Manage bots', iconName: 'users', onSelect: () => openTeamDialog({ departmentId: team.id }) },
+        { label: 'Team instructions', iconName: 'book-open', onSelect: () => openTeamInstructions({ departmentId: team.id }) },
+        { label: 'Team memory', iconName: 'brain', onSelect: () => openTeamMemory({ departmentId: team.id }) },
+        { label: 'Team settings', iconName: 'settings', onSelect: () => openTeamSettings({ departmentId: team.id }) },
+        { label: 'Rename', iconName: 'pencil', onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'rename' }) },
+        { label: 'Delete', iconName: 'trash-2', danger: true, onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'delete' }) },
+      ], { align: 'end' }) }, [icon('ellipsis', { size: 14 })]);
+      return h('div', { class: 'bots-rail-team', 'data-department-id': team.id }, [h('div', { class: 'bots-rail-line' }, [toggle, more]),
+        closed ? null : h('div', { class: 'bots-rail-group' }, team.members.flatMap(bot => [botRow(bot, { tree }), tree && isOpen(bot.id) ? botChildren(bot) : null].filter(Boolean)))]);
+    });
   }
 
   function searchResults(roster) {
@@ -598,9 +641,10 @@ export function mountBotsRail(nav) {
     const at = ++version;
     try {
       const { api: request } = await import('./api.js');
-      const [next, convos] = await Promise.all([request('/api/agents'), request('/api/agents/conversations').catch(() => null)]);
+      const [next, convos, teamData] = await Promise.all([request('/api/agents'), request('/api/agents/conversations').catch(() => null), request('/api/bot-team/map', { toast: false }).catch(() => null)]);
       if (disposed || at !== version || !Array.isArray(next)) return;
       agents = next;
+      if (teamData) { departments = teamData.departments || teamData.teams || []; rooms = teamData.rooms || []; }
       const automationData = await request('/api/bot-automations').catch(() => ({ items: [] }));  // a missing count never stops the roster refresh
       if (disposed || at !== version) return;
       const needs = needsYouCount(buildItems(automationData.items || automationData.automations || []));

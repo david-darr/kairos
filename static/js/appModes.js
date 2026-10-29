@@ -27,6 +27,7 @@ export const MODE_SWITCH = MODES.map(mode => [mode, MODE_LABELS[mode]]);
 
 // Title-bar text for tabs that are not in the Kairos nav.
 export const TAB_LABELS = { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations' };
+export const BOTS_TEAM_TABS = { botsRoom: 'Room', botsTeamMap: 'Team map' };
 
 const HOME_TABS = { kairos: 'home', forge: 'forgeHome', bots: 'botsHome' };
 
@@ -42,7 +43,7 @@ export function restoreMode(stored, isAdmin) {
 // The mode a tab id belongs to.
 export function modeForTab(tabId) {
   if (tabId === 'forgeShell' || FORGE_NAV.some(item => item.id === tabId)) return 'forge';
-  if (tabId === 'botsShell' || tabId === 'botsAutomations' || BOTS_NAV.some(item => item.id === tabId)) return 'bots';
+  if (tabId === 'botsShell' || tabId === 'botsAutomations' || Object.hasOwn(BOTS_TEAM_TABS, tabId) || BOTS_NAV.some(item => item.id === tabId)) return 'bots';
   return 'kairos';
 }
 
