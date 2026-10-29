@@ -16,7 +16,7 @@ import imaplib
 import smtplib
 import time
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from email.mime.text import MIMEText
 from email.header import decode_header
 from typing import Optional
@@ -147,6 +147,74 @@ class EmailService:
                 })
         return messages
 
+    def list_watch_messages(self, account_id: str, *, since: float, limit: int = 100) -> list[dict]:
+        """Stable UID headers for the watch. Keep the Email tab's API intact.
+
+        IMAP SINCE has day precision; the caller also filters the parsed date.
+        UIDVALIDITY is part of every saved reference, so mailbox renumbering
+        can never make a saved brief row refer to a different message.
+        """
+        account = self.get_account(account_id, decrypted=True)
+        if account is None:
+            raise KeyError("Email account not found")
+        day = datetime.fromtimestamp(since, timezone.utc).strftime("%d-%b-%Y")
+        rows = []
+        with imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"], timeout=10) as imap:
+            imap.login(account["email"], decrypt(account["password_encrypted"]))
+            status, _ = imap.select("INBOX", readonly=True)
+            if status != "OK":
+                raise ValueError("Could not open the inbox")
+            validity = _uidvalidity(imap)
+            status, data = imap.uid("search", None, "SINCE", day)
+            if status != "OK":
+                raise ValueError("Could not read mail headers")
+            for uid in reversed(data[0].split()[-max(1, min(int(limit), 100)):]):
+                status, parts = imap.uid("fetch", uid, "(BODY.PEEK[HEADER])")
+                if status != "OK":
+                    raise ValueError("Could not read a mail header")
+                payload = next((p[1] for p in parts if isinstance(p, tuple) and isinstance(p[1], bytes)), None)
+                if payload is not None:
+                    rows.append(_watch_header(email.message_from_bytes(payload), uid.decode(), validity))
+        return rows
+
+    def read_message(self, account_id: str, uid: str, *, uidvalidity: str | None = None,
+                     headers_only: bool = False, turn_taint=None) -> dict:
+        """Read one UID without marking it seen. Model text is always fenced.
+
+        Headers are returned separately for server-built cards. A caller that
+        passes the result to a model must use `records`, never interpolate the
+        header fields. Body output is plain text and bounded to 8,000 chars.
+        """
+        if not str(uid).isdigit() or int(uid) < 1:
+            raise ValueError("Invalid message reference")
+        account = self.get_account(account_id, decrypted=True)
+        if account is None:
+            raise KeyError("Email account not found")
+        with imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"], timeout=10) as imap:
+            imap.login(account["email"], decrypt(account["password_encrypted"]))
+            status, _ = imap.select("INBOX", readonly=True)
+            if status != "OK":
+                raise ValueError("Could not open the inbox")
+            validity = _uidvalidity(imap)
+            if uidvalidity is not None and str(uidvalidity) != validity:
+                raise KeyError("This mailbox changed. Check for new mail again.")
+            # Fetch at most 256 KiB, even for a very large MIME message.
+            query = "(BODY.PEEK[HEADER])" if headers_only else "(BODY.PEEK[]<0.262144>)"
+            status, data = imap.uid("fetch", str(uid), query)
+            payload = next((p[1] for p in (data or []) if isinstance(p, tuple) and isinstance(p[1], bytes)), None)
+            if status != "OK" or payload is None:
+                raise KeyError("Email not found")
+            msg = email.message_from_bytes(payload)
+        from core.untrusted import wrap_untrusted
+        from core.turn_taint import TurnTaint
+        import json
+        taint = turn_taint if turn_taint is not None else TurnTaint()
+        taint.mark("email message")
+        fields = _watch_header(msg, str(uid), validity)
+        body = "" if headers_only else _plain_body(msg)
+        return {**fields, "records": wrap_untrusted("email message", json.dumps({**fields, "body": body}, ensure_ascii=False)),
+                "tainted": True}
+
     def send_message(self, account_id: str, to: str, subject: str, body: str,
                      in_reply_to: str | None = None, cc: str | None = None) -> None:
         account = self.get_account(account_id, decrypted=True)
@@ -177,6 +245,36 @@ class EmailService:
             smtp.sendmail(account["email"], recipients, msg.as_string())
         finally:
             smtp.quit()
+
+
+def _uidvalidity(imap) -> str:
+    _, values = imap.response("UIDVALIDITY")
+    if not values or not values[0] or not values[0].strip().isdigit():
+        raise ValueError("The mailbox did not provide a stable message reference")
+    return values[0].decode().strip()
+
+
+def _watch_header(msg, uid, validity):
+    return {"uid": uid, "uidvalidity": validity, "from": _decode_header(msg.get("From", ""))[:1000],
+            "subject": _decode_header(msg.get("Subject", ""))[:1000], "date": msg.get("Date", "")[:200],
+            "message_id": msg.get("Message-ID", "")[:1000], "list_unsubscribe": bool(msg.get("List-Unsubscribe")),
+            "precedence": msg.get("Precedence", "")[:100], "auto_submitted": msg.get("Auto-Submitted", "")[:100]}
+
+
+def _plain_body(msg):
+    texts = []
+    for part in msg.walk():
+        if part.get_content_type() != "text/plain" or part.get_content_disposition() == "attachment":
+            continue
+        payload = part.get_payload(decode=True) or b""
+        try:
+            text = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        except LookupError:
+            text = payload.decode("utf-8", errors="replace")
+        texts.append(text[:8000])
+        if sum(len(t) for t in texts) >= 8000:
+            break
+    return "\n".join(texts)[:8000]
 
 
 def _decode_header(raw: str) -> str:

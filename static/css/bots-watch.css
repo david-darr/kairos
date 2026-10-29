@@ -1,0 +1,42 @@
+[data-app-mode="bots"] .bots-watch {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 560px;
+  padding: 20px;
+  border: 1px solid var(--bots-hairline-dense);
+  border-radius: var(--bots-radius-card);
+  background: var(--bots-panel);
+  color: var(--bots-ink);
+  font-family: var(--bots-font-sans);
+  font-size: var(--bots-text-row);
+}
+[data-app-mode="bots"] .bots-watch h3 { margin: 0 0 12px; font: inherit; font-weight: 600; }
+[data-app-mode="bots"] .bots-watch-state { margin: 0 0 6px; }
+[data-app-mode="bots"] .bots-watch-detail,
+[data-app-mode="bots"] .bots-watch-feedback { color: var(--bots-ink-secondary); font-size: var(--bots-text-hint-lg); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-watch-actions,
+[data-app-mode="bots"] .bots-watch-morning { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+[data-app-mode="bots"] .bots-watch-morning label { display: flex; align-items: center; gap: 6px; }
+[data-app-mode="bots"] .bots-watch button,
+[data-app-mode="bots"] .bots-watch input[type="time"] {
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--bots-control);
+  border: 1px solid var(--bots-control-line);
+  border-radius: var(--bots-radius-pill);
+  color: var(--bots-ink);
+  font: inherit;
+  transition: background var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-watch button { cursor: pointer; }
+[data-app-mode="bots"] .bots-watch button:hover { background: var(--bots-raised); }
+[data-app-mode="bots"] .bots-watch button:disabled { opacity: .6; cursor: default; }
+[data-app-mode="bots"] .bots-watch input { accent-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-watch :focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 3px; }
+[data-app-mode="bots"] .bots-watch [aria-invalid="true"] { border-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-watch [hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-app-mode="bots"] .bots-watch button,
+  [data-app-mode="bots"] .bots-watch input { transition: none; }
+}
