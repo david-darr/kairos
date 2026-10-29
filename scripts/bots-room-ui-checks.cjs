@@ -107,6 +107,7 @@ module.exports = async ({ js, waitFor, win, demoState, base }) => {
     // Restore through a fresh snapshot before the next fixture frame.
     await js('__roomUI.refresh()');
     await button('.bots-room-header > button', room.name);
+    await waitFor(`!!document.querySelector('.bots-room-panel [aria-label="Room instructions"]')`);  // the panel loads the room first
     await fill('.bots-room-panel [aria-label="Room instructions"]', 'Updated instructions');
     await js(`document.querySelector('.bots-room-panel textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}))`);
     await waitFor("document.querySelector('.bots-room-bulletin')?.textContent.includes('Updated instructions')");
