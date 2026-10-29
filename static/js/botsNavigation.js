@@ -14,10 +14,22 @@ export function normalizeBotsTarget(tab, options = {}) {
   if (tab && typeof tab === 'object') { options = tab; tab = tab.tab; }
   options = options && typeof options === 'object' ? options : {};
   const legacy = tab === 'agents';
-  const bots = legacy || tab === 'botsShell' || tab === 'botsHome';
+  const bots = legacy || ['botsShell', 'botsHome', 'botsRoom', 'botsTeamMap'].includes(tab);
   if (!bots) return { tab: typeof tab === 'string' ? tab : 'home' };
   const team = targetId(options.team?.id) ?? targetId(options.team) ?? targetId(options.systemId);
   if (legacy && team) return { tab: 'swarm', systemId: team };
+  const roomId = targetId(options.roomId ?? options.room_id);
+  const departmentId = targetId(options.departmentId ?? options.department_id);
+  if (tab === 'botsRoom' || roomId) {
+    if (!roomId) return { tab: 'botsHome' };
+    const target = { tab: 'botsRoom', roomId };
+    const threadId = targetId(options.threadId ?? options.thread_id);
+    const messageId = targetId(options.messageId ?? options.message_id);
+    if (threadId) target.threadId = threadId;
+    if (messageId) target.messageId = messageId;
+    return target;
+  }
+  if (tab === 'botsTeamMap' || departmentId) return { tab: 'botsTeamMap', ...(departmentId ? { departmentId } : {}) };
   const agentId = targetId(options.agentId ?? options.agent_id ?? options.botId);
   const sessionId = targetId(options.sessionId ?? options.session_id ?? options.threadId);
   const messageId = targetId(options.messageId ?? options.message_id);
@@ -49,6 +61,9 @@ export function notificationTarget(url, origin) {
   let link;
   try { link = new URL(url, origin); } catch { return null; }
   if (link.origin !== origin || link.pathname !== '/' || link.username || link.password) return null;
+  for (const key of ['room', 'department', 'thread']) if (link.searchParams.has(key) && !targetId(link.searchParams.get(key))) return null;
+  if (link.searchParams.has('room')) return normalizeBotsTarget('botsRoom', { roomId: link.searchParams.get('room'), threadId: link.searchParams.get('thread'), messageId: link.searchParams.get('message') });
+  if (link.searchParams.has('department')) return normalizeBotsTarget('botsTeamMap', { departmentId: link.searchParams.get('department') });
   const agentId = targetId(link.searchParams.get('agent'));
   const sessionId = targetId(link.searchParams.get('chat'));
   if (link.searchParams.has('agent') && !agentId) return null;

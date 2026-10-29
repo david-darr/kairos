@@ -127,3 +127,24 @@ export function afterDelete(rows, result) {
   const gone = new Set(list(result?.deleted));
   return list(rows).filter(row => !gone.has(row.id));
 }
+
+// Team preferences extend the old shape without changing existing device preferences.
+export function teamSidebarPreferences(value = {}) {
+  const base = sidebarPreferences(value);
+  const sections = [...new Set([...ids(value?.sections).filter(v => [...SIDEBAR_SECTIONS, 'channels'].includes(v)), 'channels', ...base.sections])];
+  return { ...base, sections, collapsed: ids(value?.collapsed).filter(v => [...SIDEBAR_SECTIONS, 'channels'].includes(v)),
+    teamOrder: ids(value?.teamOrder), closedTeams: ids(value?.closedTeams) };
+}
+export function teamGroups(bots, departments = [], preference = []) {
+  const rank = new Map(preference.map((id, at) => [id, at]));
+  const groups = departments.map(team => ({ ...team, members: list(bots).filter(b => b.section === team.name && !b.hidden) }));
+  const known = new Set(groups.map(t => t.name));
+  for (const name of [...new Set(list(bots).map(b => b.section).filter(Boolean))]) if (!known.has(name)) groups.push({ id: `section_${encodeURIComponent(name)}`, name, members: bots.filter(b => b.section === name && !b.hidden) });
+  const loose = list(bots).filter(b => !b.section && !b.hidden);
+  if (loose.length) groups.push({ id: 'ungrouped', name: 'Bots', members: loose, ungrouped: true });
+  return groups.sort((a, b) => (rank.get(a.id) ?? 1000) - (rank.get(b.id) ?? 1000) || number(a.order) - number(b.order));
+}
+export function roomRow(room) {
+  return { id: room.id, name: room.name || 'Room', working: room.working === true || room.status === 'working' || Number(room.working_count) > 0,
+    unread: Math.max(0, number(room.unread_count || room.unread)) };
+}

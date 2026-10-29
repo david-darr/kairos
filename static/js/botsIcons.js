@@ -7,6 +7,22 @@
 // modules names a drawing in this map.
 
 export const ICONS = {
+  'crown': '<path d="m2 8 5 4 5-9 5 9 5-4-3 12H5Z" /><path d="M5 22h14" />',
+  'user-plus': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M20 8v6M17 11h6" /><circle cx="9" cy="7" r="4" />',
+  'map': '<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3ZM9 3v15M15 6v15" />',
+  'network': '<rect x="9" y="2" width="6" height="6" rx="1" /><rect x="2" y="16" width="6" height="6" rx="1" /><rect x="16" y="16" width="6" height="6" rx="1" /><path d="M12 8v4M5 16v-4h14v4" />',
+  'hash': '<path d="M4 9h16M3 15h16M10 3 8 21M16 3l-2 18" />',
+  'hand': '<path d="M8 13V6a2 2 0 0 1 4 0v6M12 6V4a2 2 0 0 1 4 0v8M16 7a2 2 0 0 1 4 0v9a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-3l-4-6a2 2 0 0 1 3-2l2 2" />',
+  'flag': '<path d="M4 22V3c5-4 11 4 16 0v12c-5 4-11-4-16 0" />',
+  'target': '<circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />',
+  'route': '<circle cx="6" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M15 6h3a3 3 0 0 1 0 6H6a3 3 0 0 0 0 6h3" />',
+  'shield-alert': '<path d="M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6ZM12 8v4M12 16h.01" />',
+  'layout-grid': '<rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />',
+  'zoom-in': '<circle cx="11" cy="11" r="8" /><path d="m21 21-4-4M8 11h6M11 8v6" />',
+  'zoom-out': '<circle cx="11" cy="11" r="8" /><path d="m21 21-4-4M8 11h6" />',
+  'maximize': '<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />',
+  'move': '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4" />',
+  'megaphone': '<path d="m3 10 18-7v18L3 14ZM7 16l1 5h4l-2-6M3 10v4" />',
   'plus': '<path d="M5 12h14" /><path d="M12 5v14" />',
   'x': '<path d="M18 6 6 18" /><path d="m6 6 12 12" />',
   'search': '<path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" />',

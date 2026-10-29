@@ -25,7 +25,9 @@ import { Card, NavRow, TextRow, Segmented, Button, IconButton, PageHeader, openM
 import { icon } from './botsIcons.js';
 import { createPatchQueue, setSharedQueue, flushBotEdits as flushShared } from './botsPatchQueue.js';
 import { archiveBotWithNotice, deleteBotWithConfirm, duplicateBot } from './botsArchived.js';
-import { SIMPLE_HOME, sections, setupCard, fact, note, caps, ago, messageOf, loading, mountModule } from './botsPanelSections.js';
+import { SIMPLE_HOME, sections, setupCard, fact, note, caps, ago, messageOf, loading, mountModule, teamRow } from './botsPanelSections.js';
+import { chiefDisabledReason } from './botsSectionTeam.js';
+import { openTeamDialog } from './botsTeamHost.js';
 import { loadBotsModule } from './botsPanelHost.js';
 
 const CSS = '/static/css/bots-panel.css';
@@ -65,9 +67,14 @@ for (const def of sections()) registerBotSection(def);
 const homeOf = id => SIMPLE_HOME[id] || 'page';
 
 // -- the bot's menu ----------------------------------------------------------------------------------------------
-export function openBotMenu(anchor, agent, { onChanged, onClose } = {}) {
+export async function openBotMenu(anchor, agent, { onChanged, onClose } = {}) {
+  let team;
+  try { const raw = await api('/api/bot-departments', { toast: false }); team = (Array.isArray(raw) ? raw : raw.departments || []).find(t => t.name === agent.section); } catch { /* The dialog reports a missing team service when opened. */ }
+  if (!anchor.isConnected) return;
   return openMenu(anchor, [
     { heading: agent.name },
+    { label: team?.chief_bot_id === agent.id ? 'Remove chief' : 'Make chief', iconName: 'crown', disabled: !!chiefDisabledReason(agent), meta: chiefDisabledReason(agent),
+      onSelect: () => openTeamDialog({ agentId: agent.id, departmentId: team?.id, mode: 'chief', onChanged }) },
     { label: 'Duplicate', iconName: 'copy', onSelect: () => duplicateBot(agent) },
     { label: 'Save as preset', iconName: 'download', onSelect: async () => {
       try { await api('/api/agents/presets', { method: 'POST', body: JSON.stringify({ from_agent_id: agent.id }), toast: false }); toast('Saved. Find it under Starting role in a new bot.', 'success'); }
@@ -463,7 +470,7 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
   function settingsPage() {
     const a = state.agent;
     const intro = TextRow({ title: 'Introduction', value: a.blurb || '', maxLength: 4000, multiline: true, onCommit: v => ctx.update({ blurb: v }) });
-    const group = TextRow({ title: 'Group', hint: 'Optional. Bots in a group sit together.', value: a.section || '', maxLength: 60, onCommit: v => ctx.update({ section: v.trim() }) });
+    const group = teamRow(ctx);
     const onPage = registry.filter(s => homeOf(s.id) === 'page');
     const extra = [];
     return el('div', { class: 'bots-page-section' }, [

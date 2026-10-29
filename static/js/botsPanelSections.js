@@ -18,6 +18,8 @@
 // below load in plain Node (scripts/test_bots_panel_sections.cjs).
 import { Card, NavRow, SwitchRow, TextRow, RadioGroup, Segmented, Button, h } from './botsUi.js';
 import { icon } from './botsIcons.js';
+import { mount as mountTeam } from './botsSectionTeam.js';
+import { mountTeamModule } from './botsTeamHost.js';
 import { byteLength, clipToBytes, describeRow, canRestore, driftState, profileDiff, actorLabel, fieldLabel, shortValue } from './botsProfileDiff.js';
 
 export const SOUL_BYTES = 24000;
@@ -285,12 +287,19 @@ function identitySection(ctx) {
   } });
   const jobRow = TextRow({ title: 'Job', hint: 'What is this bot for?', value: agent.role || '', maxLength: 200, onCommit: v => ctx.update({ role: v.trim() }) });
   const blurbRow = TextRow({ title: 'Introduction', value: agent.blurb || '', maxLength: 4000, multiline: true, onCommit: v => ctx.update({ blurb: v }) });
-  const groupRow = TextRow({ title: 'Group', hint: 'Optional. Bots in a group sit together.', value: agent.section || '', maxLength: 60, onCommit: v => ctx.update({ section: v.trim() }) });
+  const groupRow = teamRow(ctx);
   const look = h('div', { class: 'bots-avatar-host' });
   const wrap = h('div', { 'data-panel-card': 'identity' }, [Card({ className: 'bots-identity', children: [nameRow, jobRow, blurbRow, groupRow] }), caps('Look'), look]);
   ctx.mountAvatar(look);
   wrap.nameField = nameRow.field;
   return wrap;
+}
+
+export function teamRow(ctx) {
+  const host = h('div', { class: 'bots-section-team', 'data-module': 'Team' });
+  const track = ctx.bindTrack ? ctx.bindTrack() : ctx.track;
+  track?.(mountTeam(host, ctx));
+  return host;
 }
 
 // -- Delivery ----------------------------------------------------------------------------------------------
@@ -492,16 +501,10 @@ function accessBasics(ctx) {
         onChange: v => { const set = new Set(ctx.state.agent.integration_ids); if (v) set.add(s.id); else set.delete(s.id); ctx.update({ integration_ids: [...set] }); } }));
     };
     draw();
-    const others = (bots || []).filter(b => b.id !== ctx.agentId && !b.hidden);
-    const peers = h('div', { class: 'bots-card-body' });
-    for (const bot of others) peers.append(SwitchRow({ title: bot.name, hint: bot.role || '', checked: (ctx.state.agent.peers || []).includes(bot.id),
-      onChange: v => { const set = new Set(ctx.state.agent.peers || []); if (v) set.add(bot.id); else set.delete(bot.id); ctx.update({ peers: [...set] }); } }));
-    if (!others.length) peers.append(note('There are no other bots to work with.'));
     const scope = ctx.state.agent.tool_scope || { allow: [], deny: [] }, apps = Object.entries(ctx.state.agent.connector_scopes || {});
     const stored = [...scope.allow.map(s => `Allowed: ${s}`), ...scope.deny.map(s => `Avoid: ${s}`), ...apps.map(([k, v]) => `${k}: ${v}`)];
     return h('div', {}, [
       h('div', { class: 'bots-card' }, [caps('Tool servers'), body]),
-      h('div', { class: 'bots-card' }, [caps('Other bots it can ask'), peers]),
       Card({ label: 'Habits', children: [
         SwitchRow({ title: 'Stay signed in', hint: 'Keep the sites it logs into between runs.', checked: !!agent.keep_signed_in, onChange: v => ctx.update({ keep_signed_in: v }) }),
         h('div', { class: 'bots-row' }, [h('span', { class: 'bots-row-main' }, [h('span', { class: 'bots-row-title', text: 'Signed-in sites' }), h('span', { class: 'bots-row-hint', text: 'Forget every login this bot has kept.' })]),
@@ -515,7 +518,12 @@ function accessBasics(ctx) {
   wrap.append(h('div', { class: 'bots-actions' }, [ctx.ui.creativeSelectionButton(() => ({ agentId: ctx.agentId }), wrap)]));
   return wrap;
 }
-const accessSection = ctx => h('div', { 'data-panel-card': 'access' }, [modular(ctx, 'Grants', () => accessBasics(ctx), { what: 'Access' })]);
+const accessSection = ctx => {
+  const reach = h('div', { 'data-module': 'Reach' });
+  const track = ctx.bindTrack ? ctx.bindTrack() : ctx.track;
+  track?.(mountTeamModule(reach, 'reach', ctx));
+  return h('div', { 'data-panel-card': 'access' }, [modular(ctx, 'Grants', () => accessBasics(ctx), { what: 'Access' }), reach]);
+};
 
 // -- Model -------------------------------------------------------------------------------------------------
 function modelSection(ctx) {
