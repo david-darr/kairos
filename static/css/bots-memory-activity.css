@@ -1,0 +1,56 @@
+/* Memory activity and About you (Bots Phase 2, unit U2). Loaded by botsSectionMemoryActivity.js and
+   botsSectionAboutYou.js through loadBotsCss(). Scope: [data-app-mode="bots"]. Tokens only: --bots-* from bots.css. */
+
+[data-app-mode="bots"] .bots-mact { display: grid; gap: 12px; min-width: 0; color: var(--bots-ink); font: 400 var(--bots-text-row)/1.4 var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-mact :is(input, textarea) { font-family: var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-mact .bots-card-body { padding: 10px 14px 12px; display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-mact-empty { margin: 0; color: var(--bots-ink-secondary); font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-mact-line { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-mact-when { color: var(--bots-ink-tertiary); font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-mact-notice { margin: 0; color: var(--bots-success); font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-mact-error-line { margin: 0; color: var(--bots-danger); font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-mact-error {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px;
+  color: var(--bots-danger); background: var(--bots-inset); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-mact-state {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; font-size: var(--bots-text-hint-lg);
+  color: var(--bots-ink-secondary); background: var(--bots-inset); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-mact-state.off, [data-app-mode="bots"] .bots-mact-state.no-model { color: var(--bots-warning); }
+[data-app-mode="bots"] .bots-mact-state svg { flex: none; margin-top: 2px; }
+
+[data-app-mode="bots"] .bots-mact-report { display: grid; gap: 4px; }
+[data-app-mode="bots"] .bots-mact-rows { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
+[data-app-mode="bots"] .bots-mact-rows dt { color: var(--bots-ink-secondary); font-size: var(--bots-text-hint-lg); }
+[data-app-mode="bots"] .bots-mact-rows dd { margin: 0; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-mact-actions, [data-app-mode="bots"] .bots-mact-form, [data-app-mode="bots"] .bots-mact-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+[data-app-mode="bots"] .bots-mact-form .bots-mact-input { flex: 1 1 160px; }
+[data-app-mode="bots"] .bots-mact-input, [data-app-mode="bots"] .bots-mact-about {
+  box-sizing: border-box; min-height: 36px; padding: 6px 10px; color: var(--bots-ink); background: var(--bots-control);
+  border: 1px solid var(--bots-control-line); border-radius: 10px;
+}
+[data-app-mode="bots"] .bots-mact-about { width: 100%; min-height: 180px; resize: vertical; line-height: 1.5; }
+[data-app-mode="bots"] :is(.bots-mact-input, .bots-mact-about):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+
+[data-app-mode="bots"] .bots-mact-idea, [data-app-mode="bots"] .bots-mact-result, [data-app-mode="bots"] .bots-mact-fact {
+  display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--bots-hairline);
+}
+[data-app-mode="bots"] .bots-mact-idea:first-child, [data-app-mode="bots"] .bots-mact-result:first-of-type, [data-app-mode="bots"] .bots-mact-fact:first-of-type { border-top: 0; }
+[data-app-mode="bots"] .bots-mact-idea-title { font-weight: 600; }
+[data-app-mode="bots"] .bots-mact-cite { color: var(--bots-accent-text); font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-mact-snippet, [data-app-mode="bots"] .bots-mact-opened { overflow-wrap: anywhere; white-space: pre-wrap; }
+[data-app-mode="bots"] .bots-mact-opened { padding: 8px 10px; background: var(--bots-inset); border-radius: 10px; max-height: 240px; overflow: auto; }
+[data-app-mode="bots"] .bots-mact-result > .bots-btn { justify-self: start; }
+[data-app-mode="bots"] .bots-mact-fact { grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+[data-app-mode="bots"] .bots-mact-fact-text { min-width: 0; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-mact-foot { justify-content: space-between; }
+[data-app-mode="bots"] .bots-mact-counter, [data-app-mode="bots"] .bots-mact-status { color: var(--bots-ink-tertiary); font-size: var(--bots-text-hint); }
+[data-app-mode="bots"] .bots-mact-counter[data-over="true"], [data-app-mode="bots"] .bots-mact-status[data-state="error"], [data-app-mode="bots"] .bots-mact-status[data-state="conflict"] { color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-mact-status[data-state="saved"] { color: var(--bots-success); }
+[data-app-mode="bots"] .bots-mact [hidden] { display: none; }
+@media (max-width: 520px) {
+  [data-app-mode="bots"] .bots-mact-fact { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-mact-rows { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { [data-app-mode="bots"] .bots-mact * { transition: none !important; animation: none !important; } }

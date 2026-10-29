@@ -581,6 +581,8 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
     if handed is not None:
         return "\n".join(f"Handed to {event['agent_name']}." + (f" {event['note']}" if event['note'] else "") for event in handed)
     image_ids = validate_image_attachments(session_id, attachment_ids)
+    await _refresh_bot_prompt(session_id)
+    scope = await _memory_turn_start(session_id, text)
     await _compact_if_nearly_full(session_id)
     index = session_manager.append_message(session_id, "user", text,
                                            extra=_user_message_extra(references, attachment_ids))
@@ -592,7 +594,10 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
     full_text = _prepare_sent_text(session_id, index, text, attachment_ids, reference_context)
     brain, just_created = await _get_brain(session_id, endpoint, is_admin)
     _taint_turn(session_id, brain, reference_context)
-    full_text = _vision_input(endpoint, _prime_with_history(session_id, just_created, endpoint, full_text, brain), image_ids)
+    primed = _prime_with_history(session_id, just_created, endpoint, full_text, brain)
+    from services import bot_turn_context
+    prepared = await _turn_resources(scope, text, endpoint, just_created, brain)
+    full_text = _vision_input(endpoint, bot_turn_context.apply(prepared, primed), image_ids)
     session = session_manager.get_session(session_id) or {}
     usage = None
     context = _run_context(session_id, endpoint, is_admin)
@@ -607,12 +612,14 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
         reply = ATTACHMENT_TOO_LARGE_MESSAGE + _oversized_file_note(session_id)
     except Exception:
         _remember_claude_session(session_id, brain, succeeded=False)
+        _turn_done(scope, context, "failed", text, "")
         await close_session_brain(session_id)
         raise
     _record_turn_telemetry(session_id, endpoint, brain, usage)
     session_manager.append_message(session_id, "assistant", reply,
                                    extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id})
     _remember_claude_session(session_id, brain)
+    _turn_done(scope, context, "done", text, reply)
     _reply_hook(session_id, endpoint, text, reply)
     return reply
 
@@ -636,25 +643,106 @@ async def _refresh_bot_prompt(session_id: str) -> None:
     cached identity text is replaced only when the effective bytes changed,
     and the old brain is closed first so the next one is built from the new
     text. An unchanged profile keeps its exact bytes (and the prompt cache).
-    Uses agent_service.prompt_snapshot when the profile service provides it."""
+    Phase 2: the text is identity only. Notes, topics and recent work are
+    resource context added per turn (services/bot_turn_context.py), so a chat
+    that froze them in earlier is upgraded here, once, without touching any
+    visible message."""
     session = session_manager.get_session(session_id) or {}
     agent_id = session.get("agent_id")
     if not agent_id:
         return
-    from services.agent_service import agent_service
-    snapshot_for = getattr(agent_service, "prompt_snapshot", None)
-    if snapshot_for is None:
-        return
+    from services import bot_turn_context
     try:
-        snapshot = snapshot_for(agent_id, session_id)
+        text = bot_turn_context.identity_text(agent_id, session_id)
     except Exception:
-        logger.exception("could not read the prompt snapshot of bot %s", agent_id)
+        logger.exception("could not build the identity text of bot %s", agent_id)
         return
-    text = (snapshot or {}).get("text")
     if not isinstance(text, str) or text == session.get("agent_prompt"):
         return
     await close_session_brain(session_id)
     session_manager.set_agent(session_id, agent_id, text)
+
+
+async def reset_provider_state(session_id: str) -> None:
+    """Drop a conversation's live brain and its provider resume state, so the next turn starts from the saved
+    transcript. Used when memory is turned off, facts are forgotten or a skill is revoked: whatever a resumed
+    provider session remembers of the old resources goes with it."""
+    await close_session_brain(session_id)
+    session_manager.set_claude_session(session_id, None)
+    session_manager.set_codex_thread_id(session_id, None)
+    session_manager.set_antigravity_conversation_id(session_id, None)
+
+
+async def reset_resumed_sessions(bot_id: str) -> None:
+    """Every idle conversation of the bot is reset now; a busy one is reset before its next turn."""
+    from services import bot_turn_context
+    for sid in bot_turn_context.invalidate_bot(bot_id):
+        if not is_busy(sid):
+            bot_turn_context.take_reset(sid)
+            await reset_provider_state(sid)
+
+
+async def _memory_turn_start(session_id: str, text: str) -> Optional[dict]:
+    """The notebook's part of a turn before the brain is chosen: a pending reset, then a direct "forget X" from
+    the owner. Returns the turn's trusted scope, or None for an ordinary chat."""
+    from services import bot_turn_context
+    scope = bot_turn_context.scope_for_session(session_id)
+    if scope is None:
+        return None
+    try:
+        if bot_turn_context.take_reset(session_id):
+            await reset_provider_state(session_id)
+        flags = bot_turn_context.bot_flags(scope["bot_id"])
+        if flags["memory"] and bot_turn_context.owner_conversation(session_manager.get_session(session_id)):
+            from services import bot_memory_upkeep
+            term = bot_memory_upkeep.detect_forget(text)
+            if term:
+                await asyncio.to_thread(bot_memory_upkeep.forget, scope["bot_id"], scope["owner"], term)
+                bot_turn_context.take_reset(session_id)
+                await reset_provider_state(session_id)
+    except Exception:
+        logger.exception("the notebook could not prepare a turn of %s", session_id)
+    return scope
+
+
+async def _turn_resources(scope: Optional[dict], text: str, endpoint: dict, just_created: bool, brain):
+    """The resource context of this turn (notebook, About you, skills, recall), or None. Also taints the brain
+    when recalled or imported text is in it."""
+    if scope is None:
+        return None
+    from services import bot_turn_context
+    stateless = endpoint.get("kind") in ("api", "local")
+    try:
+        prepared = await asyncio.to_thread(bot_turn_context.prepare, scope, text, kind="chat",
+                                           just_created=just_created, stateless=stateless)
+    except Exception:
+        logger.exception("resource context failed for %s", scope.get("session_id"))
+        return None
+    if prepared.taint and isinstance(brain, (Brain, ExternalBrain)) and not brain.pending_reference_taint:
+        brain.pending_reference_taint = prepared.taint
+    return prepared
+
+
+def _turn_done(scope: Optional[dict], context: runs.RunContext, status: str, text: str, reply: str) -> None:
+    """The notebook's part after a turn, however it ended. Never raises into the chat."""
+    if scope is None:
+        return
+    try:
+        from services import bot_turn_context
+        rows = (session_manager.get_session(scope["session_id"]) or {}).get("messages") or []
+        users = [i for i, m in enumerate(rows) if m.get("role") == "user"]
+        last = rows[-1] if rows else {}
+        user_ref = {"index": users[-1]} if users else {}
+        if users and rows[users[-1]].get("bot_message_id"):
+            user_ref = {"id": rows[users[-1]]["bot_message_id"]}
+        if last.get("role") == "assistant" and last.get("bot_message_id"):
+            reply_ref = {"id": last["bot_message_id"]}
+        else:
+            reply_ref = {"index": len(rows) - 1}
+        bot_turn_context.completed_turn(scope, run_id=context.run_id, status=status, user_text=text, reply=reply,
+                                        user_ref=user_ref, reply_ref=reply_ref)
+    except Exception:
+        logger.exception("notebook turn bookkeeping failed for %s", scope.get("session_id"))
 
 
 async def stream_message(session_id: str, text: str, attachment_ids: list[str] | None = None,
@@ -696,6 +784,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         return
     image_ids = validate_image_attachments(session_id, attachment_ids)
     await _refresh_bot_prompt(session_id)
+    scope = await _memory_turn_start(session_id, text)
     await _compact_if_nearly_full(session_id)
     if accepted_index is None:
         index = session_manager.append_message(session_id, "user", text,
@@ -721,7 +810,10 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         provider_started = True
         brain, just_created = await _get_brain(session_id, endpoint, is_admin)
         _taint_turn(session_id, brain, reference_context)
-        full_text = _vision_input(endpoint, _prime_with_history(session_id, just_created, endpoint, full_text, brain), image_ids)
+        primed = _prime_with_history(session_id, just_created, endpoint, full_text, brain)
+        from services import bot_turn_context
+        prepared = await _turn_resources(scope, text, endpoint, just_created, brain)
+        full_text = _vision_input(endpoint, bot_turn_context.apply(prepared, primed), image_ids)
         session = session_manager.get_session(session_id) or {}
         async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir")):
             # Closed here, not left to garbage collection, so a stopped turn
@@ -766,6 +858,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         runs.record(context, tally, "failed" if failed else "stopped", stop=stop,
                     detail=f"{type(exc).__name__}: {exc}" if failed else "")
         runs.leave(context)
+        _turn_done(scope, context, "failed" if failed else "stopped", text, "".join(reply_parts))
         await close_session_brain(session_id)
         raise
 
@@ -780,6 +873,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
                                           **({"failure_kind": "model_error", "failure_model_endpoint_id": endpoint["id"],
                                               "failure_model_name": endpoint["name"]} if provider_failed else {})})
     _remember_claude_session(session_id, brain)
+    _turn_done(scope, context, "failed" if provider_failed else "done", text, "".join(reply_parts))
     if not provider_failed:
         _reply_hook(session_id, endpoint, text, "".join(reply_parts))
 

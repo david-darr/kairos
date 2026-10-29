@@ -443,6 +443,19 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
         }, timeline)
     except Exception:
         logger.exception("could not record run %s", context.run_id)
+    _observe(context, tally)
+
+
+def _observe(context: RunContext, tally: Tally) -> None:
+    """A bot's recorded run feeds the skill-review counter (services/bot_turn_context.py); a stable run id means
+    a run is counted once. Never fails the run."""
+    if not context.agent_id or not context.session_id or not tally.tool_calls:
+        return
+    try:
+        from services import bot_turn_context
+        bot_turn_context.run_finished(context, tally.tool_calls)
+    except Exception:
+        logger.exception("could not observe run %s", context.run_id)
 
 
 async def complete(adapter: RunAdapter, prompt, context: RunContext, tally: Optional[Tally] = None) -> RunOutcome:
