@@ -20,7 +20,7 @@ import { showPermissionPrompt, dismissPermissionPrompt } from './permissionPromp
 import { createBotDraft } from './botsDrafts.js';
 import { mountBotsComposer, createSendController, sendKey, redactForSupport } from './botsComposer.js';
 import { mountTranscript, announcementFor } from './botsTranscript.js';
-import { teamRowRenderers } from './botsTeamChips.js';
+import { botRowRenderers } from './botsRowKinds.js';
 import { createUploader, shouldChipPaste } from './botsChatAttachments.js';
 import { mountFindBar, landOnHit, searchUrl, downloadExport } from './botsChatSearch.js';
 import { agentCall } from './agentCall.js';
@@ -113,7 +113,7 @@ export async function mountBotsChat(host, options) {
   const lastAssistantId = () => [...(transcript.loadedIds())].reverse().find(id => transcript.get(id)?.role === 'assistant' && !transcript.get(id)?.kind) || null;
   const isBusy = () => chatStream.getInFlight(sid)?.status === 'processing' || !!placeholderTurn;
   const transcript = mountTranscript(transcriptHost, {
-    rowRenderers: teamRowRenderers, openTarget: target => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: target })),
+    rowRenderers: botRowRenderers({ agentId: agent.id, sessionId: sid, botName: agent.name, refresh: () => refreshLatest({ keepPosition: true }) }), openTarget: target => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: target })),
     agent, sessionId: sid, replyStyle, simple: () => !isAdvanced(),
     renderBody: (node, text, live) => renderMessageBody(node, text, sid, true, { live }),
     kip: (bot, size, st) => botKip(bot, { size, state: st }),
@@ -313,7 +313,10 @@ export async function mountBotsChat(host, options) {
     options.onThreadChanged?.(sid, 'turn-ended');
   }
   offs.push(chatStream.subscribe(sid, paint));
-  const onRuntime = event => { if (event.detail?.sessionId === sid || event.detail?.session_id === sid) { if (event.detail.queue) { state.queue = asQueue(event.detail.queue); paintState(); } else later(refreshState, 100); } };
+  const onRuntime = event => { if (event.detail?.sessionId === sid || event.detail?.session_id === sid) {
+    // A front-desk card was added or changed (Phase 5): reload the messages, keeping the reader's place.
+    if (event.detail.type === 'bot.fd_card') { refreshLatest({ keepPosition: true }).catch(() => {}); return; }
+    if (event.detail.queue) { state.queue = asQueue(event.detail.queue); paintState(); } else later(refreshState, 100); } };
   document.addEventListener('kairos:bot-runtime', onRuntime); offs.push(() => document.removeEventListener('kairos:bot-runtime', onRuntime));
 
   // -- Actions -----------------------------------------------------------------------------------
