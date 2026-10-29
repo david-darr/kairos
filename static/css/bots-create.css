@@ -1,0 +1,167 @@
+/* Making bots (Agents 3.0 Phase 0, unit U4): the new-bot dialogs, the ready-made gallery, the
+   Archived panel and the corner notice. Loaded by botsCreate.js, botsGallery.js and
+   botsArchived.js through loadBotsCss. Scope: [data-app-mode="bots"]. Colours, radii, type and
+   motion come only from the --bots-* tokens in bots.css (reduced motion is switched off there). */
+
+/* -- the dialog shell. openPanelDialog builds it; these outrank the shared panel rules. -- */
+[data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-dialog {
+  display: flex; flex-direction: column; gap: 0; padding: 0;
+  width: min(480px, calc(100vw - 32px)); max-width: 480px; height: auto; max-height: 92dvh;
+  color: var(--bots-ink); background: var(--bots-panel);
+  border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+  box-shadow: var(--bots-shadow-float);
+  font: 400 var(--bots-text-row)/1.4 var(--bots-font-sans);
+}
+[data-app-mode="bots"] .panel-dialog.bots-dialog .modal-header {
+  margin: 0; padding: 16px 18px 12px; align-items: center;
+  font: 600 18px/1.3 var(--bots-font-sans); font-style: normal; color: var(--bots-ink);
+}
+[data-app-mode="bots"] .panel-dialog.bots-dialog .modal-close-btn {
+  width: 32px; height: 32px; color: var(--bots-ink-secondary); background: transparent;
+  border: 0; border-radius: var(--bots-radius-pill); font: 400 20px/1 var(--bots-font-sans); cursor: pointer;
+}
+[data-app-mode="bots"] .panel-dialog.bots-dialog .modal-close-btn:hover { background: var(--bots-raised-hover); color: var(--bots-ink); }
+[data-app-mode="bots"] .panel-dialog.bots-dialog .modal-body { flex: 1; min-height: 0; padding: 4px 18px 14px; }
+[data-app-mode="bots"] .panel-dialog.bots-dialog .modal-footer { padding: 12px 18px 16px; border-top: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-dialog-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; width: 100%; }
+[data-app-mode="bots"] .bots-validity { margin: 0 auto 0 0; min-width: 0; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-hint { margin: 6px 0 12px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-count { align-self: flex-end; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); font-variant-numeric: tabular-nums; }
+[data-app-mode="bots"] .bots-count.over { color: var(--bots-danger); }
+
+/* The Advanced dialog is large; on a phone it fills the screen. */
+[data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-create-dialog.advanced {
+  width: min(900px, calc(100vw - 32px)); max-width: 900px; height: min(760px, 94dvh);
+}
+@media (max-width: 768px) {
+  [data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-create-dialog.advanced,
+  [data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-gallery-dialog {
+    width: 100vw; max-width: 100vw; height: var(--ms-page-height, 100dvh); max-height: var(--ms-page-height, 100dvh); border-radius: 0;
+  }
+  [data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-dialog { padding-top: 0; padding-bottom: 0; }
+}
+
+/* -- fields in the dialogs: the row kit's look for plain controls -- */
+/* Outrank the global redesign input font, including in reused model controls. */
+[data-app-mode="bots"] .bots-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]), textarea, select) {
+  font-family: var(--bots-font-sans);
+}
+[data-app-mode="bots"] .bots-dialog :is(input[type="text"], input[type="number"], input[type="time"], input[type="search"], textarea, select) {
+  min-height: 32px; padding: 4px 10px; box-sizing: border-box;
+  font: 400 var(--bots-text-row)/1.35 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-control); border: 1px solid var(--bots-control-line); border-radius: 8px;
+}
+[data-app-mode="bots"] .bots-dialog textarea { resize: vertical; }
+[data-app-mode="bots"] .bots-dialog :is(input, textarea, select):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 1px; }
+[data-app-mode="bots"] .bots-dialog .bots-text-row input { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-stack-row { flex-direction: column; align-items: stretch; gap: 6px; }
+[data-app-mode="bots"] .bots-stack-row textarea { width: 100%; }
+[data-app-mode="bots"] .bots-note-row { align-items: flex-start; }
+[data-app-mode="bots"] .bots-note-row textarea { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-note-row select { flex: none; max-width: 38%; }
+[data-app-mode="bots"] .bots-dialog .bots-card + .bots-card, [data-app-mode="bots"] .bots-create-section > .bots-card { margin-bottom: 16px; }
+[data-app-mode="bots"] .bots-dialog .bots-row > .custom-select, [data-app-mode="bots"] .bots-dialog .bots-row > select { flex: none; min-width: 160px; }
+
+/* -- Simple: a face, six colours, a shuffle -- */
+[data-app-mode="bots"] .bots-look { display: flex; align-items: center; gap: 16px; padding: 14px; }
+[data-app-mode="bots"] .bots-look-face { flex: none; display: grid; place-items: center; width: 96px; height: 96px; background: var(--bots-inset); border-radius: var(--bots-radius-card); }
+[data-app-mode="bots"] .bots-look-side { flex: 1; min-width: 0; display: grid; gap: 10px; justify-items: start; }
+[data-app-mode="bots"] .bots-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-app-mode="bots"] .bots-swatch {
+  width: 28px; height: 28px; padding: 0; background: var(--swatch); border: 0; border-radius: 50%; cursor: pointer;
+  transition: box-shadow var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--bots-panel), 0 0 0 4px var(--bots-accent); }
+[data-app-mode="bots"] .bots-swatch:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 3px; }
+
+/* -- Advanced: section nav on the left, sections on the right -- */
+[data-app-mode="bots"] .bots-create-body { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 20px; }
+[data-app-mode="bots"] .bots-create-nav { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: 4px; }
+[data-app-mode="bots"] .bots-create-nav button {
+  padding: 9px 10px; text-align: left; font: 500 var(--bots-text-row)/1.2 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: transparent; border: 0; border-radius: 10px; cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-create-nav button:hover, [data-app-mode="bots"] .bots-create-nav button:focus-visible { background: var(--bots-raised-hover); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-create-nav button.active { color: var(--bots-ink); background: var(--bots-menu-active); box-shadow: inset 3px 0 0 var(--bots-accent); }
+[data-app-mode="bots"] .bots-create-sections { min-width: 0; }
+[data-app-mode="bots"] .bots-create-section { scroll-margin-top: 12px; margin: 0 0 24px; padding: 0 0 8px; }
+[data-app-mode="bots"] .bots-create-section h3 { margin: 0 0 6px; font: 600 17px/1.3 var(--bots-font-sans); color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-picker-host { padding: 6px; }
+@media (max-width: 768px) {
+  [data-app-mode="bots"] .bots-create-body { display: block; }
+  [data-app-mode="bots"] .bots-create-nav { position: sticky; z-index: 1; top: 0; flex-direction: row; overflow-x: auto; margin-bottom: 12px; background: var(--bots-panel); }
+  [data-app-mode="bots"] .bots-create-nav button { flex: none; min-height: 44px; }
+  [data-app-mode="bots"] .bots-create-nav button.active { box-shadow: inset 0 -3px 0 var(--bots-accent); }
+  [data-app-mode="bots"] .bots-look { flex-direction: column; align-items: flex-start; }
+}
+
+/* -- Starting role, routines -- */
+[data-app-mode="bots"] .bots-start-list .bots-start-row { display: flex; align-items: center; }
+[data-app-mode="bots"] .bots-start-pick { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-start-pick[aria-pressed="true"] { background: var(--bots-menu-active); box-shadow: inset 3px 0 0 var(--bots-accent); }
+[data-app-mode="bots"] .bots-start-more { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+[data-app-mode="bots"] .bots-routine-card { margin: 0 0 14px; }
+[data-app-mode="bots"] .bots-routine-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px 4px; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-routine-when { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+[data-app-mode="bots"] .bots-routine-when input[type="number"] { width: 90px; }
+[data-app-mode="bots"] .bots-routine-when [hidden] { display: none; }
+
+/* -- Ready-made gallery -- */
+[data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-gallery-dialog { width: min(980px, calc(100vw - 32px)); max-width: 980px; height: min(720px, 92dvh); }
+@media (max-width: 768px) {
+  [data-app-mode="bots"] .modal-backdrop > .panel-dialog.bots-gallery-dialog {
+    width: 100vw; max-width: 100vw; height: var(--ms-page-height, 100dvh); max-height: var(--ms-page-height, 100dvh); border-radius: 0;
+  }
+}
+[data-app-mode="bots"] .bots-gallery-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+[data-app-mode="bots"] .bots-chip {
+  min-height: 30px; padding: 0 14px; font: 500 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-ink-secondary);
+  background: var(--bots-inset); border: 0; border-radius: var(--bots-radius-pill); cursor: pointer;
+  transition: background var(--bots-dur-tap) var(--bots-ease), color var(--bots-dur-tap) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-chip:hover { color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-chip[aria-selected="true"] { color: var(--bots-accent-ink); background: var(--bots-ink); }
+[data-app-mode="bots"] .bots-chip:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-gallery-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { [data-app-mode="bots"] .bots-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { [data-app-mode="bots"] .bots-gallery-grid { grid-template-columns: minmax(0, 1fr); } }
+[data-app-mode="bots"] .bots-ready-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px;
+  background: var(--bots-card); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-ready-card[hidden] { display: none; }
+[data-app-mode="bots"] .bots-ready-top { display: flex; align-items: center; gap: 10px; }
+[data-app-mode="bots"] .bots-ready-id { min-width: 0; }
+[data-app-mode="bots"] .bots-ready-id h3 { margin: 0; font: 600 15px/1.3 var(--bots-font-sans); }
+[data-app-mode="bots"] .bots-ready-role { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-ready-blurb { margin: 0; font-size: var(--bots-text-hint-lg); line-height: 1.45; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-ready-try { display: grid; gap: 2px; margin: 0; padding: 8px 10px; font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); background: var(--bots-inset); border-radius: 10px; }
+[data-app-mode="bots"] .bots-ready-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
+[data-app-mode="bots"] .bots-ready-note { min-width: 0; font-size: var(--bots-text-hint); color: var(--bots-ink-tertiary); }
+
+/* -- Archived panel -- */
+[data-app-mode="bots"] .bots-archived-list { display: grid; gap: 8px; }
+[data-app-mode="bots"] .bots-archived-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: var(--bots-card); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card);
+}
+[data-app-mode="bots"] .bots-archived-id { flex: 1; min-width: 0; display: grid; }
+[data-app-mode="bots"] .bots-empty { display: grid; justify-items: center; gap: 4px; padding: 28px 12px; text-align: center; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-empty p { margin: 0; }
+@media (max-width: 560px) { [data-app-mode="bots"] .bots-archived-row { flex-wrap: wrap; } }
+
+/* -- Corner notice with Undo -- */
+#bots-notice-host { position: fixed; z-index: 2600; left: 16px; bottom: 16px; display: grid; gap: 8px; max-width: calc(100vw - 32px); }
+[data-app-mode="bots"] .bots-notice {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  font: 400 var(--bots-text-hint-lg)/1.3 var(--bots-font-sans); color: var(--bots-ink);
+  background: var(--bots-menu); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu); box-shadow: var(--bots-shadow-float);
+  animation: bots-pop-in var(--bots-dur-pop) var(--bots-ease);
+}
+[data-app-mode="bots"] .bots-notice-text { flex: 1; min-width: 0; }
+[data-app-mode="bots"] .bots-notice-action {
+  padding: 4px 10px; font: 600 var(--bots-text-hint-lg)/1 var(--bots-font-sans); color: var(--bots-accent-text);
+  background: transparent; border: 0; border-radius: var(--bots-radius-pill); cursor: pointer;
+}
+[data-app-mode="bots"] .bots-notice-action:hover { background: var(--bots-raised-hover); }
