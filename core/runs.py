@@ -136,6 +136,10 @@ class RunContext:
     # behaviour (per-message timeouts only, no token budget for chats/tasks).
     deadline: Optional[float] = None
     budget_tokens: Optional[int] = None
+    trigger: Optional[str] = None
+    reported_cost_usd: Optional[float] = None
+    # Chosen by the trusted recovery adapter, never by a model argument.
+    actual_model: dict = field(default_factory=dict, compare=False)
     computer_events: list = field(default_factory=list, compare=False)
     computer_queue: asyncio.Queue = field(default_factory=asyncio.Queue, compare=False)
 
@@ -397,6 +401,12 @@ class Tally:
                 self.last_output_at = now
         elif item.kind is EventKind.USAGE:
             self.usages.append(item.data["usage"])
+            usage = item.data["usage"]
+            # Numeric usage only. Never retain provider metadata or content.
+            self.step("model_call", detail=json.dumps({
+                "input": usage.prompt_tokens, "output": usage.output_tokens,
+                "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
+            }))
         elif item.kind is EventKind.TOOL_STARTED:
             self._tools[item.data.get("id")] = (item.data.get("name"), time.time())
             self.step("tool_started", item.data.get("name"), detail=item.data.get("input") or "")
@@ -438,12 +448,14 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
     if ended:
         timeline.append({"at": time.time(), "kind": ended[0], "name": None, "ok": ended[1],
                          "detail": clip(ended[2] or "", TIMELINE_CLIP), "seconds": None})
+    row = None  # stays None when the run could not be recorded
     try:
         from core import session_manager_store
-        session_manager_store.record_run({
+        row = {
             "id": context.run_id, "parent_id": context.parent_run_id, "surface": context.surface,
             "session_id": context.session_id, "agent_id": context.agent_id, "task_id": context.task_id,
-            "endpoint_id": context.endpoint_id, "model": context.model, "started_at": context.started_at,
+            "endpoint_id": context.actual_model.get("endpoint_id", context.endpoint_id),
+            "model": context.actual_model.get("model", context.model), "started_at": context.started_at,
             "ended_at": time.time(), "outcome": outcome,
             "stop_confirmed": None if stop is None else int(stop.confirmed),
             "tool_calls": tally.tool_calls, "total_tokens": usage.total_tokens if usage else None,
@@ -454,10 +466,17 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "output_tokens": usage.output_tokens if usage else None,
             "cache_write_tokens": usage.cache_write_tokens if usage else None,
             "first_output_at": tally.first_output_at, "last_output_at": tally.last_output_at,
-        }, timeline)
+        }
+        session_manager_store.record_run(row, timeline)
     except Exception:
         logger.exception("could not record run %s", context.run_id)
     _observe(context, tally)
+    if row is not None:
+        try:
+            from services.bot_usage import observe
+            observe(row, timeline, context)
+        except Exception:
+            logger.exception("could not queue usage for run %s", context.run_id)
 
 
 def _observe(context: RunContext, tally: Tally) -> None:

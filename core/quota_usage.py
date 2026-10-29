@@ -337,3 +337,31 @@ def get_usage_overlay(force_provider=None):
 
 async def get_usage_overlay_async(force_provider=None):
     return await asyncio.to_thread(get_usage_overlay, force_provider)
+
+
+_bot_plan_lock = threading.Lock()
+_bot_plan_cache = None
+
+
+def get_bot_plan(refresh=False):
+    """Bots has a 45-second shared cache even for manual refreshes.
+
+    Reuses provider readers and their stricter backoff. No credentials or
+    request exceptions leave quota_usage.
+    """
+    global _bot_plan_cache
+    import copy
+    with _bot_plan_lock:
+        now = time.monotonic()
+        if _bot_plan_cache and now - _bot_plan_cache[0] < 45:
+            return copy.deepcopy(_bot_plan_cache[1])
+        if refresh:
+            for name, (kind, reader) in READERS.items():
+                if any(e.get("kind") == kind for e in model_endpoints.list_endpoints()):
+                    try:
+                        _provider(name, reader, force=True)
+                    except RefreshThrottled:
+                        pass
+        value = get_usage_overlay()
+        _bot_plan_cache = (now, value)
+        return copy.deepcopy(value)

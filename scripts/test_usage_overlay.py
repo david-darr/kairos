@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 # A throwaway data directory: this suite must never touch the real data/ folder.
-_fixture = tempfile.TemporaryDirectory(prefix="jarvis-usage-overlay-test-")
+from test_data_support import TestDataDirectory
+_fixture = TestDataDirectory("jarvis-usage-overlay-test-")
 os.environ["JARVIS_DATA_DIR"] = _fixture.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

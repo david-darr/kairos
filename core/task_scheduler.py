@@ -30,6 +30,7 @@ from core.brain import Brain
 from core.builtin_tasks import BUILTIN_TASKS
 from services.agent_service import AdmissionDenied, agent_service, is_silent
 from services.task_service import task_service
+from services.bot_spend import SpendCap
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,9 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
     try:
         if source == "schedule" and not card and task_service.skip_overdue_occurrence(task["id"]):
             return False
+        if task.get("agent_id"):
+            from services.bot_spend import check
+            check(task["agent_id"])
         # Every background surface enters here, before claiming work or
         # connecting a model. The context owns admission through recording
         # failures/stops and disconnecting (Agents 2.0, 2026-10-13).
@@ -255,6 +259,17 @@ async def _run_task(task: dict, source: str = "manual") -> Optional[bool]:
                 helpers.stop_parent(f"task:{task['id']}")
                 task_service.record_stopped(task["id"])
                 raise
+    except SpendCap as exc:
+        # A refusal is still a failed run receipt, with no model connection.
+        context = runs.RunContext("card" if card else "goal", agent_id=task.get("agent_id"),
+                                  task_id=task["id"], trigger="routine")
+        task_service.note_run(task["id"], context.run_id)
+        runs.record(context, runs.Tally(), "failed", detail="spend_cap: " + str(exc))
+        task_service.record_run(task["id"], output="", error="spend_cap: " + str(exc))
+        if source == "schedule" and not card:
+            task_service.skip_occurrence(task["id"], "Monthly spend cap reached")
+        events.emit("task.refused", "Monthly spend cap reached", level="warn", task_id=task["id"])
+        raise AdmissionDenied(str(exc)) from exc
     except AdmissionDenied as exc:
         if source == "schedule" and not card:
             task_service.skip_occurrence(task["id"], str(exc))
@@ -484,6 +499,11 @@ async def _tick() -> None:
     await outbox.send_due()
     await _memory_tick()
     _check_mcp_servers(loop)
+    try:
+        from services.bot_keep_warm import tick
+        await tick()
+    except Exception:
+        logger.exception("cache upkeep tick failed")
 
 
 async def _memory_tick() -> None:
