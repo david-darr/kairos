@@ -24,7 +24,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-environment = tempfile.TemporaryDirectory(prefix="jarvis-run-tokens-")
+from test_data_support import TestDataDirectory
+environment = TestDataDirectory("jarvis-run-tokens-")
 os.environ["JARVIS_DATA_DIR"] = environment.name
 
 import httpx  # noqa: E402
@@ -288,7 +289,8 @@ class RateTests(unittest.TestCase):
 
 class MigrationTests(unittest.TestCase):
     def test_a_v7_store_gains_the_columns_and_old_rows_stay_null(self):
-        folder = tempfile.mkdtemp(dir=environment.name)
+        folder = os.path.join(environment.name, "migration-v7")
+        os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "sessions.db")
         old = sqlite3.connect(path)
         old.executescript("""
@@ -315,7 +317,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual((row["total_tokens"], row["cache_read_tokens"]), (500, 100))
                 for name, _ in store.RUN_V8_COLUMNS:
                     self.assertIsNone(row[name], f"{name} is not back-filled")
-                self.assertEqual(conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0], "8")
+                self.assertEqual(conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0], str(store.SCHEMA_VERSION))
                 self.assertTrue(os.path.exists(path + ".pre-v7"), "the old database is kept first")
                 store.close()
                 conn = store.connection()       # a second start changes nothing

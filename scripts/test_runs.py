@@ -20,7 +20,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-environment = tempfile.TemporaryDirectory(prefix="jarvis-runs-")
+from test_data_support import TestDataDirectory
+environment = TestDataDirectory("jarvis-runs-")
 os.environ["JARVIS_DATA_DIR"] = environment.name
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock  # noqa: E402
@@ -456,7 +457,12 @@ class ChatStopTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(chat_service, "_resolve_endpoint", return_value=LOCAL), \
              patch.object(chat_service, "_get_brain", return_value=(Slow(), False)):
             task = asyncio.create_task(consume())
-            await asyncio.wait_for(streaming.wait(), 20)
+            ready = asyncio.create_task(streaming.wait())
+            await asyncio.wait({task, ready}, timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            if task.done():
+                ready.cancel()
+                task.result()  # A setup failure must be reported, not hidden by a timeout.
+            self.assertTrue(ready.done(), "the scripted brain never started")
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task

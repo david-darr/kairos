@@ -205,7 +205,7 @@ async def _get_brain(session_id: str, endpoint: dict, is_admin: bool = False) ->
 
 
 def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = False,
-                 agent_id: Optional[str] = None) -> AnyBrain:
+                 agent_id: Optional[str] = None, recovery_selection: Optional[dict] = None) -> AnyBrain:
     """Construct (but do not connect) a brain for an endpoint.
 
     session_id=None builds one detached from any conversation: no cross-session
@@ -214,6 +214,12 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
     live brain happens to remember.
     """
     session = session_manager.get_session(session_id) if session_id else None
+    if recovery_selection is not None and session:
+        # An ephemeral selection. Never repin the thread or reuse another
+        # engine's native conversation id or reasoning effort.
+        session = {**session, "model_override": recovery_selection.get("model_override"),
+                   "model_effort": None, "claude_session_id": None,
+                   "model_endpoint_id": endpoint["id"]}
     workspace_dir = (session or {}).get("workspace_dir")
     forge = (session or {}).get('forge') or {}
     plan = forge.get('mode') == 'plan'
@@ -240,7 +246,7 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
     override = (session or {}).get("model_override")
     # 2026-10-14: only an attached bot session or detached bot run inherits
     # the bot's version. A session pin wins, and ordinary chats have no bot.
-    inherits_agent_model = (override is None and agent and
+    inherits_agent_model = (recovery_selection is None and override is None and agent and
                             (session is None or session.get("model_endpoint_id") == agent.get("endpoint_id")))
     if inherits_agent_model:
         override = agent.get("model_override")
@@ -342,6 +348,9 @@ def _remember_claude_session(session_id: str, brain: Optional[AnyBrain], cancell
     turn that failed on a resumed session that never completed a turn is
     the one case that forgets the session, so a broken resume cannot keep
     failing every message after it."""
+    if getattr(brain, "recovered", False):
+        return  # A fallback's native session id must never replace the pin's.
+    brain = getattr(brain, "actual", brain)
     if not isinstance(brain, Brain):
         return
     if not succeeded and not cancelled:
@@ -359,6 +368,7 @@ def _tool_rounds(brain: Optional[AnyBrain], endpoint: dict) -> Optional[dict]:
     reply so a reconnect can replay them (see ExternalBrain._seed). Tagged
     with the endpoint because only that endpoint gets them back. None for
     the CLI brains, which keep their own tool history."""
+    brain = getattr(brain, "actual", brain)
     rounds = getattr(brain, "last_tool_rounds", None) if isinstance(brain, ExternalBrain) else None
     if not rounds:
         return None
@@ -540,6 +550,9 @@ def _taint_turn(session_id: str, brain, reference_context: str) -> None:
     its own history (session_manager.set_untrusted_context). Codex's own
     shell runs outside Kairos's permission path, so this covers the Claude
     and local/API brains only, as reference taint always has."""
+    if isinstance(brain, _BotRecovery):
+        brain.reference_context = reference_context
+        return
     if not isinstance(brain, (Brain, ExternalBrain)):
         return
     marked = (session_manager.get_session(session_id) or {}).get("untrusted_context")
@@ -590,12 +603,12 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
         return NO_MODEL_MESSAGE
 
     full_text = _prepare_sent_text(session_id, index, text, attachment_ids, reference_context)
-    brain, just_created = await _get_brain(session_id, endpoint, is_admin)
+    context = _run_context(session_id, endpoint, is_admin)
+    brain, just_created = await _turn_brain(session_id, endpoint, is_admin, context)
     _taint_turn(session_id, brain, reference_context)
     full_text = _vision_input(endpoint, _prime_with_history(session_id, just_created, endpoint, full_text, brain), image_ids)
     session = session_manager.get_session(session_id) or {}
     usage = None
-    context = _run_context(session_id, endpoint, is_admin)
     try:
         async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir")):
             outcome = await runs.complete(brain, full_text, context)
@@ -609,9 +622,11 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
         _remember_claude_session(session_id, brain, succeeded=False)
         await close_session_brain(session_id)
         raise
+    endpoint = getattr(brain, "endpoint", endpoint)
     _record_turn_telemetry(session_id, endpoint, brain, usage)
     session_manager.append_message(session_id, "assistant", reply,
-                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id})
+                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id,
+                                          **_recovery_extra(brain)})
     _remember_claude_session(session_id, brain)
     _reply_hook(session_id, endpoint, text, reply)
     return reply
@@ -719,7 +734,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     try:
         full_text = _prepare_sent_text(session_id, index, text, attachment_ids, reference_context, turn_note)
         provider_started = True
-        brain, just_created = await _get_brain(session_id, endpoint, is_admin)
+        brain, just_created = await _turn_brain(session_id, endpoint, is_admin, context)
         _taint_turn(session_id, brain, reference_context)
         full_text = _vision_input(endpoint, _prime_with_history(session_id, just_created, endpoint, full_text, brain), image_ids)
         session = session_manager.get_session(session_id) or {}
@@ -773,10 +788,11 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     runs.record(context, tally, "failed" if provider_failed else "finished",
                 detail=("the reply was too large for Claude Code's buffer"
                         + oversized_note.replace("\n\n", " ")) if provider_failed else "")
+    endpoint = getattr(brain, "endpoint", endpoint)
     _record_turn_telemetry(session_id, endpoint, brain, tally.usage)
     session_manager.append_message(session_id, "assistant", "".join(reply_parts),
                                    status="failed" if provider_failed else None,
-                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id,
+                                   extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id, **_recovery_extra(brain),
                                           **({"failure_kind": "model_error", "failure_model_endpoint_id": endpoint["id"],
                                               "failure_model_name": endpoint["name"]} if provider_failed else {})})
     _remember_claude_session(session_id, brain)
@@ -890,6 +906,102 @@ def _run_context(session_id: str, endpoint: dict, is_admin: bool) -> runs.RunCon
                            is_admin=is_admin, agent_id=session.get("agent_id"))
 
 
+def _recovery_extra(brain):
+    if not getattr(brain, "recovered", False):
+        return {}
+    return {"recovery": {"endpoint_id": brain.endpoint["id"],
+                         "line": "Answered by " + log_files.scrub_credentials(brain.endpoint.get("name") or "a backup model")[:80] + "."}}
+
+
+async def _turn_brain(session_id, endpoint, is_admin, context):
+    session = session_manager.get_session(session_id) or {}
+    if session.get("agent_id"):
+        from services.agent_service import agent_service
+        bot = agent_service.get(session["agent_id"]) or {}
+        if bot.get("fallback"):
+            return _BotRecovery(session_id, endpoint, is_admin, context, bot["fallback"]), False
+    return await _get_brain(session_id, endpoint, is_admin)
+
+
+class _BotRecovery:
+    """A transient adapter; all tool execution stays on the existing brains."""
+    def __init__(self, sid, endpoint, is_admin, context, fallback):
+        self.sid, self.endpoint, self.is_admin = sid, endpoint, is_admin
+        self.context, self.fallback = context, list(fallback)[:5]
+        self.primary = dict(endpoint)
+        self.actual = None
+        self.recovered = False
+        self.reference_context = ""
+        session = session_manager.get_session(sid) or {}
+        self.pin = (session.get("model_endpoint_id"), session.get("model_override"))
+        self.last_message = len(session.get("messages", []))
+
+    def __getattr__(self, name):
+        return getattr(self.actual, name, None)
+
+    def allowed(self, selection):
+        session = session_manager.get_session(self.sid) or {}
+        endpoint = model_endpoints.get_endpoint(selection.get("endpoint_id"))
+        if not endpoint or self.pin != (session.get("model_endpoint_id"), session.get("model_override")):
+            return False
+        if len(session.get("messages", [])) != self.last_message:
+            return False
+        # Never rotate accounts on the same subscription engine. A fallback
+        # must support the input's image capability before the attempt starts.
+        if endpoint["kind"] == self.primary["kind"] and endpoint["kind"].endswith("_cli"):
+            return False
+        if self.primary.get("supports_images") and not endpoint.get("supports_images", endpoint["kind"].endswith("_cli")):
+            return False
+        from services.bot_spend import check
+        check(self.context.agent_id)
+        return True
+
+    async def events(self, prompt, stream=True):
+        from services.bot_fallback import run, NotStarted, recoverable
+        primary = {"endpoint_id": self.primary["id"], "model_override": self.pin[1]}
+
+        async def attempt(selection):
+            backup = selection is not primary
+            endpoint = model_endpoints.get_endpoint(selection["endpoint_id"]) if backup else self.primary
+            self.endpoint = endpoint
+            self.recovered = backup
+            brain = None
+            try:
+                if backup:
+                    await close_session_brain(self.sid)
+                    brain = _build_brain(endpoint, self.sid, self.is_admin, recovery_selection=selection)
+                    self.actual = brain
+                    await brain.connect()
+                    created = True
+                else:
+                    brain, created = await _get_brain(self.sid, endpoint, self.is_admin)
+                    self.actual = brain
+            except Exception as exc:
+                if brain is not None:
+                    await brain.disconnect()
+                if recoverable(exc):
+                    raise NotStarted(exc) from exc
+                raise
+            self.context.actual_model.update(endpoint_id=endpoint["id"], kind=endpoint["kind"],
+                                             model=getattr(brain, "model", None) or selection.get("model_override") or endpoint.get("model"))
+            _taint_turn(self.sid, brain, self.reference_context)
+            prepared = _prime_with_history(self.sid, created, endpoint, prompt, brain)
+            try:
+                async with contextlib.aclosing(brain.events(prepared, stream=stream)) as items:
+                    async for item in items:
+                        yield item
+            finally:
+                if backup:
+                    await brain.disconnect()
+
+        async with contextlib.aclosing(run(attempt, primary, self.fallback, allowed=self.allowed)) as items:
+            async for item in items:
+                yield item
+
+    async def cancel(self):
+        return await self.actual.cancel() if self.actual else runs.StopResult(True, "No model started")
+
+
 # Roadmap phase 3 (2026-10-05): a local or API chat whose last turn filled
 # this much of the model's known context window is compacted before its next
 # message. Claude Code and Codex compact their own context, and doing it
@@ -985,6 +1097,15 @@ def _record_turn_telemetry(session_id: str, endpoint: dict, brain, turn_usage) -
     into an error the user sees.
     """
     usage = getattr(brain, "last_usage", None)
+    try:
+        session = session_manager.get_session(session_id) or {}
+        if session.get("agent_id"):
+            from services.agent_service import agent_service
+            from services import bot_keep_warm
+            bot_keep_warm.observe(agent_service.get(session["agent_id"]) or {}, session_id, endpoint,
+                                  getattr(brain, "actual", brain), turn_usage)
+    except Exception:
+        logger.exception("could not observe API cache eligibility")
     try:
         token_usage.record_usage(endpoint["id"], turn_usage)
     except Exception:
