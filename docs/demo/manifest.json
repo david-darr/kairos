@@ -1031,7 +1031,7 @@
  "sources": {
   "demo/fixtures.js": "ce9b17d297e809192671e2b147a70bea438bbc342224d0623bbd4ca0ef3c6f78",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
-  "scripts/build_site_demo.py": "c355584e7d5dc6c1bb6abd5502ab7e98c8ddc7dc7e137ac905aa5a66fef0807b",
+  "scripts/build_site_demo.py": "b7ee6849208235c48aa0bfa001c559b2aa4bed7f8f5c9adfb215db4460bd1fdc",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
   "static/css/agents-messages.css": "43e72db9314185542729c8cf05f606bdef735353137fce712aa9f7ca14af1e3c",
   "static/css/appearance.css": "9d0e9a1819f4f09fe0433d0b4867c34d11d917f47c41d7d0c1b6dd1bb9f5072b",

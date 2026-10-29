@@ -54,7 +54,8 @@ def sources():
     files = {}
     for path in sorted(STATIC.rglob("*")):
         rel = path.relative_to(STATIC).as_posix()
-        if path.is_file() and not rel.startswith(LEFT_OUT) and "__pycache__" not in rel:
+        # AGENTS.md is a map for models working on the repo, not part of the site.
+        if path.is_file() and not rel.startswith(LEFT_OUT) and "__pycache__" not in rel and path.name != "AGENTS.md":
             files["static/" + rel] = path
     for path in sorted(DEMO.glob("*.js")):
         files["demo/" + path.name] = path
