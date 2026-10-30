@@ -19,7 +19,7 @@ export async function mount(host, ctx = {}) {
   density.onchange = () => { setSidebarDensity(person, density.value); status.textContent = 'Saved on this device.'; };
   const densityReady = () => { if (!dead) { density.value = sidebarDensity(person); density.disabled = false; } };
   api('/api/auth/status', { signal: abort.signal, toast: false }).then(found => { person = found?.username || 'local'; densityReady(); }).catch(densityReady);
-  const toggle = (name, title) => SwitchRow({ title, checked: getPref(name) === 'true', onChange: value => { setPref(name, String(value)); status.textContent = 'Saved on this device.'; } });
+  const toggle = (name, title, hint = '') => SwitchRow({ title, hint, checked: getPref(name) === 'true', onChange: value => { setPref(name, String(value)); status.textContent = 'Saved on this device.'; } });
   const replay = async (path, name) => {
     try {
       const module = await import(path);
@@ -49,7 +49,7 @@ export async function mount(host, ctx = {}) {
     choose('sendKey', 'Send key', [['enter', 'Enter'], ['shift-enter', 'Shift + Enter'], ['mod-enter', 'Ctrl or Cmd + Enter']]),
     choose('width', 'Chat width', [['default', 'Default'], ['wide', 'Wide'], ['full', 'Full']]),
     choose('font', 'Chat font', [['inter', 'Inter'], ['system', 'System'], ['serif', 'Serif']]),
-    toggle('bubbles', 'Colour user bubbles'), toggle('threads', 'Show threads'), toggle('pins', 'Pinned circles'), h('label', { class: 'bots-row' }, [h('span', { class: 'bots-row-title', text: 'Sidebar density' }), density]), toggle('runCard', 'Run card'), toggle('tools', 'Show tool calls'),
+    toggle('bubbles', 'Colour user bubbles'), toggle('threads', 'Show threads'), toggle('pins', 'Pinned circles'), h('label', { class: 'bots-row' }, [h('span', { class: 'bots-row-title', text: 'Sidebar density' }), density]), toggle('runCard', 'Run card'), toggle('universalPins', 'Universal pins', 'In Advanced, pinned bots from every team stay at the top of the sidebar while the rest scrolls.'), toggle('tools', 'Show tool calls'),
   ] }), Card({ label: 'New bots', children: [defaults, h('label', { class: 'bots-row' }, [h('span', { text: 'Thread concurrency' }), concurrency])] }),
   Card({ label: 'Get started', children: [Button({ label: 'Replay tour', onClick: () => replay('./botsTour.js', 'tour') }),
     Button({ label: 'Replay welcome', onClick: () => replay('./botsWelcome.js', 'welcome') }),

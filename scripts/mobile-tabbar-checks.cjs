@@ -163,9 +163,9 @@ module.exports = async function tabBarChecks(c) {
   await tap('chats'); await waitFor("document.getElementById('ms-tab-1').getAttribute('aria-selected') === 'true'");
   ok(true, 'Chats again, on the workspace, shows the list of chats');
   ok(await js("!document.querySelector('.ms-tabbar [data-tabbar=agents]') && !document.querySelector('#nav .nav-item[data-tab=agents]')"), 'There is no Agents item on the bar or in the sidebar');
-  // The old Agents link opens Bots: the bar then shows the Bots item, current on the roster.
+  // The old Agents link opens Bots: the bar then shows Bots, Chats and Inbox, current on the roster.
   await navigate('agents'); await waitFor("document.documentElement.dataset.appMode === 'bots' && document.documentElement.dataset.view === 'botsHome'"); await barShown();
-  eq(await items(), ['botsHome', 'more'], 'An old Agents link opens Bots, whose bar is Bots and More');
+  eq(await items(), ['botsHome', 'botsChats', 'botsInbox', 'more'], 'An old Agents link opens Bots, whose bar is Bots, Chats, Inbox and More');
   eq(await barCurrent(), 'botsHome', 'Bots opens the roster');
   await backToKairos();
   await tap('calendar'); await waitFor("document.documentElement.dataset.view === 'calendar'"); await barShown();

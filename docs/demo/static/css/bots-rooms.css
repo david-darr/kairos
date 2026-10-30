@@ -2,6 +2,12 @@
 [data-app-mode="bots"] .bots-room { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; color: var(--bots-ink); background: var(--bots-app); font: var(--bots-text-row)/1.5 var(--bots-font-sans); }
 [data-app-mode="bots"] .bots-room-title { display: block; max-width: min(100%, 360px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-app-mode="bots"] .bots-room-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--bots-hairline); }
+/* The room's group call button (agentCall.js): a pill with the phone glyph; on a phone only the glyph, 44 px round. */
+[data-app-mode="bots"] .bots-room-call .agent-call-open { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 14px; border: 1px solid var(--bots-control-line); border-radius: var(--bots-radius-pill); background: var(--bots-card); color: var(--bots-ink); font: 500 var(--bots-text-row)/1 var(--bots-font-sans); cursor: pointer; }
+[data-app-mode="bots"] .bots-room-call .agent-call-open-icon { display: inline-flex; }
+[data-app-mode="bots"] .bots-room-call .agent-call-open-icon svg { width: 16px; height: 16px; }
+[data-app-mode="bots"] .bots-room-call .agent-call-open.is-call-active { background: var(--bots-accent); border-color: var(--bots-accent); color: var(--bots-accent-ink); }
+[data-app-mode="bots"] .bots-room-call .agent-call-open:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
 [data-app-mode="bots"] .bots-room-advanced { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
 [data-app-mode="bots"] .bots-room-advanced input { width: 70px; }
 [data-app-mode="bots"] .bots-room-faces { display: flex; gap: 4px; overflow: hidden; }
@@ -55,6 +61,9 @@
   [data-app-mode="bots"] .bots-room-header { gap: 6px; padding: 8px; }
   [data-app-mode="bots"] .bots-room-header > .bots-btn { min-height: 44px; }
   [data-app-mode="bots"] .bots-room-header select { max-width: 130px; }
+  [data-app-mode="bots"] .bots-room-call .agent-call-open { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  [data-app-mode="bots"] .bots-room-call .agent-call-open-label { display: none; }
+  [data-app-mode="bots"] .bots-room-header .bots-room-title { flex: 1 1 0; min-width: 0; }
   [data-app-mode="bots"] .bots-room-faces { display: none; }
   [data-app-mode="bots"] .bots-room-advanced { width: 100%; }
   [data-app-mode="bots"] .bots-room-dialog { position: fixed; inset: auto 0 0; margin: 0; width: 100%; max-width: none; max-height: 85dvh; box-sizing: border-box; border-radius: var(--bots-radius-card) var(--bots-radius-card) 0 0; }

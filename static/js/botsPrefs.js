@@ -10,6 +10,8 @@ export const PREFS = {
   threads: { key: 'kairos:bots-show-threads', fallback: 'true', values: ['true', 'false'], attr: 'botsThreads' },
   pins: { key: 'kairos:bots-pinned-circles', fallback: 'true', values: ['true', 'false'], attr: 'botsPins' },
   runCard: { key: 'kairos:bots-run-card', fallback: 'true', values: ['true', 'false'], attr: 'botsRunCard' },
+  // Advanced: pinned bots leave the list for a panel at the top of the sidebar that stays while the list scrolls.
+  universalPins: { key: 'kairos:bots-universal-pins', fallback: 'false', values: ['true', 'false'], attr: 'botsUniversalPins' },
 };
 const memory = new Map();
 export function getPref(name) {

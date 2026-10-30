@@ -14,6 +14,8 @@ export function mount(host, ctx = {}) {
   const mode = ctx.mode || (ctx.departmentId ? 'manage' : 'create');
   let disposed = false, busy = false, baseline = null, department = null, bots = [], selected = new Set();
   const name = h('input', { 'aria-label': 'Team name', maxlength: '60', required: true });
+  // A name typed while the bots load is kept: the load fills the field only if it was left alone.
+  let typed = false; name.addEventListener('input', () => { typed = true; });
   const picker = h('div', { class: 'bots-team-picker', role: 'group', 'aria-label': 'Team members' });
   const error = h('p', { class: 'bots-team-error', role: 'alert' });
   const progress = h('p', { role: 'status', 'aria-live': 'polite' });
@@ -30,7 +32,7 @@ export function mount(host, ctx = {}) {
       const teams = Array.isArray(allTeams) ? allTeams : allTeams.departments || [];
       department = mode === 'create' ? null : teams.find(t => t.id === ctx.departmentId) || teams.find(t => t.name === bots.find(b => b.id === ctx.agentId)?.section);
       if (mode !== 'create' && !department) throw new Error('This team no longer exists.');
-      name.value = department?.name || ''; name.disabled = ['delete', 'chief'].includes(mode);
+      if (!typed) name.value = department?.name || ''; name.disabled = ['delete', 'chief'].includes(mode);
       selected = new Set(bots.filter(b => b.section && b.section === department?.name).map(b => b.id));
       if (mode === 'create' && ctx.agentId) selected.add(ctx.agentId);
       picker.replaceChildren(...bots.map(bot => {
@@ -44,7 +46,7 @@ export function mount(host, ctx = {}) {
         picker.replaceChildren(h('p', { text: `${department.chief_bot_id === bot.id ? 'Remove' : 'Make'} ${bot.name} as Chief of Staff for ${department.name}?` }));
       }
       if (mode === 'delete') picker.replaceChildren(h('p', { text: 'Remove this team. Its bots keep their conversations.' }));
-      baseline = snapshot(); error.textContent = ''; save.disabled = false;
+      baseline = { name: (department?.name || '').trim(), ids: [...selected].sort() }; error.textContent = ''; save.disabled = false;
     } catch (problem) { if (!disposed) { error.replaceChildren(h('span', { text: teamError(problem) }), Button({ label: 'Try again', onClick: refresh })); } }
   }
   async function submit() {

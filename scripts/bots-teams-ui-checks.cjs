@@ -53,6 +53,16 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitFor("document.querySelector('.bots-team-edges summary')?.textContent === 'Handoffs 1'");
     assert.equal(await js("document.querySelector('.bots-team-edge').textContent"), `${reader.name} → ${runner.name}: Check the numbers`);
 
+    // New team: a name typed while the dialog is still loading its bots survives the load.
+    assert.deepEqual(await js(`(async () => {
+      const m = await import('/static/js/botsTeamHost.js'); m.openTeamDialog({});
+      let input; for (let i = 0; i < 400 && !(input = document.querySelector('[aria-label="Team name"]')); i++) await new Promise(r => setTimeout(r, 5));
+      input.value = 'Typed early'; input.dispatchEvent(new Event('input', { bubbles: true }));
+      for (let i = 0; i < 200 && !document.querySelector('.bots-team-picker input'); i++) await new Promise(r => setTimeout(r, 10));
+      return [input.value, document.querySelectorAll('.bots-team-picker input').length > 0];
+    })()`), ['Typed early', true], 'the loaded bot list does not wipe the typed name');
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+
     // Phone width: no sideways scroll.
     win.setContentSize(390, 844); await delay(500);
     assert.ok(await js("document.documentElement.scrollWidth <= window.innerWidth + 1"), 'the map does not scroll sideways on a phone');

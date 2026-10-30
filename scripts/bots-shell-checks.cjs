@@ -316,7 +316,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await waitFor("document.documentElement.dataset.appMode === 'bots' && !document.querySelector('.ms-tab-sheet[open]') && !!document.querySelector('.bots-home .bots-grid')");
     await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
     assert.equal(await js("document.querySelector('.ms-tabbar').dataset.mode"), 'bots');
-    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['botsHome', 'more'], 'the tab bar shows the Bots item');
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['botsHome', 'botsChats', 'botsInbox', 'more'], 'the tab bar shows Bots, Chats and Inbox');
     assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').getAttribute('aria-current')"), 'page');
     assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome] .ms-tabbar-label').textContent"), 'Bots');
     assert.deepEqual(await overflow(), [], 'Bots home has no sideways scroll on a phone');

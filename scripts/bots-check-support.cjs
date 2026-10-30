@@ -18,7 +18,7 @@ async function isolateBotsCheck({ js, demoState }, state = {}) {
     'kairos:bots-send-key': null, 'kairos:bots-chat-width': null,
     'kairos:bots-show-tool-calls': null, 'kairos:bots-colour-bubbles': null,
     'kairos:bots-font': null, 'kairos:bots-show-threads': null,
-    'kairos:bots-pinned-circles': null, 'kairos:bots-run-card': null,
+    'kairos:bots-pinned-circles': null, 'kairos:bots-run-card': null, 'kairos:bots-universal-pins': null,
     'jarvis:sidebar-collapsed': 'false',
     'jarvis:agent-chat:a1': null, 'jarvis:agent-chat:a2': null,
   };

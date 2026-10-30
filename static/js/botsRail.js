@@ -32,6 +32,7 @@ import {
 } from './botsSidebarModel.js';
 import { botsThreadApi, threadMenuItems, folderMenuItems, botMenuItems, movedFolderIds, copyableLink } from './botsThreadMenu.js';
 import { buildItems, needsYouCount } from './botsAutomationModel.js';
+import { getPref } from './botsPrefs.js';
 
 const SHELL_CSS = '/static/css/bots-shell.css';
 const SIDEBAR_CSS = '/static/css/bots-sidebar.css';
@@ -135,6 +136,8 @@ export function mountBotsRail(nav) {
   const search = h('input', { type: 'search', class: 'bots-rail-search', placeholder: 'Search bots and conversations', 'aria-label': 'Search bots and conversations', autocomplete: 'off' });
   const density = h('button', { type: 'button', class: 'bots-rail-density', 'aria-label': 'Sidebar density', title: 'Sidebar density' }, [icon('sliders-horizontal', { size: 15 })]);
   const list = h('div', { class: 'bots-rail-list', role: 'list' });
+  // Universal pins (Settings > Bots, Advanced only): the pinned bots, above the list and outside its scroll.
+  const pinnedPanel = h('div', { class: 'bots-rail-universal', role: 'group', 'aria-label': 'Pinned bots', hidden: true });
   const archived = h('button', { type: 'button', class: 'nav-item bots-rail-archived', hidden: true, onclick: () => openArchived() },
     [icon('archive', { size: 16 }), h('span', { class: 'bots-rail-archived-label' })]);
   const view = Segmented({ label: 'Interface', value: interfaceNow(), options: [{ value: 'simple', label: 'Simple' }, { value: 'advanced', label: 'Advanced' }],
@@ -150,7 +153,7 @@ export function mountBotsRail(nav) {
         onclick: () => import('./botsAttentionHost.js').then(host => host.toggleAttention(name, { agentId: root.dataset.botsAgent || '', sessionId: root.dataset.botsSession || '' })).catch(() => {}) },
         [icon(glyph, { size: 15 })])));
   import('./botsAttentionHost.js').then(() => { if (!disposed) attention.hidden = false; }).catch(() => {});
-  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, templates, search, list, archived, foot]);
+  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, templates, search, pinnedPanel, list, archived, foot]);
   section.style.visibility = 'hidden';
   styled.finally(() => { section.style.visibility = ''; });
   nav.append(section);
@@ -197,7 +200,10 @@ export function mountBotsRail(nav) {
 
   density.addEventListener('click', () => { savePrefs({ density: nextDensity(prefs.density) }); applyWidth(); draw(true); announce(`Sidebar density: ${prefs.density}`); });
   // The same choice from Settings > Bots (botsPrefs.js setSidebarDensity).
-  const onPrefs = event => { if (event.detail?.name !== 'density' || event.detail.value === prefs.density) return; savePrefs({ density: event.detail.value }); applyWidth(); draw(true); };
+  const onPrefs = event => {
+    if (event.detail?.name === 'universalPins') { draw(true); return; }
+    if (event.detail?.name !== 'density' || event.detail.value === prefs.density) return; savePrefs({ density: event.detail.value }); applyWidth(); draw(true);
+  };
   document.addEventListener('kairos:bots-prefs', onPrefs);
   const live = h('div', { class: 'bots-rail-live', role: 'status', 'aria-live': 'polite' });
   section.append(live);
@@ -542,7 +548,8 @@ export function mountBotsRail(nav) {
     const hold = focusKey();
     const facts = roster.map(railRow);
     const rows = [...threads.entries()].map(([id, data]) => [id, data.rows.map(r => [r.id, r.title, r.status, r.updated_at, r.thread?.pinned, r.thread?.unread, r.thread?.folder_id, r.thread?.snoozed_until])]);
-    const next = JSON.stringify([advanced, prefs, departments, rooms, facts, roster.map(b => [b.id, b.color, b.avatar, b.folders, b.section]), hidden.length, [...pinnedIds], query, rows, root.dataset.botsAgent, root.dataset.botsSession, [...showAll],
+    const universal = advanced && !searchReady(query) && getPref('universalPins') === 'true';
+    const next = JSON.stringify([advanced, universal, prefs, departments, rooms, facts, roster.map(b => [b.id, b.color, b.avatar, b.folders, b.section]), hidden.length, [...pinnedIds], query, rows, root.dataset.botsAgent, root.dataset.botsSession, [...showAll],
       renaming, selection && [selection.agentId, [...selection.ids]]]);
     if (!force && next === signature) { markActive(); return; }
     signature = next;
@@ -551,7 +558,11 @@ export function mountBotsRail(nav) {
     const nodes = [];
     if (searchReady(query)) nodes.push(searchResults(roster));
     else if (!advanced) nodes.push(...simpleRail(roster));
-    else nodes.push(...advancedRail(roster));
+    else nodes.push(...advancedRail(roster, universal));
+    const pinnedNow = universal ? pinnedBotList() : [];
+    pinnedPanel.hidden = !pinnedNow.length;
+    pinnedPanel.replaceChildren(...(pinnedNow.length ? [prefs.density === 'icons' ? null : h('div', { class: 'bots-caps bots-rail-universal-label', text: 'Pinned' }),
+      h('div', { class: 'bots-rail-group', role: 'list' }, pinnedNow.map(bot => botRow(bot, { section: 'pinned:' })))].filter(Boolean) : []));
     if (!roster.length) nodes.push(h('p', { class: 'bots-rail-empty', text: 'No bots yet.' }));
     list.replaceChildren(...nodes);
     archived.hidden = !hidden.length;
@@ -569,12 +580,12 @@ export function mountBotsRail(nav) {
     return out;
   }
 
-  function advancedRail(roster) {
+  function advancedRail(roster, universal = false) {
     const pinned = pinnedBotList();
     const needing = attentionBots(roster, stateOf);
     const blocks = {
       channels: channelsBlock,
-      pinned: () => pinned.length && sectionBlock('pinned', 'Pinned', h('div', { class: 'bots-rail-group', role: 'list' }, pinned.map(bot => botRow(bot, { section: 'pinned:' }))), pinned.length),
+      pinned: () => !universal && pinned.length && sectionBlock('pinned', 'Pinned', h('div', { class: 'bots-rail-group', role: 'list' }, pinned.map(bot => botRow(bot, { section: 'pinned:' }))), pinned.length),
       attention: () => needing.length && sectionBlock('attention', 'Needs attention', h('div', { class: 'bots-rail-group', role: 'list' }, needing.map(bot => botRow(bot, { section: 'attention:' }))), needing.length),
       bots: () => roster.length && sectionBlock('bots', 'Bots', h('div', { class: 'bots-rail-group', role: 'list' }, teamBlocks(roster, true)), roster.length),
     };
@@ -591,8 +602,11 @@ export function mountBotsRail(nav) {
     ]), rooms.length);
   }
   function teamBlocks(roster, tree) {
-    return teamGroups(roster, departments, prefs.teamOrder).map(team => {
-      if (team.ungrouped) return h('div', { class: 'bots-rail-group' }, team.members.flatMap(bot => [botRow(bot, { tree }), tree && isOpen(bot.id) ? botChildren(bot) : null].filter(Boolean)));
+    const groups = teamGroups(roster, departments, prefs.teamOrder);
+    return groups.map(team => {
+      // Bots outside every team get their own heading once a team exists, so they never read as the last team's.
+      if (team.ungrouped) return h('div', { class: 'bots-rail-group' }, [groups.length > 1 ? h('div', { class: 'bots-caps bots-rail-loose-head', text: 'Other bots' }) : null,
+        ...team.members.flatMap(bot => [botRow(bot, { tree }), tree && isOpen(bot.id) ? botChildren(bot) : null].filter(Boolean))].filter(Boolean));
       const closed = prefs.closedTeams.includes(team.id);
       const toggle = h('button', { type: 'button', class: 'bots-section-head', 'aria-expanded': String(!closed), 'data-key': `team:${team.id}`, onclick: () => {
         savePrefs({ closedTeams: closed ? prefs.closedTeams.filter(id => id !== team.id) : [...prefs.closedTeams, team.id] }); draw(true);

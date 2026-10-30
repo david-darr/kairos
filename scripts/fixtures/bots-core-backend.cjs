@@ -345,7 +345,7 @@ module.exports = ({ state, data, now }) => {
       if (route === '/api/agents/defaults') return defaultsView();
       if (route === '/api/agents/presets') return seeded().presets.map(p => ({ ...p, source: 'saved' }));
       if (route === '/api/agents/conversations')
-        return { agents: seeded().agents.map(a => ({ id: a.id, session_id: mainOf(a.id), preview: threadsOf(a.id)[0]?.preview || '', at: clock() - 600, message_count: threadsOf(a.id).length, pinned: false, unread: 0 })), preferences: {} };
+        return { agents: seeded().agents.map(a => ({ id: a.id, session_id: mainOf(a.id), preview: threadsOf(a.id)[0]?.preview || '', at: clock() - 600, message_count: threadsOf(a.id).length, pinned: (seeded().pins || []).includes(a.id), unread: 0 })), preferences: {} };
       if (route === '/api/sessions' && query.agent_id) return threadsOf(query.agent_id).map(header);
       if ((m = route.match(/^\/api\/agents\/([^/]+)$/)) && !RESERVED.includes(m[1])) {
         const a = need(m[1]);
@@ -367,6 +367,11 @@ module.exports = ({ state, data, now }) => {
     const store = seeded();
     let m;
     if (route === '/api/agents' && method === 'POST') return summary(newBot(body));
+    // Pinning a bot (routes/agent_routes.py conversation actions); only pin and unpin are modelled here.
+    if ((m = route.match(/^\/api\/agents\/conversations\/agent\/([^/]+)$/)) && method === 'POST' && ['pin', 'unpin'].includes(body.action)) {
+      need(decodeURIComponent(m[1])); const pins = new Set(seeded().pins || []);
+      body.action === 'pin' ? pins.add(decodeURIComponent(m[1])) : pins.delete(decodeURIComponent(m[1])); seeded().pins = [...pins]; return { ok: true };
+    }
     if (route === '/api/agents/configured' && method === 'POST') return configured(body);
     if (route === '/api/agents/order' && method === 'POST') {
       const ids = body.ids || [];

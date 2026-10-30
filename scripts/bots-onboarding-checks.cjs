@@ -44,6 +44,19 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     const person = (await call('/api/auth/status')).username || 'local';
     assert.equal(await js(`JSON.parse(localStorage.getItem(${q(`kairos:bots-sidebar:${encodeURIComponent(person)}`)})).density`), densityNow, 'stored with the sidebar layout');
     await setDensity(densityBefore); await waitFor(`document.documentElement.dataset.botsDensity === ${q(densityBefore)}`);
+    // Universal pins (Advanced): a pinned bot leaves the list's Pinned section for the panel above the list, and back.
+    await call(`/api/agents/conversations/agent/${botId}`, 'POST', { action: 'pin' });
+    await js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))");
+    const pinKey = `[data-key="pinned:bot:${botId}"]`;
+    await waitFor(`!!document.querySelector('.bots-rail-list .bots-rail-section[data-section=pinned] ${pinKey}')`);
+    const pinSwitch = `[...document.querySelectorAll('[data-bots-settings] .bots-switch-row')].find(r=>r.querySelector('.bots-row-title')?.textContent.trim()==='Universal pins')`;
+    await js(`${pinSwitch}.querySelector('[role=switch]').click()`);
+    await waitFor(`!document.querySelector('.bots-rail-universal').hidden && !!document.querySelector('.bots-rail-universal ${pinKey}') && !document.querySelector('.bots-rail-list .bots-rail-section[data-section=pinned]')`);
+    assert.equal(await js("document.documentElement.dataset.botsUniversalPins"), 'true');
+    assert.ok(await js("getComputedStyle(document.querySelector('.bots-rail-universal')).overflowY === 'auto'"), 'the panel scrolls on its own');
+    await js(`${pinSwitch}.querySelector('[role=switch]').click()`);
+    await waitFor(`document.querySelector('.bots-rail-universal').hidden && !!document.querySelector('.bots-rail-list .bots-rail-section[data-section=pinned] ${pinKey}')`);
+    await call(`/api/agents/conversations/agent/${botId}`, 'POST', { action: 'unpin' });
     await clickText('[data-bots-settings] button', 'Replay welcome'); await waitFor("!!document.querySelector('.bots-welcome[open]')");
     await clickText('.bots-welcome button', 'Not now');
     await clickText('[data-bots-settings] button', 'Replay tour');

@@ -16,6 +16,7 @@ import { badgeCounts } from './mobileActivity.js';
 // rise above the bar and the bar steps aside instead.
 const FULLSCREEN = [
   '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside',
+  '.bots-attn:not([hidden])',
 ].join(', ');
 const SUBPAGE = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',
@@ -37,6 +38,7 @@ const shellIcon = (name) => {
     more: '<rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/>',
     code: '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 6l-2 12"/>',
     sessions: '<path d="M5 6h14M5 12h14M5 18h9"/>',
+    inbox: '<path d="M4 13 6.5 6h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h4.5l1.5 2.5h4l1.5-2.5H20"/>',
   };
   return paths[name] ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${paths[name]}</svg>` : ICONS[name] || '';
 };
@@ -61,9 +63,14 @@ const FORGE = [
   { id: 'sessions', label: 'Sessions', icon: 'sessions', source: 'forgeHome',
     open: () => pagerTab(1)?.isConnected ? pagerTab(1).click() : go('forgeHome', { projectId: rememberedProject(), mobilePage: 1 }) },
 ];
-// Bots mode (Agents 3.0 Phase 0): one tab, the roster; a bot's page sits under it.
+// Bots mode (Agents 3.0): the roster with each bot's page under it; Chats, the sidebar's list in a sheet
+// (rooms, teams, Team map and Automations sit under it); and the inbox, which carries the needs-you badge.
 const BOTS = [
-  { id: 'botsHome', label: 'Bots', icon: 'agents', source: 'botsHome', badge: 'bots' },
+  { id: 'botsHome', label: 'Bots', icon: 'agents', source: 'botsHome' },
+  { id: 'botsChats', label: 'Chats', icon: 'chats', source: 'botsHome',
+    open: () => import('./mobileBots.js').then(m => m.openBotsList(glass.querySelector('[data-tabbar="botsChats"]'))) },
+  { id: 'botsInbox', label: 'Inbox', icon: 'inbox', source: 'botsHome', badge: 'bots',
+    open: () => import('./mobileBots.js').then(m => m.openBotsInbox()) },
 ];
 const ITEMS = { kairos: KAIROS, forge: FORGE, bots: BOTS };
 
@@ -79,7 +86,7 @@ function selection() {
     // A Forge view still loading keeps the item it was opened from.
     return view === 'forgeHome' ? current : 'more';
   }
-  if (bots()) return view === 'botsHome' || view === 'botsShell' ? 'botsHome' : 'more';
+  if (bots()) return view === 'botsHome' || view === 'botsShell' ? 'botsHome' : ['botsRoom', 'botsTeamMap', 'botsAutomations'].includes(view) ? 'botsChats' : 'more';
   return { home: 'home', mobileLaunch: 'chats', chat: 'chats', calendar: 'calendar' }[view] || 'more';
 }
 
@@ -174,7 +181,7 @@ export function mountTabBar() {
   bar.append(glass, create); document.body.append(bar);
   // The page on screen, the pager page, the agents badge and the pushed
   // pages all live in the DOM; one observer, coalesced to a frame.
-  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] });
+  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class', 'hidden'] });
   new MutationObserver(schedule).observe(document.documentElement, { attributes: true, attributeFilter: ['data-view', 'data-app-mode', 'class'] });
   window.visualViewport?.addEventListener('resize', schedule); addEventListener('resize', schedule);
   phone.addEventListener('change', schedule); document.addEventListener('kairos:appearance', schedule);

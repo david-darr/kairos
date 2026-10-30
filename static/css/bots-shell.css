@@ -147,6 +147,8 @@
 }
 [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] { width: var(--bots-panel-w-advanced); background: var(--bots-panel); }
 [data-app-mode="bots"] .bots-panel-bar { display: flex; align-items: center; justify-content: flex-end; flex: none; height: 50px; padding: 0 8px; }
+/* The frame's close button covers the load; once the panel draws its own bar with a close, the frame's steps aside. */
+[data-app-mode="bots"] .bots-panel-aside:has(.bots-panel-body .bots-panel-bar [aria-label="Close panel"]) > .bots-panel-bar { display: none; }
 [data-app-mode="bots"] .bots-panel-close { width: 34px; height: 34px; }
 [data-app-mode="bots"] .bots-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 20px; }
 [data-app-mode="bots"] .bots-panel-loading, [data-app-mode="bots"] .bots-panel-fallback p { margin: 0; font-size: var(--bots-text-hint-lg); color: var(--bots-ink-secondary); }
@@ -163,7 +165,7 @@
   [data-app-mode="bots"] .bots-bot-card-job, [data-app-mode="bots"] .bots-bot-card-status { flex-basis: 100%; margin: 0; padding: 0; }
   [data-app-mode="bots"] .bots-new-card { flex-direction: row; justify-content: center; }
   [data-app-mode="bots"] .bots-home-actions { width: 100%; }
-  [data-app-mode="bots"] .bots-home-actions .bots-btn { flex: 1; min-height: 44px; }
+  [data-app-mode="bots"] .bots-home-actions .bots-btn { flex: 1 1 auto; min-height: 44px; white-space: nowrap; padding: 0 12px; }
 
   [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
   [data-app-mode="bots"] .bots-shell-header { padding: calc(8px + var(--mobile-safe-top, 0px)) 12px 8px; }
@@ -180,4 +182,16 @@
     padding-top: var(--mobile-safe-top, 0px);
   }
   [data-app-mode="bots"] .bots-panel-close { width: 44px; height: 44px; }
+}
+
+/* A bot that cannot start its first conversation (no model yet). */
+[data-app-mode="bots"] .bots-chat-blocked { margin: auto; max-width: 420px; padding: 32px 20px; display: grid; gap: 8px; text-align: center; justify-items: center; color: var(--bots-ink); }
+[data-app-mode="bots"] .bots-chat-blocked-title { font-size: 17px; font-weight: 600; }
+[data-app-mode="bots"] .bots-chat-blocked-detail { color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-chat-blocked-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+
+@media (max-width: 768px) {
+  .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-shell-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  /* A room and the team map bring their own headers too. */
+  .kairos-redesign[data-app-mode="bots"]:is([data-view="botsRoom"], [data-view="botsTeamMap"]) #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
 }

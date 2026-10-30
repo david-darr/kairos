@@ -60,7 +60,11 @@
 [data-app-mode="bots"] :is(.bots-team-dialog, .bots-team-map, .bots-team-card) :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
 @keyframes bots-team-sent { 30% { border-color: var(--bots-accent); box-shadow: 0 0 0 2px var(--bots-accent-border); } }
 @media (max-width: 720px) {
-  [data-app-mode="bots"] .bots-team-map-head { padding-top: 60px; }
+  [data-app-mode="bots"] .bots-team-map-head { padding-top: 12px; }
+  [data-app-mode="bots"] .bots-team-map-head h1 { flex: 1 0 100%; white-space: nowrap; }
+  /* The tags stay one row that scrolls sideways, so the map keeps the room. */
+  [data-app-mode="bots"] .bots-team-tags { flex-wrap: nowrap; overflow-x: auto; max-height: none; scrollbar-width: none; }
+  [data-app-mode="bots"] .bots-team-tags > * { flex: none; }
   [data-app-mode="bots"] .bots-team-canvas { position: relative; height: 100%; overflow-y: auto; touch-action: pan-y; background-image: none; }
   [data-app-mode="bots"] .bots-team-world { position: static; padding: 12px; display: flex; flex-direction: column; gap: 16px; }
   [data-app-mode="bots"] .bots-team-tile { position: static; width: 100% !important; }

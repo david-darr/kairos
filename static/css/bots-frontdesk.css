@@ -88,6 +88,12 @@
   [data-app-mode="bots"] .fd-card { border-radius:20px; }
   [data-app-mode="bots"] .fd-make-plus { bottom:calc(110px + env(safe-area-inset-bottom,0px)); right:16px; }
   [data-app-mode="bots"] .fd-make-fan { bottom:calc(180px + env(safe-area-inset-bottom,0px)); right:16px; }
+  [data-app-mode="bots"] .bots-shell-main .fd-header { padding:6px 12px; }
+  [data-app-mode="bots"] .bots-shell-main :is(.fd-back,.fd-header-main) { display:none; }
+  [data-app-mode="bots"] .bots-shell-main .fd-tabs { position:relative; bottom:auto; left:auto; transform:none; width:100%; height:auto; margin:0; }
+  [data-app-mode="bots"] .bots-shell-main .fd-pages { padding-bottom:0; }
+  [data-app-mode="bots"] .bots-shell-main .fd-make-plus { bottom:16px; }
+  [data-app-mode="bots"] .bots-shell-main .fd-make-fan { bottom:86px; }
 }
 @media(prefers-reduced-motion:reduce) {
   [data-app-mode="bots"] :is(.fd-build,.fd-pop,.fd-tabs::before,.fd-card-suggestion,.fd-make-fan button,.fd-making .fd-make-thumb) { animation:none; transition:none; }

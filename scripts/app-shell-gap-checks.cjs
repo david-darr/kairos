@@ -30,7 +30,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
     await waitFor(`${tabBadge} === '99+'`);
     inbox.splice(0); await refreshBadge();
     await waitFor(`${tabBadge} === ''`);
-    assert.equal(await js("document.querySelector('.ms-tabbar [data-badge=bots]').getAttribute('aria-label')"), 'Bots', 'the phone tab bar clears its badge and label too');
+    assert.equal(await js("document.querySelector('.ms-tabbar [data-badge=bots]').getAttribute('aria-label')"), 'Inbox', 'the phone tab bar clears its badge and label too (the badge sits on Inbox)');
   } finally {
     inbox.splice(0, inbox.length, ...saved); demoState.agentReview = savedReview; await refreshBadge();
   }

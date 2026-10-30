@@ -57,7 +57,7 @@ Tests, Electron checks and helpers. Every suite runs on its own, with temp data
 
 Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
 - `bots-check-support.cjs`, `bots-chief-checks.cjs`, `bots-datapanel-checks.cjs`, `bots-delegation-checks.cjs`, `bots-fdbot-checks.cjs`.
-- `bots-fdwork-checks.cjs`, `bots-frontdesk-checks.cjs`, `bots-groupcall-checks.cjs`, `bots-onboarding-checks.cjs`, `bots-report-checks.cjs`.
+- `bots-fdwork-checks.cjs`, `bots-frontdesk-checks.cjs`, `bots-groupcall-checks.cjs`, `bots-mobile-checks.cjs`, `bots-onboarding-checks.cjs`, `bots-report-checks.cjs`.
 - `bots-room-ui-checks.cjs`, `bots-rooms-checks.cjs`, `bots-teams-ui-checks.cjs`, `bots-usage-checks.cjs`, `bots-voice-checks.cjs`, `bots-widgets-checks.cjs`.
 - `bots-workbench-checks.cjs`, `test_bots_assignments.py`, `test_bots_backup.py`, `test_bots_browser_profiles.py`, `test_bots_chief.py`.
 - `test_bots_computer_limits.py`, `test_bots_data.py`, `test_bots_data_guard.py`, `test_bots_data_model.cjs`, `test_bots_delegation.cjs`.

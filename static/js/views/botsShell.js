@@ -217,13 +217,28 @@ export async function render(container, tabId, options = {}) {
     active = { owner: shell, jumpToMessage: next.jumpToMessage || none, insert: next.insert || none, focus: next.focus || none, sessionId: () => id };
     paintState();
   }
-  async function newThread() {
+  async function newThread({ first = false } = {}) {
     try {
-      const created = await api(`/api/agents/${encodeURIComponent(agent.id)}/chat`, { method: 'POST' });
+      const created = await api(`/api/agents/${encodeURIComponent(agent.id)}/chat`, { method: 'POST', toast: false });
       await readThreads();
       await openThread(created.id);
       chat?.focus?.();
-    } catch (problem) { toast(problem.message, 'error'); }
+    } catch (problem) {
+      // A bot with no conversation yet and no model to start one: say so in the page, not only in a toast.
+      if (first && !threads.length) noChat(problem); else toast(problem.message, 'error');
+    }
+  }
+  function noChat(problem) {
+    closeChat();
+    const choose = h('button', { type: 'button', class: 'bots-btn primary', text: 'Choose its model' });
+    choose.addEventListener('click', () => openBotSettings(agent.id, { section: 'model', opener: choose }));
+    const retry = h('button', { type: 'button', class: 'bots-btn', text: 'Try again' });
+    retry.addEventListener('click', () => newThread({ first: true }));
+    chatHost.replaceChildren(h('div', { class: 'bots-chat-blocked', role: 'status' }, [
+      h('p', { class: 'bots-chat-blocked-title', text: `${agent.name} needs a model before it can chat.` }),
+      h('p', { class: 'bots-chat-blocked-detail', text: /claude connection|model/i.test(problem?.message || '')
+        ? 'Add a model connection in Settings, or choose a model for this bot.' : problem?.message || 'Its first conversation could not start.' }),
+      h('div', { class: 'bots-chat-blocked-actions' }, [choose, retry])]));
   }
   async function deleteThread(item) {
     if (!await confirmDialog({ title: 'Delete this conversation?', message: `"${item.title || 'Untitled'}" will be deleted.`, confirmLabel: 'Delete conversation' })) return;
@@ -241,7 +256,7 @@ export async function render(container, tabId, options = {}) {
   if (disposed || !shell.isConnected) return undefined;
   const first = pickThread(options.sessionId || '');
   if (first) await openThread(first, { landOn: options.messageId || '' });
-  else await newThread();
+  else await newThread({ first: true });
   if (disposed) return undefined;
 
   if (options.panel) {
