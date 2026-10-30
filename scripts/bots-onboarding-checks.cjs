@@ -33,6 +33,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     // A switch is named by its row's title (aria-labelledby), so find the row and press its switch.
     await js(`(()=>{const row=[...document.querySelectorAll('[data-bots-settings] .bots-switch-row')].find(r=>r.querySelector('.bots-row-title')?.textContent.trim()==='Show tool calls');if(!row)throw new Error('Missing Show tool calls');row.querySelector('[role=switch]').click();return true;})()`);
     assert.equal(await js("document.documentElement.dataset.botsTools"), 'false');
+    // Sidebar density belongs to the sidebar's own per-person layout; the open sidebar follows the row at once.
+    const densityRow = '[data-bots-settings] select[aria-label="Sidebar density"]';
+    await waitFor(`!document.querySelector(${q(densityRow)}).disabled`);
+    const densityBefore = await js(`document.querySelector(${q(densityRow)}).value`);
+    const setDensity = value => js(`(()=>{const node=document.querySelector(${q(densityRow)});node.value=${q('VALUE')};node.dispatchEvent(new Event('change'));return true;})()`.replace('VALUE', value));
+    await setDensity(densityBefore === 'compact' ? 'icons' : 'compact');
+    const densityNow = densityBefore === 'compact' ? 'icons' : 'compact';
+    await waitFor(`document.documentElement.dataset.botsDensity === ${q(densityNow)}`);
+    const person = (await call('/api/auth/status')).username || 'local';
+    assert.equal(await js(`JSON.parse(localStorage.getItem(${q(`kairos:bots-sidebar:${encodeURIComponent(person)}`)})).density`), densityNow, 'stored with the sidebar layout');
+    await setDensity(densityBefore); await waitFor(`document.documentElement.dataset.botsDensity === ${q(densityBefore)}`);
     await clickText('[data-bots-settings] button', 'Replay welcome'); await waitFor("!!document.querySelector('.bots-welcome[open]')");
     await clickText('.bots-welcome button', 'Not now');
     await clickText('[data-bots-settings] button', 'Replay tour');

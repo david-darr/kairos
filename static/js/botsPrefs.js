@@ -1,4 +1,5 @@
 import { loadBotsCss, applyBotsInterface, setAdvanced, isAdvanced } from './botsUi.js';
+import { sidebarPreferenceKey, teamSidebarPreferences, DENSITIES } from './botsSidebarModel.js';
 
 export const PREFS = {
   sendKey: { key: 'kairos:bots-send-key', fallback: 'enter', values: ['enter', 'shift-enter', 'mod-enter'], attr: 'botsSendKey' },
@@ -29,4 +30,13 @@ export function setPref(name, value) {
 export function applyBotsPrefs() {
   loadBotsCss('/static/css/bots-prefs.css'); applyBotsInterface();
   for (const [name, spec] of Object.entries(PREFS)) document.documentElement.dataset[spec.attr] = getPref(name);
+}
+// Sidebar density is part of the sidebar's per-person layout (botsRail.js), so it is read and written there, never
+// under a key of its own. An open sidebar hears the change and redraws.
+const readSidebar = user => { try { return JSON.parse(localStorage.getItem(sidebarPreferenceKey(user)) || '{}'); } catch { return {}; } };
+export function sidebarDensity(user) { return teamSidebarPreferences(readSidebar(user)).density; }
+export function setSidebarDensity(user, value) {
+  if (!DENSITIES.includes(value)) throw new Error('Unknown sidebar density');
+  try { localStorage.setItem(sidebarPreferenceKey(user), JSON.stringify(teamSidebarPreferences({ ...readSidebar(user), density: value }))); } catch {}
+  if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('kairos:bots-prefs', { detail: { name: 'density', value } }));
 }

@@ -57,7 +57,7 @@ export function agentCall(agent, controller) {
     try {
       const { mountCallBar } = await import('./botsCallBar.js');
       if (!active || disposed) return;
-      callBar ||= mountCallBar({ agent, snapshot: () => ({ active, minimized, muted: microphoneMuted, startedAt }),
+      callBar ||= mountCallBar({ agent, members: room ? room.memberIds().map(id => room.memberName(id)) : null, snapshot: () => ({ active, minimized, muted: microphoneMuted, startedAt }),
         mute: () => setMicrophoneMuted(!microphoneMuted), hangup, restore,
         onSettings: () => { document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section: 'bot-voice' } })); minimize(); } });
       emitState();
@@ -71,6 +71,12 @@ export function agentCall(agent, controller) {
   let holding = false, holdPointer = null, voiceBusy = false, utteranceEnded = 0;
   let workUpdates=[], announcedWork=new Set();
   let endpoints = [];
+  // A group call (a room's controller has roomId): each reply names the member who spoke, and on device voices
+  // every member gets a different voice. Its summary goes to the room, so "chat" reads "room" in the copy.
+  const room = controller.roomId?.() ? controller : null;
+  let speaking = null;
+  const who = () => speaking?.name || agent.name;
+  const savedIn = room ? 'the room' : 'chat';
   const conversationKey = `kairos:call-conversation:${agent.id}`;
   const conversation = el('select', {'aria-label':'Conversation model connection'});
   const conversationModel = el('input', {type:'text','aria-label':'Conversation model version',placeholder:'Exact model ID'});
@@ -82,9 +88,9 @@ export function agentCall(agent, controller) {
     if(record.live_error)error.textContent=record.live_error;
     if(active&&callMode.value==='local')for(const job of record.jobs){if(!['ready','running'].includes(job.status)&&!announcedWork.has(job.task_id)){announcedWork.add(job.task_id);workUpdates.push(job.task_id);scheduleFlush();}}
     if(record.ended&&active)hangup();
-    if(record.ended) { summaryStatus.textContent = record.summary_state==='saved'?'Call summary saved in chat.':record.summary_state==='failed'?record.summary_error:'Saving call summary?'; }
+    if(record.ended) { summaryStatus.textContent = record.summary_state==='saved'?`Call summary saved in ${savedIn}.`:record.summary_state==='failed'?record.summary_error:'Saving call summary?'; }
   });
-  const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),el('option',{value:'cloud',text:'GPT-Live (paid cloud voice)'})]);
+  const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),...(room?[]:[el('option',{value:'cloud',text:'GPT-Live (paid cloud voice)'})])]);
   const liveEndpoint=el('select',{'aria-label':'Cloud voice API connection'});
   const liveVoiceChoice=el('select',{'aria-label':'Cloud voice'},['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));
   const paid=el('input',{type:'checkbox','aria-label':'Use paid cloud voice for this call'});
@@ -95,7 +101,7 @@ export function agentCall(agent, controller) {
   const heard = el('p', { class: 'agent-call-heard', 'aria-live': 'polite' });
   const timing = el('p', { class: 'agent-call-timing', role: 'status' });
   const voiceKey = `kairos:agent-voice:${agent.id}`;
-  const dialog = el('dialog', { class: 'agent-call', 'aria-label': `Voice call with ${agent.name}` });
+  const dialog = el('dialog', { class: 'agent-call', 'aria-label': room ? `Group call in ${agent.name}` : `Voice call with ${agent.name}` });
   dialog.dataset.state = 'setup';
   const clock = el('time', { class: 'agent-call-clock', text: '00:00' });
   const status = el('div', { class: 'agent-call-status', role: 'status', text: 'Ready when you are' });
@@ -189,10 +195,14 @@ export function agentCall(agent, controller) {
   dialog.append(el('header', { class: 'agent-call-header' }, [clock,
     el('div', { class: 'agent-call-tabs' }, [chat, el('span', { text: 'Voice', 'aria-current': 'page' })]), close]),
     el('div', { class: 'agent-call-scene' }, [orb, el('h1', { text: agent.name }), status]), engineStatus, heard, timing, setup, error, controls, holdHint, workList, summaryStatus,
-    el('p', { class: 'agent-call-privacy', text: 'Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in chat after the call.' }));
+    el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} after the call.` }));
+  const membersLine = el('p', { class: 'agent-call-members' });
+  const drawMembers = () => { membersLine.textContent = `With ${room.memberIds().map(id => room.memberName(id)).join(', ')}. Say a name to choose who answers.`; };
+  if (room) { drawMembers(); dialog.querySelector('.agent-call-scene').append(membersLine); }
   document.body.append(dialog);
   const button = el('button', { type: 'button', class: 'agent-call-open btn quiet', 'aria-label': `Call ${agent.name}`, title: `Call ${agent.name}`, text: 'Call', onclick: async () => {
     if (disposed) return;
+    if (room) drawMembers();
     dialog.showModal();
     if (active) return;
     error.textContent = ''; await loadSetup();
@@ -203,9 +213,14 @@ export function agentCall(agent, controller) {
   button.replaceChildren(callIcon, el('span', { class: 'agent-call-open-label', text: 'Call' }));
   const speakerOptions = {
     onLevel:level=>{if(active&&state==='speaking')orb.style.setProperty('--word',String(level));},
-    getVoice: () => voices.find(item => item.name === voice.value) || resolveVoice(voices),
-    onStart: () => { if (active) { setState('speaking', `${agent.name} is speaking. Interrupt to speak.`); if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms})}).catch(()=>{}); } } },
-    onEnd: () => { if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${agent.name} is finishing the reply...`);else listen(); scheduleFlush(); } },
+    getVoice: () => {
+      const chosen = voices.find(item => item.name === voice.value) || resolveVoice(voices);
+      if (!room || !speaking || !voices.length) return chosen;
+      const at = Math.max(0, room.memberIds().indexOf(speaking.id)), base = Math.max(0, voices.indexOf(chosen));
+      return voices[(base + at) % voices.length];
+    },
+    onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`); if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms})}).catch(()=>{}); } } },
+    onEnd: () => { if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
     onBoundary: () => {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
@@ -272,7 +287,7 @@ export function agentCall(agent, controller) {
   function syncModel() {
     const cloud=callMode.value==='cloud';
     const privacy=dialog.querySelector('.agent-call-privacy');
-    if(privacy)privacy.textContent=cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':'Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in chat afterwards.';
+    if(privacy)privacy.textContent=cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
     neural.node.hidden=cloud;preview.hidden=cloud;
     inputMode.closest('label').hidden=cloud;acceleration.closest('label').hidden=cloud;
     modelBox.hidden=cloud||!speech?.engine_available;runtimeSetup.hidden=cloud||!speech?.acceleration?.supported;
@@ -419,15 +434,17 @@ export function agentCall(agent, controller) {
     const text = texts.join(' '), workId=text?null:workUpdates.shift(); texts = []; deferredReply = null;
     const token = epoch, mine = revision; dispatching = true;
     try {
-      setState('thinking', `${agent.name} is thinking. You can keep speaking...`);
+      speaking = null;
+      setState('thinking', `${room ? 'The room' : agent.name} is thinking. You can keep speaking...`);
       response = { submitted: performance.now() };
       voiceBusy=true; speaker.reset();
       let output='', deferred=false;
       const consume = event => {
         if(!active||epoch!==token||revision!==mine)return;
         if(event.type==='error')throw new Error(event.message);
+        if(event.type==='speaker') { speaking = { id: event.id, name: event.name }; dialog.dataset.speaker = event.id; setState('thinking', `${event.name} is answering...`); return; }
         if(event.type==='text') {
-          output+=event.delta; heard.textContent=`${agent.name}: ${output}`;
+          output+=event.delta; heard.textContent=`${who()}: ${output}`;
           if(event.first_output_ms!=null)response.first_output_ms=event.first_output_ms;
           // If the caller is already continuing, retain the reply until the
           // next utterance can be considered instead of talking over them.
@@ -450,7 +467,7 @@ export function agentCall(agent, controller) {
   }
   function say(text) {
     if (!active || assistantMuted || !text?.trim()) { listen(); return; }
-    setState('speaking', `${agent.name} is speaking...`);
+    setState('speaking', `${who()} is speaking...`);
     try { speaker.reset(); speaker.feed(text); speaker.finish(); }
     catch { stopPlayback(); error.textContent = 'Voice playback failed. Check the selected device voice.'; listen(); }
   }
@@ -499,7 +516,7 @@ export function agentCall(agent, controller) {
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
     setState('setup', 'Ready when you are'); dialog.close(); button.classList.remove('is-call-active');
-    minimized = false; ongoingCall = null; callBar?.destroy(); callBar = null; emitState();
+    minimized = false; ongoingCall = null; speaking = null; delete dialog.dataset.speaker; callBar?.destroy(); callBar = null; emitState();
     if (detached) cleanup();
   }
   dialog.addEventListener('cancel', event => { event.preventDefault(); hangup(); });
@@ -516,7 +533,7 @@ export function agentCall(agent, controller) {
   const settingsChanged = event => { livePrefs = event.detail; };
   const botSaved = event => { if (event.detail?.agentId === agent.id && event.detail.agent) Object.assign(agent, event.detail.agent); };
   const typedReply = async event => {
-    if (!active || assistantMuted || !livePrefs.read_typed || event.detail.agentId !== agent.id || voiceBusy || state === 'speaking') return;
+    if (room || !active || assistantMuted || !livePrefs.read_typed || event.detail.agentId !== agent.id || voiceBusy || state === 'speaking') return;
     const mine = epoch;
     try {
       const prepared = await api('/api/bot-voice/speak/prepare', { method: 'POST', toast: false, body: JSON.stringify({ text: event.detail.text.slice(0, 100000), voice_id: null }) });

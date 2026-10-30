@@ -22,7 +22,7 @@ export async function mountRoom(host, options) {
   await Promise.all(CSS.map(file => loadBotsCss(`/static/css/${file}`)));
   if (options.signal?.aborted) throw new Error('Room closed.');
   applyBotsInterface();
-  let disposed = false, composer = null, draft = null, setup = null, dialog = null;
+  let disposed = false, composer = null, draft = null, setup = null, dialog = null, callAdapter = null;
   let selectedThread = options.threadId || null, draftThread = null, person = options.person || '', older = null, loadingAll = null;
   let selectionRevision = 0, switching = false;
   let readTimer = null, lastReadSeq = -1;
@@ -34,6 +34,7 @@ export async function mountRoom(host, options) {
   const title = Button({ label: 'Room', onClick: async () => { dialog = await openRoomPanel({ roomId, opener: title, signal: modalAbort.signal, onChanged: () => refresh() }); } });
   title.classList.add('bots-room-title');
   const members = h('div', { class: 'bots-room-faces', 'aria-label': 'Members' });
+  const callSlot = h('span', { class: 'bots-room-call' });
   const membersButton = Button({ label: 'Members', onClick: async () => { dialog = await openRoomMembers({ roomId, opener: membersButton, signal: modalAbort.signal, onChanged: () => refresh() }); } });
   const threadPicker = h('select', { 'aria-label': 'Room conversation' });
   const advanced = h('div', { class: 'bots-room-advanced' });
@@ -54,7 +55,7 @@ export async function mountRoom(host, options) {
   const transcriptHost = h('div', { class: 'bots-transcript-host' });
   const goalHost = h('div', { class: 'bots-room-goal-host', 'aria-live': 'polite' });
   const composerHost = h('div', { class: 'bots-composer-host' });
-  root.append(h('header', { class: 'bots-room-header' }, [title, threadPicker, members, advanced, membersButton]), findBar, error, banners, setupHost, empty, transcriptHost, goalHost, composerHost);
+  root.append(h('header', { class: 'bots-room-header' }, [title, threadPicker, members, advanced, callSlot, membersButton]), findBar, error, banners, setupHost, empty, transcriptHost, goalHost, composerHost);
   host.replaceChildren(root);
 
   const agentFor = botId => { const m = state.room?.members.find(m => memberId(m) === botId); return { ...m, id: botId, name: m?.name || 'Bot' }; };
@@ -128,6 +129,7 @@ export async function mountRoom(host, options) {
       responderSelect.value = room.default_responder.kind === 'member' ? room.default_responder.bot_id : room.default_responder.kind;
     }
     if (document.activeElement !== limit) limit.value = room.turn_timeout_minutes;
+    callSlot.hidden = !!room.archived_at || room.setup_state === 'pending' || !room.members.some(m => !m.held);
     members.replaceChildren(...room.members.map(m => h('button', { type: 'button', class: 'bots-room-face', 'data-bot-id': memberId(m), 'data-state': memberState(m),
       title: `${m.name}: ${memberStateLabel(m)}`, 'aria-label': `${m.name}: ${memberStateLabel(m)}`, onclick: () => membersButton.click() },
     [botKip(agentFor(memberId(m)), { size: 26, state: m.working ? 'working' : 'idle' }), m.held ? h('span', { class: 'bots-room-pause', text: 'Ⅱ', 'aria-hidden': 'true' }) : null])));
@@ -154,6 +156,19 @@ export async function mountRoom(host, options) {
       if (!setup) setup = mountSetup(setupHost, { room, call, onSaved: () => refresh() });
     } else { setup?.destroy(); setup = null; }
   }
+  // A group call with the room's members (agentCall.js room mode). It opens with the room's chosen responder.
+  const callable = () => (state.room?.members || []).filter(m => !m.held).map(memberId);
+  async function mountCall() {
+    if (callAdapter || options.readOnly) return;
+    const { agentCall } = await import('../agentCall.js');
+    if (disposed || callAdapter || !state.room) return;
+    callAdapter = agentCall({ id: `room-${roomId}`, roomId, name: state.room.name, call_mode: 'turns' }, {
+      roomId: () => roomId, sessionId: () => roomId, ensureSession: async () => roomId, memberIds: callable, memberName: id => agentFor(id).name,
+      agentId: () => { const r = state.room.default_responder, ids = callable(); return r?.kind === 'member' && ids.includes(r.bot_id) ? r.bot_id : ids[0]; },
+      busy: () => busy(), summarySaved: async () => { await refresh(); },
+    });
+    callSlot.replaceChildren(callAdapter.button);
+  }
   function makeComposer() {
     if (draftThread === state.threadId) return;
     composer?.dispose(); draftThread = state.threadId;
@@ -177,6 +192,7 @@ export async function mountRoom(host, options) {
     if (state.threadId === tid) page.messages = mergeMessages(state.messages, page.messages);
     model.hydrate({ room, page, queue, goal });
     selectedThread = state.threadId; switching = false; makeComposer(); clearError(); drawMessages(); paint();
+    mountCall().catch(() => {});
   }
   const stream = createRoomStream({ hydrate, sourceFactory: options.sourceFactory,
     apply: frame => { if (model.apply(frame)) { drawMessages(); paint(); options.onChanged?.(roomId); } }, onError: showError });
@@ -242,7 +258,7 @@ export async function mountRoom(host, options) {
   const offInterface = onBotsInterface(() => { paint(); composer?.paint(); });
   const poll = setInterval(() => { if (!document.hidden && !disposed) refresh(); }, 5000);
   const handle = { root, model, stream, refresh, flush: async () => ({ ok: draft?.flush() !== false }), focus: () => composer?.focus(), exportRoom,
-    destroy() { if (disposed) return; disposed = true; findRevision++; clearInterval(poll); clearTimeout(readTimer); offInterface(); modalAbort.abort(); dialog?.close(); stream.destroy(); composer?.dispose(); setup?.destroy(); transcript.dispose(); root.remove(); options.signal?.removeEventListener('abort', handle.destroy); } };
+    destroy() { if (disposed) return; disposed = true; findRevision++; clearInterval(poll); callAdapter?.dispose(); clearTimeout(readTimer); offInterface(); modalAbort.abort(); dialog?.close(); stream.destroy(); composer?.dispose(); setup?.destroy(); transcript.dispose(); root.remove(); options.signal?.removeEventListener('abort', handle.destroy); } };
   options.signal?.addEventListener('abort', handle.destroy, { once: true });
   if (options.signal?.aborted) handle.destroy();
   try { await stream.start(); }

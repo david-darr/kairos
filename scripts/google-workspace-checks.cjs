@@ -149,7 +149,14 @@ module.exports = async ({ js: rendererJs, waitFor, capture, navigate, overflow, 
   await js("[...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
   await requestAfter(reads, initialMonthRead, r => r.path === '/api/calendar/events');
   await waitFor("(() => { const g=document.querySelector('.cal-grid'); return document.querySelectorAll('.cal-day').length === (document.documentElement.classList.contains('kairos-redesign') ? Number(g.style.getPropertyValue('--calendar-weeks')) * 7 : 42); })()");
-  await waitFor("!!document.querySelector('.cal-event-pill.cal-google-event')");
+  // A month cell shows two events and folds the rest into "+N more". On a busy day (the demo's events cluster around
+  // today) the Google events can be the folded ones, so then today's day panel, which lists them all, has to show them.
+  const googlePill = "!!document.querySelector('.cal-grid .cal-event-pill.cal-google-event')";
+  await waitFor(`${googlePill} || !!document.querySelector('.cal-grid .cal-day.today .cal-event-pill.overflow')`);
+  if (!await js(googlePill)) {
+    await js("document.querySelector('.cal-grid .cal-day.today').click()");
+    await waitFor("document.querySelector('.cal-day-panel')?.textContent.includes('Google project review')");
+  }
   await capture(label + '-calendar-month-google');
 
   if (await js("document.documentElement.classList.contains('kairos-redesign') && matchMedia('(min-width: 769px)').matches")) {

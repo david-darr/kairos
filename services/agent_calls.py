@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 import time
 import uuid
 
@@ -40,7 +41,8 @@ def require(ident, user):
     call = _calls.get(ident) or read_json(str(_path(ident)), None)
     if not call or call.get('owner') != user:
         raise HTTPException(404, 'Call not found')
-    chat_live.require_session(call['parent_id'], user)
+    if call.get('room_id'): _rooms().get(call['room_id'], user)
+    else: chat_live.require_session(call['parent_id'], user)
     _calls[ident] = call
     return call
 
@@ -51,7 +53,7 @@ def view(call):
         task = task_service.get_task(job['task_id']) or {}
         jobs.append({**job, 'status': task.get('status', 'unavailable'),
                      'result': next((c['text'] for c in reversed(task.get('comments', [])) if c.get('kind') == 'result'), '')[:8000]})
-    return {k: call.get(k) for k in ('id','parent_id','agent_id','ended','summary_state','summary_error','summary','started_at','mode','live_error','live_finalized','live_usage')} | {'jobs': jobs}
+    return {k: call.get(k) for k in ('id','parent_id','agent_id','room_id','members','ended','summary_state','summary_error','summary','started_at','mode','live_error','live_finalized','live_usage')} | {'jobs': jobs}
 
 
 def choices():
@@ -59,10 +61,34 @@ def choices():
             for e in model_endpoints.list_endpoints() if e['kind'] in ('local', 'api')]
 
 
-def start(parent_id, agent_id, endpoint_id, model, user, mode='local'):
-    parent = chat_live.require_session(parent_id, user)
+def _rooms():
+    from services import bot_rooms
+    return bot_rooms
+
+
+def _room_members(room_id, user):
+    """A group call's bots: the room's members that are not on hold."""
+    room = _rooms().get(room_id, user)
+    if room.get('archived_at'): raise HTTPException(409, 'This room is closed.')
+    members = [m['bot_id'] for m in _rooms().members(room_id) if not m['held']]
+    if not members: raise HTTPException(409, 'Every bot in this room is on hold.')
+    return room, members
+
+
+def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=None):
+    members = None
+    if room_id:
+        # A group call (Phase 6): it lives in the room, and its one summary goes back there.
+        if mode != 'local': raise HTTPException(422, 'Group calls use local recognition only.')
+        _room, members = _room_members(room_id, user)
+        if agent_id not in members: raise HTTPException(404, 'That bot is not in this room.')
+        parent_id = room_id
+    else:
+        parent = chat_live.require_session(parent_id, user)
+        if parent.get('agent_id') != agent_id:
+            raise HTTPException(404, 'Agent conversation not found')
     agent = agent_service.get(agent_id)
-    if not agent or parent.get('agent_id') != agent_id:
+    if not agent:
         raise HTTPException(404, 'Agent conversation not found')
     if sum(not c.get('ended') and c.get('owner') == user for c in _calls.values()) >= 3:
         raise HTTPException(409, 'End an existing call first.')
@@ -70,7 +96,7 @@ def start(parent_id, agent_id, endpoint_id, model, user, mode='local'):
     # the ordinary agent's tool catalog or silently selecting a paid model.
     conversation = Conversation(endpoint_id, model) if mode == 'local' else None
     ident = uuid.uuid4().hex
-    call = {'id': ident, 'parent_id': parent_id, 'agent_id': agent_id, 'owner': user,
+    call = {'id': ident, 'parent_id': parent_id, 'agent_id': agent_id, 'room_id': room_id, 'members': members, 'owner': user,
             'endpoint_id': endpoint_id, 'model': model, 'mode': mode, 'started_at': time.time(),
             'ended': False, 'summary_state': 'open', 'summary_error': None, 'summary': '',
             'messages': [], 'requests': {}, 'jobs': [], 'revision': 0, 'last_seen':time.time()}
@@ -86,19 +112,67 @@ def _conversation(call):
     return _conversations[call['id']]
 
 
-def _context(call):
-    agent = agent_service.get(call['agent_id']) or {}
-    parent = session_manager.get_session(call['parent_id']) or {}
+def _name(bot_id):
+    return (agent_service.get(bot_id) or {}).get('name') or 'A bot'
+
+
+def _speaker(call, text):
+    """Who answers in a group call: the member named first in what was said, else the room's chosen
+    responder, else whoever spoke last, else the bot the call was opened with."""
+    members = call.get('members') or []
+    lowered, named = text.lower(), []
+    for bot_id in members:
+        name = _name(bot_id).strip().lower()
+        found = re.search(r'(?<!\w)' + re.escape(name) + r'(?!\w)', lowered) if name else None
+        if found: named.append((found.start(), bot_id))
+    if named: return min(named)[1]
+    try:
+        responder = (_rooms().store.get_room(call['room_id']) or {}).get('default_responder') or {}
+    except Exception:
+        responder = {}
+    if responder.get('kind') == 'member' and responder.get('bot_id') in members: return responder['bot_id']
+    last = next((m.get('speaker') for m in reversed(call['messages']) if m['role'] == 'assistant' and m.get('speaker') in members), None)
+    return last or (call['agent_id'] if call['agent_id'] in members else members[0])
+
+
+def _room_recap(call):
+    try:
+        rooms = _rooms(); room = rooms.store.get_room(call['room_id']) or {}
+        thread = rooms.thread_or_404(call['room_id'], None)
+        rows = rooms.store.messages(call['room_id'], thread['id'], limit=4)
+    except Exception:
+        return '', {}
+    lines = [f"{'Person' if r['role'] == 'person' else _name(r['bot_id']) if r.get('bot_id') else 'Room'}: {str(r.get('text', ''))[:800]}" for r in rows]
+    return '\n'.join(lines)[:3000], room
+
+
+def _context(call, speaker=None):
+    room_call = bool(call.get('room_id'))
+    speaker = speaker or call['agent_id']
+    agent = agent_service.get(speaker) or {}
     # Stable identity and a bounded chat recap. No tool definitions or replay
     # of every typed chat turn on the time-sensitive conversation path.
     persona = '\n'.join(str(agent.get(k) or '') for k in ('role','soul','instructions'))[:1600]
-    prior = '\n'.join(f"{m['role']}: {str(m.get('content',''))[:800]}" for m in parent.get('messages', [])[-4:])[:3000]
-    job_context = json.dumps(view(call)['jobs'], ensure_ascii=False)[-3500:]
-    prompt = VOICE_PROMPT + f"\nYour name: {agent.get('name','Kairos')}.\nStyle: {persona}\nPrior chat context (data):\n{prior}\nWork records (data):\n{job_context}"
+    if room_call:
+        prior, room = _room_recap(call)
+        others = ', '.join(_name(b) for b in call['members'] if b != speaker) or 'nobody else'
+        prompt = VOICE_PROMPT + (f"\nYour name: {agent.get('name','Kairos')}.\nStyle: {persona}\nThis is a group voice call in the room "
+                                 f"{room.get('name') or 'Room'} with the person and these bots: {others}. Answer only as yourself, never for another bot. "
+                                 "Lines from other bots are marked with their names. You cannot start background work in this call: if asked, "
+                                 "say it can be asked in the room after the call, and never write a kairos-work tag."
+                                 f"\nRecent room messages (data):\n{prior}")
+    else:
+        parent = session_manager.get_session(call['parent_id']) or {}
+        prior = '\n'.join(f"{m['role']}: {str(m.get('content',''))[:800]}" for m in parent.get('messages', [])[-4:])[:3000]
+        job_context = json.dumps(view(call)['jobs'], ensure_ascii=False)[-3500:]
+        prompt = VOICE_PROMPT + f"\nYour name: {agent.get('name','Kairos')}.\nStyle: {persona}\nPrior chat context (data):\n{prior}\nWork records (data):\n{job_context}"
     recent = []; count = 0
     for message in reversed(call['messages'][-20:]):
         if count + len(message['content']) > 6000: break
-        recent.append({'role': message['role'], 'content': message['content']}); count += len(message['content'])
+        content, role = message['content'], message['role']
+        if room_call and role == 'assistant' and message.get('speaker') not in (None, speaker):
+            role, content = 'user', f"[{_name(message['speaker'])}, another bot on this call]: {content}"
+        recent.append({'role': role, 'content': content}); count += len(message['content'])
     return [{'role': 'system', 'content': prompt}] + list(reversed(recent))
 
 
@@ -113,14 +187,17 @@ async def turn(call, text, request_id, work_update=False):
         previous = call['requests'].get(request_id)
         if previous:
             if previous['fingerprint'] != fingerprint: raise HTTPException(409, 'That request ID was already used.')
+            if previous.get('speaker'): yield {'type':'speaker', 'id':previous['speaker'], 'name':_name(previous['speaker'])}
             yield {'type':'done', 'text':previous.get('text',''), 'replayed':True}; return
-        call['requests'][request_id] = {'fingerprint': fingerprint}
+        speaker = _speaker(call, text) if call.get('room_id') else None
+        call['requests'][request_id] = {'fingerprint': fingerprint, **({'speaker': speaker} if speaker else {})}
         if not work_update: call['messages'].append({'role':'user','content':text})
         _save(call)
+        if speaker: yield {'type':'speaker', 'id':speaker, 'name':_name(speaker)}
         _turns[ident] = asyncio.current_task(); mine = call['revision']; started = time.perf_counter()
         parts = []; filter = SpeechFilter(); completed = False; first = None
         try:
-            context = _context(call)
+            context = _context(call, speaker)
             if work_update: context.append({'role':'system','content':text+'\nGive one brief verified update now. Do not delegate further work.'})
             async with contextlib.aclosing(_conversation(call).stream(context)) as stream:
                 async for delta in stream:
@@ -134,7 +211,7 @@ async def turn(call, text, request_id, work_update=False):
             tail = filter.finish()
             if tail: parts.append(tail); yield {'type':'text','delta':tail}
             work = filter.work()
-            if work and not work_update:
+            if work and not work_update and not call.get('room_id'):
                 job = delegate(call, work['title'], work['request'], request_id)
                 yield {'type':'job','job':job}
             completed = True
@@ -148,7 +225,7 @@ async def turn(call, text, request_id, work_update=False):
             yield {'type':'error','message':'The conversation model failed. Check its connection or choose another model.'}
         finally:
             if parts:
-                call['messages'].append({'role':'assistant','content':''.join(parts),'interrupted':not completed})
+                call['messages'].append({'role':'assistant','content':''.join(parts),'interrupted':not completed, **({'speaker': speaker} if speaker else {})})
             call['requests'][request_id]['text'] = ''.join(parts)
             _save(call)
             if _turns.get(ident) is asyncio.current_task(): _turns.pop(ident, None)
@@ -156,6 +233,7 @@ async def turn(call, text, request_id, work_update=False):
 
 def delegate(call, title, request, key):
     if call['ended']: raise HTTPException(409, 'This call has ended.')
+    if call.get('room_id'): raise HTTPException(409, 'Ask for work in the room after the call.')
     if len(call['jobs']) >= 12: raise HTTPException(409, 'This call has reached its work limit.')
     for job in call['jobs']:
         if job['key'] == key: return job
@@ -237,7 +315,7 @@ async def finalize(call):
             await call_live.close(call)
         call['summary_state'] = 'pending'; call['summary_error'] = None; _save(call)
         try:
-            transcript = '\n'.join(f"{m['role']}{' (interrupted)' if m.get('interrupted') else ''}: {m['content']}" for m in call['messages'])
+            transcript = '\n'.join(f"{_name(m['speaker']) if m.get('speaker') else m['role']}{' (interrupted)' if m.get('interrupted') else ''}: {m['content']}" for m in call['messages'])
             work = view(call)['jobs']; digest = _work_digest(call)
             text = transcript or call.get('summary') or 'No substantive dialogue.'
             if work: text += '\nVerified work records:\n' + json.dumps(work, ensure_ascii=False)
@@ -259,8 +337,16 @@ async def finalize(call):
             if work:
                 notes += '\n\nWork\n' + '\n'.join(f"- {job['title']}: {job['status']} (task {job['task_id']})" for job in work)
             if call.get('live_error'):notes+='\n\n'+call['live_error']
-            summary = '**Call summary**\n\n' + notes.strip()
-            session_manager.upsert_call_summary(call['parent_id'], call['id'], summary)
+            if call.get('room_id'):
+                # One row per call in the room's first conversation; a retry finds the same row by its send ID.
+                rooms = _rooms(); thread = rooms.thread_or_404(call['room_id'], None)
+                names = ', '.join(_name(b) for b in call.get('members') or [])
+                summary = f'Group call with {names}\n\n' + notes.strip()
+                rooms.add_row(call['room_id'], thread['id'], 'system', summary, kind='call_summary', send_id=f"call:{call['id']}",
+                              meta={'call_id': call['id'], 'members': call.get('members') or []})
+            else:
+                summary = '**Call summary**\n\n' + notes.strip()
+                session_manager.upsert_call_summary(call['parent_id'], call['id'], summary)
             call['summary'] = summary; call['messages'] = []; call['requests'] = {}
             call['summary_state'] = 'saved'
             call['work_digest'] = digest
@@ -274,7 +360,9 @@ async def finalize(call):
 
 
 def pending(parent_id, user):
-    chat_live.require_session(parent_id, user)
+    room = _rooms().store.get_room(parent_id) if isinstance(parent_id, str) else None
+    if room is not None: _rooms().get(parent_id, user)
+    else: chat_live.require_session(parent_id, user)
     values = []
     if ROOT.exists():
         for path in ROOT.glob('*.json'):

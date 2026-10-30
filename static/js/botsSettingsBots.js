@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { h, Card, SwitchRow, Button, NavRow, loadBotsCss } from './botsUi.js';
-import { applyBotsPrefs, getPref, setPref } from './botsPrefs.js';
+import { applyBotsPrefs, getPref, setPref, sidebarDensity, setSidebarDensity } from './botsPrefs.js';
 
 export async function mount(host, ctx = {}) {
   loadBotsCss('/static/css/bots-prefs.css'); applyBotsPrefs();
@@ -12,6 +12,13 @@ export async function mount(host, ctx = {}) {
     select.value = getPref(name); select.onchange = () => { setPref(name, select.value); status.textContent = 'Saved on this device.'; };
     return h('label', { class: 'bots-row' }, [h('span', { class: 'bots-row-title', text: title }), select]);
   };
+  // The sidebar keeps its layout per person, so the row waits for the signed-in name before it shows a value.
+  let person = 'local';
+  const density = h('select', { 'aria-label': 'Sidebar density', disabled: true },
+    [['comfortable', 'Comfortable'], ['compact', 'Compact'], ['icons', 'Icons only']].map(([value, text]) => h('option', { value, text })));
+  density.onchange = () => { setSidebarDensity(person, density.value); status.textContent = 'Saved on this device.'; };
+  const densityReady = () => { if (!dead) { density.value = sidebarDensity(person); density.disabled = false; } };
+  api('/api/auth/status', { signal: abort.signal, toast: false }).then(found => { person = found?.username || 'local'; densityReady(); }).catch(densityReady);
   const toggle = (name, title) => SwitchRow({ title, checked: getPref(name) === 'true', onChange: value => { setPref(name, String(value)); status.textContent = 'Saved on this device.'; } });
   const replay = async (path, name) => {
     try {
@@ -42,7 +49,7 @@ export async function mount(host, ctx = {}) {
     choose('sendKey', 'Send key', [['enter', 'Enter'], ['shift-enter', 'Shift + Enter'], ['mod-enter', 'Ctrl or Cmd + Enter']]),
     choose('width', 'Chat width', [['default', 'Default'], ['wide', 'Wide'], ['full', 'Full']]),
     choose('font', 'Chat font', [['inter', 'Inter'], ['system', 'System'], ['serif', 'Serif']]),
-    toggle('bubbles', 'Colour user bubbles'), toggle('threads', 'Show threads'), toggle('pins', 'Pinned circles'), toggle('runCard', 'Run card'), toggle('tools', 'Show tool calls'),
+    toggle('bubbles', 'Colour user bubbles'), toggle('threads', 'Show threads'), toggle('pins', 'Pinned circles'), h('label', { class: 'bots-row' }, [h('span', { class: 'bots-row-title', text: 'Sidebar density' }), density]), toggle('runCard', 'Run card'), toggle('tools', 'Show tool calls'),
   ] }), Card({ label: 'New bots', children: [defaults, h('label', { class: 'bots-row' }, [h('span', { text: 'Thread concurrency' }), concurrency])] }),
   Card({ label: 'Get started', children: [Button({ label: 'Replay tour', onClick: () => replay('./botsTour.js', 'tour') }),
     Button({ label: 'Replay welcome', onClick: () => replay('./botsWelcome.js', 'welcome') }),

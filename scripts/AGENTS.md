@@ -57,14 +57,14 @@ Tests, Electron checks and helpers. Every suite runs on its own, with temp data
 
 Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, onboarding):
 - `bots-check-support.cjs`, `bots-chief-checks.cjs`, `bots-datapanel-checks.cjs`, `bots-delegation-checks.cjs`, `bots-fdbot-checks.cjs`.
-- `bots-fdwork-checks.cjs`, `bots-frontdesk-checks.cjs`, `bots-onboarding-checks.cjs`, `bots-report-checks.cjs`, `bots-room-ui-checks.cjs`.
-- `bots-rooms-checks.cjs`, `bots-teams-ui-checks.cjs`, `bots-usage-checks.cjs`, `bots-voice-checks.cjs`, `bots-widgets-checks.cjs`.
+- `bots-fdwork-checks.cjs`, `bots-frontdesk-checks.cjs`, `bots-groupcall-checks.cjs`, `bots-onboarding-checks.cjs`, `bots-report-checks.cjs`.
+- `bots-room-ui-checks.cjs`, `bots-rooms-checks.cjs`, `bots-teams-ui-checks.cjs`, `bots-usage-checks.cjs`, `bots-voice-checks.cjs`, `bots-widgets-checks.cjs`.
 - `bots-workbench-checks.cjs`, `test_bots_assignments.py`, `test_bots_backup.py`, `test_bots_browser_profiles.py`, `test_bots_chief.py`.
 - `test_bots_computer_limits.py`, `test_bots_data.py`, `test_bots_data_guard.py`, `test_bots_data_model.cjs`, `test_bots_delegation.cjs`.
 - `test_bots_departments.py`, `test_bots_fallback.py`, `test_bots_fdbot.py`, `test_bots_fdbrief.py`, `test_bots_fdcards_wire.cjs`.
 - `test_bots_fdmake.py`, `test_bots_fdtools.py`, `test_bots_fdwatch.py`, `test_bots_fdwatch_safety.py`, `test_bots_fdwork.py`.
-- `test_bots_fdwork_api.py`, `test_bots_frame_policy.py`, `test_bots_frontdesk_cards.cjs`, `test_bots_frontdesk_model.cjs`, `test_bots_help_wiring.py`.
-- `test_bots_incidents.py`, `test_bots_integration.py`, `test_bots_loop_guard.py`, `test_bots_onboarding.py`, `test_bots_package.py`.
+- `test_bots_fdwork_api.py`, `test_bots_frame_policy.py`, `test_bots_frontdesk_cards.cjs`, `test_bots_frontdesk_model.cjs`, `test_bots_group_call.py`.
+- `test_bots_help_wiring.py`, `test_bots_incidents.py`, `test_bots_integration.py`, `test_bots_loop_guard.py`, `test_bots_onboarding.py`, `test_bots_package.py`.
 - `test_bots_peers.py`, `test_bots_report.py`, `test_bots_room_goals.py`, `test_bots_room_guard.py`, `test_bots_room_holds.py`.
 - `test_bots_room_model.cjs`, `test_bots_room_routes.py`, `test_bots_room_stream.cjs`, `test_bots_room_turns.py`, `test_bots_rooms.py`.
 - `test_bots_rooms_fixture.cjs`, `test_bots_rooms_static.py`, `test_bots_scout.py`, `test_bots_send_context.py`, `test_bots_setup.py`.

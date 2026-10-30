@@ -18,6 +18,7 @@ class Start(BaseModel):
     agent_id: str
     endpoint_id: str
     model: str | None = Field(default=None, max_length=160)
+    room_id: str | None = Field(default=None, max_length=64)
 
 class Turn(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
@@ -92,7 +93,7 @@ async def pending(parent_id: str, user: str = Depends(require_admin)):
 
 @router.post('')
 async def start(body: Start, user: str = Depends(require_admin)):
-    try: return calls.start(body.parent_id, body.agent_id, body.endpoint_id, body.model, user)
+    try: return calls.start(body.parent_id, body.agent_id, body.endpoint_id, body.model, user, room_id=body.room_id)
     except ValueError as error: raise HTTPException(422, str(error)) from error
 
 @router.get('/{ident}')

@@ -1,24 +1,25 @@
 import { api } from './api.js';
 import { h, Button, loadBotsCss } from './botsUi.js';
 
-export function mountCallBar({ agent, snapshot, mute, hangup, restore, onSettings }) {
+export function mountCallBar({ agent, members = null, snapshot, mute, hangup, restore, onSettings }) {
   loadBotsCss('/static/css/bots-voice.css');
   const root = h('section', { class: 'bots-call-bar', 'data-section': 'call', 'data-floating': '', 'data-app-mode': 'bots', 'aria-label': 'Current call' });
   const clock = h('span', { 'data-call-clock': '', role: 'status' });
   const muteButton = Button({ label: 'Mute', onClick: () => mute() });
   const back = Button({ label: 'Return to call', onClick: restore });
   const settings = Button({ label: 'Call settings', onClick: () => { restore(); onSettings?.(); } });
-  root.append(h('span', { class: 'bots-call-dot', 'aria-hidden': 'true' }), clock, muteButton,
+  const people = members?.length ? h('span', { class: 'bots-call-members', text: `With ${members.join(', ')}` }) : null;
+  root.append(h('span', { class: 'bots-call-dot', 'aria-hidden': 'true' }), clock, people, muteButton,
     Button({ label: 'Hang up', onClick: hangup }), settings, back);
   document.body.append(root);
   function refresh() {
     const state = snapshot();
     const seconds = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
-    clock.textContent = `Call with ${agent.name} · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    clock.textContent = `${members ? 'Group call in' : 'Call with'} ${agent.name} · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
     root.hidden = !state.active || !state.minimized;
     muteButton.textContent = state.muted ? 'Unmute' : 'Mute'; muteButton.setAttribute('aria-pressed', String(state.muted));
     // The current conversation gets the bar above its composer. Else it is a return pill.
-    const composer = document.querySelector(`[data-agent-id="${CSS.escape(agent.id)}"] .bots-composer`);
+    const composer = document.querySelector(agent.roomId ? `.bots-room[data-room-id="${CSS.escape(agent.roomId)}"] .bots-composer` : `[data-agent-id="${CSS.escape(agent.id)}"] .bots-composer`);
     if (composer && state.minimized) { composer.before(root); delete root.dataset.floating; }
     else if (!root.dataset.floating && !composer) { document.body.append(root); root.dataset.floating = ''; }
   }

@@ -6,7 +6,7 @@ import { botKip } from './botsKip.js';
 export function chipLabel(message) {
   const meta = message.meta || {};
   if (message.kind === 'handoff') return ({ consult: 'Asked', notify: 'Notified', work: 'Delegated' }[meta.mode || message.mode] || 'Handed over') + (meta.partner?.name ? ` to ${meta.partner.name}` : '');
-  return { incident: 'Needs attention', posted_in: 'Posted in', held: 'On hold', stopped_here: 'Stopped here', repeat: 'Repeated call', webhook_post: 'From a webhook', card: 'Work report', activity: 'Activity' }[message.kind] || 'Room update';
+  return { incident: 'Needs attention', posted_in: 'Posted in', held: 'On hold', stopped_here: 'Stopped here', repeat: 'Repeated call', webhook_post: 'From a webhook', card: 'Work report', activity: 'Activity', call_summary: 'Call summary' }[message.kind] || 'Room update';
 }
 export function teamChip(row, ctx = {}) {
   loadBotsCss('/static/css/bots-rooms.css');
@@ -25,7 +25,7 @@ export function teamChip(row, ctx = {}) {
   if ((meta.retry || failed) && ctx.canRetry?.(message)) root.append(Button({ label: 'Retry', onClick: () => ctx.onRetry?.(message) }));
   return root;
 }
-export const TEAM_ROW_KINDS = ['chip', 'handoff', 'incident', 'posted_in', 'held', 'stopped_here', 'goal', 'repeat', 'webhook_post', 'card', 'activity'];
+export const TEAM_ROW_KINDS = ['chip', 'handoff', 'incident', 'posted_in', 'held', 'stopped_here', 'goal', 'repeat', 'webhook_post', 'card', 'activity', 'call_summary'];
 export function registerTeamRows() {
   const off = TEAM_ROW_KINDS.map(kind => registerRowRenderer(kind, teamChip));
   return () => off.reverse().forEach(fn => fn());

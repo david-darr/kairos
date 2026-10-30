@@ -31,7 +31,7 @@ module.exports = ({ state }) => {
         if (route === '/api/speech/prepare' && method === 'POST') return { prepare_ms: 1, engine: 'cpu' };
         if (route === '/api/agent-calls' && method === 'POST') {
           const id = ((s.callCounter = (s.callCounter || 0) + 1)).toString(16).padStart(32, '0');
-          s.calls ||= {}; return s.calls[id] = { id, parent_id: body.parent_id, ended: false, summary_state: 'open', jobs: [] };
+          s.calls ||= {}; return s.calls[id] = { id, parent_id: body.parent_id, agent_id: body.agent_id, room_id: body.room_id || null, ended: false, summary_state: 'open', jobs: [] };
         }
         const match = /^\/api\/agent-calls\/([a-f0-9]{32})\/(prepare|end|interrupt)$/.exec(route);
         if (match && method === 'POST') {

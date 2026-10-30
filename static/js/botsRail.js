@@ -196,6 +196,9 @@ export function mountBotsRail(nav) {
   addEventListener('resize', applyWidth);
 
   density.addEventListener('click', () => { savePrefs({ density: nextDensity(prefs.density) }); applyWidth(); draw(true); announce(`Sidebar density: ${prefs.density}`); });
+  // The same choice from Settings > Bots (botsPrefs.js setSidebarDensity).
+  const onPrefs = event => { if (event.detail?.name !== 'density' || event.detail.value === prefs.density) return; savePrefs({ density: event.detail.value }); applyWidth(); draw(true); };
+  document.addEventListener('kairos:bots-prefs', onPrefs);
   const live = h('div', { class: 'bots-rail-live', role: 'status', 'aria-live': 'polite' });
   section.append(live);
   function announce(text) { live.textContent = ''; setTimeout(() => { if (!disposed) live.textContent = text; }, 30); }
@@ -697,6 +700,7 @@ export function mountBotsRail(nav) {
     document.removeEventListener('jarvis:agents-changed', refresh);
     document.removeEventListener('kairos:bots-selected', onSelected);
     document.removeEventListener('kairos:bots-threads-changed', onSelected);
+    document.removeEventListener('kairos:bots-prefs', onPrefs);
     desktop.removeEventListener('change', applyWidth); removeEventListener('resize', applyWidth);
     root.style.removeProperty('--sidebar-width'); delete root.dataset.botsDensity;
     separator.remove();
