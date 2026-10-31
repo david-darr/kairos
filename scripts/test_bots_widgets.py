@@ -323,7 +323,7 @@ class PressTests(Base):
         self.press(shown, send_id="send-0011", values={})
         self.assertIsNotNone(widgets.get(self.sid, shown["message_id"])["settled"])
 
-    def test_rooms_are_refused_until_phase_four(self):
+    def test_a_seat_session_press_is_sent_to_its_room(self):
         shown = self.show()
         with patch.object(session_manager, "get_session", wraps=session_manager.get_session) as _:
             from services import chat_live

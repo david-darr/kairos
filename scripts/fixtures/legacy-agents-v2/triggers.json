@@ -1,0 +1,27 @@
+{
+ "triggers": {
+  "6e56a65868dd": {
+   "id": "6e56a65868dd",
+   "name": "GitHub pushes",
+   "enabled": true,
+   "preset": "github",
+   "action": "card",
+   "agent_id": "be2f9f9d07",
+   "task_id": null,
+   "endpoint_id": null,
+   "events": [
+    "push"
+   ],
+   "conditions": [],
+   "title_template": "",
+   "prompt_template": "",
+   "auto_run": false,
+   "deliver_to_channel": null,
+   "secret": "fixture-placeholder",
+   "created_at": 1793482363.9065547,
+   "last_event_at": null,
+   "log": []
+  }
+ },
+ "pending": {}
+}

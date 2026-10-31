@@ -311,3 +311,7 @@ def untrusted_text(text, taint):
     from core.untrusted import wrap_untrusted
     taint.mark("imported package")
     return wrap_untrusted("imported package", text)
+
+
+# Teams and rooms register themselves as sections (services/bot_package_sections.py).
+from services import bot_package_sections  # noqa: E402,F401

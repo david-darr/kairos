@@ -46,7 +46,7 @@ Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, on
 - `bot_apps.py`, `bot_audience.py`, `bot_backup.py`, `bot_browser_profiles.py`, `bot_chief.py`.
 - `bot_data.py`, `bot_data_cards.py`, `bot_data_charts.py`, `bot_data_guard.py`, `bot_data_load.py`.
 - `bot_departments.py`, `bot_fallback.py`, `bot_help.py`, `bot_incidents.py`, `bot_keep_warm.py`.
-- `bot_onboarding.py`, `bot_package.py`, `bot_package_import.py`, `bot_peers.py`, `bot_report.py`.
+- `bot_onboarding.py`, `bot_package.py`, `bot_package_import.py`, `bot_package_sections.py`, `bot_peers.py`, `bot_report.py`.
 - `bot_room_events.py`, `bot_room_goals.py`, `bot_room_guard.py`, `bot_room_holds.py`, `bot_room_turns.py`.
 - `bot_rooms.py`, `bot_scout.py`, `bot_setup.py`, `bot_spend.py`, `bot_sweeps.py`.
 - `bot_team_changes.py`, `bot_team_memory.py`, `bot_trace.py`, `bot_usage.py`, `bot_usage_alerts.py`.

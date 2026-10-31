@@ -288,6 +288,26 @@ module.exports = ({ state, now }) => {
         else drain(r, thread);
         return { _status: 202, message, queued: waiting, queue_id: row.id, held: wanted.hold, released: wanted.release };
       }
+      // Cards in rooms (services/bot_widgets.py): a check places a bot's card, then presses it like the person would.
+      if (sub === '/__fixture/card' && method === 'POST') {
+        if (!r.member_ids.includes(body.bot_id)) return refuse(404, 'that bot is not in this room');
+        const thread = threadOf(r, body.thread_id);
+        return add(r, thread.id, 'bot', body.widget?.title || 'Card', { bot_id: body.bot_id, kind: 'widget', meta: { widget: { rev: 1, doc: body.widget, settled: null } } });
+      }
+      if (sub === '/widgets/press' && method === 'POST') {
+        const card = (s.messages[r.id] || []).find(x => x.id === body.message_id && x.kind === 'widget');
+        if (!card) return refuse(404, 'That card is gone.');
+        const widget = card.meta.widget;
+        if (widget.settled) return widget.settled.send_id === body.send_id ? widget.settled.result : refuse(409, 'This card was already answered.');
+        if (body.rev !== widget.rev) return refuse(409, 'This card changed. Look at the new one.');
+        const bot = infos(r).find(i => i.bot_id === card.bot_id);
+        const answer = add(r, card.thread_id, 'person', `@${bot ? bot.name : 'Bot'} I answered the card "${widget.doc.title || 'card'}": ${body.ref}.`, { reply_to_id: card.id, send_id: body.send_id });
+        const result = { ok: true, message_id: answer.id };
+        card.meta = { ...card.meta, widget: { ...widget, settled: { ref: body.ref, label: body.ref, send_id: body.send_id, result } } };
+        (s.presses || (s.presses = [])).push({ room: r.id, ...body });
+        frame('room.message', r.id, { message: card });
+        return result;
+      }
       if (sub === '/holds' && method === 'POST') {
         if (!r.member_ids.includes(body.bot_id)) return refuse(404, 'that bot is not in this room');
         if (typeof body.held !== 'boolean') return refuse(422, 'held is true or false');

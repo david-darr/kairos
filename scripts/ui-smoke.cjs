@@ -1645,7 +1645,17 @@ app.whenReady().then(async () => {
           const card = title => `[...document.querySelectorAll((window._calendarCardScope || '.cal-day-panel') + ' .card')].find(c=>c.querySelector('.title')?.textContent===${JSON.stringify(title)})`;
           const completed = fixture(new URL('/api/calendar/events/e-completed', base));
           const completedCard = card(completed.title);
-          const showDay = start => js(`window._calendarCardScope = '.cal-selected-agenda'; if (!document.documentElement.classList.contains('kairos-redesign')) window._calendarCardScope = '.cal-day-panel'; document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]').click()`);
+          // A day in the next month is not in this month's grid on a phone ("Outside this month"), so step there first.
+          const showDay = async start => {
+            const cell = `document.querySelector('.cal-day[aria-label=${JSON.stringify(new Date(start).toDateString())}]:not([disabled])')`;
+            const target = new Date(start), want = target.getFullYear() * 12 + target.getMonth();
+            for (let step = 0; step < 3 && !await js(`!!${cell}`); step++) {
+              const shown = await js("(() => { const d = new Date(document.querySelector('.cal-day:not(.other-month)').getAttribute('aria-label')); return d.getFullYear() * 12 + d.getMonth(); })()");
+              await js(`document.querySelector(${JSON.stringify(want > shown ? '.cal-period-next' : '.cal-period-prev')}).click()`);
+              await waitFor(`!!document.querySelector('.cal-day:not(.other-month)') && (() => { const d = new Date(document.querySelector('.cal-day:not(.other-month)').getAttribute('aria-label')); return d.getFullYear() * 12 + d.getMonth() !== ${shown}; })()`);
+            }
+            return js(`window._calendarCardScope = '.cal-selected-agenda'; if (!document.documentElement.classList.contains('kairos-redesign')) window._calendarCardScope = '.cal-day-panel'; ${cell}.click()`);
+          };
           const showUpcoming = async () => {
             await js("window._previousCalendarTitle=document.querySelector('.cal-upcoming .cal-day-panel-title') || document.querySelector('.cal-day-panel-title'); window._calendarCardScope=document.documentElement.classList.contains('kairos-redesign') ? '.cal-upcoming' : '.cal-day-panel'; [...document.querySelectorAll('.cal-range-switch button')].find(b=>b.textContent==='Month').click()");
             await waitFor("document.querySelector('.cal-day-panel')?.getAttribute('aria-busy') === 'false' && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')!==window._previousCalendarTitle && document.querySelector((window._calendarCardScope || '.cal-day-panel') + ' .cal-day-panel-title')?.textContent==='Next 7 Days'");

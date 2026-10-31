@@ -235,7 +235,7 @@ export function renderWidget(message, ctx = {}) {
     if (built.error) { state.line = built.error; state.sendId = ''; draw(); return; }
     state.busy = true; state.line = ''; draw();
     try {
-      const res = await (ctx.fetcher || fetch)(`/api/bot-widgets/${encodeURIComponent(ctx.sessionId)}/press`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(built.body) });
+      const res = await (ctx.fetcher || fetch)(ctx.pressUrl || `/api/bot-widgets/${encodeURIComponent(ctx.sessionId)}/press`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(built.body) });
       if (!res.ok) {
         let detail = '';
         try { detail = (await res.json()).detail; } catch { /* no body */ }

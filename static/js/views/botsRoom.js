@@ -10,6 +10,7 @@ import { createBotDraft } from '../botsDrafts.js';
 import { renderMessageBody } from '../chatContent.js';
 import { roomCall, openRoomPanel, openRoomMembers, openRoomThreads, mountSetup } from '../botsRoomPanel.js';
 import { teamRowRenderers } from '../botsTeamChips.js';
+import { renderWidget } from '../botsWidget.js';
 import { goalCard } from '../botsGoalCard.js';
 
 const CSS = ['bots.css', 'bots-chat.css', 'bots-composer.css', 'bots-rooms.css'];
@@ -62,7 +63,10 @@ export async function mountRoom(host, options) {
   const busy = () => !!state.live.size || state.goal?.status === 'working' || !!state.room?.members.some(m => m.working || m.waiting);
   const newestRetry = () => { const m = state.messages.at(-1); return m && (m.meta?.retry || ['cancelled', 'interrupted', 'timed_out', 'stalled', 'provider_failed'].includes(m.meta?.outcome)) ? m : null; };
   const transcript = mountTranscript(transcriptHost, {
-    agent: { name: 'room' }, sessionId: '', room: true, speakerLabels: true, rowRenderers: teamRowRenderers,
+    agent: { name: 'room' }, sessionId: '', room: true, speakerLabels: true,
+    // A bot's card in the room (services/bot_widgets.py): drawn like a chat card, answered through the room.
+    rowRenderers: { ...teamRowRenderers, widget: row => renderWidget({ id: row.message.id, widget: row.message.meta?.widget },
+      { pressUrl: `${roomPath(roomId)}/widgets/press`, refresh: () => refresh() }) },
     messageAgent: m => agentFor(m.bot_id), liveAgent: entry => agentFor(entry.bot_id),
     kip: (bot, size, status) => botKip(bot, { size, state: status }),
     simple: () => !isAdvanced(), renderBody: (node, text, live) => renderMessageBody(node, text, '', true, { live }),

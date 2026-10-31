@@ -450,8 +450,57 @@ def append_rich_row(session_id: str, bot_id: str, kind: str, content: str, field
 _LOCK = threading.RLock()
 
 
+# -- cards in rooms ---------------------------------------------------------------------------
+# A bot answers in a room through its seat session, which the room never shows. A card it makes there is
+# posted into the room's transcript as a row from that bot (kind "widget", the card on meta.widget); the
+# person's press goes to that row and back into the room as "@Bot I answered the card ...", so the same
+# bot picks it up.
+
+def _seat(session_id: str) -> Optional[tuple[str, str]]:
+    try:
+        from core import bot_rooms_store
+        return bot_rooms_store.room_for_seat(session_id)
+    except Exception:
+        return None
+
+
+def _room_thread(room_id: str, bot_id: str) -> str:
+    from core import bot_rooms_store as store
+    from services import bot_rooms
+    running = next((t for t in store.turns(room_id, status="running") if t.get("bot_id") == bot_id), None)
+    return running["thread_id"] if running else bot_rooms.thread_or_404(room_id, None)["id"]
+
+
+def _room_card(room_id: str, message_id: str) -> dict:
+    from core import bot_rooms_store as store
+    message = store.get_message(room_id, str(message_id))
+    if not message or message.get("kind") != "widget" or not isinstance((message.get("meta") or {}).get("widget"), dict):
+        raise WidgetError("That card is gone.", 404)
+    return message
+
+
+def _room_save(room_id: str, message_id: str, widget: dict) -> None:
+    from core import bot_rooms_store as store
+    from services import bot_rooms
+    message = store.get_message(room_id, message_id)
+    updated = store.update_message(room_id, message_id, meta={**(message.get("meta") or {}), "widget": widget})
+    try:
+        from services import bot_room_events as feed
+        room = store.get_room(room_id)
+        feed.publish("room.message", room_id, {"message": bot_rooms.message_view(updated)}, room["owner"] if room else None)
+    except Exception:
+        pass
+
+
 def show(session_id: str, bot_id: str, doc: Any) -> dict:
     clean = validate(doc)
+    seat = _seat(session_id)
+    if seat:
+        from services import bot_rooms
+        room_id = seat[0]
+        message, _ = bot_rooms.add_row(room_id, _room_thread(room_id, bot_id), "bot", clean.get("title") or "Card", kind="widget",
+                                       bot_id=bot_id, meta={"widget": {"rev": 1, "doc": clean, "settled": None}})
+        return {"message_id": message["id"], "rev": 1, "room_id": room_id}
     message_id = append_rich_row(session_id, bot_id, "widget", clean.get("title") or "Card",
                                  {"widget": {"rev": 1, "doc": clean, "settled": None}})
     return {"message_id": message_id, "rev": 1}
@@ -459,6 +508,18 @@ def show(session_id: str, bot_id: str, doc: Any) -> dict:
 
 def update(session_id: str, message_id: str, doc: Any) -> dict:
     clean = validate(doc)
+    seat = _seat(session_id)
+    if seat:
+        with _LOCK:
+            message = _room_card(seat[0], message_id)
+            if message.get("bot_id") != seat[1]:
+                raise WidgetError("There is no card with that id in this conversation.", 404)
+            current = message["meta"]["widget"]
+            if current.get("settled"):
+                raise WidgetError("The person already answered that card. Show a new one instead.", 409)
+            rev = int(current.get("rev") or 1) + 1
+            _room_save(seat[0], message_id, {"rev": rev, "doc": clean, "settled": None})
+        return {"message_id": message_id, "rev": rev}
     with _LOCK:
         found = find_row(session_id, message_id)
         if not found or not isinstance(found[1].get("widget"), dict):
@@ -574,7 +635,7 @@ async def press(owner: str, session_id: str, body: dict, sender: Optional[Sender
     send = sender or bot_chat_service.send
     session, _bot = bot_chat_service.require(owner, session_id)
     if session.get("room_id") or (session.get("thread") or {}).get("room_id"):
-        raise WidgetError("Cards in rooms are not answered here yet.", 409)
+        raise WidgetError("Answer this card in its room.", 409)
     message_id, ref, send_id = body.get("message_id"), body.get("ref"), body.get("send_id")
     if not isinstance(send_id, str) or not 8 <= len(send_id) <= 100:
         raise WidgetError("This press needs a send id.")
@@ -619,6 +680,56 @@ async def press(owner: str, session_id: str, body: dict, sender: Optional[Sender
                 done = {**reserved, "result": result}
                 done.pop("pending", None)
                 set_fields(session_id, found[0], {"widget": {**state, "settled": done}})
+    return result
+
+
+async def press_room(owner: str, room_id: str, body: dict, sender=None) -> dict:
+    """The person pressed something on a card in a room. Validates the same way as a chat card, marks it
+    answered, and sends the answer into the room addressed to the bot that showed it."""
+    from core import bot_rooms_store as store
+    from services import bot_rooms, bot_room_turns
+    from services.agent_service import agent_service
+    bot_rooms.get(room_id, owner)
+    message_id, ref, send_id = str(body.get("message_id")), body.get("ref"), body.get("send_id")
+    if not isinstance(send_id, str) or not 8 <= len(send_id) <= 100:
+        raise WidgetError("This press needs a send id.")
+    with _LOCK:
+        message = _room_card(room_id, message_id)
+        state = message["meta"]["widget"]
+        settled = state.get("settled")
+        if settled and settled.get("send_id") == send_id:
+            if settled.get("pending"):
+                raise WidgetError("That answer is still being sent.", 409)
+            return settled["result"]
+        if body.get("rev") != state.get("rev"):
+            raise WidgetError("This card changed. Look at the new one.", 409)
+        if settled:
+            raise WidgetError("This card was already answered.", 409)
+        doc = state["doc"]
+        if ref not in refs_of(doc):
+            raise WidgetError("That button is not on this card.", 400)
+        values = _clean_values(doc, body.get("values"), body.get("other"))
+        label, text = describe_press(doc, ref, values)
+        text = scrub_credentials(text)
+        reserved = {"at": time.time(), "ref": ref, "label": label, "send_id": send_id, "result": None, "summary": text, "pending": True}
+        if not _keeps_open(doc, ref):
+            _room_save(room_id, message_id, {**state, "settled": reserved})
+    bot = agent_service.get(message.get("bot_id")) or {}
+    addressed = f"@{bot['name']} {text}" if bot.get("name") else text
+    try:
+        submit = sender or bot_room_turns.submit
+        result = submit(room_id, message["thread_id"], addressed, send_id, "text", owner, message_id)
+    except Exception:
+        with _LOCK:
+            if not _keeps_open(doc, ref) and store.get_message(room_id, message_id):
+                _room_save(room_id, message_id, {**state, "settled": None})
+        raise
+    result = {"ok": True, "message_id": (result or {}).get("message", {}).get("id")} if isinstance(result, dict) else {"ok": True}
+    if not _keeps_open(doc, ref):
+        with _LOCK:
+            done = {**reserved, "result": result}
+            done.pop("pending", None)
+            _room_save(room_id, message_id, {**state, "settled": done})
     return result
 
 

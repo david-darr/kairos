@@ -1,0 +1,84 @@
+{
+  "be2f9f9d07": {
+    "id": "be2f9f9d07",
+    "name": "Researcher",
+    "role": "Finds sources",
+    "blurb": "Digs up facts",
+    "instructions": "Always cite sources.\nPrefer primary sources.",
+    "revision": 1,
+    "endpoint_id": null,
+    "color": "#d9b260",
+    "enabled": true,
+    "daily_run_cap": 12,
+    "deliver_to_channel": null,
+    "integration_ids": null,
+    "keep_signed_in": true,
+    "memory_upkeep": true,
+    "peers": [],
+    "created_at": 1793482363.7255583,
+    "avatar": {
+      "version": 3,
+      "character": "ajar",
+      "shape": "tall",
+      "color": "#D9B260",
+      "acc": "none",
+      "finish": "flat"
+    }
+  },
+  "8e9300920e": {
+    "id": "8e9300920e",
+    "name": "Writer",
+    "role": "Drafts posts",
+    "blurb": "",
+    "instructions": "Write plainly for engineers.",
+    "revision": 1,
+    "endpoint_id": null,
+    "color": "#b9d2e3",
+    "enabled": true,
+    "daily_run_cap": 12,
+    "deliver_to_channel": null,
+    "integration_ids": null,
+    "keep_signed_in": false,
+    "memory_upkeep": false,
+    "peers": [
+      "be2f9f9d07"
+    ],
+    "created_at": 1793482363.7315586,
+    "soul": "You are Writer. Keep every draft under 300 words.",
+    "avatar": {
+      "version": 3,
+      "character": "ajar",
+      "shape": "tall",
+      "color": "#B9D2E3",
+      "acc": "none",
+      "finish": "flat"
+    }
+  },
+  "3e738253b1": {
+    "id": "3e738253b1",
+    "name": "Planner",
+    "role": "Plans the week",
+    "blurb": "",
+    "instructions": "",
+    "revision": 1,
+    "endpoint_id": null,
+    "color": "#e8c39e",
+    "enabled": true,
+    "daily_run_cap": 12,
+    "deliver_to_channel": null,
+    "integration_ids": null,
+    "keep_signed_in": false,
+    "memory_upkeep": false,
+    "peers": [],
+    "created_at": 1793482363.7335594,
+    "soul": "Plan the week around deep work.",
+    "avatar": {
+      "version": 3,
+      "character": "ajar",
+      "shape": "tall",
+      "color": "#E8C39E",
+      "acc": "none",
+      "finish": "flat"
+    }
+  }
+}

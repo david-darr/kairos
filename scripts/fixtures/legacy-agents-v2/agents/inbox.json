@@ -1,0 +1,26 @@
+[
+  {
+    "id": "892e08ebef54",
+    "agent_id": "be2f9f9d07",
+    "kind": "question",
+    "created_at": 1793482363.806382,
+    "status": "open",
+    "title": "Which sources count?",
+    "body": "Peer reviewed only, or blogs too?",
+    "card_id": null,
+    "task_id": null,
+    "answer": null
+  },
+  {
+    "id": "71001eed1a43",
+    "agent_id": "8e9300920e",
+    "kind": "report",
+    "created_at": 1793482363.8980577,
+    "status": "open",
+    "title": "Draft ready",
+    "body": "The launch post draft is in the chat.",
+    "card_id": null,
+    "task_id": null,
+    "answer": null
+  }
+]

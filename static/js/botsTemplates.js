@@ -93,9 +93,15 @@ export function mount(host, ctx = {}) {
       } else if (tab === 'share') {
         const agents = await api('/api/agents', { signal }); if (signal.aborted) return;
         const chosen = new Set(), status = el('p', { role: 'status' });
-        const options = { routines: true };
+        const options = { routines: true, sections: ['departments', 'rooms'] };
         const include = el('input', { type: 'checkbox', checked: true, 'aria-label': 'Include paused routines' });
         include.addEventListener('change', () => { options.routines = include.checked; });
+        // Their teams and rooms come along by default (services/bot_package_sections.py).
+        const sectionBox = (name, label) => {
+          const box = el('input', { type: 'checkbox', checked: true, 'aria-label': label });
+          box.addEventListener('change', () => { options.sections = box.checked ? [...new Set([...options.sections, name])] : options.sections.filter(s => s !== name); });
+          return el('label', { class: 'bots-lifecycle-row' }, [box, label]);
+        };
         content.replaceChildren(el('h2', { text: 'Share bot personas' }), el('p', { text: 'Preview what travels. Keys, models, access and chats stay here.' }));
         for (const agent of agents) { const box = el('input', { type: 'checkbox', 'aria-label': `Share ${agent.name}` }); box.addEventListener('change', () => box.checked ? chosen.add(agent.id) : chosen.delete(agent.id)); content.append(el('label', { class: 'bots-lifecycle-row' }, [box, el('span', { text: agent.name })])); }
         const previewHost = el('div'); const save = Button({ label: 'Download package', onClick: () => act(save, () => download('/packages/export', { bot_ids: [...chosen], options }, signal, 'bots.kairos.json'), status) }); save.hidden = true;
@@ -105,7 +111,7 @@ export function mount(host, ctx = {}) {
         }, status) });
         const invalidate = () => { save.hidden = true; previewHost.replaceChildren(); };
         content.addEventListener('change', invalidate, { signal });
-        content.append(el('label', { class: 'bots-lifecycle-row' }, [include, 'Include paused routines']), preview, previewHost, save, status);
+        content.append(el('label', { class: 'bots-lifecycle-row' }, [include, 'Include paused routines']), sectionBox('departments', 'Include their teams'), sectionBox('rooms', 'Include their rooms'), preview, previewHost, save, status);
         if (!agents.length) content.append(el('p', { text: 'Create a bot before sharing a package.' }));
       } else {
         const mod = await import('./botsBackup.js'); // Scout view lives here to keep the dialog owner small.

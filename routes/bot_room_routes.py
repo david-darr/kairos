@@ -64,6 +64,9 @@ class SendBody(Body):
     reply_to_id: str | None = Field(default=None, max_length=80)
 
 
+from routes.bot_widget_routes import Press  # noqa: E402  the same press body as a chat card
+
+
 class HoldBody(Body):
     bot_id: str = Field(min_length=1, max_length=80)
     held: bool
@@ -187,6 +190,18 @@ async def get_messages(room_id: str, thread_id: str | None = None, limit: int = 
 async def send_message(room_id: str, body: SendBody, user: str = Depends(require_admin)) -> dict:
     with _guard():
         return turns.submit(room_id, body.thread_id, body.text, body.send_id, body.mode, user, body.reply_to_id)
+
+
+@router.post("/{room_id}/widgets/press")
+async def press_card(room_id: str, body: "Press", user: str = Depends(require_admin)):
+    """A card a bot showed in this room (services/bot_widgets.py press_room)."""
+    from fastapi.responses import JSONResponse
+    from services import bot_widgets
+    try:
+        with _guard():
+            return await bot_widgets.press_room(user, room_id, body.model_dump())
+    except bot_widgets.WidgetError as error:
+        return JSONResponse({"detail": str(error)}, status_code=error.status)
 
 
 @router.post("/{room_id}/holds")
