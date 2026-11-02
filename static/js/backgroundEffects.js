@@ -170,6 +170,9 @@ export function mountBackgroundEffect(el, src, opts = {}) {
     if (disposed) return;
     if (el.isConnected) connected = true;
     else if (connected) { dispose(); return; }
+    // A reading taken where the owner used to be can stay stale after a move (Home parks the phone banner at 0x0 while
+    // the week loads, then moves it into the week card; seen 2026-11-02 left the halftone blank), so observe afresh.
+    if (el.parentNode !== placedIn) { placedIn = el.parentNode; intersection.unobserve(el); intersection.observe(el); }
     if (!visible()) { stop(); settle(); return; }
     if (building) return;
     if (dirty) { stop(); build(); return; }
@@ -179,7 +182,7 @@ export function mountBackgroundEffect(el, src, opts = {}) {
   }
   const owner = { wake };
   function invalidate() { dirty = true; ++revision; wake(); }
-  let seenWidth = el.clientWidth, seenHeight = el.clientHeight;
+  let seenWidth = el.clientWidth, seenHeight = el.clientHeight, placedIn = el.parentNode;
   const observer = new ResizeObserver(() => {
     if (seenWidth === el.clientWidth && seenHeight === el.clientHeight) return;
     seenWidth = el.clientWidth; seenHeight = el.clientHeight;

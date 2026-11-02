@@ -30,7 +30,10 @@ async function run(ctx) {
   const homeCards = phone ? 'Today,Pinned,Daily notes,Recently changed,Needs attention,Browse by property' : 'Browse by property,Today,Pinned,Daily notes,Recently changed,Needs attention';
   ok(await js(`[...document.querySelectorAll('.vault-home-card h3')].map(h => h.firstChild.textContent).join() === '${homeCards}'`), 'Home has its six cards, Browse by property first on desktop and last on a phone');
   if (!phone) ok(await js("(() => { const f = document.querySelector('.vault-home-filters').getBoundingClientRect(), g = document.querySelector('.vault-home-grid').getBoundingClientRect(); return [...document.querySelectorAll('.vault-home-card:not(.vault-home-filters)')].every(c => c.getBoundingClientRect().top >= f.bottom - 1) && Math.abs(f.left - g.left) < 2 && Math.abs(f.right - g.right) < 2; })()"), 'desktop: Browse by property spans the full width above every other card');
-  ok(await js("document.querySelectorAll('.vault-month-day.has-note').length >= 15"), 'the month strip marks the days with a note');
+  // The fixture has a daily note for each of the 24 days before today (today's is the one Home offers to create), so
+  // early in a month only the days so far can be marked (failed on 2026-11-02 when this asked for 15).
+  const marked = await js("[document.querySelectorAll('.vault-month-day.has-note').length, Math.min(15, new Date().getDate() - 1)]");
+  ok(marked[0] >= marked[1], `the month strip marks the days with a note (${marked[0]} marked, at least ${marked[1]} expected)`);
   ok(await js("[...document.querySelectorAll('.vault-home-card')].find(c => c.textContent.startsWith('Pinned')).textContent.includes('Projects')"), 'Pinned shows the pinned note');
   ok(await js("[...document.querySelectorAll('.vault-home-card')].find(c => c.textContent.startsWith('Recently changed')).textContent.includes('Chat: Connecting ideas across the vault')"), 'Recently changed names the chat that changed a note');
   if (phone) {

@@ -151,7 +151,9 @@ module.exports = async function homeChecks({ js, win, waitFor, capture, delay, n
       assert.deepEqual(await sections(), clear ? ['models', 'chats', 'schedule', 'system'] : ['needs', 'working', 'models', 'chats', 'schedule', 'system'], 'Phone uses the required section order');
       assert.ok(await js("[...document.querySelector('.dashboard-grid').children].every(n=>n.scrollWidth<=n.clientWidth+2)"), 'Phone cards fit');
       await capture(clear ? 'mobile-home-clear' : 'mobile-home');
-      await reload(); await hero(true); // Mounting at phone width also has no hero.
+      // Mounting at phone width also has no hero, and the halftone draws though the banner waited in Home's parking spot
+      // first (an in-view reading from there once left it blank; backgroundEffects.js wake re-observes after a move).
+      await reload(); await hero(true);
     }
     // Completely empty optional sections also disappear, including Model usage.
     demoState.empty = true; demoState.quotas = { providers: [] };

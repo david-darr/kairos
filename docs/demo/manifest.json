@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "1b55c0f49a07d3b4b90bdfd893fa0aa83d0d505c7a7169cd257c32cc8486161c",
+  "app.js": "2a5f66e5bb56d78a9533668340f39f041fa39f799d09aea93984dd9ccc2d561d",
   "fixtures.js": "a0b8bb7d8ce896779b513f8e33a80a10ea6d77b5b4794ac0a8362bdc01f32258",
   "index.html": "14a7a7ea494b328e1bea9ed53d134c70ad21689a581f70c3e2eb253c87774038",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1213,7 +1213,7 @@
   "static/js/artifactViewer.js": "70dab9f9f223670c2cba8c74892c7b32da3b9668bb14c21d050d28b6843d94ec",
   "static/js/auth.js": "4c4040def4d26054dd202af2322f0d5ee8bc7fd01921ddc4a82e116a8e2fc38e",
   "static/js/backgroundEffectPreferences.js": "309354a82b6f76a89be34638735ca0f49cf6b4335db896cc92ab2f58d61d2068",
-  "static/js/backgroundEffects.js": "7cf57d65e83721a98f2b498436a5d16add3fceefd14f99b1a13ee328d7158779",
+  "static/js/backgroundEffects.js": "8e41134a5937eb8c921ae6b6c800f86026ea5171f9a7bf4c01c0fcc13b5378e1",
   "static/js/backgroundTasks.js": "f4e1a920609362e3305fac72ba177eb919bb8521a630ae994ee61e7da04b683a",
   "static/js/botNotifications.js": "bc4af57a9f12713e084f1eee99d0fda64309ba0874d88ec1edc54bcb7f1105aa",
   "static/js/botStatus.js": "dd15a23f7e2e44d3a4dc4b8b0620ecab465b10f085e55755364f01c9cc79575a",
