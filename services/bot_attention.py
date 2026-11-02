@@ -25,7 +25,8 @@ def clean(value, limit=2000):
 
 
 def legacy_owner():
-    return auth_manager.sole_user() or (SINGLE_USER if not auth_manager.has_any_users() else None)
+    from core.auth import owner_or_default
+    return owner_or_default(None)
 
 
 def owner_of(record):
@@ -91,8 +92,18 @@ def _source_visible(source, user, agent=None):
 
 def target_for(agent_id, user, source=None):
     source = source or {}
-    sessions = _sessions(user, agent_id)
     direct = source.get("session_id") or source.get("origin_session_id") or source.get("reply_to")
+    # A room member asks in its seat session, which only the room shows: open the room (services/bot_rooms.py).
+    seat = direct or source.get("thread_id")
+    if seat:
+        try:
+            from core import bot_rooms_store
+            found = bot_rooms_store.room_for_seat(seat)
+        except Exception:
+            found = None
+        if found:
+            return {"tab": "botsRoom", "roomId": found[0]}
+    sessions = _sessions(user, agent_id)
     chosen = next((s for s in sessions if s["id"] == direct), None)
     if not chosen:
         chosen = next((s for s in sessions if (s.get("thread") or {}).get("main")), None)

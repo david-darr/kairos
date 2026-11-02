@@ -41,6 +41,24 @@ module.exports = async ({ js, waitFor, win, demoState, base, capture }) => {
     assert.ok(answer && answer.text.startsWith(`@Card Bo ${unique} I answered the card`), 'the answer is addressed to the bot that showed the card');
     await js('window.__cardRoom.refresh()');
     await waitFor(`!document.querySelector(${q(cardSel)}) || ![...document.querySelector(${q(cardSel)}).querySelectorAll('button')].some(b => b.textContent.trim() === 'Book it' && !b.disabled)`);
+
+    // A question a bot asks during its room turn waits in its seat conversation; the room shows it and answers it there
+    // (found live 2026-11-02: before, it showed nowhere and the room waited until the turn timed out).
+    const seat = (await call(`/api/bot-rooms/${roomId}`)).body.members.find(m => m.bot_id === bo).seat_session_id;
+    assert.ok(seat, 'each member has a seat conversation');
+    const asked = await call('/api/bot-cards/__fixture/open', 'POST', { kind: 'question', thread_id: seat, bot_id: bo, title: 'Which layout?',
+      questions: [{ id: 'q1', question: 'Which layout should it use?', options: [{ label: 'Two columns' }, { label: 'Tabs' }] }] });
+    assert.equal(asked.status, 200);
+    await js('window.__cardRoom.refresh()');
+    const seatSel = '.bots-room .bots-room-seat-card:not([hidden])';
+    await waitFor(`[...document.querySelectorAll(${q(seatSel)})].some(n => n.innerText.includes('Which layout should it use?'))`);
+    const fits = await js(`(()=>{const h=document.querySelector('.bots-room-seat-cards'),c=document.querySelector('.bots-room textarea');return !!c && h.getBoundingClientRect().height <= innerHeight * 0.45 + 1 && c.getBoundingClientRect().bottom <= innerHeight;})()`);
+    assert.ok(fits, 'the question is capped, so the composer stays on screen');
+    await js(`(()=>{const card=document.querySelector(${q(seatSel)});[...card.querySelectorAll('button,label,[role=radio]')].find(n=>n.innerText.trim().startsWith('Tabs')).click();return true;})()`);
+    await js(`(()=>{const card=document.querySelector(${q(seatSel)});[...card.querySelectorAll('button')].find(b=>['Submit','Send','Send answers'].includes(b.textContent.trim())).click();return true;})()`);
+    for (let i = 0; i < 60 && !(demoState.botsCards.answers || []).some(a => a.id === asked.body.id); i++) await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual((demoState.botsCards.answers || []).find(a => a.id === asked.body.id)?.answers, { q1: 'Tabs' }, 'the answer went to the seat card');
+    await waitFor(`!document.querySelector(${q(seatSel)})`);
   } finally {
     await js('window.__cardRoom?.destroy();window.__cardScratch?.remove();delete window.__cardRoom;delete window.__cardScratch;true').catch(() => {});
     if (roomId) await call(`/api/bot-rooms/${roomId}`, 'DELETE').catch(() => {});

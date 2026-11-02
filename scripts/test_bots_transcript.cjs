@@ -23,6 +23,11 @@ const load = file => import(pathToFileURL(path.join(__dirname, '..', 'static', '
   assert.match(T.dayLabel(at(2025, 9, 1), NOW), /2025/, 'another year names the year');
   assert.equal(T.dayLabel(NaN, NOW), '');
 
+  // A reply that failed before any text names the bot and the reason, never an empty bubble.
+  assert.equal(T.failedReplyText({ failure_kind: 'rate_limited' }, 'Ada'), 'Ada could not answer. The model is busy right now.');
+  assert.equal(T.failedReplyText({ failure_kind: 'request_error' }, 'Ada'), 'Ada could not answer. The request could not be sent to the model.');
+  assert.equal(T.failedReplyText({ failure_kind: 'model_error' }), 'The bot could not answer. The model stopped with an error.');
+
   // Rows: day markers, joined senders, a quiet gap, the unread divider.
   let rows = T.buildRows([msg('a', 'user', at(2026, 10, 28, 9)), msg('b', 'assistant', at(2026, 10, 28, 9, 1)), msg('c', 'assistant', at(2026, 10, 28, 9, 2)),
     msg('d', 'user', at(2026, 10, 29, 9)), msg('e', 'assistant', at(2026, 10, 29, 9, 1)), msg('f', 'assistant', at(2026, 10, 29, 12))], { now: NOW, readId: 'f' });

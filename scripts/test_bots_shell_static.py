@@ -140,6 +140,26 @@ class BotsShellStaticTests(unittest.TestCase):
                      "botsNavigation.js", "botsSidebarModel.js", "botsThreadMenu.js", "views/agents.js", "agentCreation.js", "agentProfile.js"):
             self.assertNotIn("—", text(JS / name), name)
 
+    def test_every_bots_link_into_settings_names_a_real_page(self):
+        # A wrong id silently opens Appearance (views/settings.js openSettingsWindow), so a typo here is a dead button.
+        pages = set(re.findall(r'\{\s*id:\s*"([a-z0-9-]+)",\s*label:', text(JS / "views" / "settings.js")))
+        self.assertIn("computer-use", pages)
+        links = []
+        for path in JS.glob("bots*.js"):
+            source = text(path)
+            links += [(path.name, s) for s in re.findall(r"tab:\s*'settings',\s*section:\s*'([a-z0-9-]+)'", source)]
+            links += [(path.name, s) for s in re.findall(r"go\('settings',\s*\{\s*section:\s*'([a-z0-9-]+)'", source)]
+        onboarding = (REPO / "services" / "bot_onboarding.py").read_text(encoding="utf-8")
+        links += [("bot_onboarding.py", s) for s in re.findall(r'one\("[a-z]+", "[^"]+", [^,]+, "([a-z0-9-]+)"\)', onboarding)]
+        self.assertGreaterEqual(len(links), 8)
+        self.assertEqual([link for link in links if link[1] not in pages], [])
+
+    def test_no_bots_module_hands_a_bare_null_to_the_dom(self):
+        # node.replaceChildren(a, cond ? b : null) prints "null" on the page (the Routines tab did); h() and el() skip it.
+        pattern = re.compile(r"\.(?:replaceChildren|append|prepend)\([^;]*\?\s*[\w.]+\s*:\s*null\)")
+        found = [(path.name, m.group(0)[:80]) for path in [*JS.glob("bots*.js"), *(JS / "views").glob("bots*.js")] for m in pattern.finditer(text(path))]
+        self.assertEqual(found, [])
+
 
 if __name__ == "__main__":
     unittest.main()

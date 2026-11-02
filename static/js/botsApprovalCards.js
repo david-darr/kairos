@@ -228,11 +228,14 @@ export async function mount(host, ctx = {}) {
     view.timer = setTimeout(() => refresh(), POLL_MS);
   }
 
+  // The poll redraws only when a card changed: a rebuild every few seconds would pull focus out of a half-typed answer.
+  let drawn = null;
   async function refresh() {
     if (view.disposed) return;
     await load();
     if (view.disposed) return;
-    render();
+    const now = JSON.stringify(view.cards);
+    if (now !== drawn) render();
     schedule();
   }
 
@@ -388,8 +391,10 @@ export async function mount(host, ctx = {}) {
     if (view.disposed) return;
     // Keep keyboard focus where it was when the panel rebuilds.
     const active = document.activeElement;
+    const typing = active?.matches?.('input[type=text], input:not([type]), textarea') ? active : null;
     const hadFocus = active && root.contains(active) ? { id: active.closest('[data-card-id]')?.dataset.cardId, action: active.dataset.action || '',
-      tab: active.getAttribute('role') === 'tab', option: active.matches('.bots-cards-option input') ? active.value : null } : null;
+      tab: active.getAttribute('role') === 'tab', option: active.matches('.bots-cards-option input') ? active.value : null,
+      field: typing ? { label: typing.getAttribute('aria-label') || typing.placeholder || '', start: typing.selectionStart, end: typing.selectionEnd } : null } : null;
     const { pending, settled } = splitCards(view.cards);
     ctx.onPending?.(pending.length > 0);
     const nodes = [];
@@ -400,13 +405,16 @@ export async function mount(host, ctx = {}) {
       for (const card of [...settled, ...pending]) nodes.push(cardRow(card));
     }
     root.replaceChildren(...nodes);
+    drawn = JSON.stringify(view.cards);
     root.dataset.pending = String(pending.length);
     if (hadFocus && hadFocus.id) {
       const scope = root.querySelector(`[data-card-id="${hadFocus.id}"]`);
       const target = !scope ? null : hadFocus.action ? scope.querySelector(`[data-action="${hadFocus.action}"]`)
         : hadFocus.tab ? scope.querySelector('[role="tab"][aria-selected="true"]')
-        : hadFocus.option !== null ? [...scope.querySelectorAll('.bots-cards-option input')].find(input => input.value === hadFocus.option) : null;
+        : hadFocus.option !== null ? [...scope.querySelectorAll('.bots-cards-option input')].find(input => input.value === hadFocus.option)
+        : hadFocus.field ? [...scope.querySelectorAll('input, textarea')].find(input => (input.getAttribute('aria-label') || input.placeholder || '') === hadFocus.field.label) : null;
       target?.focus();
+      if (target && hadFocus.field && typeof target.setSelectionRange === 'function') { try { target.setSelectionRange(hadFocus.field.start, hadFocus.field.end); } catch { /* not a text field */ } }
     }
     if (slot === 'transcript' && !view.change) mountChanges();
   }

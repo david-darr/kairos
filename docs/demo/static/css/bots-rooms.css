@@ -74,3 +74,7 @@
 @media (prefers-reduced-motion: reduce) {
   [data-app-mode="bots"] .bots-room *, [data-app-mode="bots"] .bots-room-dialog * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+/* A member's question or approval, raised in its seat session, answered in the room (botsRoom.js). */
+/* Shrinks into whatever height is left, with its own scroll, so a long question never pushes the composer off a phone screen. */
+[data-app-mode="bots"] .bots-room-seat-cards { display: grid; align-content: start; gap: 8px; padding: 0 16px; flex: 0 1 auto; min-height: 0; max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
+[data-app-mode="bots"] .bots-room-seat-card[hidden] { display: none; }

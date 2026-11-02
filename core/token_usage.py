@@ -97,6 +97,11 @@ def build_context_state(usage: dict | None, capacity: dict | None, model_id: str
         state["percent"] = round(min(used / effective, 1.0) * 100, 1)
         state["estimated_capacity"] = bool(capacity.get("estimated"))
         state["capacity_source"] = capacity.get("source")
+        # A reading the provider marks as summed over a turn's model calls (Codex with tool steps, core/codex_brain.py)
+        # is not one prompt; past the window it says nothing about fullness (707,646 against 258,400, seen 2026-11-02),
+        # so it keeps its count and gets no percent rather than claim the chat is full.
+        if usage.get("input_summed") and used > effective:
+            state["percent"], state["measurement"] = None, "summed"
     return state
 
 

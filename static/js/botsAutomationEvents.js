@@ -168,7 +168,7 @@ export async function runFix(item, ctx) {
       const run = item.routine?.runs.find(r => r.id === fix.runId) || item.routine?.lastRun;
       if (run?.threadId) ctx.openThread(item.botId, run.threadId);
       else toast('That run has no conversation to open.', 'error');
-    } else if (fix.kind === 'usage') ctx.go('settings', { section: 'usage' });
+    } else if (fix.kind === 'usage') ctx.go('settings', { section: 'bot-usage' });
     else if (fix.kind === 'reconnect') ctx.go('tool-store', {});
     else if (fix.kind === 'edit') ctx.edit(item);
     else if (fix.kind === 'run') {

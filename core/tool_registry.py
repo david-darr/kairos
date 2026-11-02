@@ -1878,7 +1878,8 @@ def _bot_scope(ctx: ToolContext) -> dict:
     session = session_manager.get_session(ctx.session_id) if ctx.session_id else None
     if session and session.get("agent_id") != ctx.agent_id:
         raise ValueError("This conversation belongs to another bot.")
-    owner = (session or {}).get("owner_user") or ctx.owner_user or task_scope.current_owner(ctx.agent_id) or SINGLE_USER
+    from core.auth import owner_or_default
+    owner = (session or {}).get("owner_user") or ctx.owner_user or task_scope.current_owner(ctx.agent_id) or owner_or_default(None) or SINGLE_USER
     return {"agent_id": ctx.agent_id, "bot_id": ctx.agent_id, "owner_user": owner, "owner": owner,
             "session_id": ctx.session_id, "is_admin": ctx.is_admin, "thread_id": ctx.session_id}
 

@@ -112,7 +112,12 @@ module.exports = ({ state, now }) => {
     }
     if (r.uploads && route === '/api/chat/validate-attachments' && method === 'POST') return { ok: true };
     let m;
-    if (route === '/api/bot-chat/presence' && method === 'POST') { r.log.push(['presence', body]); return { ok: true }; }
+    // routes/bot_chat_routes.py PresenceBody forbids other fields: a wrong name is a 422 there, so it is one here too.
+    if (route === '/api/bot-chat/presence' && method === 'POST') {
+      const extra = Object.keys(body || {}).filter(k => !['timezone', 'language', 'focused_thread'].includes(k));
+      if (extra.length) return { _status: 422, detail: `Unknown presence fields: ${extra.join(', ')}` };
+      r.log.push(['presence', body]); return { ok: true };
+    }
     if (!(m = route.match(/^\/api\/bot-chat\/([^/]+)\/(send|interrupt|regenerate|active-branch|pin|read|compact|queue\/resume|queue\/([^/]+)(?:\/(edit|steer))?|messages\/([^/]+)\/(edit|reaction))$/))) return undefined;
     if (state.botsRuntime?.convs?.[m[1]]) return undefined;   // the runtime fixture owns its own conversations
     if (!owned(m[1])) return undefined;   // not ours: fall through to the next fixture
@@ -122,6 +127,8 @@ module.exports = ({ state, now }) => {
       if (plan?.mode === 'before') throw new Refusal(plan.status || 503, 'The server is busy');
       if (!(body.attachment_ids || []).length) text(body.text);
       need(typeof body.send_id === 'string' && body.send_id.length >= 8, 400, 'send_id is required');
+      // services/bot_chat_service.py MODES: none, 'goal' or 'spoken'. Anything else is refused there, so here too.
+      need([undefined, null, 'goal', 'spoken'].includes(body.mode), 422, 'Unknown message mode');
       const fingerprint = JSON.stringify([body.text, body.attachment_ids || [], body.reply_to_id || null, body.mode || 'chat']);
       const seen = s.receipts[body.send_id];
       if (seen) { need(seen.fingerprint === fingerprint, 409, 'That send ID was used for a different message'); return seen.result; }

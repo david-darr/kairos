@@ -667,6 +667,7 @@ class CodexBrain:
         completed = False
         failure = None
         open_tools: set[str] = set()
+        stepped = False  # a tool step means more than one model call, so Codex's input_tokens is a sum
         while True:
             line = await self._next_line(proc)
             if not line:
@@ -693,7 +694,7 @@ class CodexBrain:
                 item = event["item"]
                 item_id = str(item.get("id") or "")
                 if item_id not in open_tools:
-                    open_tools.add(item_id)
+                    open_tools.add(item_id); stepped = True
                     yield runs.tool_started(item_id, *_codex_tool(item))
                 if etype == "item.completed":
                     open_tools.discard(item_id)
@@ -708,10 +709,11 @@ class CodexBrain:
                 # path does would double-count. Pre-summed here instead.
                 #
                 # input_tokens is kept alongside that pre-summed total
-                # (David's ask 2026-09-15, the context indicator): it is the
-                # size of the context this turn actually sent, which is a
-                # different quantity from the cumulative spend total above
-                # and cannot be recovered from it. Adding keys is safe for
+                # (David's ask 2026-09-15, the context indicator). For a
+                # one-call turn it is the size of the context sent; a turn
+                # with tool steps sums every call's input and is marked
+                # input_summed (core/token_usage.py build_context_state then
+                # drops the percent past the window). Adding keys is safe for
                 # the existing counter — core/token_usage.py's
                 # _extract_total_tokens() prefers an explicit "total_tokens"
                 # and returns early, so it never sees these and cannot
@@ -724,6 +726,7 @@ class CodexBrain:
                     "input_tokens": usage.get("input_tokens"),
                     "cached_input_tokens": usage.get("cached_input_tokens"),
                     "output_tokens": usage.get("output_tokens"),
+                    "input_summed": stepped,
                 }
             elif etype in ("error", "turn.failed"):
                 failure = event.get("message") or (event.get("error") or {}).get("message") or "Codex could not complete this turn"

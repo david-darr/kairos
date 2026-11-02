@@ -12,7 +12,9 @@ export function mountScout(host, { signal, showImport }) {
     try {
       const result = await request('/packages/scout', { path: path.value }, signal);
       if (destroyed || signal.aborted) return;
-      evidence.replaceChildren(...result.evidence.map(e => el('p', { text: `${e.key}: ${e.file}. ${e.reason}` })));
+      // Each row names the suggested bot and the file that suggested it ('.' is the folder as a whole).
+      const named = new Map((result.preview?.bots || []).map(bot => [bot.key, bot.name]));
+      evidence.replaceChildren(...result.evidence.map(e => el('p', { text: `${named.get(e.key) || e.key}${e.file === '.' ? '' : `, from ${e.file}`}: ${e.reason}` })));
       const next = Button({ label: 'Preview team', onClick: () => showImport(result) }); evidence.append(next); status.textContent = 'Suggested from files. Nothing has been created.';
     } catch (error) { if (!destroyed && !signal.aborted) status.textContent = failure(error); }
     finally { if (!destroyed) run.disabled = false; }

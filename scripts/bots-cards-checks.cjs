@@ -144,6 +144,10 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.match(await text('#cards-composer .bots-cards-count'), /2000 of 2000/);
     await fill('#cards-composer .bots-cards-custom', 'my own');
     assert.equal(await js("document.activeElement.className"), 'bots-cards-custom', 'typing keeps focus');
+    // The 3-second poll leaves an unchanged card alone: the same box keeps its text and the focus (found live 2026-11-02).
+    await js("document.querySelector('#cards-composer .bots-cards-custom').__kept = true");
+    await new Promise(r => setTimeout(r, 3800));
+    assert.deepEqual(await js("[document.activeElement.__kept === true, document.activeElement.value]"), [true, 'my own'], 'a poll never rebuilds the card under the person');
     for (let i = 3; i <= 5; i++) {
       await click('#cards-composer [data-action="next"]');
       assert.equal(await text('#cards-composer .bots-cards-prompt'), `Question ${i}?`);

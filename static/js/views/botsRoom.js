@@ -56,7 +56,10 @@ export async function mountRoom(host, options) {
   const transcriptHost = h('div', { class: 'bots-transcript-host' });
   const goalHost = h('div', { class: 'bots-room-goal-host', 'aria-live': 'polite' });
   const composerHost = h('div', { class: 'bots-composer-host' });
-  root.append(h('header', { class: 'bots-room-header' }, [title, threadPicker, members, advanced, callSlot, membersButton]), findBar, error, banners, setupHost, empty, transcriptHost, goalHost, composerHost);
+  // A member's approvals and questions are raised in its seat session, which the room never shows; answer them here.
+  const seatCards = h('div', { class: 'bots-room-seat-cards' });
+  const seatPanels = new Map();   // seat session id -> Promise of the mounted cards panel
+  root.append(h('header', { class: 'bots-room-header' }, [title, threadPicker, members, advanced, callSlot, membersButton]), findBar, error, banners, setupHost, empty, transcriptHost, goalHost, seatCards, composerHost);
   host.replaceChildren(root);
 
   const agentFor = botId => { const m = state.room?.members.find(m => memberId(m) === botId); return { ...m, id: botId, name: m?.name || 'Bot' }; };
@@ -133,6 +136,7 @@ export async function mountRoom(host, options) {
       responderSelect.value = room.default_responder.kind === 'member' ? room.default_responder.bot_id : room.default_responder.kind;
     }
     if (document.activeElement !== limit) limit.value = room.turn_timeout_minutes;
+    syncSeatCards();
     callSlot.hidden = !!room.archived_at || room.setup_state === 'pending' || !room.members.some(m => !m.held);
     members.replaceChildren(...room.members.map(m => h('button', { type: 'button', class: 'bots-room-face', 'data-bot-id': memberId(m), 'data-state': memberState(m),
       title: `${m.name}: ${memberStateLabel(m)}`, 'aria-label': `${m.name}: ${memberStateLabel(m)}`, onclick: () => membersButton.click() },
@@ -172,6 +176,22 @@ export async function mountRoom(host, options) {
       busy: () => busy(), summarySaved: async () => { await refresh(); },
     });
     callSlot.replaceChildren(callAdapter.button);
+  }
+  function syncSeatCards() {
+    const seats = new Map((state.room?.members || []).filter(m => m.seat_session_id).map(m => [m.seat_session_id, m]));
+    for (const [seat, panel] of seatPanels) {
+      if (seats.has(seat)) continue;
+      panel.then(p => p?.dispose?.()).catch(() => {}); seatPanels.delete(seat);
+      seatCards.querySelector(`[data-seat="${CSS.escape(seat)}"]`)?.remove();
+    }
+    for (const [seat, member] of seats) {
+      if (seatPanels.has(seat)) { seatPanels.get(seat).then(p => p?.refresh?.()).catch(() => {}); continue; }
+      const holder = h('section', { class: 'bots-room-seat-card', 'data-seat': seat, 'aria-label': `${member.name} needs your answer`, hidden: true },
+        [h('strong', { class: 'bots-room-speaker', text: member.name })]);
+      seatCards.append(holder);
+      seatPanels.set(seat, import('../botsApprovalCards.js').then(mod => (disposed ? null : mod.mount(holder, {
+        agentId: memberId(member), threadId: seat, slot: 'composer', signal: modalAbort.signal, onPending: waiting => { holder.hidden = !waiting; } }))));
+    }
   }
   function makeComposer() {
     if (draftThread === state.threadId) return;
@@ -262,7 +282,8 @@ export async function mountRoom(host, options) {
   const offInterface = onBotsInterface(() => { paint(); composer?.paint(); });
   const poll = setInterval(() => { if (!document.hidden && !disposed) refresh(); }, 5000);
   const handle = { root, model, stream, refresh, flush: async () => ({ ok: draft?.flush() !== false }), focus: () => composer?.focus(), exportRoom,
-    destroy() { if (disposed) return; disposed = true; findRevision++; clearInterval(poll); callAdapter?.dispose(); clearTimeout(readTimer); offInterface(); modalAbort.abort(); dialog?.close(); stream.destroy(); composer?.dispose(); setup?.destroy(); transcript.dispose(); root.remove(); options.signal?.removeEventListener('abort', handle.destroy); } };
+    destroy() { if (disposed) return; disposed = true; findRevision++; clearInterval(poll); callAdapter?.dispose();
+      for (const panel of seatPanels.values()) panel.then(p => p?.dispose?.()).catch(() => {}); clearTimeout(readTimer); offInterface(); modalAbort.abort(); dialog?.close(); stream.destroy(); composer?.dispose(); setup?.destroy(); transcript.dispose(); root.remove(); options.signal?.removeEventListener('abort', handle.destroy); } };
   options.signal?.addEventListener('abort', handle.destroy, { once: true });
   if (options.signal?.aborted) handle.destroy();
   try { await stream.start(); }

@@ -109,7 +109,8 @@ export async function mount(host, ctx = {}) {
     else if (!state.loaded) content = h('p', { class: 'bots-routines-message', role: 'status', text: 'Loading...' });
     else if (!state.routines.length) content = h('p', { class: 'bots-routines-message', text: 'No routines yet. Add one and this bot works on its own, on a schedule.' });
     else content = Card({ children: state.routines.map(row) });
-    root.replaceChildren(h('div', { class: 'bots-routines-head' }, [h('span', { class: 'bots-caps', text: 'Routines' }), add]), content, state.routines.length ? all : null);
+    // replaceChildren would print a null as the text "null", so the link is added only when there is something to see.
+    root.replaceChildren(h('div', { class: 'bots-routines-head' }, [h('span', { class: 'bots-caps', text: 'Routines' }), add]), content, ...(state.routines.length ? [all] : []));
     if (focused) root.querySelector(`.bots-routines-row[data-routine-id="${window.CSS.escape(focused)}"] .bots-routines-name`)?.focus({ preventScroll: true });
   }
 

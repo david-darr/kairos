@@ -54,7 +54,8 @@ export async function mount(host, ctx) {
       action.textContent = view.label;
       action.disabled = false;
       action.onclick = () => {
-        if (view.action === 'settings' || view.action === 'prepare') document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section: 'computer' } }));
+        // The same Settings page the setup checklist sends Computer to (bot_onboarding.checks).
+        if (view.action === 'settings' || view.action === 'prepare') document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section: 'computer-use' } }));
         else if (view.action === 'place') chooser.querySelector('button')?.focus();
         else if (view.action === 'refresh') refresh();
         else if (view.action === 'release') mutate('/computer/control', lease.release());

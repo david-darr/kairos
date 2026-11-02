@@ -22,9 +22,8 @@ def scout(path: str, *, owner_user=None):
     names, consumed = [], 0
     with os.scandir(root) as entries:
         for entry in entries:
-            if entry.is_symlink() or Path(entry.path).is_junction():
-                raise ValueError("Folder scout does not follow links")
-            if entry.name.startswith("."):
+            # A link inside the folder (a linked node_modules or venv) is left out, never followed or read.
+            if entry.is_symlink() or Path(entry.path).is_junction() or entry.name.startswith("."):
                 continue
             consumed += len(entry.name.encode("utf-8")) + 1
             if consumed > MAX_BYTES or len(names) >= 2000:
@@ -78,11 +77,11 @@ def scout(path: str, *, owner_user=None):
     if bots:
         bots.insert(0, {"key": "lead", "name": "Project lead", "role": "Coordinate the work and review the result.",
                         "soul": "Keep the goal, next steps and blockers clear. Give each specialist a concrete outcome. Review before reporting completion.", "routines": []})
-        evidence.insert(0, {"key": "lead", "file": ".", "reason": "Specialist evidence found in the top-level folder"})
+        evidence.insert(0, {"key": "lead", "file": ".", "reason": "Leads the specialists this folder suggests."})
     else:
         bots = [{"key": "general", "name": "Project helper", "role": "Help with this project.",
                  "soul": "Start by understanding the goal and the files. Make a short plan and verify each completed step.", "routines": []}]
-        evidence = [{"key": "general", "file": ".", "reason": "No specialist evidence found"}]
+        evidence = [{"key": "general", "file": ".", "reason": "Nothing in the folder pointed to a specialist."}]
     result = bot_package.inspect(bot_package.canonical(bot_package.seal(bots, name="Project team")), owner_user=owner_user)
     result.update(evidence=evidence, bytes_read=consumed)
     return result

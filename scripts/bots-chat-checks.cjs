@@ -104,7 +104,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, wr
     await waitFor("!!document.querySelector('.bots-live')");
     assert.equal(sendsTo(sid, start).length, 1);
     const sent = JSON.parse(sendsTo(sid, start)[0].body);
-    assert.deepEqual([sent.text, sent.expected_leaf_id, typeof sent.send_id, sent.mode], ['What changed today?', store().session(sid).messages[1].id, 'string', 'chat'], 'the send carries its leaf and a send ID');
+    assert.deepEqual([sent.text, sent.expected_leaf_id, typeof sent.send_id, sent.mode], ['What changed today?', store().session(sid).messages[1].id, 'string', null], 'the send carries its leaf and a send ID; an ordinary message has no mode (bot_chat_service.MODES)');
     assert.equal(await js(`document.querySelector(${q(INPUT)}).value`), '', 'the field is clear as soon as it sends');
     assert.equal(await js("localStorage.getItem('kairos:bots-draft:local:" + botId + ":" + sid + "')"), null, 'and no draft stays behind');
     assert.ok((await messageTexts()).includes('What changed today?'), 'your message shows at once');

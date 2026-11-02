@@ -306,8 +306,8 @@ def owner_of(session: Optional[dict]) -> Optional[str]:
     """The trusted owner of a conversation: the session's account, else the single local user."""
     if not session:
         return None
-    from core.auth import SINGLE_USER
-    return session.get("owner_user") or SINGLE_USER
+    from core.auth import SINGLE_USER, owner_or_default
+    return owner_or_default(session.get("owner_user")) or SINGLE_USER
 
 
 def scope_for_session(session_id: str) -> Optional[dict]:

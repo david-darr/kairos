@@ -86,6 +86,17 @@ def redeem_ui_code(code: str) -> bool:
     return expires is not None and expires >= time.time()
 
 
+def owner_or_default(owner: Optional[str]) -> Optional[str]:
+    """Who a record belongs to when it names no owner (a chat made before accounts, or through a channel).
+    With accounts off every request is the single local user, so it is theirs; with accounts on it is the only
+    account's, or no one's when there are several, so one person's old records never show to another."""
+    if owner:
+        return owner
+    if not auth_enabled():
+        return SINGLE_USER
+    return auth_manager.sole_user() or (SINGLE_USER if not auth_manager.has_any_users() else None)
+
+
 def auth_enabled() -> bool:
     """True if EITHER the AUTH_ENABLED env var or the persisted setting says
     so. Two sources because they serve different deployments: the env var is

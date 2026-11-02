@@ -46,8 +46,8 @@ def front_context():
     session = session_manager.get_session(sid) if sid else None
     if not bot or bot.get("builtin") != "front_desk" or not session or session.get("agent_id") != bid:
         raise ValueError("Bring back the front desk before starting a task")
-    from core.auth import SINGLE_USER
-    return bot, session.get("owner_user") or SINGLE_USER
+    from core.auth import SINGLE_USER, owner_or_default
+    return bot, owner_or_default(session.get("owner_user")) or SINGLE_USER
 
 
 def require_owner(user):

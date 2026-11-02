@@ -37,5 +37,17 @@ class ScoutTests(unittest.TestCase):
             with self.assertRaises(ValueError): scout(str(self.root))
         with self.assertRaises(ValueError): scout("relative/folder")
 
+    def test_links_inside_are_skipped_not_read(self):
+        outside = Path(ENV.name) / (self.root.name + "-outside"); outside.mkdir()
+        (outside / "README.md").write_text("# Secret readme")
+        try:
+            os.symlink(outside / "README.md", self.root / "README.md")
+            os.symlink(outside, self.root / "node_modules", target_is_directory=True)
+        except OSError:
+            self.skipTest("this machine cannot make links")
+        result = scout(str(self.root))
+        self.assertEqual(result["bytes_read"], 0)
+        self.assertEqual(result["preview"]["bots"][0]["key"], "general")
+
 
 if __name__ == "__main__": unittest.main()

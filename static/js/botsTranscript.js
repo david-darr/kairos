@@ -44,6 +44,13 @@ export const elapsedLabel = seconds => { const s = Math.max(0, Math.floor(second
 export const workedLabel = seconds => { const s = Math.max(0, Math.round(seconds)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
 
 // -- Pure: text ------------------------------------------------------------------
+// What a reply that failed before any text says, by the server's failure kind (chat_service.failure_kind).
+export function failedReplyText(message, name) {
+  const why = { rate_limited: 'The model is busy right now.', request_error: 'The request could not be sent to the model.' }[message?.failure_kind]
+    || 'The model stopped with an error.';
+  return `${name || 'The bot'} could not answer. ${why}`;
+}
+
 // A conversational reply shows one bubble per paragraph. A blank line inside a fenced code block is not a paragraph break.
 export function splitConversational(text) {
   const parts = [];
@@ -319,7 +326,11 @@ export function mountTranscript(host, opts) {
       bubbles.append(h('div', { class: 'bots-msg-bubble' }, [editor.node]));
       queueMicrotask(editor.focus);
     } else if (user) bubbles.append(h('div', { class: 'bots-msg-bubble' }, [userBody(message)]));
-    else {
+    else if (message.status === 'failed' && !String(message.content || '').trim()) {
+      // A reply that failed before any text: say so, and offer the retry the message menu also has.
+      const retry = opts.handlers?.regenerate ? h('button', { type: 'button', class: 'bots-btn', text: 'Try again', onclick: () => opts.handlers.regenerate(message) }) : null;
+      bubbles.append(h('div', { class: 'bots-msg-bubble bots-msg-failed', role: 'status' }, [h('span', { text: failedReplyText(message, speaker?.name) }), retry].filter(Boolean)));
+    } else {
       const parts = opts.replyStyle?.() === 'conversational' && !raw.has(message.id) ? splitConversational(message.content) : [message.content || ''];
       for (const part of parts) bubbles.append(h('div', { class: 'bots-msg-bubble' }, [bodyNode(message, part)]));
     }

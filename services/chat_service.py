@@ -527,7 +527,11 @@ def _prepare_sent_text(session_id: str, index: int, text: str, attachment_ids: l
         sent += forge_sessions.repo_context(session_id)
     from core import addons
     if addons.enabled('roblox'):
-        sent += addons.module('roblox_style').context(session_id, text)
+        # An add-on's extra context is optional: a broken or missing add-on is logged, never the end of the turn.
+        try:
+            sent += addons.module('roblox_style').context(session_id, text)
+        except Exception:
+            logger.warning("the Roblox add-on context was skipped for chat %s", session_id, exc_info=True)
     session_manager.record_sent_text(session_id, index, text, sent)
     if (session_manager.get_session(session_id) or {}).get('forge'):
         forge_sessions.mark_repo_context_loaded(session_id)

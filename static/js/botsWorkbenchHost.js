@@ -60,6 +60,8 @@ export async function mount(host, ctx) {
     try {
       const module = await loaders[tab]();
       if (!life.active || generation !== own) return;
+      // Some tabs (Data, Routines) append to the panel, so the loading line goes first.
+      body.replaceChildren();
       const handle = await module.mount(body, { ...ctx, advanced: isAdvanced(), signal });
       if (!life.active || generation !== own) { (handle.destroy || handle.dispose)?.(); return; }
       tabHandle = handle;

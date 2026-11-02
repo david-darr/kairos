@@ -75,7 +75,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(calls.find(c => c.url === '/api/forge/sessions').body, { project_id: 'p1', task: 'Fix it' }); assert.equal(nav.at(-1).tab, 'forge');
   const oldChips = make('chips', { options: ['No'] }); assert.equal(find(oldChips, 'No').disabled, true);
   const chips = make('chips', { options: ['Do this'] }, {}, { isLatestTurn: true }); find(chips, 'Do this').click(); await tick();
-  const sent = calls.find(c => c.url === '/api/bot-chat/main/send'); assert.equal(sent.body.text, 'Do this'); assert.equal(sent.body.expected_revision, 3);
+  const sent = calls.find(c => c.url === '/api/bot-chat/main/send'); assert.equal(sent.body.text, 'Do this'); assert.ok(!('expected_revision' in sent.body), 'the send route forbids it (routes/bot_chat_routes.py SendBody)');
   const count = calls.length; find(chips, 'Do this').click(); await tick(); assert.equal(calls.length, count);
   assert.equal(make('checkin', { at: 0, summary: 'Checked for you' }).querySelectorAll('button').length, 0);
   for (const kind of ['welcome', 'reach']) assert.ok(make(kind).textContent.length > 0);

@@ -33,7 +33,7 @@ module.exports = ({ state, now }) => {
   const room = id => ensure().rooms.find(r => r.id === id);
   const threadOf = (r, id) => (id == null ? r.threads[0] : r.threads.find(t => t.id === id));
   const isWorking = r => Object.keys(ensure().working).some(k => k.startsWith(r.id + ':'));
-  const visible = r => ({ ...r, members: r.member_ids.map(id => { const b = bot(id); return { bot_id: id, name: b ? b.name : id, held: !!r.held[id], working: Object.values(ensure().working).some(w => w.roomId === r.id && w.bot === id), waiting: false, seat_session_id: null, last_seen_seq: 0 }; }),
+  const visible = r => ({ ...r, members: r.member_ids.map(id => { const b = bot(id); return { bot_id: id, name: b ? b.name : id, held: !!r.held[id], working: Object.values(ensure().working).some(w => w.roomId === r.id && w.bot === id), waiting: false, seat_session_id: `seat-${r.id}-${id}`, last_seen_seq: 0 }; }),
     working: isWorking(r), unread: r.messages_unread || 0, last_seq: (ensure().messages[r.id] || []).length, member_ids: undefined, held: undefined, messages_unread: undefined });
   const infos = r => r.member_ids.filter(id => bot(id)).map(id => ({ bot_id: id, name: bot(id).name, held: !!r.held[id] }));
 

@@ -567,7 +567,8 @@ def client_message(row: dict, owner: str, versions: dict | None = None) -> dict:
     message["reactions"] = reaction_list(row.get("reactions"), owner)
     if versions and row.get("bot_message_id") in versions:
         found = versions[row["bot_message_id"]]
-        message["version"] = {"index": found["index"], "count": found["total"], "ids": found["ids"]}
+        # The tree counts from 1; the page counts from 0 (botsMessageActions.versionSwitcher shows index + 1 of count).
+        message["version"] = {"index": found["index"] - 1, "count": found["total"], "ids": found["ids"]}
     return message
 
 

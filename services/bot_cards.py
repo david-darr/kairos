@@ -243,8 +243,15 @@ def _now() -> float:
 
 
 def _owner(owner: Optional[str]) -> str:
-    from core.auth import SINGLE_USER
-    return owner or SINGLE_USER
+    from core.auth import SINGLE_USER, owner_or_default
+    return owner_or_default(owner) or SINGLE_USER
+
+
+def _mine(card_owner: str, who: str) -> bool:
+    """A card is yours when it names you; a card saved for the single local user (before accounts were turned
+    on) is also the only account's."""
+    from core.auth import SINGLE_USER, owner_or_default
+    return card_owner == who or (card_owner == SINGLE_USER and who == owner_or_default(None))
 
 
 class CardStore:
@@ -416,7 +423,7 @@ class CardStore:
 
     def _owned(self, card_id: str, owner: Optional[str]) -> dict:
         card = self._cards.get(card_id)
-        if card is None or card["owner_user"] != _owner(owner):
+        if card is None or not _mine(card["owner_user"], _owner(owner)):
             raise CardNotFound("No card with that id.")
         self._expire_locked(card)
         return card
@@ -428,7 +435,7 @@ class CardStore:
             found = []
             changed = False
             for card in self._cards.values():
-                if card["owner_user"] != who:
+                if not _mine(card["owner_user"], who):
                     continue
                 if thread_id is not None and card["thread_id"] != thread_id:
                     continue

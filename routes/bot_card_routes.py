@@ -47,10 +47,12 @@ class ResumeBody(BaseModel):
 
 
 def _own_thread(thread_id: str, user: str) -> None:
-    from core.auth import SINGLE_USER
-    from core.session_manager import session_manager
-    session = session_manager.get_session(thread_id)
-    if not session or (session.get("owner_user") or SINGLE_USER) != user:
+    """The same rule as the chat itself (services/chat_live.py), so a card list never refuses a chat the
+    person can open."""
+    from services import chat_live
+    try:
+        chat_live.require_session(thread_id, user)
+    except HTTPException:
         raise HTTPException(404, "conversation not found")
 
 

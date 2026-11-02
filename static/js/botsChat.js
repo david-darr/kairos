@@ -156,7 +156,8 @@ export async function mountBotsChat(host, options) {
     flushSettings: options.flushSettings || (async () => { const mod = await import('./botsPatchQueue.js'); return mod.flushBotEdits ? mod.flushBotEdits(agent.id) : { ok: true }; }),
     request: async payload => {
       if (payload.attachment_ids?.length) await call('/api/chat/validate-attachments', { method: 'POST', body: { session_id: sid, attachment_ids: payload.attachment_ids } });
-      return call(`/api/bot-chat/${enc(sid)}/send`, { method: 'POST', body: payload });
+      // The draft calls an ordinary message 'chat'; the server's modes are none, 'goal' and 'spoken' (bot_chat_service.MODES).
+      return call(`/api/bot-chat/${enc(sid)}/send`, { method: 'POST', body: { ...payload, mode: payload.mode === 'chat' ? null : payload.mode } });
     },
     // The data result the person has open and the parts of an app they pointed at (Phase 6) go with the message.
     extras: () => ({ data_context: currentDataContext(agent.id), pointed: pointedList().map(({ tag, label }) => ({ tag, label })) }),
@@ -459,7 +460,7 @@ export async function mountBotsChat(host, options) {
     const now = Date.now();
     if (now - lastPresence < PRESENCE_MS || document.hidden) return;
     lastPresence = now;
-    call('/api/bot-chat/presence', { method: 'POST', body: { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: navigator.language, session_id: sid } }).catch(() => {});
+    call('/api/bot-chat/presence', { method: 'POST', body: { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: navigator.language, focused_thread: sid } }).catch(() => {});
   };
   const onActive = () => { presence(); scheduleRead(); };
   for (const name of ['focus', 'pointerdown', 'keydown']) window.addEventListener(name, onActive, true);

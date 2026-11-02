@@ -149,7 +149,7 @@ export function renderFrontDeskCard(message, ctx = {}) {
         else {
           if (!ctx.sessionId) throw new Error('Open this conversation to reply.');
           const state = await call(`/api/bot-chat/${enc(ctx.sessionId)}/state`);
-          await call(`/api/bot-chat/${enc(ctx.sessionId)}/send`, { text: words, send_id: crypto.randomUUID(), expected_leaf_id: state.active_leaf_id ?? null, expected_revision: state.branch_revision ?? 0 });
+          await call(`/api/bot-chat/${enc(ctx.sessionId)}/send`, { text: words, send_id: crypto.randomUUID(), expected_leaf_id: state.active_leaf_id ?? null });
         }
         sent = true; row.dataset.answered = 'true'; chip.setAttribute('aria-pressed', 'true');
       });
@@ -170,7 +170,7 @@ export function renderFrontDeskCard(message, ctx = {}) {
       const value = connected[key], ready = Array.isArray(value) ? value.length > 0 : !!value;
       row.append(text('p', `${label}: ${ready ? 'Connected' : 'Not connected'}`, 'fd-caption'));
     }
-    actions([button('Connections', () => navigate({ tab: 'settings', section: 'connections' }))]);
+    actions([button('Connections', () => navigate({ tab: 'settings', section: 'integrations' }))]);
   }
   row.append(error);
   const delay = entranceDelay(ctx.index || 0, ctx.count || 1, { history: ctx.history !== false, firstDay: !!ctx.firstDay });

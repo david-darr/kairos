@@ -65,7 +65,7 @@ Bots Phases 4-6 (teams, front desk, workbench, data, usage, lifecycle, voice, on
 - `test_bots_fdmake.py`, `test_bots_fdtools.py`, `test_bots_fdwatch.py`, `test_bots_fdwatch_safety.py`, `test_bots_fdwork.py`.
 - `test_bots_fdwork_api.py`, `test_bots_frame_policy.py`, `test_bots_frontdesk_cards.cjs`, `test_bots_frontdesk_model.cjs`, `test_bots_group_call.py`.
 - `test_bots_help_wiring.py`, `test_bots_incidents.py`, `test_bots_integration.py`, `test_bots_loop_guard.py`, `test_bots_onboarding.py`, `test_bots_package.py`,
-  `test_bots_package_sections.py`, `test_bots_legacy_upgrade.py`, `test_bots_room_widgets.py`.
+  `test_bots_package_sections.py`, `test_bots_legacy_upgrade.py`, `test_bots_live_fixes.py`, `test_bots_room_widgets.py`.
 - `test_bots_peers.py`, `test_bots_report.py`, `test_bots_room_goals.py`, `test_bots_room_guard.py`, `test_bots_room_holds.py`.
 - `test_bots_room_model.cjs`, `test_bots_room_routes.py`, `test_bots_room_stream.cjs`, `test_bots_room_turns.py`, `test_bots_rooms.py`.
 - `test_bots_rooms_fixture.cjs`, `test_bots_rooms_static.py`, `test_bots_scout.py`, `test_bots_send_context.py`, `test_bots_setup.py`.

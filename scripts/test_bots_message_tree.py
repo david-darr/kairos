@@ -278,6 +278,8 @@ class BranchSelectionTests(BranchCase):
         self.assertNotIn("other answer", " ".join(self.replay()))
         shown = [m for m in page["messages"] if m.get("version")]
         self.assertEqual([m["version"]["count"] for m in shown], [2], "the switcher knows both versions")
+        version = shown[0]["version"]
+        self.assertEqual(version["ids"][version["index"]], shown[0]["id"], "the position counts from 0, the way the page reads it")
         self.assertEqual(shown[0]["id"], shown[0]["bot_message_id"])
         self.assertFalse(service.chat_service.is_busy(self.sid), "the claim was released")
 
