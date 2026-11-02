@@ -10,6 +10,12 @@ venv/
 data/
 # ...but the bundled skill templates ship real data files (hash-checked).
 !skill_templates/**/data/
+# ...and so do the app's static data and its copy in the site demo. Ignored,
+# they were force-added file by file, and the demo's bots-ready.json was
+# missed: the published demo requested a file that was never committed
+# (found 2026-11-01).
+!static/data/
+!docs/demo/static/data/
 .kairos-mobile-runtime/
 # Isolated mobile and renderer fixtures, not release source.
 kairos-mobile-test-*/

@@ -346,15 +346,19 @@ class TidyTests(Base):
     async def test_the_tick_starts_the_daily_tidy_only_after_the_tidy_time(self):
         upkeep.set_settings_provider(lambda: {"tidy_time": "03:00", "capture_quiet_seconds": 300})
         self.addCleanup(upkeep.set_settings_provider, None)
-        midnight = datetime.fromtimestamp(NOW).replace(hour=0, minute=0, second=0).timestamp()
+        # Wall-clock moments, not midnight plus seconds: on a daylight-saving
+        # day that sum lands an hour off (2026-11-01 has 25 hours, so +3h01m
+        # was 02:01). 01:00 exists once on every day, unlike 02:00-02:59.
+        day = datetime.fromtimestamp(NOW).replace(hour=0, minute=0, second=0, microsecond=0)
+        at = lambda hour, minute: day.replace(hour=hour, minute=minute).timestamp()
         upkeep._memory["last_check"] = 0
-        early = await upkeep.tick(midnight + 2 * 3600)
+        early = await upkeep.tick(at(1, 0))
         self.assertEqual(early["tidy"], [])
-        late = await upkeep.tick(midnight + 3 * 3600 + 60)
+        late = await upkeep.tick(at(3, 1))
         self.assertEqual(late["tidy"], [self.bid])
         await upkeep.settle()
-        self.assertEqual(upkeep.bot_state(self.bid)["last_tidy_day"], datetime.fromtimestamp(midnight).date().isoformat())
-        again = await upkeep.tick(midnight + 3 * 3600 + 120)
+        self.assertEqual(upkeep.bot_state(self.bid)["last_tidy_day"], day.date().isoformat())
+        again = await upkeep.tick(at(3, 2))
         self.assertEqual(again["tidy"], [], "checked every ten minutes, and once per day")
         self.assertEqual(upkeep.settings()["tidy_time"], "03:00")
 
