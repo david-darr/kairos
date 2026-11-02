@@ -41,13 +41,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     assert.deepEqual(await js("(() => { const r = document.querySelector('.bots-room-call .agent-call-open').getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })()"), [44, 44]);
     assert.ok(await js("document.documentElement.scrollWidth <= innerWidth + 1"), 'no sideways scroll');
 
-    // A bot's page from the sheet: the same spacing, and the tab bar points back at Bots.
+    // A bot's page from the sheet: the same spacing; the page is full screen (2026-11-02), so the tab bar steps aside and its back button returns.
     await js("document.querySelector('[data-tabbar=botsChats]').click()");
     await waitFor(`!!document.querySelector('#ms-bots-sheet[open] [data-key="bot:${ada}"] .bots-rail-row')`);
     await js(`document.querySelector('#ms-bots-sheet [data-key="bot:${ada}"] .bots-rail-row').click()`);
     await waitFor(`!document.querySelector('#ms-bots-sheet[open]') && document.querySelector('.bots-shell')?.dataset.agentId === ${q(ada)}`);
     await waitFor("!!document.querySelector('.bots-shell .bots-composer') || !!document.querySelector('.bots-chat-blocked')");
     assert.ok(await js("document.querySelector('.bots-shell-header').getBoundingClientRect().top < 30"), 'no blank band above the bot header');
+    await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
+    assert.ok(await js("getComputedStyle(document.querySelector('.bots-head-back')).display !== 'none'"), 'a bot page has its own back button');
+    await js("document.querySelector('.bots-head-back').click()");
+    await waitFor("document.documentElement.dataset.view === 'botsHome' && document.querySelector('.ms-tabbar').dataset.state === 'shown'");
     assert.equal(await js("document.querySelector('.ms-tabbar-item[aria-current=page]').dataset.tabbar"), 'botsHome');
 
     // Inbox: the attention sheet; the tab bar steps aside while it is open and comes back after.

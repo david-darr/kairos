@@ -110,7 +110,9 @@ export function normalizeMascot(raw, context) {
 // Bots by id, for <kairos-mascot bot="id">. agentAvatar.js keeps it current.
 const bots = new Map();
 export function rememberBot(agent) { if (agent?.id) bots.set(agent.id, agent); }
-export function botMascot(agent) { return toAjarSpec(agent?.avatar, { id: agent?.id, color: agent?.color }); }
+// The front desk is Kairos's own Kip, never a bot pastel (David, 2026-11-02: "Its character should also be the normal Kip icon").
+export const isFrontDesk = agent => agent?.builtin === 'front_desk';
+export function botMascot(agent) { return isFrontDesk(agent) ? { ...KAIROS_SPEC } : toAjarSpec(agent?.avatar, { id: agent?.id, color: agent?.color }); }
 
 // -- tokens ----------------------------------------------------------------------
 
@@ -499,7 +501,7 @@ export class KairosMascot extends ElementBase {
     try { raw = this.hasAttribute('spec') ? JSON.parse(this.getAttribute('spec')) : null; } catch { raw = null; }
     const agent = this._agent || (this.getAttribute('bot') ? bots.get(this.getAttribute('bot')) : null);
     let spec = raw ? normalizeMascot(raw)
-      : agent || this.getAttribute('bot') ? toAjarSpec(agent?.avatar, { id: agent?.id || this.getAttribute('bot'), color: agent?.color }) : { ...KAIROS_SPEC };
+      : agent ? botMascot(agent) : this.getAttribute('bot') ? toAjarSpec(null, { id: this.getAttribute('bot') }) : { ...KAIROS_SPEC };
     // An explicit finish wins; Kairos's own Kip follows the person's Kip style; a bot keeps its own look.
     const asked = this.getAttribute('finish');
     if (AJAR_FINISHES.includes(asked)) spec = { ...spec, finish: asked };

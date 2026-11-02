@@ -39,6 +39,15 @@ class BriefTests(Harness):
         self.assertEqual(len(self.cards), 1)
         self.assertEqual(next(iter(self.cards.values()))["fd_kind"], "brief")
 
+    def test_today_reads_the_brief_without_posting(self):
+        # The desktop Today panel (2026-11-02) reads the same sections; only the brief itself posts a card.
+        self.reference()
+        before = dict(self.cards)
+        today = self.run_async(brief.refresh("today", post=False))
+        self.assertTrue(today["has_content"])
+        self.assertEqual([s["id"] for s in today["sections"]], ["needs", "day", "mail", "routines", "ideas"])
+        self.assertEqual(self.cards, before)
+
     def test_dismiss_is_a_server_action_records_sender_without_turn(self):
         self.reference()
         with patch.object(adapter, "send_draft_turn", AsyncMock()) as turn:
@@ -198,7 +207,7 @@ class RoutesTests(Harness):
         from fastapi import HTTPException
         def denied(): raise HTTPException(403, "Admin required")
         self.app.dependency_overrides[require_admin] = denied
-        for method, path in (("GET", "/watch"), ("GET", "/brief"), ("GET", "/drafts"), ("POST", "/watch/run-now"),
+        for method, path in (("GET", "/watch"), ("GET", "/brief"), ("GET", "/today"), ("GET", "/drafts"), ("POST", "/watch/run-now"),
                              ("POST", "/brief/rows/m/draft"), ("POST", "/drafts/d/send"), ("DELETE", "/drafts/d")):
             self.assertEqual(self.web.request(method, "/api/front-desk" + path).status_code, 403)
 

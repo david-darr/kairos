@@ -287,6 +287,11 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     loadModule: name => loadBotsModule(`section:${name}`),
     conversationsCard: () => conversationsCard(ctx),
     async mountAvatar(holder, { draft = false } = {}) {
+      // The front desk is always Kairos's own Kip (mascot.js isFrontDesk), so there is no look to choose.
+      if (state.agent?.builtin === 'front_desk') {
+        holder.replaceChildren(Object.assign(document.createElement('p'), { className: 'bots-row-hint', textContent: 'Kip always looks like Kairos’s own Kip, in the Kip style chosen in Appearance.' }));
+        return null;
+      }
       const { mountAvatarEditor } = await import('./botsAvatarEditor.js');
       if (destroyed) return null;
       const editor = mountAvatarEditor(holder, { agent: { ...state.agent, avatar_snapshot: state.detail?.avatar_snapshot }, draft, ctx: { update: ctx.update, flush: ctx.flush, adopt: ctx.adopt, api, toast } });

@@ -45,5 +45,20 @@ const path = require('node:path');
   assert.ok(Make.safeMakeThumb('/api/designs/abcdef123456/boards/one/thumb'));
   assert.deepEqual(Make.makeTarget({ open: { tab: 'design', id: 'abcdef123456' } }), { tab: 'design', designId: 'abcdef123456' });
   for (const url of ['javascript:alert(1)', '/generated-files/../x', '/generated-files/%2e%2e', '//evil/file', '/generated-files/a%2fb']) assert.equal(Make.makeTarget({ open: { tab: 'artifact', id: url, session_id: 's' } }), null);
+  // What Kip says it watches, and the desktop Today panel (2026-11-02 redesign).
+  assert.equal(M.watchLine({ state: 'working', connected: { calendar: true, mail: true } }, ['Projects', 'Projects']), 'Watching Calendar, Mail and Projects');
+  assert.equal(M.watchLine({ state: 'working', connected: { mail: true } }), 'Watching Mail');
+  assert.equal(M.watchLine({ state: 'working', connected: {} }), '', 'working with nothing to watch says nothing');
+  assert.match(M.watchLine({ state: 'paused', connected: { mail: true } }), /paused/);
+  assert.match(M.watchLine({ state: 'not_connected', connected: {} }), /Connect mail or calendar/);
+  assert.equal(M.watchLine(null), '');
+  const view = M.todayView({ date_label: 'Monday, November 02', sections: [
+    { id: 'needs', rows: [1, 2, 3, 4, 5].map(i => ({ text: 'Need ' + i, note: '' })), more: 2, empty: 'Nothing needs you right now.' },
+    { id: 'routines', rows: [{ text: 'Left out' }] }, { id: 'day', rows: [], empty: 'No more meetings today.' }] },
+    [{ id: 'tab:p:1', tab_name: 'Projects', title: 'Open tasks', kind: 'list', rows: [{ title: 'Ship it', meta: 'today', badge: 'P1' }] },
+     { id: 'tab:p:2', tab_name: 'Projects', title: 'Done', kind: 'progress', label: 'This week', value: 3, total: 5 }]);
+  assert.deepEqual(view.sections.map(s => [s.id, s.label, s.rows.length, s.more]), [['needs', 'Needs you', 4, 3], ['day', 'Calendar', 0, 0]], 'only Needs you, Calendar and Mail, four rows each');
+  assert.deepEqual(view.tabs.map(t => [t.label, t.title, t.rows[0].text, t.rows[0].note]), [['Projects', 'Open tasks', 'Ship it', 'today · P1'], ['Projects', 'Done', '3 of 5', 'This week']]);
+  assert.deepEqual(M.todayView(null), { date: '', sections: [], tabs: [] });
   console.log('PASS: front-desk tabs, badge, timers, swipe, ordering, motion and Kip priority');
 })().catch(e => { console.error(e); process.exitCode = 1; });

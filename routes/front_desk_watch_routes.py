@@ -58,6 +58,12 @@ async def get_brief(user: str = Depends(owner)):
     return await brief.refresh("open")
 
 
+@router.get("/today")
+async def get_today(user: str = Depends(owner)):
+    """The brief's sections for the desktop Today panel, read only: nothing is posted to the chat."""
+    return await brief.refresh("today", post=False)
+
+
 @router.post("/presence")
 async def presence(body: Presence, user: str = Depends(owner)):
     try:

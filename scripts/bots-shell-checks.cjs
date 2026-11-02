@@ -323,25 +323,24 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await waitFor(`document.querySelectorAll('.bots-bot-card').length === ${roster.length + 1}`);
     assert.deepEqual(await js(cardIds), expectedCards, 'cards on a phone: every visible bot, then New bot');
     await capture('mobile-bots-home');
-    // A bot's page: the header is a pill with a back button, the chat is in place, the Bots tab stays selected.
+    // A bot's page: the header is a pill with a back button, the chat is in place, and the page is full screen (2026-11-02): the tab bar steps aside.
     await js("document.querySelector('.bots-bot-card[data-agent-id=a1]').click()");
     await waitFor("!!document.querySelector('.bots-shell[data-agent-id=a1] .bots-composer-input')");
-    assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').getAttribute('aria-current')"), 'page', 'the Bots tab stays current on a bot page');
+    await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'");
     assert.equal(await js("getComputedStyle(document.querySelector('.bots-head-back')).display !== 'none'"), true, 'a phone gets a back button');
     assert.deepEqual(await overflow(), [], 'a bot page has no sideways scroll on a phone: ' + await js("[...document.querySelectorAll('#view-content *')].filter(n => n.getBoundingClientRect().right > innerWidth + 1 && n.getClientRects().length).slice(0, 8).map(n => n.tagName + '.' + n.className + ' ' + Math.round(n.getBoundingClientRect().right)).join(' | ') + ' CHAIN ' + (() => { const out = []; for (let n = document.querySelector('.side-chat-composer'); n && n.id !== 'app'; n = n.parentElement) { const r = n.getBoundingClientRect(); out.push(n.className.toString().slice(0, 30) + ':' + Math.round(r.left) + '-' + Math.round(r.right) + ' m' + getComputedStyle(n).marginLeft + '/' + getComputedStyle(n).marginRight); } return out.join(' > '); })()"));
     assert.equal(await js("document.querySelector('.bots-head-pill').getBoundingClientRect().height >= 44 && document.querySelector('.bots-head-convos').getBoundingClientRect().height >= 44"), true, '44 px targets');
     await capture('mobile-bots-shell');
-    // The panel covers the page and the bar steps aside; closing brings it back.
+    // The panel covers the page; the bar stays aside.
     await js("document.querySelector('.bots-head-pill').click()");
     await waitFor("!!document.querySelector('#bots-panel .stub-panel')");
-    await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'");
     await waitFor("(() => { const r = document.querySelector('#bots-panel').getBoundingClientRect(); return Math.abs(r.left) < 1 && Math.abs(r.top) < 1 && Math.abs(r.width - innerWidth) < 1 && Math.abs(r.height - innerHeight) < 1; })()", 4000);
     await capture('mobile-bots-panel');
     await pressKey('Escape');
-    await waitFor("!document.querySelector('#bots-panel') && document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-    // The Bots tab on a bot page goes back to the roster.
-    await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').click()");
-    await waitFor("document.documentElement.dataset.view === 'botsHome'");
+    await waitFor("!document.querySelector('#bots-panel') && document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'");
+    // The back button goes to the roster, where the bar comes back.
+    await js("document.querySelector('.bots-head-back').click()");
+    await waitFor("document.documentElement.dataset.view === 'botsHome' && document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
     // More in Bots mode holds only the switch (and the account), and goes back to Kairos.
     await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
     await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')");

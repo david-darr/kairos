@@ -88,7 +88,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
   // A02-4: light and dark themes (Color presets), auto does not exist
   // =====================================================================
   await section('theme', async () => {
-    const presets = { Parchment: '#f3eadb', Linen: '#e9e4da', Stone: '#a7aca5', Clay: '#533c32', Plum: '#3c2943', Ocean: '#233447', Forest: '#23302e', Graphite: '#202127' };
+    const presets = { Parchment: '#f3eadb', Linen: '#e9e4da', Stone: '#a7aca5', Clay: '#533c32', Plum: '#3c2943', Ocean: '#233447', Forest: '#23302e', Graphite: '#202127', Espresso: '#18130f' };
     await homeReady();
     const tokensBefore = await js("import('/static/js/mascot.js').then(m => ({ version: m.mascotThemeVersion(), stage: m.mascotTokens()['--m-stage'], body: m.mascotTokens()['--m-ink-body'] }))");
     const heroBefore = await js("document.querySelector('.dashboard-mascot kairos-mascot').innerHTML");

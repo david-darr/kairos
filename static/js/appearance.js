@@ -169,7 +169,7 @@ export function halftoneSharedChatPicture() {
 }
 
 export function appearanceName(value = getAppearance()) {
-  const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite' };
+  const palette = { '#f3eadb': 'Parchment', '#e9e4da': 'Linen', '#a7aca5': 'Stone', '#533c32': 'Clay', '#3c2943': 'Plum', '#233447': 'Ocean', '#23302e': 'Forest', '#202127': 'Graphite', '#18130f': 'Espresso' };
   return value.mode === 'default' ? 'Parchment' : value.mode === 'color'
     ? palette[value.color?.toLowerCase()] || value.color : value.mode === 'glass' ? `Liquid glass, ${GLASS_WALLPAPERS[value.glassWallpaper].title}`
     : value.mode === 'animated' ? `Animated, ${value.animatedPiece === OWN_ART ? 'your own'

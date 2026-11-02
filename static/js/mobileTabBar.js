@@ -17,6 +17,8 @@ import { badgeCounts } from './mobileActivity.js';
 const FULLSCREEN = [
   '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside',
   '.bots-attn:not([hidden])',
+  // Every bot page is full screen with its own way back: a chat has its back button, the front desk its menu and its own tabs.
+  '.bots-shell',
 ].join(', ');
 const SUBPAGE = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page',

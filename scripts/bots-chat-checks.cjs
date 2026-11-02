@@ -297,12 +297,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, wr
     // -- Find reaches another version and lands on it --------------------------------------------------------------
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }))");
     await waitFor("document.querySelector('.bots-find')?.hidden === false");
+    // The landing flash lasts 1.8 s; record it as it happens so a slow poll under load cannot miss it.
+    await js("window.__flashSeen = false; window.__flashWatch = new MutationObserver(() => { if (document.querySelector('.bots-msg.flash')) window.__flashSeen = true; }); window.__flashWatch.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); true");
     await fill('.bots-find-input', 'next turn');
     await waitFor("document.querySelector('.bots-find-count')?.textContent.includes('1 of')");
     assert.ok((await text('.bots-find-other')).includes('Other version'), 'a hit in another version is labelled');
     assert.equal(await js("document.querySelector('.bots-find-other').hidden"), false);
     await waitFor("[...document.querySelectorAll('.bots-msg.user')].some(n => n.textContent.includes('The next turn'))");
-    await waitFor("!!document.querySelector('.bots-msg.flash')");
+    await waitFor('window.__flashSeen === true');
+    await js('window.__flashWatch.disconnect(); delete window.__flashWatch; delete window.__flashSeen; true');
     await key('.bots-find-input', 'Escape');
     await waitFor("document.querySelector('.bots-find')?.hidden === true");
     await click('.bots-versions [aria-label="Next version"]');

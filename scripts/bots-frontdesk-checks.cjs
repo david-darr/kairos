@@ -55,6 +55,10 @@ module.exports = async ({ js, waitFor, delay, win, capture, demoState, base }) =
         if(path.startsWith('/api/front-desk/make')) return realApi(path,opts);
         if(path==='/api/front-desk/work')return {groups:{needs_input:[{id:'own-task'}],working:[]},loose:{questions:[{id:'own-question'}],approvals:[]}};
         if(path==='/api/forge/sessions')return {id:'own-forge'};
+        if(path==='/api/front-desk/watch')return {state:'working',connected:{calendar:true,mail:true}};
+        if(path==='/api/home/tab-cards')return {cards:[{id:'tab:projects:open',tab_name:'Projects',title:'Open',kind:'stat',value:2,label:'tasks'}]};
+        if(path==='/api/front-desk/today')return {date_label:'Monday',sections:[{id:'needs',rows:[{text:'Answer the venue',note:'Draft ready'}],more:0,empty:''},
+          {id:'day',rows:[],empty:'No more meetings today.'},{id:'mail',rows:[],empty:'No important emails right now.'},{id:'routines',rows:[{text:'Left out'}],empty:''}]};
         return {thread_id:${q(sid)}};
       };
       const agent={...${q(made.body)},builtin:'front_desk'};
@@ -98,6 +102,13 @@ module.exports = async ({ js, waitFor, delay, win, capture, demoState, base }) =
     await js("document.querySelector('.fd-newtask textarea').value='Make a design for our plan';document.querySelector('.fd-newtask textarea').dispatchEvent(new Event('input',{bubbles:true}))");
     await click('.fd-newtask .primary'); await waitFor("!document.querySelector('.fd-newtask[open]')");
     assert.ok(await js("window.__fdCalls.some(c=>c.path==='/api/front-desk/tasks'&&c.body.kind==='make'&&c.body.make_kind==='design')"));
+    // The desktop front desk (2026-11-02 redesign): what Kip watches under its name, and the Today panel beside the chat.
+    await waitFor("document.querySelector('.fd-watching:not(.fd-watching-dock)')?.textContent==='Watching Calendar, Mail and Projects'");
+    await waitFor("!!document.querySelector('.fd-today:not([hidden])')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.fd-today-section h3')].map(n=>n.textContent)"), ['Needs you', 'Calendar', 'Mail', 'Projects'], 'Today: the brief, then each custom tab');
+    assert.ok(await js("document.querySelector('.fd-today').textContent.includes('Answer the venue') && !document.querySelector('.fd-today').textContent.includes('Left out')"));
+    assert.equal(await js("getComputedStyle(document.querySelector('.fd-menu')).display"), 'none', 'no phone controls on a desktop');
+    await click('.fd-today-add'); assert.equal(await js('window.__fdNav.at(-1).tab'), 'tool-store');
     await capture('desktop-bots-frontdesk');
 
     await debug.sendCommand('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -106,6 +117,12 @@ module.exports = async ({ js, waitFor, delay, win, capture, demoState, base }) =
     assert.equal(await js("document.querySelector('.fd-tabs').getBoundingClientRect().width <= innerWidth-30"), true);
     assert.equal(await js("document.querySelector('.fd-tabs').getBoundingClientRect().bottom <= innerHeight"), true);
     assert.equal(await js("document.getElementById('fd-check-host').scrollWidth<=innerWidth"), true);
+    // Kip on a phone: floating menu, Kip and account controls on top, its own tabs at the bottom, nothing overlapping, no Today panel.
+    const phone = await js("(()=>{const r=s=>document.querySelector(s).getBoundingClientRect();const m=r('.fd-menu'),a=r('.fd-account'),k=r('.fd-identity'),t=r('.fd-tabs');return {m:[m.width,m.height],a:[a.width,a.height],k:k.width,kTop:k.top,headBottom:Math.max(m.bottom,a.bottom,k.bottom),tabsTop:t.top,tabsBottom:t.bottom,h:innerHeight,today:!!document.querySelector('.fd-today').getClientRects().length};})()");
+    assert.deepEqual([phone.m, phone.a], [[52, 52], [52, 52]], 'menu and account are 52px round buttons');
+    assert.ok(phone.k >= 70 && phone.kTop < 40, 'Kip sits at the top centre');
+    assert.ok(phone.tabsTop > phone.headBottom + 200 && phone.h - phone.tabsBottom <= 40, 'the tabs sit at the bottom, clear of the controls');
+    assert.equal(phone.today, false, 'no Today panel on a phone');
     await click('[data-fd-tab=chat]');
     // A fresh owned suggestion, then a true touch drag left. Buttons were proved above.
     await js(`(async()=>{const C=await import('/static/js/botsFrontDeskCards.js');const r=C.renderFrontDeskCard({id:'swipe',type:'fd_card',fd_kind:'suggestion',fd_data:{suggestion_id:'own-swipe',title:'Swipe me'}},{api:window.__fdApi}); r.id='fd-swipe'; window.__fdCards.push(r);const cards=document.getElementById('fd-check-cards');cards.prepend(r);r.scrollIntoView();return true;})()`);

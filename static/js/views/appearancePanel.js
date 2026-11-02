@@ -71,7 +71,7 @@ export function renderAppearancePanel(content, _status, page) {
   const color = el('input', { type: 'color', id: 'appearance-color', 'aria-label': 'Custom base color' });
   const hex = el('span', { class: 'appearance-color-value' });
   const swatches = el('div', { class: 'appearance-swatches', role: 'group', 'aria-label': 'Base colors' });
-  for (const [name, value] of [['Parchment', '#f3eadb'], ['Linen', '#e9e4da'], ['Stone', '#a7aca5'], ['Clay', '#533c32'], ['Plum', '#3c2943'], ['Ocean', '#233447'], ['Forest', '#23302e'], ['Graphite', '#202127']]) {
+  for (const [name, value] of [['Parchment', '#f3eadb'], ['Linen', '#e9e4da'], ['Stone', '#a7aca5'], ['Clay', '#533c32'], ['Plum', '#3c2943'], ['Ocean', '#233447'], ['Forest', '#23302e'], ['Graphite', '#202127'], ['Espresso', '#18130f']]) {
     swatches.append(el('button', { type: 'button', title: name, 'aria-label': name, 'data-color': value,
       style: `--swatch:${value}`, onclick: () => { updateAppearance({ color: value }); sync(); } }));
   }

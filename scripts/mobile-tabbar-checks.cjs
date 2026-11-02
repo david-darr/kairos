@@ -49,6 +49,18 @@ module.exports = async function tabBarChecks(c) {
     const b = await js(`(() => { const n = [...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden'); if (!n) return null; const r = n.getBoundingClientRect(); return { top: r.top, w: r.width, h: r.height, hit: n.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) }; })()`);
     ok(b && b.w >= 43.99 && b.h >= 43.99 && b.top >= (await safeTop()) - 0.5 && b.hit, `${label}: visible back clears the status area and hit-tests: ${JSON.stringify(b)}`);
   };
+  // A bot's page is full screen on a phone (2026-11-02 redesign): the bar steps aside, its own back button returns,
+  // and its composer reaches the bottom of the screen.
+  const fullPage = async (label, { back, composer } = {}) => {
+    await delay(100); await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'"); await delay(400);
+    ok(await js("document.querySelector('.ms-tabbar').inert && !document.documentElement.classList.contains('ms-tabbar-up')"), `${label}: bar aside and no space reserved`);
+    if (back) await backControl(label, back);
+    if (composer) {
+      // Measured against the page (an iPhone screen sets its own page height), with no room kept for a bar that is not there.
+      const at = await js(`(() => { const r = document.querySelector(${JSON.stringify(composer)}).getBoundingClientRect(), v = document.querySelector('.bots-shell').getBoundingClientRect(); return { bottom: Math.round(r.bottom), page: Math.round(v.bottom), inner: innerHeight }; })()`);
+      ok(at.bottom <= at.page + 1 && at.bottom >= at.page - 120 && at.page >= at.inner - 120, `${label}: composer at the bottom of the page ${JSON.stringify(at)}`);
+    }
+  };
   const pushedPage = async (label, { back, composer, current, composerGap } = {}) => {
     await barShown(); await delay(400);
     eq(await barState(), 'shown', `${label}: bar shown`);
@@ -249,13 +261,12 @@ module.exports = async function tabBarChecks(c) {
   await pushedPage('Live launch chat', { back: '.ms-chat-back', composer: '.ms-live-chat .ms-composer', current: 'chats' });
   await tap('chats'); await waitFor("!document.querySelector('.ms-live-chat') && document.querySelector('#ms-tab-1[aria-selected=true]')");
   ok(true, 'Current Chats pops live launch chat to the Chats list');
-  for (const action of ['tab', 'back']) {
-    await openBotPage();
-    await pushedPage('Bot page', agentPage);
-    if (action === 'tab') await tap('botsHome'); else await js("document.querySelector('.bots-head-back').click()");
-    await waitFor("!!document.querySelector('.bots-home .bots-grid') && !document.querySelector('.bots-shell')");
-    ok(true, `${action}: returns the bot page to the Bots roster`);
-  }
+  await openBotPage();
+  await fullPage('Bot page', agentPage);
+  await js("document.querySelector('.bots-head-back').click()");
+  await waitFor("!!document.querySelector('.bots-home .bots-grid') && !document.querySelector('.bots-shell')");
+  await barShown();
+  ok(true, 'back: returns the bot page to the Bots roster, and the bar comes back');
   await backToKairos();
   // A team opens the Swarm view (a Kairos page, under More); the Bots inbox is a drawer beside the roster.
   const teamId = await js("(async () => { const r = await fetch('/api/swarm/systems'); return (await r.json()).items?.[0]?.id || null; })()");
@@ -387,7 +398,7 @@ module.exports = async function tabBarChecks(c) {
     await pushedPage(`${name} conversation`, conversationPage);
     await geometry(`${name} conversation`, screen, gap, w);
     await openBotPage();
-    await pushedPage(`${name} bot page`, agentPage); await geometry(`${name} bot page`, screen, gap, w);
+    await fullPage(`${name} bot page`, agentPage);
     await backToKairos();
     await openSettings(); await pushedPage(`${name} Settings list`, { back: '.settings-mobile-back', current: 'more' });
     await geometry(`${name} Settings list`, screen, gap, w);
@@ -419,7 +430,7 @@ module.exports = async function tabBarChecks(c) {
     await shot(`tabbar-${name}-forge-sessions`);
     await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await barShown(); await delay(300);
     await shot(`tabbar-${name}-conversation`);
-    await openBotPage(); await barShown(); await delay(400);
+    await openBotPage(); await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden'"); await delay(400);
     await shot(`tabbar-${name}-bot-page`);
     await backToKairos();
     await openSettings(); await barShown(); await delay(400); await shot(`tabbar-${name}-settings`);

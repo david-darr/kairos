@@ -9,12 +9,12 @@
 // observer, so rosters stay cheap to poll. Live movement is <kairos-mascot>
 // (mascot.js), used only where a state changes.
 import { AJAR_ACCESSORIES, AJAR_ACCESSORY_NAMES, AJAR_COLORS, AJAR_COLOR_NAMES, AJAR_SHAPES,
-  createMascot, defaultMascot, mascotUrl, rememberBot, toAjarSpec } from './mascot.js';
+  botMascot, createMascot, defaultMascot, isFrontDesk, mascotUrl, rememberBot, toAjarSpec } from './mascot.js';
 import { loadBotsCss } from './botsUi.js';
 
 export function defaultAvatar(id, color) { return defaultMascot(id, color); }
 // Any stored spec, v2 dot face or v3 Ajar, as a clean Ajar spec.
-export function avatarSpec(agent) { return toAjarSpec(agent?.avatar, { id: agent?.id, color: agent?.color }); }
+export function avatarSpec(agent) { return botMascot(agent); }
 export function avatarUrl(spec, pose = 'idle') { return mascotUrl(spec, pose); }
 
 // -- an uploaded picture beside the Kip (Phase 1, unit U2) --------------------------------------
@@ -72,7 +72,7 @@ function pictureNode(agent, size, spec, pose) {
 export function agentAvatar(agent, size = 72, pose = 'idle') {
   rememberBot(agent);
   const spec = avatarSpec(agent);
-  const withPicture = agent?.avatar_image ? pictureNode(agent, size, spec, pose) : null;
+  const withPicture = agent?.avatar_image && !isFrontDesk(agent) ? pictureNode(agent, size, spec, pose) : null;
   if (withPicture) return withPicture;
   const node = document.createElement('span');
   // agent-dot-avatar stays as the layout hook every view already sizes by.

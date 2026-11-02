@@ -92,7 +92,9 @@ def _questions():
         and r.get("sender", {}).get("id") == store.bot_id()]
 
 
-async def refresh(reason, *, records=None):
+async def refresh(reason, *, records=None, post=True):
+    """The brief's sections from mail, calendar, routine runs and questions. post=False only reads them
+    (the desktop Today panel): no card is posted or updated."""
     from core import front_desk_checks as checks
     records, now = records or {}, time.time()
     value = store.read("brief")
@@ -126,7 +128,7 @@ async def refresh(reason, *, records=None):
     key = "brief:" + local.date().isoformat()
     # If the last row was dismissed, update the existing card to its empty
     # state; never create an empty card on a first check.
-    if result["has_content"] or value.get("card_key") == key:
+    if post and (result["has_content"] or value.get("card_key") == key):
         adapter.post_card("brief", result, key=key)
         with store.LOCK:
             current = store.read("brief")

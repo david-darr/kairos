@@ -21,6 +21,7 @@
 // Node; api.js is reached lazily.
 import { botStatusLine } from './botStatus.js';
 import { agentAvatar } from './agentAvatar.js';
+import { isFrontDesk } from './mascot.js';
 import { icon } from './botsIcons.js';
 import { Segmented, isAdvanced, setAdvanced, onBotsInterface, loadBotsCss, openMenu } from './botsUi.js';
 import { openNewBot, openArchived, openBotSettings } from './botsPanelHost.js';
@@ -263,6 +264,19 @@ export function mountBotsRail(nav) {
     row.append(main);
     if (tree) row.append(h('button', { type: 'button', class: 'bots-rail-more', 'aria-label': `More for ${fact.name}`, 'aria-haspopup': 'menu', onclick: () => botMenu(bot, row.lastChild) }, [icon('ellipsis', { size: 15 })]));
     return row;
+  }
+
+  // Kip, the front desk, sits above every section as its own card (2026-11-02 redesign) and leaves the bot lists.
+  function deskCard(bot) {
+    const fact = railRow(bot);
+    const main = h('button', { type: 'button', class: 'nav-item bots-rail-row bots-rail-desk', 'data-tab': 'botsShell', 'data-agent-id': bot.id,
+      'data-state': fact.state, 'aria-label': `${fact.name}, your front desk${fact.needs ? `, ${fact.needs} waiting` : ''}`, title: fact.text, onclick: () => openBot(bot.id) }, [
+      agentAvatar(bot, 36),
+      h('span', { class: 'bots-rail-desk-text' }, [h('span', { class: 'bots-rail-name', text: fact.name }), h('span', { class: 'bots-rail-desk-role', text: 'Your front desk' })]),
+      fact.needs ? h('span', { class: 'bots-rail-count', text: fact.needs > 99 ? '99+' : String(fact.needs) }) : null,
+    ]);
+    main.addEventListener('contextmenu', event => { event.preventDefault(); botMenu(bot, main); });
+    return h('div', { class: 'bots-rail-line bots-rail-desk-line', 'data-key': `desk:${botKey(bot)}` }, [main]);
   }
 
   function pinCircle(bot) {
@@ -544,9 +558,9 @@ export function mountBotsRail(nav) {
   function draw(force = false) {
     if (disposed) return;
     const advanced = isAdvanced();
-    const roster = bots(), hidden = archivedBots(agents);
+    const everyone = bots(), desk = everyone.find(isFrontDesk), roster = everyone.filter(bot => !isFrontDesk(bot)), hidden = archivedBots(agents);
     const hold = focusKey();
-    const facts = roster.map(railRow);
+    const facts = everyone.map(railRow);
     const rows = [...threads.entries()].map(([id, data]) => [id, data.rows.map(r => [r.id, r.title, r.status, r.updated_at, r.thread?.pinned, r.thread?.unread, r.thread?.folder_id, r.thread?.snoozed_until])]);
     const universal = advanced && !searchReady(query) && getPref('universalPins') === 'true';
     const next = JSON.stringify([advanced, universal, prefs, departments, rooms, facts, roster.map(b => [b.id, b.color, b.avatar, b.folders, b.section]), hidden.length, [...pinnedIds], query, rows, root.dataset.botsAgent, root.dataset.botsSession, [...showAll],
@@ -556,14 +570,13 @@ export function mountBotsRail(nav) {
     section.dataset.interface = advanced ? 'advanced' : 'simple';
     search.hidden = false;
     const nodes = [];
-    if (searchReady(query)) nodes.push(searchResults(roster));
-    else if (!advanced) nodes.push(...simpleRail(roster));
-    else nodes.push(...advancedRail(roster, universal));
+    if (searchReady(query)) nodes.push(searchResults(everyone));
+    else nodes.push(...(desk ? [deskCard(desk)] : []), ...(advanced ? advancedRail(roster, universal) : simpleRail(roster)));
     const pinnedNow = universal ? pinnedBotList() : [];
     pinnedPanel.hidden = !pinnedNow.length;
     pinnedPanel.replaceChildren(...(pinnedNow.length ? [prefs.density === 'icons' ? null : h('div', { class: 'bots-caps bots-rail-universal-label', text: 'Pinned' }),
       h('div', { class: 'bots-rail-group', role: 'list' }, pinnedNow.map(bot => botRow(bot, { section: 'pinned:' })))].filter(Boolean) : []));
-    if (!roster.length) nodes.push(h('p', { class: 'bots-rail-empty', text: 'No bots yet.' }));
+    if (!everyone.length) nodes.push(h('p', { class: 'bots-rail-empty', text: 'No bots yet.' }));
     list.replaceChildren(...nodes);
     archived.hidden = !hidden.length;
     archived.querySelector('.bots-rail-archived-label').textContent = `Archived (${hidden.length})`;

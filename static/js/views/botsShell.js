@@ -121,7 +121,8 @@ export async function render(container, tabId, options = {}) {
 
   const chatHost = h('div', { class: 'bots-chat-host' });
   const main = h('div', { class: 'bots-shell-main' }, [header, convos, chatHost]);
-  const shell = h('div', { class: 'bots-shell', 'data-agent-id': agent.id, 'data-bot-name': agent.name }, [main]);
+  // The front desk brings its own header (botsFrontDesk.js), so the bot header steps aside for it.
+  const shell = h('div', { class: agent.builtin === 'front_desk' ? 'bots-shell is-frontdesk' : 'bots-shell', 'data-agent-id': agent.id, 'data-bot-name': agent.name }, [main]);
   withBotColor(shell, agent.color);
   container.replaceChildren(shell);
   document.documentElement.dataset.botsAgent = agent.id;

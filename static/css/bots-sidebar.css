@@ -112,6 +112,16 @@
 [data-app-mode="bots"] .bots-rail-resize:hover::after, [data-app-mode="bots"] .bots-rail-resize.dragging::after, [data-app-mode="bots"] .bots-rail-resize:focus-visible::after { background: var(--bots-focus); }
 [data-app-mode="bots"] .bots-rail-resize:focus-visible { outline: none; }
 
+/* -- Kip, the front desk: one card above every section (2026-11-02 redesign) ------------------- */
+
+[data-app-mode="bots"] .bots-rail-desk-line { margin: 4px 0 10px; }
+[data-app-mode="bots"] .bots-rail-row.bots-rail-desk { gap: 10px; min-height: 56px; padding: 8px 10px; border: 1px solid var(--bots-accent-border); border-radius: 16px; background: var(--bots-card); }
+[data-app-mode="bots"] .bots-rail-row.bots-rail-desk:hover { background: var(--bots-raised); }
+[data-app-mode="bots"] .bots-rail-row.bots-rail-desk[aria-current="page"], [data-app-mode="bots"] .bots-rail-row.bots-rail-desk.active { border-color: var(--bots-accent); }
+[data-app-mode="bots"] .bots-rail-desk-text { display: flex; flex: 1; min-width: 0; flex-direction: column; text-align: left; }
+[data-app-mode="bots"] .bots-rail-desk-text .bots-rail-name { font-weight: 600; }
+[data-app-mode="bots"] .bots-rail-desk-role { font-size: var(--bots-text-hint); color: var(--bots-ink-secondary); }
+
 /* -- Density ------------------------------------------------------------------------------ */
 
 [data-app-mode="bots"] .bots-rail[data-density="compact"] :is(.bots-rail-row, .bots-thread-row, .bots-rail-new, .bots-rail-archived) { min-height: 32px; padding-top: 3px; padding-bottom: 3px; }
@@ -120,7 +130,8 @@
 /* Icons: faces only, like the collapsed rail, but at the sidebar's own 92 / 80 px width. */
 @media (min-width: 769px) {
   [data-app-mode="bots"] .bots-rail[data-density="icons"] :is(.bots-rail-head > .bots-caps, .bots-rail-search, .bots-rail-foot, .bots-rail-name, .bots-rail-count, .bots-rail-new > span, .bots-rail-archived > span,
-    .bots-rail-children, .bots-rail-toggle, .bots-rail-more, .bots-section-head, .bots-folder-count) { display: none; }
+    .bots-rail-children, .bots-rail-toggle, .bots-rail-more, .bots-section-head, .bots-folder-count, .bots-rail-desk-text) { display: none; }
+  [data-app-mode="bots"] #sidebar .bots-rail[data-density="icons"] .bots-rail-row.bots-rail-desk { border: 0; background: transparent; min-height: 0; }
   [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-head { justify-content: center; }
   [data-app-mode="bots"] #sidebar .bots-rail[data-density="icons"] :is(.bots-rail-new, .bots-rail-row, .bots-rail-archived) { justify-content: center; padding: 6px 0; }
   [data-app-mode="bots"] .bots-rail[data-density="icons"] .bots-rail-line { justify-content: center; }

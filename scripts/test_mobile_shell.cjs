@@ -426,8 +426,8 @@ class Surface {
   assert.doesNotMatch(tabbarSource, /\bPUSHED\b/);
   const fullscreen = tabbarSource.match(/const FULLSCREEN = \[([\s\S]*?)\]\.join/)[1];
   // The Bots panel opens full screen on a phone and hides the tab bar like the others (Bots Phase 0); so does the
-  // Bots inbox sheet while it is open (2026-10-30).
-  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside', '.bots-attn:not([hidden])']);
+  // Bots inbox sheet while it is open (2026-10-30), and a bot's page with its own back button (2026-11-02).
+  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside', '.bots-attn:not([hidden])', '.bots-shell']);
   const hides = tabbarSource.match(/function hiddenNow\(\) \{([\s\S]*?)\n\}/)[1];
   assert.match(hides, /!mobileOn\(\)/);
   assert.match(hides, /document\.querySelector\(FULLSCREEN\)/);

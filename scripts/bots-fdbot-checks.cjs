@@ -33,6 +33,9 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base }) => {
     assert.equal(await js("document.querySelector('.bots-bot-card[data-agent-id]')?.dataset.agentId"), bot.id, 'seed order places the front desk first on home');
     await waitFor(`!!document.querySelector('.bots-rail-row[data-agent-id="${bot.id}"]')`);
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id]')?.dataset.agentId"), bot.id, 'front desk leads the bot rail');
+    // 2026-11-02: Kip is its own card above the sections, as Kairos's own Kip, and leaves the bot lists.
+    assert.ok(await js(`(() => { const desk = document.querySelector('.bots-rail-desk[data-agent-id="${bot.id}"]'); return !!desk && desk.textContent.includes('Your front desk')
+      && document.querySelectorAll('.bots-rail-row[data-agent-id="${bot.id}"]').length === 1 && JSON.parse(desk.querySelector('[data-avatar-spec]').dataset.avatarSpec).color === 'ink'; })()`), 'one Kip card, with the normal Kip');
 
     // Exercise the real menu without depending on the front-desk shell unit.
     anchorId = `fd-menu-${Date.now()}`;
