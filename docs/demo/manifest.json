@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "7c4f5bdcd6b476cac84b6bd33841b92e5edbcb908124d52731798ed3cba63955",
+  "app.js": "2102779d7839490aeb69f4347984a0e2ad0af7ab85bd3d1575b1505b9038be0b",
   "fixtures.js": "a0b8bb7d8ce896779b513f8e33a80a10ea6d77b5b4794ac0a8362bdc01f32258",
   "index.html": "14a7a7ea494b328e1bea9ed53d134c70ad21689a581f70c3e2eb253c87774038",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1718,7 +1718,7 @@
   "static/js/views/library.js": "07179a2a54bfa81e727447d341052570bb50f88a67478e36a3aa9fbad06726b0",
   "static/js/views/mobileLaunch.js": "a5872b9d87e27c219b140095c39655e1b3622c3a03cd1c945ffc7c57c85c5c16",
   "static/js/views/notes.js": "6691d323ca3aa03b0d8422ab4b368cc70076dc57b217e53f420283361d2642be",
-  "static/js/views/settings.js": "da58d2cfb08718e3d79edccc69ca14002755dd3448e7288cf8da618642ceea20",
+  "static/js/views/settings.js": "3b6e280025d2fe34ebadd2ab621667f3bf21c5147c73ffe208fab426034455b1",
   "static/js/views/settingsChannels.js": "55542d563e6b62ba1f6284de5b2bcfaaed16ab3a3c644b4463f61b32ee8d7e47",
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "9a7beaa36d355c83f8c5398c1594d7f1183c1ae528af897eb56133fa8b57619e",

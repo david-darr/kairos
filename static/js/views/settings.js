@@ -1372,14 +1372,36 @@ async function renderRemotePanel(body) {
     }
     const parts = [];
 
+    // "Live" is what the watchdog last saw, not just that the listener's task
+    // is running: a dead listener read as Live while one user's phone
+    // couldn't connect at all (2026-11-01). While it's reconnecting the
+    // listener can be down with the setting still on, so that counts as on.
+    const h = s.health || {};
+    const recovering = s.enabled && (h.state === "reconnecting" || h.state === "waiting");
     // Fall back to composing the address from host and port rather than a
     // blank line, in case the URL wasn't captured (listener restored at start).
-    if (s.running_now) s.url = s.url || (s.hostname ? `https://${s.hostname}:${s.port}` : null);
-    if (s.running_now && s.url) {
+    if (s.running_now || recovering) s.url = s.url || (s.hostname ? `https://${s.hostname}:${s.port}` : null);
+    if ((s.running_now || recovering) && s.url) {
+      const at = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const expired = s.cert_days_left !== null && s.cert_days_left !== undefined && s.cert_days_left < 0;
+      const status = expired ? pill("Certificate expired", "error")
+        : h.state === "live" ? pill("Live", "ok")
+          : recovering ? pill("Reconnecting", "warn")
+            : pill("Checking", "muted");
+      const lines = [el("div", { class: "set-mono", text: s.url })];
+      if (expired) {
+        lines.push(el("div", { text: "Browsers will refuse this address until Tailscale issues a new certificate. Kairos keeps trying; check that HTTPS Certificates are still on at login.tailscale.com/admin/dns." }));
+      } else if (recovering) {
+        lines.push(el("div", { text: `Not answering${h.last_error_at ? ` since ${at(h.last_error_at)}` : ""}: ${h.last_error || "unknown problem"}` }));
+        lines.push(el("div", { text: "Kairos checks every 30 seconds and reconnects on its own." }));
+      } else {
+        lines.push(el("div", { text: "Open this exact address from any device signed into your Tailscale account. Include the port." }));
+        if (h.state === "live" && h.last_check) lines.push(el("div", { class: "meta", text: `Answered a check at ${at(h.last_check)}.` }));
+      }
+      if (h.restarts) lines.push(el("div", { class: "meta", text: `Reconnected ${h.restarts} time${h.restarts === 1 ? "" : "s"} since it was turned on.` }));
       parts.push(group({}, [row({
-        title: [el("span", { text: "Remote access is on" }), pill("Live", "ok")],
-        description: [el("div", { class: "set-mono", text: s.url }),
-          el("div", { text: "Open this exact address from any device signed into your Tailscale account. Include the port." })],
+        title: [el("span", { text: "Remote access is on" }), status],
+        description: lines,
         control: [
           el("button", { class: "btn", text: "Copy link", onclick: async () => { await navigator.clipboard.writeText(s.url); toast("Link copied", "success"); } }),
           el("button", { class: "btn danger", text: "Turn off", onclick: async () => {

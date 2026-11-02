@@ -1,11 +1,15 @@
-"""Remote Access (Tailscale): detection, refusals, TLS listener, routes, reconnect.
+"""Remote Access (Tailscale): detection, refusals, TLS listener, routes, reconnect,
+the watchdog and certificate renewal.
 
 No real Tailscale, network or firewall is touched. The Tailscale command is
 replaced with a recorded fake, the Windows firewall check is stubbed, and the
 one real listener binds to loopback with a certificate generated here, so the
 bind address, HTTPS, the login gate and stop/restart are exercised for real.
+A dead listener is made by closing uvicorn's listening sockets while its task
+keeps running, which is the state a dropped Tailscale adapter leaves behind.
 MANUAL (not covered): a real tailnet sign-in, a Tailscale-issued certificate,
-another device reaching the URL, and the UAC prompt for the firewall rule.
+another device reaching the URL, the UAC prompt for the firewall rule, and a
+real Tailscale drop (sleep/wake, or restarting the Tailscale service).
 
     .venv\\Scripts\\python.exe scripts\\test_remote_access.py
 """
@@ -41,7 +45,8 @@ logging.disable(logging.CRITICAL)
 HOST = "box.tail1234.ts.net"
 
 
-def make_cert(directory: Path):
+def make_cert(directory: Path, days=90):
+    """Valid for `days` from now; past the renewal window by default."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -50,8 +55,8 @@ def make_cert(directory: Path):
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOST)])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
-            .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(days=1))
-            .not_valid_after(now + datetime.timedelta(days=2)).sign(key, hashes.SHA256()))
+            .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(days=100))
+            .not_valid_after(now + datetime.timedelta(days=days)).sign(key, hashes.SHA256()))
     cert_path, key_path = directory / f"{HOST}.crt", directory / f"{HOST}.key"
     cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
@@ -96,12 +101,21 @@ class RemoteAccess(unittest.IsolatedAsyncioTestCase):
         self.certs.mkdir(exist_ok=True)
         for item in (patch.object(remote_access, "CERTS_DIR", str(self.certs)),
                      patch.object(remote_access, "firewall_rule_exists", return_value=True),
-                     patch.object(remote_access, "tailscale_exe", return_value="tailscale-fake")):
+                     patch.object(remote_access, "tailscale_exe", return_value="tailscale-fake"),
+                     # Renewal back-off is module state; each test starts with none.
+                     patch.object(remote_access, "_last_renew_attempt", 0.0),
+                     patch.object(remote_access, "_last_renew_error", None)):
             item.start(); self.addCleanup(item.stop)
         self.saved = {k: settings_store.get_setting(k) for k in ("remote_access_enabled", "remote_access_port")}
         settings_store.update_settings(remote_access_enabled=False, remote_access_port=free_port())
         self.addCleanup(lambda: settings_store.update_settings(**self.saved))
-        self.addCleanup(lambda: asyncio.get_event_loop().run_until_complete(remote_access.stop()) if remote_access.is_running() else None)
+        self.addAsyncCleanup(self.stop_all)
+
+    async def stop_all(self):
+        # A watchdog left waiting (Tailscale down) has no listener but must
+        # still be stopped, or it outlives this test's event loop.
+        if remote_access.is_running() or remote_access.is_watching():
+            await remote_access.stop()
 
     def fake(self, **kwargs):
         fake = Fake(**kwargs)
@@ -258,6 +272,233 @@ class RemoteAccess(unittest.IsolatedAsyncioTestCase):
         await remote_access.start_if_enabled()
         self.assertFalse(remote_access.is_running(), "a disabled setting starts nothing")
 
+    # -- the watchdog: a listener that stops answering is noticed and rebuilt -
+
+    async def start_driven(self):
+        """A started listener with its background watchdog stopped, so each
+        test drives check_once() itself and nothing races it."""
+        await self.start_loopback()
+        await remote_access._cancel_watchdog()
+        self.events = []
+        recorder = patch.object(remote_access.events, "emit", lambda kind, message, **kw: self.events.append(kind))
+        recorder.start(); self.addCleanup(recorder.stop)
+        return settings_store.get_setting("remote_access_port")
+
+    def kill_sockets(self):
+        """What a dropped Tailscale adapter leaves: the server task alive,
+        nothing accepting connections."""
+        for listening in remote_access._server.servers:
+            listening.close()
+
+    async def answers(self, port, ip="127.0.0.1"):
+        async with self.tls() as client:
+            return (await client.get(f"https://{ip}:{port}/api/auth/status")).status_code == 200
+
+    async def test_a_live_listener_passes_the_check(self):
+        port = await self.start_driven()
+        self.assertEqual(remote_access.health()["state"], "checking", "not called Live before anything was checked")
+        await remote_access.check_once()
+        h = remote_access.health()
+        self.assertEqual((h["state"], h["reachable"], h["restarts"]), ("live", True, 0))
+        self.assertIsNotNone(h["last_ok"])
+        self.assertEqual(remote_access.detect()["health"]["state"], "live", "Settings reads the watchdog's result")
+        self.assertTrue(await self.answers(port))
+
+    async def test_a_listener_that_stops_answering_is_rebuilt(self):
+        port = await self.start_driven()
+        await remote_access.check_once()
+        self.kill_sockets()
+        self.assertTrue(remote_access.is_running(), "the task is still alive: the old status would have said Live")
+        await remote_access.check_once()
+        h = remote_access.health()
+        self.assertEqual((h["state"], h["reachable"], h["restarts"]), ("reconnecting", False, 0),
+                         "one failed check marks it, without a restart yet")
+        self.assertIn(f"port {port}", h["last_error"])
+        self.assertEqual(self.events, ["remote.dropped"])
+        await remote_access.check_once()
+        h = remote_access.health()
+        self.assertEqual((h["state"], h["reachable"], h["restarts"]), ("live", True, 1), "the second failure rebuilds it")
+        self.assertEqual(self.events, ["remote.dropped", "remote.recovered"], "a drop and a recovery, each said once")
+        self.assertTrue(await self.answers(port), "a phone reaches the rebuilt listener on the same address")
+        self.assertEqual(remote_access._current_url, f"https://{HOST}:{port}")
+
+    async def test_a_listener_whose_task_died_is_rebuilt(self):
+        port = await self.start_driven()
+        remote_access._server.should_exit = True
+        await remote_access._server_task
+        self.assertFalse(remote_access.is_running())
+        await remote_access.check_once()
+        self.assertTrue(remote_access.is_running())
+        self.assertEqual(remote_access.health()["state"], "live")
+        self.assertTrue(await self.answers(port))
+
+    async def test_a_changed_tailscale_address_is_rebound(self):
+        port = await self.start_driven()
+        self.fake(status=up(ip="127.0.0.2"))
+        await remote_access.check_once()
+        self.assertEqual(remote_access._server.config.host, "127.0.0.2", "rebound to the new address")
+        self.assertEqual(remote_access.health()["state"], "live")
+        self.assertTrue(await self.answers(port, ip="127.0.0.2"))
+        self.assertTrue(remote_access._port_available("127.0.0.1", port)[0], "the old address was released")
+
+    async def test_a_slow_tailscale_status_alone_does_not_take_a_working_listener_down(self):
+        port = await self.start_driven()
+        await remote_access.check_once()
+        self.fake(status=None)
+        await remote_access.check_once()
+        self.assertTrue(remote_access.is_running())
+        self.assertEqual((remote_access.health()["state"], remote_access.health()["restarts"]), ("live", 0))
+        self.assertEqual(self.events, [])
+        self.assertTrue(await self.answers(port))
+
+    async def test_tailscale_going_down_waits_and_comes_back(self):
+        port = await self.start_driven()
+        fake = self.fake(status=None)
+        self.kill_sockets()  # the Tailscale address is gone with it
+        await remote_access.check_once()
+        h = remote_access.health()
+        self.assertEqual(h["state"], "waiting")
+        self.assertIn("Tailscale is off", h["last_error"])
+        self.assertFalse(remote_access.is_running(), "a listener on a vanished address is taken down, not left looking live")
+        self.assertTrue(remote_access._port_available("127.0.0.1", port)[0])
+        await remote_access.check_once()
+        self.assertEqual(self.events, ["remote.dropped"], "still down is not a second alert")
+        fake.status = up(ip="127.0.0.1")
+        await remote_access.check_once()
+        self.assertTrue(remote_access.is_running())
+        self.assertEqual((remote_access.health()["state"], remote_access.health()["restarts"]), ("live", 1))
+        self.assertTrue(await self.answers(port))
+        await remote_access.stop()
+        self.assertFalse(remote_access.is_watching())
+        self.assertEqual(remote_access.health()["state"], "off")
+
+    async def test_booting_before_tailscale_keeps_trying(self):
+        """The Visualizer's bug: one try at boot and none after."""
+        self.admin()
+        make_cert(self.certs)
+        settings_store.update_settings(remote_access_enabled=True)
+        fake = self.fake(status=None)
+        await remote_access.start_if_enabled()
+        self.assertFalse(remote_access.is_running())
+        self.assertTrue(remote_access.is_watching(), "the watchdog keeps trying after a failed boot")
+        await remote_access._cancel_watchdog()
+        self.assertEqual(remote_access.health()["state"], "waiting")
+        fake.status = up(ip="127.0.0.1")
+        await remote_access.check_once()
+        self.assertTrue(remote_access.is_running())
+        self.assertEqual(remote_access.health()["state"], "live")
+
+    async def test_the_watchdog_loop_rebuilds_on_its_own(self):
+        with patch.object(remote_access, "WATCHDOG_INTERVAL", 0.2):
+            await self.start_loopback()
+            port = settings_store.get_setting("remote_access_port")
+            self.assertTrue(remote_access.is_watching())
+            self.kill_sockets()
+            for _ in range(60):
+                await asyncio.sleep(0.1)
+                if remote_access.health()["restarts"] and remote_access.health()["state"] == "live":
+                    break
+            self.assertEqual((remote_access.health()["state"], remote_access.health()["restarts"]), ("live", 1))
+            self.assertTrue(await self.answers(port))
+            await remote_access.stop()
+            self.assertFalse(remote_access.is_watching(), "turning remote access off stops the watchdog too")
+
+    async def test_enable_while_the_boot_watchdog_waits_leaves_one_watchdog(self):
+        settings_store.update_settings(remote_access_enabled=True)
+        fake = self.fake(status=None)
+        await remote_access.start_if_enabled()
+        boot_watchdog = remote_access._watchdog_task
+        self.admin()
+        make_cert(self.certs)
+        fake.status = up(ip="127.0.0.1")
+        self.assertTrue((await remote_access.start())["ok"])
+        self.assertTrue(boot_watchdog.done(), "the waiting watchdog was replaced, not left racing the new one")
+        self.assertTrue(remote_access.is_watching())
+
+    async def test_stopping_the_watchdog_never_swallows_the_callers_own_cancellation(self):
+        """App shutdown cancels whoever is stopping remote access; that must not vanish."""
+        async def slow_to_stop():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.5)
+                raise
+        remote_access._watchdog_task = asyncio.create_task(slow_to_stop())
+        await asyncio.sleep(0)
+        caller = asyncio.create_task(remote_access._cancel_watchdog())
+        await asyncio.sleep(0.05)
+        caller.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await caller
+        self.assertFalse(remote_access.is_watching())
+
+    # -- certificate renewal -------------------------------------------------
+
+    def cert_text(self):
+        return (self.certs / f"{HOST}.crt").read_bytes()
+
+    async def test_a_certificate_near_expiry_is_renewed_and_a_fresh_one_reused(self):
+        make_cert(self.certs, days=90)
+        fake = self.fake(status=up())
+        self.assertEqual(remote_access.provision_cert(HOST)[2], None)
+        self.assertEqual([c for c in fake.calls if c[0] == "cert"], [], "a fresh certificate is not re-requested")
+        make_cert(self.certs, days=10)
+        self.assertEqual(remote_access.provision_cert(HOST)[2], None)
+        calls = [c for c in fake.calls if c[0] == "cert"]
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][2].endswith(".crt.new"), "fetched beside the working pair, then swapped in")
+        self.assertEqual(self.cert_text(), b"CERT", "the new pair replaced the old")
+        self.assertEqual(sorted(p.name for p in self.certs.iterdir()), sorted([f"{HOST}.crt", f"{HOST}.key"]), "nothing left behind")
+        self.assertIsNone(remote_access.detect()["cert_days_left"], "an unreadable pair reports no expiry rather than failing")
+
+    async def test_a_failed_renewal_keeps_a_valid_certificate_and_an_expired_one_is_an_error(self):
+        make_cert(self.certs, days=10)
+        before = self.cert_text()
+        self.fake(status=up(), cert_ok=False, cert_error="rate limited")
+        cert_path, _, error = remote_access.provision_cert(HOST)
+        self.assertEqual((error, self.cert_text()), (None, before), "a still-valid pair is kept when renewal fails")
+        self.assertIsNotNone(cert_path)
+        self.assertEqual(remote_access.detect()["cert_days_left"], 9)
+        make_cert(self.certs, days=-1)
+        fake = self.fake(status=up(), cert_ok=False, cert_error="rate limited")
+        for _ in range(3):
+            error = remote_access.provision_cert(HOST)[2]
+            self.assertIn("expired", error)
+            self.assertIn("rate limited", error, "the last renewal error is still what the user sees")
+        self.assertEqual([c for c in fake.calls if c[0] == "cert"], [],
+                         "every rebuild of an expired listener does not ask Tailscale again inside the back-off")
+        remote_access._last_renew_attempt = 0
+        remote_access.provision_cert(HOST)
+        self.assertEqual(len([c for c in fake.calls if c[0] == "cert"]), 1, "after the back-off it tries again")
+
+    async def test_the_watchdog_renews_and_restarts_once_and_backs_off_after_a_failure(self):
+        port = await self.start_driven()
+        await remote_access.check_once()
+        make_cert(self.certs, days=10)
+        remote_access._last_renew_attempt = 0
+        renewals = []
+
+        def renew(hostname):
+            renewals.append(hostname)
+            remote_access._last_renew_attempt = remote_access.time.time()
+            make_cert(self.certs, days=90)
+        with patch.object(remote_access, "_renew_cert", renew):
+            await remote_access.check_once()
+            self.assertEqual(renewals, [HOST])
+            self.assertEqual((remote_access.health()["state"], remote_access.health()["restarts"]), ("live", 1),
+                             "the listener restarted to load the new certificate")
+            self.assertEqual(self.events, [], "a planned restart is not reported as a drop")
+            self.assertTrue(await self.answers(port))
+            await remote_access.check_once()
+            self.assertEqual(renewals, [HOST], "a renewed certificate is not renewed again")
+        make_cert(self.certs, days=10)
+        remote_access._last_renew_attempt = 0
+        failing = self.fake(status=up(ip="127.0.0.1"), cert_ok=False, cert_error="rate limited")
+        await remote_access.check_once()
+        await remote_access.check_once()
+        self.assertEqual(len([c for c in failing.calls if c[0] == "cert"]), 1, "a failed renewal waits before trying again")
+        self.assertEqual(remote_access.health()["state"], "live", "and the listener keeps serving the still-valid one")
+
     # -- routes ----------------------------------------------------------------
 
     def clients(self):
@@ -302,6 +543,7 @@ class RemoteAccess(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(settings_store.get_setting("remote_access_enabled"))
         live = (await c.get("/api/remote/status")).json()
         self.assertEqual((live["running_now"], live["url"]), (True, enabled.json()["url"]))
+        self.assertIn(live["health"]["state"], ("checking", "live"), "the status route carries the watchdog's view")
         moved = free_port()
         self.assertEqual((await c.post("/api/remote/port", json={"port": moved})).json()["restarted"], True, "a running listener moves to the new port")
         self.assertEqual((await c.get("/api/remote/status")).json()["url"], f"https://{HOST}:{moved}")
