@@ -104,7 +104,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, base, demo
     assert.ok(fit.inside, `${label}: confirmation stays on screen ${JSON.stringify(fit)}`);
     assert.ok(fit.buttons, `${label}: both buttons are visible and large enough ${JSON.stringify(fit)}`);
     await capture(`app-shell-${label.replace(' ', '-')}-confirm`);
-    await escape();
+    // On a phone Escape slides the sheet down first (2026-11-03).
+    await escape(); await waitFor(`${dialogs} === 0`, 1500).catch(() => {});
     assert.equal(await js(dialogs), 0, `${label}: Escape dismisses the confirmation`);
     await js("import('/static/js/workspaceProfile.js').then(m => m.openWorkspaceProfile(document.body))");
     await waitFor("!!document.querySelector('.workspace-profile-settings button')");

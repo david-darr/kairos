@@ -1,44 +1,65 @@
 /* The phone's sliding sidebar (mobileSidebar.js, David 2026-11-02, as the
-   Claude app has it). The sidebar waits under the page's left edge; opening
-   slides the page right, rounds its corners and dims it, and the sidebar
-   drifts in behind. A swipe drags both (mobileDrawers.js sets --drawer-swipe-x
-   on the sidebar; mobileSidebar.js sets --ms-drawer-x for the page). */
+   Claude app has it). One position drives everything (2026-11-03, David: "more
+   seamless"): --ms-x is how far the page has moved right (0 closed, the
+   sidebar's width open, the finger's place mid-swipe) and --ms-p the same as a
+   fraction. The sidebar rides on the page's left edge, and the page's menu
+   button, status-bar frost, corners, shadow and dim all move with it on one
+   curve. A swipe sets --ms-drawer-x/--ms-drawer-p; letting go runs the same
+   curve from the finger, timed to its speed (--ms-drawer-dur). The page keeps
+   its transform until the close has finished sliding (ms-drawer-settling). */
 .ms-drawer, .ms-drawer-scrim, .ms-menu-btn { display: none; }
 @media (max-width: 768px) {
-  .kairos-redesign { --ms-drawer-w: min(84vw, 330px); --ms-drawer-ease: cubic-bezier(.22, 1, .36, 1); }
+  .kairos-redesign {
+    --ms-drawer-w: min(84vw, 330px); --ms-drawer-ease: cubic-bezier(.32, .72, 0, 1); --ms-drawer-dur: 420ms;
+    --ms-x: 0px; --ms-p: 0;
+  }
+  .kairos-redesign.ms-drawer-open { --ms-x: var(--ms-drawer-w); --ms-p: 1; }
+  .kairos-redesign.ms-drawer-dragging { --ms-x: var(--ms-drawer-x, 0px); --ms-p: var(--ms-drawer-p, 0); }
 
   .kairos-redesign .ms-drawer {
     position: fixed; z-index: 1160; top: 0; left: 0; bottom: calc(0px - var(--ms-below-fold, 0px)); width: var(--ms-drawer-w);
     display: flex; flex-direction: column; box-sizing: border-box;
     padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 14px) 14px calc(max(16px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))));
     background: var(--rd-ground); color: var(--rd-ink); font-family: var(--rd-font-ui);
-    transform: translateX(-28%); opacity: 0; visibility: hidden;
-    transition: transform 380ms var(--ms-drawer-ease), opacity 260ms ease, visibility 0s 380ms;
+    transform: translateX(calc(var(--ms-x) - 100%)); visibility: hidden;
+    transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease), visibility 0s var(--ms-drawer-dur);
   }
-  .kairos-redesign.ms-drawer-open .ms-drawer { transform: none; opacity: 1; visibility: visible; transition: transform 380ms var(--ms-drawer-ease), opacity 200ms ease, visibility 0s; }
-  .kairos-redesign .ms-drawer.drawer-dragging {
-    visibility: visible; opacity: 1; transition: none;
-    transform: translateX(calc(var(--drawer-swipe-x, 0px) * .28));
-  }
+  .kairos-redesign:is(.ms-drawer-open, .ms-drawer-dragging) .ms-drawer { visibility: visible; transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease), visibility 0s; }
 
-  /* The page: slides aside with rounded corners while the sidebar is open. */
-  .kairos-redesign #content { transition: transform 380ms var(--ms-drawer-ease), border-radius 380ms var(--ms-drawer-ease); }
-  .kairos-redesign.ms-drawer-open #content {
-    transform: translateX(var(--ms-drawer-w)); border-radius: 28px; overflow: hidden;
-    box-shadow: -10px 0 40px rgba(var(--shade-rgb), .18);
+  /* The page: slides aside with rounded corners and a shadow while the sidebar is open. */
+  .kairos-redesign #content {
+    transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease), border-radius var(--ms-drawer-dur) var(--ms-drawer-ease), box-shadow var(--ms-drawer-dur) var(--ms-drawer-ease);
   }
-  .kairos-redesign.ms-drawer-dragging #content { transform: translateX(var(--ms-drawer-x, 0px)); border-radius: 28px; overflow: hidden; transition: none; }
-  .kairos-redesign.ms-drawer-open .ms-global-frost,
-  .kairos-redesign.ms-drawer-dragging .ms-global-frost { visibility: hidden; }
+  .kairos-redesign:is(.ms-drawer-open, .ms-drawer-dragging, .ms-drawer-settling) #content {
+    transform: translateX(var(--ms-x)); border-radius: calc(28px * var(--ms-p)); overflow: hidden;
+    box-shadow: -10px 0 40px rgba(var(--shade-rgb), calc(.18 * var(--ms-p)));
+  }
+  /* What sits over the page outside it moves with it. */
+  .kairos-redesign :is(.ms-global-frost, .ms-menu-btn) { transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease); }
+  .kairos-redesign:is(.ms-drawer-open, .ms-drawer-dragging, .ms-drawer-settling) :is(.ms-global-frost, .ms-menu-btn) { transform: translateX(var(--ms-x)); }
 
   /* The dim over the page, and the tap target that closes the sidebar. */
   .kairos-redesign .ms-drawer-scrim {
-    position: fixed; z-index: 1155; top: 0; right: 0; bottom: calc(0px - var(--ms-below-fold, 0px)); left: var(--ms-drawer-w);
-    border-radius: 28px 0 0 28px; background: rgba(var(--shade-rgb), .22); opacity: 0;
-    transition: opacity 300ms ease;
+    display: block; position: fixed; z-index: 1155; top: 0; left: 0; width: 100%; bottom: calc(0px - var(--ms-below-fold, 0px));
+    border-radius: calc(28px * var(--ms-p)); background: rgba(var(--shade-rgb), .22);
+    transform: translateX(var(--ms-x)); opacity: 0; visibility: hidden; pointer-events: none;
+    transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease), border-radius var(--ms-drawer-dur) var(--ms-drawer-ease),
+      opacity var(--ms-drawer-dur) var(--ms-drawer-ease), visibility 0s var(--ms-drawer-dur);
   }
-  .kairos-redesign.ms-drawer-open .ms-drawer-scrim { display: block; opacity: 1; }
-  .kairos-redesign.ms-drawer-dragging .ms-drawer-scrim { left: var(--ms-drawer-x, 0px); transition: none; }
+  .kairos-redesign.ms-drawer-open .ms-drawer-scrim {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transition: transform var(--ms-drawer-dur) var(--ms-drawer-ease), border-radius var(--ms-drawer-dur) var(--ms-drawer-ease),
+      opacity var(--ms-drawer-dur) var(--ms-drawer-ease), visibility 0s;
+  }
+  .kairos-redesign.ms-drawer-dragging .ms-drawer-scrim { opacity: var(--ms-p); visibility: visible; }
+  /* Swipe back on a pushed page (2026-11-03): the page follows the finger right
+     (--ms-back-x), slides off as its Back runs, or eases back if let go short. */
+  .kairos-redesign:is(.ms-back-dragging, .ms-back-leaving, .ms-back-return) :is(#content, .ms-global-frost) { transform: translateX(var(--ms-back-x, 0px)); }
+  .kairos-redesign:is(.ms-back-dragging, .ms-back-leaving, .ms-back-return) #content { box-shadow: -12px 0 32px rgba(var(--shade-rgb), .16); }
+  .kairos-redesign.ms-back-dragging :is(#content, .ms-global-frost) { transition: none; }
+  .kairos-redesign:is(.ms-back-leaving, .ms-back-return) :is(#content, .ms-global-frost) { transition: transform var(--ms-back-dur, 300ms) var(--ms-drawer-ease); }
+  /* Under the finger nothing eases. */
+  .kairos-redesign.ms-drawer-dragging :is(.ms-drawer, #content, .ms-drawer-scrim, .ms-global-frost, .ms-menu-btn) { transition: none; }
 
   .kairos-redesign .ms-drawer-brand { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; margin-bottom: 14px; }
   .kairos-redesign .ms-drawer-brand svg { flex: none; width: 30px; height: 30px; }
@@ -91,12 +112,12 @@
     color: var(--rd-ink); box-shadow: 0 4px 14px rgba(var(--shade-rgb), .1); cursor: pointer;
     backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
   }
-  .kairos-redesign .ms-menu-btn[hidden], .kairos-redesign.ms-drawer-open .ms-menu-btn { display: none; }
+  .kairos-redesign .ms-menu-btn[hidden] { display: none; }
   .kairos-redesign .ms-menu-btn svg { width: 20px; height: 20px; }
   /* The title it sits beside makes room for it. */
   .kairos-redesign .ms-menu-indent { margin-inline-start: 52px !important; padding-block: var(--ms-menu-pad, 0px); }
 
   @media (prefers-reduced-motion: reduce) {
-    .kairos-redesign :is(.ms-drawer, .ms-drawer-scrim, #content) { transition: none !important; }
+    .kairos-redesign :is(.ms-drawer, .ms-drawer-scrim, #content, .ms-global-frost, .ms-menu-btn) { transition: none !important; }
   }
 }

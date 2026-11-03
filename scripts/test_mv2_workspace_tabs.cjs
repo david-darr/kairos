@@ -48,7 +48,7 @@ const context = vm.createContext({ console, Date, Intl, URL, Set, Map, Promise, 
 const cache = new Map();
 const mocks = {
   'api.js': { el, modelMark: () => el('span'), api: async (url, options) => { requests.push(url); sent.push({ url, options }); return typeof responses === 'function' ? responses(url, options) : responses[url] ?? []; }, iconButton: () => el('button'), openPanelDialog() {}, toast() {} },
-  'mobileSheet.js': { mountSheetSurface(panel) { panel.prepend(el('button', { class: 'ms-sheet-grabber' })); return () => {}; }, openMobileSheet(options) {
+  'mobileSheet.js': { slideSheetAway() { return false; }, mountSheetSurface(panel) { panel.prepend(el('button', { class: 'ms-sheet-grabber' })); return () => {}; }, openMobileSheet(options) {
     sheetOptions = options;
     let closed = false;
     return { close() { if (!closed) { closed = true; options.onClose(); } } };

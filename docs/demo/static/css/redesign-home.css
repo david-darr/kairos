@@ -346,6 +346,9 @@
   .kairos-redesign .hm-home .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
   .kairos-redesign .hm-home .dashboard-grid > * { grid-column: 1; }
   .kairos-redesign .dashboard:not(.ms-home):has(> .hm-home) { padding: 62px 20px max(140px, var(--mobile-safe-bottom, 0px)); }
+  /* 2026-11-03 (David): the greeting starts where the other tabs' titles do,
+     not below the shell's 62px reserve for an absolute title. */
+  .kairos-redesign #view-content.view.dashboard:not(.chat-layout):not(.ms-home):has(> .hm-home) { padding-top: calc(18px + var(--mobile-safe-top, env(safe-area-inset-top, 0px))); }
   .kairos-redesign .hm-heading { gap: 12px; }
   .kairos-redesign .hm-heading > div:first-child { min-width: 0; }
   .kairos-redesign .hm-heading-actions { flex-shrink: 0; flex-wrap: nowrap; }

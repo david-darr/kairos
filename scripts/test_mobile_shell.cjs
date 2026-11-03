@@ -110,14 +110,15 @@ class Surface {
   assert.equal(host.values['--ms-page'], 1);
   assert.equal(tabs[1].attrs['aria-selected'], 'true');
   assert.equal(pages[0].inert, true);
+  // 2026-11-03 (David): a swipe right opens the app's sidebar from either page; the switch goes back to New.
   swipe(80, 200, 100, 0);
-  assert.equal(host.values['--ms-page'], 0, 'Former sidebar zone belongs to the pager');
-  swipe(300, 200, -100, 0);
+  assert.equal(host.values['--ms-page'], 1, 'A swipe right is left to the sidebar');
   swipe(10, 200, 100, 0);
   assert.equal(host.values['--ms-page'], 1, 'System edge is untouched');
   const row = { closest: selector => selector === 'button' || selector === '.ms-history-main' ? {} : null };
   swipe(300, 200, 100, 0, row);
-  assert.equal(host.values['--ms-page'], 0, 'A rightward row swipe outside the drawer zone returns to New');
+  assert.equal(host.values['--ms-page'], 1, 'A rightward row swipe does not page back either');
+  tabs[0].emit('click', {}); assert.equal(host.values['--ms-page'], 0, 'The switch goes back to New');
   swipe(300, 200, -100, 150);
   assert.equal(host.values['--ms-page'], 0, 'Vertical scrolling never switches pages');
   swipe(300, 200, -100, 0, target, true);
