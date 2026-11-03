@@ -53,6 +53,7 @@
 <link rel="stylesheet" href="static/css/design-canvas.css">
 <link rel="stylesheet" href="static/css/redesign-mobile.css">
 <link rel="stylesheet" href="static/css/redesign-tabbar.css">
+<link rel="stylesheet" href="static/css/mobile-sidebar.css">
 <link rel="stylesheet" href="static/css/redesign-workspaces.css">
 <link rel="stylesheet" href="static/css/mascot.css">
 <link rel="stylesheet" href="static/css/bots.css">
@@ -64,9 +65,9 @@
        browser tab. -->
   <header id="titlebar" class="titlebar"><div class="titlebar-brand" id="titlebar-brand"></div><span class="titlebar-tab" id="titlebar-tab"></span></header>
   <div id="app">
-    <!-- Phone navigation is the bottom tab bar (static/js/mobileTabBar.js,
-         2026-10-22), which replaced the menu button that lived here. The
-         backdrop stays for the sidebar's own close path. -->
+    <!-- Phone navigation is the sliding sidebar (static/js/mobileSidebar.js,
+         2026-11-02), built apart from this desktop sidebar. The backdrop
+         stays for the desktop sidebar's own close path. -->
     <div id="mobile-backdrop" class="mobile-backdrop hidden"></div>
     <div id="sidebar">
       <div class="sidebar-header">

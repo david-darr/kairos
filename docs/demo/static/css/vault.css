@@ -448,7 +448,7 @@ button.vault-history-row:hover { background: var(--accent-dim); }
 
   /* Map: full bleed, a peek sheet instead of the side panel. */
   .kairos-redesign .library-vault-host[data-mode="map"] { margin: 0 -16px; width: auto; }
-  .kairos-redesign .library-vault-host[data-mode="map"] .vault-graph-wrap { height: calc(100dvh - 290px - var(--mobile-safe-top, env(safe-area-inset-top, 0px)) - var(--ms-tabbar-space, 0px)); min-height: 380px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
+  .kairos-redesign .library-vault-host[data-mode="map"] .vault-graph-wrap { height: calc(100dvh - 290px - var(--mobile-safe-top, env(safe-area-inset-top, 0px))); min-height: 380px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
   .kairos-redesign .library-vault-host[data-mode="map"] .vault-panel { display: none !important; }
   .kairos-redesign .vault-toolbar { top: 10px; left: 12px; right: 12px; }
   .kairos-redesign .vault-toolbar .vault-mode-pill, .kairos-redesign .vault-toolbar .btn, .kairos-redesign .vault-search { min-height: 44px; }

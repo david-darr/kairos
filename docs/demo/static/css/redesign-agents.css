@@ -481,8 +481,8 @@
 }
 
 @media (max-width: 768px) {
-  .kairos-redesign[data-view=agents] .view.agents-shell-view { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
-  .kairos-redesign[data-view=agents] .view.agents-shell-view:has(.agents-workspace.has-conversation) { padding-bottom: var(--ms-tabbar-space, 0px); }
+  .kairos-redesign[data-view=agents] .view.agents-shell-view { padding-bottom: calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); }
+  .kairos-redesign[data-view=agents] .view.agents-shell-view:has(.agents-workspace.has-conversation) { padding-bottom: 0; }
 }
 
 @media (max-width: 768px) {

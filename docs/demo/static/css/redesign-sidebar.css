@@ -1,7 +1,7 @@
 /* Desktop redesign (2026-10-28, canvas boards Main and Rail): the sidebar,
    its 56 px rail, the All tabs popover and the chat history popout. Built by
-   sidebarNav.js and chatHistoryPopout.js; desktop only, phones keep their
-   drawer and tab bar. Sharp edges throughout. Theme tokens only. */
+   sidebarNav.js and chatHistoryPopout.js; desktop only, phones have their
+   own sliding sidebar (mobile-sidebar.css). Sharp edges throughout. Theme tokens only. */
 
 @media (min-width: 769px) {
   .kairos-redesign:not(.sidebar-collapsed) { --sidebar-width: 232px; }
