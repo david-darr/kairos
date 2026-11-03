@@ -1,4 +1,4 @@
-// Bots on a phone (Agents 3.0, 2026-10-30). The tab bar's Chats opens the sidebar's own list (bots and their
+// Bots on a phone (Agents 3.0, 2026-10-30). Chats under More in Bots opens the sidebar's own list (bots and their
 // conversations, rooms, teams, Team map, Templates, Automations, Archived) in a full-screen sheet: one list for
 // both sizes, so a phone reaches everything the desktop sidebar does. Inbox opens the attention host's inbox,
 // which is already a bottom sheet on a phone (bots-attention.css). Picking anything in the list closes the sheet.
@@ -17,7 +17,6 @@ export function closeBotsList({ restoreFocus = true } = {}) {
   sheet.querySelector('.ms-bots-list-host').replaceChildren();
   document.removeEventListener('jarvis:navigate', closeOnLeave);
   phone.removeEventListener?.('change', closeOnSize);
-  opener?.setAttribute('aria-expanded', 'false');
   if (restoreFocus && opener?.isConnected) opener.focus({ preventScroll: true });
 }
 
@@ -46,7 +45,6 @@ export async function openBotsList(from) {
   document.addEventListener('jarvis:navigate', closeOnLeave);
   phone.addEventListener?.('change', closeOnSize);
   sheet.showModal(); sheet.setAttribute('aria-modal', 'true');
-  opener?.setAttribute('aria-expanded', 'true');
 }
 
 export async function openBotsInbox() {

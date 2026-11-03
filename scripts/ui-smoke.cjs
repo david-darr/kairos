@@ -747,15 +747,15 @@ app.whenReady().then(async () => {
     for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
       win.setContentSize(width, height); await delay(100);
       await navigate('home');
-      if (label === 'mobile') { await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); }
-      await js(label === 'mobile' ? "[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()" : "document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
+      if (label === 'mobile') await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+      // A phone switches modes from the sliding sidebar's Forge row (mobileSidebar.js).
+      await js(label === 'mobile' ? "document.querySelector('.ms-drawer-row[data-drawer=forge]').click()" : "document.querySelector('#forge-mode-switch [data-mode=forge]').click()");
       if (width <= 768) {
         await require('./mobile-forge-checks.cjs')({ js, win, waitFor, delay, navigate, capture, writes, reads, demoState, overflow });
         await navigate('home');
-        await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
-        await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
-        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview,Bots Preview', 'phone keeps all three mode controls');
-        await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
+        await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+        assert.equal(await js("[...document.querySelectorAll('.ms-drawer-row:not([hidden]) .ms-drawer-label')].map(n => n.textContent).join(',')"), 'Home,Chats,Forge,Bots,More', 'phone keeps all three modes in the sidebar');
+        await js("document.querySelector('.ms-drawer-row[data-drawer=home]').click()");
         demoState.isAdmin = false;
         await win.loadURL(base);
         await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
@@ -796,7 +796,7 @@ app.whenReady().then(async () => {
       await waitFor("document.querySelector('.forge-lifespan .forge-widget-body').textContent === 'Not a git repository'");
       await waitFor("document.querySelectorAll('#nav [data-forge-project]').length === 2");
       assert.ok(await js("!document.querySelector('[data-tab=forgeProjects], [data-tab=forgeSessions]')"), label + ' old views are absent');
-      if (width <= 768) await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); document.querySelector('.ms-tab-sheet').click()");
+      if (width <= 768) await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click(); document.querySelector('.ms-tab-sheet').click()");
       await js("document.querySelector('[aria-label=\"Add project\"]').click()");
       assert.deepEqual(await js("[...document.querySelectorAll('.forge-project-menu button')].map(b => b.textContent)"), ['Open folder', 'Clone repo', 'New repo'], label + ' project menu');
       await js("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
@@ -1106,12 +1106,12 @@ app.whenReady().then(async () => {
         await js("document.querySelector('.forge-mode-rail').click()"); await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
         await js("document.querySelector('#sidebar-toggle').click()"); await delay(350);
       } else {
-        // Saved desktop collapse does not affect phone mode controls.
-        await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('.ms-tabbar [data-tabbar=more]').click()"); await delay(300);
-        assert.equal(await js("[...document.querySelectorAll('.ms-mode-row button')].map(n => n.textContent).join(',')"), 'Kairos,Forge Preview,Bots Preview');
+        // Saved desktop collapse does not affect the phone sidebar's modes.
+        await js("document.documentElement.classList.add('sidebar-collapsed'); document.querySelector('.ms-menu-btn').click()"); await delay(450);
+        assert.equal(await js("[...document.querySelectorAll('.ms-drawer-row:not([hidden]) .ms-drawer-label')].map(n => n.textContent).join(',')"), 'Home,Chats,Forge,Bots,More');
         await capture('mobile-forge-switch-collapsed');
-        await js("[...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Forge Preview').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.querySelector('.ms-tab-sheet[open]')");
-        await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click(); [...document.querySelectorAll('.ms-mode-row button')].find(n => n.textContent === 'Kairos').click()");
+        await js("document.querySelector('.ms-drawer-row[data-drawer=forge]').click()"); await waitFor("!!document.querySelector('.forge-home') && !document.documentElement.classList.contains('ms-drawer-open')");
+        await js("document.querySelector('.ms-drawer-row[data-drawer=home]').click()");
         await waitFor("!!document.querySelector('.dashboard-content.is-filled')");
         await js("document.documentElement.classList.remove('sidebar-collapsed')");
       }
@@ -1171,14 +1171,14 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.sidebar-tooltip').classList.contains('show')"));
     win.setContentSize(390, 844);
     await delay(100);
-    await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'calendar', 'more'], "The phone tab bar replaces the sidebar (Agents became the Bots mode)");
-    await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-drawer-row:not([hidden])')].map(n => n.dataset.drawer)"), ['home', 'chats', 'forge', 'bots', 'more'], "The phone's sliding sidebar replaces the desktop sidebar (Agents became the Bots mode)");
+    await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()");
     await delay(300);
     assert.equal(await railWidth(), 0, "Phone keeps old sidebar hidden despite desktop preference");
-    assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=notes]') && !document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=home]')"), "More lists the tabs the bar does not");
+    assert.ok(await js("!!document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=notes]') && !document.querySelector('.ms-tab-sheet[open] .ms-tab-tile[data-tab=home]')"), "More lists the tabs the sidebar does not");
     await capture("mobile-sidebar");
-    await js("document.querySelector('.ms-tab-sheet').close(); document.querySelector('.ms-tabbar [data-tabbar=home]').click()");
+    await js("document.querySelector('.ms-tab-sheet').close(); document.querySelector('.ms-drawer-row[data-drawer=home]').click()");
     win.setContentSize(1440, 900);
     await delay(100);
     await js("document.querySelector('#sidebar-toggle').focus()");

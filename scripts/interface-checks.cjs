@@ -24,14 +24,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
       assert.equal(await js("!document.getElementById('mobile-view-context')"), true, 'No redundant workspace pill');
       if (width <= 768 && tab !== 'chat' && tab !== 'home') {
         assert.equal(await js(`(() => {
-          const h=document.querySelector('.view-header h2'), b=document.querySelector('.ms-tabbar').getBoundingClientRect();
-          if (!h) return true;
-          const range=document.createRange(); range.selectNodeContents(h); const r=range.getBoundingClientRect();
-          return r.bottom<=b.top;
-        })()`), true, `${tab} title clears the tab bar`);
+          const h=document.querySelector('.view-header h2'), m=document.querySelector('.ms-menu-btn');
+          if (!h || m.hidden) return true;
+          const range=document.createRange(); range.selectNodeContents(h); const r=range.getBoundingClientRect(), b=m.getBoundingClientRect();
+          return r.left>=b.right;
+        })()`), true, `${tab} title clears the menu button`);
       }
       if (width <= 768 && tab === 'home') {
-        assert.equal(await js("!document.getElementById('mobile-menu-btn') && !!document.querySelector('.ms-tabbar [data-tabbar=home][aria-current=page]') && !document.querySelector('.ms-shell')"), true, 'Home has the tab bar, Home current, and the dashboard');
+        await waitFor("!!document.querySelector('.ms-drawer-row[data-drawer=home][aria-current=page]') && !document.querySelector('.ms-menu-btn').hidden");
+        assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-shell')"), true, 'Home has the menu button, Home current in the sidebar, and the dashboard');
         assert.equal(await js("document.querySelector('.hm-heading, .dashboard-header').getClientRects().length > 0 && !document.querySelector('.ms-your-day')"), true, 'Dashboard is directly visible');
       }
       if (tab === 'calendar') {
@@ -43,10 +44,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         assert.equal(await js("document.activeElement.classList.contains('cal-calendars-trigger') && document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar popup restores its button and hides its choices');
       }
       if (width <= 768 && tab === 'library') {
-        await js("document.querySelector('.ms-tabbar [data-tabbar=more]').click()");
+        await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()");
         assert.equal(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), true, 'More opens its sheet');
         await js("document.querySelector('.ms-tab-sheet').click()");
-        assert.equal(await js("document.activeElement.dataset.tabbar"), 'more', 'More regains focus');
+        assert.equal(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), true, 'The menu button regains focus');
         await js('document.activeElement.blur()');
       }
       await capture(`interface-${label}-${tab}`);
@@ -63,10 +64,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     })()`), true, 'Action glyphs centered within controls');
     if (width <= 768) {
       assert.equal(await js("!document.querySelector('.chat-header-new') && document.querySelector('.chat-mobile-header').getBoundingClientRect().height<=74"), true, 'Phone header is a single compact row');
-      const bottomGap = await js("document.querySelector('.ms-tabbar').getBoundingClientRect().top-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
-      assert.ok(bottomGap>=9 && bottomGap<=11, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
+      const bottomGap = await js("innerHeight-document.querySelector('.chat-input-bar').getBoundingClientRect().bottom");
+      assert.ok(bottomGap>=11 && bottomGap<=13, `Composer keeps a comfortable bottom gap (${bottomGap}px)`);
       await js("document.querySelector('.chat-phone-tools > button').click()");
-      assert.equal(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace') && document.querySelector('.ms-tabbar').dataset.state === 'shown' && !!document.querySelector('.ms-chat-back')?.getClientRects().length"), true, 'A conversation keeps the tab bar and Back leads out');
+      assert.equal(await js("![...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].some(n => n.textContent === 'Your workspace') && document.querySelector('.ms-menu-btn').hidden && !!document.querySelector('.ms-chat-back')?.getClientRects().length"), true, 'A conversation has Back in place of the menu button');
       await capture(`interface-${label}-workspace`);
       await js("document.querySelector('.chat-phone-tools > button').click()");
 
@@ -143,9 +144,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await capture(`interface-${label}-composer-options`);
     await js("document.getElementById('chat-messages').click(); document.getElementById('chat-history-toggle').click()");
     if (width <= 768) {
-      // Opening the drawer schedules tab-bar visibility through MutationObserver + rAF.
-      await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'hidden'");
-      assert.equal(await js("document.querySelector('.ms-tabbar').dataset.state === 'hidden' && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
+      await waitFor("document.getElementById('chat-sessions').classList.contains('open')");
+      assert.equal(await js("document.querySelector('.ms-menu-btn').hidden && document.getElementById('chat-sessions').contains(document.querySelector('.chat-history-close svg'))"), true, 'Conversations owns its own close control');
     }
     if (width > 768) await waitFor("!!document.querySelector('#rd-history')");
     await capture(`interface-${label}-history`);

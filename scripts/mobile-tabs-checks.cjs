@@ -35,30 +35,31 @@ async function run(ctx) {
   await resize(390, 844);
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
 
-  // 2026-10-22 (David): a liquid-glass tab bar at the bottom replaces the top-left avatar and its workspace sheet.
-  const MORE = "document.querySelector('.ms-tabbar [data-tabbar=more]')";
-  const barState = () => js("document.querySelector('.ms-tabbar')?.dataset.state || null");
-  const barCurrent = () => js("document.querySelector('.ms-tabbar')?.dataset.state === 'shown' ? document.querySelector('.ms-tabbar [aria-current=page]')?.dataset.tabbar || null : 'hidden'");
-  // The bar follows the page on the next frame (mobileTabBar.js); two frames later it has settled.
+  // 2026-11-02 (David): the sliding sidebar (mobileSidebar.js) replaces the bottom tab bar of 2026-10-22.
+  // More is a sidebar row; clicking it opens the More sheet whether or not the sidebar is open.
+  const MORE = "document.querySelector('.ms-drawer-row[data-drawer=more]')";
+  // The sidebar follows the page on the next frame; two frames later it has settled.
   const frames = () => js("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))");
-  const barShown = async () => { await frames(); await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown' && getComputedStyle(document.querySelector('.ms-tabbar')).transform === 'none'"); };
-  const barGone = () => waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'hidden' && getComputedStyle(document.querySelector('.ms-tabbar')).visibility === 'hidden'");
-  const noAvatar = () => js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar, .menu-stroke')");
-  const checkChrome = async (tab, current = 'more') => {
-    ok(await noAvatar(), tab + ' has no avatar or hamburger');
-    if (current === 'hidden') { await barGone(); ok(await barCurrent() === 'hidden', tab + ' hides the tab bar'); }
-    else { await barShown(); eq(await barCurrent(), current, tab + ' marks ' + current + ' on the tab bar'); }
+  const navCurrent = async () => { await frames(); return js("document.querySelector('.ms-drawer-row[aria-current=page]')?.dataset.drawer || null"); };
+  // The round menu button beside a top-level page's title; pushed and full-screen pages have none.
+  const menuShown = async () => { await frames(); await waitFor("!document.querySelector('.ms-menu-btn').hidden && !!document.querySelector('.ms-menu-btn').getClientRects().length"); };
+  const menuGone = async () => { await frames(); await waitFor("document.querySelector('.ms-menu-btn').hidden"); };
+  const noAvatar = () => js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-avatar, .menu-stroke, .ms-tabbar')");
+  const checkChrome = async (tab, current = 'more', menu = true) => {
+    ok(await noAvatar(), tab + ' has no avatar, hamburger or tab bar');
+    if (menu) await menuShown(); else await menuGone();
+    eq(await navCurrent(), current, tab + ' marks ' + current + ' in the sidebar');
     ok(await js("document.getElementById('view-content').getBoundingClientRect().left === 0"), tab + ' page keeps the full width');
     const frost = await js("(() => { const n = document.querySelector('.ms-global-frost'); const i = n.querySelector('i'); const s = getComputedStyle(i); return { top: n.getBoundingClientRect().top, bg: s.backgroundColor, blur: parseFloat((s.backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), mask: s.maskImage.includes('linear-gradient'), shown: getComputedStyle(n).visibility !== 'hidden' }; })()");
     ok(frost.top === 0 && frost.shown && frost.mask && frost.blur <= 8 && /rgba\(0, 0, 0, 0\)|transparent/.test(frost.bg), tab + ' frost starts at y=0 as a light, masked, untinted blur: ' + JSON.stringify(frost));
     // 2026-10-21 (David, on device): the frost covers only the status bar area (safe area + a short fade), and the older tinted strip is gone.
     const band = await js("(() => { const n = document.querySelector('.ms-global-frost'); const probe = document.createElement('div'); probe.style.cssText = 'position:fixed;top:0;height:var(--mobile-safe-top, env(safe-area-inset-top, 0px))'; document.body.append(probe); const safe = probe.getBoundingClientRect().height; probe.remove(); return { height: n.getBoundingClientRect().height, safe, blur: parseFloat((getComputedStyle(n.querySelector('i')).backdropFilter.match(/blur[(]([0-9.]+)px/) || [])[1]), strip: getComputedStyle(document.documentElement, '::after').display }; })()");
     ok(band.height <= band.safe + 0.5 && band.blur <= 1 && band.strip === 'none', tab + ' frost ends at the bottom of the status bar area, light, with no tinted strip: ' + JSON.stringify(band));
-    // With the avatar gone, nothing in a page header is drawn under the tab bar either.
-    if (current !== 'hidden') ok(await js("(() => { const a = document.querySelector('.ms-tabbar').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, button, input')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => n.getBoundingClientRect().bottom <= a.top + 0.5); })()"), tab + ' header controls sit clear of the tab bar');
+    // The menu button covers nothing in the page header.
+    if (menu) ok(await js("(() => { const a = document.querySelector('.ms-menu-btn').getBoundingClientRect(); return [...document.querySelectorAll('#view-content > header, #view-content .view-header, #view-content .settings-titlebar, #view-content .bots-home')].flatMap(h => [...h.querySelectorAll('h1, h2, h3, button, input')]).filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden').every(n => { const r = n.getBoundingClientRect(); return r.right <= a.left || r.left >= a.right || r.bottom <= a.top || r.top >= a.bottom; }); })()"), tab + ' header controls sit clear of the menu button');
   };
-  // Agents became the Bots mode (2026-10-29): its roster is the Bots item on the bar.
-  for (const [tab, current] of [['home', 'home'], ['tool-store', 'more'], ['school', 'more'], ['botsHome', 'botsHome']]) {
+  // Agents became the Bots mode (2026-10-29): its roster is the sidebar's Bots row.
+  for (const [tab, current] of [['home', 'home'], ['tool-store', 'more'], ['school', 'more'], ['botsHome', 'bots']]) {
     await navigate(tab); await delay(500); await checkChrome(tab, current);
   }
   await navigate('home'); await waitFor("document.documentElement.dataset.appMode === 'kairos'");
@@ -88,8 +89,8 @@ async function run(ctx) {
     await waitFor("!!document.querySelector('.ms-page-search input')"); await delay(250);
     eq(await docks(), 0, tab + ' has no bottom search dock');
     eq(await js("document.querySelectorAll('.ms-page-search input').length"), 1, tab + ' has exactly one page search');
-    ok(await noAvatar(), tab + ' uses tab-bar chrome');
-    eq(await barCurrent(), 'more', tab + ' selects More');
+    ok(await noAvatar(), tab + ' uses the sidebar chrome');
+    eq(await navCurrent(), 'more', tab + ' selects More');
     const geometry = await js(`(() => {
       const p = document.querySelector('.ms-page-search'), h = document.querySelector('.view-header');
       const r = p.getBoundingClientRect(), hr = h.getBoundingClientRect(), cs = getComputedStyle(p), i = getComputedStyle(p.querySelector('input'));
@@ -105,8 +106,8 @@ async function run(ctx) {
     ok(geometry.actions.length <= 2 && geometry.actions.some(a => a.label === want.plus && a.w >= 44 && a.h >= 44), tab + ' named action is in the header with a 44px target');
     eq(await small('.ms-page-search input, .view-header .workspace-round'), [], tab + ' search/header targets are 44px');
     ok(await noSideways(), tab + ' has no sideways scroll'); eq(await overflow(), [], tab + ' no overflow');
-    const clear = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: document.querySelector('.ms-tabbar').getBoundingClientRect().top }; })()`);
-    ok(clear.last <= clear.top + 1, tab + ' last content clears only the tab bar: ' + JSON.stringify(clear));
+    const clear = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: innerHeight }; })()`);
+    ok(clear.last <= clear.top + 1, tab + ' last content stays on screen: ' + JSON.stringify(clear));
     await js(`document.querySelector('${view}').scrollTo(0, 0)`); await shot('page-search-' + tab);
   }
 
@@ -308,15 +309,15 @@ async function run(ctx) {
   await waitFor("!!document.querySelector('.library-editor textarea')");
   await delay(250);
   eq(await docks(), 0, 'The dock leaves while the editor is open');
-  await barShown(); eq(await barCurrent(), 'more', 'The editor keeps the tab bar');
+  await menuGone(); eq(await navCurrent(), 'more', 'The editor is a pushed page: no menu button, More current');
   ok(await js("!!document.querySelector('.library-editor button[aria-label=\"Back to Library\"]').getClientRects().length"), 'The editor keeps Back to Library');
   ok(writes.slice(viewWritesBefore).some(w => w.method === 'POST' && w.path === '/api/documents'), 'Dock + creates through the existing route');
   eq(await small('.library-editor button, .library-editor input'), [], 'Editor controls are 44px');
   await shot('library-editor');
   await js("document.querySelector('.library-editor textarea').focus(); document.querySelector('.library-editor textarea').value = 'changed'; document.querySelector('.library-editor textarea').dispatchEvent(new Event('input', { bubbles: true }))");
-  await js("document.querySelector('.ms-tabbar [data-tabbar=home]').click()");
+  await js("document.querySelector('.ms-drawer-row[data-drawer=home]').click()");
   await waitFor("!!document.querySelector('.confirm-panel')");
-  ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard unsaved changes?')"), 'Tab navigation asks before discarding document edits');
+  ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard unsaved changes?')"), 'Sidebar navigation asks before discarding document edits');
   await js("[...document.querySelectorAll('.confirm-panel .btn')].find(b => b.textContent.trim() === 'Cancel').click()");
   await waitFor("!document.querySelector('.confirm-panel')");
   eq(await js("document.querySelector('.library-editor textarea').value"), 'changed', 'Cancel preserves the document edit');
@@ -331,7 +332,7 @@ async function run(ctx) {
   await js("[...document.querySelectorAll('.confirm-panel .btn, .panel-dialog .btn')].find(b => /Discard/.test(b.textContent)).click()");
   await waitFor("document.querySelectorAll('.ms-page-search').length === 1 && document.querySelectorAll('.library-document-card').length >= 3");
   eq(await docks(), 0, 'Back restores page search without a dock');
-  await barShown(); eq(await barCurrent(), 'more', 'The tab bar slides back after the editor');
+  await menuShown(); eq(await navCurrent(), 'more', 'The menu button returns after the editor');
   await libTab('Vault');
   await waitFor("!!document.querySelector('.library-vault-browser') && document.querySelectorAll('.ms-page-search').length === 1 && !!document.querySelector('.ms-page-search input')");
   await waitFor("document.querySelectorAll('.library-vault-tree button, .library-vault-tree summary').length > 0");
@@ -428,71 +429,18 @@ async function run(ctx) {
   const forgeResult = await require('./mobile-forge-checks.cjs')(ctx);
   assertions += forgeResult.assertions;
 
-  // ---- G2. Workspace sheet: the Kairos / Forge mode switch ----------------------------------
-  const modeState = () => js(`(() => { const g = document.querySelector('.ms-tab-sheet[open] .ms-mode-switch'); if (!g) return null; const radios = [...g.querySelectorAll('[role=radio]')];
-    const caption = [...g.parentElement.querySelectorAll('.ms-mode-caption')].filter(n => n.getClientRects().length).map(n => n.textContent);
-    const tile = document.querySelector('.ms-tab-sheet[open] .ms-tab-group')?.getBoundingClientRect();
-    return { role: g.getAttribute('role'), label: g.getAttribute('aria-label'), names: radios.map(n => n.textContent.trim()), checked: radios.map(n => n.getAttribute('aria-checked')),
-      tabs: radios.map(n => n.tabIndex), described: radios.map(n => document.getElementById(n.getAttribute('aria-describedby'))?.textContent || ''), caption,
-      sizes: radios.map(n => { const r = n.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }), aboveTabs: !!tile && g.getBoundingClientRect().bottom <= tile.top,
-      thumb: (() => { const t = g.querySelector('.ms-mode-thumb').getBoundingClientRect(), on = radios.find(n => n.getAttribute('aria-checked') === 'true').getBoundingClientRect(); return Math.abs(t.left - on.left) <= 6 && Math.abs(t.right - on.right) <= 6; })(),
-      readout: !!document.querySelector('.ms-sheet-readout'), mode: document.documentElement.dataset.appMode }; })()`);
-  const openSheet = async () => { await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open] .ms-mode-switch')"); await delay(350); };
-  await navigate('home'); await delay(400); await openSheet();
-  let modes = await modeState();
-  eq([modes.role, modes.label, modes.names, modes.checked, modes.tabs], ['radiogroup', 'App mode', ['Kairos', 'Forge Preview', 'Bots Preview'], ['true', 'false', 'false'], [0, -1, -1]], 'Mode switch is a radio group with Kairos checked and a roving tab stop: ' + JSON.stringify(modes));
-  ok(modes.described.every(text => text.length > 10) && modes.caption.length === 0, 'Each mode keeps its one-line description for assistive technology; the MoreSheet board shows only the three names: ' + JSON.stringify(modes));
-  ok(modes.sizes.every(Boolean) && modes.aboveTabs && modes.thumb, 'Mode options are 44px, sit at the top of the sheet, and the thumb marks Kairos: ' + JSON.stringify(modes));
-  ok(!modes.readout, 'The temporary Safari readout is gone from the sheet');
-  eq(await small('.ms-tab-sheet[open] .ms-mode-switch button'), [], 'Mode switch has no control under 44px');
-  ok(await js("![...document.querySelectorAll('.ms-tab-sheet[open] .ms-mode-row *')].some(n => n.childElementCount === 0 && n.textContent.includes(String.fromCharCode(8212)))"), 'Mode switch copy has no em dash');
-  await shot('sheet-mode-kairos');
-  // Arrow keys move focus only; nothing switches until Space or Enter.
-  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').focus()");
-  await press('ArrowRight');
-  ok(await js("document.activeElement.dataset.mode === 'forge' && document.activeElement.tabIndex === 0 && document.querySelector('.ms-mode-switch [data-mode=kairos]').tabIndex === -1 && document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.ms-tab-sheet[open]')"), 'ArrowRight moves focus to Forge without switching');
-  await press('ArrowLeft');
-  ok(await js("document.activeElement.dataset.mode === 'kairos'"), 'ArrowLeft returns focus to Kairos');
-  await press('End');
-  ok(await js("document.activeElement.dataset.mode === 'bots' && document.activeElement.tabIndex === 0 && document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.ms-tab-sheet[open]')"), 'End moves focus to Bots without switching');
-  await press('ArrowLeft');
-  ok(await js("document.activeElement.dataset.mode === 'forge'"), 'ArrowLeft from Bots returns focus to Forge');
-  // Space activates the focused option (with its text, so the browser treats it as a real key press).
-  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
-  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
-  await waitFor("document.documentElement.dataset.appMode === 'forge' && !document.querySelector('.ms-tab-sheet[open]') && !!document.querySelector('.mf-dashboard')");
-  ok(await js("document.getElementById('view-content').dataset.view === 'forgeHome' && !document.querySelector('.mf-project')"), 'Space on the focused Forge switches modes and lands on the Forge Home overview');
-  await waitFor("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5");
-  await openSheet();
-  modes = await modeState();
-  eq([modes.checked, modes.tabs, modes.mode], [['false', 'true', 'false'], [-1, 0, -1], 'forge'], 'In Forge mode the switch marks Forge Preview: ' + JSON.stringify(modes));
-  ok(modes.caption.length === 0 && modes.described[1].length > 10 && modes.thumb && modes.sizes.every(Boolean), 'Forge keeps its description for assistive technology and the thumb sits on Forge: ' + JSON.stringify(modes));
-  await shot('sheet-mode-forge');
-  await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
-  ok(await js("document.querySelector('.ms-mode-switch[data-active=kairos] [data-mode=kairos][aria-checked=true]') !== null"), 'Tapping Kairos moves the thumb before the switch');
-  await waitFor("document.documentElement.dataset.appMode === 'kairos' && !document.querySelector('.ms-tab-sheet[open]') && document.getElementById('view-content').dataset.view === 'home'");
-  await waitFor("!!document.querySelector('.dashboard-content')");
-  ok(true, 'Tapping Kairos switches back and lands on the dashboard');
-  // Reduced motion: the thumb does not slide and the switch happens at once.
-  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  await openSheet();
-  ok(await js("/^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-thumb')).transitionDuration) && /^0s(, 0s)*$/.test(getComputedStyle(document.querySelector('.ms-mode-option')).transitionDuration)"), 'Reduced motion removes the mode thumb slide');
-  ok(await js("new Promise(r => { document.querySelector('.ms-mode-switch [data-mode=forge]').click(); setTimeout(() => r(!document.querySelector('.ms-tab-sheet[open]')), 60); })"), 'Reduced motion switches without waiting for the slide');
-  await waitFor("document.documentElement.dataset.appMode === 'forge' && !!document.querySelector('.mf-dashboard')");
-  await openSheet(); await js("document.querySelector('.ms-mode-switch [data-mode=kairos]').click()");
-  await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.getElementById('view-content').dataset.view === 'home'");
-  await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  // (G2, the More sheet's mode switch, is gone: the sidebar's Forge and Bots rows switch modes; mobile-sidebar-checks.cjs.)
 
   // ---- H. Keyboard lift, safe areas, reduced motion, resize cycles -------------------------
   await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1"); await delay(600);
   const beforeKeyboard = await rect('.ms-page-search');
   await js("(() => { window.__realVV = window.visualViewport; Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => ({ height: innerHeight - 300, offsetTop: 0, width: innerWidth, addEventListener() {}, removeEventListener() {} }) }); dispatchEvent(new Event('resize')); })()");
-  await barGone();
-  ok(Math.abs((await rect('.ms-page-search')).t - beforeKeyboard.t) <= 1 && await docks() === 0, 'Keyboard hides bar while page search stays in normal flow');
-  await js("(() => { Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__realVV }); dispatchEvent(new Event('resize')); })()"); await barShown();
+  await menuGone();
+  ok(Math.abs((await rect('.ms-page-search')).t - beforeKeyboard.t) <= 1 && await docks() === 0, 'Keyboard hides the menu button while page search stays in normal flow');
+  await js("(() => { Object.defineProperty(window, 'visualViewport', { configurable: true, value: window.__realVV }); dispatchEvent(new Event('resize')); })()"); await menuShown();
   ok(Math.abs((await rect('.ms-page-search')).t - beforeKeyboard.t) <= 1, 'Keyboard down preserves page search position');
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '34px')");
-  ok((await rect('.ms-tabbar')).b <= 844 - 34 + 1 && await docks() === 0, 'Safe area affects tab bar without creating a search dock');
+  ok(await docks() === 0, 'The safe area creates no search dock');
   await js("document.documentElement.style.setProperty('--native-safe-bottom', '0px')");
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }); await delay(150);
   ok(await js("getComputedStyle(document.querySelector('.ms-page-search')).transform === 'none'"), 'Reduced motion leaves search in normal flow');
@@ -571,8 +519,8 @@ async function run(ctx) {
       }
       ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), `${tab} does not scroll sideways at ${name}`);
       eq(await small('.view-header .workspace-round, .ms-page-search input'), [], `${tab} search controls are 44px at ${name}`);
-      const reach = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const d = document.querySelector('.ms-tabbar').getBoundingClientRect(); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: d.top, kb: getComputedStyle(document.querySelector('.ms-tabbar')).getPropertyValue('--ms-keyboard'), vv: [visualViewport.height, innerHeight], scroll: v.scrollTop, sh: v.scrollHeight, ch: v.clientHeight }; })()`);
-      ok(reach.last <= reach.top + 1, `${tab} last content clears the tab bar at ${name}: ` + JSON.stringify(reach));
+      const reach = await js(`(() => { const v = document.querySelector('${view}'); v.scrollTo(0, 1e6); const items = [...v.querySelectorAll('.view-constrained > *')].filter(n => n.getClientRects().length); return { last: Math.max(...items.map(n => n.getBoundingClientRect().bottom)), top: innerHeight, vv: [visualViewport.height, innerHeight], scroll: v.scrollTop, sh: v.scrollHeight, ch: v.clientHeight }; })()`);
+      ok(reach.last <= reach.top + 1, `${tab} last content stays on screen at ${name}: ` + JSON.stringify(reach));
     }
     await js(`document.querySelector('${view}').scrollTo(0, 0)`);
     await shot('page-search-' + name);
@@ -591,7 +539,7 @@ async function run(ctx) {
   const backBtn = () => js("document.querySelector('.settings-mobile-back').click()");
   const visibleItems = () => js("[...document.querySelectorAll('.settings-nav-item')].filter(n => n.getClientRects().length).map(n => n.dataset.section)");
   await openSettings('notes');
-  await checkChrome('settings', 'more');
+  await checkChrome('settings', 'more', false);
   eq(await mview(), 'list', 'Settings opens on its list');
   const nav = await rect('#settings-nav');
   ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
@@ -689,9 +637,9 @@ async function run(ctx) {
   await js("document.querySelector('.settings-window .settings-titlebar-btn[title=Close]')?.click()");
   await resize(390, 844);
 
-  // ---- T. The tab bar: every tab, selection, More, hiding, glass, badges, reduced motion -----
-  // (scripts/mobile-tabbar-checks.cjs; its assertions count here through ok and eq.)
-  await require('./mobile-tabbar-checks.cjs')({ ...ctx, ok, eq, rect, hit, small, noSideways, barState, barCurrent, barShown, barGone, noAvatar, MORE, shot, resize, cdp, press });
+  // ---- T. The sliding sidebar: menu button, rows, More, profile, New chat, swipe, Kip, devices -----
+  // (scripts/mobile-sidebar-checks.cjs; its assertions count here through ok and eq.)
+  await require('./mobile-sidebar-checks.cjs')({ ...ctx, ok, eq, rect, hit, small, noSideways, navCurrent, menuShown, menuGone, noAvatar, MORE, shot, resize, cdp, press });
 
   // 2026-10-21 (David, iPhone home-screen app, 393x852): iOS gives a home-screen app a layout viewport
   // short by the status bar (100dvh = innerHeight = fixed inset:0 = 793) while 100lvh is the screen (852).
@@ -712,7 +660,7 @@ async function run(ctx) {
     const r = await js(`(() => {
       const pop = [...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.getClientRects().length); if (!pop) return { open: false };
       const pr = pop.getBoundingClientRect(), bad = [];
-      for (const n of document.querySelectorAll('.ms-tabbar-item, .ms-chat-back, .chat-mobile-header button, .ms-header button, .mf-session-header button, #view-content .view-header h2, .ms-chat-heading')) {
+      for (const n of document.querySelectorAll('.ms-menu-btn, .ms-chat-back, .chat-mobile-header button, .ms-header button, .mf-session-header button, #view-content .view-header h2, .ms-chat-heading')) {
         if (pop.contains(n) || !n.getClientRects().length || getComputedStyle(n).visibility === 'hidden') continue;
         const b = n.getBoundingClientRect(), x = (b.left + b.right) / 2, y = (b.top + b.bottom) / 2;
         if (x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) continue;
@@ -741,14 +689,14 @@ async function run(ctx) {
       const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { row, title: title && box(forgeTitle ? title.parentElement : title), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
+      return { row, title: title && box(forgeTitle ? title.parentElement : title), indent: !forgeTitle && !!title?.classList.contains('ms-menu-indent'), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
     })()`);
     // Home's independently redesigned hero has no shell title; keep checking
     // its first-content clearance without treating a section heading as one.
     if (!label.endsWith(': home')) ok(r.title && r.text, `${label}: the page title is present`);
     if (r.title) {
-      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.l - r.row.l) <= 1 && r.title.r <= r.row.r + 1 && r.align === 'left' && r.italic === 'italic' && /serif/i.test(r.family),
-        `${label}: the serif italic title leads the top row on the left: ${JSON.stringify(r)}`);
+      ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.l - (r.row.l + (r.indent ? 52 : 0))) <= 1 && r.title.r <= r.row.r + 1 && r.align === 'left' && r.italic === 'italic' && /serif/i.test(r.family),
+        `${label}: the serif italic title leads the top row on the left (beside the menu button on a top-level page): ${JSON.stringify(r)}`);
       ok(r.buttons.filter(b => !b.back).length <= 2, `${label}: at most two header actions`);
       for (const b of r.buttons) ok(b.r - b.l >= 44 && b.b - b.t >= 44 && b.radius >= (b.b - b.t) / 2 && b.l >= r.row.l - 1 && b.r <= r.row.r + 1 && b.t >= r.row.t - 1 && b.b <= r.row.b + 1 && (b.back ? Math.abs(b.l - r.row.l) <= 1 : b.l >= r.title.r - 1), `${label}: round header buttons clear the title and stay in the top row: ${JSON.stringify(b)}`);
     }
@@ -757,17 +705,15 @@ async function run(ctx) {
   for (const [name, w, layout, screen, top, bottom, nudge] of devices) {
     await resize(w, layout);
     await js(`(() => { const s = document.documentElement.style; s.setProperty('--ms-page-height', '${screen}px'); s.setProperty('--native-safe-top', '${top}px'); s.setProperty('--native-safe-bottom', '${bottom}px'); s.setProperty('--ms-ios-nudge', '${nudge}px'); })()`);
-    const gap = Math.max(28, bottom);
+    const gap = Math.max(12, bottom); // Docks and composers clear the home indicator, or 12px without one.
     await navigate('chat'); await waitFor("!!document.querySelector('.ms-shell:not([hidden]) .ms-composer, .ms-shell:not([hidden]) .ms-launch-composer:not([hidden])')"); await delay(300);
     const page = await js(`['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return s + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom); })`);
     eq(page, ['html', 'body', '#app', '#content', '#view-content', '.ms-shell', '.ms-background'].map(s => `${s} 0-${screen}`), `${name}: the launch page fills the screen`);
     await require('./chat-header-checks.cjs')({ js, ok, eq, press }, name, top + nudge + 6);
     ok(await noAvatar(), `${name}: no avatar on the launch page`);
-    await barShown();
-    const bar = await rect('.ms-tabbar');
-    ok(Math.abs(bar.b - (screen - gap)) <= 1 && bar.h === 62 && Math.abs(bar.l - 18) <= 1 && Math.abs(bar.r - (w - 18)) <= 1, `${name}: the tab bar sits ${gap}px above the true screen bottom, 18px from each side: ${JSON.stringify(bar)}`);
+    await menuShown();
     const composer = await rect('.ms-shell .ms-composer') || await rect('.ms-launch-composer');
-    ok(composer && Math.abs(composer.b - (bar.t - 10)) <= 1, `${name}: launch composer sits 10px above the tab bar: ${JSON.stringify(composer)}`);
+    ok(composer && Math.abs(composer.b - (screen - gap)) <= 1, `${name}: launch composer sits ${gap}px above the true screen bottom: ${JSON.stringify(composer)}`);
     const frost = await js("[...document.querySelectorAll('.ms-shell .ms-header .ms-blur-top i')].filter(n => n.getClientRects().length).map(n => n.getBoundingClientRect().bottom)");
     ok(frost.every(b => b <= top + 0.5), `${name}: launch frost stays within the ${top}px status bar: ${frost}`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'launch');
@@ -779,16 +725,15 @@ async function run(ctx) {
     await js("document.querySelector('.ms-tab-sheet').close()");
     // A conversation's composer.
     await navigate('chat', { mobileConversation: true }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
-    await barShown();
-    const chatBar = await rect('.ms-tabbar');
+    await menuGone();
     const chat = await rect('.ms-conversation .ms-composer');
-    ok(Math.abs(chatBar.b - (screen - gap)) <= 1 && Math.abs(chat.b - (chatBar.t - 10)) <= 1, `${name}: the bar clears the screen bottom and the conversation composer sits 10px above it: ${JSON.stringify(chat)}`);
+    ok(Math.abs(chat.b - (screen - gap)) <= 1, `${name}: the conversation composer sits ${gap}px above the true screen bottom: ${JSON.stringify(chat)}`);
     ok(Math.round((await rect('#view-content')).b) === screen, `${name}: conversation fills the screen`);
     // A searchable tab: in-page search and a bottom sheet.
     await navigate('notes'); await waitFor("document.querySelectorAll('.ms-page-search').length === 1"); await delay(300);
-    await barShown();
-    const dock = await rect('.ms-page-search'), dockBar = await rect('.ms-tabbar');
-    ok(Math.abs(dockBar.b - (screen - gap)) <= 1 && dock.b < dockBar.t && await docks() === 0, `${name}: the search stays in the page while the tab bar sits ${gap}px above the screen bottom: ${JSON.stringify([dock, dockBar])}`);
+    await menuShown();
+    const dock = await rect('.ms-page-search');
+    ok(dock && dock.b < screen && await docks() === 0, `${name}: the search stays in the page: ${JSON.stringify(dock)}`);
     const globalFrost = await rect('.ms-global-frost');
     ok(!globalFrost || globalFrost.b <= top + 0.5, `${name}: page frost stays within the status bar`);
     await js("import('/static/js/mobileSheet.js').then(m => { const p = document.createElement('p'); p.textContent = 'Fold check'; window.__foldSheet = m.openMobileSheet({ title: 'Fold check', content: p, fullHeight: true }); })");
@@ -801,23 +746,20 @@ async function run(ctx) {
     await navigate('forgeHome', { mobilePage: 0 }); await waitFor("!!document.querySelector('.mf-project')"); await js("document.getElementById('mf-tab-0').click()"); await delay(500);
     eq(Math.round((await rect('.mf-project')).b), screen, `${name}: Forge project page fills the screen`);
     const forgeBottom = await js("(() => { const b = document.querySelector('.mf-project #mf-new .ms-launch-bottom'); const kids = [...b.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height); return { box: Math.round(b.getBoundingClientRect().bottom), last: Math.round(Math.max(...kids.map(n => n.getBoundingClientRect().bottom))), composer: Math.round(document.querySelector('.mf-project .forge-composer').getBoundingClientRect().bottom) }; })()");
-    await barShown();
-    const forgeBar = await rect('.ms-tabbar');
-    ok(forgeBottom.box === screen && Math.abs(forgeBottom.last - (forgeBar.t - 10)) <= 1 && forgeBottom.composer <= forgeBar.t - 10, `${name}: Forge New composer sits above the tab bar: ${JSON.stringify([forgeBottom, forgeBar])}`);
+    ok(forgeBottom.box === screen && Math.abs(forgeBottom.last - (screen - gap)) <= 1 && forgeBottom.composer <= screen - gap, `${name}: Forge New composer sits ${gap}px above the true screen bottom: ${JSON.stringify(forgeBottom)}`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-new');
     await js("document.getElementById('mf-tab-1').click()"); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(400);
     await js("document.querySelector('#mf-sessions .ms-history-main').click()");
     await waitFor("!!document.querySelector('.mf-session .forge-transcript-composer')"); await delay(500);
-    await barShown();
-    const sessionBar = await rect('.ms-tabbar');
+    await menuGone();
     const forgeChat = await rect('.mf-session .forge-transcript-composer');
-    ok(forgeChat && Math.abs(sessionBar.b - (screen - gap)) <= 1 && Math.abs(forgeChat.b - (sessionBar.t - 10)) <= 1, `${name}: the bar clears the screen bottom and the Forge session composer sits 10px above it: ${JSON.stringify(forgeChat)}`);
+    ok(forgeChat && Math.abs(forgeChat.b - (screen - gap)) <= 1, `${name}: the Forge session composer sits ${gap}px above the true screen bottom: ${JSON.stringify(forgeChat)}`);
     await js("document.querySelector('.mf-changes').click()"); await waitFor("!!document.querySelector('dialog.ms-sheet[open] .mf-git-dock')"); await delay(400);
     const changes = { sheet: await rect('dialog.ms-sheet[open]'), dock: await rect('.mf-git-dock'), actions: await js("document.querySelectorAll('.mf-git-dock button').length") }, dockGap = Math.max(8, bottom);
     ok(Math.round(changes.sheet.b) === screen, `${name}: Changes sheet reaches the screen bottom: ${JSON.stringify(changes)}`);
     // A dock with actions sits above the home indicator; with nothing to do there is no dock at all, never an empty pill.
     ok(changes.actions ? Math.abs(changes.dock.b - (screen - dockGap)) <= 1 : changes.dock === null, `${name}: Changes dock ${changes.actions ? 'sits ' + dockGap + 'px above the screen bottom' : 'is hidden with no actions'}: ${JSON.stringify(changes)}`);
-    ok(await js("(() => { const b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('dialog.ms-sheet[open]'); })()"), `${name}: the modal Changes sheet covers the bar`);
+    ok(await js("!!document.elementFromPoint(innerWidth / 2, innerHeight - 20)?.closest('dialog.ms-sheet[open]')"), `${name}: the modal Changes sheet covers the bottom of the page`);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'forge-changes');
     await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
     if (!nudge) continue;
@@ -862,7 +804,7 @@ async function run(ctx) {
     }
     await navigate('notes'); await delay(300);
     // The More sheet, Home's customize sheet, Tool Store details and Forge's Projects sheet.
-    await barShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(300);
+    await menuShown(); await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-tab-sheet[open]')"); await delay(300);
     await popupClear('.ms-tab-sheet[open]', `${name}: More sheet`, top);
     await shot('fold-' + w + 'x' + screen + (nudge ? '-iphone-' : '-other-') + 'more-sheet'); await js("document.querySelector('.ms-tab-sheet').close()");
     await navigate('home'); await delay(500); await js("document.querySelector('.hm-customize').click()"); await waitFor("!!document.querySelector('.hm-sheet')"); await delay(300);
@@ -881,7 +823,7 @@ async function run(ctx) {
   await js("(() => { const s = document.documentElement.style; s.removeProperty('--ms-page-height'); s.removeProperty('--native-safe-top'); s.removeProperty('--ms-ios-nudge'); s.setProperty('--native-safe-bottom', '0px'); })()");
 
   // ---- S. Swipe down dismisses every phone sheet (2026-10-25, David) --------------------
-  await resize(390, 844); await navigate('home'); await barShown();
+  await resize(390, 844); await navigate('home'); await menuShown();
   const touchDrag = async (x, y, dy, pause) => {
     await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
     for (let i = 1; i <= 8; i++) { await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + dy * i / 8 }] }); await delay(pause); }
@@ -912,7 +854,7 @@ async function run(ctx) {
   const far = await rect('.ms-more-sheet .ms-sheet-heading');
   const finish = await touchDrag(far.l + 20, far.t + 4, 360, 20); await finish();
   await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')");
-  ok(await js(`document.activeElement === ${MORE}`), 'A swipe-closed sheet returns focus to its opener');
+  ok(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), 'A swipe-closed sheet returns focus to the menu button the sidebar was opened from');
   ok(await js("document.querySelector('dialog.ms-more-sheet').style.transform === ''"), 'The closed sheet is clean for the next open');
   await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
   await js("document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click()");

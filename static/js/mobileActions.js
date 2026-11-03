@@ -1,52 +1,9 @@
 import { el } from './api.js';
-import { pill, emptyState } from './kairosParts.js';
+import { emptyState } from './kairosParts.js';
 import { go, mobileOn, button } from './mobileShared.js';
 import { openMobileSheet } from './mobileSheet.js';
 import { activityItems } from './mobileActivity.js';
-import { ICONS } from './icons.js';
 import { createMascot } from './mascot.js';
-
-// Use the destination's existing control once its asynchronous render is ready.
-function destination(tab, options, selector, activate = false) {
-  const old = document.getElementById('view-content');
-  let timer;
-  const observer = new MutationObserver(() => {
-    const root = document.getElementById('view-content');
-    if (!mobileOn()) { observer.disconnect(); clearTimeout(timer); return; }
-    const target = root !== old && root?.querySelector(selector);
-    if (!target) return;
-    observer.disconnect(); clearTimeout(timer);
-    target.scrollIntoView({ block: 'center' });
-    if (activate) target.click(); else target.focus();
-  });
-  observer.observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
-  timer = setTimeout(() => observer.disconnect(), 5000);
-  go(tab, options);
-}
-
-export function openQuickCreate(opener) {
-  if (!mobileOn()) return;
-  const content = el('nav', { class: 'ms-quick-create rd-stagger', 'aria-label': 'Create' });
-  let sheet;
-  const actions = [
-    ['New chat', 'Ask anything', 'chats', () => go('chat', { mobileConversation: true })],
-    ['Quick note', 'Capture a thought', 'notes', () => destination('notes', {}, '[data-mobile-create-label="Add note"]')],
-    ['New design', 'Website, app, poster, slides', 'design', () => destination('library', { section: 'designs' }, '.design-composer textarea')],
-    ['Event or task', 'Schedule it', 'calendar', () => destination('calendar', {}, '[data-mobile-create-label="New event"]', true)],
-    ['Talk to Kairos', 'Voice', 'voice', () => destination('chat', { mobileConversation: true }, '#chat-openmic', true)],
-  ];
-  for (const [text, detail, icon, action] of actions) {
-    const row = pill({ text, kind: 'secondary', onClick: () => { sheet.close(); action(); } });
-    row.classList.add('ms-quick-action');
-    const mark = el('span', { class: 'ms-quick-icon', 'aria-hidden': 'true' }); mark.innerHTML = icon === 'voice' ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>' : ICONS[icon] || ICONS.newChat;
-    row.prepend(mark); row.append(el('small', { text: detail })); content.append(row);
-  }
-  sheet = openMobileSheet({ title: 'Quick create', content, opener });
-  sheet.dialog.classList.add('ms-quick-popup');
-  sheet.dialog.classList.remove('rd-sheet-in');
-  sheet.dialog.append(sheet.dismiss);
-  sheet.dismiss.className = 'ms-quick-close';
-}
 
 export function openNotifications(opener) {
   if (!mobileOn()) return;

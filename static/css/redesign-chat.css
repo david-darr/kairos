@@ -212,9 +212,6 @@
   .kairos-redesign[data-view=mobileLaunch] .ms-launch-bottom { flex-shrink: 0; }
   /* The board has no blur band: it painted a hard-edged rectangle behind the rounded prompt. */
   .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom > .ms-blur-bottom { display: none; }
-  .kairos-redesign.ms-tabbar-up[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom {
-    padding-bottom: var(--ms-launch-clearance, calc(12px + var(--ms-tabbar-space)));
-  }
   @media (max-height: 480px) {
     .kairos-redesign[data-view=mobileLaunch] .ms-intro { flex-basis: 0; padding-block: 0; overflow: hidden; }
   }
@@ -360,8 +357,8 @@
   .kairos-redesign[data-view=mobileLaunch] .rd-chat-prompts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 12px 20px 18px; }
   .kairos-redesign[data-view=mobileLaunch] .rd-chat-prompts .rd-chat-prompt { min-height: 40px; padding: 10px 14px; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface-solid); font: 13px var(--rd-font-ui); }
   .kairos-redesign[data-view=mobileLaunch] .ms-live-chat .rd-chat-prompts { display: none; }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom { margin-top: 0; padding-inline: 20px; }
-  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history { padding: 0 20px var(--ms-tabbar-space, 120px); gap: 18px; overflow-y: auto; }
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell:not(.ms-live-chat) .ms-launch-bottom { margin-top: auto; padding-inline: 20px; } /* The composer meets the bottom edge; spare height sits above it. */
+  .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history { padding: 0 20px 0; gap: 18px; overflow-y: auto; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search { display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px; align-items: center; gap: 10px; min-height: 54px; margin: 0; padding: 4px 5px 4px 18px; box-shadow: none; backdrop-filter: none; }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search input { height: 44px; padding: 0; font: 15px var(--rd-font-ui); }
   .kairos-redesign[data-view=mobileLaunch] .ms-shell .ms-history-search > button { width: 44px; height: 44px; padding: 0; border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); font-size: 0; background: var(--rd-surface-solid); }

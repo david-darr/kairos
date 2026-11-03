@@ -269,5 +269,3 @@
 .design-system-colors input[type="color"] { width: 100%; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 .design-system-pane[hidden] { display: none; }
 .design-composer[hidden] { display: none; }
-/* The phone tab bar (mobileTabBar.js): the view already leaves its room for
-   the board list; the pager and an engaged composer hide it. */

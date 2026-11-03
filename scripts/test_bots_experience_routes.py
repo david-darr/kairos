@@ -136,10 +136,10 @@ class BotsRoutesTests(unittest.TestCase):
         nav = re.search(r"const NAV = \[(.*?)\n\];", app_js, flags=re.S).group(1)
         self.assertNotIn('id: "agents"', nav)
         self.assertNotIn("data-tab=\"agents\"", app_js)
-        bar = (JS / "mobileTabBar.js").read_text(encoding="utf-8")
-        self.assertNotIn("id: 'agents'", bar)
-        self.assertNotIn("source: 'agents'", bar)
-        self.assertIn("new Set(['home', 'chat', 'calendar', 'botsHome'])", (JS / "mobileTabSheet.js").read_text(encoding="utf-8"))
+        sidebar = (JS / "mobileSidebar.js").read_text(encoding="utf-8")
+        self.assertNotIn("id: 'agents'", sidebar)
+        self.assertIn("id: 'bots'", sidebar)
+        self.assertIn("new Set(['home', 'chat'])", (JS / "mobileTabSheet.js").read_text(encoding="utf-8"))
         self.assertNotIn("Agents", (JS / "redesignHome.js").read_text(encoding="utf-8").split("const DEFAULT_ORDER")[0])
 
     def test_the_old_agents_view_is_only_a_redirect(self):

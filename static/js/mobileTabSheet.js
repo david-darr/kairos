@@ -1,23 +1,21 @@
 import { openNotifications } from './mobileActions.js';
 import { attachSheetDrag } from './mobileSheet.js';
-import { button, mobileOn, haptic, reduced } from './mobileShared.js';
+import { button, mobileOn, haptic, go } from './mobileShared.js';
 import { activityItems } from './mobileActivity.js';
-import { sidebarLayout } from './layout.js';
+import { sidebarLayout, knownTabs } from './layout.js';
 import { ICONS } from './icons.js';
-import { ICON as KAIROS_MARK } from './brand.js';
 
-// The More sheet (2026-10-22): opened from the tab bar's More (mobileTabBar.js).
-// It holds every tab the bar does not, grouped as Settings > Layout groups
-// them, the Kairos / Forge mode switch, Forge projects, work in progress, and
-// the account and Settings. It replaced the avatar's workspace sheet.
+// The More sheet: opened from More in the phone's sidebar (mobileSidebar.js,
+// 2026-11-02). It holds every Kairos tab the sidebar does not, in any mode,
+// grouped as Settings > Layout groups them; in Bots, the bots' chats and inbox;
+// Forge projects, work in progress, and the account and Settings.
 let sheet, opener;
-// The tabs the bar itself shows; More lists the rest.
-const ON_BAR = new Set(['home', 'chat', 'calendar', 'botsHome']);
+// The tabs the sidebar itself shows; More lists the rest.
+const IN_SIDEBAR = new Set(['home', 'chat']);
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
-const setExpanded = value => { if (opener?.dataset?.tabbar === 'more') opener.setAttribute('aria-expanded', String(value)); };
 export function closeMoreSheet() {
   if (!sheet?.open) return;
-  sheet.close(); sheet.removeAttribute('aria-modal'); setExpanded(false);
+  sheet.close(); sheet.removeAttribute('aria-modal');
   opener?.isConnected && opener.focus({ preventScroll: true });
 }
 
@@ -45,12 +43,25 @@ export function openMoreSheet(from) {
   const grab = button('Close More', closeMoreSheet, 'ms-sheet-grab'); grab.setAttribute('aria-label', 'Close More');
   const heading = document.createElement('h2'); heading.className = 'ms-sheet-heading'; heading.textContent = 'More';
   const groups = document.createElement('nav'); groups.setAttribute('aria-label', 'Tabs');
-  const sources = [...document.querySelectorAll('#nav .nav-item')];
   const grids = new Map();
-  // Kairos's bar tabs, and the only tab of Forge (Forge Home) and of Bots (Bots), are on the bar already.
-  const single = ['forge', 'bots'].includes(document.documentElement.dataset.appMode);
-  const listed = sources.filter(n => !['design', 'designs'].includes(n.dataset.tab) && !(single || ON_BAR.has(n.dataset.tab)));
-  for (const group of sidebarLayout(listed.map(n => n.dataset.tab))) {
+  // Bots mode: the bots' own lists, which have no row in the sidebar.
+  if (document.documentElement.dataset.appMode === 'bots') {
+    const section = document.createElement('section'); section.className = 'ms-tab-group'; section.dataset.group = 'bots';
+    const label = document.createElement('h3'); label.className = 'ms-group-label'; label.textContent = 'Bots';
+    const grid = document.createElement('div'); grid.className = 'ms-tab-grid';
+    const tile = (id, text, icon, open) => {
+      const node = button('', () => { closeMoreSheet(); import('./mobileBots.js').then(open); }, 'ms-tab-tile ms-glass');
+      node.innerHTML = `${ICONS[icon] || ''}<span></span>`; node.querySelector('span').textContent = text;
+      node.dataset.tab = id; node.setAttribute('aria-label', text); return node;
+    };
+    grid.append(tile('botsChats', 'Chats', 'chats', m => m.openBotsList(opener)), tile('botsInbox', 'Inbox', 'inbox', m => m.openBotsInbox()));
+    section.append(label, grid); groups.append(section);
+  }
+  // Every Kairos tab, from any mode: the list app.js last built (layout.js), so
+  // Settings > Layout order and hidden tabs and custom tabs hold here too.
+  const listed = knownTabs().filter(tab => !['design', 'designs'].includes(tab.id) && !IN_SIDEBAR.has(tab.id));
+  const current = document.documentElement.dataset.appMode === 'kairos' || !document.documentElement.dataset.appMode ? document.documentElement.dataset.view : '';
+  for (const group of sidebarLayout(listed.map(tab => tab.id))) {
     if (!group.ids.length) continue;
     const section = document.createElement('section'); section.className = 'ms-tab-group'; section.dataset.group = group.id;
     const label = document.createElement('h3'); label.className = 'ms-group-label'; label.textContent = group.label || 'Tabs';
@@ -58,19 +69,18 @@ export function openMoreSheet(from) {
     section.append(label, grid); groups.append(section);
     for (const id of group.ids) grids.set(id, grid);
   }
-  // The rendered nav is the source of truth for order, visibility, icons,
-  // authorization and custom tabs. Copy presentation, delegate each action.
-  for (const source of listed) {
-    const grid = grids.get(source.dataset.tab); if (!grid) continue;
-    const tile = button('', () => { closeMoreSheet(); source.click(); }, 'ms-tab-tile ms-glass');
-    tile.innerHTML = source.innerHTML; tile.dataset.tab = source.dataset.tab;
+  // Navigation switches back to Kairos itself (app.js modeForTab).
+  for (const tab of listed) {
+    const grid = grids.get(tab.id); if (!grid) continue;
+    const tile = button('', () => { closeMoreSheet(); go(tab.id); }, 'ms-tab-tile ms-glass');
+    tile.innerHTML = `${tab.svg || ''}<span></span>`; tile.querySelector('span').textContent = tab.label; tile.dataset.tab = tab.id;
     // A custom tab without its own icon falls back to the Library glyph; give it a distinct generic one here.
-    if (source.dataset.tab !== 'library' && source.querySelector('svg')?.innerHTML === libraryGlyph()) tile.querySelector('svg').outerHTML = ICONS.tabGeneric;
-    tile.setAttribute('aria-label', source.getAttribute('aria-label') || source.textContent.trim());
-    if (source.hasAttribute('aria-current')) tile.setAttribute('aria-current', 'page');
+    if (tab.id !== 'library' && tile.querySelector('svg')?.innerHTML === libraryGlyph()) tile.querySelector('svg').outerHTML = ICONS.tabGeneric;
+    tile.querySelector('svg')?.setAttribute('aria-hidden', 'true');
+    tile.setAttribute('aria-label', tab.label);
+    if (tab.id === current) tile.setAttribute('aria-current', 'page');
     grid.append(tile);
   }
-  const modeRow = modeSwitch();
   const projects = document.createElement('section'); projects.className = 'ms-sheet-projects';
   const addProject = document.querySelector('.forge-project-section .forge-icon-button');
   if (addProject) {
@@ -125,68 +135,10 @@ export function openMoreSheet(from) {
   extras.append(work);
   const closeButton = button('', closeMoreSheet, 'ms-sheet-close'); closeButton.innerHTML = ICONS.close; closeButton.setAttribute('aria-label', 'Close');
   header.append(heading, closeButton);
-  panel.append(grab, header, modeRow, groups, extras, footer); sheet.replaceChildren(panel);
-  sheet.classList.add('rd-sheet-in'); sheet.setAttribute('aria-modal', 'true'); sheet.showModal(); setExpanded(true);
+  panel.append(grab, header, groups, extras, footer); sheet.replaceChildren(panel);
+  sheet.classList.add('rd-sheet-in'); sheet.setAttribute('aria-modal', 'true'); sheet.showModal();
   // Focus the dialog itself, not the grabber: no ring on open; Tab then reaches the first control.
   sheet.tabIndex = -1; sheet.focus({ preventScroll: true });
-}
-
-// The app mode switch at the top of the More sheet: one segmented radio group,
-// Kairos, Forge Preview and Bots Preview, each with its mark and a one-line
-// description. It delegates to the sidebar's own mode buttons, so Kairos still lands
-// on the dashboard, Forge on the Forge Home overview and Bots on the roster. Arrow keys move focus
-// only (manual activation): Space or Enter switches, because switching
-// closes the sheet and changes the whole app.
-const MODES = {
-  kairos: { name: 'Kairos', mark: () => KAIROS_MARK, about: 'Your assistant, chats and everyday tabs' },
-  forge: { name: 'Forge', badge: 'Preview', mark: () => ICONS.code, about: 'Coding agents working across your projects' },
-  bots: { name: 'Bots', badge: 'Preview', mark: () => ICONS.agents, about: 'Your bots, their chats and settings' },
-};
-function modeSwitch() {
-  const row = document.createElement('section'); row.className = 'ms-mode-row';
-  const sources = [...document.querySelectorAll('#forge-mode-switch [data-mode]')].filter(source => MODES[source.dataset.mode]);
-  row.hidden = sources.length < 2;
-  if (row.hidden) return row;
-  const active = MODES[document.documentElement.dataset.appMode] ? document.documentElement.dataset.appMode : 'kairos';
-  const group = document.createElement('div'); group.className = 'ms-mode-switch';
-  group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', 'App mode'); group.dataset.active = active;
-  const thumb = document.createElement('span'); thumb.className = 'ms-mode-thumb'; thumb.setAttribute('aria-hidden', 'true'); group.append(thumb);
-  const captions = [];
-  let switching = false;
-  const radios = sources.map(source => {
-    const mode = source.dataset.mode, info = MODES[mode];
-    const caption = document.createElement('p'); caption.className = 'ms-mode-caption'; caption.id = `ms-mode-about-${mode}`;
-    caption.textContent = info.about; caption.hidden = mode !== active; captions.push(caption);
-    const radio = button('', () => {
-      if (switching) return;
-      switching = true; haptic();
-      radios.forEach(other => { other.setAttribute('aria-checked', String(other === radio)); other.tabIndex = other === radio ? 0 : -1; });
-      captions.forEach(item => { item.hidden = item !== caption; });
-      group.dataset.active = mode;
-      // The thumb slides across before the app changes; with reduced motion it switches at once.
-      setTimeout(() => { closeMoreSheet(); source.click(); }, reduced.matches ? 0 : 220);
-    }, 'ms-mode-option');
-    radio.setAttribute('role', 'radio'); radio.dataset.mode = mode;
-    radio.setAttribute('aria-checked', String(mode === active)); radio.tabIndex = mode === active ? 0 : -1;
-    radio.setAttribute('aria-describedby', caption.id);
-    radio.innerHTML = info.mark();
-    radio.firstElementChild?.setAttribute('aria-hidden', 'true');
-    const name = document.createElement('span'); name.className = 'ms-mode-name'; name.textContent = info.name; radio.append(name);
-    if (info.badge) { const badge = document.createElement('small'); badge.textContent = info.badge; name.append(' ', badge); }
-    group.append(radio);
-    return radio;
-  });
-  group.addEventListener('keydown', event => {
-    const keys = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
-    const at = radios.indexOf(document.activeElement);
-    if (at < 0 || !(event.key in keys || event.key === 'Home' || event.key === 'End')) return;
-    event.preventDefault();
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? radios.length - 1 : (at + keys[event.key] + radios.length) % radios.length;
-    radios.forEach((radio, i) => { radio.tabIndex = i === next ? 0 : -1; });
-    radios[next].focus();
-  });
-  row.append(group, ...captions);
-  return row;
 }
 
 export function initMoreSheet() {

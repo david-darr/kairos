@@ -147,12 +147,13 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   // -- Phone: week replaces the hero; the Home badge carries the needs-you signal (393x852) ----------------------------
   win.setContentSize(393, 852); await delay(400);
   await navigate('home');
-  await waitFor("!!document.querySelector('.ms-tabbar') && !!document.querySelector('.hm-week .dashboard-core')");
+  await waitFor("!document.querySelector('.ms-menu-btn').hidden && !!document.querySelector('.hm-week .dashboard-core')");
   assert.ok(await js("!document.querySelector('.dashboard-hero, .dashboard-mascot, kairos-mascot[follow-pointer]')"), 'Phone Home has no hero mascot or pointer listener');
-  assert.ok(await js("(() => { const h = document.querySelector('.hm-heading').getBoundingClientRect(), b = document.querySelector('.ms-tabbar').getBoundingClientRect(); return h.left >= 0 && h.right <= innerWidth && h.bottom <= b.top; })()"), 'Phone Home heading clears the tab bar');
-  // The bar's Home badge is the needs-you signal on phone (Agents became Bots): untouched, no mascot in the bar.
-  assert.equal(await js("document.querySelectorAll('.ms-tabbar kairos-mascot, .ms-tabbar .agent-mascot').length"), 0);
-  assert.ok(await js("!!document.querySelector('.ms-tabbar-item[data-tabbar=home] .ms-tabbar-badge:not([hidden])')"), 'the Home badge still shows');
+  assert.ok(await js("(() => { const h = document.querySelector('.hm-heading').getBoundingClientRect(), b = document.querySelector('.ms-menu-btn').getBoundingClientRect(); return h.left >= 0 && h.right <= innerWidth && (h.top >= b.bottom || h.bottom <= b.top || [...document.querySelectorAll('.hm-heading h1, .hm-heading h2')].every(t => t.getBoundingClientRect().left >= b.right)); })()"), 'Phone Home heading clears the menu button');
+  // The sidebar's Home badge is the needs-you signal on phone (Agents became Bots): untouched, no mascot in the sidebar.
+  assert.equal(await js("document.querySelectorAll('#ms-drawer kairos-mascot, #ms-drawer .agent-mascot').length"), 0);
+  await waitFor("!!document.querySelector('.ms-drawer-row[data-drawer=home] .ms-drawer-badge:not([hidden])')");
+  assert.ok(true, 'the Home badge still shows');
   // Phone Home draws no Kip, so its style switch sits beside Customize: a 44px target that opens the shared sheet.
   assert.ok(await js("(() => { const b = document.querySelector('.hm-phone-kip'); return !!b && b.getBoundingClientRect().height >= 44 && b.textContent === 'Kip: Halftone'; })()"), 'phone Home offers the Kip style switch');
   await js("document.querySelector('.hm-phone-kip').click()");

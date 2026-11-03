@@ -37,7 +37,7 @@
   .kairos-redesign .ms-shell .ms-background { position: absolute; inset: 0; border-radius: 0; z-index: -1; opacity: .65; pointer-events: none; }
   .kairos-redesign .ms-shell .ms-background::after { background: linear-gradient(180deg, color-mix(in srgb, var(--rd-ground) 20%, transparent), color-mix(in srgb, var(--rd-ground) 75%, transparent)); }
   .kairos-redesign .ms-header { position: relative; z-index: 3; padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 6px) 16px 8px; }
-  /* The top row holds the page's title or switch only; navigation is the tab bar (redesign-tabbar.css). */
+  /* The top row holds the page's title or switch only; navigation is the sliding sidebar (mobile-sidebar.css). */
   .kairos-redesign .ms-header-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 8px; height: 44px; }
   .kairos-redesign .ms-settings { display: grid; place-items: center; padding: 0; width: 44px; height: 44px; }
   .kairos-redesign .ms-settings svg { width: 20px; height: 20px; }
@@ -640,8 +640,8 @@
 
 /* Page title (2026-10-21, David): on every phone tab the title sits on the
    top row (44px, 6px under the status bar) against the right edge; the page
-   content starts below that row. Since the tab bar replaced the avatar
-   (2026-10-22) the row holds the title alone. One rule for the shared page header and the
+   content starts below that row. The row holds the title and, on a
+   top-level page, the sidebar's menu button beside it (2026-11-02). One rule for the shared page header and the
    two pages that draw their own (Agents' bar, Settings' title bar). Pages with
    a switch in that row (Chats, Forge New/Sessions) keep the switch as their
    title; Forge Home's own header row follows the same placement. */
@@ -663,9 +663,9 @@
   .kairos-redesign .settings-mobile-page .settings-titlebar .title { margin-left: auto; text-align: right; }
 }
 
-/* Full-screen panels and sheets sit above every page header and the tab bar
+/* Full-screen panels and sheets sit above every page header
    (2026-10-21, David: Chat's documents panel lay under the chat's title and
-   buttons). Headers are 55-56 and the tab bar 1100; dialogs and the shared
+   buttons). Headers are 55-56 and the phone sidebar 1160; dialogs and the shared
    sheets are already in the top layer or above 1400. Each panel clears the
    status bar with its own header. */
 @media (max-width: 768px) {
@@ -678,31 +678,3 @@
 /* More sheet: the app mode switch at its top (mobileTabSheet.js).
    A segmented radio group with a sliding thumb, like the New / Chats switch; the
    sheet-wide reduced-motion rule turns the slide off. */
-@media (max-width: 768px) {
-  .kairos-redesign .ms-tab-sheet .ms-mode-row { margin: 0 0 24px; }
-  .kairos-redesign .ms-tab-sheet .ms-mode-switch {
-    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-    padding: 4px; border-radius: 999px; border: 1px solid var(--rd-line); background: var(--rd-surface-2);
-  }
-  .kairos-redesign .ms-tab-sheet .ms-mode-thumb {
-    position: absolute; z-index: -1; inset: 4px auto 4px 4px; width: calc((100% - 8px) / 3); box-sizing: border-box;
-    border-radius: 999px; border: 1px solid var(--rd-line-strong); background: var(--rd-surface-solid); box-shadow: var(--rd-shadow);
-    transition: transform 260ms cubic-bezier(.22, 1, .36, 1);
-  }
-  .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=forge] .ms-mode-thumb { transform: translateX(100%); }
-  .kairos-redesign .ms-tab-sheet .ms-mode-switch[data-active=bots] .ms-mode-thumb { transform: translateX(200%); }
-  .kairos-redesign .ms-tab-sheet .ms-mode-option {
-    display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; min-width: 0; padding: 0 12px;
-    border: 0; border-radius: 999px; background: transparent; color: var(--rd-ink-dim); font-size: 15px; font-weight: 500;
-    transition: color 200ms ease;
-  }
-  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=true] { color: var(--rd-ink); font-weight: 600; }
-  .kairos-redesign .ms-tab-sheet .ms-mode-option svg { flex: none; width: 22px; height: 22px; }
-  .kairos-redesign .ms-tab-sheet .ms-mode-option[aria-checked=false] svg { opacity: .6; }
-  .kairos-redesign .ms-tab-sheet .ms-mode-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .kairos-redesign .ms-tab-sheet .ms-mode-name small {
-    margin-left: 2px; padding: 1px 6px; border-radius: 999px; background: var(--rd-surface-2);
-    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--rd-ink-dim);
-  }
-  .kairos-redesign .ms-tab-sheet .ms-mode-caption { margin: 10px 4px 0; text-align: center; font-size: 13px; line-height: 1.4; color: var(--rd-ink-dim); }
-}

@@ -80,17 +80,15 @@ class BotsShellStaticTests(unittest.TestCase):
         used = set(re.findall(r"var\((--bots-[\w-]+)", css))
         self.assertFalse(used - defined, f"undefined tokens: {sorted(used - defined)}")
 
-    def test_the_phone_sheet_and_tab_bar_know_all_three_modes(self):
+    def test_the_phone_sidebar_reaches_all_three_modes(self):
+        # 2026-11-02: the sliding sidebar's Home, Forge and Bots rows switch modes; More has no mode switch.
+        sidebar = text(JS / "mobileSidebar.js")
+        for tab in ("go('home')", "go('forgeHome')", "go('botsHome')"):
+            self.assertIn(tab, sidebar)
         sheet = text(JS / "mobileTabSheet.js")
-        for mode in MODES:
-            self.assertRegex(sheet, rf"\b{mode}: \{{ name:", f"mobileTabSheet MODES has no {mode}")
-        bar = text(JS / "mobileTabBar.js")
-        self.assertIn("ITEMS = { kairos: KAIROS, forge: FORGE, bots: BOTS }", bar)
-        self.assertIn("'botsHome'", bar)
-        # The thumb slides across three segments.
-        mobile = text(CSS / "redesign-mobile.css")
-        self.assertIn("repeat(3, minmax(0, 1fr))", mobile)
-        self.assertIn("[data-active=bots] .ms-mode-thumb { transform: translateX(200%); }", mobile)
+        self.assertNotIn("ms-mode-switch", sheet)
+        self.assertIn("openBotsList", sheet)
+        self.assertIn("openBotsInbox", sheet)
 
     def test_app_js_builds_the_switch_from_appmodes(self):
         app = text(JS / "app.js")

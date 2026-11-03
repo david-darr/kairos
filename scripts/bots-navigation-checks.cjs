@@ -323,14 +323,14 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await quiet();
     await win.loadURL(base);
     await reset([390, 844]);
-    await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-    assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.dataset.tabbar)"), ['home', 'chats', 'calendar', 'more'], 'the phone bar has no Agents');
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+    assert.deepEqual(await js("[...document.querySelectorAll('.ms-drawer-row:not([hidden])')].map(n => n.dataset.drawer)"), ['home', 'chats', 'forge', 'bots', 'more'], 'the phone sidebar has no Agents');
     await navigate('agents', { agentId: botId });
-    await waitFor(`document.documentElement.dataset.botsAgent === ${JSON.stringify(botId)} && document.querySelector('.ms-tabbar')?.dataset.mode === 'bots'`);
+    await waitFor(`document.documentElement.dataset.botsAgent === ${JSON.stringify(botId)} && document.documentElement.dataset.appMode === 'bots'`);
     assert.equal(await view(), 'botsShell', 'an old agent link opens the bot on a phone');
     await navigate('agents');
     await waitFor("document.getElementById('view-content').dataset.view === 'botsHome'");
-    assert.equal(await js("document.querySelector('.ms-tabbar [data-tabbar=botsHome]').getAttribute('aria-current')"), 'page');
+    await waitFor("document.querySelector('.ms-drawer-row[data-drawer=bots]')?.getAttribute('aria-current') === 'page'");
     await reset([1440, 900]);
 
     assert.deepEqual(await js(errorToasts), [], 'no error toast');

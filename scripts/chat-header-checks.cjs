@@ -16,7 +16,7 @@ module.exports = async ({ js, ok, eq, press }, label, rowTop) => {
       switches: switches.length, direct: row.nextElementSibling === control && control.parentElement === header,
       switch: box(control), role: control.getAttribute('role'), names: tabs.map(n => n.textContent),
       tabs: tabs.map(box), buttons: buttons.map(box), round: buttons.every(n => parseFloat(getComputedStyle(n).borderRadius) >= 23),
-      hit: [...buttons, ...tabs].every(hit), width: innerWidth,
+      hit: [...buttons, ...tabs].every(hit), width: innerWidth, menu: box(document.querySelector('.ms-menu-btn')),
       overflow: header.scrollWidth > header.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1 };
   })()`);
   ok(r, `${label}: Chats header, title row and switch exist`);
@@ -24,9 +24,12 @@ module.exports = async ({ js, ok, eq, press }, label, rowTop) => {
   ok(/serif/i.test(r.font), `${label}: Chats title uses the serif family: ${r.font}`);
   ok(Math.abs(r.row.t - (rowTop + 8)) <= 1 && Math.abs(r.row.l - 20) <= 1 && Math.abs(r.row.r - (r.width - 20)) <= 1,
     `${label}: title row clears the status bar and keeps 20px gutters: ${JSON.stringify(r)}`);
-  ok(Math.abs(r.title.l - r.row.l) <= 1 && r.buttons.length > 0 && r.buttons.length <= 2 && r.round &&
+  // The sliding sidebar's menu button (2026-11-02) leads the row; the title sits 52px in, beside it.
+  ok(r.menu.w >= 44 && r.menu.r <= r.title.l - 4 && Math.abs((r.menu.t + r.menu.b) / 2 - (r.title.t + r.title.b) / 2) <= 3,
+    `${label}: the menu button leads the title row: ${JSON.stringify([r.menu, r.title])}`);
+  ok(Math.abs(r.title.l - (r.row.l + 52)) <= 1 && r.buttons.length > 0 && r.buttons.length <= 2 && r.round &&
     r.buttons.every((b, i) => Math.abs(b.w - 46) <= 1 && Math.abs(b.h - 46) <= 1 && b.t >= r.row.t - 1 && b.b <= r.row.b + 1 && b.l >= (i ? r.buttons[i - 1].r : r.title.r) && b.r <= r.row.r + 1),
-    `${label}: title left and at most two round 46px actions right, without overlap`);
+    `${label}: title beside the menu button and at most two round 46px actions right, without overlap`);
   eq([r.switches, r.direct, r.role, r.names], [1, true, 'tablist', ['New', 'Chats']], `${label}: one original switch directly follows the title row inside the header`);
   ok(Math.abs(r.switch.t - r.row.b - 18) <= 1 && r.switch.b <= r.header.b + 1 && r.switch.l >= r.header.l && r.switch.r <= r.header.r &&
     r.tabs.length === 2 && r.tabs.every(b => b.w >= 44 && b.h >= 44 && b.t >= r.switch.t && b.b <= r.switch.b) && r.tabs[0].r <= r.tabs[1].l && r.hit && !r.overflow,

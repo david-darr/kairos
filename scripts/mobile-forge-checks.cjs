@@ -31,9 +31,9 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   const menu = async () => { await click('.mf-session-header [aria-label="Session actions"]'); await sheetNamed('Session actions'); };
   const tool = async name => { await menu(); await textButton('dialog.ms-sheet', name); await sheetNamed(name); };
   const cards = ['Working now', 'Running services', 'Git activity', 'Recent projects', 'Repo lifespan'];
-  // The phone tab bar (mobileTabBar.js): Forge Home, New, Sessions and More.
-  const barItem = async id => { await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"); await click(`.ms-tabbar [data-tabbar=${id}]`); await delay(150); };
-  const barCurrent = () => js("document.querySelector('.ms-tabbar')?.dataset.state === 'shown' ? document.querySelector('.ms-tabbar [aria-current=page]')?.dataset.tabbar : 'hidden'");
+  // The phone's sliding sidebar (mobileSidebar.js): Forge is one row; New and Sessions are the page's own switch.
+  const sidebarRow = async id => { await click(`.ms-drawer-row[data-drawer=${id}]`); await delay(150); };
+  const navCurrent = async () => { await js("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))"); return js("document.querySelector('.ms-drawer-row[aria-current=page]')?.dataset.drawer || null"); };
   // Home: as Kairos Home opens the dashboard, Forge Home opens the overview page.
   await navigate('forgeHome');
   await waitFor("!!document.querySelector('.mf-dashboard') && document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5 && document.querySelectorAll('#nav [data-forge-project]').length > 0");
@@ -41,8 +41,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await delay(300);
   ok(await js("!document.querySelector('.mf-project') && !document.querySelector('dialog.ms-sheet[open]')"), 'Home opens the overview as a page, not the pager or a sheet');
   ok(await js("document.querySelector('.mf-dashboard-title').textContent === document.querySelector('[aria-label=Project]').textContent.trim() && !!document.querySelector('.mf-title-copy small') && !document.querySelector('.ms-avatar, #mobile-menu-btn')"), 'Overview uses the phone header, with no avatar');
-  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-  assert.deepEqual(await js("[...document.querySelectorAll('.ms-tabbar-item')].map(n => n.querySelector('.ms-tabbar-label').textContent)"), ['Forge Home', 'New', 'Sessions', 'More']); assertions++;
+  await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+  assert.deepEqual(await js("[...document.querySelectorAll('.ms-drawer-row:not([hidden]) .ms-drawer-label')].map(n => n.textContent)"), ['Home', 'Chats', 'Forge', 'Bots', 'More']); assertions++;
   ok(await js("parseFloat(getComputedStyle(document.querySelector('.mf-dashboard .ms-header')).paddingTop) >= 6"), 'Overview header clears the safe area');
   ok(await js("!!document.querySelector('.mf-board .mf-activity .rd-dot-matrix') && !!document.querySelector('.mf-board .mf-working-section') && document.querySelectorAll('.mf-summary-grid > section').length === 2"), 'Overview presents real activity, working sessions and paired summary cards');
   ok(await js("getComputedStyle(document.querySelector('.mf-dashboard-title')).fontStyle === 'italic' && getComputedStyle(document.querySelector('.mf-card')).borderRadius === '26px' && [...document.querySelectorAll('.mf-dashboard .ms-header-row > button')].filter(n => n.getClientRects().length).length === 2 && [...document.querySelectorAll('.mf-dashboard .mf-icon')].every(n => n.getBoundingClientRect().width === 46 && n.getBoundingClientRect().height === 46)"), 'Overview uses the board title, 26px cards and exactly two round 46px actions');
@@ -69,9 +69,9 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5"), 'Customize shows it again');
   await escape(); await delay(150);
   ok(await js("!document.querySelector('[data-widget-toggle]')?.getClientRects().length"), 'Customize closes');
-  ok(await barCurrent() === 'forgeHome', 'The tab bar marks Forge Home current on the overview');
-  // New: as Kairos Chats opens What should we work on?, Forge New opens the pager's New page.
-  await barItem('new');
+  ok(await navCurrent() === 'forge', 'The sidebar marks Forge current on the overview');
+  // New: as Kairos Chats opens What should we work on?, the overview's New session opens the pager's New page.
+  await click('.mf-dashboard-new');
   await waitFor("!!document.querySelector('.mf-project') && document.querySelector('#mf-tab-0').getAttribute('aria-selected') === 'true' && !!document.querySelector('[aria-label=Project]')");
   ok(await js("!document.querySelector('.mf-dashboard')"), 'Sessions opens the New / Sessions pager');
   await delay(500);
@@ -111,13 +111,13 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
           const start = first.getBoundingClientRect().top;
           intro.scrollTop = intro.scrollHeight;
           const end = intro.lastElementChild.getBoundingClientRect().bottom;
-          const bar = document.querySelector('.ms-tabbar').getBoundingClientRect();
+          const probe = document.createElement('i'); probe.style.cssText = 'position:fixed;height:var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))'; document.body.append(probe); const inset = probe.getBoundingClientRect().height; probe.remove();
           const last = Math.max(...[...bottom.children].filter(n => n.getClientRects().length && n.getBoundingClientRect().height).map(n => n.getBoundingClientRect().bottom));
           intro.scrollTop = 0;
-          return { separate: box.bottom <= group.top + 1, start: start >= box.top - 1, end: end <= box.bottom + 1, gap: bar.top - last };
+          return { separate: box.bottom <= group.top + 1, start: start >= box.top - 1, end: end <= box.bottom + 1, gap: group.bottom - last, want: Math.max(12, inset) };
         })()`);
         ok(layout.separate && layout.start && layout.end, `Forge intro scrolls fully above activity at ${width}x${height}, growth ${activityHeight}: ${JSON.stringify(layout)}`);
-        ok(Math.abs(layout.gap - 10) <= 1, `Forge bottom content stays 10px above the bar at ${width}x${height}: ${JSON.stringify(layout)}`);
+        ok(Math.abs(layout.gap - layout.want) <= 1, `Forge bottom content clears the home indicator (or 12px) at ${width}x${height}: ${JSON.stringify(layout)}`);
       }
       await capture(`mobile-forge-new-clearance-${width}x${height}`);
     }
@@ -130,17 +130,17 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
     })()`);
     win.setContentSize(...originalSize); await delay(300);
   }
-  ok(await barCurrent() === 'new', 'The tab bar marks New current on the pager');
+  ok(await navCurrent() === 'forge', 'The sidebar keeps Forge current on the pager');
   await click('#mf-tab-1'); await delay(200);
-  ok(await barCurrent() === 'sessions', 'Swiping the pager to Sessions moves the bar to Sessions');
+  ok(await navCurrent() === 'forge' && await js("document.querySelector('#mf-tab-1').getAttribute('aria-selected') === 'true'"), 'The pager moves to Sessions with Forge still current');
   await click('#mf-tab-0'); await delay(100);
-  await barItem('more');
+  await sidebarRow('more');
   await waitFor("!!document.querySelector('.ms-tab-sheet[open]')");
-  ok(await js("!!document.querySelector('.ms-sheet-projects') && document.querySelectorAll('.ms-mode-row button').length === 3 && !document.querySelector('.ms-tab-sheet .ms-tab-tile')"), 'More retains projects and all three workspace modes, with no tab the bar already has');
+  ok(await js("!!document.querySelector('.ms-sheet-projects') && !document.querySelector('.ms-mode-row') && document.querySelectorAll('.ms-tab-sheet .ms-tab-tile').length > 0"), 'Forge More keeps the projects and lists the Kairos tabs; the sidebar replaces the mode switch');
   await js("document.querySelector('.ms-tab-sheet').close()");
-  await barItem('forgeHome');
+  await sidebarRow('forge');
   await waitFor("!!document.querySelector('.mf-dashboard') && !document.querySelector('.mf-project')");
-  ok(true, 'Forge Home on the tab bar returns to the overview');
+  ok(true, 'Forge in the sidebar returns to the overview');
   await click('.mf-dashboard-new');
   await waitFor("!!document.querySelector('.mf-project') && document.querySelector('#mf-tab-0').getAttribute('aria-selected') === 'true' && !!document.querySelector('[aria-label=Project]')");
   ok(true, 'New session on the overview opens the New page');
@@ -187,8 +187,8 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   const forgeSessionId = await js("document.querySelector('.forge-surface-tabs [aria-selected=true]').closest('[data-surface-id]').dataset.surfaceId.slice(8)");
   await waitFor("document.querySelector('.forge-send')?.textContent === 'Send'");
   await delay(300);
-  await waitFor("document.querySelector('.ms-tabbar')?.dataset.state === 'shown'");
-  ok(await barCurrent() === 'sessions', 'The session keeps Sessions current on the tab bar');
+  await waitFor("document.querySelector('.ms-menu-btn').hidden");
+  ok(await navCurrent() === 'forge', 'A session is a pushed page under Forge: its own Back, no menu button');
   ok(await js("document.querySelector('.forge-project-sidebar').hidden && !document.querySelector('.forge-workspace').inert"), 'Conversation opens directly without the old sidebar modal');
   ok(await js("!!document.querySelector('.mf-session-header strong') && !!document.querySelector('.mf-count')"), 'Session title, subtitle and changes badge are present');
   ok(await js("getComputedStyle(document.querySelector('.forge-surface-bar')).display === 'none' && document.querySelector('.forge-shell').dataset.split === 'false'"), 'Phone has neither desktop tabs nor side-by-side panes');

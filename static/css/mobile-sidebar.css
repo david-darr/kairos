@@ -1,0 +1,102 @@
+/* The phone's sliding sidebar (mobileSidebar.js, David 2026-11-02, as the
+   Claude app has it). The sidebar waits under the page's left edge; opening
+   slides the page right, rounds its corners and dims it, and the sidebar
+   drifts in behind. A swipe drags both (mobileDrawers.js sets --drawer-swipe-x
+   on the sidebar; mobileSidebar.js sets --ms-drawer-x for the page). */
+.ms-drawer, .ms-drawer-scrim, .ms-menu-btn { display: none; }
+@media (max-width: 768px) {
+  .kairos-redesign { --ms-drawer-w: min(84vw, 330px); --ms-drawer-ease: cubic-bezier(.22, 1, .36, 1); }
+
+  .kairos-redesign .ms-drawer {
+    position: fixed; z-index: 1160; top: 0; left: 0; bottom: calc(0px - var(--ms-below-fold, 0px)); width: var(--ms-drawer-w);
+    display: flex; flex-direction: column; box-sizing: border-box;
+    padding: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 14px) 14px calc(max(16px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))));
+    background: var(--rd-ground); color: var(--rd-ink); font-family: var(--rd-font-ui);
+    transform: translateX(-28%); opacity: 0; visibility: hidden;
+    transition: transform 380ms var(--ms-drawer-ease), opacity 260ms ease, visibility 0s 380ms;
+  }
+  .kairos-redesign.ms-drawer-open .ms-drawer { transform: none; opacity: 1; visibility: visible; transition: transform 380ms var(--ms-drawer-ease), opacity 200ms ease, visibility 0s; }
+  .kairos-redesign .ms-drawer.drawer-dragging {
+    visibility: visible; opacity: 1; transition: none;
+    transform: translateX(calc(var(--drawer-swipe-x, 0px) * .28));
+  }
+
+  /* The page: slides aside with rounded corners while the sidebar is open. */
+  .kairos-redesign #content { transition: transform 380ms var(--ms-drawer-ease), border-radius 380ms var(--ms-drawer-ease); }
+  .kairos-redesign.ms-drawer-open #content {
+    transform: translateX(var(--ms-drawer-w)); border-radius: 28px; overflow: hidden;
+    box-shadow: -10px 0 40px rgba(var(--shade-rgb), .18);
+  }
+  .kairos-redesign.ms-drawer-dragging #content { transform: translateX(var(--ms-drawer-x, 0px)); border-radius: 28px; overflow: hidden; transition: none; }
+  .kairos-redesign.ms-drawer-open .ms-global-frost,
+  .kairos-redesign.ms-drawer-dragging .ms-global-frost { visibility: hidden; }
+
+  /* The dim over the page, and the tap target that closes the sidebar. */
+  .kairos-redesign .ms-drawer-scrim {
+    position: fixed; z-index: 1155; top: 0; right: 0; bottom: calc(0px - var(--ms-below-fold, 0px)); left: var(--ms-drawer-w);
+    border-radius: 28px 0 0 28px; background: rgba(var(--shade-rgb), .22); opacity: 0;
+    transition: opacity 300ms ease;
+  }
+  .kairos-redesign.ms-drawer-open .ms-drawer-scrim { display: block; opacity: 1; }
+  .kairos-redesign.ms-drawer-dragging .ms-drawer-scrim { left: var(--ms-drawer-x, 0px); transition: none; }
+
+  .kairos-redesign .ms-drawer-brand { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; margin-bottom: 14px; }
+  .kairos-redesign .ms-drawer-brand svg { flex: none; width: 30px; height: 30px; }
+  .kairos-redesign .ms-drawer-brand span { font: italic 600 26px/1 var(--rd-font-title); letter-spacing: .01em; }
+
+  .kairos-redesign .ms-drawer-nav { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; }
+  .kairos-redesign .ms-drawer-row {
+    position: relative; display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 12px;
+    border: 0; border-radius: 16px; background: transparent; color: var(--rd-ink);
+    font: 500 16px/1.2 var(--rd-font-ui); text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .kairos-redesign .ms-drawer-row[hidden] { display: none; }
+  .kairos-redesign .ms-drawer-row svg { flex: none; width: 22px; height: 22px; color: var(--rd-ink-dim); }
+  .kairos-redesign .ms-drawer-row:active { background: var(--rd-surface-2); }
+  .kairos-redesign .ms-drawer-row[aria-current=page] { background: var(--rd-surface-solid); font-weight: 600; box-shadow: inset 0 0 0 1px var(--rd-line); }
+  .kairos-redesign .ms-drawer-row[aria-current=page] svg { color: var(--rd-ink); }
+  .kairos-redesign .ms-drawer-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-drawer-badge {
+    flex: none; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 999px;
+    background: var(--rd-ink); color: var(--rd-ground); font: 600 11px/20px var(--rd-font-ui); text-align: center;
+  }
+  .kairos-redesign .ms-drawer-badge[hidden] { display: none; }
+
+  /* The bottom: the profile (to Settings) and New chat. */
+  .kairos-redesign .ms-drawer-foot { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--rd-line); }
+  .kairos-redesign .ms-drawer-profile {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 6px;
+    border: 0; border-radius: 16px; background: transparent; color: var(--rd-ink); font: 500 15px var(--rd-font-ui); text-align: left; cursor: pointer;
+  }
+  .kairos-redesign .ms-drawer-avatar {
+    flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--rd-primary-bg); color: var(--rd-primary-fg); font: italic 600 18px var(--rd-font-title);
+  }
+  .kairos-redesign .ms-drawer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kairos-redesign .ms-drawer-new {
+    flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px;
+    border: 0; border-radius: 999px; background: var(--rd-primary-bg); color: var(--rd-primary-fg);
+    font: 600 14px var(--rd-font-ui); cursor: pointer; box-shadow: 0 8px 20px rgba(var(--shade-rgb), .18);
+  }
+  .kairos-redesign .ms-drawer-new svg { width: 18px; height: 18px; }
+  /* Focus lands on the sidebar itself when it opens; it draws no ring. */
+  .kairos-redesign .ms-drawer:focus { outline: none; }
+  .kairos-redesign :is(.ms-drawer-row, .ms-drawer-profile, .ms-drawer-new, .ms-menu-btn):focus-visible { outline: 2px solid var(--rd-focus); outline-offset: 2px; }
+
+  /* The round menu button beside a top-level page's title. */
+  .kairos-redesign .ms-menu-btn {
+    position: fixed; z-index: 60; top: var(--ms-menu-top, calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 10px));
+    left: max(12px, env(safe-area-inset-left, 0px)); display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+    border: 1px solid var(--rd-line); border-radius: 999px; background: color-mix(in srgb, var(--rd-surface-solid) 88%, transparent);
+    color: var(--rd-ink); box-shadow: 0 4px 14px rgba(var(--shade-rgb), .1); cursor: pointer;
+    backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
+  }
+  .kairos-redesign .ms-menu-btn[hidden], .kairos-redesign.ms-drawer-open .ms-menu-btn { display: none; }
+  .kairos-redesign .ms-menu-btn svg { width: 20px; height: 20px; }
+  /* The title it sits beside makes room for it. */
+  .kairos-redesign .ms-menu-indent { margin-inline-start: 52px !important; padding-block: var(--ms-menu-pad, 0px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .kairos-redesign :is(.ms-drawer, .ms-drawer-scrim, #content) { transition: none !important; }
+  }
+}

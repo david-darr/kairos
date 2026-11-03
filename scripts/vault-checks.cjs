@@ -44,8 +44,8 @@ async function run(ctx) {
     eq(await js("[...document.querySelectorAll('.vault-today-btn')].map(b => b.getAttribute('aria-label'))"), ["Today's note"], "phone: Today's note stays in the page");
     eq(await small('.library-vault-browser button, .library-vault-browser summary, .vault-today-btn, .ms-page-search input'), [], 'phone: list page controls are 44px');
     await delay(300);
-    const barSearch = await js("(() => { const bar = document.querySelector('.ms-tabbar'); const search = document.querySelector('.ms-page-search'); if (!bar || !search) return null; return { up: document.documentElement.classList.contains('ms-tabbar-up'), search: search.getBoundingClientRect().bottom, bar: bar.getBoundingClientRect().top }; })()");
-    ok(barSearch && barSearch.up && barSearch.search <= barSearch.bar + 0.5, 'phone: the tab bar shows on the list page below the in-page search: ' + JSON.stringify(barSearch));
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+    ok(await js("document.querySelector('.ms-page-search').getBoundingClientRect().top >= document.querySelector('.ms-menu-btn').getBoundingClientRect().bottom"), 'phone: the list page has the menu button by its title, above the in-page search');
   }
   await capture(label + '-vault-home');
   eq(await overflow(), [], 'Vault Home has no overflow');
@@ -101,7 +101,8 @@ async function run(ctx) {
     ok(await js("document.querySelector('.library-vault-browser').classList.contains('vault-phone-detail') && document.querySelector('.library-vault-sidebar').hidden"), 'phone: the note pushes in as its own page');
     ok(await js("!!document.querySelector('.vault-phone-back')"), 'phone: the note page has a back button');
     await delay(400);
-    ok(await js("document.documentElement.classList.contains('ms-tabbar-up') && document.querySelector('.ms-tabbar')?.dataset.state === 'shown'"), 'phone: the pushed note page keeps the tab bar');
+    await waitFor("document.querySelector('.ms-menu-btn').hidden");
+    ok(true, 'phone: the pushed note page has its own Back in place of the menu button');
     eq(await js("document.querySelectorAll('.ms-dock').length"), 0, 'phone: the dock leaves with the list page');
     eq(await small('.vault-phone-detail .library-vault-reader-head button, .vault-phone-back'), [], 'phone: note controls are 44px');
     await capture(label + '-vault-note');
@@ -155,7 +156,7 @@ async function run(ctx) {
   await cm("view.dispatch({ changes: { from: view.state.doc.length, insert: '\\nAdded in the Library.\\n' } });");
   await waitFor("document.querySelector('.vault-note-title').classList.contains('dirty')");
   ok(true, 'a dirty dot shows on the title');
-  await click(phone ? '.ms-tabbar [data-tabbar=home]' : '#sidebar .nav-item[data-tab=home]');
+  await click(phone ? '.ms-drawer-row[data-drawer=home]' : '#sidebar .nav-item[data-tab=home]');
   await waitFor("!!document.querySelector('.confirm-panel')");
   ok(await js("document.querySelector('.confirm-panel').textContent.includes('Discard note edits?')"), 'tab navigation asks before discarding note edits');
   await clickText('.confirm-panel .btn', 'Cancel');

@@ -26,7 +26,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow, 
     assert.equal(await js("document.querySelector('.ms-global-frost').getBoundingClientRect().top === 0 && getComputedStyle(document.querySelector('.ms-global-frost i')).backgroundColor === 'rgba(0, 0, 0, 0)'"), true, name + ' untinted frost begins at y=0');
     for (const tab of ['home', 'notes', 'library', 'calendar', 'tasks', 'botsHome']) {
       await navigate(tab); await delay(300);
-      await visibleBelow('.ms-tabbar', top + 5, tab + ' tab bar sits on screen, clear of the status area');
+      await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+      await visibleBelow('.ms-menu-btn', top + 5, tab + ' menu button sits on screen, clear of the status area');
       assert.equal(await js("getComputedStyle(document.getElementById('view-content')).scrollbarWidth"), 'none', tab + ' hides scrollbar');
       assert.deepEqual(await overflow(), [], name + ' ' + tab + ' fits');
     }
@@ -44,8 +45,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow, 
     await js("document.querySelector('.library-document-card').click()");
     await waitFor("!!document.querySelector('.library-editor')");
     await visibleBelow('.library-editor .view-header', top, name + ' document controls clear status area');
-    await waitFor("document.querySelector('.ms-tabbar').dataset.state === 'shown'");
-    assert.equal(await js("!document.getElementById('mobile-menu-btn') && !document.querySelector('.ms-tabbar').inert && [...document.querySelectorAll('.library-editor button')].some(b => b.getAttribute('aria-label') === 'Back to Library' && b.getClientRects().length)"), true, 'The document editor keeps the tab bar and Back to Library');
+    await waitFor("document.querySelector('.ms-menu-btn').hidden");
+    assert.equal(await js("!document.getElementById('mobile-menu-btn') && [...document.querySelectorAll('.library-editor button')].some(b => b.getAttribute('aria-label') === 'Back to Library' && b.getClientRects().length)"), true, 'The document editor has Back to Library in place of the menu button');
     await capture(name + '-document-safe-area');
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.getElementById('chat-messages')");
@@ -79,18 +80,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow, 
     await capture(name + '-forge-overview-safe-area');
     await js("document.querySelector('.mf-dashboard [aria-label=\"New session\"]').click()");
     await waitFor("(() => {const c=document.querySelector('.mf-project[data-forge-page=\"0\"] #mf-new .forge-composer'); return c && !c.closest('[hidden],[inert]') && c.getBoundingClientRect().width>0;})()");
-    // Landscape intentionally moves New/Sessions navigation to the tab bar.
-    const newNavigation = height <= 480 ? '.ms-tabbar[data-mode="forge"] [data-tabbar="new"]' : '.mf-project .ms-switch';
-    assert.equal(await js("getComputedStyle(document.querySelector('.mf-project .ms-switch')).display === 'none'"), height <= 480, name + ' top New/Sessions switch visibility follows the short-screen layout');
+    // New/Sessions stay in the page's own switch at every size (the tab bar that carried them in landscape is gone).
+    const newNavigation = '.mf-project .ms-switch';
+    assert.equal(await js("getComputedStyle(document.querySelector('.mf-project .ms-switch')).display !== 'none'"), true, name + ' the New/Sessions switch is shown');
     await waitFor(`(() => {const n=document.querySelector(${JSON.stringify(newNavigation)}); return n && !n.closest('[hidden],[inert]') && n.getBoundingClientRect().width>0;})()`);
     for (const selector of ['.mf-project .ms-header-row', newNavigation, '.mf-project [aria-label="Back to Forge Home"]', '#mf-new .forge-composer']) {
       await forgeControl(selector, top, side, name + ' Forge New controls clear status area: ' + selector);
     }
     assert.equal(await js("document.querySelector('#mf-tab-0').getAttribute('aria-selected')"), 'true', name + ' New page is selected');
     assert.equal(await js(`document.querySelector('#mf-new .forge-composer').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' Forge New composer clears home indicator inset');
-    await waitFor("(() => {const b=document.querySelector('.ms-tabbar[data-mode=\"forge\"][data-state=\"shown\"] [data-tabbar=\"new\"]'); return b && !b.closest('[hidden],[inert]') && b.getBoundingClientRect().width>0;})()");
-    assert.equal(await js(`document.querySelector('.ms-tabbar [data-tabbar="new"]').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' tab-bar New clears home indicator inset');
-    assert.equal(await js("document.querySelector('#mf-new .forge-composer').getBoundingClientRect().bottom <= document.querySelector('.ms-tabbar').getBoundingClientRect().top"), true, name + ' Forge New composer does not overlap the visible tab bar');
     assert.deepEqual(await overflow(), [], name + ' Forge New fits');
     await capture(name + '-forge-new-safe-area');
     await navigate('forgeShell', { projectId: 'fp1', sessionId: 'fs1' });

@@ -4,8 +4,8 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 // 2026-10-13: accept the documented script path as well as its short name.
 const requestedSuite = path.basename(process.argv[2] || '').replace(/\.cjs$/, '');
-// Tabbar checks share the mobile-tabs synthetic backend and layout helpers.
-const suite = requestedSuite === 'mobile-tabbar-checks' ? 'mobile-tabs-checks' : requestedSuite;
+// The phone sidebar checks share the mobile-tabs synthetic backend and layout helpers.
+const suite = requestedSuite === 'mobile-sidebar-checks' ? 'mobile-tabs-checks' : requestedSuite;
 if (!['bg-tasks-smoke', 'browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks', 'chat-scroll-checks'].includes(suite)) {
   throw new Error('Choose bg-tasks-smoke, browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, crm-smoke, roblox-smoke, mobile-tabs-checks, ask-user-checks, or chat-scroll-checks');
 }

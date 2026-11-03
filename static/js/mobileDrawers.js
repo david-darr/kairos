@@ -23,7 +23,9 @@ function clearGesture() {
 
 function start(event) {
   clearGesture();
-  if (!mobile() || event.touches.length !== 1 || document.querySelector('dialog[open], [aria-modal="true"]') ||
+  // Another modal on screen keeps its own gestures; a registered drawer, open, is modal itself.
+  const modal = document.querySelector('dialog[open], [aria-modal="true"]:not(dialog)');
+  if (!mobile() || event.touches.length !== 1 || (modal && ![...drawers].some(d => d.panel === modal)) ||
       !event.target.closest || event.target.closest(excluded) ||
       !window.getSelection()?.isCollapsed) return;
   // Horizontal content (code, tables, carousels) keeps its own gestures.

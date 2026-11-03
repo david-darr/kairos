@@ -157,7 +157,7 @@
 /* -- Phone ------------------------------------------------------------------------------- */
 
 @media (max-width: 768px) {
-  [data-app-mode="bots"] .view.bots-home-view { padding: calc(20px + var(--mobile-safe-top, 0px)) 16px calc(24px + var(--ms-tabbar-space, 0px)); }
+  [data-app-mode="bots"] .view.bots-home-view { padding: calc(20px + var(--mobile-safe-top, 0px)) 16px calc(24px); }
   [data-app-mode="bots"] .bots-grid { grid-template-columns: 1fr; }
   [data-app-mode="bots"] .bots-bot-card { min-height: 0; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 14px; gap: 4px 12px; }
   [data-app-mode="bots"] .bots-bot-card-top { width: auto; margin: 0; }
@@ -167,7 +167,7 @@
   [data-app-mode="bots"] .bots-home-actions { width: 100%; }
   [data-app-mode="bots"] .bots-home-actions .bots-btn { flex: 1 1 auto; min-height: 44px; white-space: nowrap; padding: 0 12px; }
 
-  [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
+  [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: 0; }
   /* The page already keeps the status bar clear (its padding below); adding it here again left a 70px gap on an iPhone (2026-11-02). */
   [data-app-mode="bots"] .bots-shell-header { padding: 8px 12px; }
   /* A bot's chat on a phone scrolls up under its header and tools, softly blurred (David, 2026-11-02: as Duet does).
@@ -176,7 +176,7 @@
   [data-app-mode="bots"] .bots-shell:not(.is-frontdesk) > .bots-shell-main::before { content: ""; position: absolute; top: 0; left: 0; right: 0; z-index: 3; pointer-events: none;
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     background: linear-gradient(to bottom, color-mix(in srgb, var(--bots-app) 50%, transparent), color-mix(in srgb, var(--bots-app) 0%, transparent));
-    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 40%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0, #000 40%, transparent 100%); height: 120px; }
+    -webkit-mask-image: linear-gradient(to bottom, var(--rd-ink) 0, var(--rd-ink) 40%, transparent 100%); mask-image: linear-gradient(to bottom, var(--rd-ink) 0, var(--rd-ink) 40%, transparent 100%); height: 120px; }
   [data-app-mode="bots"] .bots-shell:not(.is-frontdesk) .bots-chat-toolbar { position: absolute; top: 60px; left: 0; right: 0; z-index: 5; }
   [data-app-mode="bots"] .bots-shell:not(.is-frontdesk) .bots-log { padding-top: 112px; }
   [data-app-mode="bots"] .bots-head-back { display: grid; flex: none; width: 44px; height: 44px; margin-left: -8px; }
@@ -186,7 +186,7 @@
   [data-app-mode="bots"] .bots-head-status { display: none; }
   [data-app-mode="bots"] .bots-head-convos, [data-app-mode="bots"] .bots-monitor { flex: none; width: 44px; height: 44px; }
   [data-app-mode="bots"] .bots-convos { top: 60px; right: 12px; }
-  /* The panel covers the page; the tab bar steps aside (mobileTabBar.js FULLSCREEN). */
+  /* The panel covers the page. */
   [data-app-mode="bots"] .bots-panel-aside, [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] {
     position: fixed; inset: 0; z-index: 60; width: auto; height: auto; border-left: 0; background: var(--bots-app);
     padding-top: var(--mobile-safe-top, 0px);
@@ -201,9 +201,9 @@
 [data-app-mode="bots"] .bots-chat-blocked-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
 
 @media (max-width: 768px) {
-  .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-shell-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(8px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-shell-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(8px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); }
   /* The roster has no top row of buttons, so it starts just below the status bar, not 62px under it (redesign-mobile.css). */
   .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-home-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 12px); }
   /* A room and the team map bring their own headers too. */
-  .kairos-redesign[data-app-mode="bots"]:is([data-view="botsRoom"], [data-view="botsTeamMap"]) #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  .kairos-redesign[data-app-mode="bots"]:is([data-view="botsRoom"], [data-view="botsTeamMap"]) #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)))); }
 }

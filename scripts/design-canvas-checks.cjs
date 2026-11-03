@@ -633,11 +633,11 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
         return Math.abs(r.top - title.top) <= 1 && r.left >= title.right && Math.round(r.width) === 46 && Math.round(r.height) === 46 && parseFloat(s.borderRadius) >= 23;
       }) && name.top >= title.bottom && model.top >= title.bottom;
     })()`), `Library has a title and two round actions above its content at ${width}`);
-    // The phone tab bar (mobileTabBar.js): the board list keeps it; the pager hides it.
-    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    // The phone sidebar's menu button (mobileSidebar.js): the board list has it; the pager hides it.
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
     await noErrorToasts(`phone ${width}`);
     await capture(`design-phone-${width}`);
-    // More lists every tab but the bar's own; Design is not one of them any more.
+    // More lists every tab but Home and Chats; Design is not one of them any more.
     await js("import('/static/js/mobileTabSheet.js').then(m => { m.openMoreSheet(document.body); return 1; })");
     await waitFor("document.querySelectorAll('.ms-tab-tile').length > 0");
     const tiles = await js("[...document.querySelectorAll('.ms-tab-tile')].map(t => t.textContent.trim())");
@@ -646,7 +646,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     await delay(300);
     await js("document.querySelectorAll('.design-list-card')[0].click()");
     await waitFor("!!document.querySelector('.design-focus iframe')");
-    await waitFor("!document.documentElement.classList.contains('ms-tabbar-up')");
+    await waitFor("document.querySelector('.ms-menu-btn').hidden");
     const pagerBelowHeader = () => js(`(() => {
       const header = document.querySelector('.design-page-header').getBoundingClientRect();
       const model = document.querySelector('.design-page .design-model-btn');
@@ -670,15 +670,15 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
     await waitFor("/2 \\/ 3/.test(document.querySelector('.design-focus-bar strong').textContent)");
     await capture(`design-phone-pager-${width}`);
     await js("document.querySelector('.design-focus-bar [aria-label=\"Close focus\"]').click()");
-    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
-    // A draft keeps the composer 10px above the bar.
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
+    // A draft keeps the composer clear of the bottom edge.
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = 'warmer'; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
     // The draft grows the composer (is-active); its geometry settles a frame or two later.
-    await waitFor("Math.abs(document.querySelector('.design-composer').getBoundingClientRect().bottom - (document.querySelector('.ms-tabbar').getBoundingClientRect().top - 10)) <= 1 && document.querySelector('.ms-tabbar').getAnimations().length === 0");
-    assert.ok(true, 'Draft composer clears the tab bar by 10px');
+    await waitFor("Math.abs(document.querySelector('.design-composer').getBoundingClientRect().bottom - (innerHeight - 12)) <= 1");
+    assert.ok(true, 'Draft composer clears the bottom edge by 12px');
     await js("(() => { const i = document.querySelector('.design-composer-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await waitFor("document.documentElement.classList.contains('ms-tabbar-up')");
+    await waitFor("!document.querySelector('.ms-menu-btn').hidden");
     await navigate('chat', { sessionId: 's1', mobileConversation: true });
     await js(`import('/static/js/chatContent.js').then(m => m.openDesignTab('s1', '${PID}'))`);
     await waitFor("!!document.querySelector('.chat-design-pane .design-model-btn')?.offsetParent && !document.querySelector('.chat-design-pane .design-model-btn').disabled");

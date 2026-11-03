@@ -264,8 +264,8 @@ function closeMobileMenu() {
   document.getElementById('mobile-backdrop').classList.add('hidden');
   syncMobileMenu();
 }
-// Phone navigation is the bottom tab bar (mobileTabBar.js, 2026-10-22); the
-// sidebar stays hidden and inert at phone width.
+// Phone navigation is the sliding sidebar (mobileSidebar.js, 2026-11-02);
+// this desktop sidebar stays hidden and inert at phone width.
 function setupMobileMenu() {
   mountMobileChrome();
   mobileMenuMedia.addEventListener('change', () => closeMobileMenu(false));

@@ -9,7 +9,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   const clickText = (selector, text) => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.textContent.trim() === ${JSON.stringify(text)}).click()`);
   const refreshBadge = () => js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed')), true");
   const navBadge = "document.querySelector('#nav .nav-item[data-tab=botsHome] .nav-badge')?.textContent || ''";  // Agents became the Bots mode: its nav item carries the count
-  const tabBadge = "(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-tabbar [data-badge=bots] .ms-tabbar-badge'))";
+  const tabBadge = "(b => b && !b.hidden ? b.textContent.trim() : '')(document.querySelector('.ms-drawer-row[data-drawer=bots] .ms-drawer-badge'))";
   const escape = () => press('Escape', 'Escape', 27);
 
   // -- badges ----------------------------------------------------------------
@@ -30,7 +30,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
     await waitFor(`${tabBadge} === '99+'`);
     inbox.splice(0); await refreshBadge();
     await waitFor(`${tabBadge} === ''`);
-    assert.equal(await js("document.querySelector('.ms-tabbar [data-badge=bots]').getAttribute('aria-label')"), 'Inbox', 'the phone tab bar clears its badge and label too (the badge sits on Inbox)');
+    assert.equal(await js("document.querySelector('.ms-drawer-row[data-drawer=bots]').getAttribute('aria-label')"), 'Bots', 'the phone sidebar clears its badge and label too (the badge sits on Bots)');
   } finally {
     inbox.splice(0, inbox.length, ...saved); demoState.agentReview = savedReview; await refreshBadge();
   }
@@ -88,7 +88,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   console.log('PASS: phone background sheet lists work, closes, returns focus and hides when empty');
 
   // -- Library document leave guard -------------------------------------------
-  for (const [label, w, h, homeButton] of [['desktop', 1440, 900, '#sidebar .nav-item[data-tab=home]'], ['phone', 390, 844, '.ms-tabbar [data-tabbar=home]']]) {
+  for (const [label, w, h, homeButton] of [['desktop', 1440, 900, '#sidebar .nav-item[data-tab=home]'], ['phone', 390, 844, '.ms-drawer-row[data-drawer=home]']]) {
     await size(w, h);
     await navigate('library', { section: 'documents' });
     await waitFor("!!document.querySelector('.library-document-card')");

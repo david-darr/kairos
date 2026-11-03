@@ -98,9 +98,9 @@ export function setHomeCards(next) {
 }
 export function knownHomeCards() { return cards.slice(); }
 
-// Every tab the sidebar can show ({id, label}), as app.js last built it,
-// custom tabs included, for the Layout page to list.
-export function setKnownTabs(tabs) { known = tabs.map(({ id, label }) => ({ id, label })); }
+// Every tab the sidebar can show ({id, label, svg}), as app.js last built it,
+// custom tabs included, for the Layout page and the phone's More sheet to list.
+export function setKnownTabs(tabs) { known = tabs.map(({ id, label, svg }) => ({ id, label, svg })); }
 export function knownTabs() { return known.slice(); }
 
 // The sidebar's groups with every known tab placed exactly once: where it

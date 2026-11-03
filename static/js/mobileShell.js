@@ -15,7 +15,7 @@ import { wireKipSwitch } from './kipPicker.js';
 
 let selectedPage = 0, launchDraft = '', selectedModelId = '';
 export function clearMobileDraft(text) { if (launchDraft === text) launchDraft = ''; }
-// The New / Chats page last shown, so the tab bar's Chats returns to it.
+// The New / Chats page last shown, so the sidebar's Chats returns to it.
 export const chatPage = () => selectedPage;
 export const isPhoneShell = mobileOn;
 export function phoneRoute(tab, options) {
@@ -72,7 +72,7 @@ export function mountMobileHome({ container, content, banner, options }) {
   const modelChoice = el('select', { 'aria-label': 'Model for new chat', 'data-mobile-hook': 'model-picker' }, [el('option', { value: '', text: 'Choose a model' })]);
   modelChoice.addEventListener('change', () => { selectedModelId = modelChoice.value; });
   const context = el('div', { class: 'ms-context' }, [modelChoice]);
-  // Chats owns the title and switch; global navigation stays in the tab bar.
+  // Chats owns the title and switch; global navigation stays in the sidebar.
   const header = el('header', { class: 'ms-header rd-chats-header' }, [edgeBlur('top'),
     el('div', { class: 'ms-header-row' }, [el('h1', { text: 'Chats' }), el('div', { class: 'rd-chat-header-actions' }, [newChat, chatActions])]), switcher, context]);
   const launch = el('section', { class: 'ms-page ms-launch', id: 'ms-page-0', role: 'tabpanel', 'aria-labelledby': newTab.id });
@@ -182,27 +182,6 @@ export function mountMobileHome({ container, content, banner, options }) {
   shell.hidden = true; sync();
   // The shell fills the page (CSS); the keyboard lift pads its bottom so the composer rides the keyboard.
   const keyboard = watchKeyboard(shell);
-  // Measure the bar in the same coordinates as the launch page. In a short
-  // landscape viewport the intro must yield before it can push the dock down.
-  const placeDock = () => {
-    const bar = document.querySelector('.ms-tabbar');
-    if (!mobileOn() || !bar || bar.dataset.state !== 'shown') {
-      shell.style.removeProperty('--ms-launch-clearance'); return;
-    }
-    shell.style.setProperty('--ms-launch-clearance', `${Math.max(0, shell.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10)}px`);
-  };
-  // The bar glides into place after a resize or rotation without changing size, so measure again when it settles.
-  let settleTimer = 0;
-  const settleDock = () => { placeDock(); clearTimeout(settleTimer); settleTimer = setTimeout(placeDock, 450); };
-  const dockSize = new ResizeObserver(settleDock);
-  dockSize.observe(shell);
-  const tabbar = document.querySelector('.ms-tabbar');
-  if (tabbar) dockSize.observe(tabbar);
-  const dockState = new MutationObserver(settleDock);
-  if (tabbar) { dockState.observe(tabbar, { attributes: true, attributeFilter: ['data-state'] }); tabbar.addEventListener('transitionend', placeDock); }
-  window.addEventListener('resize', settleDock);
-  document.addEventListener('kairos:appearance', settleDock);
-  placeDock();
   phone.addEventListener('change', sync); document.addEventListener('kairos:appearance', sync);
   return { update(key, value) {
     historyUI.update(key, value);
@@ -216,9 +195,6 @@ export function mountMobileHome({ container, content, banner, options }) {
     disposeActions();
     disposed = true; detachIntro(); kipSwitch.dispose(); if (!launchHost) launchDraft = input.value; releaseLaunch(); detachActivity?.(); pager.dispose(); historyUI.dispose();
     keyboard();
-    dockSize.disconnect(); dockState.disconnect();
-    window.removeEventListener('resize', settleDock);
-    document.removeEventListener('kairos:appearance', settleDock); clearTimeout(settleTimer); tabbar?.removeEventListener('transitionend', placeDock);
     phone.removeEventListener('change', sync); document.removeEventListener('kairos:appearance', sync);
     shell.remove(); bannerAnchor.remove();
   } };

@@ -32,9 +32,9 @@ export function mountFrontDesk(host, options = {}) {
   // What Kip watches: under its name on a desktop, at the top of the composer on a phone.
   const watchHead = h('p', { class: 'fd-watching', hidden: true });
   const watchDock = h('p', { class: 'fd-watching fd-watching-dock', hidden: true });
-  // A phone gets Kip's own floating controls: the bots list on the left, the account on the right.
-  const menu = h('button', { type: 'button', class: 'fd-float fd-menu', 'aria-label': 'All bots and rooms', 'aria-haspopup': 'dialog',
-    onclick: () => import('./mobileBots.js').then(m => m.openBotsList(menu)) }, [glyph('menu')]);
+  // A phone gets Kip's own floating controls: the app's sidebar on the left, the account on the right.
+  const menu = h('button', { type: 'button', class: 'fd-float fd-menu', 'aria-label': 'Open menu', 'aria-haspopup': 'dialog', 'aria-controls': 'ms-drawer', 'aria-expanded': 'false',
+    onclick: () => import('./mobileSidebar.js').then(m => m.openDrawer(menu)) }, [glyph('menu')]);
   const account = h('button', { type: 'button', class: 'fd-float fd-account', 'aria-label': 'Account and settings', 'aria-haspopup': 'dialog',
     onclick: () => import('./mobileTabSheet.js').then(m => m.openMoreSheet(account)) }, [icon('user', { size: 20 })]);
   const today = h('aside', { class: 'fd-today', 'aria-label': 'Today', hidden: true });

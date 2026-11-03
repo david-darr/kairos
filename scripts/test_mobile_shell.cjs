@@ -420,31 +420,30 @@ class Surface {
   }
 
   assert.doesNotMatch(source('app.js'), /registerMobileDrawer/);
-  assert.match(source('mobileChrome.js'), /mountTabBar\(\)/);
+  assert.match(source('mobileChrome.js'), /mountSidebar\(\)/);
   assert.doesNotMatch(source('mobileChrome.js') + source('mobileShell.js') + source('mobileForge.js') + source('app.js'), /openTabSheet|ms-avatar|mobile-menu-btn/, 'The avatar and its workspace sheet are gone');
-  const tabbarSource = source('mobileTabBar.js');
-  assert.doesNotMatch(tabbarSource, /\bPUSHED\b/);
-  const fullscreen = tabbarSource.match(/const FULLSCREEN = \[([\s\S]*?)\]\.join/)[1];
-  // The Bots panel opens full screen on a phone and hides the tab bar like the others (Bots Phase 0); so does the
-  // Bots inbox sheet while it is open (2026-10-30), and a bot's page with its own back button (2026-11-02).
-  assert.deepEqual([...fullscreen.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside', '.bots-attn:not([hidden])', '.bots-shell']);
-  const hides = tabbarSource.match(/function hiddenNow\(\) \{([\s\S]*?)\n\}/)[1];
-  assert.match(hides, /!mobileOn\(\)/);
-  assert.match(hides, /document\.querySelector\(FULLSCREEN\)/);
-  assert.match(hides, /keyboardLift\(innerHeight, window\.visualViewport\) > 0/);
-  assert.equal((hides.match(/querySelector/g) || []).length, 1, 'Only full-screen views and the keyboard hide the phone bar');
-  assert.doesNotMatch(hides, /SUBPAGE/);
-  for (const enabled of [false, true]) for (const fullscreen of [false, true]) for (const lift of [0, 300]) {
-    const hidden = vm.runInNewContext(`(${tabbarSource.match(/function hiddenNow\(\) \{[\s\S]*?\n\}/)[0]})()`, {
-      mobileOn: () => enabled, FULLSCREEN: 'full-screen', innerHeight: 844, window: { visualViewport: {} },
-      document: { querySelector: selector => { assert.equal(selector, 'full-screen'); return fullscreen; } }, keyboardLift: () => lift,
-    });
-    assert.equal(hidden, !enabled || fullscreen || lift > 0, 'Only desktop, full-screen views and keyboard hide the bar');
+  // The phone's sliding sidebar (2026-11-02) replaced the bottom tab bar: no bar module, no bar space.
+  assert.ok(!fs.existsSync(path.join(__dirname, '../static/js/mobileTabBar.js')), 'The tab bar module is gone');
+  const sidebarSource = source('mobileSidebar.js');
+  const noButton = sidebarSource.match(/const NO_BUTTON = \[([\s\S]*?)\]\.join/)[1];
+  // Pushed pages keep their own Back and full-screen views their own way out; neither shows the menu button.
+  assert.deepEqual([...noButton.matchAll(/'([^']+)'/g)].map(m => m[1]), ['.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page', '.library-editor',
+    '.vault-phone-detail', '.bots-shell', '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open', '#view-content .artifact-panel', '.bots-panel-aside', '.bots-attn:not([hidden])']);
+  assert.match(sidebarSource, /registerMobileDrawer\(\{ panel: drawer, backdrop: scrim/);
+  assert.match(sidebarSource, /keyboardLift\(innerHeight, window\.visualViewport\) > 0/, 'The keyboard hides the menu button');
+  for (const label of ['Home', 'Chats', 'Forge', 'Bots']) assert.match(sidebarSource, new RegExp(`label: '${label}'`), label + ' is a sidebar row');
+  assert.match(sidebarSource, /row\('more', 'More'/);
+  assert.match(sidebarSource, /<span>New chat<\/span>/);
+  assert.match(sidebarSource, /\.sidebar-settings-btn'\)\?\.click\(\)/, 'The profile opens Settings');
+  for (const dir of ['js', 'css']) for (const file of fs.readdirSync(path.join(__dirname, '../static', dir), { recursive: true })) {
+    if (!/\.(js|css)$/.test(file)) continue;
+    assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../static', dir, file), 'utf8'), /ms-tabbar|mobileTabBar|openQuickCreate|ms-launch-clearance/, 'No retired tab bar code or styles in ' + file);
   }
   assert.match(source('agentsMessenger.js'), /class: 'agents-conversation-back'/);
   assert.match(source('agentsMessenger.js'), /\[back, phoneOpen, phoneActions, viewTabs\]/, 'The Agents bar keeps Back and Open chats, then the v2 phone actions, before the view tabs');
-  assert.match(source('mobileTabSheet.js'), /ON_BAR = new Set\(\['home', 'chat', 'calendar', 'botsHome'\]\)/, 'More lists the tabs the bar does not (Bots home is on the bar in Bots mode)');
-  assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed/);
+  assert.match(source('mobileTabSheet.js'), /IN_SIDEBAR = new Set\(\['home', 'chat'\]\)/, 'More lists every Kairos tab the sidebar does not, in any mode');
+  assert.match(source('mobileTabSheet.js'), /sidebarLayout\(listed\.map\(tab => tab\.id\)\)/);
+  assert.match(source('mobileTabSheet.js'), /knownTabs\(\)/);
   assert.match(source('mobileTabSheet.js'), /forgeProjectActions/);
   assert.doesNotMatch(source('mobileShell.js'), /'Your workspace':/);
   assert.doesNotMatch(source('mobileShell.js'), /Your day|touchstart/);

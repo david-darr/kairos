@@ -37,12 +37,11 @@ class Node {
     requestAnimationFrame: cb => { frame = cb; return 1; }, setTimeout, clearTimeout, console,
   });
   const make = (tag, attrs = {}, children = []) => { const node = new Node(); Object.assign(node, attrs); node.append(...children); return node; };
-  let closed = 0, sheetContent;
   const stubs = {
     './mobileShared.js': { mobileOn: () => enabled, phone: { addEventListener() {} }, button: (label, action) => ({ label, action }), go: (tab, options) => posts.push([tab, options]) },
     './mobileActions.js': { openNotifications() {} },
-    './api.js': { el: make }, './kairosParts.js': { pill: attrs => Object.assign(new Node(), attrs), emptyState: attrs => attrs },
-    './mobileSheet.js': { openMobileSheet: ({ content }) => { sheetContent = content; return { dialog: new Node(), dismiss: new Node(), close() { closed++; } }; } },
+    './api.js': { el: make }, './kairosParts.js': { emptyState: attrs => attrs },
+    './mobileSheet.js': { openMobileSheet: () => ({ dialog: new Node(), dismiss: new Node(), close() {} }) },
     './mascot.js': { createMascot: () => new Node() },
     './mobileActivity.js': { activityItems: () => ({ live: [], done: [] }) }, './icons.js': { ICONS: {} },
   };
@@ -74,11 +73,5 @@ class Node {
   enabled = false; current = root('tasks'); mutation(); tick();
   assert.equal(current.classList.contains('rd-enter-rise'), false, 'Classic/desktop stays unchanged');
   enabled = true;
-  const actions = await load('mobileActions.js'); actions.openQuickCreate(new Node());
-  assert.equal(sheetContent.children.length, 5);
-  sheetContent.children[0].onClick();
-  assert.equal(closed, 1); assert.equal(posts[0][0], 'chat');
-  assert.equal(posts[0][1].mobileConversation, true, 'New chat delegates to the existing conversation route');
-  enabled = false; actions.openQuickCreate(new Node()); assert.equal(closed, 1);
-  console.log('PASS: phone entrances, deferred scroll restore, Classic gate, Quick create routing and close');
+  console.log('PASS: phone entrances, deferred scroll restore, Classic gate');
 })().catch(error => { console.error(error); process.exitCode = 1; });

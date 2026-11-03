@@ -46,7 +46,7 @@ export function activityItems() {
     done: [...finished.values()].sort((a, b) => b.at - a.at).map(i => ({ title: i.title, status: i.status, go: () => { dismiss(i.key); i.go ? i.go() : openChat(i.sessionId); } })) };
 }
 export const refreshActivity = () => { signature = ''; render(); };
-// What the tab bar's Home badge shows: needs-you items, else running work.
+// What the phone sidebar's Home badge shows: needs-you items, else running work.
 let badges = { need: 0, live: 0 };
 export const badgeCounts = () => ({ ...badges });
 export function attachActivity(slot, accepts = () => true) {
@@ -59,8 +59,8 @@ function render() {
   const live = [...snapshot.need.filter(i => !i.finished && !(i.kind === 'chat' && i.status !== 'processing')), ...snapshot.work]
     .map(i => i.agentId ? { ...i, stop: () => stopAgent(i) } : i).filter(acceptsHome);
   const done = [...finished.values()].filter(acceptsHome).sort((a, b) => b.at - a.at);
-  // Status outside the launch surface never floats over content: it shows as a badge on the tab bar's Home
-  // (mobileTabBar.js), on a conversation's back button while the bar is away, and as rows in the More sheet.
+  // Status outside the launch surface never floats over content: it shows as a badge on the sidebar's Home
+  // (mobileSidebar.js), on a conversation's back button, and as rows in the More sheet.
   const count = attentionCount(), total = live.length;
   for (const anchor of document.querySelectorAll('.ms-chat-back')) {
     let badge = anchor.querySelector(':scope > .ms-avatar-badge');
