@@ -168,14 +168,15 @@
   [data-app-mode="bots"] .bots-home-actions .bots-btn { flex: 1 1 auto; min-height: 44px; white-space: nowrap; padding: 0 12px; }
 
   [data-app-mode="bots"] .view.bots-shell-view { padding-bottom: var(--ms-tabbar-space, 0px); }
-  [data-app-mode="bots"] .bots-shell-header { padding: calc(8px + var(--mobile-safe-top, 0px)) 12px 8px; }
+  /* The page already keeps the status bar clear (its padding below); adding it here again left a 70px gap on an iPhone (2026-11-02). */
+  [data-app-mode="bots"] .bots-shell-header { padding: 8px 12px; }
   [data-app-mode="bots"] .bots-head-back { display: grid; flex: none; width: 44px; height: 44px; margin-left: -8px; }
   [data-app-mode="bots"] .bots-head-pill { min-height: 44px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
   /* The job is Advanced-only and long; on a phone it would push the Conversations button off screen. */
   [data-bots-interface="advanced"][data-app-mode="bots"] .bots-head-role:not(:empty) { display: none; }
   [data-app-mode="bots"] .bots-head-status { display: none; }
   [data-app-mode="bots"] .bots-head-convos, [data-app-mode="bots"] .bots-monitor { flex: none; width: 44px; height: 44px; }
-  [data-app-mode="bots"] .bots-convos { top: calc(60px + var(--mobile-safe-top, 0px)); right: 12px; }
+  [data-app-mode="bots"] .bots-convos { top: 60px; right: 12px; }
   /* The panel covers the page; the tab bar steps aside (mobileTabBar.js FULLSCREEN). */
   [data-app-mode="bots"] .bots-panel-aside, [data-app-mode="bots"] .bots-panel-aside[data-mode="advanced"] {
     position: fixed; inset: 0; z-index: 60; width: auto; height: auto; border-left: 0; background: var(--bots-app);
@@ -192,6 +193,8 @@
 
 @media (max-width: 768px) {
   .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-shell-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
+  /* The roster has no top row of buttons, so it starts just below the status bar, not 62px under it (redesign-mobile.css). */
+  .kairos-redesign[data-app-mode="bots"] #view-content.view.bots-home-view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding-top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 12px); }
   /* A room and the team map bring their own headers too. */
   .kairos-redesign[data-app-mode="bots"]:is([data-view="botsRoom"], [data-view="botsTeamMap"]) #view-content.view:not(.chat-layout):not(.settings-mobile-page):not(.ms-home) { padding: var(--mobile-safe-top, env(safe-area-inset-top, 0px)) 0 calc(max(24px, var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))) + var(--ms-tabbar-space, 0px)); }
 }
