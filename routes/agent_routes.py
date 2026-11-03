@@ -298,11 +298,20 @@ async def create_agent(body: AgentBody, user: str = Depends(require_admin)) -> d
 @router.get("/inbox")
 async def whole_inbox(user: str = Depends(require_admin)) -> dict:
     """Everything waiting on the person, across agents: open items, plus
-    agents' results waiting for review (read from the cards, not copied)."""
+    agents' results waiting for review (read from the cards, not copied).
+    Reports and results follow the Bots Inbox (services/bot_attention.py):
+    left out once the person marks them done, or after 30 days.
+    Questions are settled only by their answers, so they always stay."""
+    import time
+    from core import bot_attention_store
+    done = {key for key, pref in bot_attention_store.inbox_preferences(user).items() if pref["done"]}
+    cutoff = time.time() - 30 * 86400
     reviews = [t for t in task_service.list_tasks()
-               if t.get("agent_id") and t["schedule_kind"] == "card" and t.get("status") == "review"]
+               if t.get("agent_id") and t["schedule_kind"] == "card" and t.get("status") == "review"
+               and "review:" + t["id"] not in done and (t.get("updated_at") or t.get("created_at") or 0) >= cutoff]
     from services.agent_handoff import person_inbox
-    items = person_inbox()
+    items = [i for i in person_inbox() if i["kind"] == "question"
+             or ("item:" + i["id"] not in done and (i.get("created_at") or 0) >= cutoff)]
     return {"items": items, "reviews": reviews, "count": len(items) + len(reviews)}
 
 

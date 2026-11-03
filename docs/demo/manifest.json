@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "cf932491e636571b173de8bdc85d7fcf8da16727e635fac40f9d034525c1b137",
+  "app.js": "04010dd3f23999f50417f75d86cbe91146cd9c00ae2fbb0f582858ca8e5c3a5d",
   "fixtures.js": "3d2bfea869aebb649fde25b11598a456f82df6b977236f8f0ab61d269bb329da",
   "index.html": "14d95158c3292ac91495f3ec8395c0acb68f67bf3e3a4097a9f287e6c12d3c71",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1192,7 +1192,7 @@
   "static/img/model-marks/together.svg": "b3ec218e7e0b0432a2ce07f5ec98a1dcd24f808c74d5fee624ab31e4947feef3",
   "static/img/model-marks/zhipu.svg": "d4c3fe5ff92820b2ae5e3ddaaa30e6fc622cb746b75baad97f4bb2428fa25c5d",
   "static/index.html": "a7122201d2da17cadba1e44d2cf73a0af5f4cb1e3bb548844c6eb2b819006686",
-  "static/js/activityModel.js": "ec00b6fba631830c1ccc6a2f93ecc3a8f62fc00090b931b75e7043de094375fd",
+  "static/js/activityModel.js": "d5587b7bf2f5560a092b444367722b2504b369e7bded54d2335dfad3a14d5980",
   "static/js/agentAvatar.js": "d1c328bbe95965cf2a3d234ae75c5c9b06964db327a025ab4819ed18aec51c73",
   "static/js/agentCall.js": "a80797b2f4ee998b3d7593920f4b8eb371c888f4d6faba53d7dee16c1db4072e",
   "static/js/agentChat.js": "9b536965b82e4a80bddb63286340b0d59682e6252985d1b57282b9addf402a96",
@@ -1466,7 +1466,7 @@
   "static/js/redesignChatParts.js": "110d0ab24532b745cc03435d64652feb598a72737cb4bdc910ac7f536f12501c",
   "static/js/redesignConversations.js": "4cd8bacce1a617e2320bbade13c162e504157915d74062ecac2d683ce6626637",
   "static/js/redesignHome.js": "93d6a758a533305b0a98b9286fa4efd765f23a547d649411f75aa775ae26c032",
-  "static/js/redesignShell.js": "4ea8235f62385103db8867c0ce4f05fb52f807307a2abd267adca65d8c0a962c",
+  "static/js/redesignShell.js": "bc56db8244a31662985d0e2c7f589dd5b56f382f7d7d01f4261c142133fef3ad",
   "static/js/redesignToolStoreMobile.js": "3da7e7cb178c409a37381b1573a519ce18fdf5aa677ba4b6523b3605416109f1",
   "static/js/routinesPanel.js": "605dc3b69bb5b9a77071cc6e85e720afc2b95c08cb2415cef8f081a5ec395dd7",
   "static/js/runHistory.js": "29206bf0fb56af44e24cec0e878669d39d05171ee7088af18b0734cad1cb5d62",

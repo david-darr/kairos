@@ -23,7 +23,7 @@ from core import bot_attention_store as store  # noqa: E402
 from core import permissions  # noqa: E402
 from core.middleware import require_admin  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
-from routes import bot_attention_routes  # noqa: E402
+from routes import agent_routes, bot_attention_routes  # noqa: E402
 from services import bot_attention, bot_push  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
 from services.task_service import task_service  # noqa: E402
@@ -31,6 +31,7 @@ from services.task_service import task_service  # noqa: E402
 CURRENT = {"user": "david"}
 app = FastAPI()
 app.include_router(bot_attention_routes.router)
+app.include_router(agent_routes.router)  # the older /api/agents/inbox that Updates reads
 app.dependency_overrides[require_admin] = lambda: CURRENT["user"]
 web = TestClient(app)
 BASE = "/api/bot-attention"
@@ -142,6 +143,25 @@ class ReadVersusDone(AttentionCase):
 
     def test_unknown_item_is_404(self):
         self.assertEqual(web.post(f"{BASE}/inbox/item:nope/done").status_code, 404)
+
+    def test_done_reports_and_results_leave_the_updates_list(self):
+        # Updates, the sidebar badge, Home and the notch read /api/agents/inbox.
+        report = agent_service.add_item(self.bot["id"], "report", "Weekly roundup", "All quiet")
+        question, card = self.question(), self.card()
+        old = agent_service.add_item(self.bot["id"], "report", "Last quarter", "Old news")
+        old["created_at"] = time.time() - 31 * 86400
+        legacy = lambda: web.get("/api/agents/inbox").json()
+        data = legacy()
+        self.assertEqual(sorted(i["id"] for i in data["items"]), sorted([report["id"], question["id"]]), "reports past 30 days follow the Bots Inbox")
+        self.assertEqual(data["count"], 3)
+        for ident in ("item:" + report["id"], "review:" + card["id"]):
+            self.assertEqual(web.post(f"{BASE}/inbox/{ident}/done").status_code, 200)
+        data = legacy()
+        self.assertEqual([i["id"] for i in data["items"]], [question["id"]], "a question stays until it is answered")
+        self.assertEqual((data["reviews"], data["count"]), ([], 1))
+        self.assertEqual(agent_service.get_item(report["id"])["status"], "open", "Done files the report; it answers nothing")
+        web.post(f"{BASE}/inbox/item:{report['id']}/reopen")
+        self.assertIn(report["id"], [i["id"] for i in legacy()["items"]], "moving it back to the inbox brings it back")
 
 
 class Responding(AttentionCase):

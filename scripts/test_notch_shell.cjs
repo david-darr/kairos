@@ -153,6 +153,17 @@ assert.equal(aggregate.need.find(item => item.key === 'inbox:question').agent.na
 assert.equal(aggregate.work.find(item => item.kind === 'agent').agent.id, 'bot');
 console.log('PASS: shared collector preserves working chats, approvals, failures, agent questions and bot identities');
 
+// Reports and results can be filed as done from Updates; a question only through its answer.
+const filed = [];
+const inboxRemote = { agents: [], inbox: { items: [{ id: 'q', agent_id: 'bot', kind: 'question' }, { id: 'r', agent_id: 'bot', kind: 'report' }], reviews: [{ id: 'c', agent_id: 'bot' }] }, pending: [], devices: [] };
+const filing = collectorContext.collect({ chats: new Map(), remote: inboxRemote, fileDone: ident => filed.push(ident) });
+const byKey = key => filing.need.find(item => item.key === key);
+assert.equal(byKey('inbox:q').done, undefined, 'a question has no Done');
+byKey('inbox:r').done(); byKey('review:c').done();
+assert.deepEqual(filed, ['item:r', 'review:c'], 'Done files the report and the result under their Bots Inbox ids');
+assert.ok(collectorContext.collect({ chats: new Map(), remote: inboxRemote }).need.every(item => !item.done), 'without a filer (the notch) nothing offers Done');
+console.log('PASS: reports and results offer Done in Updates; questions do not');
+
 // Fewer than two agents at work: the quiet view takes the row. Two or more: the agent chips return, unchanged.
 const panel = elements.get('notch-panel'), bigKip = elements.get('notch-kip-large');
 const holds = (node, target) => node === target || (node.children || []).some(child => holds(child, target));

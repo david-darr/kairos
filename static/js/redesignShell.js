@@ -93,7 +93,19 @@ async function poll() {
   if (started) refresh();
 }
 
-function collect() { return collectActivity({ chats, remote, dismissed, chatStream, openSession, go, refresh }); }
+// Files a report or result as done in the Bots Inbox, the one place that
+// remembers it, so it leaves this list, the badges and the Inbox's Needs you.
+async function fileDone(ident) {
+  const [lane, id] = ident.split(":");
+  if (lane === "item") remote.inbox.items = remote.inbox.items.filter(item => item.id !== id);
+  else remote.inbox.reviews = remote.inbox.reviews.filter(card => card.id !== id);
+  refresh();
+  // A refused filing comes back on the next read; api() already says why.
+  try { await api(`/api/bot-attention/inbox/${encodeURIComponent(ident)}/done`, { method: "POST" }); } catch {}
+  poll();
+}
+
+function collect() { return collectActivity({ chats, remote, dismissed, chatStream, openSession, go, refresh, fileDone }); }
 
 // -- view ---------------------------------------------------------------------
 
