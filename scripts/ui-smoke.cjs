@@ -1825,7 +1825,7 @@ app.whenReady().then(async () => {
       // -- grouped nav + keyword search (David's ask 2026-09-15).
       assert.deepEqual(
         await js("[...document.querySelectorAll('.settings-nav-group')].filter(g=>!g.hidden).map(g=>g.textContent)"),
-        await js("document.documentElement.classList.contains('kairos-redesign')") ? ["General", "Intelligence", "Your data", "Access", "Advanced"] : ["Models", "Connections", "Workspace", "Personal", "Administration"],
+        await js("document.documentElement.classList.contains('kairos-redesign')") ? ["General", "Models", "Connections", "Agents", "Bots", "Your data", "Access", "Advanced"] : ["Models", "Connections", "Workspace", "Personal", "Administration"],
         label + " settings groups",
       );
       assert.ok(!(await js("document.querySelector('[data-section=custom-tabs]')")), "Tabs are managed in the Tool Store");

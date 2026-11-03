@@ -16,9 +16,11 @@ for (const admin of [true, false]) {
     .map(group => ({ ...group, sections: group.sections.filter(section => !section.admin || admin) }));
   const board = context.groups();
   assert.deepEqual(ids(board), ids(originalGroups), 'Every authorized section remains reachable exactly once');
-  assert.deepEqual(Array.from(board, group => group.label), ['General', 'Intelligence', 'Your data', 'Access', 'Advanced']);
-  assert.deepEqual(Array.from(board[0].sections, section => section.id), ['appearance', 'notifications', 'speech', 'channels', 'remote']);
-  assert.ok(board.find(group => group.id === 'intelligence').sections.some(section => section.id === 'integrations' && section.label === 'Integrations' && ['calendar', 'email'].every(word => section.keywords.includes(word))));
+  assert.deepEqual(Array.from(board, group => group.label), admin
+    ? ['General', 'Models', 'Connections', 'Agents', 'Bots', 'Your data', 'Access', 'Advanced']
+    : ['General', 'Models', 'Connections', 'Bots', 'Your data', 'Access']);
+  assert.deepEqual(Array.from(board[0].sections, section => section.id), ['appearance', 'layout', 'notifications', 'speech', 'shortcuts']);
+  assert.ok(board.find(group => group.id === 'connections').sections.some(section => section.id === 'integrations' && section.label === 'Integrations' && ['calendar', 'email'].every(word => section.keywords.includes(word))));
   assert.ok(!board.find(group => group.id === 'your-data').sections.some(section => section.id === 'integrations'));
   assert.ok(!board.find(group => group.id === 'access').sections.some(section => section.id === 'remote'));
   for (const group of board) for (const section of group.sections) {

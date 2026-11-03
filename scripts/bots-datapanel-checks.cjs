@@ -254,6 +254,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await clickText('.bots-menu .bots-menu-row', 'CSV file');
     for (let i = 0; i < 60 && !state().exports.length; i++) await delay(50);
     assert.deepEqual(state().exports.map(e => e.format), ['csv'], 'CSV is made by the server');
+    for (let i = 0; i < 80 && !(await js("window.__downloads.some(d => d.name.endsWith('.csv'))")); i++) await delay(50);
     assert.ok(await js("window.__downloads.some(d => d.name.endsWith('.csv'))"), 'and saved as a file');
 
     // -- History and Pin -----------------------------------------------------------------------------------------------------

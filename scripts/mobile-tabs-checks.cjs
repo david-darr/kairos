@@ -545,8 +545,8 @@ async function run(ctx) {
   ok(nav && nav.t < 130 && nav.h >= 844 - 130, 'The section list fills the screen instead of taking half: ' + JSON.stringify(nav));
   eq(await js("document.getElementById('settings-content').getClientRects().length === 0 || document.getElementById('settings-content').getBoundingClientRect().height === 0"), true, 'No page content shares the screen with the list');
   const ids = await sectionIds();
-  eq(await js("[...document.querySelectorAll('.settings-nav-group')].map(n => n.textContent)"), ['General', 'Intelligence', 'Your data', 'Access', 'Advanced'], 'Settings follows the board group order');
-  eq(await js("[...document.querySelectorAll('.settings-nav-item')].slice(0, 3).map(n => n.dataset.section)"), ['appearance', 'notifications', 'speech'], 'General starts with appearance, notifications and voice');
+  eq(await js("[...document.querySelectorAll('.settings-nav-group')].map(n => n.textContent)"), ['General', 'Models', 'Connections', 'Agents', 'Bots', 'Your data', 'Access', 'Advanced'], 'Settings follows the group order');
+  eq(await js("[...document.querySelectorAll('.settings-nav-item')].slice(0, 3).map(n => n.dataset.section)"), ['appearance', 'layout', 'notifications'], 'General starts with appearance, layout and notifications');
   ok(await js("document.querySelector('[data-section=appearance] .settings-nav-value').textContent.length > 0"), 'Appearance shows its saved theme value');
 
   ok(ids.length >= 10, 'The list holds every section: ' + ids.length);

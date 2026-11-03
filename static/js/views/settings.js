@@ -589,11 +589,14 @@ function visibleSections() {
     if (section) sections.set(id, { ...section, label, keywords: [...section.keywords, section.label.toLowerCase()] });
   }
   return [
-    ['general', 'General', ['appearance', 'notifications', 'speech', 'channels', 'remote']],
-    ['intelligence', 'Intelligence', ['added-models', 'add-models', 'agent-tools', 'permissions', 'integrations', 'bots', 'bot-voice', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-usage', 'bot-housekeeping', 'bot-templates', 'bot-computers']],
-    ['your-data', 'Your data', ['vault', 'file-checkpoints', 'system']],
+    ['general', 'General', ['appearance', 'layout', 'notifications', 'speech', 'shortcuts']],
+    ['models', 'Models', ['added-models', 'add-models']],
+    ['connections', 'Connections', ['integrations', 'channels', 'remote']],
+    ['agents', 'Agents', ['agent-tools', 'permissions', 'hooks', 'computer-use']],
+    ['bots', 'Bots', ['bots', 'bot-voice', 'bot-apps', 'bot-keys', 'bot-logins', 'bot-about-you', 'bot-skill-library', 'bot-computers', 'bot-templates', 'bot-usage', 'bot-housekeeping']],
+    ['your-data', 'Your data', ['vault', 'file-checkpoints', 'sandbox-changes', 'system']],
     ['access', 'Access', ['account', 'users']],
-    ['advanced', 'Advanced', ['logs', 'computer-use', 'layout', 'shortcuts', 'forge', 'hooks', 'runs', 'sandbox-changes']],
+    ['advanced', 'Advanced', ['forge', 'runs', 'logs']],
   ].map(([id, label, ids]) => ({ id, label, sections: ids.map(id => sections.get(id)).filter(Boolean) }))
     .filter(group => group.sections.length);
 }
@@ -614,11 +617,11 @@ function buildNav() {
     const heading = el("div", { class: "settings-nav-group", text: group.label });
     const block = el("div", { class: "settings-nav-block" });
     navList.append(heading, block);
-    // Redesign preview: Administration can fold. The button has no text and
+    // Redesign preview: Advanced can fold. The button has no text and
     // stays display:none until redesign-settings.css shows it, so with the
     // switch off nothing about the nav changes.
-    if (group.id === "administration") {
-      const fold = el("button", { type: "button", class: "settings-nav-fold", "aria-expanded": "true", "aria-label": "Administration pages" });
+    if (group.id === "advanced") {
+      const fold = el("button", { type: "button", class: "settings-nav-fold", "aria-expanded": "true", "aria-label": "Advanced pages" });
       fold.dataset.count = String(group.sections.length);
       fold.addEventListener("click", () => setFold(fold, block, block.dataset.collapsed !== "true"));
       heading.append(fold);

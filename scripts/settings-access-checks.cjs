@@ -69,8 +69,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   const admin = await navIds();
   assert.deepEqual(admin.slice().sort(), sections.map(s => s.id).sort(), 'an admin reaches every section exactly once');
   assert.deepEqual(await js("[...document.querySelectorAll('.settings-nav-group')].map(n => n.textContent)"),
-    ['General', 'Intelligence', 'Your data', 'Access', 'Advanced'], 'final grouping');
-  assert.deepEqual(admin.slice(0, 5), ['appearance', 'notifications', 'speech', 'channels', 'remote'], 'General keeps Channels and Remote Access');
+    ['General', 'Models', 'Connections', 'Agents', 'Bots', 'Your data', 'Access', 'Advanced'], 'final grouping');
+  assert.deepEqual(admin.slice(0, 5), ['appearance', 'layout', 'notifications', 'speech', 'shortcuts'], 'General holds the personal settings');
   const misses = [];
   for (const section of sections) {
     const terms = [section.label.toLowerCase(), ...section.keywords];

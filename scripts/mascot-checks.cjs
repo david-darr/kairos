@@ -155,7 +155,8 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
   await waitFor("!!document.querySelector('.ms-drawer-row[data-drawer=home] .ms-drawer-badge:not([hidden])')");
   assert.ok(true, 'the Home badge still shows');
   // Phone Home draws no Kip, so its style switch sits beside Customize: a 44px target that opens the shared sheet.
-  assert.ok(await js("(() => { const b = document.querySelector('.hm-phone-kip'); return !!b && b.getBoundingClientRect().height >= 44 && b.textContent === 'Kip: Halftone'; })()"), 'phone Home offers the Kip style switch');
+  await waitFor("(() => { const b = document.querySelector('.hm-phone-kip'); return !!b && b.getBoundingClientRect().height >= 44 && b.textContent === 'Kip: Halftone'; })()");
+  assert.ok(true, 'phone Home offers the Kip style switch');
   await js("document.querySelector('.hm-phone-kip').click()");
   await waitFor("!!document.querySelector('.ms-sheet .kip-choices')");
   assert.deepEqual(await js("[...document.querySelectorAll('.ms-sheet [role=radio]')].map(n => n.dataset.kipStyle + ':' + (n.getBoundingClientRect().height >= 44))"), ['flat:true', 'halftone:true', 'pixel:true', 'hidden:true']);
