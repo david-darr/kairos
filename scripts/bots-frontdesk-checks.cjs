@@ -124,8 +124,8 @@ module.exports = async ({ js, waitFor, delay, win, capture, demoState, base }) =
     assert.ok(phone.tabsTop > phone.headBottom + 200 && phone.h - phone.tabsBottom <= 40, 'the tabs sit at the bottom, clear of the controls');
     assert.equal(phone.today, false, 'no Today panel on a phone');
     await click('[data-fd-tab=chat]');
-    // A fresh owned suggestion, then a true touch drag left. Buttons were proved above.
-    await js(`(async()=>{const C=await import('/static/js/botsFrontDeskCards.js');const r=C.renderFrontDeskCard({id:'swipe',type:'fd_card',fd_kind:'suggestion',fd_data:{suggestion_id:'own-swipe',title:'Swipe me'}},{api:window.__fdApi}); r.id='fd-swipe'; window.__fdCards.push(r);const cards=document.getElementById('fd-check-cards');cards.prepend(r);r.scrollIntoView();return true;})()`);
+    // A fresh owned suggestion (the stand-in card list gets the real list's top space: Kip's controls float over it)., then a true touch drag left. Buttons were proved above.
+    await js(`(async()=>{const C=await import('/static/js/botsFrontDeskCards.js');const r=C.renderFrontDeskCard({id:'swipe',type:'fd_card',fd_kind:'suggestion',fd_data:{suggestion_id:'own-swipe',title:'Swipe me'}},{api:window.__fdApi}); r.id='fd-swipe'; window.__fdCards.push(r);const cards=document.getElementById('fd-check-cards');cards.style.paddingTop='150px';cards.prepend(r);r.scrollIntoView({block:'center'});return true;})()`);
     const point = await js("(()=>{const r=document.getElementById('fd-swipe').getBoundingClientRect();return {x:r.right-24,y:r.top+30};})()");
     await debug.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
     await debug.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x - 160, y: point.y + 2 }] });
