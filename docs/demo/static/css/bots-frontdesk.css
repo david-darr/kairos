@@ -105,7 +105,7 @@
     padding:8px 16px 28px; background:none; pointer-events:none; }
   /* Kip's pages scroll up under its floating controls, softly blurred, as Duet does (David, 2026-11-02). */
   [data-app-mode="bots"] .fd-body { position:relative; }
-  [data-app-mode="bots"] .fd-body::before { content: ""; position: absolute; top: 0; left: 0; right: 0; z-index: 3; pointer-events: none; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); background: linear-gradient(to bottom, color-mix(in srgb, var(--bots-app) 72%, transparent), color-mix(in srgb, var(--bots-app) 0%, transparent)); -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 55%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0, #000 55%, transparent 100%); height:150px; }
+  [data-app-mode="bots"] .fd-body::before { content: ""; position: absolute; top: 0; left: 0; right: 0; z-index: 3; pointer-events: none; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); background: linear-gradient(to bottom, color-mix(in srgb, var(--bots-app) 50%, transparent), color-mix(in srgb, var(--bots-app) 0%, transparent)); -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 40%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0, #000 40%, transparent 100%); height:136px; }
   [data-app-mode="bots"] .fd-page-chat .bots-chat-toolbar { position:absolute; top:96px; left:0; right:0; z-index:5; }
   [data-app-mode="bots"] .fd-page-chat .bots-log { padding-top:148px; }
   [data-app-mode="bots"] .fd-page:not(.fd-page-chat) { padding-top:100px; box-sizing:border-box; }
@@ -122,10 +122,10 @@
   [data-app-mode="bots"] .fd-watching-dock::before { content:""; flex:none; width:6px; height:6px; border-radius:var(--bots-radius-pill); background:var(--bots-ink-tertiary); }
   [data-app-mode="bots"] .fd-watching-dock[data-on="true"]::before { background:var(--bots-success); }
   [data-app-mode="bots"] .fd-step { font-size:var(--bots-text-hint); margin-top:4px; }
-  [data-app-mode="bots"] .fd-tabs { position:absolute; bottom:calc(18px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); width:min(310px,calc(100% - 80px)); box-sizing:border-box; height:64px; margin:0; z-index:5; }
+  [data-app-mode="bots"] .fd-tabs { position:absolute; bottom:6px; left:50%; transform:translateX(-50%); width:min(310px,calc(100% - 80px)); box-sizing:border-box; height:64px; margin:0; z-index:5; }
   [data-app-mode="bots"] .fd-tabs > button { flex:1; width:0; min-width:0; flex-direction:column; gap:2px; font-size:12px; }
   /* The page already keeps the status bar clear (bots-shell.css), so the header only clears Kip and its buttons. */
-  [data-app-mode="bots"] .fd-pages { padding:0 0 calc(96px + env(safe-area-inset-bottom,0px)); box-sizing:border-box; }
+  [data-app-mode="bots"] .fd-pages { padding:0 0 78px; box-sizing:border-box; }
   [data-app-mode="bots"] .bots-frontdesk .bots-msg[data-role="assistant"] .bots-msg-bubble { font-size:18px; line-height:1.5; }
   [data-app-mode="bots"] .fd-card { border-radius:24px; }
   [data-app-mode="bots"] .fd-card-suggestion .fd-card-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }

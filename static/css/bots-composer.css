@@ -70,7 +70,8 @@
 [data-app-mode="bots"] .bots-composer[data-form="phone"] .bots-composer-tools { display: none; }
 [data-app-mode="bots"] .bots-composer[data-form="phone"] .bots-queue .bots-btn, [data-app-mode="bots"] .bots-composer[data-form="phone"] .bots-outbox .bots-btn { min-height: 44px; }
 [data-app-mode="bots"] .bots-composer-stop[hidden] { display: none; }
-@media (max-width: 768px) { [data-app-mode="bots"] .bots-composer-host { padding: 4px 12px calc(12px + env(safe-area-inset-bottom, 0px)); } }
+/* The page keeps the home bar clear on a phone (bots-shell.css), so the composer adds only its own gap. */
+@media (max-width: 768px) { [data-app-mode="bots"] .bots-composer-host { padding: 4px 12px 8px; } }
 
 /* Slash and mention suggestions */
 [data-app-mode="bots"] .bots-composer-menu { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 20; display: flex; flex-direction: column; max-height: 18rem; overflow-y: auto; margin-bottom: 6px; padding: 6px; background: var(--bots-menu); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-menu); box-shadow: var(--bots-shadow-float); }
