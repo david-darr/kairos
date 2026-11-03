@@ -1,0 +1,16 @@
+{
+  "name": "Fintech Mint",
+  "mood": ["trustworthy", "fresh", "efficient"],
+  "tags": ["finance", "invoice", "invoicing", "money", "payments", "banking", "fintech", "budget", "accounting", "freelancer", "tax", "billing"],
+  "good_for": ["website", "screen", "slides", "social", "banner", "poster", "email"],
+  "fonts": {"display": "outfit", "body": "inter"},
+  "office_fonts": {"display": "Segoe UI Semibold", "body": "Segoe UI"},
+  "color": {"bg": "#0E1A17", "surface": "#14251F", "surface-2": "#1B3029", "text": "#EAF5F0", "text-dim": "#9DB8AD",
+            "accent": "#3DDC97", "accent-text": "#5BE6A8", "on-accent": "#062016", "accent-2": "#F5C451",
+            "hairline": "#24403A", "hairline-soft": "#1C332D", "danger": "#FF7A6B", "success": "#3DDC97"},
+  "shape": {"radius": "16px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0",
+            "display_weight": "600", "display_style": "normal"},
+  "imagery": "UI cards with real-looking figures, simple icons; numbers are the hero",
+  "archetypes": ["hero-split", "big-number", "bento", "comparison"],
+  "guide": "Money made calm: deep green ground, mint for the one action and for good numbers. Large figures, tabular numerals, rounded cards that look like the product."
+}

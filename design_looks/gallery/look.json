@@ -1,0 +1,16 @@
+{
+  "name": "Gallery",
+  "mood": ["artful", "spare", "curated"],
+  "tags": ["architecture", "portfolio", "gallery", "studio", "agency", "photography", "exhibition", "museum", "designer", "art", "showcase"],
+  "good_for": ["website", "poster", "slides", "social", "print"],
+  "fonts": {"display": "unbounded", "body": "inter"},
+  "office_fonts": {"display": "Segoe UI Black", "body": "Segoe UI"},
+  "color": {"bg": "#FFFFFF", "surface": "#F4F4F4", "surface-2": "#E8E8E8", "text": "#0A0A0A", "text-dim": "#5A5A5A",
+            "accent": "#0A0A0A", "accent-text": "#0A0A0A", "on-accent": "#FFFFFF", "accent-2": "#FF5A36",
+            "hairline": "#0A0A0A", "hairline-soft": "#DDDDDD", "danger": "#C2361A", "success": "#1F7A3F"},
+  "shape": {"radius": "0px", "button": "underline", "border": "1px", "label_case": "upper", "label_tracking": "0.06em",
+            "display_weight": "500", "display_style": "normal"},
+  "imagery": "full-bleed work images, generous white walls, small captions with numbers",
+  "archetypes": ["grid-12", "editorial-column", "big-number"],
+  "guide": "White walls, black type, the work is the colour. A wide geometric headline, small numbered captions, one orange-red dot at most."
+}

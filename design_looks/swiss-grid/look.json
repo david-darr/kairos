@@ -1,0 +1,16 @@
+{
+  "name": "Swiss Grid",
+  "mood": ["precise", "objective", "confident"],
+  "tags": ["corporate", "architecture", "conference", "data", "report", "engineering", "agency", "transport", "annual", "systems"],
+  "good_for": ["poster", "slides", "print", "website", "screen", "banner"],
+  "fonts": {"display": "inter", "body": "inter"},
+  "office_fonts": {"display": "Arial", "body": "Arial"},
+  "color": {"bg": "#FFFFFF", "surface": "#F2F2F2", "surface-2": "#E6E6E6", "text": "#111111", "text-dim": "#555555",
+            "accent": "#E30613", "accent-text": "#C20510", "on-accent": "#FFFFFF", "accent-2": "#111111",
+            "hairline": "#111111", "hairline-soft": "#D0D0D0", "danger": "#C20510", "success": "#1E7A3C"},
+  "shape": {"radius": "0px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.08em",
+            "display_weight": "800", "display_style": "normal"},
+  "imagery": "flat colour fields, strict photo crops on the grid, numbers as graphics",
+  "archetypes": ["grid-12", "big-number", "comparison", "timeline"],
+  "guide": "Everything on a visible grid. Flush-left type, tight leading on headlines, heavy weight contrast. Red is a signal: one block or one rule per board. No rounded corners, no shadows."
+}

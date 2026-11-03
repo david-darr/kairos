@@ -1,0 +1,16 @@
+{
+  "name": "Terracotta",
+  "mood": ["earthy", "warm", "crafted"],
+  "tags": ["craft", "pottery", "travel", "restaurant", "culture", "desert", "ceramics", "workshop", "retreat", "handmade", "tour", "mediterranean"],
+  "good_for": ["poster", "website", "social", "print", "email", "slides"],
+  "fonts": {"display": "syne", "body": "manrope"},
+  "office_fonts": {"display": "Segoe UI Black", "body": "Segoe UI"},
+  "color": {"bg": "#F3E6D8", "surface": "#FBF4EC", "surface-2": "#EBD8C4", "text": "#3A1F14", "text-dim": "#6E4C3C",
+            "accent": "#A8441F", "accent-text": "#A8441F", "on-accent": "#FFFFFF", "accent-2": "#2F5D62",
+            "hairline": "#D9BFA6", "hairline-soft": "#E8D5C1", "danger": "#9C2B1E", "success": "#3F6B3A"},
+  "shape": {"radius": "28px", "button": "pill", "border": "1px", "label_case": "upper", "label_tracking": "0.12em",
+            "display_weight": "700", "display_style": "normal"},
+  "imagery": "sunlit photography, arch shapes, clay and stone textures",
+  "archetypes": ["hero-split", "poster-stack", "editorial-column"],
+  "guide": "Sun-baked: wide expressive headline, clay orange and a deep teal, arches and big rounded frames. Feels handmade, never rustic clip art."
+}

@@ -84,6 +84,10 @@ DEFAULTS: dict[str, Any] = {
     # off (David's ask 2026-09-06: syncing should happen "so a user doesn't
     # have to press it themselves"). See core/builtin_tasks.py.
     "auto_enabled_builtins": [],
+    # The look new designs start in when nobody chose one (Tool Store > Design
+    # systems > Use as default). None: models pick a look per brief with
+    # creative_direction; a design made by hand starts in Kairos.
+    "design_default_look": None,
 }
 
 

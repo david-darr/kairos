@@ -1,0 +1,16 @@
+{
+  "name": "Pop Color",
+  "mood": ["vibrant", "cheeky", "fresh"],
+  "tags": ["promo", "sale", "creator", "festival", "food truck", "drink", "snack", "youth", "influencer", "merch", "giveaway"],
+  "good_for": ["social", "poster", "banner", "website", "screen"],
+  "fonts": {"display": "bricolagegrotesque", "body": "dmsans"},
+  "office_fonts": {"display": "Segoe UI Black", "body": "Segoe UI"},
+  "color": {"bg": "#FFE14D", "surface": "#FFFFFF", "surface-2": "#FFF2A6", "text": "#111111", "text-dim": "#3D3A2A",
+            "accent": "#FF3EA5", "accent-text": "#B8006A", "on-accent": "#111111", "accent-2": "#2D5BFF",
+            "hairline": "#111111", "hairline-soft": "#E5C93F", "danger": "#B8006A", "success": "#0B7A47"},
+  "shape": {"radius": "18px", "button": "pill", "border": "2px", "label_case": "none", "label_tracking": "-0.01em",
+            "display_weight": "800", "display_style": "normal"},
+  "imagery": "cut-out product shots with hard shadows, stickers, bold flat shapes",
+  "archetypes": ["poster-stack", "bento", "big-number"],
+  "guide": "Sunshine yellow, hot pink, black outlines. Tight, chunky, slightly squished headline. Cut-out images that overlap card edges. Fun, never messy: two colours plus black."
+}

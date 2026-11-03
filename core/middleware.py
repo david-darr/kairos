@@ -18,9 +18,10 @@ from core.constants import APP_PORT
 
 
 _NO_CACHE_SUFFIXES = (".js", ".mjs", ".css", ".html")
-# The only responses whose own Content-Security-Policy survives (see dispatch): a Design board's render
-# and a bot's sandboxed app page.
+# The only responses whose own Content-Security-Policy survives (see dispatch): a Design board's render,
+# a bundled look's preview (script-free) and a bot's sandboxed app page.
 _OWN_POLICY_PATHS = (re.compile(r"/api/designs/[^/]+/boards/[^/]+/render"),
+                     re.compile(r"/api/design-looks/[a-z0-9-]+/preview"),
                      re.compile(r"/api/bot-widgets/[^/]+/apps/[^/]+/frame"))
 
 # The port this process's local listener actually serves on, from the first

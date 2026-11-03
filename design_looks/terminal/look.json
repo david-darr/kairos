@@ -1,0 +1,16 @@
+{
+  "name": "Terminal",
+  "mood": ["technical", "minimal", "hacker"],
+  "tags": ["code", "developer", "hackathon", "cli", "security", "devops", "open source", "linux", "infrastructure", "terminal", "ctf"],
+  "good_for": ["poster", "slides", "social", "website", "banner", "screen"],
+  "fonts": {"display": "jetbrainsmono", "body": "jetbrainsmono"},
+  "office_fonts": {"display": "Consolas", "body": "Consolas"},
+  "color": {"bg": "#0A0E0A", "surface": "#111811", "surface-2": "#182218", "text": "#D7F5D3", "text-dim": "#8FB58B",
+            "accent": "#39FF88", "accent-text": "#39FF88", "on-accent": "#0A0E0A", "accent-2": "#FFB84D",
+            "hairline": "#25402A", "hairline-soft": "#1A2E1E", "danger": "#FF6B6B", "success": "#39FF88"},
+  "shape": {"radius": "2px", "button": "square", "border": "1px", "label_case": "none", "label_tracking": "0",
+            "display_weight": "700", "display_style": "normal"},
+  "imagery": "prompt lines, ASCII diagrams, scanline texture; text is the image",
+  "archetypes": ["editorial-column", "big-number", "timeline"],
+  "guide": "Everything monospace. A prompt (>) before headlines, comments (//) as labels, bright green for the one command to run. Line art in ASCII, no photos."
+}

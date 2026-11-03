@@ -1,0 +1,16 @@
+{
+  "name": "Nocturne",
+  "mood": ["dramatic", "elegant", "mysterious"],
+  "tags": ["night", "concert", "theatre", "film", "evening", "astronomy", "jazz", "opera", "premiere", "moon", "stars", "drama"],
+  "good_for": ["poster", "social", "slides", "website", "print"],
+  "fonts": {"display": "dmserifdisplay", "body": "dmsans"},
+  "office_fonts": {"display": "Georgia", "body": "Segoe UI"},
+  "color": {"bg": "#0E1530", "surface": "#18214A", "surface-2": "#222C5C", "text": "#F2EEE2", "text-dim": "#B9B7C9",
+            "accent": "#E8C66A", "accent-text": "#E8C66A", "on-accent": "#0E1530", "accent-2": "#8FA8FF",
+            "hairline": "#2D3870", "hairline-soft": "#212A58", "danger": "#FF8A80", "success": "#8FD9A8"},
+  "shape": {"radius": "6px", "button": "soft", "border": "1px", "label_case": "upper", "label_tracking": "0.18em",
+            "display_weight": "400", "display_style": "normal"},
+  "imagery": "a single luminous object (moon, spotlight, stage) in deep navy; fine star dust",
+  "archetypes": ["poster-stack", "quote", "hero-split"],
+  "guide": "Curtain up: deep navy, one golden light, a high-contrast display serif. Spaced capitals for dates and places. Keep it sparse so the glow reads."
+}

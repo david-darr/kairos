@@ -250,6 +250,33 @@ def render_document(design_id: str, slug: str, *, version: Optional[int] = None,
             f"{source}{script}</body></html>")
 
 
+def sample_csp(origin: str) -> str:
+    """A look preview's policy: like a board's, with no script at all."""
+    base = origin.rstrip("/")
+    return ("default-src 'none'; style-src 'unsafe-inline'; "
+            f"font-src {base}/api/design-fonts/; img-src data:; script-src 'none'; connect-src 'none'; "
+            "form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'; frame-ancestors 'self'")
+
+
+def render_sample(system_id: str, *, font_base: str = "/api/design-fonts") -> Optional[str]:
+    """Tool Store's 1200x800 preview of a bundled look or the Kairos system; None for saved systems."""
+    from core import design_looks
+    look = design_looks.get(system_id)
+    if look is None and system_id != design_systems.BUILTIN_ID:
+        return None
+    system = design_systems.get(system_id)
+    if look is None:  # Kairos, drawn with the same preview as the looks.
+        look = {"name": "Kairos", "mood": ["warm", "calm", "precise"], "imagery": "",
+                "guide": "Parchment grounds, bistre ink and a gold point. Warm, calm and precise.",
+                "shape": {"radius": "12px", "button": "pill", "border": "1px", "label_case": "none",
+                          "label_tracking": "0.02em", "display_weight": "500", "display_style": "italic"}}
+    head = "\n".join([design_systems.font_faces(system["id"], font_base), design_systems.tokens_css(system["tokens"]),
+                      RESET % {"w": 1200, "h": 800, "min": 800}])
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(look["name"])}</title>'
+            f'<meta name="viewport" content="width=1200"><style>{head}</style></head>'
+            f"<body>{design_looks.sample(look)}</body></html>")
+
+
 def _min_height(meta: dict) -> int:
     """A growing board (website, email) is as tall as its content, at least its
     minimum: the page must not stretch to the frame, or it could never shrink."""

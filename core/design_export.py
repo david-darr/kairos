@@ -92,7 +92,8 @@ def html_zip(design_id: str, boards: Optional[list] = None) -> bytes:
             path = design_systems.font_path(system["id"], face.get("file", ""))
             if path:
                 folder_name = "kairos" if system["id"] == design_systems.BUILTIN_ID else system["id"]
-                archive.write(str(path), f"fonts/{folder_name}/{path.name}")
+                # The name the CSS asks for: a bundled look's files go by alias (fraunces-0.ttf).
+                archive.write(str(path), f"fonts/{folder_name}/{face.get('file') or path.name}")
         manifest = {k: v for k, v in data.items() if k not in ("chat_ids", "owner", "visible_to")}
         manifest["boards"] = {slug: data["boards"][slug] for slug in slugs}  # a partial zip lists only what it holds
         archive.writestr("design.json", json.dumps(manifest, indent=2))

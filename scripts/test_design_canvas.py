@@ -92,7 +92,8 @@ def new_chat(title="design chat", owner="local"):
 
 
 def create(session_id, boards=ONBOARDING, surface=tool_registry.OPENAI, **kw):
-    result = call("design_create", {"title": "Habit onboarding", "boards": boards}, ctx(session_id, surface, **kw), surface)
+    result = call("design_create", {"title": "Habit onboarding", "look": "kairos", "boards": boards},
+                  ctx(session_id, surface, **kw), surface)
     match = re.search(r"Created design ([a-f0-9]{12})", text(result))
     assert match, text(result)
     return match.group(1), text(result)
@@ -407,7 +408,7 @@ class SurfaceTests(unittest.TestCase):
         client = TestClient(app, client=("127.0.0.1", 50000))
         token = tool_access.issue(sid, is_admin=True)
         response = client.post("/api/tools/design_create", headers={"X-JARVIS-Tool-Token": token},
-                               json={"arguments": {"title": "Codex design", "boards": ONBOARDING}})
+                               json={"arguments": {"title": "Codex design", "look": "kairos", "boards": ONBOARDING}})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("Created design", response.json()["result"])
 
@@ -451,7 +452,7 @@ class ProviderLoopTests(unittest.TestCase):
         fake, bodies = self.scripted([
             self.tool_call("kairos_tool_search", {"query": "design create screens"}),
             self.answer(json.dumps({"name": "kairos_tool_call", "arguments": {"name": "design_create", "arguments": {
-                "title": "Habit onboarding", "boards": ONBOARDING}}})),
+                "title": "Habit onboarding", "look": "kairos", "boards": ONBOARDING}}})),
             self.answer("Here is your onboarding: [Design: Habit onboarding](/designs/x)"),
         ])
         with patch.object(openai_compatible, "_post_chat", fake):
@@ -476,7 +477,7 @@ class ProviderLoopTests(unittest.TestCase):
         sid = new_chat("api")
         brain = ExternalBrain("https://api.openai.com/v1", "gpt-5", "sk-test", session_id=sid, window=400000, is_admin=True)
         fake, bodies = self.scripted([
-            self.tool_call("design_create", {"title": "Habit onboarding", "boards": ONBOARDING}),
+            self.tool_call("design_create", {"title": "Habit onboarding", "look": "kairos", "boards": ONBOARDING}),
             self.tool_call("design_outline", {"board": "2"}, 1),
             self.answer("Created [Design: Habit onboarding](/designs/x)."),
         ])
@@ -776,7 +777,8 @@ class RoutingTests(unittest.TestCase):
 
     def test_every_chat_model_is_told_to_use_the_canvas(self):
         from core import system_prompt
-        line = "To design screens, pages or slides, use the Design canvas: design_create, then design_edit by id."
+        line = ("To design screens, pages, posters or slides, pick a look with creative_direction, then use the "
+                "Design canvas: design_create with that look, then design_edit by id.")
         for name, prompt in (("claude", system_prompt.for_claude()), ("external", system_prompt.for_external()),
                              ("codex", system_prompt.for_codex("py", "cli.py"))):
             self.assertIn(line, prompt, name)
@@ -798,15 +800,16 @@ class RoutingTests(unittest.TestCase):
         sid = new_chat()
         create(sid, boards=[{"title": "One", "frame": "phone"}])
         few = text(call("design_tokens", {"set": {"--ds-accent": "#225588"}}, ctx(sid)))
-        self.assertNotIn("Keep the system's look", few)
+        self.assertNotIn("Keep the chosen look", few)
         many = text(call("design_tokens", {"set": {"--ds-bg": "#101418", "--ds-text": "#F2F4F8", "--ds-surface": "#1B2026",
                                                     "--ds-accent": "#55AA88"}}, ctx(sid)))
-        self.assertIn("overrode 4 of the design system's tokens", many)
-        self.assertIn("unless the person asked for a different look", many)
+        self.assertIn("overrode 4 of the look's tokens", many)
+        self.assertIn("Keep the chosen look unless the person asked", many)
         spec = next(s for s in tool_registry.specs(tool_registry.OPENAI, True) if s.name == "design_tokens")
-        self.assertIn("unless the person asks for a different look or palette", spec.description)
+        self.assertIn("unless the person asks for a different palette", spec.description)
         skill = (REPO / "skill_templates" / "design-canvas" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("Keep the design system's look", skill)
+        self.assertIn("Follow the look's guide", skill)
+        self.assertIn("creative_direction", skill)
 
 
 def _rects(data):
@@ -877,7 +880,7 @@ class FormatTests(unittest.TestCase):
             self.assertIn(says, str(caught.exception))
         self.assertEqual(f.resolve("custom", w=1000, h=500)[0]["w"], 1000, "custom is allowed for exact sizes")
         sid = new_chat()
-        refused = text(call("design_create", {"title": "Site", "boards": [{"title": "Home", "frame": "none", "w": 1468, "h": 3990,
+        refused = text(call("design_create", {"title": "Site", "look": "kairos", "boards": [{"title": "Home", "frame": "none", "w": 1468, "h": 3990,
                                                                            "html": "<main>Hi</main>"}]}, ctx(sid)))
         self.assertTrue(refused.startswith("Not run: Board \"Home\": Pick a format"), refused)
         self.assertEqual(design_store.designs_for_chat(sid), [], "a refused create leaves no design behind")
@@ -895,7 +898,7 @@ class FormatTests(unittest.TestCase):
 
     def test_a_website_is_a_desktop_and_mobile_pair_that_grows(self):
         sid = new_chat()
-        made = text(call("design_create", {"title": "Kairos site", "boards": [
+        made = text(call("design_create", {"title": "Kairos site", "look": "kairos", "boards": [
             {"title": "Home", "format": "website", "orientation": "landscape", "html": "<main><h1>Kairos</h1></main>",
              "mobile_html": "<main><h1>Kairos</h1><p>Phone</p></main>"}]}, ctx(sid)))
         design_id = re.search(r"Created design ([a-f0-9]{12})", made).group(1)

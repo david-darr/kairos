@@ -1,0 +1,16 @@
+{
+  "name": "Botanical",
+  "mood": ["fresh", "natural", "gentle"],
+  "tags": ["garden", "plants", "organic", "farm", "food", "nature", "eco", "market", "florist", "sustainability", "outdoors", "herbal"],
+  "good_for": ["poster", "social", "website", "print", "email", "screen"],
+  "fonts": {"display": "instrumentserif", "body": "dmsans"},
+  "office_fonts": {"display": "Georgia", "body": "Segoe UI"},
+  "color": {"bg": "#EEF1E6", "surface": "#FFFFFF", "surface-2": "#E1E7D4", "text": "#1F2A1E", "text-dim": "#4F5C4D",
+            "accent": "#3F6B3A", "accent-text": "#3F6B3A", "on-accent": "#FFFFFF", "accent-2": "#D98E4A",
+            "hairline": "#C7D0B8", "hairline-soft": "#DCE3CF", "danger": "#9C3B2E", "success": "#3F6B3A"},
+  "shape": {"radius": "10px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0.01em",
+            "display_weight": "400", "display_style": "normal"},
+  "imagery": "leaf and stem line drawings, produce photography in daylight, paper textures",
+  "archetypes": ["hero-split", "editorial-column", "bento"],
+  "guide": "Fresh from the garden: a thin elegant serif headline, a clean sans body, leaf green and a touch of apricot on sage paper. Botanical line art over photos."
+}

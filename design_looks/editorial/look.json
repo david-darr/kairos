@@ -1,0 +1,16 @@
+{
+  "name": "Editorial",
+  "mood": ["literate", "considered", "warm"],
+  "tags": ["magazine", "story", "essay", "literary", "book", "culture", "interview", "journal", "longform", "guide", "review"],
+  "good_for": ["poster", "print", "slides", "website", "social", "email"],
+  "fonts": {"display": "fraunces", "body": "sourceserif4"},
+  "office_fonts": {"display": "Georgia", "body": "Georgia"},
+  "color": {"bg": "#F7F3EC", "surface": "#FFFFFF", "surface-2": "#EFE8DC", "text": "#1C1A17", "text-dim": "#5E5850",
+            "accent": "#B2361E", "accent-text": "#9A2E19", "on-accent": "#FFFFFF", "accent-2": "#2F4A3A",
+            "hairline": "#CFC5B5", "hairline-soft": "#E4DCCD", "danger": "#9A2E19", "success": "#2F6B3F"},
+  "shape": {"radius": "2px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.14em",
+            "display_weight": "600", "display_style": "normal"},
+  "imagery": "photography with generous margins, or a single large illustration; never clip art",
+  "archetypes": ["editorial-column", "hero-split", "quote", "big-number"],
+  "guide": "A magazine page: a large serif headline, a narrow reading column, a small upper-case kicker in the accent. One vermilion point per page. Generous white space; hairline rules between sections."
+}

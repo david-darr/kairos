@@ -149,7 +149,29 @@ function serve(url, req, res) {
     try { res.end(fs.readFileSync(file)); } catch { res.writeHead(404); res.end(); }
     return true;
   }
-  if (url.pathname === '/api/design-systems') return json([{ id: 'kairos', name: 'Kairos', builtin: true }]);
+  // Tool Store > Design systems: Kairos, two bundled looks and a saved system (core/design_looks.py).
+  if (url.pathname === '/api/design-systems') return json([{ id: 'kairos', name: 'Kairos', builtin: true },
+    { id: 'sport', name: 'Sport', builtin: false, bundled: true, mood: ['energetic', 'competitive', 'bold'] },
+    { id: 'editorial', name: 'Editorial', builtin: false, bundled: true, mood: ['literate', 'considered', 'warm'] },
+    { id: 'acme-1a2b3c', name: 'Acme', builtin: false, source: 'pasted CSS' }]);
+  if (url.pathname === '/api/design-systems/default/look' && req.method === 'GET') return json({ id: state.defaultLook ?? null });
+  if (url.pathname === '/api/design-systems/default/look' && req.method === 'POST') return read(body => { state.defaultLook = body.id ?? null; json({ id: state.defaultLook }); });
+  const sys = url.pathname.match(/^\/api\/design-systems\/([a-z0-9-]+)$/);
+  if (sys) {
+    const looks = { sport: { mood: ['energetic', 'competitive', 'bold'], fonts: { display: 'Bebas Neue', body: 'Barlow Condensed' } },
+                    editorial: { mood: ['literate', 'considered', 'warm'], fonts: { display: 'Fraunces', body: 'Source Serif 4' } } };
+    const names = { kairos: 'Kairos', sport: 'Sport', editorial: 'Editorial', 'acme-1a2b3c': 'Acme' };
+    if (!names[sys[1]]) return false;
+    return json({ id: sys[1], name: names[sys[1]], builtin: sys[1] === 'kairos', bundled: !!looks[sys[1]], look: looks[sys[1]],
+      source: sys[1] === 'acme-1a2b3c' ? 'pasted CSS' : undefined, guide: '# x\nA guide line.', variables: { '--ds-bg': '#101418', '--ds-accent': '#C6FF3D' } });
+  }
+  const preview = url.pathname.match(/^\/api\/design-looks\/([a-z0-9-]+)\/preview$/);
+  if (preview) {
+    state.previews = (state.previews || 0) + 1;
+    res.setHeader('Content-Type', 'text/html'); res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'");
+    res.end(`<!doctype html><html><body style="margin:0;width:1200px;height:800px;background:#101418;color:#fff"><h1 style="font-size:104px;margin:80px">${preview[1]}</h1></body></html>`);
+    return true;
+  }
   // The design's linked chat and its model (designModelPicker.js).
   if (url.pathname === '/api/sessions/dz1' && req.method === 'GET') return json({ id: 'dz1', title: 'Design chat', messages: [], model_endpoint_id: state.model.endpoint, model_override: state.model.model, model_effort: state.model.effort });
   if (url.pathname === '/api/sessions/dz1/model' && req.method === 'POST') return read(body => {
@@ -713,6 +735,37 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   }
   win.setContentSize(1440, 900); await delay(300);
   await navigate('library', { section: 'documents' });
+  await looks({ js, waitFor, delay, navigate, win, capture, overflow });
+}
+
+// Tool Store > Design systems: the looks with their previews, Use as default, on desktop and a phone.
+async function looks({ js, waitFor, delay, navigate, win, capture, overflow }) {
+  for (const width of [1440, 390]) {
+    win.setContentSize(width, width === 390 ? 844 : 900); await delay(300);
+    state.previews = 0;
+    await navigate('tool-store');
+    await waitFor("!![...document.querySelectorAll('.tool-store-filters button')].find(b => b.textContent === 'Design systems')");
+    await js("[...document.querySelectorAll('.tool-store-filters button')].find(b => b.textContent === 'Design systems').click()");
+    await waitFor("document.querySelectorAll('.design-look-card').length === 3");
+    assert.ok(await js("[...document.querySelectorAll('.tool-store-heading')].some(h => h.textContent === 'Looks · 3') && [...document.querySelectorAll('.tool-store-heading')].some(h => h.textContent === 'Saved systems · 1')"),
+      `looks and saved systems are listed apart at ${width}`);
+    await waitFor("[...document.querySelectorAll('.design-look-frame')].every(f => f.getAttribute('sandbox') === '' && f.src.includes('/api/design-looks/'))");
+    assert.ok(await js("document.querySelector('.design-look-card').textContent.includes('Kairos brand') && [...document.querySelectorAll('.design-look-card')].some(c => c.textContent.includes('Bebas Neue + Barlow Condensed'))"),
+      `each look shows its mood and type at ${width}`);
+    assert.ok(await js("[...document.querySelectorAll('.design-look-preview')].every(p => p.getBoundingClientRect().right <= innerWidth + 0.5)"), `previews fit the window at ${width}`);
+    if (overflow) assert.deepEqual(await overflow(), [], `no sideways scroll on Design systems at ${width}`);
+    if (width === 1440) {
+      const before = state.posts.length;
+      await js("[...document.querySelectorAll('.design-look-card')].find(c => c.textContent.includes('Sport')).querySelector('button').click()");
+      await waitFor("[...document.querySelectorAll('.design-look-card')].find(c => c.textContent.includes('Sport'))?.classList.contains('is-default')");
+      assert.ok(state.posts.slice(before).some(p => p.path === '/api/design-systems/default/look' && p.body.id === 'sport'), 'Use as default saves the look');
+      assert.ok(await js("[...document.querySelectorAll('.design-look-card')].find(c => c.textContent.includes('Sport')).querySelector('[aria-pressed=\"true\"]')?.textContent === 'Stop using as default'"),
+        'the default look says so and can be undone');
+    }
+    await capture(`design-looks-${width}`);
+  }
+  state.defaultLook = null;
+  win.setContentSize(1440, 900); await delay(300);
 }
 
 module.exports = { serve, run };

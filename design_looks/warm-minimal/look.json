@@ -1,0 +1,16 @@
+{
+  "name": "Warm Minimal",
+  "mood": ["calm", "soft", "honest"],
+  "tags": ["wellness", "home", "cafe", "coffee", "lifestyle", "interior", "yoga", "meditation", "skincare", "bakery", "slow"],
+  "good_for": ["website", "screen", "social", "poster", "email", "print"],
+  "fonts": {"display": "manrope", "body": "manrope"},
+  "office_fonts": {"display": "Segoe UI", "body": "Segoe UI"},
+  "color": {"bg": "#F4EFE8", "surface": "#FBF8F3", "surface-2": "#EAE2D6", "text": "#2B2620", "text-dim": "#6B6258",
+            "accent": "#8A6A4A", "accent-text": "#76583B", "on-accent": "#FFFFFF", "accent-2": "#A9B49A",
+            "hairline": "#D8CDBF", "hairline-soft": "#E7DFD3", "danger": "#9C3B2E", "success": "#4F7A4A"},
+  "shape": {"radius": "14px", "button": "soft", "border": "1px", "label_case": "none", "label_tracking": "0.01em",
+            "display_weight": "500", "display_style": "normal"},
+  "imagery": "soft natural-light photography, linen and wood textures, lots of empty space",
+  "archetypes": ["hero-split", "editorial-column", "bento"],
+  "guide": "Quiet and tactile: medium-weight type, sentence case, soft corners, sand and clay. Let space do the work; one image per board at most."
+}

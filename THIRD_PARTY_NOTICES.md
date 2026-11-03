@@ -62,3 +62,38 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+## Design look fonts
+
+Source: https://github.com/google/fonts at commit 2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc (each file checked against that commit's git blob hash).
+License: SIL Open Font License 1.1 for every family below. Unmodified .ttf files in static/fonts/looks/<family>/, each folder with its licence text in OFL.txt. Used by the Design canvas's bundled looks (design_looks/).
+
+- anton: Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git)
+- archivo: Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+- archivoblack: Copyright 2017 The Archivo Black Project Authors (https://github.com/Omnibus-Type/ArchivoBlack)
+- barlowcondensed: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+- bebasneue: Copyright © 2010 by Dharma Type.
+- bricolagegrotesque: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
+- dmsans: Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+- dmserifdisplay: Copyright 2014-2018 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'. All Rights Reserved. Source is a trademark of Adobe in the United States and/or other countries. Copyright 2019 Google LLC.
+- ebgaramond: Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
+- fraunces: Copyright 2018 The Fraunces Project Authors (https://github.com/undercasetype/Fraunces)
+- fredoka: Copyright 2016 The Fredoka Project Authors (https://github.com/hafontia/Fredoka-One)
+- ibmplexsans: Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+- ibmplexserif: Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+- instrumentserif: Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
+- jetbrainsmono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+- librebaskerville: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville) with Reserved Font Name Libre Baskerville.
+- lora: Copyright 2011 The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), with Reserved Font Name "Lora".
+- manrope: Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)
+- nunito: Copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)
+- oswald: Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont)
+- outfit: Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)
+- playfairdisplay: Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name "Playfair Display"
+- pressstart2p: Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name "Press Start 2P".
+- sourceserif4: Copyright 2014 The Source Serif 4 Project Authors (https://github.com/adobe-fonts/source-serif)
+- spacegrotesk: Copyright 2020 The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk)
+- spacemono: Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)
+- syne: Copyright 2017 The Syne Project Authors (https://gitlab.com/bonjour-monde/fonderie/syne-typeface)
+- unbounded: Copyright 2022 The Unbounded Project Authors (https://github.com/googlefonts/unbounded)
+- vt323: Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)

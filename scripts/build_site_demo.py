@@ -29,7 +29,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 STATIC, DEMO, OUT = REPO / "static", REPO / "demo", REPO / "docs" / "demo"
-LEFT_OUT = ("usage-overlay.html", "css/usage-overlay.css", "img/mascot/")  # the CLI's Kip sheets are not part of the site
+# The CLI's Kip sheets are not part of the site; nor are the Design looks' fonts (13 MB), since the demo has no designs.
+LEFT_OUT = ("usage-overlay.html", "css/usage-overlay.css", "img/mascot/", "fonts/looks/")
 # The hero and the lazy PDF viewer/worker keep their own module files.
 # The site also draws the mascot (Kairos Mascot build spec, 2026-10-22).
 KEPT_JS = ("js/dither.js", "js/mascot.js", "js/kip.js", "js/vendor/pdf.mjs", "js/vendor/pdf.worker.mjs")

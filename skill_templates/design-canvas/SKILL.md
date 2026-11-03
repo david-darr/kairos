@@ -1,15 +1,33 @@
 ---
 name: design-canvas
-description: Design screens, pages and slides on Kairos's Design canvas with the design_* tools, the same way on every model.
+description: Design screens, pages, posters, slides and social posts on Kairos's Design canvas with the design_* tools, in a look chosen for the brief, the same way on every model.
 ---
 
 # Design canvas
 
 A design is a canvas of boards. Each board is one plain HTML fragment (no
-`<html>`, `<head>`, `<body>` or scripts) styled by the design system's
-`--ds-*` variables. Kairos gives every element a short id (`data-kd="btn7"`);
-edits address elements by those ids. For visual direction first, read
-`ui-ux-pro-max` and call `ui_design` (action `design_system` for a new look).
+`<html>`, `<head>`, `<body>` or scripts) styled by its look's `--ds-*`
+variables. Kairos gives every element a short id (`data-kd="btn7"`); edits
+address elements by those ids. For deeper UI and UX guidance read
+`ui-ux-pro-max` and call `ui_design`.
+
+## Direction first: pick a look for this brief
+
+Nothing is built before the look is chosen. Two different briefs should never
+look like the same template.
+
+1. Call `creative_direction` with the person's request (`brief`) and what you are
+   making (`type`). It returns three directions: a look, its palette and type,
+   a layout and an imagery plan.
+2. Pick the one that fits the subject and audience best. Say which in one line
+   of your reply ("Sport look: condensed capitals and volt green, for a kids'
+   league that wants energy").
+3. Pass it as `look` to `design_create`. Without a look, design_create creates
+   nothing and returns the three directions.
+
+The Kairos look (parchment, bistre, gold) is only for work about Kairos itself,
+or when the person asks for it. If the person names colours, fonts or a brand,
+pick the closest look and change only those tokens with `design_tokens`.
 
 ## Formats: pick one from the request
 
@@ -37,19 +55,20 @@ the person asked for and pick the format; never invent a width or height.
 
 ## Workflow
 
-1. `design_create` with the first board (or the first page's pair):
-   `{title, format, orientation, size?, html, mobile_html?}`.
+1. `creative_direction`, then `design_create` with the look and the first board
+   (or the first page's pair): `{title, look, boards: [{title, format, orientation, size?, html, mobile_html?}]}`.
 2. Add the other boards one at a time with `design_add_board` (same fields).
    The person watches the design build beside the chat as you go.
 3. Put the design link the tool returns in your reply.
-4. Check your work: `design_outline` (text) and the lint notes in each result;
+4. Read the notes every call returns: they flag type below the format's floor,
+   empty placeholder boxes, grey bars standing in for text, low contrast and a
+   mostly blank board. Fix each with `design_edit` before you hand over.
    `design_snapshot` shows a board as an image if you can read images.
 5. Change things with `design_edit`, never by recreating the design or
    rewriting a board. One call may carry up to 20 operations on one board.
 6. Rename, duplicate, delete, reorder or move boards: `design_boards`.
-   Boards sit in rows by format; `resize` keeps a fixed format's ratio and
-   changes a website board's height only. Colours and type for the whole
-   design: `design_tokens`. Comments the user pinned: `design_comments`.
+   Colours and type for the whole design, or another look: `design_tokens`.
+   Comments the user pinned: `design_comments`.
 7. Files: `design_export` with `html` (offline zip), `png`, `pdf` or `pptx`.
 
 ## design_edit operations
@@ -70,56 +89,168 @@ changes nothing and says what is valid; read it and try again.
 
 ## Rules
 
-- Colours, fonts, sizes and spacing come from variables: `var(--ds-bg)`,
-  `var(--ds-surface)`, `var(--ds-text)`, `var(--ds-text-dim)`,
-  `var(--ds-accent)`, `var(--ds-accent-text)`, `var(--ds-danger)`,
-  `var(--ds-success)`, `var(--ds-hairline)`, `var(--ds-font-sans)`,
-  `var(--ds-size-1..7)`, `var(--ds-space-1..8)`, `var(--ds-radius-s|m|l|pill)`,
-  `var(--ds-shadow-1|2)`. No raw hex colours. `design_tokens` lists values.
-- Keep the design system's look. Change tokens with `design_tokens` only when the
-  person asks for a different look or palette; otherwise style with the
-  system's variables as they are (the default system is Kairos's own brand).
-- The accent is for hairlines, icons and one point of emphasis, never text.
-  Text uses `--ds-text`, links `--ds-accent-text`.
-- Real, readable text. Buttons and tap targets at least 44px tall.
+- Colours, fonts, sizes and spacing come from variables, the same names in
+  every look: `var(--ds-bg)`, `var(--ds-surface)`, `var(--ds-surface-2)`,
+  `var(--ds-text)`, `var(--ds-text-dim)`, `var(--ds-accent)`,
+  `var(--ds-accent-text)`, `var(--ds-on-accent)`, `var(--ds-accent-2)`,
+  `var(--ds-hairline)`, `var(--ds-danger)`, `var(--ds-success)`,
+  `var(--ds-font-display)` (headlines), `var(--ds-font-sans)` (everything else),
+  `var(--ds-font-mono)`, `var(--ds-size-1..7)`, `var(--ds-space-1..8)`,
+  `var(--ds-radius-s|m|l|pill)`, `var(--ds-border-w)`, `var(--ds-shadow-1|2)`.
+  No raw hex colours. `design_tokens` lists the values and the look's guide.
+- Follow the look's guide (`design_tokens` shows it): its headline weight and
+  case, its button style, its one accent moment. Copy its components
+  (button.primary, button.secondary, card, list.row, nav.bar, tab.bar, input,
+  kicker, headline) from `design_outline` instead of inventing structure.
+- Text on an accent fill uses `var(--ds-on-accent)`. Elsewhere text uses
+  `--ds-text` or `--ds-text-dim`; labels and links `--ds-accent-text`.
+- Type floors, in px at the board's size: slides 24, social 22, posters 20,
+  everything else 12. Headlines on posters and slides are big: 96 to 220px.
+- Real, readable text: no lorem ipsum, no grey bars standing in for text, no
+  empty boxes standing in for images. Missing facts become visible
+  placeholders like [DATE]. Buttons and tap targets at least 44px tall.
+- Images: only the design's own `assets/...` files or `data:image/...` URLs.
+  No external links, fonts, iframes, forms or event handlers; they are removed.
+  With no image, use type, colour blocks, numbers or simple shapes as the
+  visual, never an empty frame.
 - Click-through without scripts: `data-kd-goto="<board slug>"` opens a board,
   `data-kd-goto="back"` goes back, `data-kd-goto-mode="overlay"` opens it as an
   overlay, and `data-kd-toggle="<element id>"` shows or hides an element.
-- Images: only the design's own `assets/...` files or `data:image/...` URLs.
-  No external links, fonts, iframes, forms or event handlers; they are removed.
-- Copy the system's components (button.primary, card, list.row, nav.bar,
-  tab.bar, input) from `design_outline` instead of inventing structure.
 
-## Skeletons
+## Layout skeletons
 
-App phone screen (format app, orientation portrait):
+`creative_direction` names one or two of these for the brief. Copy the shape,
+then fill it with the real content; every one uses only tokens.
+
+**poster-stack** (poster, social): a kicker, a huge headline, one block of facts, a call to action.
+
+```html
+<main style="display: flex; flex-direction: column; width: 100%; height: 100%; padding: 96px 88px; gap: 40px; background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans)">
+  <p style="margin: 0; color: var(--ds-accent-text); font-size: 28px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase">Kicker</p>
+  <h1 style="margin: 0; font: 400 200px/0.9 var(--ds-font-display)">Big<br>headline</h1>
+  <div style="flex: 1"></div>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding-top: 32px; border-top: var(--ds-border-w) solid var(--ds-hairline)">
+    <div><p style="margin: 0; color: var(--ds-text-dim); font-size: 22px">When</p><p style="margin: 6px 0 0; font-size: 34px; font-weight: 600">[DATE]</p></div>
+    <div><p style="margin: 0; color: var(--ds-text-dim); font-size: 22px">Where</p><p style="margin: 6px 0 0; font-size: 34px; font-weight: 600">[PLACE]</p></div>
+    <div><p style="margin: 0; color: var(--ds-text-dim); font-size: 22px">Who</p><p style="margin: 6px 0 0; font-size: 34px; font-weight: 600">Ages 8 to 10</p></div>
+  </div>
+  <p style="margin: 0; padding: 28px 36px; background: var(--ds-accent); color: var(--ds-on-accent); font-size: 40px; font-weight: 700">Sign up at [LINK]</p>
+</main>
+```
+
+**big-number** (poster, slides, social): one figure carries the board.
+
+```html
+<section style="display: grid; align-content: center; width: 1920px; height: 1080px; padding: 0 160px; gap: 24px; background: var(--ds-bg); color: var(--ds-text)">
+  <p style="margin: 0; color: var(--ds-accent-text); font-size: 32px; letter-spacing: .1em; text-transform: uppercase">The problem</p>
+  <p style="margin: 0; font: 400 360px/0.85 var(--ds-font-display); color: var(--ds-accent)">3 hrs</p>
+  <p style="margin: 0; max-width: 1100px; font-size: 48px; line-height: 1.2">a week, every freelancer, chasing unpaid invoices.</p>
+</section>
+```
+
+**slide-title** (slides): the opening or a section slide.
+
+```html
+<section style="display: flex; flex-direction: column; justify-content: flex-end; width: 1920px; height: 1080px; padding: 140px 160px; background: var(--ds-bg); color: var(--ds-text)">
+  <p style="margin: 0 0 32px; color: var(--ds-accent-text); font-size: 30px; letter-spacing: .12em; text-transform: uppercase">Section 01</p>
+  <h1 style="margin: 0; max-width: 1400px; font: 400 150px/0.95 var(--ds-font-display)">One idea per slide</h1>
+  <div style="width: 160px; height: 8px; margin-top: 56px; background: var(--ds-accent)" aria-hidden="true"></div>
+</section>
+```
+
+**comparison** (slides, website, screen): two or three columns side by side.
+
+```html
+<section style="display: grid; grid-template-columns: 1fr 1fr; gap: 48px; width: 1920px; height: 1080px; padding: 140px 160px; background: var(--ds-bg); color: var(--ds-text)">
+  <div style="padding: 56px; border: var(--ds-border-w) solid var(--ds-hairline); border-radius: var(--ds-radius-l); background: var(--ds-surface)">
+    <p style="margin: 0; color: var(--ds-text-dim); font-size: 30px">Before</p>
+    <p style="margin: 20px 0 0; font: 400 72px/1.05 var(--ds-font-display)">Spreadsheets and reminders by hand</p>
+  </div>
+  <div style="padding: 56px; border-radius: var(--ds-radius-l); background: var(--ds-accent); color: var(--ds-on-accent)">
+    <p style="margin: 0; font-size: 30px">After</p>
+    <p style="margin: 20px 0 0; font: 400 72px/1.05 var(--ds-font-display)">Invoices out in 30 seconds</p>
+  </div>
+</section>
+```
+
+**timeline** (slides, print): steps or a schedule left to right.
+
+```html
+<section style="display: grid; align-content: center; gap: 64px; width: 1920px; height: 1080px; padding: 0 160px; background: var(--ds-bg); color: var(--ds-text)">
+  <h2 style="margin: 0; font: 400 96px/1 var(--ds-font-display)">Eight Saturdays</h2>
+  <ol style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; margin: 0; padding: 0; list-style: none; border-top: var(--ds-border-w) solid var(--ds-hairline)">
+    <li style="padding-top: 28px"><p style="margin: 0; color: var(--ds-accent-text); font-size: 28px">Weeks 1-2</p><p style="margin: 8px 0 0; font-size: 40px">First touch</p></li>
+    <li style="padding-top: 28px"><p style="margin: 0; color: var(--ds-accent-text); font-size: 28px">Weeks 3-4</p><p style="margin: 8px 0 0; font-size: 40px">Passing</p></li>
+    <li style="padding-top: 28px"><p style="margin: 0; color: var(--ds-accent-text); font-size: 28px">Weeks 5-6</p><p style="margin: 8px 0 0; font-size: 40px">Teamwork</p></li>
+    <li style="padding-top: 28px"><p style="margin: 0; color: var(--ds-accent-text); font-size: 28px">Weeks 7-8</p><p style="margin: 8px 0 0; font-size: 40px">Game day</p></li>
+  </ol>
+</section>
+```
+
+**quote** (slides, social, print): one sentence, large, with who said it.
+
+```html
+<section style="display: grid; align-content: center; width: 1920px; height: 1080px; padding: 0 220px; background: var(--ds-surface); color: var(--ds-text)">
+  <p style="margin: 0; font: 400 96px/1.1 var(--ds-font-display)">"The domain was his long before it was theirs."</p>
+  <p style="margin: 48px 0 0; color: var(--ds-text-dim); font-size: 34px">Defense theory of the case</p>
+</section>
+```
+
+**hero-split** (website desktop, banner): headline and action on one side, the product or picture on the other.
+
+```html
+<section style="display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--ds-space-8); align-items: center; min-height: 900px; padding: var(--ds-space-8); background: var(--ds-bg); color: var(--ds-text)">
+  <div><p style="margin: 0 0 var(--ds-space-4); color: var(--ds-accent-text); font-size: var(--ds-size-3); letter-spacing: .1em; text-transform: uppercase">For freelancers</p>
+  <h1 style="margin: 0 0 var(--ds-space-5); font: 400 88px/0.98 var(--ds-font-display)">Get paid without the paperwork</h1>
+  <p style="margin: 0 0 var(--ds-space-6); color: var(--ds-text-dim); font-size: var(--ds-size-4); line-height: 1.5">Send an invoice in 30 seconds. Ledgerly chases it for you.</p>
+  <button style="min-height: 56px; padding: 0 var(--ds-space-6); border: 0; border-radius: var(--ds-radius-m); background: var(--ds-accent); color: var(--ds-on-accent); font-size: var(--ds-size-4); font-weight: 600">Start free</button></div>
+  <div style="padding: var(--ds-space-6); border: var(--ds-border-w) solid var(--ds-hairline); border-radius: var(--ds-radius-l); background: var(--ds-surface)">
+    <p style="margin: 0; color: var(--ds-text-dim)">Invoice #0042</p><p style="margin: var(--ds-space-3) 0 0; font: 400 64px/1 var(--ds-font-display)">$1,800.00</p>
+    <p style="margin: var(--ds-space-4) 0 0; color: var(--ds-success); font-weight: 600">Paid by card, 2 days early</p></div>
+</section>
+```
+
+**bento** (screen, website): a grid of cards of different sizes, each with real content.
+
+```html
+<main style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--ds-space-3); min-height: 844px; padding: var(--ds-space-6) var(--ds-space-4); background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans)">
+  <h1 style="grid-column: 1 / -1; margin: 0 0 var(--ds-space-2); font: 400 var(--ds-size-6)/1.05 var(--ds-font-display)">Saturday, 9 AM</h1>
+  <div style="grid-column: 1 / -1; padding: var(--ds-space-5); border-radius: var(--ds-radius-l); background: var(--ds-accent); color: var(--ds-on-accent)"><p style="margin: 0; font-size: var(--ds-size-2)">Next session</p><p style="margin: var(--ds-space-2) 0 0; font-size: var(--ds-size-5); font-weight: 700">First touch drills</p></div>
+  <div style="padding: var(--ds-space-4); border: var(--ds-border-w) solid var(--ds-hairline); border-radius: var(--ds-radius-m); background: var(--ds-surface)"><p style="margin: 0; color: var(--ds-text-dim); font-size: var(--ds-size-2)">Players</p><p style="margin: var(--ds-space-1) 0 0; font-size: var(--ds-size-6)">14</p></div>
+  <div style="padding: var(--ds-space-4); border: var(--ds-border-w) solid var(--ds-hairline); border-radius: var(--ds-radius-m); background: var(--ds-surface)"><p style="margin: 0; color: var(--ds-text-dim); font-size: var(--ds-size-2)">Week</p><p style="margin: var(--ds-space-1) 0 0; font-size: var(--ds-size-6)">1 of 8</p></div>
+</main>
+```
+
+**editorial-column** (print, email, website): a narrow reading column under a strong headline.
+
+```html
+<article style="display: grid; justify-items: center; padding: 72px 64px; background: var(--ds-bg); color: var(--ds-text)">
+  <div style="width: 100%; max-width: 640px">
+    <p style="margin: 0; color: var(--ds-accent-text); font-size: 14px; letter-spacing: .14em; text-transform: uppercase">Parent and player guide</p>
+    <h1 style="margin: 12px 0 20px; font: 400 56px/1.02 var(--ds-font-display)">Welcome to camp</h1>
+    <p style="margin: 0 0 16px; font-size: 17px; line-height: 1.65">Eight Saturdays of first touch, passing and teamwork, coached by certified coaches.</p>
+    <hr style="margin: 32px 0; border: 0; border-top: var(--ds-border-w) solid var(--ds-hairline)">
+  </div>
+</article>
+```
+
+**grid-12** (poster, print, website): content locked to a twelve-column grid; headline spans eight, facts four.
+
+```html
+<main style="display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 24px; align-content: start; width: 100%; height: 100%; padding: 80px; background: var(--ds-bg); color: var(--ds-text)">
+  <h1 style="grid-column: 1 / 9; margin: 0; font: 800 150px/0.9 var(--ds-font-display)">Annual report</h1>
+  <div style="grid-column: 10 / 13; align-self: end; border-top: var(--ds-border-w) solid var(--ds-hairline); padding-top: 16px; font-size: 22px">2026<br>Engineering</div>
+</main>
+```
+
+**app screen** (app): status, title, the main content, one action at the bottom.
 
 ```html
 <main style="display: flex; flex-direction: column; min-height: 844px; padding: var(--ds-space-7) var(--ds-space-5) var(--ds-space-6); background: var(--ds-bg); color: var(--ds-text); font-family: var(--ds-font-sans)">
   <p style="margin: 0; color: var(--ds-text-dim); font-size: var(--ds-size-2)">Step 1 of 3</p>
-  <h1 style="margin: var(--ds-space-3) 0; font-size: var(--ds-size-6); font-weight: 500">Build a habit that lasts</h1>
+  <h1 style="margin: var(--ds-space-3) 0; font: 400 var(--ds-size-7)/1.02 var(--ds-font-display)">Build a habit that lasts</h1>
   <p style="margin: 0; color: var(--ds-text-dim); font-size: var(--ds-size-3)">One small step every day.</p>
   <div style="flex: 1"></div>
-  <button data-kd-goto="screen-2" style="min-height: 52px; border: 0; border-radius: var(--ds-radius-pill); background: var(--ds-text); color: var(--ds-bg); font-size: var(--ds-size-3)">Continue</button>
+  <button data-kd-goto="screen-2" style="min-height: 52px; border: 0; border-radius: var(--ds-radius-m); background: var(--ds-accent); color: var(--ds-on-accent); font-size: var(--ds-size-3); font-weight: 600">Continue</button>
 </main>
-```
-
-Website desktop section (format website; its mobile pair stacks the columns):
-
-```html
-<section style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--ds-space-7); align-items: center; min-height: 900px; padding: var(--ds-space-8); background: var(--ds-bg); color: var(--ds-text)">
-  <div><h1 style="margin: 0 0 var(--ds-space-4); font-size: var(--ds-size-7); font-weight: 500">Headline</h1>
-  <p style="margin: 0 0 var(--ds-space-6); color: var(--ds-text-dim); font-size: var(--ds-size-4)">Supporting line.</p>
-  <button style="min-height: 52px; padding: 0 var(--ds-space-6); border: 0; border-radius: var(--ds-radius-pill); background: var(--ds-text); color: var(--ds-bg)">Get started</button></div>
-  <div style="aspect-ratio: 4 / 3; border: 1px solid var(--ds-hairline); border-radius: var(--ds-radius-l); background: var(--ds-surface)"></div>
-</section>
-```
-
-Slide (format slides, orientation landscape):
-
-```html
-<section style="display: flex; flex-direction: column; justify-content: center; width: 1920px; height: 1080px; padding: 0 160px; background: var(--ds-bg); color: var(--ds-text)">
-  <p style="margin: 0 0 var(--ds-space-4); color: var(--ds-accent-text); font-size: 28px">Section</p>
-  <h1 style="margin: 0; font-size: 96px; font-weight: 500; line-height: 1.05">One idea per slide</h1>
-</section>
 ```

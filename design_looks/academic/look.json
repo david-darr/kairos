@@ -1,0 +1,16 @@
+{
+  "name": "Academic",
+  "mood": ["scholarly", "measured", "trustworthy"],
+  "tags": ["school", "university", "course", "lecture", "research", "study", "thesis", "class", "syllabus", "exam", "education", "seminar", "paper"],
+  "good_for": ["print", "slides", "poster", "website", "email"],
+  "fonts": {"display": "ebgaramond", "body": "sourceserif4"},
+  "office_fonts": {"display": "Garamond", "body": "Cambria"},
+  "color": {"bg": "#FBFAF7", "surface": "#FFFFFF", "surface-2": "#F0EDE6", "text": "#1B1E28", "text-dim": "#555B6A",
+            "accent": "#7A1F2B", "accent-text": "#7A1F2B", "on-accent": "#FFFFFF", "accent-2": "#2C4A6B",
+            "hairline": "#C9C5BB", "hairline-soft": "#E3E0D8", "danger": "#7A1F2B", "success": "#2E6B45"},
+  "shape": {"radius": "3px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.1em",
+            "display_weight": "500", "display_style": "normal"},
+  "imagery": "diagrams, figures with numbered captions, small seals or crests drawn simply",
+  "archetypes": ["editorial-column", "comparison", "timeline", "quote"],
+  "guide": "A well-set paper: Garamond headings, a readable serif body, numbered sections, oxblood for section numbers and one rule. Clarity over decoration."
+}

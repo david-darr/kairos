@@ -1,0 +1,16 @@
+{
+  "name": "Playful",
+  "mood": ["joyful", "friendly", "bouncy"],
+  "tags": ["kids", "children", "family", "school", "camp", "toy", "party", "birthday", "playground", "youth", "learning", "summer"],
+  "good_for": ["poster", "social", "screen", "website", "print", "email"],
+  "fonts": {"display": "fredoka", "body": "nunito"},
+  "office_fonts": {"display": "Segoe UI Black", "body": "Segoe UI"},
+  "color": {"bg": "#FFF7E8", "surface": "#FFFFFF", "surface-2": "#FFE9C7", "text": "#2D1F4E", "text-dim": "#5C4F7A",
+            "accent": "#FF6B4A", "accent-text": "#C2401F", "on-accent": "#2D1F4E", "accent-2": "#4AC6B7",
+            "hairline": "#F1D9B5", "hairline-soft": "#F7E6CC", "danger": "#C2401F", "success": "#1F8A70"},
+  "shape": {"radius": "24px", "button": "pill", "border": "2px", "label_case": "none", "label_tracking": "0",
+            "display_weight": "700", "display_style": "normal"},
+  "imagery": "chunky flat illustrations, rounded shapes, stickers; bright but never more than three colours",
+  "archetypes": ["poster-stack", "bento", "hero-split"],
+  "guide": "Round and warm: big bold rounded headline, coral and teal on cream, pill buttons, chunky cards. Readable for parents first, fun for kids second."
+}

@@ -47,7 +47,7 @@ CLI_PATH = Path(__file__).resolve().parents[1] / "mcp_servers" / "hive_mind_cli.
 # listed them by hand, plus the explicitly reviewed additions below.
 # Bots only pre-approve reads; every mutation reaches the shared broker.
 CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
-    'forge_app_logs search_sessions list_skills ui_design read_skill search_skills list_notes '
+    'forge_app_logs search_sessions list_skills ui_design creative_direction read_skill search_skills list_notes '
     'list_tasks list_tab_tasks read_tab_task list_upcoming_events list_specs read_spec list_documents '
     'read_document list_contacts list_task_runs list_email_accounts helper_results agent_read_topic design_outline '
     'design_read design_snapshot skill_read skill_index notebook_read recall_search recall_read '
@@ -208,7 +208,8 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
     the bridge and run exactly as before (2026-10-06, vault note "Local
     Model Fit (Build Spec)")."""
     CORE = {"ask_user", "search_sessions", "search_vault", "read_vault_file", "list_notes", "create_note", "update_note",
-            "list_tasks", "list_tab_tasks", "read_tab_task", "complete_tab_task", "list_upcoming_events", "search_skills", "read_skill", "ui_design"}
+            "list_tasks", "list_tab_tasks", "read_tab_task", "complete_tab_task", "list_upcoming_events", "search_skills", "read_skill", "ui_design",
+            "creative_direction"}
     BRIDGE = {"kairos_tool_search", "kairos_tool_describe", "kairos_tool_call"}
 
     def brain(self, window, **kw):

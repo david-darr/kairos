@@ -1,0 +1,16 @@
+{
+  "name": "Nordic",
+  "mood": ["clear", "helpful", "balanced"],
+  "tags": ["health", "clinic", "nonprofit", "government", "transit", "utility", "service", "booking", "hr", "onboarding", "dashboard", "productivity"],
+  "good_for": ["screen", "website", "slides", "email", "print", "social"],
+  "fonts": {"display": "outfit", "body": "outfit"},
+  "office_fonts": {"display": "Segoe UI Semibold", "body": "Segoe UI"},
+  "color": {"bg": "#F1F3F5", "surface": "#FFFFFF", "surface-2": "#E4E8EC", "text": "#1D2733", "text-dim": "#55616E",
+            "accent": "#2F6FED", "accent-text": "#2457C5", "on-accent": "#FFFFFF", "accent-2": "#F2994A",
+            "hairline": "#D3D9E0", "hairline-soft": "#E3E7EC", "danger": "#C9372C", "success": "#2E8B57"},
+  "shape": {"radius": "12px", "button": "soft", "border": "1px", "label_case": "none", "label_tracking": "0",
+            "display_weight": "600", "display_style": "normal"},
+  "imagery": "simple line icons, friendly spot illustrations, clean UI",
+  "archetypes": ["bento", "hero-split", "comparison"],
+  "guide": "A service people trust: cool greys, one clear blue for actions, plenty of white cards, sentence case. Every screen has one obvious next step."
+}

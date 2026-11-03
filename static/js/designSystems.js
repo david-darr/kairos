@@ -1,7 +1,8 @@
 // Tool Store > Design systems (vault: Design Canvas (Build Spec), 3d, phase 3).
-// The built-in Kairos system, and systems an admin makes from a palette and
-// fonts, pasted CSS variables, or a Forge project's stylesheets (read only).
-// A design switches system in one click from its Tokens panel.
+// The built-in Kairos system, the bundled looks (vault: Creative Output Quality
+// and Video Studio (Build Spec), Phase 1), and systems an admin makes from a
+// palette and fonts, pasted CSS variables, or a Forge project's stylesheets
+// (read only). A design switches look in one click from its Tokens panel.
 import { api, el, toast, confirmDialog } from './api.js';
 
 const ROLES = ['bg', 'surface', 'text', 'text-dim', 'accent', 'accent-text', 'danger', 'success'];
@@ -14,24 +15,60 @@ function swatches(variables) {
   }));
 }
 
+// A look's preview board, drawn by the backend in the look's own fonts and tokens. The frame runs no
+// script (empty sandbox; the route's policy allows none) and is scaled down from 1200x800.
+function lookPreview(system) {
+  const frame = el('iframe', { class: 'design-look-frame', src: `/api/design-looks/${encodeURIComponent(system.id)}/preview`,
+    sandbox: '', loading: 'lazy', scrolling: 'no', tabindex: '-1', title: `${system.name} look preview`, 'aria-hidden': 'true' });
+  return el('div', { class: 'design-look-preview' }, [frame]);
+}
+
+function lookCard(system, { admin, isDefault, host }) {
+  const look = system.look || {};
+  const fonts = look.fonts ? Object.values(look.fonts).filter((v, i, all) => all.indexOf(v) === i).join(' + ') : 'Cormorant Garamond + Jost';
+  const mood = (look.mood || (system.builtin ? ['warm', 'calm', 'precise'] : [])).join(', ');
+  return el('article', { class: `tool-store-card design-system-card design-look-card${isDefault ? ' is-default' : ''}` }, [el('div', { class: 'design-card-body' }, [
+    lookPreview(system),
+    el('header', {}, [el('strong', { text: system.name }), el('span', { class: 'meta', text: isDefault ? 'Default' : (system.builtin ? 'Kairos brand' : 'Look') })]),
+    el('p', { class: 'meta', text: `${mood} · ${fonts}` }),
+    admin ? el('button', { type: 'button', class: 'btn quiet', 'aria-pressed': String(isDefault),
+      text: isDefault ? 'Stop using as default' : 'Use as default', onclick: async () => {
+        try {
+          await api('/api/design-systems/default/look', { method: 'POST', body: JSON.stringify({ id: isDefault ? null : system.id }) });
+          toast(isDefault ? 'New designs pick their own look again' : `New designs start in ${system.name}`, 'success');
+          renderDesignSystems(host, { admin });
+        } catch { /* api() shows the error */ }
+      } }) : el('span'),
+  ])]);
+}
+
 export async function renderDesignSystems(host, { admin = false } = {}) {
   host.replaceChildren(el('p', { class: 'meta', role: 'status', text: 'Loading design systems...' }));
   let systems = [];
+  let chosen = null;
   try { systems = await api('/api/design-systems'); } catch { host.replaceChildren(el('p', { class: 'meta', text: 'Design systems could not load.' })); return; }
+  try { chosen = (await api('/api/design-systems/default/look')).id; } catch { chosen = null; }
+  const looks = systems.filter(s => s.builtin || s.bundled);
+  const saved = systems.filter(s => !s.builtin && !s.bundled);
   const details = await Promise.all(systems.map(s => api(`/api/design-systems/${s.id}`).catch(() => null)));
-  const grid = el('div', { class: 'tool-store-grid design-system-grid' }, details.filter(Boolean).map(system => el('article', { class: 'tool-store-card design-system-card' }, [
-    el('header', {}, [el('strong', { text: system.name }), el('span', { class: 'meta', text: system.builtin ? 'Built in, the default' : system.source || 'Saved' })]),
+  const byId = Object.fromEntries(details.filter(Boolean).map(s => [s.id, s]));
+  const lookGrid = el('div', { class: 'tool-store-grid design-system-grid design-look-grid' }, looks.map(s => byId[s.id]).filter(Boolean)
+    .map(system => lookCard(system, { admin, isDefault: chosen === system.id, host })));
+  const savedGrid = el('div', { class: 'tool-store-grid design-system-grid' }, saved.map(s => byId[s.id]).filter(Boolean).map(system => el('article', { class: 'tool-store-card design-system-card' }, [el('div', { class: 'design-card-body' }, [
+    el('header', {}, [el('strong', { text: system.name }), el('span', { class: 'meta', text: chosen === system.id ? 'Default' : system.source || 'Saved' })]),
     swatches(system.variables || {}),
     el('p', { class: 'meta', text: (system.guide || '').split('\n').find(line => line && !line.startsWith('#')) || 'A design system for the Design canvas.' }),
-    admin && !system.builtin ? el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
+    admin ? el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
       if (!await confirmDialog({ title: `Remove ${system.name}?`, message: 'Designs using it fall back to Kairos.', confirmLabel: 'Remove' })) return;
       await api(`/api/design-systems/${system.id}`, { method: 'DELETE' }).catch(() => null);
       renderDesignSystems(host, { admin });
     } }) : el('span'),
-  ])));
-  host.replaceChildren(el('h3', { class: 'tool-store-heading', text: `Design systems · ${systems.length}` }),
-    el('p', { class: 'meta', text: 'Boards use a system\'s --ds- variables, so a design can switch systems in one click from its Tokens panel.' }), grid);
-  if (admin) host.append(newSystemForm(host, details.find(s => s?.builtin)?.variables || {}));
+  ])])));
+  host.replaceChildren(el('h3', { class: 'tool-store-heading', text: `Looks · ${looks.length}` }),
+    el('p', { class: 'meta', text: chosen ? 'New designs start in your default look.' : 'Kairos suggests a look for each brief; a design switches look in one click from its Tokens panel.' }),
+    lookGrid);
+  if (saved.length) host.append(el('h3', { class: 'tool-store-heading', text: `Saved systems · ${saved.length}` }), savedGrid);
+  if (admin) host.append(newSystemForm(host, byId.kairos?.variables || {}));
 }
 
 function newSystemForm(host, base) {

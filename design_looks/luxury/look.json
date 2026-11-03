@@ -1,0 +1,16 @@
+{
+  "name": "Luxury",
+  "mood": ["refined", "exclusive", "quiet"],
+  "tags": ["fashion", "jewelry", "hotel", "wine", "premium", "luxury", "gala", "wedding", "perfume", "boutique", "estate", "fine dining"],
+  "good_for": ["poster", "social", "website", "print", "slides", "email"],
+  "fonts": {"display": "playfairdisplay", "body": "jost"},
+  "office_fonts": {"display": "Georgia", "body": "Century Gothic"},
+  "color": {"bg": "#111111", "surface": "#1A1A1A", "surface-2": "#242424", "text": "#F3EEE6", "text-dim": "#B5ADA0",
+            "accent": "#C9A45C", "accent-text": "#D9BB7F", "on-accent": "#111111", "accent-2": "#7D2E2E",
+            "hairline": "#3A352D", "hairline-soft": "#2A2620", "danger": "#E08A7A", "success": "#9CC79A"},
+  "shape": {"radius": "0px", "button": "underline", "border": "1px", "label_case": "upper", "label_tracking": "0.28em",
+            "display_weight": "500", "display_style": "italic"},
+  "imagery": "dark, low-key product photography with one light source; lots of black",
+  "archetypes": ["editorial-column", "quote", "hero-split"],
+  "guide": "Whisper, don't shout: an italic serif headline, very wide-tracked small capitals, thin gold rules, black space. Fewer words than you think."
+}

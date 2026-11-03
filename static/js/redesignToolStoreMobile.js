@@ -162,7 +162,8 @@ export function initToolStoreMobile({ view, results, toolbar, filters, installed
       }
       if (!node.matches(".tool-store-grid")) continue;
       for (const card of node.children) {
-        if (!card.matches(".tool-store-card") || card.dataset.tsKey) continue;
+        // Design-system cards stay whole cards on a phone (design-canvas.css): their preview and button are the content.
+        if (!card.matches(".tool-store-card") || card.matches(".design-system-card") || card.dataset.tsKey) continue;
         decorate(card, card.dataset.addon ? "addon" : card.classList.contains("tool-store-build-card") ? "build" : section || "tool");
       }
     }

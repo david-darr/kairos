@@ -735,17 +735,51 @@ def _forge_css(project_id: str) -> tuple[str, str]:
     return css, f"Forge project {project.get('name')}"
 
 
+class DefaultLook(BaseModel):
+    id: Optional[str] = Field(default=None, max_length=60)
+
+
+@systems_router.get("/default/look")
+async def get_default_look(user: str = Depends(require_user)) -> dict:
+    return {"id": design_systems.default_id()}
+
+
+@systems_router.post("/default/look")
+async def set_default_look(body: DefaultLook, user: str = Depends(require_admin)) -> dict:
+    """Use as default: the look new designs start in when nobody chose one. None clears it."""
+    from core import settings as settings_store
+    if body.id is not None and design_systems.get(body.id) is None:
+        raise HTTPException(404, "Design system not found")
+    settings_store.update_settings(design_default_look=body.id)
+    return {"id": design_systems.default_id()}
+
+
 @systems_router.delete("/{system_id}")
 async def delete_system(system_id: str, user: str = Depends(require_admin)) -> dict:
     import shutil
     from pathlib import Path
+    from core import design_looks
     if system_id == design_systems.BUILTIN_ID or not design_systems.ID_RE.fullmatch(system_id):
         raise HTTPException(422, "The built-in Kairos system cannot be removed")
+    if design_looks.get(system_id):
+        raise HTTPException(422, "Bundled looks ship with Kairos and cannot be removed")
     shutil.rmtree(Path(design_systems.SYSTEMS_DIR, system_id), ignore_errors=True)
     return {"ok": True}
 
 
 # -- fonts and the render worker --------------------------------------------------------
+
+@render_router.get("/api/design-looks/{system_id}/preview")
+async def look_preview(system_id: str, request: Request) -> HTMLResponse:
+    """A bundled look's (or Kairos's) preview board for Tool Store cards. Bundled content only, like
+    the fonts, so it needs no session (the card's frame is sandboxed and sends none); no script runs."""
+    page = design_render.render_sample(system_id) if design_systems.ID_RE.fullmatch(system_id or "") else None
+    if page is None:
+        raise HTTPException(404, "Not found")
+    origin = f"{request.url.scheme}://{request.url.netloc}"
+    return HTMLResponse(page, headers={"Content-Security-Policy": design_render.sample_csp(origin),
+                                       "X-Kairos-Design-Render": "1", "Cache-Control": "no-store"})
+
 
 @render_router.get("/api/design-fonts/{system_id}/{file}")
 async def design_font(system_id: str, file: str) -> FileResponse:

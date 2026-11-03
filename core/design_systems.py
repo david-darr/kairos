@@ -23,6 +23,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from core import design_looks
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR, STATIC_DIR
 
@@ -35,7 +36,7 @@ _lock = threading.Lock()
 KAIROS_MAP = {
     "bg": "--k-parchment", "surface": "--k-surface", "surface-2": "--k-surface-2",
     "text": "--k-ink", "text-dim": "--k-ink-dim", "text-faint": "--k-ink-faint",
-    "accent": "--k-gold", "accent-hi": "--k-gold-hi", "accent-text": "--k-gold-text",
+    "accent": "--k-gold", "accent-hi": "--k-gold-hi", "accent-text": "--k-gold-text", "on-accent": "--k-ink",
     "danger": "--k-danger", "success": "--k-success", "rose": "--k-rose", "powder": "--k-powder",
     "hairline": "--k-hairline", "hairline-soft": "--k-hairline-soft",
 }
@@ -55,8 +56,10 @@ def _theme_values() -> dict[str, str]:
 
 
 def _fonts_from_theme(values: dict[str, str]) -> dict[str, str]:
+    # display is the headline face every look has (core/design_looks.py); Kairos's is its serif.
     return {"sans": values.get("--k-font-sans", "system-ui, sans-serif"),
-            "serif": values.get("--k-font-serif", "serif")}
+            "serif": values.get("--k-font-serif", "serif"),
+            "display": values.get("--k-font-serif", "serif")}
 
 
 def kairos_tokens() -> dict:
@@ -128,7 +131,8 @@ def tokens_css(tokens: dict, overrides: Optional[dict] = None) -> str:
 
 
 def font_faces(system_id: str, base: str) -> str:
-    """@font-face rules, from the design's own font route only (no CDN)."""
+    """@font-face rules, from the design's own font route only (no CDN). A bundled look's
+    files are named by alias (`fraunces-0.ttf`); design_looks maps them back."""
     faces = KAIROS_FONT_FACES if system_id == BUILTIN_ID else tuple(
         (f.get("family"), f.get("file"), f.get("weight", "400"), f.get("style", "normal"))
         for f in (get(system_id) or {}).get("fonts", []) if isinstance(f, dict))
@@ -151,6 +155,9 @@ def font_path(system_id: str, file: str) -> Optional[Path]:
         return Path(STATIC_DIR, "fonts", file) if file in allowed else None
     if not ID_RE.fullmatch(system_id or ""):
         return None
+    if design_looks.get(system_id):
+        allowed = {face["file"] for face in design_looks.fonts(design_looks.get(system_id))}
+        return design_looks.font_path(file) if file in allowed else None
     path = Path(SYSTEMS_DIR, system_id, "fonts", file)
     return path if path.is_file() else None
 
@@ -161,11 +168,30 @@ def builtin() -> dict:
                 {"family": f, "file": file, "weight": w, "style": s} for f, file, w, s in KAIROS_FONT_FACES]}
 
 
+def default_id() -> Optional[str]:
+    """The look or system the person chose as their default, if it still exists."""
+    from core import settings as settings_store
+    chosen = settings_store.get_setting("design_default_look")
+    return chosen if isinstance(chosen, str) and chosen != BUILTIN_ID and get(chosen) else (
+        BUILTIN_ID if chosen == BUILTIN_ID else None)
+
+
+def look_system(look: dict) -> dict:
+    """A bundled look in the same shape as a saved system, so boards, exports and tools treat it alike."""
+    return {"id": look["id"], "name": look["name"], "builtin": False, "bundled": True,
+            "tokens": design_looks.tokens(look), "guide": design_looks.guide(look),
+            "components": design_looks.components(look), "fonts": design_looks.fonts(look),
+            "source": "bundled look", "created_by": None, "look": design_looks.summary(look)}
+
+
 def get(system_id: Optional[str]) -> Optional[dict]:
     if not system_id or system_id == BUILTIN_ID:
         return builtin()
     if not ID_RE.fullmatch(system_id):
         return None
+    look = design_looks.get(system_id)
+    if look:
+        return look_system(look)
     folder = Path(SYSTEMS_DIR, system_id)
     data = read_json(str(folder / "system.json"), None)
     if not isinstance(data, dict):
@@ -180,9 +206,11 @@ def get(system_id: Optional[str]) -> Optional[dict]:
 
 def list_systems() -> list[dict]:
     out = [{"id": BUILTIN_ID, "name": "Kairos", "builtin": True}]
+    out += [{"id": look["id"], "name": look["name"], "builtin": False, "bundled": True, "mood": look["mood"]}
+            for look in design_looks.load().values()]
     if os.path.isdir(SYSTEMS_DIR):
         for name in sorted(os.listdir(SYSTEMS_DIR)):
-            system = get(name) if ID_RE.fullmatch(name) else None
+            system = get(name) if ID_RE.fullmatch(name) and not design_looks.get(name) else None
             if system:
                 out.append({"id": system["id"], "name": system["name"], "builtin": False, "source": system.get("source")})
     return out
@@ -219,7 +247,7 @@ def save(name: str, tokens: dict, guide: str = "", *, created_by: str = "", sour
     if system_id is None:
         base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30] or "system"
         system_id = f"{base}-{secrets.token_hex(3)}"
-    if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id):
+    if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id) or design_looks.get(system_id):
         raise ValueError("That design system cannot be changed.")
     folder = Path(SYSTEMS_DIR, system_id)
     with _lock:

@@ -279,7 +279,9 @@ def create(title: str, *, owner: Optional[str], chat_key_: Optional[str], by: st
            design_system: Optional[str] = None, boards: Optional[list] = None, source: str = "",
            session_id: Optional[str] = None) -> tuple[dict, list[str]]:
     title = (title or "").strip()[:120] or "Untitled design"
-    system = design_systems.get(design_system or design_systems.BUILTIN_ID)
+    # Models always name a look (design_tools asks for one first); a design made by
+    # hand starts in the person's default look, else Kairos.
+    system = design_systems.get(design_system or design_systems.default_id() or design_systems.BUILTIN_ID)
     if system is None:
         raise ValueError(f"No design system `{design_system}`. Systems: "
                          + ", ".join(s["id"] for s in design_systems.list_systems()))

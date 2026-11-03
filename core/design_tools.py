@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from core import design_formats, design_html, design_store, design_systems
+from core import creative_direction, design_checks, design_formats, design_html, design_store, design_systems
 from core.tool_registry import (ALL, CLAUDE, CODEX, OPENAI, READ, WRITE, ToolContext, ToolResult, _object, _str,
                                 register)
 from core.untrusted import wrap_untrusted
@@ -117,7 +117,10 @@ def _tokens(data: dict) -> dict[str, str]:
 
 def _lint(data: dict, slug: str, text: Optional[str] = None) -> list[str]:
     root = design_html.parse(text if text is not None else design_store.board_html(data["id"], slug))
-    return design_html.lint(root, _tokens(data))
+    tokens = _tokens(data)
+    thumb = design_store.thumb_path(data["id"], slug)
+    return design_html.lint(root, tokens) + design_checks.check(root, data["boards"].get(slug) or {}, tokens,
+                                                                thumb if thumb.is_file() else None)
 
 
 def _guard(handler):
@@ -139,16 +142,38 @@ NEXT_STEPS = ("Next: design_outline (see ids), design_edit (change elements by i
               "design_snapshot (see a board), design_export (zip, png, pdf or pptx).")
 
 
+@register("creative_direction",
+          "Before designing anything (screens, a website, a poster, slides, a social post, a printed page, a banner, an "
+          "email), get three art directions for the brief: a look (its palette, type pairing and mood), a layout and an "
+          "imagery plan. Pick one and pass its look to design_create. Same answer for the same brief; no model call.",
+          _object({"brief": _str("What the person asked for, in their words, with the subject"),
+                   "type": {"type": "string", "enum": list(creative_direction.KINDS),
+                            "description": "What is being made (optional; read from the brief when left out)"}},
+                  ("brief",)),
+          surfaces=ALL, effect=READ, core=True)
+async def _creative_direction(args, ctx):
+    owner = None
+    if ctx.session_id:
+        from core.session_manager import session_manager
+        owner = (session_manager.get_session(ctx.session_id) or {}).get("owner_user")
+    return creative_direction.describe(str(args.get("brief") or "")[:2000], args.get("type"), owner=owner)
+
+
 @register("design_create",
           "Design screens, app UI, a mockup or wireframe, an onboarding flow, a website or landing page, a poster, "
           "slides, a social post, a print page, a banner or an email on Kairos's Design canvas: create a design (HTML "
-          "boards in a design system) linked to this chat. " + SKILL_HINT + " "
+          "boards in a look) linked to this chat. " + SKILL_HINT + " "
+          "Pick the look first with creative_direction and pass it as look; without one nothing is created and you get "
+          "three directions to choose from. "
           "Pass the first board or two as boards: [{title, format, orientation, size?, html, mobile_html?}], then add "
           "the rest one at a time with design_add_board so the person watches the design build. " + FORMAT_HELP + " "
           "Each html is a fragment (no <html>/<head>) styled with var(--ds-...) tokens; no scripts. "
           "Use data-kd-goto=\"<board slug>\" on a button to link screens. Returns the design id and a link to include in your reply.",
           _object({"title": _str("Design title"),
-                    "design_system": _str("Design system id (default kairos)"),
+                   "look": _str("The look from creative_direction (e.g. editorial, sport, retro-pixel; kairos only "
+                                "when the person asked for Kairos's own look)"),
+                   "brief": _str("The person's request, used to suggest looks when none is given"),
+                    "design_system": _str("A saved design system id, instead of a look"),
                     "boards": {"type": "array", "description": "Starter boards, in order (at most 12; a website page counts as its desktop and mobile pair)",
                                "items": {"type": "object", "properties": {
                                    "title": {"type": "string"}, "format": _FORMAT, "orientation": _ORIENTATION,
@@ -171,8 +196,21 @@ async def _design_create(args, ctx):
     if owner is None:
         from core.auth import SINGLE_USER
         owner = SINGLE_USER
+    system_id = args.get("look") or args.get("design_system") or design_systems.default_id()
+    if not system_id:
+        brief = str(args.get("brief") or args.get("title") or "")[:2000]
+        first = next((b for b in args.get("boards") or [] if isinstance(b, dict)), {})
+        # A board's format, or the old frame names (phone, slide...), says what is being made.
+        kind = {"app": "screen", "phone": "screen", "tablet": "screen", "slide": "slides", "desktop": "website",
+                "browser": "website"}.get(first.get("format") or first.get("frame"), first.get("format"))
+        kind = kind if kind in creative_direction.KINDS else None
+        return ("Not created yet: pick a look first. " + creative_direction.describe(brief, kind, owner=owner)
+                + "\nThen call design_create again with the same boards and look=\"...\".")
+    if design_systems.get(system_id) is None:
+        looks = ", ".join(s["id"] for s in design_systems.list_systems())
+        return f"Not run: no look or design system `{system_id}`. Looks and systems: {looks}."
     data, notes = design_store.create(args.get("title") or "", owner=owner, chat_key_=key, by=_by(ctx),
-                                      design_system=args.get("design_system"), boards=args.get("boards"),
+                                      design_system=system_id, boards=args.get("boards"),
                                       session_id=ctx.session_id)
     lint = []
     for slug, _ in design_store.ordered_boards(data):
@@ -455,11 +493,11 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
 
 @register("design_tokens",
           "Read the design's tokens (the --ds-* variables boards use), or change some for this design with set "
-          "{\"--ds-accent\": \"#...\"}, switch the whole design to another system with system=<id>, or clear=true "
-          "to drop this design's changes. Every board restyles at once. Keep the design system's tokens unless the "
-          "person asks for a different look or palette.",
+          "{\"--ds-accent\": \"#...\"}, switch the whole design to another look or system with system=<id>, or "
+          "clear=true to drop this design's changes. Every board restyles at once. Keep the chosen look's tokens unless "
+          "the person asks for a different palette; for a new direction switch looks instead.",
           _object({"design_id": _ID, "set": {"type": "object", "description": "Token values to change"},
-                   "system": _str("Switch to this design system id"), "clear": {"type": "boolean"}}),
+                   "system": _str("Switch to this look or design system id"), "clear": {"type": "boolean"}}),
           surfaces=ALL, effect=WRITE)
 @_guard
 async def _design_tokens(args, ctx):
@@ -501,9 +539,10 @@ def tokens_change(data: dict, args: dict, *, by: str, session_id: Optional[str],
     text = f"Version {result['version']}: {result['summary']}. Every board uses the new values."
     changed = len(args.get("set") or {})
     if not user_edit and changed > BRAND_OVERRIDES:
-        # Guidance, not a block (2026-10-22): a model restyling a whole system unasked loses the brand.
-        text += (f"\nNote: this overrode {changed} of the design system's tokens. Keep the system's look unless the "
-                 "person asked for a different look or palette; design_tokens clear=true puts it back.")
+        # Guidance, not a block (2026-10-22): a model restyling a whole look unasked loses what made it coherent.
+        text += (f"\nNote: this overrode {changed} of the look's tokens. Keep the chosen look unless the person asked "
+                 "for a different palette; to change direction, switch looks with design_tokens system=<look>. "
+                 "design_tokens clear=true puts the look back.")
     return text
 
 

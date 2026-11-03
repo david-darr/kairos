@@ -1,0 +1,16 @@
+{
+  "name": "Retro Pixel",
+  "mood": ["nostalgic", "playful", "nerdy"],
+  "tags": ["game", "gaming", "minecraft", "server", "arcade", "pixel", "retro", "esports", "roblox", "lan", "speedrun", "8-bit", "twitch"],
+  "good_for": ["poster", "social", "screen", "slides", "banner", "website", "print"],
+  "fonts": {"display": "pressstart2p", "body": "spacemono"},
+  "office_fonts": {"display": "Consolas", "body": "Consolas"},
+  "color": {"bg": "#1B1240", "surface": "#2A1D5C", "surface-2": "#3A2A78", "text": "#F4F1FF", "text-dim": "#C4BCEB",
+            "accent": "#7CFF6B", "accent-text": "#7CFF6B", "on-accent": "#1B1240", "accent-2": "#FFD23F",
+            "hairline": "#4C3C94", "hairline-soft": "#352673", "danger": "#FF6B8B", "success": "#7CFF6B"},
+  "shape": {"radius": "0px", "button": "square", "border": "4px", "label_case": "upper", "label_tracking": "0.04em",
+            "display_weight": "400", "display_style": "normal"},
+  "imagery": "pixel-art scenes and sprites drawn on a grid, blocky borders, starfields; never smooth gradients",
+  "archetypes": ["poster-stack", "bento", "big-number"],
+  "guide": "A title screen: pixel headline used sparingly (short words only), monospace body, chunky 4px borders, grass green and coin yellow on night purple. Keep pixel type large; body stays readable."
+}

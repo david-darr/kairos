@@ -1,0 +1,16 @@
+{
+  "name": "Headline",
+  "mood": ["urgent", "direct", "public"],
+  "tags": ["campaign", "election", "rally", "announcement", "sale", "event", "volunteer", "fundraiser", "march", "recruitment", "open day"],
+  "good_for": ["poster", "social", "banner", "slides", "print"],
+  "fonts": {"display": "oswald", "body": "ibmplexsans"},
+  "office_fonts": {"display": "Arial Narrow", "body": "Arial"},
+  "color": {"bg": "#E9E4DA", "surface": "#F6F3ED", "surface-2": "#DCD5C8", "text": "#141414", "text-dim": "#45413A",
+            "accent": "#FF4F1F", "accent-text": "#B8330D", "on-accent": "#141414", "accent-2": "#1E3A8A",
+            "hairline": "#141414", "hairline-soft": "#C8C0B2", "danger": "#B8330D", "success": "#2F6B3A"},
+  "shape": {"radius": "0px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.04em",
+            "display_weight": "700", "display_style": "normal"},
+  "imagery": "duotone photos in orange and black, arrows, numbered steps",
+  "archetypes": ["poster-stack", "big-number", "grid-12"],
+  "guide": "A street poster: very large condensed capitals filling the width, an orange slab for the date or call to action, black rules. Say it in five words."
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Sport",
+  "mood": ["energetic", "competitive", "bold"],
+  "tags": ["sport", "sports", "soccer", "football", "basketball", "tennis", "team", "fitness", "league", "match", "training", "coach", "athletics", "gym", "running", "tournament"],
+  "good_for": ["poster", "social", "slides", "screen", "website", "banner", "print"],
+  "fonts": {"display": "bebasneue", "body": "barlowcondensed"},
+  "office_fonts": {"display": "Impact", "body": "Arial Narrow"},
+  "color": {"bg": "#101418", "surface": "#1B2129", "surface-2": "#262E38", "text": "#FFFFFF", "text-dim": "#B4BDC8",
+            "accent": "#C6FF3D", "accent-text": "#C6FF3D", "on-accent": "#101418", "accent-2": "#FF5A1F",
+            "hairline": "#2F3946", "hairline-soft": "#222A34", "danger": "#FF6B5A", "success": "#C6FF3D"},
+  "shape": {"radius": "4px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.06em",
+            "display_weight": "400", "display_style": "normal"},
+  "imagery": "action photography with motion, diagonal cuts, stats as huge numbers",
+  "archetypes": ["poster-stack", "big-number", "comparison", "timeline"],
+  "guide": "Matchday energy: towering condensed capitals, one volt-green highlight, diagonal energy, stats as big numbers. Works for kids' leagues too; swap volt for the team colour."
+}

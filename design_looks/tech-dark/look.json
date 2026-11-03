@@ -1,0 +1,16 @@
+{
+  "name": "Tech Dark",
+  "mood": ["sharp", "modern", "electric"],
+  "tags": ["saas", "ai", "developer", "software", "startup", "api", "platform", "cloud", "tool"],
+  "good_for": ["website", "screen", "slides", "social", "banner", "poster"],
+  "fonts": {"display": "spacegrotesk", "body": "inter", "mono": "jetbrainsmono"},
+  "office_fonts": {"display": "Segoe UI Semibold", "body": "Segoe UI"},
+  "color": {"bg": "#0B0F17", "surface": "#121826", "surface-2": "#1A2233", "text": "#E8ECF4", "text-dim": "#9AA4B8",
+            "accent": "#6D4AFF", "accent-text": "#A996FF", "on-accent": "#FFFFFF", "accent-2": "#2DD4BF",
+            "hairline": "#2A3346", "hairline-soft": "#1E2636", "danger": "#FF6B6B", "success": "#34D399"},
+  "shape": {"radius": "12px", "button": "soft", "border": "1px", "label_case": "upper", "label_tracking": "0.1em",
+            "display_weight": "600", "display_style": "normal"},
+  "imagery": "product screens in a frame, subtle grid or dot textures, code snippets; no stock photos",
+  "archetypes": ["hero-split", "bento", "comparison", "big-number"],
+  "guide": "A product launch at night: dark ground, crisp grotesk headline, one violet action. Show the product itself, framed. Monospace for small technical labels."
+}

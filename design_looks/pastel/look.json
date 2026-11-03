@@ -1,0 +1,16 @@
+{
+  "name": "Pastel",
+  "mood": ["tender", "sweet", "light"],
+  "tags": ["baby", "wedding", "beauty", "bakery", "spa", "invitation", "shower", "mothers", "florals", "stationery", "candles", "nails"],
+  "good_for": ["print", "social", "poster", "email", "website"],
+  "fonts": {"display": "lora", "body": "nunito"},
+  "office_fonts": {"display": "Georgia", "body": "Segoe UI"},
+  "color": {"bg": "#FBF3F6", "surface": "#FFFFFF", "surface-2": "#F5E4EC", "text": "#3B2A3F", "text-dim": "#6E5A72",
+            "accent": "#A54A7C", "accent-text": "#A54A7C", "on-accent": "#FFFFFF", "accent-2": "#8FB9A8",
+            "hairline": "#E8CFDB", "hairline-soft": "#F1DFE7", "danger": "#A33B3B", "success": "#4E8A6E"},
+  "shape": {"radius": "20px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0.02em",
+            "display_weight": "500", "display_style": "italic"},
+  "imagery": "soft florals, watercolour washes kept light, delicate line ornaments",
+  "archetypes": ["editorial-column", "quote", "poster-stack"],
+  "guide": "Blush and sage: an italic serif headline, rounded friendly body, berry for the one action. Delicate ornaments, soft rounded frames, airy spacing."
+}

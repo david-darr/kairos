@@ -1,0 +1,16 @@
+{
+  "name": "Brutalist",
+  "mood": ["loud", "raw", "defiant"],
+  "tags": ["zine", "music", "art", "protest", "streetwear", "event", "club", "gig", "underground", "skate", "punk", "manifesto"],
+  "good_for": ["poster", "social", "website", "banner", "slides"],
+  "fonts": {"display": "archivoblack", "body": "spacemono"},
+  "office_fonts": {"display": "Arial Black", "body": "Courier New"},
+  "color": {"bg": "#F2F2F2", "surface": "#FFFFFF", "surface-2": "#E0E0E0", "text": "#000000", "text-dim": "#3D3D3D",
+            "accent": "#FFE600", "accent-text": "#000000", "on-accent": "#000000", "accent-2": "#FF2E00",
+            "hairline": "#000000", "hairline-soft": "#000000", "danger": "#C21F00", "success": "#0B7A2B"},
+  "shape": {"radius": "0px", "button": "square", "border": "3px", "label_case": "upper", "label_tracking": "0.02em",
+            "display_weight": "400", "display_style": "normal"},
+  "imagery": "high-contrast black and white photos, photocopy grain, stickers and tape; type as image",
+  "archetypes": ["poster-stack", "grid-12", "big-number"],
+  "guide": "Thick black borders, no radius, no shadow softening. Huge black headline, monospace body, a yellow block for the one thing to read first. Break the grid on purpose, once."
+}
