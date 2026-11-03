@@ -47,6 +47,8 @@ const ROWS = [
 ];
 
 let drawer, scrim, nav, menu, opener = null, frame = 0, anchor = null;
+// The page observer watches the whole document, these writes included: change only what changed.
+const setHidden = (node, value) => { if (node.hidden !== value) node.hidden = value; };
 
 // Which row the page on screen belongs to; anything else lives under More.
 function selection() {
@@ -67,7 +69,7 @@ function row(id, label, action) {
 
 function build() {
   drawer = document.createElement('div'); drawer.className = 'ms-drawer'; drawer.id = 'ms-drawer'; drawer.tabIndex = -1;
-  drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-label', 'Menu');
+  drawer.setAttribute('aria-label', 'Menu');
   const brand = document.createElement('div'); brand.className = 'ms-drawer-brand';
   brand.innerHTML = `${KAIROS_MARK}<span>Kairos</span>`; brand.firstElementChild.setAttribute('aria-hidden', 'true');
   nav = document.createElement('nav'); nav.className = 'ms-drawer-nav'; nav.setAttribute('aria-label', 'Main');
@@ -116,7 +118,7 @@ function paintRows() {
   const current = selection();
   const { need, live } = badgeCounts();
   for (const node of nav.querySelectorAll('.ms-drawer-row')) {
-    if (node.dataset.admin) node.hidden = !hasMode(node.dataset.drawer);
+    if (node.dataset.admin) setHidden(node, !hasMode(node.dataset.drawer));
     if (node.dataset.drawer === current) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current');
     const label = node.querySelector('.ms-drawer-label').textContent;
     let count = '', spoken = '';
@@ -127,7 +129,8 @@ function paintRows() {
     }
     let badge = node.querySelector('.ms-drawer-badge');
     if (count && !badge) { badge = document.createElement('span'); badge.className = 'ms-drawer-badge'; badge.setAttribute('aria-hidden', 'true'); node.append(badge); }
-    if (badge) { badge.textContent = typeof count === 'number' && count > 99 ? '99+' : String(count); badge.hidden = !count; }
+    const text = typeof count === 'number' && count > 99 ? '99+' : String(count);
+    if (badge) { if (badge.textContent !== text) badge.textContent = text; setHidden(badge, !count); }
     node.setAttribute('aria-label', spoken ? `${label}, ${spoken}` : label);
   }
 }
@@ -156,7 +159,7 @@ function placeMenu() {
     title.classList.add('ms-menu-indent');
   }
   anchor = title;
-  menu.hidden = !title;
+  setHidden(menu, !title);
   // The page rises in after it renders; follow its title until the person scrolls, then the button stays put.
   if (title && !(document.getElementById('view-content')?.scrollTop > 2)) {
     // Centred on the title's first line, so a title that wraps (or grows when a name loads) keeps it in place.
@@ -184,7 +187,7 @@ export function openDrawer(from = menu) {
   opener = from; haptic(); paintProfile(); paintRows();
   const root = document.documentElement;
   root.classList.add('ms-drawer-open');
-  drawer.inert = false; drawer.removeAttribute('aria-hidden'); drawer.setAttribute('aria-modal', 'true');
+  drawer.inert = false; drawer.removeAttribute('aria-hidden'); drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true');
   const content = document.getElementById('content'); if (content) content.inert = true;
   for (const node of [menu, from]) node?.setAttribute('aria-expanded', 'true');
   // Focus the sidebar itself, not a row: no ring on open; Tab then reaches the first row.
@@ -196,7 +199,7 @@ function close(restoreFocus = true) {
   if (!drawer) return;
   const wasOpen = drawerOpen();
   document.documentElement.classList.remove('ms-drawer-open');
-  drawer.inert = true; drawer.setAttribute('aria-hidden', 'true'); drawer.removeAttribute('aria-modal');
+  drawer.inert = true; drawer.setAttribute('aria-hidden', 'true'); drawer.removeAttribute('role'); drawer.removeAttribute('aria-modal');
   const content = document.getElementById('content'); if (content) content.inert = false;
   for (const node of [menu, opener]) node?.setAttribute('aria-expanded', 'false');
   if (!wasOpen) return;
@@ -209,7 +212,8 @@ export function mountSidebar() {
   build(); close(false);
   registerMobileDrawer({ panel: drawer, backdrop: scrim, isOpen: drawerOpen,
     // Leave the outermost edge to Safari's system Back gesture (mobileDrawers.js).
-    canOpen: (target, touch) => mobileOn() && isMainDrawerZone(touch),
+    // A pager past its first page takes a swipe right back a page first, as iOS does (mobilePager.js).
+    canOpen: (target, touch) => mobileOn() && isMainDrawerZone(touch) && !target.closest('.ms-page-track')?.firstElementChild?.inert,
     open: () => openDrawer(menuTarget() || menu), close: () => close(),
     onDrag: (offset, width) => {
       const root = document.documentElement;
@@ -223,8 +227,8 @@ export function mountSidebar() {
   });
   document.addEventListener('jarvis:navigate', () => close(false));
   document.addEventListener('kairos:mobile-drawer-opening', event => { if (event.detail?.id !== 'drawer') close(false); });
-  // The page on screen, the pushed pages and the Bots badge all live in the DOM; one observer, coalesced to a frame.
-  new MutationObserver(schedule).observe(document.getElementById('view-content')?.parentElement || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+  // The page on screen, the pushed pages, full-screen sheets outside the page (the Bots inbox) and the Bots badge all live in the DOM; one observer, coalesced to a frame.
+  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
   new MutationObserver(schedule).observe(document.getElementById('nav'), { childList: true, subtree: true, characterData: true });
   new MutationObserver(() => { release(); schedule(); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-view', 'data-app-mode'] });

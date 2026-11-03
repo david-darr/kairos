@@ -70,8 +70,10 @@ export function openMoreSheet(from) {
     for (const id of group.ids) grids.set(id, grid);
   }
   // Navigation switches back to Kairos itself (app.js modeForTab).
-  for (const tab of listed) {
-    const grid = grids.get(tab.id); if (!grid) continue;
+  // Tiles follow the saved group order (grids was filled group by group).
+  const byId = new Map(listed.map(tab => [tab.id, tab]));
+  for (const [id, grid] of grids) {
+    const tab = byId.get(id); if (!tab) continue;
     const tile = button('', () => { closeMoreSheet(); go(tab.id); }, 'ms-tab-tile ms-glass');
     tile.innerHTML = `${tab.svg || ''}<span></span>`; tile.querySelector('span').textContent = tab.label; tile.dataset.tab = tab.id;
     // A custom tab without its own icon falls back to the Library glyph; give it a distinct generic one here.

@@ -105,7 +105,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   await js("document.getElementById('ms-tab-1').click()"); await delay(450);
   await swipe('.ms-history-list', 40, 700, 140); await delay(500);
   assert.equal(await page(), 0, 'A right swipe in the former drawer zone returns to New');
-  assert.equal(await js("document.getElementById('sidebar').classList.contains('open')"), false, 'No swipe opens the old sidebar');
+  assert.equal(await js("document.getElementById('sidebar').classList.contains('open') || document.documentElement.classList.contains('ms-drawer-open')"), false, 'A swipe back a page opens neither sidebar');
   await js("document.getElementById('ms-tab-1').click()"); await delay(300);
 
   // ---- A2: history

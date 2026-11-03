@@ -60,7 +60,7 @@ module.exports = async function sidebarChecks(c) {
   eq(await js(`[${MENU}.getAttribute('aria-label'), ${MENU}.getAttribute('aria-haspopup'), ${MENU}.getAttribute('aria-controls'), ${MENU}.getAttribute('aria-expanded')]`), ['Open menu', 'dialog', 'ms-drawer', 'false'], 'The menu button names the sidebar it opens');
   ok(await js(`${MENU}.querySelector('svg')?.getAttribute('aria-hidden') === 'true'`), 'Its glyph is decorative');
   await besideTitle('Home');
-  ok(await js("(() => { const d = document.getElementById('ms-drawer'); return d.inert && d.getAttribute('aria-hidden') === 'true' && !d.hasAttribute('aria-modal') && getComputedStyle(d).visibility === 'hidden'; })()"), 'Closed, the sidebar is hidden, inert and not modal');
+  ok(await js("(() => { const d = document.getElementById('ms-drawer'); return d.inert && d.getAttribute('aria-hidden') === 'true' && !d.hasAttribute('aria-modal') && !d.hasAttribute('role') && getComputedStyle(d).visibility === 'hidden'; })()"), 'Closed, the sidebar is hidden, inert and not a dialog (Bots notices wait for open dialogs)');
   ok(await js("getComputedStyle(document.getElementById('content')).transform === 'none'"), 'Closed, the page is not moved');
 
   // ---- 2. Open: the brand, the rows, the bottom, focus ----------------------------------------
