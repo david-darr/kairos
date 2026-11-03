@@ -142,12 +142,14 @@ export async function mount(root, ctx) {
 
     const back = h('button', { type: 'button', class: 'bots-back', 'data-action': 'back' }, [icon('arrow-left', { size: 14 }), 'Inbox']);
     back.addEventListener('click', () => { view.openId = ''; view.error = ''; draw(); });
-    const filing = h('button', { type: 'button', class: 'bots-btn', text: row.done ? 'Move back to inbox' : 'Mark done' });
+    // An open question or approval is settled by its own buttons; Mark done would only hide it while the bot still waits.
+    const asks = row.status === 'open' && (row.kind === 'question' || row.kind === 'approval');
+    const filing = h('button', { type: 'button', class: 'bots-btn', text: row.done ? 'Move back to inbox' : 'Mark done', hidden: asks && !row.done });
     filing.addEventListener('click', async () => {
       try { await ctx.post(`${BASE}/inbox/${encodeURIComponent(row.id)}/${row.done ? 'reopen' : 'done'}`); view.openId = ''; await load(); }
       catch (error) { view.error = errorText(error); draw(); }
     });
-    buttons.push(filing);
+    if (!filing.hidden) buttons.push(filing);
     const openChat = row.target ? h('button', { type: 'button', class: 'bots-btn', 'data-action': 'open-chat' }, [icon('message-square', { size: 16 }), 'Open in chat']) : null;
     openChat?.addEventListener('click', () => ctx.openTarget(row.target));
 

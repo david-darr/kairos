@@ -163,6 +163,16 @@ export function renderFrontDeskCard(message, ctx = {}) {
     row.append(text('p', data.text || data.greeting || 'Tell me what you need a hand with.'));
     const lines = data.lines || ['I can help with your day.', 'I can take on a task.', 'I can pass work to another bot.'];
     for (const line of (Array.isArray(lines) ? lines : []).slice(0, 3)) row.append(text('p', line));
+    // Things to try (2026-11-02): one tap sends the words to Kip, for someone who does not know what to ask yet.
+    const examples = (Array.isArray(data.examples) ? data.examples : []).slice(0, 4).map(value => String(value).slice(0, 200));
+    if (examples.length) actions(examples.map(words => button(words, async () => {
+      if (ctx.send) await ctx.send(words);
+      else {
+        if (!ctx.sessionId) throw new Error('Open this conversation to reply.');
+        const state = await call(`/api/bot-chat/${enc(ctx.sessionId)}/state`);
+        await call(`/api/bot-chat/${enc(ctx.sessionId)}/send`, { text: words, send_id: crypto.randomUUID(), expected_leaf_id: state.active_leaf_id ?? null });
+      }
+    })));
   } else if (kind === 'reach') {
     title('What I can reach');
     const connected = data.connected || data;

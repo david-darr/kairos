@@ -146,7 +146,27 @@ export function mountBotsRail(nav) {
   const automationBadge = h('span', { class: 'bots-status-dot', 'data-state': 'needs_you', hidden: true, 'aria-hidden': 'true' });
   const automations = h('button', { type: 'button', class: 'nav-item', 'data-tab': 'botsAutomations', onclick: () => go({ tab: 'botsAutomations' }) }, [icon('calendar-clock', { size: 16 }), h('span', { text: 'Automations' }), automationBadge]);
   const foot = h('div', { class: 'bots-rail-foot' }, [automations, view]);
-  const head = h('div', { class: 'bots-rail-head' }, [h('span', { class: 'bots-caps', text: 'Your bots' }), density]);
+  // 2026-11-02 ("so many buttons"): the sidebar shows the Inbox, search, Kip and the bots and rooms. Making things and
+  // the rarer views sit behind + and More; their controls stay in the page, hidden, for keyboard paths and checks.
+  const panelFor = name => () => import('./botsAttentionHost.js').then(host => host.toggleAttention(name, { agentId: root.dataset.botsAgent || '', sessionId: root.dataset.botsSession || '' })).catch(() => {});
+  const make = h('button', { type: 'button', class: 'bots-icon-btn bots-rail-make', 'aria-label': 'New', title: 'New', 'aria-haspopup': 'menu',
+    onclick: () => openMenu(make, [
+      { label: 'New bot', iconName: 'plus', onSelect: () => openNewBot() },
+      { label: 'Ready-made bots', iconName: 'layout-grid', onSelect: () => import('./botsTemplates.js').then(m => m.openTemplates()) },
+      { label: 'New room', iconName: 'hash', onSelect: () => openNewRoom() },
+    ], { align: 'end' }) }, [icon('plus', { size: 16 })]);
+  const more = h('button', { type: 'button', class: 'bots-icon-btn bots-rail-moremenu', 'aria-label': 'More', title: 'More', 'aria-haspopup': 'menu',
+    onclick: () => openMenu(more, [
+      { label: 'Team map', iconName: 'map', onSelect: () => teamNavigate('botsTeamMap') },
+      { label: 'Automations', iconName: 'calendar-clock', onSelect: () => go({ tab: 'botsAutomations' }) },
+      { separator: true },
+      { label: 'Notifications', iconName: 'bell', onSelect: panelFor('notifications') },
+      { label: 'Activity', iconName: 'history', onSelect: panelFor('activity') },
+      { label: 'Inspector', iconName: 'eye', onSelect: panelFor('inspector') },
+      { separator: true },
+      { label: isAdvanced() ? 'Switch to Simple' : 'Switch to Advanced', iconName: 'sliders-horizontal', onSelect: () => setAdvanced(!isAdvanced()) },
+    ], { align: 'end' }) }, [icon('ellipsis', { size: 16 })]);
+  const head = h('div', { class: 'bots-rail-head' }, [h('span', { class: 'bots-caps', text: 'Your bots' }), h('span', { class: 'bots-head-fill' }), make, more, density]);
   // Inbox, Notifications, Activity and Inspector (unit U5's drawer). The row shows only when that module loads.
   const attention = h('div', { class: 'bots-rail-attention', role: 'group', 'aria-label': 'Attention', hidden: true },
     [['inbox', 'Inbox', 'message-square'], ['notifications', 'Notifications', 'bell'], ['activity', 'Activity', 'history'], ['inspector', 'Inspector', 'eye']].map(([name, label, glyph]) =>
@@ -154,7 +174,11 @@ export function mountBotsRail(nav) {
         onclick: () => import('./botsAttentionHost.js').then(host => host.toggleAttention(name, { agentId: root.dataset.botsAgent || '', sessionId: root.dataset.botsSession || '' })).catch(() => {}) },
         [icon(glyph, { size: 15 })])));
   import('./botsAttentionHost.js').then(() => { if (!disposed) attention.hidden = false; }).catch(() => {});
-  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, attention, teamMap, newBot, templates, search, pinnedPanel, list, archived, foot]);
+  // The Inbox is the one attention view in the sidebar, as a row with its count; the other three are under More.
+  const inboxRow = h('button', { type: 'button', class: 'nav-item bots-rail-inbox', 'aria-label': 'Inbox', onclick: panelFor('inbox') },
+    [icon('message-square', { size: 16 }), h('span', { text: 'Inbox' }), h('span', { class: 'bots-rail-count bots-rail-inbox-count', hidden: true })]);
+  for (const node of [teamMap, newBot, templates, density, foot]) node.classList.add('bots-rail-tucked');
+  const section = h('section', { class: 'bots-rail', 'aria-label': 'Your bots' }, [head, inboxRow, attention, teamMap, newBot, templates, search, pinnedPanel, list, archived, foot]);
   section.style.visibility = 'hidden';
   styled.finally(() => { section.style.visibility = ''; });
   nav.append(section);
@@ -270,9 +294,9 @@ export function mountBotsRail(nav) {
   function deskCard(bot) {
     const fact = railRow(bot);
     const main = h('button', { type: 'button', class: 'nav-item bots-rail-row bots-rail-desk', 'data-tab': 'botsShell', 'data-agent-id': bot.id,
-      'data-state': fact.state, 'aria-label': `${fact.name}, your front desk${fact.needs ? `, ${fact.needs} waiting` : ''}`, title: fact.text, onclick: () => openBot(bot.id) }, [
+      'data-state': fact.state, 'aria-label': `${fact.name}, your assistant${fact.needs ? `, ${fact.needs} waiting` : ''}`, title: fact.text, onclick: () => openBot(bot.id) }, [
       agentAvatar(bot, 36),
-      h('span', { class: 'bots-rail-desk-text' }, [h('span', { class: 'bots-rail-name', text: fact.name }), h('span', { class: 'bots-rail-desk-role', text: 'Your front desk' })]),
+      h('span', { class: 'bots-rail-desk-text' }, [h('span', { class: 'bots-rail-name', text: fact.name }), h('span', { class: 'bots-rail-desk-role', text: 'Your assistant' })]),
       fact.needs ? h('span', { class: 'bots-rail-count', text: fact.needs > 99 ? '99+' : String(fact.needs) }) : null,
     ]);
     main.addEventListener('contextmenu', event => { event.preventDefault(); botMenu(bot, main); });
@@ -683,6 +707,13 @@ export function mountBotsRail(nav) {
       const needs = needsYouCount(buildItems(automationData.items || automationData.automations || []));
       automationBadge.hidden = needs === 0;
       automations.setAttribute('aria-label', needs ? `Automations, ${needs} need you` : 'Automations');
+      // The Inbox row's count: what is waiting on the person and not marked done (bot_attention.needs_you).
+      const waiting = await request('/api/bot-attention/needs-you', { toast: false }).then(r => (r?.rows || []).length).catch(() => null);
+      if (!disposed && waiting !== null) {
+        const count = inboxRow.querySelector('.bots-rail-inbox-count');
+        count.hidden = !waiting; count.textContent = waiting > 99 ? '99+' : String(waiting);
+        inboxRow.setAttribute('aria-label', waiting ? `Inbox, ${waiting} need you` : 'Inbox');
+      }
       if (convos?.agents) pinnedIds = new Set(convos.agents.filter(item => item.pinned).map(item => item.id));
       // A bot's folders ride on the bot record; keep each loaded list in step with it.
       for (const [id, data] of threads) { const bot = botById(id); if (bot && Array.isArray(bot.folders)) data.folders = bot.folders; }

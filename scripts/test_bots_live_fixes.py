@@ -113,5 +113,44 @@ class AddonTests(unittest.TestCase):
         recorded.assert_called_once()
 
 
+class NeedsYouTests(unittest.TestCase):
+    # 2026-11-02: "Needs you" stayed after Mark done, and a bot waiting on an answer read as working.
+    def test_marked_done_leaves_the_count(self):
+        rows = [{"id": "item:a", "status": "open", "kind": "question", "bucket": "needs-you"},
+                {"id": "item:b", "status": "open", "kind": "review", "bucket": "done"},
+                {"id": "item:c", "status": "open", "kind": "report", "bucket": "news"}]
+        with patch.object(bot_attention, "inbox", return_value={"rows": rows}):
+            self.assertEqual([r["id"] for r in bot_attention.needs_you("david")["rows"]], ["item:a"])
+
+    def summary(self, activity, inbox_items=(), done=()):
+        from routes import agent_routes
+        agent = {"id": "bot-1", "name": "Ada", "enabled": True}
+        with patch("services.agent_handoff.person_inbox", return_value=list(inbox_items)), \
+                patch("services.chat_live.agent_activity", return_value=activity), \
+                patch.object(agent_routes, "_owned", return_value=[]), \
+                patch.object(agent_routes.agent_service, "can_run", return_value=(True, "")), \
+                patch.object(agent_routes.agent_service, "runs_today", return_value=0), \
+                patch("core.bot_attention_store.inbox_preferences", return_value={key: {"done": True} for key in done}):
+            return agent_routes._summary(agent, "david")
+
+    def test_waiting_on_an_answer_is_needs_you_not_working(self):
+        waiting = {"kind": "chat", "working": True, "waiting": True, "name": "Chat"}
+        self.assertEqual(self.summary(waiting)["status"], "needs_you")
+        self.assertEqual(self.summary({**waiting, "waiting": False})["status"], "working")
+        self.assertEqual(self.summary(None)["status"], "idle")
+
+    def test_a_bot_count_drops_what_was_marked_done(self):
+        items = [{"id": "q1", "kind": "report"}, {"id": "q2", "kind": "report"}]
+        self.assertEqual(self.summary(None, items)["needs_you"], 2)
+        self.assertEqual(self.summary(None, items, done=["item:q1"])["needs_you"], 1)
+
+
+class SetupCardTests(unittest.TestCase):
+    def test_kip_never_gets_the_blank_bot_setup_card(self):
+        from services import bot_setup
+        with patch.object(bot_setup.bot_attention, "require_bot", return_value={"id": "kip", "builtin": "front_desk", "origin": {"kind": "blank"}}):
+            self.assertFalse(bot_setup.eligible("kip", "david"))
+
+
 if __name__ == "__main__":
     unittest.main()

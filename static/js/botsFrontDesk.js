@@ -39,7 +39,7 @@ export function mountFrontDesk(host, options = {}) {
     onclick: () => import('./mobileTabSheet.js').then(m => m.openMoreSheet(account)) }, [icon('user', { size: 20 })]);
   const today = h('aside', { class: 'fd-today', 'aria-label': 'Today', hidden: true });
   const step = h('div', { class: 'fd-step', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
-  const tabs = h('div', { class: 'fd-tabs', role: 'tablist', 'aria-label': 'Front desk' });
+  const tabs = h('div', { class: 'fd-tabs', role: 'tablist', 'aria-label': 'Kip' });
   const panels = new Map(), buttons = new Map();
   const pages = h('div', { class: 'fd-pages' });
   for (const tab of TABS) {

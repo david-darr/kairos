@@ -18,7 +18,14 @@
 
 [data-app-mode="bots"] .bots-transcript-host { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
 /* A question or approval above the composer shrinks into the height left, with its own scroll, so its buttons stay on a phone screen. */
-[data-app-mode="bots"] .bots-card-composer { flex: 0 1 auto; min-height: 0; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; }
+/* Questions, approvals and a new bot's setup sit after the last message, in the message column (2026-11-02). */
+[data-app-mode="bots"] .bots-inline-cards { display: grid; gap: 12px; width: 100%; max-width: 760px; margin: 0 auto; padding: 0 16px 16px; box-sizing: border-box; }
+[data-app-mode="bots"] .bots-inline-cards > :empty, [data-app-mode="bots"] .bots-inline-cards > [hidden] { display: none; }
+[data-app-mode="bots"] .bots-card-transcript { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 16px; box-sizing: border-box; }
+[data-app-mode="bots"] .bots-waiting-line { display: flex; align-items: center; gap: 8px; align-self: center; width: fit-content; max-width: calc(100% - 32px); min-height: 36px; margin: 0 auto 6px; padding: 0 14px;
+  border: 1px solid var(--bots-accent-border); border-radius: var(--bots-radius-pill); background: var(--bots-card); color: var(--bots-ink); font: 500 var(--bots-text-hint-lg) var(--bots-font-sans); cursor: pointer; }
+[data-app-mode="bots"] .bots-waiting-line[hidden] { display: none; }
+[data-app-mode="bots"] .bots-waiting-line:focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
 [data-app-mode="bots"] .bots-transcript-wrap { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 [data-app-mode="bots"] .bots-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
 [data-app-mode="bots"] .bots-log { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 16px 16px; box-sizing: border-box; }
@@ -178,6 +185,7 @@
 [data-app-mode="bots"] .bots-support-text { width: 100%; box-sizing: border-box; font: 400 var(--bots-text-hint-lg)/1.5 var(--bots-font-mono); color: var(--bots-ink); background: var(--bots-card); border: 1px solid var(--bots-control-line); border-radius: 8px; padding: 8px; }
 
 @media (max-width: 768px) {
+  [data-app-mode="bots"] :is(.bots-inline-cards, .bots-card-transcript) { padding-left: 12px; padding-right: 12px; }
   [data-app-mode="bots"] .bots-log { padding: 8px 12px 12px; }
   [data-app-mode="bots"] .bots-msg.user { max-width: calc(100% - 48px); }
   [data-app-mode="bots"] .bots-find { margin: 4px 12px; }

@@ -427,4 +427,5 @@ def today(user, since=None):
 
 
 def needs_you(user):
-    return {"rows": [r for r in inbox(user)["rows"] if r["status"] == "open" and r["kind"] != "report"]}
+    # The inbox's own needs-you bucket: open, not a report, and not marked done by this person.
+    return {"rows": [r for r in inbox(user)["rows"] if r["bucket"] == "needs-you"]}

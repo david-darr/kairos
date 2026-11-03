@@ -53,13 +53,14 @@ class FrontDeskCase(unittest.TestCase):
         self.assertEqual(len({a["id"] for a in agents}), 1)
         bot = agents[0]
         self.assertEqual((bot["name"], bot["role"], bot["builtin"], bot["order"], bot["daily_run_cap"], bot["approval_mode"]),
-                         ("Kip", "Front desk", "front_desk", -1, 100, "full"))
+                         ("Kip", "Assistant", "front_desk", -1, 100, "edits"))
         self.assertEqual(bot["outbound"], bot_record.new_defaults()["outbound"])
         self.assertEqual(len(session_manager.list_sessions(agent_id=bot["id"])), 1)
         sid = front_desk.main_thread_id()
         session = session_manager.get_session(sid)
         self.assertEqual(session["owner_user"], "david")
-        self.assertEqual([m["fd_kind"] for m in session["messages"]], ["welcome", "welcome", "reach"])
+        self.assertEqual([m["fd_kind"] for m in session["messages"]], ["welcome", "reach"])
+        self.assertEqual(len(session["messages"][0]["fd_data"]["examples"]), 3, "the welcome offers things to try")
         self.assertEqual(len(front_desk.read_state()["morning"]), 3)
         self.assertTrue(front_desk.read_state()["welcome_posted"])
 
@@ -90,7 +91,24 @@ class FrontDeskCase(unittest.TestCase):
         self.state_file.unlink()
         self.assertEqual(front_desk.ensure()["id"], bot["id"])
         self.assertEqual(len(agent_service.list_agents()), 1)
-        self.assertEqual(len(session_manager.get_session(front_desk.main_thread_id())["messages"]), 3)
+        self.assertEqual(len(session_manager.get_session(front_desk.main_thread_id())["messages"]), 2)
+
+    def test_an_earlier_kip_becomes_the_team_lead_once(self):
+        # 2026-11-02: Kip asks before anything leaves Kairos, hands work to teammates without asking, and greets
+        # once with what it can do now. A Kip the person set back to Full afterwards stays at Full.
+        from services import bot_peers
+        bot = front_desk.ensure()
+        agent_service.mutate_bot(bot["id"], lambda a: a.update(approval_mode="full", soul=front_desk._FIRST_SOUL, blurb=front_desk.LEGACY_BLURBS[0], role="Front desk"))
+        front_desk.update_state({"lead_v1": False, "welcome_v2": False})
+        front_desk.ensure()
+        moved = agent_service.get(bot["id"])
+        self.assertEqual((moved["approval_mode"], moved["soul"], moved["blurb"], moved["role"]), ("edits", front_desk.FRONT_DESK_SOUL, front_desk.FRONT_DESK_BLURB, "Assistant"))
+        self.assertFalse(bot_peers.state()["approve_peer_comms"][bot["id"]])
+        kinds = [m.get("fd_kind") for m in session_manager.get_session(front_desk.main_thread_id())["messages"]]
+        self.assertEqual(kinds.count("welcome"), 2, "one greeting, plus one saying what Kip does now")
+        agent_service.mutate_bot(bot["id"], lambda a: a.update(approval_mode="full"))
+        front_desk.ensure()
+        self.assertEqual(agent_service.get(bot["id"])["approval_mode"], "full", "the migration runs once")
 
     def test_corrupt_stamp_fails_closed(self):
         self.state_file.write_text("{bad json", encoding="utf-8")

@@ -154,6 +154,16 @@ def set_reach(bot_id, *, mode, peers=(), acknowledge_scope=False, expected_revis
         return view(bot_id)
 
 
+def set_peer_comms(bot_id, approve):
+    """Whether this bot asks before it hands work to or messages another bot (the Access page's switch)."""
+    if type(approve) is not bool:
+        raise ValueError("approve_peer_comms must be a boolean")
+    with _LOCK:
+        data = state()
+        data["approve_peer_comms"][bot_id] = approve
+        write_json_atomic(str(STATE_PATH), data)
+
+
 def authorize(bot, target, action="coordinate_bots", *, approved=False, session_id=None):
     """A synchronous admission verdict. The model handler owns the broker wait."""
     bot, target = _bot(bot), _bot(target)

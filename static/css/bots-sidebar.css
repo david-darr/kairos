@@ -112,6 +112,16 @@
 [data-app-mode="bots"] .bots-rail-resize:hover::after, [data-app-mode="bots"] .bots-rail-resize.dragging::after, [data-app-mode="bots"] .bots-rail-resize:focus-visible::after { background: var(--bots-focus); }
 [data-app-mode="bots"] .bots-rail-resize:focus-visible { outline: none; }
 
+/* -- Fewer controls (2026-11-02): + and More in the head, one Inbox row; the rest stay in the page, hidden ------ */
+
+[data-app-mode="bots"] .bots-rail .bots-rail-tucked, [data-app-mode="bots"] .bots-rail .bots-rail-attention { display: none !important; }
+[data-app-mode="bots"] .bots-rail-head { gap: 2px; }
+[data-app-mode="bots"] .bots-rail-head .bots-head-fill { flex: 1; }
+[data-app-mode="bots"] :is(.bots-rail-make, .bots-rail-moremenu) { width: 32px; height: 32px; }
+[data-app-mode="bots"] .bots-rail-inbox { display: flex; align-items: center; gap: 10px; }
+[data-app-mode="bots"] .bots-rail-inbox .bots-rail-inbox-count { margin-left: auto; }
+[data-app-mode="bots"] .bots-rail-inbox .bots-rail-inbox-count[hidden] { display: none; }
+
 /* -- Kip, the front desk: one card above every section (2026-11-02 redesign) ------------------- */
 
 [data-app-mode="bots"] .bots-rail-desk-line { margin: 4px 0 10px; }
@@ -170,4 +180,5 @@
 [data-app-mode="bots"] .ms-bots-sheet .ms-bots-list-host { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 [data-app-mode="bots"] .ms-bots-sheet .bots-rail { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 [data-app-mode="bots"] .ms-bots-sheet .bots-rail-density { display: none; }
+[data-app-mode="bots"] .ms-bots-sheet :is(.bots-rail-make, .bots-rail-moremenu) { width: 44px; height: 44px; }
 [data-app-mode="bots"] .ms-bots-sheet :is(.nav-item, .bots-rail-line > button, .bots-rail-room, .bots-section-head, .bots-rail-attention-btn, .bots-rail-newthread) { min-height: 44px; }

@@ -101,7 +101,17 @@ export async function mountBotsChat(host, options) {
     if (disposed) end(); else offs.push(end);
   };
   mountPiece('./botsApprovalCards.js', cardTranscript, { slot: 'transcript' }).catch(error => console.warn('Bots cards could not load', error));
-  mountPiece('./botsApprovalCards.js', cardComposer, { slot: 'composer', onPending: waiting => { composerHost.hidden = waiting; } }).catch(error => console.warn('Bots cards could not load', error));
+  // A question or approval sits in the conversation, under the message that asked (2026-11-02); the composer stays,
+  // with one line that leads back to it.
+  const waitingLine = h('button', { type: 'button', class: 'bots-waiting-line', hidden: true,
+    onclick: () => cardComposer.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [icon('hand', { size: 15 }), h('span', { text: `${agent.name} is waiting on your answer` })]);
+  root.insertBefore(waitingLine, composerHost);
+  mountPiece('./botsApprovalCards.js', cardComposer, { slot: 'composer', onPending: waiting => {
+    const was = !waitingLine.hidden; waitingLine.hidden = !waiting;
+    // The card can report before the transcript below is made; then it is the first thing on screen anyway.
+    let following = true; try { following = transcript.isFollowing(); } catch { /* not mounted yet */ }
+    if (waiting && !was && following) requestAnimationFrame(() => cardComposer.scrollIntoView({ block: 'nearest' }));
+  } }).catch(error => console.warn('Bots cards could not load', error));
   // First-run setup card for a new blank bot (Phase 4). The server sends the chosen "/setup <job>" itself, so a
   // pick only reloads the conversation; "Something else" puts "/setup " in the composer to finish by hand.
   const setupHost = h('div', { class: 'bots-setup-host' });
@@ -151,6 +161,8 @@ export async function mountBotsChat(host, options) {
       react: (m, emoji, on) => react(m, emoji, on),
     },
   });
+  // The setup card and the pending question or approval follow the last message, in the same column, and scroll with it.
+  transcript.scroller.append(h('div', { class: 'bots-inline-cards' }, [setupHost, cardComposer]));
   const sendController = createSendController({
     draft, getLeaf: () => state.leaf,
     flushSettings: options.flushSettings || (async () => { const mod = await import('./botsPatchQueue.js'); return mod.flushBotEdits ? mod.flushBotEdits(agent.id) : { ok: true }; }),
@@ -301,9 +313,22 @@ export async function mountBotsChat(host, options) {
       if (placeholderTurn !== turnId || chatStream.getInFlight(sid)?.turnId === turnId) return;
       await refreshState();
       if (placeholderTurn === turnId && state.turnId !== turnId) { placeholderTurn = null; await refreshLatest({ keepPosition: false }); transcript.clearLive(); paintState(); }
+      // Still running on the server but not on the feed: keep asking, so the placeholder never outlives the turn
+      // (2026-11-02: a bot could stay on "Thinking" after its reply had saved).
+      else if (placeholderTurn === turnId) later(check, 8000);
     };
-    later(check, 2500); later(check, 8000);
+    later(check, 2500);
   }
+  // The feed can miss a turn's end (a sleep, a lost connection). Every 20 s while it says a turn is running, ask the
+  // server; when the server has no turn, a fresh snapshot lets chatStream.js settle the stale one.
+  const watchdog = async () => {
+    if (chatStream.getInFlight(sid)?.status === 'processing') {
+      await refreshState();
+      if (!disposed && !state.turnId && chatStream.getInFlight(sid)?.status === 'processing') chatStream.sync().catch(() => {});
+    }
+    later(watchdog, 20000);
+  };
+  later(watchdog, 20000);
   function paint(entry) {
     if (disposed || !entry) return;
     if (entry.status === 'processing') {

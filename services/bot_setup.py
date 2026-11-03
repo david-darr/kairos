@@ -32,7 +32,8 @@ def _read():
 
 def eligible(bot_id, user):
     bot = bot_attention.require_bot(bot_id, user)
-    if ((bot.get("origin") or {}).get("kind") != "blank" or teams.service().setup_receipts(bot_id) or
+    # The front desk is not a blank bot to set up; it greets the person itself (botsFrontDesk.js).
+    if (bot.get("builtin") == "front_desk" or (bot.get("origin") or {}).get("kind") != "blank" or teams.service().setup_receipts(bot_id) or
             not teams.service().chat_endpoint(bot)):
         return False
     row = _read()["requests"].get(bot_id)

@@ -235,6 +235,8 @@ const server = http.createServer(async (req, res) => {
       // The attention host (app.js) polls these on every page; the plain demo answers them empty. The Bots backend answers them for real.
       const attentionIdle = botsRead === undefined && url.pathname === '/api/bot-attention/inbox' ? { rows: [], counts: { 'needs-you': 0, news: 0, done: 0 }, count: 0 }
         : botsRead === undefined && url.pathname === '/api/bot-attention/notifications' ? { rows: [], unread: 0 }
+        // The Bots sidebar's Inbox count (2026-11-02).
+        : botsRead === undefined && url.pathname === '/api/bot-attention/needs-you' ? { rows: [] }
         : botsRead === undefined && url.pathname === '/api/bot-automations' ? { items: [] }
         : botsRead === undefined && url.pathname === '/api/bot-limit-resets' ? { endpoints: [] }
         // The rail's team map and the templates page can still be reading when a check leaves Bots mode (Phases 4 and 6).

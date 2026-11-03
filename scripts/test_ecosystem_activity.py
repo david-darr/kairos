@@ -39,7 +39,8 @@ class ActivityTests(unittest.TestCase):
         with patch.object(agent_routes, '_owned', return_value=[]), patch('services.agent_handoff.person_inbox', return_value=[]), patch.object(agent_routes.agent_service, 'can_run', return_value=(True, '')), patch.object(agent_routes.agent_service, 'runs_today', return_value=0):
             with patch.object(chat_live, 'agent_activity', return_value={'kind':'chat','working':True,'waiting':True,'name':'Homework','detail':'','count':1}):
                 value = agent_routes._summary(agent)
-            self.assertEqual(value['status'], 'working')
+            # Waiting on the person's answer reads as needs you, not working (2026-11-02: bots stuck on "Thinking").
+            self.assertEqual(value['status'], 'needs_you')
             self.assertEqual(value['needs_you'], 1)
             self.assertEqual(value['activity']['name'], 'Homework')
             with patch.object(chat_live, 'agent_activity', return_value=None):

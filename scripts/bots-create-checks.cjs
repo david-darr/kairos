@@ -369,11 +369,19 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Settings'");
     assert.match(await text('#bots-u4-host .bots-back'), /Details/);
     assert.ok(await exists('#bots-u4-host [data-panel-card="soul"] textarea'), 'instructions on the Settings page');
-    assert.ok(await exists('#bots-u4-host [data-panel-card="permissions"]'));
-    assert.equal(await js("document.querySelectorAll('#bots-u4-host [aria-label=Approval] [role=radio]:not([disabled])').length"), 5, 'approval offers all five levels');
+    // 2026-11-02: Simple's Settings keeps the instructions, Routines and Access; the rest is one row away.
+    const navTitles = () => js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row .bots-row-title')].map(n => n.textContent)");
+    assert.deepEqual(await navTitles(), ['Routines', 'Access', 'More settings'], 'Settings: Routines, Access and More settings');
+    await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row')].find(n => n.textContent.includes('More settings')).click()");
+    await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'More settings'");
+    assert.deepEqual(await navTitles(), ['Overview', 'Delivery', 'Permissions', 'Skills', 'Memory', 'Voice and alerts', 'Who can see it', 'History', 'Usage'], 'every other section');
+    await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row')].find(n => n.textContent.includes('Permissions')).click()");
+    await waitFor("document.querySelectorAll('#bots-u4-host [data-panel-card=\"permissions\"] [aria-label=Approval] [role=radio]:not([disabled])').length === 5", 4000);
     assert.match(await js("document.querySelector('#bots-u4-host [aria-label=Approval] [role=radio][aria-checked=true]').textContent"), /Full/, 'a new bot stays on Full');
-    const more = await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row .bots-row-title')].map(n => n.textContent)");
-    assert.deepEqual(more, ['Overview', 'Skills', 'Memory', 'Routines', 'Access', 'Voice and alerts', 'Who can see it', 'History', 'Usage'], 'every section that is not on Details or Settings');
+    await key('Escape', '#bots-u4-host .bots-back');
+    await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'More settings'");
+    await key('Escape', '#bots-u4-host .bots-back');
+    await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Settings'");
     await js("[...document.querySelectorAll('#bots-u4-host .bots-nav-row')].find(n => n.textContent.includes('Access')).click()");
     await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Access'");
     assert.match(await text('#bots-u4-host .bots-back'), /Settings/);
@@ -507,7 +515,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     assert.ok(await exists('#bots-u4-host [data-panel-card="soul"] textarea'), 'and on the instructions card in Simple');
     await mountPanel('simple', { section: 'usage' });
     await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Usage'");
-    assert.match(await text('#bots-u4-host .bots-back'), /Settings/);
+    assert.match(await text('#bots-u4-host .bots-back'), /More settings/, 'a link to Usage lands under More settings');
     await js("window.__panel.openSection('access')");
     await waitFor("document.querySelector('#bots-u4-host .bots-page-title')?.textContent === 'Access'", 4000);
     assert.equal(await js("window.__panel.openSection('nope')"), false, 'an unknown section is refused, not drawn');

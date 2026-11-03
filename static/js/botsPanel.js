@@ -456,13 +456,13 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     if (top === 'tabs') wrap.append(state.tab === 'library' ? libraryPage(ctx) : state.tab === 'computer' ? computerPage(ctx) : detailsPage());
     else {
       const def = registry.find(s => s.id === top);
-      const title = top === 'settings' ? 'Settings' : def?.label || top;
+      const title = top === 'settings' ? 'Settings' : top === 'more' ? 'More settings' : def?.label || top;
       wrap.append(PageHeader({ title, backLabel: previous, onBack: pop }));
-      wrap.append(top === 'settings' ? settingsPage() : def ? el('div', { class: 'bots-page-section' }, [bodyOf(def)]) : note('This page is not available.'));
+      wrap.append(top === 'settings' ? settingsPage() : top === 'more' ? moreSettingsPage() : def ? el('div', { class: 'bots-page-section' }, [bodyOf(def)]) : note('This page is not available.'));
     }
     return wrap;
   }
-  const PAGE_TITLE = id => (id === 'settings' ? 'Settings' : id === 'details' ? 'Details' : id === 'library' ? 'Library' : id === 'computer' ? 'Computer' : registry.find(s => s.id === id)?.label || id);
+  const PAGE_TITLE = id => (id === 'settings' ? 'Settings' : id === 'more' ? 'More settings' : id === 'details' ? 'Details' : id === 'library' ? 'Library' : id === 'computer' ? 'Computer' : registry.find(s => s.id === id)?.label || id);
   const sectionNode = id => { const def = registry.find(s => s.id === id); return def ? bodyOf(def) : note('This section is not available.'); };
 
   function detailsPage() {
@@ -477,12 +477,19 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     const a = state.agent;
     const intro = TextRow({ title: 'Introduction', value: a.blurb || '', maxLength: 4000, multiline: true, onCommit: v => ctx.update({ blurb: v }) });
     const group = teamRow(ctx);
-    const onPage = registry.filter(s => homeOf(s.id) === 'page');
-    const extra = [];
+    // Simple keeps four things in reach (2026-11-02, "so many buttons"): what it is told, who it is, its routines and
+    // what it can use. Everything else is one row away under More settings, and all of it stays in Advanced.
+    const go = id => () => { state.stack = ['settings', id]; render(); };
+    const sectionRow = id => { const s = registry.find(d => d.id === id); return s ? NavRow({ title: s.label, iconName: s.iconName, onClick: go(id) }) : null; };
     return el('div', { class: 'bots-page-section' }, [
-      sectionNode('soul'), Card({ children: [intro, group] }), sectionNode('delivery'), sectionNode('permissions'),
-      Card({ label: 'More', children: [NavRow({ title: 'Overview', iconName: 'info', onClick: () => { state.stack = ['settings', 'overview']; render(); } }),
-        ...onPage.map(s => NavRow({ title: s.label, iconName: s.iconName, onClick: () => { state.stack = ['settings', s.id]; render(); } })), ...extra] })]);
+      sectionNode('soul'), Card({ children: [intro, group] }),
+      Card({ children: [sectionRow('routines'), sectionRow('access'), NavRow({ title: 'More settings', iconName: 'ellipsis', onClick: go('more') })].filter(Boolean) })]);
+  }
+  function moreSettingsPage() {
+    const go = id => () => { state.stack = ['settings', 'more', id]; render(); };
+    const rest = ['overview', 'delivery', 'permissions', ...registry.filter(s => homeOf(s.id) === 'page' && !['routines', 'access'].includes(s.id)).map(s => s.id)];
+    return el('div', { class: 'bots-page-section' }, [Card({ children: rest.map(id => registry.find(s => s.id === id)).filter(Boolean)
+      .map(s => NavRow({ title: s.label, iconName: s.iconName, onClick: go(s.id) })) })]);
   }
 
   // -- moving around ---------------------------------------------------------------------------------------
@@ -501,7 +508,8 @@ export function mountBotPanel(host, { agentId, section = null, mode = null, onCl
     } else {
       const home = homeOf(id);
       if (home === 'details') { state.stack = []; state.tab = 'details'; }
-      else state.stack = home === 'settings' ? ['settings'] : ['settings', id];
+      // Settings holds the instructions, Routines and Access; everything else lives under More settings.
+      else state.stack = id === 'soul' ? ['settings'] : ['routines', 'access'].includes(id) ? ['settings', id] : ['settings', 'more', id];
       if (focus) pendingFocus = () => {
         if (id === 'identity') root.querySelector('.bots-hero-name')?.focus();
         else root.querySelector(`[data-panel-card="${id}"]`)?.scrollIntoView({ block: 'nearest' });

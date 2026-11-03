@@ -34,8 +34,17 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base }) => {
     await waitFor(`!!document.querySelector('.bots-rail-row[data-agent-id="${bot.id}"]')`);
     assert.equal(await js("document.querySelector('.bots-rail-row[data-agent-id]')?.dataset.agentId"), bot.id, 'front desk leads the bot rail');
     // 2026-11-02: Kip is its own card above the sections, as Kairos's own Kip, and leaves the bot lists.
-    assert.ok(await js(`(() => { const desk = document.querySelector('.bots-rail-desk[data-agent-id="${bot.id}"]'); return !!desk && desk.textContent.includes('Your front desk')
+    assert.ok(await js(`(() => { const desk = document.querySelector('.bots-rail-desk[data-agent-id="${bot.id}"]'); return !!desk && desk.textContent.includes('Your assistant')
       && document.querySelectorAll('.bots-rail-row[data-agent-id="${bot.id}"]').length === 1 && JSON.parse(desk.querySelector('[data-avatar-spec]').dataset.avatarSpec).color === 'ink'; })()`), 'one Kip card, with the normal Kip');
+    // Fewer controls (2026-11-02): New and More in the head and one Inbox row; Team map and the rest sit in the menus.
+    const shown = sel => js(`!!document.querySelector(${JSON.stringify(sel)})?.getClientRects().length`);
+    assert.deepEqual([await shown('.bots-rail-make'), await shown('.bots-rail-moremenu'), await shown('.bots-rail-inbox'), await shown('.bots-rail-team-map'), await shown('.bots-rail-attention-btn')],
+      [true, true, true, false, false], 'the sidebar shows New, More and Inbox only');
+    await js("document.querySelector('.bots-rail-moremenu').click()");
+    await waitFor("!!document.querySelector('.bots-menu')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.bots-menu .bots-menu-row-label')].map(n => n.textContent).slice(0, 5)"), ['Team map', 'Automations', 'Notifications', 'Activity', 'Inspector']);
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+    await waitFor("!document.querySelector('.bots-menu')");
 
     // Exercise the real menu without depending on the front-desk shell unit.
     anchorId = `fd-menu-${Date.now()}`;

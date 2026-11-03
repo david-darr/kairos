@@ -207,22 +207,27 @@ def _owned(agent_id: str) -> list[dict]:
     return [t for t in task_service.list_tasks() if t.get("agent_id") == agent_id]
 
 
-def _summary(agent: dict) -> dict:
-    """The agent plus what its card on the Agents list shows."""
+def _summary(agent: dict, user: str | None = None) -> dict:
+    """The agent plus what its card on the Agents list shows. With `user`, items that person marked done in the
+    inbox no longer count as needing them (2026-11-02: "Needs you" stayed after Mark done)."""
     from services.agent_handoff import person_inbox
     from services.chat_live import agent_activity
+    from core import bot_attention_store
+    done = {key for key, pref in bot_attention_store.inbox_preferences(user).items() if pref.get("done")} if user else set()
     owned = _owned(agent["id"])
     running = next((t for t in owned if t["schedule_kind"] == "card" and t.get("status") == "running"), None) \
         or next((t for t in owned if t["schedule_kind"] != "card" and t.get("run_started_at")), None)
-    needs_you = len(person_inbox(agent["id"])) + sum(
-        1 for t in owned if t["schedule_kind"] == "card" and t.get("status") == "review")
+    needs_you = sum(1 for item in person_inbox(agent["id"]) if "item:" + item["id"] not in done) + sum(
+        1 for t in owned if t["schedule_kind"] == "card" and t.get("status") == "review" and "review:" + t["id"] not in done)
     chat = agent_activity(agent["id"])
     needs_you += int(bool(chat and chat["waiting"]))
     activity = ({"kind": "task", "working": True, "waiting": bool(chat and chat["waiting"]),
                  "name": running["name"], "detail": str(running.get("prompt") or "")[:240]}
                 if running else chat)
     may_run, why_not = agent_service.can_run(agent["id"])
-    status = ("off" if not agent["enabled"] else "working" if activity else "needs_you" if needs_you
+    # A turn paused on the person's answer is waiting on them, not working (2026-11-02: bots stuck on "Thinking").
+    waiting = bool(activity and activity.get("waiting"))
+    status = ("off" if not agent["enabled"] else "needs_you" if waiting else "working" if activity else "needs_you" if needs_you
               else "capped" if not may_run else "idle")
     # `instructions` is the old name of the one standing-instruction field: it
     # reads as the soul, so the older Agents tab shows (and edits) what is used.
@@ -276,7 +281,7 @@ def _refused(error: ValueError) -> HTTPException:
 
 @router.get("")
 async def list_agents(user: str = Depends(require_admin)) -> list[dict]:
-    return [_summary(a) for a in agent_service.list_agents()]
+    return [_summary(a, user) for a in agent_service.list_agents()]
 
 
 @router.post("")
@@ -489,7 +494,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
     owned = _owned(agent_id)
     owned_ids = {t["id"] for t in owned}
     return {
-        "agent": _summary(agent),
+        "agent": _summary(agent, user),
         "soul_file": agent_service.read_soul(agent_id),
         "memory": agent_service.read_memory(agent_id),
         "memory_upkeep_journal": agent_service.memory_upkeep_journal(agent_id),

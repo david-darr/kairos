@@ -201,12 +201,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, wr
     assert.ok(asked.id, 'a card for the question');
     await js("document.dispatchEvent(new CustomEvent('kairos:bot-card')); true");
     await waitFor("document.querySelector('.bots-card-composer')?.textContent.includes('Run a command')");
-    await waitFor("document.querySelector('.bots-composer-host').hidden === true");
+    // 2026-11-02: the card sits in the conversation after the last message, the composer stays, and one line leads back.
+    assert.ok(await js("!!document.querySelector('.bots-transcript .bots-inline-cards .bots-card-composer')"), 'the card is in the conversation');
+    await waitFor("document.querySelector('.bots-waiting-line')?.hidden === false && document.querySelector('.bots-composer-host').hidden === false");
+    assert.match(await js("document.querySelector('.bots-waiting-line').textContent"), /is waiting on your answer/);
     assert.equal(await js("document.querySelector('.bots-live').dataset.state"), 'needs');
     liveChange(sid, { permission: null });
     await call(`/api/bot-cards/__fixture/expire/${asked.id}`, 'POST', {});
     await js("document.dispatchEvent(new CustomEvent('kairos:bot-card')); true");
-    await waitFor("document.querySelector('.bots-composer-host').hidden === false");
+    await waitFor("document.querySelector('.bots-waiting-line').hidden === true");
     await waitFor(`document.querySelector(${q(INPUT)}).disabled === false`);
     reply(sid, 'Next turn answer.');
     await waitFor("!document.querySelector('.bots-live')");
