@@ -62,8 +62,30 @@ module.exports = async function sidebarChecks(c) {
   await besideTitle('Home');
   ok(await js("(() => { const d = document.getElementById('ms-drawer'); return d.inert && d.getAttribute('aria-hidden') === 'true' && !d.hasAttribute('aria-modal') && !d.hasAttribute('role') && getComputedStyle(d).visibility === 'hidden'; })()"), 'Closed, the sidebar is hidden, inert and not a dialog (Bots notices wait for open dialogs)');
   ok(await js("getComputedStyle(document.getElementById('content')).transform === 'none'"), 'Closed, the page is not moved');
+  // 2026-11-03 (David): Home's greeting starts where the other tabs' titles do.
+  const titleTop = () => js("(() => { const t = document.querySelector('.ms-menu-indent'); return t ? Math.round(t.getBoundingClientRect().top) : null; })()");
+  const homeTop = await titleTop();
+  await navigate('calendar'); await menuShown(); await besideTitle('Calendar');
+  const calendarTop = await titleTop();
+  ok(homeTop !== null && calendarTop !== null && Math.abs(homeTop - calendarTop) <= 4, `Home's title sits level with Calendar's: ${homeTop} vs ${calendarTop}`);
+  await navigate('home'); await menuShown(); await besideTitle('Home');
 
-  // ---- 2. Open: the brand, the rows, the bottom, focus ----------------------------------------
+  // ---- 2. Open: one motion; then the brand, the rows, the bottom, focus ----------------------------
+  // 2026-11-03 (David, "more seamless"): mid-slide the sidebar rides the page's edge, the menu button moves
+  // with the page instead of vanishing, and the dim fades in rather than popping on.
+  const slide = await js(`(async () => { const c = document.getElementById('content'), d = document.getElementById('ms-drawer'), m = ${MENU}, s = document.querySelector('.ms-drawer-scrim');
+    const m0 = m.getBoundingClientRect().left; m.click(); const seen = [];
+    for (let i = 0; i < 60; i++) { await new Promise(r => requestAnimationFrame(r)); const page = c.getBoundingClientRect().left;
+      seen.push({ page: Math.round(page), edge: Math.round(d.getBoundingClientRect().right), menu: Math.round(m.getBoundingClientRect().left - page - m0), scrim: +(+getComputedStyle(s).opacity).toFixed(3), shown: !m.hidden && m.getClientRects().length > 0 });
+      if (page > d.getBoundingClientRect().width - 1) break; }
+    return seen; })()`);
+  const midSlide = slide.find(r => r.page > 60 && r.page < 260);
+  ok(midSlide && Math.abs(midSlide.edge - midSlide.page) <= 1 && Math.abs(midSlide.menu) <= 1 && midSlide.shown && midSlide.scrim > 0 && midSlide.scrim < 1,
+    'Mid-slide the sidebar rides the page edge, the menu button moves with the page and the dim fades in: ' + JSON.stringify(midSlide || slide.slice(0, 4)));
+  await settled();
+  ok(await js(`${MENU}.getBoundingClientRect().left > 300 && ${MENU}.inert`), 'Open, the menu button sits aside with the page, out of reach under the dim');
+  await press('Escape'); await closed(); await settled();
+  ok(await js("!document.documentElement.classList.contains('ms-drawer-settling') && getComputedStyle(document.getElementById('content')).transform === 'none'"), 'Once closed the page lets go of its transform');
   await openSidebar();
   const open = await js(`(() => { const d = document.getElementById('ms-drawer'), r = d.getBoundingClientRect(), c = document.getElementById('content'), cr = c.getBoundingClientRect(), s = document.querySelector('.ms-drawer-scrim').getBoundingClientRect();
     return { role: d.getAttribute('role'), modal: d.getAttribute('aria-modal'), label: d.getAttribute('aria-label'), focus: document.activeElement === d, expanded: ${MENU}.getAttribute('aria-expanded'),
@@ -81,7 +103,7 @@ module.exports = async function sidebarChecks(c) {
   eq(open.labels, ['Home', 'Chats', 'Forge', 'Bots', 'More'], 'Each row carries its name');
   ok(open.icons, 'Each row has a decorative icon');
   eq(open.current, ['home'], 'Home is the current row on the dashboard');
-  ok(open.drawer[0] === 0 && open.drawer[1] >= 280 && open.drawer[1] <= 330 && open.page[0] === Math.round(open.drawer[1]) && open.page[1] >= 24 && open.scrim[0] === open.page[0] && open.scrim[1] === W && open.contentInert,
+  ok(Math.abs(open.drawer[0]) < 0.5 && open.drawer[1] >= 280 && open.drawer[1] <= 330 && open.page[0] === Math.round(open.drawer[1]) && open.page[1] >= 24 && open.scrim[0] === open.page[0] && open.scrim[1] >= W && open.contentInert,
     'The page slides aside by the sidebar width, rounded, dimmed and inert: ' + JSON.stringify(open));
   ok(open.profile.name === open.account && open.profile.initial === open.avatar && open.profile.label === `${open.account}, Settings`, 'The profile shows the account initial and name and says it opens Settings: ' + JSON.stringify(open.profile));
   eq(open.create, 'New chat', 'New chat sits at the bottom');
@@ -170,7 +192,7 @@ module.exports = async function sidebarChecks(c) {
   eq(await navCurrent(), 'chats', 'New chat opens a conversation under Chats');
   await menuGone(); ok(true, 'A conversation keeps its own Back: no menu button');
 
-  // ---- 7. Pushed and full-screen pages: no menu button; the swipe still opens the sidebar ----------
+  // ---- 7. Pushed and full-screen pages: no menu button (a swipe right goes back, section 8) ----------
   const pushed = [
     ['a conversation', () => navigate('chat', { sessionId: 's1' }), "!!document.querySelector('.ms-conversation .ms-composer')"],
     ['a bot page', () => navigate('agents', { agentId: 'a1' }), "!!document.querySelector('.bots-composer-input')"],
@@ -205,9 +227,42 @@ module.exports = async function sidebarChecks(c) {
     await settled(); await shot('sidebar-swiped-open');
     await swipe(360, 420, -220); await closed();
     ok(await js("!document.documentElement.classList.contains('ms-drawer-dragging') && !document.documentElement.style.getPropertyValue('--ms-drawer-x')"), 'A swipe left on the page closes it and leaves nothing behind');
-    await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(300);
-    await swipe(60, 300, 220); ok(await isOpen(), 'A pushed page opens the sidebar by swipe too');
-    await js("document.querySelector('.ms-drawer-scrim').click()"); await closed();
+    // A swipe let go half way finishes from the finger, not from where the page started.
+    const released = await (async () => {
+      await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 420 }] });
+      for (let i = 1; i <= 8; i++) { await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 60 + 140 * i / 8, y: 420 }] }); await delay(16); }
+      await js("window.__pageX = []; (function f() { window.__pageX.push(Math.round(document.getElementById('content').getBoundingClientRect().left)); if (window.__pageX.length < 30) requestAnimationFrame(f); })()");
+      await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await delay(600);
+      return js('window.__pageX');
+    })();
+    ok(await isOpen() && released[0] >= 100 && released.every((x, i) => i === 0 || x >= released[i - 1] - 1), 'Let go mid-swipe, the page carries on from the finger without jumping back: ' + JSON.stringify(released.slice(0, 8)));
+    await js("document.querySelector('.ms-drawer-scrim').click()"); await closed(); await settled();
+
+    // 2026-11-03 (David): on a pushed page a swipe right goes back first; the next swipe opens the sidebar.
+    const backTo = [
+      ['a conversation', () => navigate('chat', { sessionId: 's1' }), "!!document.querySelector('.ms-conversation .ms-composer')", 'the Chats list', "!!document.querySelector('.ms-history-list') && !document.querySelector('.ms-conversation:not(.ms-launch-chat)')"],
+      ['a bot page', () => navigate('agents', { agentId: 'a1' }), "!!document.querySelector('.bots-composer-input')", 'the Bots roster', "!document.querySelector('.bots-shell')"],
+      ['a Forge session', async () => { await navigate('forgeHome', { mobilePage: 1 }); await waitFor("document.querySelectorAll('#mf-sessions .ms-history-main').length > 0"); await delay(300); await js("document.querySelector('#mf-sessions .ms-history-main').click()"); }, "!!document.querySelector('.mf-session .forge-transcript-composer')", 'the Sessions list', "!document.querySelector('.mf-session')"],
+    ];
+    for (const [label, go, ready, target, landed] of backTo) {
+      await go(); await waitFor(ready); await delay(400);
+      await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 300 }] });
+      for (let i = 1; i <= 8; i++) { await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 60 + 200 * i / 8, y: 300 }] }); await delay(16); }
+      const following = await js("Math.round(document.getElementById('content').getBoundingClientRect().left)");
+      await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      ok(following > 120, `${label}: the page follows the finger right: ${following}`);
+      await waitFor(landed, 4000); await menuShown(); await delay(300);
+      ok(!(await isOpen()), `${label}: a swipe right goes back to ${target}, not to the sidebar`);
+      const placed = await js("({ classes: document.documentElement.className.match(/ms-back-[a-z]+/g), transform: getComputedStyle(document.getElementById('content')).transform })");
+      ok(!placed.classes && placed.transform === 'none', `${label}: the page is back in place after going back: ${JSON.stringify(placed)}`);
+      await swipe(60, 420, 220); ok(await isOpen(), `${label}: the next swipe right, on ${target}, opens the sidebar`);
+      await js("document.querySelector('.ms-drawer-scrim').click()"); await closed(); await settled();
+    }
+    // A short pull on a pushed page eases it back and stays.
+    await navigate('chat', { sessionId: 's1' }); await waitFor("!!document.querySelector('.ms-conversation .ms-composer')"); await delay(400);
+    await swipe(60, 300, 50);
+    await delay(400);
+    ok(await js("!!document.querySelector('.ms-conversation:not(.ms-launch-chat)') && !/ms-back-/.test(document.documentElement.className) && getComputedStyle(document.getElementById('content')).transform === 'none'"), 'A short pull on a pushed page eases back and stays there');
   } finally { await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }); }
 
   // ---- 9. Kip: its own menu button opens the sidebar ------------------------------------------------

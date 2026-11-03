@@ -426,13 +426,7 @@ export function createVaultExplorer(container, { store = createVaultStore(), ope
   };
   phone.addEventListener('change', syncPhone); document.addEventListener('kairos:appearance', syncPhone);
 
-  let edge = null;
-  const touchStart = event => { if (mobileOn() && browser.classList.contains('vault-phone-detail') && event.touches.length === 1 && event.touches[0].clientX < 24 && !document.querySelector('dialog[open]')) edge = { x: event.touches[0].clientX, y: event.touches[0].clientY }; };
-  const touchEnd = event => { if (edge && event.changedTouches[0].clientX - edge.x > 70 && Math.abs(event.changedTouches[0].clientY - edge.y) < 60) back_(); edge = null; };
-  const touchCancel = () => { edge = null; };
-  reader.addEventListener('touchstart', touchStart, { passive: true });
-  reader.addEventListener('touchend', touchEnd);
-  reader.addEventListener('touchcancel', touchCancel);
+  // A swipe right runs Back to Vault (.vault-phone-back) through the app's shared swipe back (mobileSidebar.js).
 
   async function canLeave() {
     return editor ? editor.canLeave() : true;

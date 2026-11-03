@@ -2,11 +2,13 @@
 // conversations, rooms, teams, Team map, Templates, Automations, Archived) in a full-screen sheet: one list for
 // both sizes, so a phone reaches everything the desktop sidebar does. Inbox opens the attention host's inbox,
 // which is already a bottom sheet on a phone (bots-attention.css). Picking anything in the list closes the sheet.
-import { attachSheetDrag } from './mobileSheet.js';
+import { attachSheetDrag, slideSheetAway } from './mobileSheet.js';
 import { button, mobileOn, phone, haptic } from './mobileShared.js';
 
 let sheet = null, cleanup = null, opener = null, offPanel = null;
 
+// The grabber, Escape and a tap outside slide the sheet down; leaving the page closes it at once.
+const dismissList = () => slideSheetAway(sheet) || closeBotsList();
 function closeOnLeave() { closeBotsList({ restoreFocus: false }); }
 function closeOnSize() { if (!mobileOn()) closeBotsList({ restoreFocus: false }); }
 
@@ -26,11 +28,11 @@ export async function openBotsList(from) {
   if (!sheet) {
     sheet = document.createElement('dialog'); sheet.className = 'ms-tab-sheet ms-bots-sheet rd-sheet-in'; sheet.id = 'ms-bots-sheet';
     sheet.setAttribute('aria-label', 'Chats');
-    sheet.addEventListener('click', event => { if (event.target === sheet) closeBotsList(); });
-    sheet.addEventListener('cancel', event => { event.preventDefault(); closeBotsList(); });
+    sheet.addEventListener('click', event => { if (event.target === sheet) dismissList(); });
+    sheet.addEventListener('cancel', event => { event.preventDefault(); dismissList(); });
     attachSheetDrag(sheet, closeBotsList, { enabled: mobileOn });
     const panel = document.createElement('div'); panel.className = 'ms-sheet-panel';
-    const grab = button('Close Chats', () => closeBotsList(), 'ms-sheet-grab'); grab.setAttribute('aria-label', 'Close Chats');
+    const grab = button('Close Chats', dismissList, 'ms-sheet-grab'); grab.setAttribute('aria-label', 'Close Chats');
     const heading = document.createElement('h2'); heading.className = 'ms-sheet-heading'; heading.textContent = 'Chats';
     const host = document.createElement('nav'); host.className = 'ms-bots-list-host'; host.setAttribute('aria-label', 'Bots and conversations');
     panel.append(grab, heading, host); sheet.append(panel); document.body.append(sheet);

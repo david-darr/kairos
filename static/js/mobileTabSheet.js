@@ -1,5 +1,5 @@
 import { openNotifications } from './mobileActions.js';
-import { attachSheetDrag } from './mobileSheet.js';
+import { attachSheetDrag, slideSheetAway } from './mobileSheet.js';
 import { button, mobileOn, haptic, go } from './mobileShared.js';
 import { activityItems } from './mobileActivity.js';
 import { sidebarLayout, knownTabs } from './layout.js';
@@ -13,6 +13,8 @@ let sheet, opener;
 // The tabs the sidebar itself shows; More lists the rest.
 const IN_SIDEBAR = new Set(['home', 'chat']);
 const libraryGlyph = () => { const t = document.createElement('template'); t.innerHTML = ICONS.library; return t.content.firstElementChild.innerHTML; };
+// The grabber, Escape and a tap outside slide the sheet down; a tile closes it at once and moves on.
+const dismissMore = () => slideSheetAway(sheet) || closeMoreSheet();
 export function closeMoreSheet() {
   if (!sheet?.open) return;
   sheet.close(); sheet.removeAttribute('aria-modal');
@@ -24,11 +26,11 @@ export function openMoreSheet(from) {
   if (!sheet) {
     sheet = document.createElement('dialog'); sheet.className = 'ms-tab-sheet ms-more-sheet rd-sheet-in'; sheet.id = 'ms-more-sheet';
     sheet.setAttribute('aria-label', 'More');
-    sheet.addEventListener('click', e => { if (e.target === sheet) closeMoreSheet(); });
-    sheet.addEventListener('cancel', e => { e.preventDefault(); closeMoreSheet(); });
+    sheet.addEventListener('click', e => { if (e.target === sheet) dismissMore(); });
+    sheet.addEventListener('cancel', e => { e.preventDefault(); dismissMore(); });
     attachSheetDrag(sheet, closeMoreSheet, { enabled: mobileOn });
     sheet.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { e.preventDefault(); closeMoreSheet(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); dismissMore(); return; }
       if (e.key !== 'Tab') return;
       const controls = [...sheet.querySelectorAll('button, a[href]')].filter(n => !n.disabled && n.getClientRects().length);
       const first = controls[0], last = controls.at(-1);
@@ -40,7 +42,7 @@ export function openMoreSheet(from) {
   document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'more-sheet' } }));
   opener = from; haptic();
   const panel = document.createElement('div'); panel.className = 'ms-sheet-panel';
-  const grab = button('Close More', closeMoreSheet, 'ms-sheet-grab'); grab.setAttribute('aria-label', 'Close More');
+  const grab = button('Close More', dismissMore, 'ms-sheet-grab'); grab.setAttribute('aria-label', 'Close More');
   const heading = document.createElement('h2'); heading.className = 'ms-sheet-heading'; heading.textContent = 'More';
   const groups = document.createElement('nav'); groups.setAttribute('aria-label', 'Tabs');
   const grids = new Map();

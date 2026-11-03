@@ -135,7 +135,7 @@ async function run(ctx) {
   ok(await js("document.activeElement === document.querySelector('.view-constrained .form-grid input')"), 'Notes + focuses the new note field');
   await js("document.querySelector('.notes-sort-trigger').click()");
   ok(await js("document.querySelector('dialog.ms-sheet[open] .notes-sort')?.options.length === 3"), 'Quiet Sort opens all existing sort options in a sheet');
-  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   ok(await js("document.activeElement === document.querySelector('.notes-sort-trigger')"), 'Sort closes back to its text control');
 
   for (const [tab, q] of [['tasks', 'Write'], ['cookbook', 'local'], ['email', 'Project']]) {
@@ -160,14 +160,14 @@ async function run(ctx) {
   ok(await js("[...document.querySelectorAll('#tasks-list .task-row-details')].every(n => !n.getClientRects().length)"), 'Routine rows keep desktop controls out of the list');
   await js("document.querySelector('.task-routine-row').click()");
   ok(await js("!!document.querySelector('dialog.ms-sheet[open] .task-row-details .custom-select') && /Turn off|Turn on/.test(document.querySelector('dialog.ms-sheet[open]').textContent) && /Run now|Stop/.test(document.querySelector('dialog.ms-sheet[open]').textContent)"), 'Tapping a routine opens its real model, delivery, toggle and run controls');
-  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   ok(await js("document.activeElement === document.querySelector('.task-routine-row')"), 'Task sheet returns focus to the routine');
   await js("document.querySelector('.view-header [aria-label=\"New task\"]').click()");
   ok(await js("!!document.activeElement.closest('details')?.open"), 'Header Tasks + opens and focuses the schedule form');
   await navigate('email'); await waitFor("!!document.querySelector('.ms-page-search')");
   await js("document.querySelector('.view-header [aria-label=Accounts]').click()");
   ok(await js("!!document.querySelector('dialog.ms-sheet[open] #email-accounts-list') && !!document.querySelector('dialog.ms-sheet[open] details.disclosure-panel')"), 'Header Accounts opens connection and account management together');
-  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   await navigate('cookbook'); await waitFor("!!document.querySelector('.ms-page-search')");
   const downloads = writes.length;
   await js("document.querySelector('.view-header [aria-label=\"Setup guide\"]').click()");
@@ -366,7 +366,7 @@ async function run(ctx) {
   await js("document.querySelector('.view-header [aria-label=\"Create or upload in Drive\"]').click()");
   ok(await js("!!document.querySelector('dialog.ms-sheet[open] details.google-new-menu[open]') && document.querySelectorAll('dialog.ms-sheet[open] .google-new-actions button').length === 4"), 'Drive + opens all existing New actions in a sheet');
   await shot('library-drive');
-  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()");
+  await js("document.querySelector('dialog.ms-sheet[open] .ms-sheet-header button').click()"); await waitFor("!document.querySelector('dialog.ms-sheet[open]')");
   for (const name of ['Files', 'Vault', 'Google Drive', 'Files', 'Vault']) {
     await libTab(name); await delay(500);
     ok(await docks() === 0 && (await js("document.querySelectorAll('.ms-page-search input').length")) <= 1, 'No duplicate dock or search after switching to ' + name);
@@ -686,14 +686,17 @@ async function run(ctx) {
       const buttons = headerButtons.map(n => ({ ...box(n), radius: parseFloat(getComputedStyle(n).borderRadius), back: n.matches('.settings-mobile-back') }));
       const style = title && getComputedStyle(title.querySelector('.settings-mobile-title') || title);
       const v = document.getElementById('view-content');
-      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background') && !headerButtons.some(b => b.contains(n)) && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
+      const tops = [...v.querySelectorAll('*')].filter(n => n.getClientRects().length && !title?.contains(n) && !n.closest('.settings-titlebar, .ms-header, .ms-background, .hm-heading') && !headerButtons.some(b => b.contains(n)) && getComputedStyle(n).position !== 'fixed' && getComputedStyle(n).visibility !== 'hidden' && n.getBoundingClientRect().height > 0 && (!n.children.length || n.matches('button, input, textarea, select, img, canvas, .tool-store-top, .dashboard-hero')))
         .map(n => ({ t: n.getBoundingClientRect().top, n: (n.className || n.tagName) + ' ' + n.textContent.trim().slice(0, 16) }));
       const first = tops.sort((a, b) => a.t - b.t)[0];
-      return { row, title: title && box(forgeTitle ? title.parentElement : title), indent: !forgeTitle && !!title?.classList.contains('ms-menu-indent'), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
+      const greeting = document.querySelector('#view-content .hm-heading');
+      return { row, greeting: greeting && box(greeting), title: title && box(forgeTitle ? title.parentElement : title), indent: !forgeTitle && !!title?.classList.contains('ms-menu-indent'), text: title && title.textContent.trim(), first, width: innerWidth, buttons, align: style?.textAlign, italic: style?.fontStyle, family: style?.fontFamily };
     })()`);
     // Home's independently redesigned hero has no shell title; keep checking
     // its first-content clearance without treating a section heading as one.
     if (!label.endsWith(': home')) ok(r.title && r.text, `${label}: the page title is present`);
+    // 2026-11-03 (David): Home's greeting starts in the top row, where the other tabs' titles sit.
+    else ok(r.greeting && r.greeting.t >= r.row.t - 1 && r.greeting.t <= r.row.t + 16, `${label}: the greeting starts on the top row: ${JSON.stringify({ greeting: r.greeting, row: r.row })}`);
     if (r.title) {
       ok(Math.abs((r.title.t + r.title.b) / 2 - (r.row.t + r.row.b) / 2) <= 1 && Math.abs(r.title.l - (r.row.l + (r.indent ? 52 : 0))) <= 1 && r.title.r <= r.row.r + 1 && r.align === 'left' && r.italic === 'italic' && /serif/i.test(r.family),
         `${label}: the serif italic title leads the top row on the left (beside the menu button on a top-level page): ${JSON.stringify(r)}`);
@@ -839,9 +842,19 @@ async function run(ctx) {
   ok(Math.abs(pulled.top - resting.top - 70 * 7 / 8) < 12 || pulled.top - resting.top > 40, 'The sheet follows the finger: ' + JSON.stringify({ resting, pulled }));
   ok(Number(pulled.drag) > 0 && Number(pulled.drag) < 0.3, 'The scrim fades with the drag: ' + pulled.drag);
   await shot('sheet-swipe-mid-drag');
+  // 2026-11-03 (David): it settles back without overshooting its rest, and the scrim fades back in.
+  await js("window.__sheetTops = []; (function f() { const d = document.querySelector('dialog[open]'); if (d) window.__sheetTops.push(d.getBoundingClientRect().top); if (window.__sheetTops.length < 30) requestAnimationFrame(f); })()");
   await release(); await delay(450);
   const back = await sheetState();
   ok(back && Math.abs(back.top - resting.top) < 1 && back.transform === '' && back.drag === '', 'A short pull springs back to rest: ' + JSON.stringify(back));
+  const tops = await js('window.__sheetTops');
+  ok(tops.length > 3 && Math.min(...tops) >= resting.top - 0.5 && tops.some(t => t > resting.top + 1 && t < pulled.top - 1), 'It eases back through the distance with no bounce past its rest: ' + JSON.stringify(tops.map(Math.round).slice(0, 10)));
+  // Pulled up from its handle, it gives a little and stops.
+  const up = await touchDrag(grabAt.l + 20, grabAt.t + 4, -160, 16);
+  const raised = await sheetState();
+  ok(raised.top < resting.top - 2 && raised.top > resting.top - 20, 'Pulled up, the sheet resists and stops near its rest: ' + JSON.stringify({ resting: resting.top, raised: raised.top }));
+  await up(); await delay(450);
+  ok(Math.abs((await sheetState()).top - resting.top) < 1, 'Let go, it settles back to rest');
   // Content scrolled away from the top does not start a dismissal.
   await js("(() => { const d = document.querySelector('dialog.ms-more-sheet'); d.style.maxHeight = '320px'; d.scrollTop = 40; })()");
   const scrolledAt = await rect('.ms-more-sheet .ms-tab-tile');
@@ -857,8 +870,14 @@ async function run(ctx) {
   ok(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), 'A swipe-closed sheet returns focus to the menu button the sidebar was opened from');
   ok(await js("document.querySelector('dialog.ms-more-sheet').style.transform === ''"), 'The closed sheet is clean for the next open');
   await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
-  await js("document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click()");
+  // The grabber, Escape and a tap outside slide the sheet down before it closes, rather than making it vanish.
+  const sliding = await js("(async () => { document.querySelector('dialog.ms-more-sheet .ms-sheet-grab').click(); const d = document.querySelector('dialog.ms-more-sheet'), top = d.getBoundingClientRect().top; await new Promise(r => setTimeout(r, 120)); return { open: d.open, from: top, now: d.getBoundingClientRect().top }; })()");
+  ok(sliding.open && sliding.now > sliding.from + 40, 'The grabber slides the sheet down: ' + JSON.stringify(sliding));
   await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')"); eq(1, 1, 'The grabber click still closes after a swipe');
+  await js(`${MORE}.click()`); await waitFor("!!document.querySelector('dialog.ms-more-sheet[open]')"); await settleMotion('dialog.ms-more-sheet'); await delay(150);
+  const escaping = await js("(async () => { const d = document.querySelector('dialog.ms-more-sheet'), top = d.getBoundingClientRect().top; d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await new Promise(r => setTimeout(r, 120)); return { open: d.open, from: top, now: d.getBoundingClientRect().top }; })()");
+  ok(escaping.open && escaping.now > escaping.from + 40, 'Escape slides the sheet down too: ' + JSON.stringify(escaping));
+  await waitFor("!document.querySelector('dialog.ms-more-sheet[open]')");
   // ---- R. Every round button centres its glyph (2026-10-25, David) ---------------------
   // Measures the drawn ink of each visible round button's icon (the SVG's content box mapped to the screen)
   // against the button's own box; a text glyph or generated-content icon cannot be centred reliably, so it fails.

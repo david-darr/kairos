@@ -78,12 +78,8 @@ export function mountMobileForgeSession(shell, bridge) {
       header.append(edgeBlur('top'), backButton, el('div', { class: 'mf-session-heading' }, [el('strong'), el('small')]), changes, more); shell.prepend(header); const status = bridge.status; statusHome = document.createComment('Forge status home'); status.before(statusHome); header.after(status); update();
     } else if (!mobileOn() && header) { sheet?.close(); statusHome?.after(bridge.status); statusHome?.remove(); header.remove(); header = null; }
   };
-  let edge;
-  const start = e => { if (mobileOn() && e.touches.length === 1 && e.touches[0].clientX < 24 && !document.querySelector('dialog[open]')) edge = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
-  const end = e => { if (edge && e.changedTouches[0].clientX - edge.x > 70 && Math.abs(e.changedTouches[0].clientY - edge.y) < 60) back(); edge = null; };
-  const cancel = () => { edge = null; };
-  shell.addEventListener('touchstart', start, { passive: true }); shell.addEventListener('touchend', end); shell.addEventListener('touchcancel', cancel);
+  // A swipe right runs Back (.mf-back) through the app's shared swipe back (mobileSidebar.js).
   document.addEventListener('kairos:forge-review', loadCount);
   phone.addEventListener('change', gate); document.addEventListener('kairos:appearance', gate); gate();
-  return { update, tool, changes: () => tool('git'), dispose() { disposed = true; ++countVersion; document.removeEventListener('kairos:forge-review', loadCount); sheet?.close(); statusHome?.after(bridge.status); statusHome?.remove(); header?.remove(); shell.classList.remove('mf-session'); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); shell.removeEventListener('touchstart', start); shell.removeEventListener('touchend', end); shell.removeEventListener('touchcancel', cancel); } };
+  return { update, tool, changes: () => tool('git'), dispose() { disposed = true; ++countVersion; document.removeEventListener('kairos:forge-review', loadCount); sheet?.close(); statusHome?.after(bridge.status); statusHome?.remove(); header?.remove(); shell.classList.remove('mf-session'); phone.removeEventListener('change', gate); document.removeEventListener('kairos:appearance', gate); } };
 }

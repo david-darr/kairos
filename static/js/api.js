@@ -1,4 +1,4 @@
-import { mountSheetSurface } from './mobileSheet.js';
+import { mountSheetSurface, slideSheetAway } from './mobileSheet.js';
 import { createMascot } from './mascot.js';
 // Thin fetch wrapper — every view module goes through this rather than
 // calling fetch() directly, matching Odysseus's own shared-request-helper
@@ -195,10 +195,12 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
     onClose?.();
     if (opener?.isConnected) opener.focus();
   };
+  // On a phone the close button, Escape and a tap outside slide the sheet down first.
+  const dismiss = () => slideSheetAway(panel) || close();
   const top = () => panelDialogs.at(-1) === dialog;
   const keydown = event => {
     if (!top()) return;
-    if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); dismiss(); }
     else if (event.key === "Tab") {
       const list = controls(), at = list.indexOf(document.activeElement);
       if (!list.length || (event.shiftKey ? at <= 0 : at === -1 || at === list.length - 1)) {
@@ -213,8 +215,8 @@ export function openPanelDialog({ title, body, footer, wide = false, className =
   const disposeSheet = mountSheetSurface(panel, close);
   panelDialogs.push(dialog);
   opener?.setAttribute?.("aria-haspopup", "dialog");
-  closeButton.addEventListener("click", close, { signal: controller.signal });
-  backdrop.addEventListener("click", event => { if (event.target === backdrop && top()) close(); }, { signal: controller.signal });
+  closeButton.addEventListener("click", dismiss, { signal: controller.signal });
+  backdrop.addEventListener("click", event => { if (event.target === backdrop && top()) dismiss(); }, { signal: controller.signal });
   document.addEventListener("keydown", keydown);
   document.addEventListener("focusin", focusin);
   document.documentElement.classList.add("panel-dialog-open");

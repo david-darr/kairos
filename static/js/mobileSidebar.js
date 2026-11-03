@@ -1,4 +1,4 @@
-import { mobileOn, phone, go, haptic } from './mobileShared.js';
+import { mobileOn, phone, go, haptic, reduced } from './mobileShared.js';
 import { ICONS } from './icons.js';
 import { ICON as KAIROS_MARK } from './brand.js';
 import { openMoreSheet } from './mobileTabSheet.js';
@@ -13,14 +13,19 @@ import { registerMobileDrawer, isMainDrawerZone } from './mobileDrawers.js';
 // opens Settings, and New chat at the bottom. It opens from the round menu
 // button on each top-level page, Kip's menu button, or a swipe right; the page
 // slides aside, rounded and dimmed, and a tap on it or a swipe left closes it.
+// On a pushed page (a chat, a bot, a Forge session, a Settings page, a document,
+// a vault note) a swipe right goes back first, the page following the finger;
+// the next swipe, on the top-level page, opens the sidebar (2026-11-03, David).
 
 // Pushed pages carry their own back control, and full-screen views their own
-// way out; the menu button stays off them (a swipe still opens the sidebar).
+// way out; the menu button stays off them.
 const NO_BUTTON = [
   '.ms-conversation:not(.ms-launch-chat)', '.ms-live-chat', '.mf-session', '.settings-mobile-page', '.library-editor',
   '.vault-phone-detail', '.bots-shell', '.design-focus', '#chat-sessions.open', '.agent-conversations-home.is-open',
   '#view-content .artifact-panel', '.bots-panel-aside', '.bots-attn:not([hidden])',
 ].join(', ');
+// Each pushed page's way back, innermost first (a bot's drill-down page before the bot itself).
+const BACK = ['.settings-mobile-back', '.library-editor-back', '.vault-phone-back', '.mf-back', '.bots-back', '.bots-head-back', '.ms-chat-back'];
 const glyph = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const GLYPHS = {
   menu: glyph('<path d="M4 8h16M4 16h11"/>'),
@@ -136,7 +141,7 @@ function paintRows() {
 }
 
 // The top-level page's own title: the menu button sits beside it. While the
-// sidebar is open the button keeps its place, hidden under it (CSS).
+// sidebar is open the button rides aside with the page, under the dim (CSS).
 function pageTitle() {
   const view = document.getElementById('view-content');
   // Measured against the page, which is slid aside while the sidebar is open.
@@ -181,30 +186,147 @@ const release = () => { anchor?.classList.remove('ms-menu-indent'); anchor?.styl
 // Kip draws its own menu button; focus returns to whichever opened the sidebar.
 const menuTarget = () => (opener?.isConnected && opener.getClientRects().length ? opener : null) || (!menu.hidden ? menu : null);
 
-export function openDrawer(from = menu) {
+// Letting go of a swipe finishes at the finger's speed: the curve starts at
+// about 2.25x its average speed (cubic-bezier(.32,.72,0,1)), so the slide lasts
+// 2.25 x distance / speed, kept between 200ms and the usual 420ms.
+let settleTimer = 0, settleEnd = null;
+function pace(from, to, speed) {
+  const root = document.documentElement;
+  const distance = Math.abs(to - from);
+  if (speed > 0 && distance > 0) root.style.setProperty('--ms-drawer-dur', `${Math.round(Math.min(420, Math.max(200, 2.25 * distance / speed)))}ms`);
+  else root.style.removeProperty('--ms-drawer-dur');
+}
+// The page keeps its transform until the slide closed has finished, then lets it go
+// (a transformed page would hold its fixed children, and the corners would pop).
+function settle() {
+  const root = document.documentElement, content = document.getElementById('content');
+  clearTimeout(settleTimer); if (settleEnd) content?.removeEventListener('transitionend', settleEnd);
+  const done = () => {
+    clearTimeout(settleTimer); content?.removeEventListener('transitionend', onEnd); settleEnd = null;
+    // At rest already: letting go of the transform must not start a transition of its own.
+    if (!drawerOpen() && root.classList.contains('ms-drawer-settling')) {
+      if (content) content.style.transition = 'none';
+      root.classList.remove('ms-drawer-settling');
+      content?.getBoundingClientRect();
+      if (content) content.style.transition = '';
+    }
+    root.style.removeProperty('--ms-drawer-dur');
+  };
+  const onEnd = event => { if (event.target === content && event.propertyName === 'transform') done(); };
+  settleEnd = onEnd; content?.addEventListener('transitionend', onEnd);
+  settleTimer = setTimeout(done, (parseFloat(getComputedStyle(root).getPropertyValue('--ms-drawer-dur')) || 420) + 120);
+}
+// The swipe's own state ends only once open or close has set where the page goes,
+// so the slide starts from the finger's place, not from where the page was.
+function letGo() {
+  const root = document.documentElement;
+  if (!root.classList.contains('ms-drawer-dragging')) return;
+  root.classList.remove('ms-drawer-dragging'); root.style.removeProperty('--ms-drawer-x'); root.style.removeProperty('--ms-drawer-p');
+}
+const drawerWidth = () => drawer.getBoundingClientRect().width || Math.min(innerWidth * .84, 330);
+const pageX = () => Math.max(0, document.getElementById('content')?.getBoundingClientRect().left || 0);
+
+export function openDrawer(from = menu, { speed = 0 } = {}) {
   if (!mobileOn() || !drawer || drawerOpen()) return;
   document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'drawer' } }));
   opener = from; haptic(); paintProfile(); paintRows();
   const root = document.documentElement;
-  root.classList.add('ms-drawer-open');
+  pace(pageX(), drawerWidth(), speed);
+  root.classList.add('ms-drawer-open', 'ms-drawer-settling'); letGo(); settle();
   drawer.inert = false; drawer.removeAttribute('aria-hidden'); drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true');
   const content = document.getElementById('content'); if (content) content.inert = true;
+  // The menu button moves aside with the page, under the dim: out of reach until the sidebar closes.
+  menu.inert = true;
   for (const node of [menu, from]) node?.setAttribute('aria-expanded', 'true');
   // Focus the sidebar itself, not a row: no ring on open; Tab then reaches the first row.
   drawer.focus({ preventScroll: true });
 }
 
 export function closeDrawer(restoreFocus = true) { close(restoreFocus); }
-function close(restoreFocus = true) {
+function close(restoreFocus = true, { speed = 0 } = {}) {
   if (!drawer) return;
-  const wasOpen = drawerOpen();
-  document.documentElement.classList.remove('ms-drawer-open');
+  const wasOpen = drawerOpen(), root = document.documentElement;
+  if (wasOpen) { pace(pageX(), 0, speed); root.classList.add('ms-drawer-settling'); }
+  root.classList.remove('ms-drawer-open'); letGo();
+  if (wasOpen) settle();
   drawer.inert = true; drawer.setAttribute('aria-hidden', 'true'); drawer.removeAttribute('role'); drawer.removeAttribute('aria-modal');
   const content = document.getElementById('content'); if (content) content.inert = false;
+  if (menu) menu.inert = false;
   for (const node of [menu, opener]) node?.setAttribute('aria-expanded', 'false');
   if (!wasOpen) return;
   schedule();
   if (restoreFocus) requestAnimationFrame(() => menuTarget()?.focus({ preventScroll: true }));
+}
+
+// ---- Swipe back: the page follows the finger right, then its own Back runs ----
+const shown = node => node.isConnected && !node.disabled && node.getClientRects().length > 0 &&
+  getComputedStyle(node).visibility !== 'hidden' && !node.closest('[hidden], [inert], [aria-hidden="true"], dialog, .ms-drawer');
+function backControl(target, touch) {
+  // The outermost edge is Safari's own Back, except in the home-screen app, which has none.
+  if (!mobileOn() || touch.clientX > Math.min(200, innerWidth * .5) || (touch.clientX < 16 && navigator.standalone !== true)) return null;
+  const content = document.getElementById('content');
+  if (!content?.contains(target)) return null;
+  for (const selector of BACK) {
+    const node = [...content.querySelectorAll(selector)].find(shown);
+    if (node) return node;
+  }
+  return null;
+}
+let backTimer = 0;
+const backX = px => document.documentElement.style.setProperty('--ms-back-x', `${Math.round(px)}px`);
+function backReset(animate) {
+  const root = document.documentElement, content = document.getElementById('content');
+  clearTimeout(backTimer);
+  if (!animate) {
+    // The page that replaced it appears in place, without sliding in from the side it left by.
+    const moved = [content, document.querySelector('.ms-global-frost')].filter(Boolean);
+    for (const node of moved) node.style.transition = 'none';
+    root.classList.remove('ms-back-dragging', 'ms-back-leaving', 'ms-back-return');
+    root.style.removeProperty('--ms-back-x'); root.style.removeProperty('--ms-back-dur');
+    content?.getBoundingClientRect();
+    for (const node of moved) node.style.transition = '';
+    if (!reduced.matches) content?.animate({ opacity: [0, 1] }, { duration: 180, easing: 'ease-out' });
+    return;
+  }
+  root.classList.add('ms-back-return'); root.classList.remove('ms-back-dragging', 'ms-back-leaving'); backX(0);
+  backTimer = setTimeout(() => backReset(false), 340);
+}
+function backDrag(dx) {
+  if (reduced.matches) return;
+  document.documentElement.classList.add('ms-back-dragging'); backX(dx);
+}
+function backCancel() {
+  const root = document.documentElement;
+  if (root.classList.contains('ms-back-dragging')) { root.classList.add('ms-back-return'); root.classList.remove('ms-back-dragging'); backX(0); }
+  clearTimeout(backTimer); backTimer = setTimeout(() => {
+    root.classList.remove('ms-back-return'); root.style.removeProperty('--ms-back-x');
+  }, 340);
+}
+// The page slides off at the finger's speed, then the page's own Back runs. If that
+// leaves the page in place (an unsaved-changes question, a refusal), it slides back.
+function backGo(control, { speed = 0 } = {}) {
+  const root = document.documentElement;
+  if (reduced.matches || !root.classList.contains('ms-back-dragging')) { haptic(); control.click(); backReset(false); return; }
+  const from = parseFloat(root.style.getPropertyValue('--ms-back-x')) || 0, distance = Math.max(1, innerWidth - from);
+  root.style.setProperty('--ms-back-dur', `${speed > 0 ? Math.round(Math.min(320, Math.max(160, 2.25 * distance / speed))) : 280}ms`);
+  root.classList.add('ms-back-leaving'); root.classList.remove('ms-back-dragging'); backX(innerWidth);
+  clearTimeout(backTimer);
+  backTimer = setTimeout(() => {
+    const content = document.getElementById('content');
+    let changed = false;
+    const watch = new MutationObserver(() => { changed = true; });
+    if (content) watch.observe(content, { childList: true, subtree: true });
+    haptic(); control.click();
+    const began = performance.now();
+    const check = () => {
+      // The page changed (whatever opens over the new one); else a question over it (unsaved changes) keeps it.
+      if (!shown(control) || (changed && performance.now() - began > 60)) { watch.disconnect(); backReset(false); return; }
+      if (document.querySelector('dialog[open], [aria-modal="true"]:not(.ms-drawer)')) { watch.disconnect(); backReset(true); return; }
+      if (performance.now() - began > 900) { watch.disconnect(); backReset(true); return; }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }, parseFloat(root.style.getPropertyValue('--ms-back-dur')) + 20);
 }
 
 export function mountSidebar() {
@@ -212,18 +334,23 @@ export function mountSidebar() {
   build(); close(false);
   registerMobileDrawer({ panel: drawer, backdrop: scrim, isOpen: drawerOpen,
     // Leave the outermost edge to Safari's system Back gesture (mobileDrawers.js).
-    // A pager past its first page takes a swipe right back a page first, as iOS does (mobilePager.js).
-    canOpen: (target, touch) => mobileOn() && isMainDrawerZone(touch) && !target.closest('.ms-page-track')?.firstElementChild?.inert,
-    open: () => openDrawer(menuTarget() || menu), close: () => close(),
+    // A pushed page goes back first (back); a top-level page, the Chats and Sessions lists included, opens the sidebar.
+    canOpen: (target, touch) => mobileOn() && isMainDrawerZone(touch),
+    back: backControl, onBackDrag: backDrag, onBack: backGo, onBackCancel: backCancel,
+    open: info => openDrawer(menuTarget() || menu, info), close: info => close(true, info),
     onDrag: (offset, width) => {
       const root = document.documentElement;
       root.classList.add('ms-drawer-dragging');
       root.style.setProperty('--ms-drawer-x', `${Math.round(width + offset)}px`);
+      root.style.setProperty('--ms-drawer-p', String(Math.max(0, Math.min(1, 1 + offset / width))));
     },
-    onDragEnd: () => {
+    // A swipe that does not commit eases back from the finger as well.
+    onDragEnd: () => queueMicrotask(() => {
       const root = document.documentElement;
-      root.classList.remove('ms-drawer-dragging'); root.style.removeProperty('--ms-drawer-x');
-    },
+      if (!root.classList.contains('ms-drawer-dragging')) return;
+      if (!drawerOpen()) root.classList.add('ms-drawer-settling');
+      letGo(); settle();
+    }),
   });
   document.addEventListener('jarvis:navigate', () => close(false));
   document.addEventListener('kairos:mobile-drawer-opening', event => { if (event.detail?.id !== 'drawer') close(false); });

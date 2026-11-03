@@ -46,8 +46,9 @@ export function mountPager(host, pages, tabs, initial = 0, onChange = () => {}, 
     if (!gesture.locked) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) < 5) return;
       if (index === 1 && dx < 0) { gesture = null; return; }
-      // Nothing lies left of the first page: a swipe right there opens the app's sidebar (mobileSidebar.js).
-      if (index === 0 && dx > 0) { gesture = null; return; }
+      // A swipe right opens the app's sidebar from either page (mobileSidebar.js, 2026-11-03, David);
+      // the switch at the top goes back to the first page.
+      if (dx > 0) { gesture = null; return; }
       if (Math.abs(dy) > Math.abs(dx) || scrolls(gesture.target, dx)) { gesture = null; return; }
       gesture.locked = true; host.classList.add('ms-dragging');
     }

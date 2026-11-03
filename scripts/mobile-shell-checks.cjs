@@ -100,13 +100,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await page(), 1, 'A left swipe moves New to Chats');
   await swipe('.ms-history-list', 300, 600, 20, 0, { commit: false }); await delay(300);
   assert.equal(await page(), 1, 'A cancelled short drag leaves the page alone');
+  // 2026-11-03 (David): a swipe right on the Chats list opens the app's sidebar; the switch goes back to New.
   await swipe('.ms-history-list', 300, 700, 140); await delay(450);
-  assert.equal(await page(), 0, 'A right swipe outside the drawer zone returns to New');
-  await js("document.getElementById('ms-tab-1').click()"); await delay(450);
+  assert.equal(await page(), 1, 'A right swipe outside the sidebar zone leaves the Chats list in place');
+  assert.equal(await js("document.documentElement.classList.contains('ms-drawer-open')"), false, 'and opens nothing');
   await swipe('.ms-history-list', 40, 700, 140); await delay(500);
-  assert.equal(await page(), 0, 'A right swipe in the former drawer zone returns to New');
-  assert.equal(await js("document.getElementById('sidebar').classList.contains('open') || document.documentElement.classList.contains('ms-drawer-open')"), false, 'A swipe back a page opens neither sidebar');
-  await js("document.getElementById('ms-tab-1').click()"); await delay(300);
+  assert.equal(await page(), 1, 'A right swipe in the sidebar zone does not page back to New');
+  assert.equal(await js("document.documentElement.classList.contains('ms-drawer-open')"), true, 'It opens the app sidebar');
+  await js("document.querySelector('.ms-drawer-scrim').click()"); await waitFor("!document.documentElement.classList.contains('ms-drawer-open')"); await delay(500);
 
   // ---- A2: history
   const ids = await js("[...document.querySelectorAll('.ms-history-row')].map(n => n.dataset.sessionId)");
@@ -237,7 +238,8 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), true, 'Focus returns to the menu button');
   // Backdrop and downward swipe
   await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
-  await js("document.querySelector('.ms-tab-sheet').click()"); await delay(350);
+  // 2026-11-03: a tap outside slides the sheet down (300ms) before it closes.
+  await js("document.querySelector('.ms-tab-sheet').click()"); await waitFor("!document.querySelector('.ms-tab-sheet[open]')", 1500).catch(() => {});
   assert.equal(await js("!document.querySelector('.ms-tab-sheet[open]')"), true, 'Backdrop taps close the sheet');
   await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')"); await delay(350);
   // The sheet closes when its slide-out ends (320ms, 360ms fallback); a fixed 350ms pause raced that under load.
@@ -371,8 +373,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   assert.equal(await js("getComputedStyle(document.querySelector('.ms-composer')).transitionDuration.split(',').every(d => d.trim() === '0s')"), true, 'The composer morph is instant');
   await js("document.getElementById('ms-tab-1').click()");
   assert.equal(await page(), 1, 'Reduced motion still switches pages');
-  await swipe('.ms-history-list', 300, 700, 140); await delay(500);
-  assert.equal(await page(), 0, 'A swipe switches without continuous dragging');
+  await js("document.getElementById('ms-tab-0').click()");
+  await swipe('.ms-intro', 300, 300, -140); await delay(500);
+  assert.equal(await page(), 1, 'A swipe switches without continuous dragging');
+  await js("document.getElementById('ms-tab-0').click()");
   await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()"); await waitFor("document.querySelector('dialog.ms-tab-sheet[open]')");
   const moreMotion = await js(`(() => {
     const node = document.querySelector('.ms-tab-sheet'), style = getComputedStyle(node);

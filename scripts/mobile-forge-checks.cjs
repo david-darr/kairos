@@ -8,7 +8,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const textButton = (root, text) => js(`[...document.querySelectorAll(${JSON.stringify(root + ' button')})].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`);
   const escape = () => win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
-  const close = async () => { await click('dialog.ms-sheet[open] .ms-sheet-header button'); await delay(100); };
+  const close = async () => { await click('dialog.ms-sheet[open] .ms-sheet-header button'); await waitFor("!document.querySelector('dialog.ms-sheet[open]')", 1500).catch(() => {}); await delay(50); };
   const input = (selector, value) => js(`{ const n = document.querySelector(${JSON.stringify(selector)}); n.value = ${JSON.stringify(value)}; n.dispatchEvent(new Event('input', { bubbles: true })); }`);
   const fit = async name => {
     ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), name + ' fits the viewport');
@@ -67,7 +67,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   ok(await js("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 4 && !document.querySelector('.mf-dashboard .forge-widget-grid').textContent.includes('Running services')"), 'Customize hides a card on the phone overview');
   await click('[data-widget-toggle=services]');
   ok(await js("document.querySelectorAll('.mf-dashboard .forge-widget-grid > section').length === 5"), 'Customize shows it again');
-  await escape(); await delay(150);
+  await escape(); await waitFor("!document.querySelector('[data-widget-toggle]')?.getClientRects().length", 1500).catch(() => {});
   ok(await js("!document.querySelector('[data-widget-toggle]')?.getClientRects().length"), 'Customize closes');
   ok(await navCurrent() === 'forge', 'The sidebar marks Forge current on the overview');
   // New: as Kairos Chats opens What should we work on?, the overview's New session opens the pager's New page.
@@ -283,7 +283,7 @@ module.exports = async function mobileForgeChecks({ js, win, waitFor, delay, nav
   await menu(); await textButton('dialog.ms-sheet', 'End session');
   await waitFor("!!document.querySelector('.forge-end-options')");
   ok(await js("document.querySelectorAll('.forge-end-options button').length === 4"), 'All four end-session choices stay reachable');
-  await escape(); await delay(100);
+  await escape(); await waitFor("!document.querySelector('.forge-end-options')", 1500).catch(() => {});
   await click('.mf-back');
   await waitFor("!!document.querySelector('.mf-project') && document.querySelector('#mf-tab-1').getAttribute('aria-selected') === 'true'");
   ok(true, 'Back returns to the project Sessions page');
