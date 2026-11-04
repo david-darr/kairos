@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "4px", "label_case": "upper", "label_tracking": "0.04em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "pixel-art scenes and sprites drawn on a grid, blocky borders, starfields; never smooth gradients",
+  "image_treatment": "dither",
+  "pattern": "grid",
   "archetypes": ["poster-stack", "bento", "big-number"],
   "guide": "A title screen: pixel headline used sparingly (short words only), monospace body, chunky 4px borders, grass green and coin yellow on night purple. Keep pixel type large; body stays readable."
 }

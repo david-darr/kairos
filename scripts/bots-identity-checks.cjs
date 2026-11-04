@@ -300,11 +300,19 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
 
     // ================= Generate: the saved connection, and a late result that must not win =====================================
     await click(`${card('identity')} .bots-avatar-make summary`);
-    assert.ok(await exists(`${card('identity')} [aria-label="Connection key"]`), 'with no connection, the editor asks for one');
-    await type(`${card('identity')} [aria-label="Connection key"]`, 'sk-test-key-123456');
-    await click(`${card('identity')} [data-action=save-provider]`);
+    assert.equal(await exists(`${card('identity')} input[type=password]`), false, 'the avatar editor has no key field');
+    assert.ok((await text(`${card('identity')} .bots-avatar-make`)).includes('Settings > Connections > Image generation.'), 'the shared connection is explained');
+    // The check's own navigation spy (installed at the start) records every jarvis:navigate in window.__nav.
+    const navBefore = await js('window.__nav.length');
+    await click(`${card('identity')} [data-action=image-settings]`);
+    assert.deepEqual(await js(`window.__nav.slice(${navBefore})`),[{ tab: 'settings', section: 'images' }], 'the button opens the image Settings section');
+    await call('/api/image-provider', 'PUT', { kind: 'openai', key: 'sk-test-key-123456', model: 'gpt-image-1', daily_limit: 50 });
+    await delay(1100); // expire shared GETs before remounting
+    await mountPanel(botId, 'advanced');
+    await openSection('identity');
+    await waitFor(`!!document.querySelector('${card('identity')} .bots-avatar-editor')`);
+    await click(`${card('identity')} .bots-avatar-make summary`);
     await waitFor(`!!document.querySelector('${card('identity')} .bots-avatar-direction')`);
-    assert.equal(await js("document.body.innerHTML.includes('sk-test-key-123456')"), false, 'the key is never shown again');
     await type(`${card('identity')} .bots-avatar-direction`, 'a friendly fox in a scarf');
     await click(`${card('identity')} [data-action=generate]`);
     await waitFor(`!!document.querySelector('${card('identity')} [data-action=apply]:not([disabled])')`);

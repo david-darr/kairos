@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.constants import BASE_DIR, STATIC_DIR
+from core.image_treatments import TREATMENTS, PATTERNS
 
 LOOKS_DIR = Path(BASE_DIR, "design_looks")
 FONTS_DIR = Path(STATIC_DIR, "fonts", "looks")
@@ -60,7 +61,8 @@ ROLES = ("bg", "surface", "text", "text-dim", "accent", "accent-text", "on-accen
 AA_PAIRS = (("text", "bg"), ("text", "surface"), ("text-dim", "bg"), ("text-dim", "surface"),
             ("accent-text", "bg"), ("on-accent", "accent"))
 BUTTONS = ("pill", "soft", "square", "underline")
-LOOK_FIELDS = ("name", "mood", "tags", "good_for", "fonts", "office_fonts", "color", "shape", "imagery", "archetypes", "guide")
+LOOK_FIELDS = ("name", "mood", "tags", "good_for", "fonts", "office_fonts", "color", "shape", "imagery",
+               "image_treatment", "pattern", "archetypes", "guide")
 
 
 def _face_files(key: str) -> list[tuple[str, Path, str, str]]:
@@ -157,9 +159,14 @@ def repair(color: dict) -> list[str]:
 
 
 def _validate(look_id: str, raw: dict) -> dict:
+    # Reference drafts and saved styles from before pictures have no image defaults yet.
+    raw = {"image_treatment": "duotone", "pattern": "dots", **raw}
     missing = [f for f in LOOK_FIELDS if f not in raw]
     if missing:
         raise ValueError(f"{look_id}: missing {', '.join(missing)}")
+    for field, names in (("image_treatment", TREATMENTS), ("pattern", PATTERNS)):
+        if raw[field] not in names:
+            raise ValueError(f"{look_id}: {field} is one of {', '.join(names)}")
     color = raw["color"]
     for role in ROLES:
         if not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color.get(role, ""))):
@@ -253,7 +260,7 @@ def guide(look: dict) -> str:
             f"- Buttons: {shape['button']}; corners var(--ds-radius-m); borders {shape['border']} solid var(--ds-hairline).\n"
             "- Text: var(--ds-text) on var(--ds-bg) or var(--ds-surface); secondary var(--ds-text-dim). "
             "On an accent fill, text is var(--ds-on-accent).\n"
-            f"- Imagery: {look['imagery']}.\n"
+            f"- Imagery: {look['imagery']}. Treatment: {look['image_treatment']}; pattern: {look['pattern']}.\n"
             "- One accent moment per board; var(--ds-accent-2) only as a small second highlight.")
 
 
@@ -335,6 +342,7 @@ def sample(look: dict) -> str:
 def summary(look: dict) -> dict:
     """What a chat or the Tool Store sees about a look."""
     return {"id": look["id"], "name": look["name"], "mood": look["mood"], "tags": look["tags"],
-            "good_for": look["good_for"], "imagery": look["imagery"], "archetypes": look["archetypes"],
+            "good_for": look["good_for"], "imagery": look["imagery"],
+            "image_treatment": look["image_treatment"], "pattern": look["pattern"], "archetypes": look["archetypes"],
             "fonts": {role: FAMILIES[key][0] for role, key in look["fonts"].items()},
             "palette": {role: look["color"][role] for role in ("bg", "surface", "text", "accent", "accent-2") if role in look["color"]}}

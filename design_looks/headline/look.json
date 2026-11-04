@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.04em",
             "display_weight": "700", "display_style": "normal"},
   "imagery": "duotone photos in orange and black, arrows, numbered steps",
+  "image_treatment": "duotone",
+  "pattern": "stripes",
   "archetypes": ["poster-stack", "big-number", "grid-12"],
   "guide": "A street poster: very large condensed capitals filling the width, an orange slab for the date or call to action, black rules. Say it in five words."
 }

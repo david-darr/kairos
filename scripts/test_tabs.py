@@ -622,7 +622,7 @@ def value(): return {{"answer": answer}}
 
     def test_school_loads_only_when_enabled_and_crm_stays_in_gallery(self):
         with patch.object(tabs, "PREBUILT_TABS_DIR", str(REPO / "tabs")):
-            self.assertEqual({e["slug"] for e in tabs.list_templates()}, {"school", "crm"})
+            self.assertEqual({e["slug"] for e in tabs.list_templates()}, {"school", "crm", "studio"})
             school = next(e for e in tabs.list_templates() if e["slug"] == "school")
             self.assertIn("courses", school["blurb"])
             self.assertEqual(self.status("school", "prebuilt")["status"], "off")

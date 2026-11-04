@@ -11,6 +11,8 @@
   "shape": {"radius": "10px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0.01em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "leaf and stem line drawings, produce photography in daylight, paper textures",
+  "image_treatment": "grain",
+  "pattern": "topo",
   "archetypes": ["hero-split", "editorial-column", "bento"],
   "guide": "Fresh from the garden: a thin elegant serif headline, a clean sans body, leaf green and a touch of apricot on sage paper. Botanical line art over photos."
 }

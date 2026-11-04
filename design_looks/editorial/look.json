@@ -11,6 +11,8 @@
   "shape": {"radius": "2px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.14em",
             "display_weight": "600", "display_style": "normal"},
   "imagery": "photography with generous margins, or a single large illustration; never clip art",
+  "image_treatment": "grain",
+  "pattern": "dots",
   "archetypes": ["editorial-column", "hero-split", "quote", "big-number"],
   "guide": "A magazine page: a large serif headline, a narrow reading column, a small upper-case kicker in the accent. One vermilion point per page. Generous white space; hairline rules between sections."
 }

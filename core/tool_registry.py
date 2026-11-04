@@ -235,6 +235,8 @@ def design_gate(spec: ToolSpec, session_id: str | None) -> bool:
     design is linked to it (core/design_tools.py), so chats that never
     design pay no tokens for them. Listing only: call() still accepts them,
     and each checks the chat's own link."""
+    # The image tools are listed like design_create, from the start: a model's tool list is fixed when its
+    # turn begins, before design_create links the design (Phase 3 benchmark: none were called otherwise).
     if not session_id or not spec.name.startswith('design_') or spec.name in ('design_create', 'design_system_save'):
         return True
     from core import design_tools
@@ -388,6 +390,13 @@ def cli_usage(spec: ToolSpec) -> str:
 
 
 def _shown(spec: ToolSpec, small_window: bool, session_id: str | None = None) -> bool:
+    from core import image_tools, video_tools
+    if small_window and spec.name in image_tools.NAMES:  # Shown directly to a small model while it designs.
+        from core import design_tools
+        return bool(session_id) and (design_tools.design_mode(session_id) or design_tools.linked(session_id))
+    if small_window and (spec.name == 'video_create' or spec.name in video_tools.LINKED_TOOLS):
+        # A small model sees the video tools while the chat makes a video (its mode, or a video linked).
+        return bool(session_id) and (video_tools.video_mode(session_id) or video_tools.linked(session_id))
     if spec.name == 'design_create' and small_window and session_id:
         from core import design_tools  # Offered directly while the chat is in Design mode.
         return design_tools.design_mode(session_id)
@@ -1865,7 +1874,7 @@ async def _roblox_assets(args, ctx):
 
 
 # The Design canvas's tools register themselves into this table.
-from core import design_tools  # noqa: E402,F401
+from core import design_tools, image_tools, video_tools  # noqa: E402,F401
 
 
 # -- Bots resource tools, registered through guarded imports (Bots Phase 2 U4) ------------------

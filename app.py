@@ -61,6 +61,7 @@ from routes import (
     notification_routes,
 )
 from routes import cli_routes  # Kairos CLI terminal pairing (core/cli_access.py)
+from routes import image_routes
 from routes import design_routes  # The Design canvas (vault: Design Canvas (Build Spec))
 from core import llamacpp_engine
 from services import chat_service, mobile_notifications, skills_service, swarm_service
@@ -316,6 +317,7 @@ for _bots_router in (front_desk_routes, front_desk_make_routes, front_desk_watch
                      bot_data_routes, bot_widget_routes, bot_workbench_routes, bot_usage_routes, bot_lifecycle_routes):
     app.include_router(_bots_router.router)
 app.include_router(agent_routes.router)
+app.include_router(image_routes.router)
 app.include_router(computer_routes.router)
 app.include_router(connector_routes.router)
 app.include_router(trigger_routes.router)
@@ -325,6 +327,11 @@ app.include_router(run_routes.router)
 app.include_router(notification_routes.router)
 app.include_router(cli_routes.router)
 app.include_router(cli_routes.files_router)
+from routes import video_routes
+from core import middleware as _video_middleware
+# Only this exact fixed-script player may retain its restrictive response CSP.
+_video_middleware._OWN_POLICY_PATHS += (video_routes.PLAYER_PATH,)
+app.include_router(video_routes.router)
 app.include_router(design_routes.router)
 app.include_router(design_routes.systems_router)
 app.include_router(design_routes.render_router)

@@ -50,7 +50,7 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     'forge_app_logs search_sessions list_skills ui_design creative_direction read_skill search_skills list_notes '
     'list_tasks list_tab_tasks read_tab_task list_upcoming_events list_specs read_spec list_documents '
     'read_document list_contacts list_task_runs list_email_accounts helper_results agent_read_topic design_outline '
-    'design_read design_snapshot skill_read skill_index notebook_read recall_search recall_read '
+    'video_outline video_preview design_read design_snapshot skill_read skill_index notebook_read recall_search recall_read '
     'query_tool_result highlevel_search_contacts highlevel_get_contact highlevel_get_contact_notes highlevel_list_contact_tasks highlevel_list_calendars highlevel_get_free_slots '
     'highlevel_get_contact_appointments highlevel_list_pipelines highlevel_search_opportunities highlevel_get_opportunity x_search_recent x_count_recent x_user '
     'x_user_posts x_post trigger_info '

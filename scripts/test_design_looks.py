@@ -266,15 +266,18 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(any("grey placeholder bars" in n for n in self.notes(bars, poster)))
         grey = "".join(f'<div style="width: 300px; height: 14px; background: #DDDDDD"></div>' for _ in range(3))
         self.assertTrue(any("grey placeholder bars" in n for n in self.notes(grey, poster)))
-        # Pixel art from the after run (Codex, Minecraft): accent strips placed absolutely are drawing.
+        no_picture = ["This poster has no picture. Add one: image_generate (if connected), image_search for a licensed photo, "
+                      "image_treat on the person's photo, or image_pattern for a texture. A finished "
+                      "poster has a picture or a texture; place it with design_edit."]
+        # Decoration is not a placeholder, but it still leaves a poster without a picture.
         tree = "".join(f'<div style="position:absolute;left:0;top:-{40 + 20 * n}px;width:{220 - 40 * n}px;height:20px;background:var(--ds-accent)"></div>'
                        for n in range(4))
-        self.assertEqual(self.notes(f'<div style="position: relative">{tree}</div>', poster), [])
+        self.assertEqual(self.notes(f'<div style="position: relative">{tree}</div>', poster), no_picture)
         moon = '<div style="width: 600px; height: 600px; border-radius: 50%; background: var(--ds-accent)"></div>'
         rule = '<div aria-hidden="true" style="width: 600px; height: 400px; background: var(--ds-accent)"></div>'
         image = '<div style="width: 600px; height: 400px; background: var(--ds-surface)"><img src="data:image/png;base64,AAAA" alt="x"></div>'
         for html in (moon, rule, image, '<div style="width: 600px; height: 400px; background: var(--ds-surface)"><p>Facts</p></div>'):
-            self.assertEqual(self.notes(html, poster), [], html)
+            self.assertEqual(self.notes(html, poster), [] if html == image else no_picture, html)
 
     def test_typefaces_and_empty_render(self):
         many = "".join(f'<p style="font-family: {f}">x</p>' for f in ("Arial", "Georgia", "Courier", "Impact"))

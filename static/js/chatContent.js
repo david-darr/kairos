@@ -14,6 +14,7 @@ const GENERATED = /^\/generated-(?:images|files)\/[^/?#]+$/;
 const ARTIFACT_URL = /^(?:\/generated-(?:images|files)\/[^/?#]+|\/chat-files\/[a-f0-9]{24}|\/designs\/[a-f0-9]{12})$/;
 // A design opens as a Design tab in this pane (designCanvas.js).
 const DESIGN_URL = /^\/designs\/([a-f0-9]{12})$/;
+const VIDEO_URL = /^\/videos\/([a-f0-9]{12})$/;
 const TAGS = ['p', 'br', 'strong', 'em', 'del', 's', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'input'];
 
 export async function copyText(text) {
@@ -82,6 +83,37 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
       ]);
       card.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
       card.addEventListener('auxclick', event => { if (event.button === 1) { event.preventDefault(); openArtifact(sessionId, url, filename, card, { background: true }); } });
+      node.replaceWith(card);
+    } else if (node.tagName === 'A' && VIDEO_URL.test(url) && sessionId) {
+      const videoId = url.match(VIDEO_URL)[1];
+      const title = (label || 'Video').replace(/^Video:\s*/, '');
+      const detail = el('span', { text: 'Video' });
+      const info = el('span', { class: 'artifact-info' }, [el('strong', { text: title }), detail]);
+      const action = el('button', { type: 'button', class: 'btn', text: 'Open in Studio', style: 'min-height:44px', onclick: () => {
+        document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: action.dataset.enabled === 'true' ? 'studio' : 'tool-store',
+          videoId, category: 'Tabs', query: 'Studio' } }));
+      } });
+      action.disabled = true;
+      const card = el('div', { class: 'artifact-card video-card-link', style: 'flex-wrap:wrap;max-width:100%;overflow:hidden' }, [info, action]);
+      Promise.all([api(`/api/videos/${videoId}`), api('/api/system/custom-tabs')]).then(async ([p, tabs]) => {
+        action.dataset.enabled = String(tabs.some(t => t.id === 'studio'));
+        action.textContent = action.dataset.enabled === 'true' ? 'Open in Studio' : 'Turn on Studio';
+        action.disabled = false;
+        detail.textContent = `${p.beats.reduce((sum, b) => sum + b.bars, 0) * 240 / p.bpm} s · ${p.aspects.join(', ')}`;
+        const image = el('iframe', { src: `/api/videos/${videoId}/player?aspect=${encodeURIComponent(p.aspects[0])}`, title: `First frame of ${p.title}`,
+          sandbox: 'allow-scripts allow-same-origin', loading: 'lazy', style: 'width:160px;height:90px;max-width:100%;border:0;pointer-events:none' });
+        image.addEventListener('load', () => { const w = image.contentWindow; w?.kdReady?.then(() => w.kdDrawFrame(.8)).catch(() => {}); });
+        card.prepend(image);
+        try {
+          const resources = await api(`/api/tab-studio/videos/${videoId}/resources`);
+          if (resources.thumbnail) image.replaceWith(el('img', { src: `/api/videos/${videoId}/renders/${resources.thumbnail}`, alt: `Thumbnail of ${p.title}`, style: 'width:160px;height:90px;max-width:100%;object-fit:contain' }));
+          const file = resources.renders.filter(f => /\.mp4$/.test(f)).at(-1);
+          if (file) card.append(el('button', { type: 'button', class: 'btn', text: 'Play video', style: 'min-height:44px', onclick: event => {
+            event.currentTarget.replaceWith(el('video', { src: `/api/videos/${videoId}/renders/${file}`, controls: true, autoplay: true,
+              'aria-label': `Play ${p.title}`, style: 'width:100%;max-height:280px' }));
+          } }));
+        } catch { /* A disabled tab may not have its helper routes mounted yet. */ }
+      }).catch(() => { detail.textContent = 'Video · no longer available'; action.textContent = 'Video unavailable'; });
       node.replaceWith(card);
     } else if (node.tagName === 'A' && DESIGN_URL.test(url) && sessionId) {
       const designId = url.match(DESIGN_URL)[1];

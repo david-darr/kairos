@@ -640,9 +640,15 @@ async function startApp() {
   const customTabs = await buildSidebar();
   setupSidebar();
   setupMobileMenu();
-  document.addEventListener("jarvis:navigate", (event) => {
+  document.addEventListener("jarvis:navigate", async (event) => {
     const { tab, ...options } = event.detail;
-    tab === "settings" ? openSettings(options) : switchTab(tab, options);
+    if (tab === "settings") { openSettings(options); return; }
+    await switchTab(tab, options);
+    if (tab === 'tool-store' && options.query) {
+      const search = document.querySelector('.tool-store-search');
+      if (search) { search.value = options.query; search.dispatchEvent(new Event('input')); }
+      [...document.querySelectorAll('.tool-store-filters button')].find(b => b.textContent === options.category)?.click();
+    }
   });
   window.jarvis?.usageOverlay?.onNavigate?.((target, detail) => {
     const { tab, options, then } = notchNavigation(target, detail);
@@ -724,13 +730,23 @@ async function startApp() {
   // A design link: #/library/designs/<id>, or the older #/design/<id>; both open in Library > Designs.
   const DESIGN_LINK = /^#\/(?:design|library\/designs)\/([a-f0-9]{12})$/;
   const designLink = DESIGN_LINK.exec(location.hash);
+  const STUDIO_LINK = /^#\/studio(?:\/([a-f0-9]{12}))?$/;
+  const openStudioLink = async match => {
+    if (customViewUrls.studio) await switchTab('studio', { videoId: match[1] });
+    else {
+      document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'tool-store', category: 'Tabs', query: 'Studio' } }));
+    }
+  };
   window.addEventListener('hashchange', () => {
+    const studio = STUDIO_LINK.exec(location.hash);
+    if (studio) { openStudioLink(studio); return; }
     const match = DESIGN_LINK.exec(location.hash);
     if (match && !(activeTab === 'library' && document.querySelector(`.design-page[data-design-id="${match[1]}"]`))) {
       switchTab('library', { section: 'designs', designId: match[1] });
     }
   });
   if (chatWindow) await switchTab('chat', chatWindow);
+  else if (STUDIO_LINK.test(location.hash)) await openStudioLink(STUDIO_LINK.exec(location.hash));
   else if (designLink) await switchTab('library', { section: 'designs', designId: designLink[1] });
   else if (!await openNotificationChat(location.href)) {
     const launch = new URL(location.href).searchParams;

@@ -11,6 +11,8 @@
   "shape": {"radius": "12px", "button": "soft", "border": "1px", "label_case": "upper", "label_tracking": "0.1em",
             "display_weight": "600", "display_style": "normal"},
   "imagery": "product screens in a frame, subtle grid or dot textures, code snippets; no stock photos",
+  "image_treatment": "dither",
+  "pattern": "dots",
   "archetypes": ["hero-split", "bento", "comparison", "big-number"],
   "guide": "A product launch at night: dark ground, crisp grotesk headline, one violet action. Show the product itself, framed. Monospace for small technical labels."
 }

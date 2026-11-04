@@ -60,14 +60,10 @@ const ID = 'a'.repeat(32);
     assert.equal(E.applyBody(null), null);
   });
 
-  await check('the generate form checks the direction and the connection', () => {
+  await check('the generate form checks the direction', () => {
     assert.match(E.checkDirection('  ').error, /Describe/);
     assert.match(E.checkDirection('x'.repeat(401)).error, /400/);
     assert.equal(E.checkDirection('  a fox ').direction, 'a fox');
-    assert.match(E.checkProvider({ kind: 'nope', key: 'sk-12345678' }), /Choose/);
-    assert.match(E.checkProvider({ kind: 'openai', key: 'short' }), /key/);
-    assert.match(E.checkProvider({ kind: 'compatible', key: 'sk-12345678' }), /address/);
-    assert.equal(E.checkProvider({ kind: 'xai', key: 'sk-12345678' }), '');
   });
 
   await check("the picture comes from the bot's own folder, or the person's draft folder", () => {

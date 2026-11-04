@@ -11,6 +11,8 @@
   "shape": {"radius": "28px", "button": "pill", "border": "1px", "label_case": "upper", "label_tracking": "0.12em",
             "display_weight": "700", "display_style": "normal"},
   "imagery": "sunlit photography, arch shapes, clay and stone textures",
+  "image_treatment": "grain",
+  "pattern": "topo",
   "archetypes": ["hero-split", "poster-stack", "editorial-column"],
   "guide": "Sun-baked: wide expressive headline, clay orange and a deep teal, arches and big rounded frames. Feels handmade, never rustic clip art."
 }

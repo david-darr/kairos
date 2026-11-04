@@ -15,11 +15,13 @@ const { BrowserWindow, session } = require('electron');
 
 const PARTITION = 'persist:design-render';
 const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
+const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*$/;
+let activeWindow = null, activeJob = '';
 let running = false, stopped = false, controller = null, configured = false;
 // The content's height: the bottom of the body's last child (the viewer script measures the same way).
 const MEASURE = `(() => { let bottom = 0; for (const c of document.body.children) { if (c.tagName === 'SCRIPT') continue; const r = c.getBoundingClientRect(); if (r.height) bottom = Math.max(bottom, r.bottom + (parseFloat(getComputedStyle(c).marginBottom) || 0)); } return Math.ceil(bottom + scrollY); })()`;
 // The board the current job renders: the request filter allows only its routes.
-const current = { designId: '' };
+const current = { designId: '', videoId: '', path: '', look: '' };
 const KD_ID = /^[a-z][a-z0-9-]{0,47}$/;
 // What a PNG job may hide, for the PowerPoint background picture (core/design_pptx.py): an element's
 // text, its own box paint, or all of it. Fixed rules; only ids that match KD_ID are used.
@@ -73,10 +75,16 @@ const LAYOUT = `(() => {
   return JSON.stringify({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight, elements: out });
 })()`;
 
-function allowedRequest(raw, origin, designId) {
+function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', look = '') {
   try {
     const url = new URL(raw);
     if (url.origin !== origin || url.username || url.password) return false;
+    if (videoId) {
+      return (url.pathname + url.search === playerPath) ||
+        (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
+        /^\/static\/motion\/(engine|kit|layout)\.js$/.test(url.pathname) ||
+        (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
+    }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');
   } catch { return false; }
 }
@@ -90,22 +98,28 @@ function configure(origin) {
   isolated.setDevicePermissionHandler(() => false);
   isolated.on('will-download', event => event.preventDefault());
   isolated.webRequest.onBeforeRequest((details, callback) =>
-    callback({ cancel: !allowedRequest(details.url, origin, current.designId) }));
+    callback({ cancel: !allowedRequest(details.url, origin, current.designId, current.videoId, current.path, current.look) }));
   return isolated;
 }
 
-async function renderJob(origin, job) {
-  const match = JOB_PATH.exec(String(job.path || ''));
+async function renderJob(origin, job, backendUrl, token) {
+  const video = job.kind === 'video';
+  const match = (video ? VIDEO_PATH : JOB_PATH).exec(String(job.path || ''));
   const w = Math.max(64, Math.min(4000, Number(job.w) || 0));
   let h = Math.max(64, Math.min(8000, Number(job.h) || 0));
-  if (!match || !['png', 'pdf', 'layout'].includes(job.kind)) throw new Error('refused an invalid render job');
-  current.designId = match[1];
+  if (!match || (!video && !['png', 'pdf', 'layout'].includes(job.kind))) throw new Error('refused an invalid render job');
+  current.designId = video ? '' : match[1];
+  current.videoId = video ? match[1] : '';
+  current.path = String(job.path);
+  current.look = String(job.look || '');
+  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 3600)) throw new Error('refused invalid video timing');
   const isolated = configure(origin);
   const win = new BrowserWindow({
     show: false, width: w, height: h, useContentSize: true, frame: false, paintWhenInitiallyHidden: true,
     webPreferences: { session: isolated, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false,
       javascript: true, webSecurity: true, spellcheck: false, backgroundThrottling: false },
   });
+  activeWindow = win; activeJob = job.id;
   try {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', event => event.preventDefault());
@@ -114,6 +128,7 @@ async function renderJob(origin, job) {
     // page renders at the screen's scale and the capture is resized below.
     const painted = new Promise(resolve => win.webContents.once('paint', resolve));
     await win.loadURL(origin + job.path);
+    if (video) return await captureVideo(win, job, backendUrl, token);
     await Promise.race([painted, new Promise(resolve => setTimeout(resolve, 3000))]);
     // Fonts first, then one frame, so the capture shows the real type.
     await win.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))).then(() => 1)', true)
@@ -160,16 +175,53 @@ async function renderJob(origin, job) {
     return { type: 'application/pdf', body: pdf };
   } finally {
     if (!win.isDestroyed()) win.destroy();
+    if (activeWindow === win) { activeWindow = null; activeJob = ''; }
   }
 }
 
-async function post(backendUrl, token, job, result, error) {
-  await fetch(`${backendUrl}/api/design-render/result/${encodeURIComponent(job.id)}`, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+// Backpressure comes from awaiting each acknowledged part before capturing more.
+async function captureVideo(win, job, backendUrl, token) {
+  const evaluate = code => win.webContents.executeJavaScript(code, true);
+  const info = await evaluate('Promise.resolve(window.kdReady).then(() => document.fonts.ready).then(() => window.kdInfo)');
+  if (!info || info.width !== job.w || info.height !== job.h || info.fps !== 30 ||
+      !Number.isFinite(info.duration) || info.duration <= 0 || Math.ceil(info.duration * 30 - 1e-7) !== job.frames) {
+    throw new Error('The motion player dimensions or timing do not match this video job');
+  }
+  const times = job.preview ? job.times : Array.from({ length: job.frames }, (_, i) => i / job.fps);
+  if (!Array.isArray(times) || !times.length || (job.preview && times.length > 12) ||
+      times.some(t => !Number.isFinite(t) || t < 0 || t >= info.duration)) throw new Error('invalid video sample times');
+  const sampleTimes = job.layoutTimes;
+  if (!Array.isArray(sampleTimes) || sampleTimes.length > 120 ||
+      sampleTimes.some(t => !Number.isFinite(t) || t < 0 || t >= info.duration)) throw new Error('invalid layout sample times');
+  const layouts = [];
+  for (const t of sampleTimes) {
+    if (stopped || win.isDestroyed()) throw new Error('video cancelled');
+    const elements = await evaluate(`Promise.resolve(window.kdDrawFrame(${t})).then(() => window.kdLayout(${t}))`);
+    layouts.push({ time: t, elements });
+  }
+  let frames = [], part = 0;
+  for (let i = 0; i < times.length; i++) {
+    if (stopped || win.isDestroyed()) throw new Error('video cancelled');
+    const data = await evaluate(`Promise.resolve(window.kdDrawFrame(${times[i]})).then(() => document.getElementById('kd-canvas').toDataURL('image/jpeg', 0.92))`);
+    if (typeof data !== 'string' || !data.startsWith('data:image/jpeg;base64,')) throw new Error('motion player did not return a JPEG');
+    frames.push(data.slice(data.indexOf(',') + 1));
+    if (frames.length === 15 || i === times.length - 1) {
+      await post(backendUrl, token, job, { type: 'application/json', body: JSON.stringify({ frames, layouts: part === 0 ? layouts : [] }) }, null, part++);
+      frames = [];
+    }
+  }
+  return { type: 'application/json', body: JSON.stringify({ frames: times.length }) };
+}
+
+async function post(backendUrl, token, job, result, error, part = null) {
+  const suffix = part === null ? '' : `?part=${part}`;
+  const response = await fetch(`${backendUrl}/api/design-render/result/${encodeURIComponent(job.id)}${suffix}`, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(90000),
     headers: { 'X-Kairos-Render-Token': token, 'Content-Type': result?.type || 'application/octet-stream',
       ...(error ? { 'X-Kairos-Render-Error': String(error).replace(/[^\x20-\x7e]/g, ' ').slice(0, 200) } : {}) },
     body: result ? result.body : Buffer.alloc(0),
-  }).catch(() => {});
+  });
+  if (job.kind === 'video' && (!response.ok || !(await response.json()).ok)) throw new Error('video job cancelled or result refused');
 }
 
 // One job at a time, in arrival order: a board render is quick, and one
@@ -178,13 +230,14 @@ async function serve(backendUrl, token) {
   const origin = new URL(backendUrl).origin;
   const queue = [];
   let busy = false;
+  let pumping = Promise.resolve();
   const pump = async () => {
     if (busy) return;
     busy = true;
-    while (queue.length) {
+    while (queue.length && !stopped) {
       const job = queue.shift();
-      try { await post(backendUrl, token, job, await renderJob(origin, job)); }
-      catch (error) { await post(backendUrl, token, job, null, error.message || 'render failed'); }
+      try { await post(backendUrl, token, job, await renderJob(origin, job, backendUrl, token)); }
+      catch (error) { await post(backendUrl, token, job, null, error.message || 'render failed').catch(() => {}); }
     }
     busy = false;
   };
@@ -194,15 +247,30 @@ async function serve(backendUrl, token) {
   if (!response.ok || !response.body) throw new Error(`render stream refused (${response.status})`);
   const decoder = new TextDecoder();
   let buffer = '';
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let cut;
-    while ((cut = buffer.indexOf('\n\n')) >= 0) {
-      const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
-      const line = block.split('\n').find(part => part.startsWith('data: '));
-      if (!line) continue;
-      try { queue.push(JSON.parse(line.slice(6))); pump(); } catch { /* A malformed line is ignored. */ }
+  try {
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+        const line = block.split('\n').find(part => part.startsWith('data: '));
+        if (!line) continue;
+        try {
+          const job = JSON.parse(line.slice(6));
+          if (job.kind === 'cancel') {
+            const index = queue.findIndex(item => item.id === job.id);
+            if (index >= 0) queue.splice(index, 1);
+            if (activeJob === job.id && activeWindow && !activeWindow.isDestroyed()) activeWindow.destroy();
+          } else { queue.push(job); if (!busy) pumping = pump(); }
+        } catch { /* A malformed line is ignored. */ }
+      }
     }
+  } finally {
+    // A reconnect must not start a second window while the old stream's
+    // pump is still rendering. Abandon its queue and drain the active job.
+    queue.length = 0;
+    if (activeWindow && !activeWindow.isDestroyed()) activeWindow.destroy();
+    await pumping;
   }
 }
 
@@ -223,6 +291,6 @@ function start({ backendUrl, token }) {
   })();
 }
 
-function stop() { stopped = true; controller?.abort(); }
+function stop() { stopped = true; controller?.abort(); if (activeWindow && !activeWindow.isDestroyed()) activeWindow.destroy(); }
 
-module.exports = { start, stop, allowedRequest, JOB_PATH, KD_ID, HIDE_RULES };
+module.exports = { start, stop, allowedRequest, JOB_PATH, VIDEO_PATH, KD_ID, HIDE_RULES };

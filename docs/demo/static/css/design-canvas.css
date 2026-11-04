@@ -158,6 +158,13 @@
 .design-menu-item { min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
 .design-menu-item:hover, .design-menu-item:focus-visible { background: var(--surface-2); }
 .design-menu-item:disabled { color: var(--text-faint); cursor: not-allowed; }
+.design-menu-check { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-top: 1px solid var(--hairline-soft); margin-top: 4px; color: var(--text-dim); cursor: pointer; }
+/* A document board's printed pages (designCanvas.js openPages), side by side, scrolling. */
+.design-pages { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--bg); }
+.design-pages-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--hairline-soft); }
+.design-pages-strip { flex: 1; display: flex; gap: 24px; align-items: flex-start; padding: 24px; overflow: auto; }
+.design-print-page { flex: 0 0 auto; display: grid; gap: 8px; margin: 0; justify-items: center; }
+.design-print-page img { width: min(420px, 80vw); height: auto; border: 1px solid var(--hairline-soft); box-shadow: var(--popup-shadow); background: #fff; }
 
 /* Focus: one board at real size, live and clickable. */
 .design-focus { position: absolute; inset: 0; z-index: 25; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--bg); }
@@ -215,6 +222,8 @@
 /* -- phones: the redesign shell (3i) ----------------------------------------- */
 @media (max-width: 768px) {
   .design-view-toggle { display: inline-flex; }
+  .design-pages-strip { flex-direction: column; align-items: center; }
+  .design-pages-head .btn { min-height: 44px; }
   .kairos-redesign .design-toolbar { position: sticky; top: 0; z-index: 5; gap: 6px; flex-wrap: wrap; }
   .kairos-redesign .design-page-header { overflow-x: auto; }
   .kairos-redesign .design-list { grid-template-columns: minmax(0, 1fr); }
@@ -268,4 +277,37 @@
 .design-system-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px 12px; }
 .design-system-colors input[type="color"] { width: 100%; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 .design-system-pane[hidden] { display: none; }
+/* Looks: a 1200x800 preview board scaled to the card's width, at most 300x200. */
+.design-look-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 316px), 1fr)); }
+.design-look-card { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.design-look-card.is-default { box-shadow: inset 0 0 0 2px var(--accent, currentColor); }
+.design-look-preview { position: relative; width: 100%; max-width: 300px; height: auto; aspect-ratio: 3 / 2; margin: 0 auto; overflow: hidden;
+  border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); background: var(--surface-2, transparent); }
+.design-look-frame { position: absolute; top: 0; left: 0; width: 1200px; height: 800px; border: 0;
+  transform: scale(var(--look-scale, .25)); transform-origin: 0 0; pointer-events: none; }
+/* A card's content sits in one body, so the phone Tool Store's row rules (aimed at a card's direct
+   children: name, first line, buttons) leave it alone. */
+.design-card-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; align-content: start; height: 100%; }
+.design-card-body > header { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.design-card-body > header > * { min-width: 0; overflow-wrap: anywhere; }
+.design-card-body > p { margin: 0; }
+.design-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.design-card-actions > .btn { flex: 1 1 auto; }
+/* New style from references: the draft editor under the form. */
+.design-style-draft { display: grid; gap: 10px; padding-top: 6px; }
+.design-style-draft[hidden] { display: none; }
+.design-style-draft .design-look-preview { margin: 0; }
+.design-style-changes { margin: 0; padding-left: 18px; }
+.design-style-fonts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 6px 12px; }
+.design-style-fonts select { min-height: 44px; }
+/* The phone Tool Store turns cards into rows that open a sheet; design-system cards are their own
+   small pages (a preview, a palette, one button), so they stay cards in a single column. */
+@media (max-width: 768px) {
+  .kairos-redesign .design-system-grid { display: grid; gap: 12px; overflow: visible; border: 0; border-radius: 0; background: none; box-shadow: none; }
+  .kairos-redesign [data-view="tool-store"] .design-system-grid > .design-system-card:not(.ts-in-sheet) {
+    display: block; min-height: 0; padding: 14px;
+    border: 1px solid var(--rd-line); border-radius: 16px; background: var(--rd-surface); box-shadow: var(--rd-shadow); }
+  .kairos-redesign .design-system-grid > .design-system-card:not(.ts-in-sheet) > .design-card-body { display: grid; }
+  .kairos-redesign .design-system-grid .design-card-body .btn { min-height: 44px; }
+}
 .design-composer[hidden] { display: none; }

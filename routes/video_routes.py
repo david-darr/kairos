@@ -1,0 +1,248 @@
+"""Authenticated video CRUD and a narrowly signed, offline-only player page."""
+from __future__ import annotations
+import json
+import re
+from pathlib import Path
+from typing import Any, Optional
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel, ConfigDict, Field
+from core import design_render, design_render_bridge, design_systems, ffmpeg_tools, video_render, video_store
+from core.auth import auth_manager
+from core.middleware import get_current_user, require_user
+from core.constants import STATIC_DIR
+
+router = APIRouter(tags=["videos"])
+PLAYER_PATH = re.compile(r"/api/videos/[a-f0-9]{12}/player")
+
+
+class VideoBody(BaseModel):
+    """Bound client input; server-owned metadata is accepted only for round trips."""
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    look: str = Field(min_length=1, max_length=60)
+    beats: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    bpm: float = 120
+    fps: int = 30
+    aspects: list[str] = Field(default=["16:9"], min_length=1, max_length=3)
+    music: dict[str, Any] = Field(default={"mood": "energetic", "volume": .7})
+    id: Optional[str] = None
+    owner: Optional[str] = None
+    chat_ids: list[str] = []
+    visible_to: list[str] = []
+    version: Optional[int] = None
+    created: Optional[float] = None
+    updated: Optional[float] = None
+
+    def project(self):
+        return {k: v for k, v in self.model_dump().items() if k in video_store.FIELDS and (k != "id" or v is not None)}
+
+
+class RenderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    aspect: str = "16:9"
+
+
+class CopyAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    design_id: str = Field(pattern=r"^[a-f0-9]{12}$")
+    asset: str = Field(max_length=100)
+
+
+def _call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except LookupError as error:
+        raise HTTPException(404, str(error).strip("'")) from None
+    except (ValueError, PermissionError) as error:
+        raise HTTPException(422, str(error)) from None
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from None
+
+
+def _video(video_id, user):
+    return _call(video_store.require_user_access, video_id, user, auth_manager.is_admin(user))
+
+
+def _look(look, user):
+    system = design_systems.get(look)
+    if not system or not design_systems.visible(system, user, auth_manager.is_admin(user)):
+        raise HTTPException(422, "look: choose a visible look with creative_direction.")
+    return system
+
+
+@router.get("/api/videos/ffmpeg")
+async def ffmpeg_status(user: str = Depends(require_user)):
+    found = ffmpeg_tools.find()
+    return {"found": bool(found), "version": ffmpeg_tools.version() if found else None,
+            "message": "FFmpeg is ready." if found else ffmpeg_tools.MISSING}
+
+
+@router.get("/api/videos")
+async def list_videos(user: str = Depends(require_user)):
+    return video_store.list_for_user(user, auth_manager.is_admin(user))
+
+
+@router.post("/api/videos")
+async def create_video(body: VideoBody, user: str = Depends(require_user)):
+    p = body.project()
+    p.pop("id", None)
+    _look(p["look"], user)
+    return _call(video_store.create, owner=user, **p)
+
+
+@router.get("/api/videos/{video_id}")
+async def get_video(video_id: str, user: str = Depends(require_user)):
+    return _video(video_id, user)
+
+
+@router.put("/api/videos/{video_id}")
+async def put_video(video_id: str, body: VideoBody, user: str = Depends(require_user)):
+    current = _video(video_id, user)
+    _look(body.look, user)
+    # The Studio and a model's video_edit can edit the same video; a save made from an older version is refused
+    # instead of silently replacing the newer one.
+    if body.version is not None and body.version != current.get("version"):
+        raise HTTPException(409, f"This video changed since you opened it (it is now version {current.get('version')}). "
+                                 "Your last change wasn't saved; the latest version is loaded, make the change again.")
+    return _call(video_store.save, video_id, {"id": video_id, **body.project()})
+
+
+@router.delete("/api/videos/{video_id}")
+async def delete_video(video_id: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    for job in list(video_render._jobs.values()):
+        if job["video_id"] == video_id and job["status"] not in ("ready",) and not job["status"].startswith("failed:"):
+            video_render.cancel(job["id"])
+    _call(video_store.delete, video_id)
+    return {"ok": True}
+
+
+def player_page(project):
+    """Inject data, never executable project text, into lane D's fixed template."""
+    path = Path(STATIC_DIR) / "motion" / "player.html"
+    if not path.is_file():
+        raise HTTPException(503, "The motion player is not available in this build yet.")
+    page = path.read_text(encoding="utf-8")
+    if "<!--KD-PROJECT-->" not in page or "<!--KD-TOKENS-->" not in page:
+        raise HTTPException(503, "The motion player needs its project and token markers.")
+    system = design_systems.get(project["look"])
+    if not system:
+        raise HTTPException(422, "look: this video's look is no longer available.")
+    data = {k: v for k, v in project.items() if k in video_store.FIELDS}
+    data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    css = design_systems.tokens_css(system["tokens"]) + design_systems.font_faces(system["id"], "/api/design-fonts")
+    page = page.replace("<!--KD-PROJECT-->", '<script type="application/json" id="kd-project">' + data_json + '</script>')
+    page = page.replace("<!--KD-TOKENS-->", '<style>' + css.replace("</", "<\\/") + '</style>')
+    # Image paths stay assets/<hash> as the shared schema requires. Module URLs
+    # are absolute because this page is served from the project's own route.
+    page = re.sub(r'(src=["\'])(?:\./)?((?:engine|kit|layout)\.js)(["\'])', r'\1/static/motion/\2\3', page)
+    return page
+
+
+@router.get("/api/videos/{video_id}/player")
+async def player(video_id: str, request: Request, aspect: str = "16:9", rt: Optional[str] = None, v: Optional[int] = None):
+    # Without the worker's signed token, a person must be signed in before the video is even looked up, so an
+    # anonymous caller learns nothing about which ids exist.
+    if rt is None:
+        user = get_current_user(request)
+        if user is None:
+            raise HTTPException(401, "authentication required")
+        _video(video_id, user)
+    current = _call(video_store.get, video_id)
+    version = v if v is not None else current["version"]
+    if rt is not None and not design_render.verify(video_id, f"video:{aspect}:{version}", rt):
+        raise HTTPException(404, "Video not found")
+    project = current
+    if version != current["version"]:
+        project = next((p for p in video_store.history(video_id) if p["version"] == version), None)
+        if project is None:
+            raise HTTPException(404, "Video version not found")
+    if aspect not in project["aspects"]:
+        raise HTTPException(422, "aspect: choose an aspect listed in the project.")
+    origin = f"{request.url.scheme}://{request.url.netloc}"
+    csp = (f"default-src 'none'; script-src {origin}/static/motion/; style-src 'unsafe-inline'; "
+           f"img-src {origin}/api/videos/{video_id}/assets/; font-src {origin}/api/design-fonts/; "
+           f"connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+    return HTMLResponse(player_page(project), headers={"Content-Security-Policy": csp, "Cache-Control": "no-store",
+                                                       "X-Kairos-Design-Render": "1", "X-Frame-Options": "SAMEORIGIN"})
+
+
+@router.get("/api/videos/{video_id}/assets/{name}")
+async def get_asset(video_id: str, name: str):
+    # Same immutable content-addressed capability as design assets: offscreen
+    # windows have no account cookies, and a name reveals no other file.
+    path = _call(video_store.asset_path, video_id, name)
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable",
+                                       "Access-Control-Allow-Origin": "*", "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@router.post("/api/videos/{video_id}/assets")
+async def add_asset(video_id: str, request: Request, user: str = Depends(require_user)):
+    _video(video_id, user)
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = CopyAsset.model_validate(await request.json())
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        asset = _call(video_store.add_asset, video_id, design_id=body.design_id, asset=body.asset,
+                      user=user, is_admin=auth_manager.is_admin(user))
+    else:
+        form = await request.form()
+        upload = form.get("file")
+        if not hasattr(upload, "read"):
+            raise HTTPException(422, "asset: upload an image in the file field.")
+        try:
+            raw = await upload.read(25 * 1024 * 1024 + 1)
+            ext = Path(upload.filename or "").suffix
+            asset = _call(video_store.add_asset, video_id, raw, ext)
+        finally:
+            await form.close()
+    return {"asset": asset}
+
+
+@router.post("/api/videos/{video_id}/render")
+async def render_video(video_id: str, body: RenderBody, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _call(video_render.start, video_id, body.aspect)
+
+
+def _job(job_id, user):
+    state = _call(video_render.status, job_id)
+    _video(state["video_id"], user)
+    return {k: v for k, v in state.items() if k != "path"}
+
+
+@router.get("/api/video-jobs/{job_id}")
+async def get_job(job_id: str, user: str = Depends(require_user)):
+    return _job(job_id, user)
+
+
+@router.post("/api/video-jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, user: str = Depends(require_user)):
+    _job(job_id, user)
+    _call(video_render.cancel, job_id)
+    return _job(job_id, user)
+
+
+@router.get("/api/videos/{video_id}/renders/{file}")
+async def download(video_id: str, file: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    if not re.fullmatch(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.mp4|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)", file):
+        raise HTTPException(404, "Render not found")
+    path = video_store._folder(video_id) / "renders" / file
+    if not path.is_file():
+        raise HTTPException(404, "Render not found")
+    return FileResponse(path, filename=file)
+
+
+@router.get("/api/videos/{video_id}/history")
+async def history(video_id: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return video_store.history(video_id)
+
+
+@router.post("/api/videos/{video_id}/restore/{version}")
+async def restore(video_id: str, version: int, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _call(video_store.restore, video_id, version)

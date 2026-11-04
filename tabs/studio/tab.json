@@ -1,0 +1,12 @@
+{
+  "slug": "studio",
+  "name": "Studio",
+  "version": "1.0.0",
+  "api": 1,
+  "hooks": [],
+  "description": "Video projects, live editing and local render downloads.",
+  "icon_svg": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 9h18v12H3zM3 9l-1-5 18-3 1 5zM7 3l4 4m3-5 4 4\"/><path d=\"m10 12 5 3-5 3z\"/></svg>",
+  "blurb": "Make and edit videos in any look, then download them.",
+  "detail": "Arrange beats, preview in your chosen look, and render videos on this computer. Download MP4 videos, contact sheets and soundtracks. Publishing is not included.",
+  "reads": "Reads and edits your visible videos and copies design assets you choose. Uses FFmpeg on this computer for rendering. Kairos never installs FFmpeg."
+}

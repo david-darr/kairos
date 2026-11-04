@@ -15,6 +15,13 @@ function swatches(variables) {
   }));
 }
 
+// Fit the whole preview board when the card's width changes.
+const lookPreviewObserver = new ResizeObserver(entries => {
+  for (const { target: box, contentRect: { width } } of entries) {
+    if (width > 0) box.style.setProperty('--look-scale', String(width / 1200));
+  }
+});
+
 // A look's preview board, drawn by the backend in the look's own fonts and tokens. The frame runs no
 // script (empty sandbox; the route's policy allows none) and is scaled down from 1200x800. A person's
 // style or draft is private, so its preview carries the token the authenticated read handed out.
@@ -22,7 +29,9 @@ function lookPreview(system, token = system.preview_token) {
   const query = token ? `?rt=${encodeURIComponent(token)}` : '';
   const frame = el('iframe', { class: 'design-look-frame', src: `/api/design-looks/${encodeURIComponent(system.id)}/preview${query}`,
     sandbox: '', loading: 'lazy', scrolling: 'no', tabindex: '-1', title: `${system.name || 'Style'} preview`, 'aria-hidden': 'true' });
-  return el('div', { class: 'design-look-preview' }, [frame]);
+  const box = el('div', { class: 'design-look-preview' }, [frame]);
+  lookPreviewObserver.observe(box);
+  return box;
 }
 
 function fontsText(look) {

@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "underline", "border": "1px", "label_case": "upper", "label_tracking": "0.06em",
             "display_weight": "500", "display_style": "normal"},
   "imagery": "full-bleed work images, generous white walls, small captions with numbers",
+  "image_treatment": "posterize",
+  "pattern": "waves",
   "archetypes": ["grid-12", "editorial-column", "big-number"],
   "guide": "White walls, black type, the work is the colour. A wide geometric headline, small numbered captions, one orange-red dot at most."
 }

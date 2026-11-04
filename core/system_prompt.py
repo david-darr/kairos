@@ -54,7 +54,10 @@ UI_DESIGN_DISCIPLINE = (
 # Every chat model (not helpers, which cannot write): a design request goes to
 # the Design canvas (core/design_tools.py), not a hand-built HTML file.
 DESIGN_CANVAS_LINE = ("\n\nTo design screens, pages, posters, slides, or a document or PDF, pick a look with "
-                      "creative_direction, then use the Design canvas: design_create with that look, then design_edit by id.")
+                      "creative_direction, then use the Design canvas: design_create with that look, then design_edit by id. "
+                      "Pictures come from image_generate, image_search (openly licensed photos, credit on the board), "
+                      "image_treat or image_pattern; never draw pictures or clip art in code. "
+                      "To make a video, pick a look with creative_direction, then video_create with a beat sheet, video_preview, and video_render.")
 # 2026-10-28: the index of how-to skills for extending Kairos (skill_templates/kairos-developer).
 DEVELOPER_LINE = ("\n\nTo build or automate something with Kairos itself (a tab, skill, integration, routine, agent "
                   "or code project), read_skill kairos-developer first.")

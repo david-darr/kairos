@@ -11,6 +11,8 @@
   "shape": {"radius": "6px", "button": "soft", "border": "1px", "label_case": "upper", "label_tracking": "0.18em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "a single luminous object (moon, spotlight, stage) in deep navy; fine star dust",
+  "image_treatment": "dither",
+  "pattern": "noise",
   "archetypes": ["poster-stack", "quote", "hero-split"],
   "guide": "Curtain up: deep navy, one golden light, a high-contrast display serif. Spaced capitals for dates and places. Keep it sparse so the glow reads."
 }

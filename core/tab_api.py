@@ -477,3 +477,86 @@ def for_tab(package):
         raise ValueError("The tab is not approved or enabled")
     return TabAPI(parts[1], entry)
 
+
+# Video workspace capabilities. Callers pass the authenticated user, never
+# model-supplied ownership. Video CRUD remains on the shared HTTP API.
+def video_looks(user):
+    from core import design_systems
+    looks = design_systems.list_systems(user, is_admin(user))
+    default = design_systems.default_id() or design_systems.BUILTIN_ID
+    if default not in {row["id"] for row in looks}:
+        default = design_systems.BUILTIN_ID
+    return {"looks": looks, "default": default}
+
+
+def video_look_tokens(look, user):
+    from core import design_systems
+    system = design_systems.get(look)
+    if not system or not design_systems.visible(system, user, is_admin(user)):
+        raise LookupError("No such look.")
+    return {"variables": design_systems.variables(system["tokens"]),
+            "font_css": design_systems.font_faces(system["id"], "/api/design-fonts")}
+
+
+def video_design_source(design_id, user):
+    from core import design_store, video_store
+    data = design_store.require_user_access(design_id, user, is_admin(user))
+    return {"title": data["title"], "look": data["design_system"],
+            "boards": [{"title": board["title"], "html": design_store.board_html(design_id, slug)}
+                       for slug, board in design_store.ordered_boards(data)],
+            "assets": sorted("assets/" + p.name for p in (design_store._folder(design_id) / "assets").iterdir()
+                             if p.is_file() and video_store.ASSET.fullmatch("assets/" + p.name))}
+
+
+def video_resources(video_id, user):
+    from core import video_render, video_store
+    video_store.require_user_access(video_id, user, is_admin(user))
+    folder = video_store._folder(video_id)
+    pattern = re.compile(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.mp4|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)")
+    files = sorted((p for p in (folder / "renders").iterdir() if p.is_file() and pattern.fullmatch(p.name)),
+                   key=lambda p: (p.stat().st_mtime_ns, p.name))
+    thumbs = [p.name for p in files if p.name.startswith("thumb-")]
+    return {"assets": sorted("assets/" + p.name for p in (folder / "assets").iterdir()
+                             if p.is_file() and video_store.ASSET.fullmatch("assets/" + p.name)),
+            "renders": [p.name for p in files], "thumbnail": thumbs[-1] if thumbs else None,
+            "jobs": [{k: v for k, v in job.items() if k != "path"} for job in list(video_render._jobs.values())
+                     if job["video_id"] == video_id]}
+
+
+def video_create_project(user, project):
+    from core import video_store
+    video_look_tokens(project.get("look"), user)
+    fields = {k: v for k, v in project.items() if k in video_store.FIELDS and k != "id"}
+    return video_store.create(owner=user, **fields)
+
+
+def video_save_project(video_id, project, user):
+    from core import video_store
+    video_store.require_user_access(video_id, user, is_admin(user))
+    video_look_tokens(project.get("look"), user)
+    return video_store.save(video_id, project)
+
+
+def video_delete_project(video_id, user):
+    from core import video_store
+    video_store.require_user_access(video_id, user, is_admin(user))
+    video_store.delete(video_id)
+
+
+def video_copy_design_asset(video_id, design_id, asset, user):
+    from core import video_store
+    video_store.require_user_access(video_id, user, is_admin(user))
+    return video_store.add_asset(video_id, design_id=design_id, asset=asset, user=user, is_admin=is_admin(user))
+
+
+def video_link_session(video_id, session_id, user):
+    from core import design_store, video_store
+    from core.session_manager import session_manager
+    session = session_manager.get_session(session_id)
+    if not session or session.get("owner_user") != user:
+        raise LookupError("No such chat.")
+    if video_id:
+        video_store.require_user_access(video_id, user, is_admin(user))
+        video_store.link_chat(video_id, session_id)
+    design_store.set_design_mode(session_id, True)
+
