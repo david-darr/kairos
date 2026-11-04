@@ -24,13 +24,15 @@ const VIEWER = source.match(/VIEWER_SCRIPT = r"""([\s\S]*?)"""/)[1];
 const HASH = 'sha256-' + crypto.createHash('sha256').update(VIEWER, 'utf8').digest('base64');
 const RESET = source.match(/\nRESET = """([\s\S]*?)"""/)[1];
 const reset = (w, h, min) => RESET.replace(/%\((w|h|min)\)s/g, (_, k) => ({ w, h, min })[k]).replace(/%%/g, '%');
-const ID = 'd5e5e5e5e5e5', MID = 'e6e6e6e6e6e6', PID = 'f7f7f7f7f7f7';
+const ID = 'd5e5e5e5e5e5', MID = 'e6e6e6e6e6e6', PID = 'f7f7f7f7f7f7', DID = 'a8a8a8a8a8a8';
+// A printed page for the Pages view (any PNG; the real ones come from the desktop app's print).
+const PAGE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC', 'base64');
 // A board's own palette lives inside its frame; these are the Kairos system's values.
 const TOKENS = ':root{--ds-bg:#F3EADB;--ds-surface:#FBF6EE;--ds-text:#3A2A20;--ds-text-dim:#6B5646;--ds-accent:#B8893B;--ds-accent-text:#83601F;--ds-hairline:rgba(184,137,59,.55);--ds-hairline-soft:rgba(184,137,59,.25);--ds-success:#5E7A4A;--ds-font-sans:Jost,system-ui,sans-serif;--ds-font-serif:"Cormorant Garamond",Georgia,serif;--ds-size-1:12px;--ds-size-2:14px;--ds-size-3:16px;--ds-size-4:20px;--ds-size-5:28px;--ds-size-6:36px;--ds-size-7:56px;--ds-space-2:8px;--ds-space-3:12px;--ds-space-4:16px;--ds-space-5:24px;--ds-space-6:32px;--ds-space-7:48px;--ds-space-8:72px;--ds-radius-m:12px;--ds-radius-l:20px;--ds-radius-pill:999px}';
 
 // core/design_formats.py, mirrored for the synthetic server.
 const CHROME = { phone: [36, 12, 22], tablet: [22, 18, 22], browser: [40, 0, 0] };
-const LABELS = { 'app:phone': 'App · Phone', 'app:tablet': 'App · Tablet', 'website:desktop': 'Website · Desktop', 'website:mobile': 'Website · Mobile', slides: 'Slides', poster: 'Poster', social: 'Social' };
+const LABELS = { document: 'Document · US Letter', 'app:phone': 'App · Phone', 'app:tablet': 'App · Tablet', 'website:desktop': 'Website · Desktop', 'website:mobile': 'Website · Mobile', slides: 'Slides', poster: 'Poster', social: 'Social' };
 function layout(boards) {
   const order = Object.keys(boards).sort((a, b) => boards[a].order - boards[b].order);
   const rows = new Map();
@@ -48,9 +50,9 @@ function layout(boards) {
   return order;
 }
 const board = (title, order, format, size, orientation, frame, w, h, more = {}) => {
-  const grows = format === 'website';
+  const grows = format === 'website' || format === 'document';
   return { title, order, format, size, orientation, frame, w, h, x: 0, y: 0, grows, ratio: grows || !format ? null : w / h,
-    min_h: grows ? Math.min(h, size === 'mobile' ? 844 : 900) : undefined, section: format === 'website' || format === 'app' ? `${format}:${size}` : format,
+    min_h: grows ? Math.min(h, format === 'document' ? 1056 : size === 'mobile' ? 844 : 900) : undefined, section: format === 'website' || format === 'app' ? `${format}:${size}` : format,
     format_label: more.label || LABELS[format === 'website' || format === 'app' ? `${format}:${size}` : format], ...more };
 };
 const page = (heading, body, extra = '') => `<main style="min-height:100%;padding:var(--ds-space-7);background:var(--ds-bg);color:var(--ds-text);font-family:var(--ds-font-sans)">${extra}<h1 style="margin:0 0 var(--ds-space-4);font-size:var(--ds-size-6);font-weight:500">${heading}</h1><p style="margin:0;color:var(--ds-text-dim);font-size:var(--ds-size-4)">${body}</p></main>`;
@@ -96,6 +98,10 @@ const designs = {
   [PID]: { title: 'Launch site', chat: 's1', render: false, version: 1, comments: [], hidden: true, boards: {
     home: board('Home', 1, 'website', 'desktop', null, 'browser', 1440, 1700) },
   html: { home: SITE(false), 'home-mobile': SITE(true) } },
+  // A document board (Phase 2): it prints on real pages, so the canvas offers Pages and Word.
+  [DID]: { title: 'Spring guide', chat: 's1', render: true, version: 1, comments: [], hidden: true, boards: {
+    guide: board('Guide', 1, 'document', 'letter', null, 'none', 816, 2400) },
+  html: { guide: page('Spring coaching guide', 'Eight Saturdays of first touch, passing and teamwork.') } },
 };
 for (const d of Object.values(designs)) layout(d.boards);
 const FORMATS = [
@@ -216,6 +222,11 @@ function serve(url, req, res) {
     return true;
   }
   if (/^\/boards\/[a-z0-9-]+\/thumb$/.test(rest)) { res.writeHead(404); res.end('{"detail":"No thumbnail"}'); return true; }
+  const pages = rest.match(/^\/boards\/([a-z0-9-]+)\/pages(?:\/(\d+))?$/);
+  if (pages && d.boards[pages[1]]?.format === 'document') {
+    if (!pages[2]) return json({ count: 3, key: 'k1' });
+    res.setHeader('Content-Type', 'image/png'); res.end(PAGE_PNG); return true;
+  }
   if (rest === '' && req.method === 'GET') return json(view(m[1]));
   if (rest === '/comments' && req.method === 'GET') return json(d.comments);
   if (rest === '/comments' && req.method === 'POST') return read(body => {
@@ -749,6 +760,43 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   win.setContentSize(1440, 900); await delay(300);
   await navigate('library', { section: 'documents' });
   await looks({ js, waitFor, delay, navigate, win, capture, overflow });
+  await documents({ js, waitFor, delay, navigate, win, capture, overflow });
+}
+
+// A document board (Creative Output Quality Phase 2): Pages shows the printed pages; Export offers the
+// editable PowerPoint, exact picture slides, Word and the design-fonts choice; on desktop and a phone.
+async function documents({ js, waitFor, delay, navigate, win, capture, overflow }) {
+  const openExport = async () => {
+    await js("[...document.querySelectorAll('.design-toolbar .btn')].find(b => b.textContent === 'Export').click()");
+    await waitFor("!!document.querySelector('.design-export-menu')");
+  };
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    win.setContentSize(width, height); await delay(300);
+    await navigate('design', { designId: DID });
+    await waitFor("[...document.querySelectorAll('.design-toolbar .btn')].some(b => b.textContent === 'Export' && b.offsetParent)");
+    // The Library page slides in (rd-push-in); measure once it has landed.
+    await waitFor("(document.querySelector('.design-page')?.getAnimations({ subtree: true }) || []).every(a => a.playState !== 'running')");
+    await openExport();
+    const items = await js("[...document.querySelectorAll('.design-export-menu .design-menu-item')].map(b => [b.dataset.export || 'pages', b.textContent, b.disabled])");
+    assert.deepEqual(items.map(i => i[0]), ['pages', 'html', 'png', 'pdf', 'pptx', 'pptx-pictures', 'docx'], `every export at ${width}`);
+    assert.ok(items.some(i => i[1] === 'PowerPoint (editable)') && items.some(i => i[1] === 'Word (document boards)') && items[0][1] === 'See printed pages',
+      'the export names say what they make');
+    assert.ok(items.every(i => !i[2]), `with the desktop app every export is offered at ${width}`);
+    assert.ok(await js("!!document.querySelector('.design-export-menu .design-menu-check input[type=checkbox]')"), 'Keep design fonts is offered');
+    if (overflow) assert.deepEqual(await overflow(), [], `no sideways scroll with the export menu open at ${width}`);
+    await capture(`design-export-menu-${width}`);
+    await js("document.querySelector('.design-see-pages').click()");
+    await waitFor("document.querySelectorAll('.design-pages .design-print-page img').length === 3");
+    assert.deepEqual(await js("[...document.querySelectorAll('.design-print-page figcaption')].map(f => f.textContent)"),
+      ['Page 1 of 3', 'Page 2 of 3', 'Page 3 of 3'], `the printed pages are listed at ${width}`);
+    assert.ok(await js("[...document.querySelectorAll('.design-print-page img')].every(i => i.src.includes('/boards/guide/pages/') && i.alt.startsWith('Page '))"), 'each page is an image with alt text');
+    assert.ok(await js("document.activeElement?.textContent === 'Close'"), 'focus moves into the pages view');
+    if (overflow) assert.deepEqual(await overflow(), [], `no sideways scroll on the pages view at ${width}`);
+    await capture(`design-pages-${width}`);
+    await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await waitFor("!document.querySelector('.design-pages') && document.activeElement?.textContent === 'Export'");
+  }
+  win.setContentSize(1440, 900); await delay(300);
 }
 
 // Tool Store > Design systems: the looks with their previews, Use as default, on desktop and a phone.

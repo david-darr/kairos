@@ -196,7 +196,7 @@ class ExportInspectionTests(unittest.TestCase):
     def zip(self, boards=None):
         r = self.client.post(f"/api/designs/{self.design_id}/export", json={"format": "html", **({"boards": boards} if boards else {})})
         self.assertEqual(r.status_code, 200, r.text)
-        name, raw = run(design_export.export(self.design_id, "html", boards))
+        name, raw, _ = run(design_export.export(self.design_id, "html", boards))
         return name, zipfile.ZipFile(io.BytesIO(raw)), r.json()
 
     def test_every_local_reference_in_the_zip_resolves_inside_the_zip(self):
@@ -237,16 +237,16 @@ class ExportInspectionTests(unittest.TestCase):
     def test_render_jobs_carry_each_boards_dimensions_and_pptx_keeps_their_ratio(self):
         jobs = []
 
-        async def fake(design_id, slug, kind="png", *, scale=1, version=None):
+        async def fake(design_id, slug, kind="png", *, scale=1, version=None, hide=None):
             meta = design_store.manifest(design_id)["boards"][slug]
             jobs.append((slug, kind, scale, meta["w"], meta["h"]))
             return _png(meta["w"] // 10, meta["h"] // 10) if kind == "png" else _pdf()
         design_store.change(self.design_id, lambda d, f: (None, "x"), by="t", tool="t")  # no-op
         self.client.post(f"/api/designs/{self.design_id}/board-action", json={"action": "add", "title": "Deck", "format": "slide"})
         with patch.object(design_render_bridge, "render", fake), patch.object(design_render_bridge, "available", lambda: True):
-            _, deck = run(design_export.export(self.design_id, "pptx"))
-            _, png = run(design_export.export(self.design_id, "png", ["pick-a-habit"]))
-            _, pdf = run(design_export.export(self.design_id, "pdf", ["welcome", "reminders"]))
+            _, deck, _ = run(design_export.export(self.design_id, "pptx", pptx_mode="pictures"))
+            _, png, _ = run(design_export.export(self.design_id, "png", ["pick-a-habit"]))
+            _, pdf, _ = run(design_export.export(self.design_id, "pdf", ["welcome", "reminders"]))
         from pptx import Presentation
         presentation = Presentation(io.BytesIO(deck))
         data = design_store.manifest(self.design_id)

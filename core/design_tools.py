@@ -102,6 +102,9 @@ def _link(data: dict) -> str:
 def _size_text(info: dict) -> str:
     """"Website · Desktop 1440 wide, height grows (now 2310)", "Poster · 2:3 portrait 1200x1800"."""
     name = design_formats.label(info)
+    if design_formats.paged(info):
+        pages = max(1, -(-int(info["h"]) // design_formats.page(info)[2]))
+        return f"{name}, {info['w']} wide, its pages flow with the content (about {pages} page{'s' if pages > 1 else ''})"
     if design_formats.grows(info):
         return f"{name} {info['w']} wide, height grows with the content (now {info['h']})"
     return f"{name} {info['w']}x{info['h']}"
@@ -116,12 +119,25 @@ def _tokens(data: dict) -> dict[str, str]:
     return design_systems.variables(system["tokens"], data.get("token_overrides"))
 
 
+async def _print_pages(data: dict, slug: str) -> None:
+    """A document board's pages, printed now when the desktop app is here, so the blank-page check sees
+    this version (the background refresh would come after the model has read its notes)."""
+    from core import design_render_bridge
+    if design_formats.paged(data["boards"].get(slug) or {}) and design_render_bridge.available():
+        try:
+            await design_render_bridge.pages(data["id"], slug)
+        except (design_render_bridge.Unavailable, RuntimeError):
+            pass
+
+
 def _lint(data: dict, slug: str, text: Optional[str] = None) -> list[str]:
     root = design_html.parse(text if text is not None else design_store.board_html(data["id"], slug))
     tokens = _tokens(data)
     thumb = design_store.thumb_path(data["id"], slug)
+    from core import design_render_bridge
     return design_html.lint(root, tokens) + design_checks.check(root, data["boards"].get(slug) or {}, tokens,
-                                                                thumb if thumb.is_file() else None)
+                                                                thumb if thumb.is_file() else None,
+                                                                pages=design_render_bridge.cached_pages(data["id"], slug))
 
 
 def _guard(handler):
@@ -162,8 +178,9 @@ async def _creative_direction(args, ctx):
 
 @register("design_create",
           "Design screens, app UI, a mockup or wireframe, an onboarding flow, a website or landing page, a poster, "
-          "slides, a social post, a print page, a banner or an email on Kairos's Design canvas: create a design (HTML "
-          "boards in a look) linked to this chat. " + SKILL_HINT + " "
+          "slides, a social post, a print page, a document or PDF (report, guide, proposal, resume, worksheet: format "
+          "document, its pages flow), a banner or an email on Kairos's Design canvas: create a design (HTML boards in a "
+          "look) linked to this chat. " + SKILL_HINT + " "
           "Pick the look first with creative_direction and pass it as look; without one nothing is created and you get "
           "three directions to choose from. "
           "Pass the first board or two as boards: [{title, format, orientation, size?, html, mobile_html?}], then add "
@@ -215,6 +232,7 @@ async def _design_create(args, ctx):
                                       session_id=ctx.session_id)
     lint = []
     for slug, _ in design_store.ordered_boards(data):
+        await _print_pages(data, slug)
         lint += [f"{slug}: {n}" for n in _lint(data, slug)]
     boards = "\n".join(f"- {slug}: \"{info['title']}\" ({_size_text(info)})"
                        for slug, info in design_store.ordered_boards(data))
@@ -302,6 +320,7 @@ async def _design_add_board(args, ctx):
     for slug, more in result["result"]:
         info = result["manifest"]["boards"][slug]
         lines.append(f"{slug} \"{info['title']}\" ({_size_text(info)})")
+        await _print_pages(result["manifest"], slug)
         notes += [f"{slug}: {n}" for n in more + _lint(result["manifest"], slug)]
     return f"Added board {' and '.join(lines)} as version {result['version']}.{_notes(notes)}"
 
@@ -345,6 +364,7 @@ async def _design_edit(args, ctx):
     if result.get("unchanged"):
         return "Nothing changed: the operations left the board as it was."
     changed = result["changed"].get(slug, [])
+    await _print_pages(result["manifest"], slug)
     lint = _lint(result["manifest"], slug, holder["text"])
     return (f"Version {result['version']}: changed {', '.join(changed) or 'the board'} on {slug}."
             f"{_notes(holder['notes'] + lint)}")
@@ -702,17 +722,24 @@ async def _design_comments(args, ctx):
 
 
 @register("design_export",
-          "Export a design as a file for this chat: format html (a zip that opens offline), png, pdf or pptx "
-          "(picture slides). Optional boards limits it to some boards. Returns a download link to include in your reply.",
-          _object({"design_id": _ID, "format": {"type": "string", "enum": ["html", "png", "pdf", "pptx"]},
-                   "boards": {"type": "array", "items": {"type": "string"}}}, ("format",)),
+          "Export a design as a file for this chat: format html (a zip that opens offline), png, pdf (a document "
+          "board keeps all its pages), pptx (editable: slides, posters and other fixed-size boards become real PowerPoint text, shapes, pictures and "
+          "charts; pptx_mode pictures for exact picture slides) or docx (Word, document boards only). fonts office "
+          "(default: fonts every Office has, close to the look) or design (the look's own fonts, for people who have "
+          "them). Optional boards limits it to some boards. Returns a download link to include in your reply.",
+          _object({"design_id": _ID, "format": {"type": "string", "enum": ["html", "png", "pdf", "pptx", "docx"]},
+                   "boards": {"type": "array", "items": {"type": "string"}},
+                   "pptx_mode": {"type": "string", "enum": ["editable", "pictures"]},
+                   "fonts": {"type": "string", "enum": ["office", "design"]}}, ("format",)),
           surfaces=ALL, effect=WRITE)
 @_guard
 async def _design_export(args, ctx):
     from core import design_export, design_render_bridge
     data = _design(args, ctx)
     try:
-        filename, raw = await design_export.export(data["id"], args.get("format"), args.get("boards"))
+        filename, raw, notes = await design_export.export(data["id"], args.get("format"), args.get("boards"),
+                                                          pptx_mode=args.get("pptx_mode") or "editable",
+                                                          fonts=args.get("fonts") or "office")
     except design_render_bridge.Unavailable as error:
         return f"Not run: {error}"
     published = design_export.publish(filename, raw)
@@ -720,7 +747,7 @@ async def _design_export(args, ctx):
         from core.session_manager import session_manager
         session_manager.register_artifact(ctx.session_id, published["url"])
     return (f"Exported {filename}. Include this exact markdown link in your reply so it renders as a download: "
-            f"[{filename}]({published['url']})")
+            f"[{filename}]({published['url']})" + _notes(notes))
 
 
 @register("design_system_save",

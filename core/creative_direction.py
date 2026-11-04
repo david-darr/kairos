@@ -32,7 +32,8 @@ ARCHETYPES = {
     "poster": ["poster-stack", "big-number", "editorial-column", "grid-12"],
     "screen": ["bento", "hero-split", "comparison", "editorial-column"],
     "website": ["hero-split", "bento", "comparison", "editorial-column", "grid-12"],
-    "slides": ["slide-title", "big-number", "comparison", "timeline", "quote", "hero-split"],
+    "slides": ["slide-title", "big-number", "big-statement", "comparison", "two-column", "chart", "timeline", "quote",
+               "image-led", "closing"],
     "social": ["poster-stack", "big-number", "quote"],
     "print": ["editorial-column", "grid-12", "comparison", "timeline"],
     "email": ["editorial-column", "hero-split"],
@@ -156,6 +157,12 @@ def describe(brief: str, kind: Optional[str] = None, *, owner: Optional[str] = N
         fonts = " / ".join(f"{v} ({k})" for k, v in d["fonts"].items())
         lines.append(f"{n}. look=\"{d['look']}\" {d['name']} ({', '.join(d['mood'])}): {d['why']}. {d['guide']}\n"
                      f"   Palette: {palette}. Type: {fonts}. Layout: {', '.join(d['layout'])}. Imagery: {d['imagery']}.")
+    if kind == "print":
+        lines.append("A document or PDF of more than one page is format document (its pages flow, with page numbers): "
+                     "read_skill pdf-document. Exactly one printed page is format print.")
+    if kind == "slides":
+        lines.append("Mix the ten slide archetypes in the design-canvas skill, one idea per slide; charts are tables in "
+                     "<figure data-chart>.")
     lines.append("Every look's tokens are the same var(--ds-...) names; headlines use var(--ds-font-display), "
                  "text on an accent fill uses var(--ds-on-accent). Layout skeletons are in the design-canvas skill.")
     return "\n".join(lines)

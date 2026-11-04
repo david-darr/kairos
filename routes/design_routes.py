@@ -362,6 +362,30 @@ async def board_thumb(design_id: str, slug: str, user: str = Depends(require_use
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/{design_id}/boards/{slug}/pages")
+async def board_pages(design_id: str, slug: str, user: str = Depends(require_user)) -> dict:
+    """A document board's printed pages: how many, rendered (or refreshed) first when the desktop app is here."""
+    data = _design(design_id, user)
+    if slug not in data["boards"] or not design_formats.paged(data["boards"][slug]):
+        raise HTTPException(404, "Not a document board")
+    try:
+        images = await design_render_bridge.pages(design_id, slug)
+    except (design_render_bridge.Unavailable, RuntimeError) as error:
+        raise HTTPException(503, str(error)) from None
+    if not images:
+        raise HTTPException(503, design_render_bridge.NEEDS_APP)
+    return {"count": len(images), "key": design_store.board_hash(design_id, slug)}
+
+
+@router.get("/{design_id}/boards/{slug}/pages/{n}")
+async def board_page(design_id: str, slug: str, n: int, user: str = Depends(require_user)) -> Response:
+    _design(design_id, user)
+    files = design_render_bridge.cached_pages(design_id, slug)
+    if not 1 <= n <= len(files):
+        raise HTTPException(404, "No such page")
+    return Response(files[n - 1].read_bytes(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 class AddBoard(BaseModel):
     title: str = Field(default="New board", max_length=80)
     frame: Optional[str] = None
@@ -610,6 +634,8 @@ class Export(BaseModel):
     format: str
     boards: Optional[list[str]] = None
     session_id: Optional[str] = None
+    pptx_mode: str = "editable"
+    fonts: str = "office"
 
 
 @router.post("/{design_id}/export")
@@ -618,7 +644,8 @@ async def export_design(design_id: str, body: Export, user: str = Depends(requir
     if body.session_id:
         _owns_chat(body.session_id, user)
     try:
-        filename, raw = await design_export.export(design_id, body.format, body.boards)
+        filename, raw, notes = await design_export.export(design_id, body.format, body.boards,
+                                                          pptx_mode=body.pptx_mode, fonts=body.fonts)
     except design_render_bridge.Unavailable as error:
         raise HTTPException(503, str(error)) from None
     except (ValueError, LookupError) as error:
@@ -627,7 +654,7 @@ async def export_design(design_id: str, body: Export, user: str = Depends(requir
     if body.session_id:
         from core.session_manager import session_manager
         session_manager.register_artifact(body.session_id, published["url"])
-    return {"filename": filename, "url": published["url"], "size": len(raw)}
+    return {"filename": filename, "url": published["url"], "size": len(raw), "notes": notes}
 
 
 # -- phase 4: build this in Forge ------------------------------------------------------

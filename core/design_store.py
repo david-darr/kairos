@@ -775,5 +775,7 @@ def thumb_path(design_id: str, slug: str) -> Path:
 def board_hash(design_id: str, slug: str) -> str:
     data = manifest(design_id)
     text = board_html(design_id, slug)
+    # The title is in a document's running header, so it counts too.
     return hashlib.sha256(json.dumps([text, data.get("design_system"), data.get("token_overrides"),
-                                      data["boards"][slug]["w"], data["boards"][slug]["h"]]).encode()).hexdigest()[:16]
+                                      data["boards"][slug]["w"], data["boards"][slug]["h"],
+                                      data.get("title")]).encode()).hexdigest()[:16]

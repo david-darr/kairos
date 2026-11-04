@@ -90,7 +90,7 @@ def resolve(session_id: str, reference: dict) -> str:
 
 DESIGN_MODE_FIRST = (
     "\n\n[Design mode] This chat designs on Kairos's Design canvas. Before designing, read the design-canvas skill "
-    "(read_skill design-canvas). Pick the format from the request (website pairs, app, poster, slides, social, "
+    "(read_skill design-canvas). Pick the format from the request (website pairs, app, poster, slides, social, document, "
     "print, banner, email), create the design with design_create and its first board, add the rest one at a time "
     "with design_add_board, then change it with design_edit by element id. Include the design link the tool "
     "returns in your reply.")

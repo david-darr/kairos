@@ -886,9 +886,10 @@ async def _save_generated_image(args, ctx):
 @register(
     "save_generated_file",
     "Bring a locally-created file into this conversation as a real downloadable attachment. Use "
-    "this after actually writing a file to disk with a Bash-run script — for example a poster, "
-    "flyer, or presentation built with python-pptx, a Word doc with python-docx, a spreadsheet "
-    "with openpyxl, or a PDF with reportlab. This tool does not create anything itself, only "
+    "this after actually writing a file to disk with a Bash-run script, such as a spreadsheet with "
+    "openpyxl or a file the Design canvas can't make. A designed PDF, Word document, deck or poster "
+    "comes from the Design canvas instead (design_create, then design_export pdf, docx or pptx), "
+    "which gives it a look and checks it. This tool does not create anything itself, only "
     "the write-then-call-this-tool pattern works, not calling this on a file that doesn't exist. "
     "The result comes back as a markdown link — you MUST include that exact markdown verbatim in "
     "your reply, on its own line, so the user gets a real download link (in Discord it is sent as "

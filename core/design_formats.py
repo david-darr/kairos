@@ -10,7 +10,10 @@ size stays true to it:
 - poster: 2:3, 3:4, A-series (1:1.414), 18x24 or 11x17, portrait or landscape;
 - slides: 16:9 at 1920x1080;
 - social: square 1:1, portrait 4:5, landscape 1.91:1 and story 9:16;
-- print: US letter and A4, portrait or landscape;
+- print: US letter and A4, portrait or landscape (one page);
+- document: US letter or A4 pages that the content flows across, with a
+  running header and page numbers (Creative Output Quality spec, Phase 2):
+  one board is the whole document, as wide as its page, height grows;
 - banner: a site header, leaderboard, billboard, skyscraper or LinkedIn cover;
 - email: 600 wide, height grows;
 - custom: exact pixel sizes, only when the person asks for exact dimensions.
@@ -69,7 +72,12 @@ FORMATS: dict[str, dict] = {
     "print": {"label": "Print", "grow": False, "orientations": ("portrait", "landscape"), "default_size": "letter",
               "sizes": {"letter": {"label": "US Letter", "w": 816, "h": 1056},
                         "a4": {"label": "A4", "w": 794, "h": 1123}},
-              "hint": "a printed page: letter, one-pager, resume, certificate"},
+              "hint": "one printed page: a one-pager, flyer, certificate or single-page resume"},
+    "document": {"label": "Document", "grow": True, "paged": True, "orientations": (), "default_size": "letter",
+                 "sizes": {"letter": {"label": "US Letter", "w": 816, "h": 1056, "page": "letter"},
+                           "a4": {"label": "A4", "w": 794, "h": 1123, "page": "A4"}},
+                 "hint": "a document or PDF of one or more pages (report, guide, proposal, handout, worksheet, "
+                         "cheat sheet): the content flows across pages with page numbers"},
     "banner": {"label": "Banner", "grow": False, "orientations": ("landscape",), "default_size": "header",
                "default_orientation": "landscape",
                "sizes": {"header": {"label": "Header 3:1", "w": 1500, "h": 500},
@@ -138,7 +146,8 @@ def resolve(fmt: Optional[str], *, size: Optional[str] = None, orientation: Opti
     aliases = {"web": "website", "site": "website", "page": "website", "landing": "website", "deck": "slides",
                "slide": "slides", "presentation": "slides", "mobile": "app", "phone": "app", "tablet": "app",
                "flyer": "poster", "instagram": "social", "post": "social", "story": "social", "newsletter": "email",
-               "document": "print", "letter": "print", "a4": "print"}
+               "report": "document", "pdf": "document", "guide": "document", "proposal": "document",
+               "handout": "document", "worksheet": "document", "letter": "print", "a4": "print"}
     if fmt not in FORMATS and fmt in aliases:
         implied = {"phone": "phone", "tablet": "tablet", "mobile": "phone", "story": "story", "a4": "a4",
                    "letter": "letter"}.get(fmt)
@@ -246,6 +255,22 @@ def ratio(board: dict) -> Optional[float]:
 
 def grows(board: dict) -> bool:
     return board.get("format") in FORMATS and bool(FORMATS[board["format"]]["grow"])
+
+
+# A document's page margin on every side, in CSS px (0.75 in). The screen view
+# pads the board by the same amount, so lines wrap where they will in print.
+PAGE_MARGIN = 72
+
+
+def paged(board: dict) -> bool:
+    """A document board: printed as pages its content flows across, not one board-sized page."""
+    return board.get("format") in FORMATS and bool(FORMATS[board["format"]].get("paged"))
+
+
+def page(board: dict) -> tuple[str, int, int]:
+    """A document board's CSS page size name and its page width and height in px."""
+    spec = FORMATS["document"]["sizes"].get(board.get("size") or "") or FORMATS["document"]["sizes"]["letter"]
+    return spec["page"], spec["w"], spec["h"]
 
 
 def resize(board: dict, w=None, h=None) -> tuple[int, int, Optional[int]]:

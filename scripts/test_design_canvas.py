@@ -590,7 +590,7 @@ class ExportTests(unittest.TestCase):
         self.design_id, _ = create(self.sid)
 
     def test_the_html_zip_opens_offline(self):
-        name, raw = run(design_export.export(self.design_id, "html"))
+        name, raw, _ = run(design_export.export(self.design_id, "html"))
         self.assertTrue(name.endswith(".zip"))
         archive = zipfile.ZipFile(io.BytesIO(raw))
         files = set(archive.namelist())
@@ -632,9 +632,10 @@ class ExportTests(unittest.TestCase):
                     design_render_bridge.complete(job["id"], _png() if job["kind"] == "png" else _pdf())
             task = asyncio.ensure_future(worker())
             try:
-                pdf_name, pdf = await design_export.export(self.design_id, "pdf")
-                pptx_name, deck = await design_export.export(self.design_id, "pptx")
-                png_name, pngs = await design_export.export(self.design_id, "png", ["welcome"])
+                pdf_name, pdf, _ = await design_export.export(self.design_id, "pdf")
+                # Exact picture slides; the editable deck is test_design_documents.py's.
+                pptx_name, deck, _ = await design_export.export(self.design_id, "pptx", pptx_mode="pictures")
+                png_name, pngs, _ = await design_export.export(self.design_id, "png", ["welcome"])
             finally:
                 task.cancel()
                 try:
@@ -777,8 +778,8 @@ class RoutingTests(unittest.TestCase):
 
     def test_every_chat_model_is_told_to_use_the_canvas(self):
         from core import system_prompt
-        line = ("To design screens, pages, posters or slides, pick a look with creative_direction, then use the "
-                "Design canvas: design_create with that look, then design_edit by id.")
+        line = ("To design screens, pages, posters, slides, or a document or PDF, pick a look with "
+                "creative_direction, then use the Design canvas: design_create with that look, then design_edit by id.")
         for name, prompt in (("claude", system_prompt.for_claude()), ("external", system_prompt.for_external()),
                              ("codex", system_prompt.for_codex("py", "cli.py"))):
             self.assertIn(line, prompt, name)

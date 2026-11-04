@@ -923,21 +923,59 @@ export function mountDesignCanvas(host, { designId, compact = false, onSelection
   }
 
   // -- export and add ---------------------------------------------------------------
+  // PowerPoint is editable (native text, shapes, pictures, charts) unless the person wants exact pictures;
+  // Word is for document boards and needs no desktop app (core/design_export.py).
   function openExport(anchor) {
-    const items = [['html', 'HTML zip (opens offline)'], ['png', 'PNG images'], ['pdf', 'PDF'], ['pptx', 'PowerPoint (picture slides)']];
-    const menu = el('div', { class: 'design-menu', role: 'menu', 'aria-label': 'Export' }, items.map(([format, label]) =>
-      el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', text: label, disabled: format !== 'html' && !renderAvailable,
-        title: format !== 'html' && !renderAvailable ? 'Needs the Kairos desktop app' : '', onclick: () => { menu.remove(); exportAs(format); } })));
+    const hasDocument = order().some(slug => design.boards[slug]?.format === 'document');
+    const items = [['html', 'HTML zip (opens offline)', true], ['png', 'PNG images', renderAvailable], ['pdf', 'PDF', renderAvailable],
+      ['pptx', 'PowerPoint (editable)', renderAvailable], ['pptx-pictures', 'PowerPoint (exact picture slides)', renderAvailable]];
+    if (hasDocument) items.push(['docx', 'Word (document boards)', true]);
+    const keepFonts = el('input', { type: 'checkbox', class: 'design-keep-fonts' });
+    const menu = el('div', { class: 'design-menu design-export-menu', role: 'menu', 'aria-label': 'Export' }, items.map(([format, label, ok]) =>
+      el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item', 'data-export': format, text: label, disabled: !ok,
+        title: ok ? '' : 'Needs the Kairos desktop app', onclick: () => { menu.remove(); exportAs(format, keepFonts.checked); } })));
+    menu.append(el('label', { class: 'design-menu-check', title: 'Office fonts are installed everywhere; the design fonts look exact for people who have them' },
+      [keepFonts, el('span', { text: 'Keep design fonts (PowerPoint, Word)' })]));
+    // A document board prints on real pages (core/design_formats.py document): see them as printed.
+    if (hasDocument) menu.prepend(el('button', { type: 'button', role: 'menuitem', class: 'design-menu-item design-see-pages',
+      text: 'See printed pages', onclick: () => { menu.remove(); openPages(documentSlug(), anchor); } }));
     if (!renderAvailable) menu.append(el('p', { class: 'meta', text: 'PNG, PDF and PowerPoint need the Kairos desktop app.' }));
     showMenu(menu, anchor);
   }
-  async function exportAs(format) {
+  async function exportAs(choice, keepFonts = false) {
     toast('Exporting...');
+    const format = choice === 'pptx-pictures' ? 'pptx' : choice;
+    const body = { format, fonts: keepFonts ? 'design' : 'office', pptx_mode: choice === 'pptx-pictures' ? 'pictures' : 'editable' };
     try {
-      const result = await api(`/api/designs/${designId}/export`, { method: 'POST', body: JSON.stringify({ format }) });
+      const result = await api(`/api/designs/${designId}/export`, { method: 'POST', body: JSON.stringify(body) });
       const link = el('a', { href: result.url, download: result.filename }); document.body.append(link); link.click(); link.remove();
-      toast(`Exported ${result.filename}`, 'success');
+      toast((result.notes || []).length ? `Exported ${result.filename}. ${result.notes.join(' ')}` : `Exported ${result.filename}`,
+        (result.notes || []).length ? 'info' : 'success');
     } catch { /* api shows the error. */ }
+  }
+  function documentSlug() {
+    const documents = order().filter(slug => design.boards[slug]?.format === 'document');
+    return documents.includes(selected) ? selected : documents[0];
+  }
+  async function openPages(slug, returnTo) {
+    if (!slug) return;
+    const close = () => { dialog.remove(); document.removeEventListener('keydown', onKey, true); returnTo?.focus(); };
+    const onKey = event => { if (event.key === 'Escape') { event.preventDefault(); close(); } };
+    const strip = el('div', { class: 'design-pages-strip', role: 'list' }, [el('p', { class: 'meta', text: 'Printing the pages...' })]);
+    const closeBtn = el('button', { type: 'button', class: 'btn quiet', text: 'Close', onclick: close });
+    const dialog = el('div', { class: 'design-pages', role: 'dialog', 'aria-modal': 'true', 'aria-label': `Pages of ${design.boards[slug]?.title || slug}` }, [
+      el('div', { class: 'design-pages-head' }, [el('strong', { text: design.boards[slug]?.title || slug }), closeBtn]), strip]);
+    root.append(dialog);
+    document.addEventListener('keydown', onKey, true);
+    closeBtn.focus();
+    try {
+      const info = await api(`/api/designs/${designId}/boards/${slug}/pages`);
+      strip.replaceChildren(...Array.from({ length: info.count }, (_, i) => el('figure', { class: 'design-print-page', role: 'listitem' }, [
+        el('img', { alt: `Page ${i + 1} of ${info.count}`, loading: 'lazy', src: `/api/designs/${designId}/boards/${slug}/pages/${i + 1}?k=${info.key}` }),
+        el('figcaption', { class: 'meta', text: `Page ${i + 1} of ${info.count}` })])));
+    } catch {
+      strip.replaceChildren(el('p', { class: 'meta', text: 'The pages need the Kairos desktop app, which prints them.' }));
+    }
   }
   // Add a board in a named format (core/design_formats.py); a website adds its pair.
   function formatItems(onPick, { pair = true } = {}) {

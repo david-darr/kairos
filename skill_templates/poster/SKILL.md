@@ -39,7 +39,8 @@ way, it is checked as it is built, and the person can change any word later.
    and fix each with `design_edit`. With image reading, `design_snapshot` and
    look at it: the headline should be readable at thumbnail size.
 5. **Hand it over.** `design_export` with `png` for sharing and printing at
-   home, `pdf` for a print shop, `pptx` if they want to edit it in PowerPoint.
+   home, `pdf` for a print shop, `pptx` if they want to change the words in
+   PowerPoint (the text, shapes and pictures come out editable).
    Put the design link and the export link in your reply.
 
 ## Notes

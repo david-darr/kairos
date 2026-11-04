@@ -1,6 +1,6 @@
 ---
 name: design-canvas
-description: Design screens, pages, posters, slides and social posts on Kairos's Design canvas with the design_* tools, in a look chosen for the brief, the same way on every model.
+description: Design screens, pages, posters, slides, documents and PDFs, and social posts on Kairos's Design canvas with the design_* tools, in a look chosen for the brief, the same way on every model.
 ---
 
 # Design canvas
@@ -61,7 +61,8 @@ the person asked for and pick the format; never invent a width or height.
 | poster, flyer, print ad | `poster` | `portrait` or `landscape` | `2:3` (default), `3:4`, `a-series`, `18x24`, `11x17` |
 | slides, deck, presentation | `slides` | `landscape` | `16:9` 1920x1080, one board per slide |
 | Instagram or social post, story | `social` | `square` 1:1, `portrait` 4:5, `landscape` 1.91:1 | `post` (default) or `story` 9:16 |
-| letter, one-pager, resume, printed page | `print` | `portrait` or `landscape` | `letter` (default) or `a4` |
+| document or PDF of one or more pages: report, guide, proposal, handout, worksheet, cheat sheet | `document` | (none) | `letter` (default) or `a4`; pages flow (read `pdf-document`) |
+| exactly one printed page: one-pager, flyer, certificate, one-page resume | `print` | `portrait` or `landscape` | `letter` (default) or `a4` |
 | web banner, ad unit, cover image | `banner` | `landscape` | `header` 3:1 (default), `leaderboard`, `billboard`, `linkedin`, `skyscraper` |
 | email, newsletter | `email` | (none) | 600 wide |
 | exact pixel sizes the person gave | `custom` | (none) | pass `w` and `h` |
@@ -69,8 +70,10 @@ the person asked for and pick the format; never invent a width or height.
 - A website is always a pair: each page gets a desktop board and a mobile
   board. Pass the desktop HTML as `html` and the mobile HTML as
   `mobile_html` (without it the mobile board starts as a copy to rework).
-- Website and email boards are a fixed width and grow with their content.
-  Never set their height; write the page and it becomes as tall as it is.
+- Website, email and document boards are a fixed width and grow with their
+  content. Never set their height; write the page and it becomes as tall as it is.
+  A document prints on real Letter or A4 pages with a running header and page
+  numbers; read `pdf-document` before making one.
 - `custom` only when the person named exact dimensions.
 
 ## Workflow
@@ -89,7 +92,15 @@ the person asked for and pick the format; never invent a width or height.
 6. Rename, duplicate, delete, reorder or move boards: `design_boards`.
    Colours and type for the whole design, or another look: `design_tokens`.
    Comments the user pinned: `design_comments`.
-7. Files: `design_export` with `html` (offline zip), `png`, `pdf` or `pptx`.
+7. Files: `design_export` with `html` (offline zip), `png`, `pdf`, `pptx` or
+   `docx` (Word, document boards). PPTX is editable: every slide (or poster,
+   social or print board) becomes real PowerPoint text boxes, shapes, pictures
+   and charts, so write slide text
+   as text (never inside an image) and charts as tables (below). Add
+   `pptx_mode: "pictures"` only when the person wants exact picture slides, and
+   `fonts: "design"` when they have the look's fonts installed. The export
+   notes flag any text that may overflow in PowerPoint; shorten it and export
+   again.
 
 ## design_edit operations
 
@@ -125,7 +136,10 @@ changes nothing and says what is valid; read it and try again.
 - Text on an accent fill uses `var(--ds-on-accent)`. Elsewhere text uses
   `--ds-text` or `--ds-text-dim`; labels and links `--ds-accent-text`.
 - Type floors, in px at the board's size: slides 24, social 22, posters 20,
-  everything else 12. Headlines on posters and slides are big: 96 to 220px.
+  documents 13, everything else 12. Headlines on posters and slides are big:
+  96 to 220px.
+- One idea per slide: a headline that says the point and at most a few short
+  lines. More than about 60 words is a document on a slide; split it.
 - Real, readable text: no lorem ipsum, no grey bars standing in for text, no
   empty boxes standing in for images. Missing facts become visible
   placeholders like [DATE]. Buttons and tap targets at least 44px tall.
@@ -136,6 +150,28 @@ changes nothing and says what is valid; read it and try again.
 - Click-through without scripts: `data-kd-goto="<board slug>"` opens a board,
   `data-kd-goto="back"` goes back, `data-kd-goto-mode="overlay"` opens it as an
   overlay, and `data-kd-toggle="<element id>"` shows or hides an element.
+
+## Charts: write the numbers, Kairos draws them
+
+Never draw a chart by hand with divs or SVG. Put a plain table in a figure and
+name the chart; every save draws it in the look's colours (bar, line, donut)
+or as big numbers (stat), and the PowerPoint export makes it a native chart.
+
+```html
+<figure data-chart="bar" style="margin: 0">
+  <figcaption style="font-size: 28px; margin-bottom: 16px">Signups by month</figcaption>
+  <table><thead><tr><th>Month</th><th>Signups</th><th>Churn</th></tr></thead>
+    <tbody><tr><td>Jan</td><td>700</td><td>80</td></tr><tr><td>Feb</td><td>1,500</td><td>95</td></tr></tbody></table>
+</figure>
+```
+
+- The first column is the labels; each other column is a series (up to six).
+  Numbers may be written 1,500, 1.5k, $2.4M or 45%.
+- `data-chart="bar"` (add `data-orient="horizontal"` for bars across), `line`,
+  `donut` (the first number column, as shares), `stat` (each row a big number:
+  label, then the value as written).
+- The chart is as wide as its figure; size the figure, not the drawing. Edit the
+  table to change the chart.
 
 ## Layout skeletons
 
@@ -213,6 +249,56 @@ then fill it with the real content; every one uses only tokens.
 <section style="display: grid; align-content: center; width: 1920px; height: 1080px; padding: 0 220px; background: var(--ds-surface); color: var(--ds-text)">
   <p style="margin: 0; font: 400 96px/1.1 var(--ds-font-display)">"The domain was his long before it was theirs."</p>
   <p style="margin: 48px 0 0; color: var(--ds-text-dim); font-size: 34px">Defense theory of the case</p>
+</section>
+```
+
+**Slides: ten archetypes.** A deck mixes them; never ten of the same. The
+skeletons above cover **slide-title** (also the **section** divider: same shape,
+a section number as the kicker), **big-number**, **comparison**, **timeline**
+and **quote**. The other five:
+
+**big-statement** (slides): one sentence fills the slide.
+
+```html
+<section style="display: grid; align-content: center; width: 1920px; height: 1080px; padding: 0 200px; background: var(--ds-accent); color: var(--ds-on-accent)">
+  <p style="margin: 0; font: 400 120px/1.02 var(--ds-font-display)">Late payments are a design problem, not a people problem.</p>
+</section>
+```
+
+**image-led** (slides): a full-height picture from the design's assets beside a short point.
+
+```html
+<section style="display: grid; grid-template-columns: 1.2fr 1fr; width: 1920px; height: 1080px; background: var(--ds-bg); color: var(--ds-text)">
+  <img src="assets/..." alt="Coach and players at the first session" style="width: 100%; height: 1080px; object-fit: cover; display: block">
+  <div style="display: grid; align-content: center; padding: 0 120px; gap: 32px"><h2 style="margin: 0; font: 400 96px/1 var(--ds-font-display)">Every Saturday</h2>
+  <p style="margin: 0; color: var(--ds-text-dim); font-size: 36px; line-height: 1.35">Small groups, certified coaches, one ball per player.</p></div>
+</section>
+```
+
+**two-column** (slides): a point on the left, its three supports on the right.
+
+```html
+<section style="display: grid; grid-template-columns: 1fr 1fr; gap: 120px; align-items: center; width: 1920px; height: 1080px; padding: 0 160px; background: var(--ds-bg); color: var(--ds-text)">
+  <h2 style="margin: 0; font: 400 104px/1 var(--ds-font-display)">Why studios switch</h2>
+  <ul style="margin: 0; padding-left: 1.2em; font-size: 40px; line-height: 1.5"><li>Invoices go out the day the work ships</li><li>Reminders chase late payers</li><li>Card and bank in one place</li></ul>
+</section>
+```
+
+**chart** (slides): the finding as the headline, the chart as the proof.
+
+```html
+<section style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 96px; align-items: center; width: 1920px; height: 1080px; padding: 0 140px; background: var(--ds-bg); color: var(--ds-text)">
+  <div><h2 style="margin: 0; font: 400 96px/1 var(--ds-font-display)">Signups tripled</h2><p style="margin: 32px 0 0; color: var(--ds-text-dim); font-size: 36px">From 700 in January to 2,100 in March.</p></div>
+  <figure data-chart="bar" style="margin: 0"><table><thead><tr><th>Month</th><th>Signups</th></tr></thead><tbody><tr><td>Jan</td><td>700</td></tr><tr><td>Feb</td><td>1,500</td></tr><tr><td>Mar</td><td>2,100</td></tr></tbody></table></figure>
+</section>
+```
+
+**closing** (slides): the ask, and how to act on it.
+
+```html
+<section style="display: grid; align-content: center; justify-items: start; gap: 48px; width: 1920px; height: 1080px; padding: 0 160px; background: var(--ds-bg); color: var(--ds-text)">
+  <h2 style="margin: 0; font: 400 140px/0.95 var(--ds-font-display)">Raising $2M to reach 5,000 studios</h2>
+  <p style="margin: 0; padding: 24px 48px; border-radius: var(--ds-radius-pill); background: var(--ds-accent); color: var(--ds-on-accent); font-size: 40px">[EMAIL]</p>
 </section>
 ```
 

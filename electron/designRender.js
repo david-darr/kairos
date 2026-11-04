@@ -7,8 +7,10 @@
 // partition (persist:design-render) with no preload, every permission denied,
 // downloads and new windows refused, and every request outside that board's
 // render route, its assets and the design fonts cancelled. The window
-// captures a PNG or prints a PDF the size of the board, and the bytes go back
-// to POST /api/design-render/result/<job>. Modelled on forgePreview.js.
+// captures a PNG, prints a PDF (the size of the board, or a document's own
+// pages), or measures the board's layout for the editable PowerPoint export,
+// and the bytes go back to POST /api/design-render/result/<job>. Modelled on
+// forgePreview.js.
 const { BrowserWindow, session } = require('electron');
 
 const PARTITION = 'persist:design-render';
@@ -18,6 +20,58 @@ let running = false, stopped = false, controller = null, configured = false;
 const MEASURE = `(() => { let bottom = 0; for (const c of document.body.children) { if (c.tagName === 'SCRIPT') continue; const r = c.getBoundingClientRect(); if (r.height) bottom = Math.max(bottom, r.bottom + (parseFloat(getComputedStyle(c).marginBottom) || 0)); } return Math.ceil(bottom + scrollY); })()`;
 // The board the current job renders: the request filter allows only its routes.
 const current = { designId: '' };
+const KD_ID = /^[a-z][a-z0-9-]{0,47}$/;
+// What a PNG job may hide, for the PowerPoint background picture (core/design_pptx.py): an element's
+// text, its own box paint, or all of it. Fixed rules; only ids that match KD_ID are used.
+const HIDE_RULES = {
+  text: 'color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; text-decoration-color: transparent !important',
+  box: 'background: transparent !important; border-color: transparent !important; box-shadow: none !important; outline: none !important',
+  all: 'visibility: hidden !important',
+};
+// The layout job: every element's box and the computed style the PowerPoint builder maps, plus the
+// text runs of each block that holds only inline content. Read only; nothing on the page changes.
+const LAYOUT = `(() => {
+  const INLINE = new Set(['B','STRONG','I','EM','SPAN','A','SMALL','SUP','SUB','BR','MARK','CODE','U','S']);
+  const keep = ['color','backgroundColor','backgroundImage','borderTopWidth','borderTopStyle','borderTopColor',
+    'borderRightWidth','borderBottomWidth','borderLeftWidth','borderTopLeftRadius','fontFamily','fontSize','fontWeight',
+    'fontStyle','lineHeight','letterSpacing','textAlign','textTransform','opacity','transform','filter','boxShadow',
+    'visibility','display','clipPath','mixBlendMode','paddingTop','paddingRight','paddingBottom','paddingLeft',
+    'objectFit','listStyleType','writingMode','textDecorationLine','whiteSpace','position','backdropFilter','maskImage'];
+  const style = el => { const s = getComputedStyle(el), o = {}; for (const k of keep) o[k] = s[k]; return o; };
+  const runs = el => {
+    const list = [];
+    const walk = node => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) {
+          if (!child.data) continue;
+          const s = getComputedStyle(node);
+          list.push({ text: child.data, color: s.color, weight: s.fontWeight, italic: s.fontStyle === 'italic',
+            size: s.fontSize, family: s.fontFamily, transform: s.textTransform,
+            underline: s.textDecorationLine.includes('underline') });
+        } else if (child.nodeType === 1) {
+          if (child.tagName === 'BR') list.push({ br: true }); else walk(child);
+        }
+      }
+    };
+    walk(el);
+    return list;
+  };
+  const inlineOnly = el => [...el.querySelectorAll('*')].every(c => INLINE.has(c.tagName));
+  const out = [];
+  for (const el of document.body.querySelectorAll('*')) {
+    if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+    if (el.closest('svg') && el.tagName.toLowerCase() !== 'svg') continue;
+    const r = el.getBoundingClientRect();
+    const entry = { id: el.getAttribute('data-kd') || '', tag: el.tagName.toLowerCase(),
+      parent: (el.parentElement && el.parentElement.getAttribute('data-kd')) || '',
+      x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height, style: style(el) };
+    if (el.hasAttribute('data-chart')) entry.chart = el.getAttribute('data-chart');
+    if (el.tagName === 'IMG') { entry.src = el.getAttribute('src') || ''; entry.natural = [el.naturalWidth, el.naturalHeight]; }
+    if (!INLINE.has(el.tagName) && el.textContent.trim() && inlineOnly(el)) entry.runs = runs(el);
+    out.push(entry);
+  }
+  return JSON.stringify({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight, elements: out });
+})()`;
 
 function allowedRequest(raw, origin, designId) {
   try {
@@ -44,7 +98,7 @@ async function renderJob(origin, job) {
   const match = JOB_PATH.exec(String(job.path || ''));
   const w = Math.max(64, Math.min(4000, Number(job.w) || 0));
   let h = Math.max(64, Math.min(8000, Number(job.h) || 0));
-  if (!match || !['png', 'pdf'].includes(job.kind)) throw new Error('refused an invalid render job');
+  if (!match || !['png', 'pdf', 'layout'].includes(job.kind)) throw new Error('refused an invalid render job');
   current.designId = match[1];
   const isolated = configure(origin);
   const win = new BrowserWindow({
@@ -71,10 +125,25 @@ async function renderJob(origin, job) {
       if (measured >= 64 && Math.abs(measured - h) > 1) {
         h = Math.max(64, Math.min(8000, Math.max(Math.round(measured), Number(job.min_h) || 0)));
         win.setContentSize(w, h);
-        // The page's own print size follows (its @page rule names the stored height).
-        await win.webContents.executeJavaScript(`(() => { const s = document.createElement('style'); s.textContent = '@page { size: ${w}px ${h}px; margin: 0 } @media print { html, body { height: ${h}px } }'; document.head.append(s); return 1; })()`, true).catch(() => 1);
+        // The page's own print size follows (its @page rule names the stored height); a document
+        // prints on its own pages instead (core/design_render.py PAGED_PRINT).
+        if (!job.paged) await win.webContents.executeJavaScript(`(() => { const s = document.createElement('style'); s.textContent = '@page { size: ${w}px ${h}px; margin: 0 } @media print { html, body { height: ${h}px } }'; document.head.append(s); return 1; })()`, true).catch(() => 1);
         await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))).then(() => 1)', true).catch(() => 1);
       }
+    }
+    if (job.kind === 'layout') {
+      const json = await win.webContents.executeJavaScript(LAYOUT, true);
+      return { type: 'application/json', body: Buffer.from(String(json), 'utf8') };
+    }
+    const hide = Array.isArray(job.hide)
+      ? job.hide.filter(item => item && KD_ID.test(String(item.id)) && HIDE_RULES[item.mode]).slice(0, 2000) : [];
+    if (hide.length) {
+      const css = hide.map(item => {
+        const sel = `[data-kd="${item.id}"]`;
+        return `${item.mode === 'text' ? `${sel}, ${sel} *, ${sel}::marker, ${sel} *::marker` : sel} { ${HIDE_RULES[item.mode]} }`;
+      }).join('\n');
+      await win.webContents.executeJavaScript(`(() => { const s = document.createElement('style'); s.textContent = ${JSON.stringify(css)}; document.head.append(s); return 1; })()`, true);
+      await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))).then(() => 1)', true).catch(() => 1);
     }
     if (job.kind === 'png') {
       // A rectangle capture fails (UnknownVizError) on an offscreen window: take
@@ -83,8 +152,11 @@ async function renderJob(origin, job) {
       const image = (await win.webContents.capturePage()).resize({ width: w * scale, height: h * scale, quality: 'best' });
       return { type: 'image/png', body: image.toPNG() };
     }
-    const pdf = await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true,
-      pageSize: { width: w / 96, height: h / 96 }, margins: { marginType: 'none' } });
+    // A document prints on the pages its CSS names (Letter or A4, flowing); any other board as one page its size.
+    const pdf = job.paged
+      ? await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'default' } })
+      : await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true,
+        pageSize: { width: w / 96, height: h / 96 }, margins: { marginType: 'none' } });
     return { type: 'application/pdf', body: pdf };
   } finally {
     if (!win.isDestroyed()) win.destroy();
@@ -153,4 +225,4 @@ function start({ backendUrl, token }) {
 
 function stop() { stopped = true; controller?.abort(); }
 
-module.exports = { start, stop, allowedRequest, JOB_PATH };
+module.exports = { start, stop, allowedRequest, JOB_PATH, KD_ID, HIDE_RULES };

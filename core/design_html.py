@@ -347,8 +347,10 @@ def serialize(node: Node, *, parent_raw: bool = False) -> str:
 def normalize(source: str) -> tuple[str, Element, list[str]]:
     """Parse, clean and id a board. Returns the stored HTML, its tree and the
     notes on what was removed. Raises DesignError when it is too large."""
+    from core import design_charts
     root = parse(source)
     notes = sanitize(root)
+    notes += design_charts.expand(root)  # Charts are drawn from their tables on every save.
     assign_ids(root)
     text = serialize(root).strip()
     if len(text.encode("utf-8")) > MAX_BOARD_BYTES:

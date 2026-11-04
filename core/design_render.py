@@ -198,8 +198,30 @@ html[data-kd-mode="text"] [data-kd] { cursor: text; }
 [data-kd-mark~="changed"] { outline: 2px solid var(--ds-success); outline-offset: -2px; transition: outline-color .6s; }
 [contenteditable] { outline: 2px solid var(--kd-ui, var(--ds-accent)) !important; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
-@page { size: %(w)spx %(h)spx; margin: 0; }
+"""
+# A fixed or growing board prints as one page its own size.
+BOARD_PRINT = """@page { size: %(w)spx %(h)spx; margin: 0; }
 @media print { html, body { height: %(h)spx; overflow: hidden; } }
+"""
+# A document board prints as real pages (Creative Output Quality spec, Phase 2; the rules Phase 0 proved in
+# Electron): the content flows across them, a running header from the second page, page numbers on every
+# page, table headers repeated, headings kept with what follows. On screen the board is padded by the page
+# margin so lines wrap where they will in print. A board's own <style> can override any of it, e.g.
+# `@page { @top-left { content: none } }`. Margin boxes don't see custom properties, so their font and colour
+# are the look's values, resolved here.
+PAGED_PRINT = """@media screen { body { padding: %(m)spx; } }
+@page { size: %(page)s; margin: %(m)spx; background: %(bg)s;
+  @top-left { content: "%(header)s"; font: 8.5pt %(font)s; color: %(dim)s; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 8.5pt %(font)s; color: %(dim)s; } }
+@page :first { @top-left { content: none; } }
+@media print {
+  html { width: auto; min-height: 0; }
+  body { min-height: 0; }
+  thead { display: table-header-group; }
+  tr, figure, img, svg, blockquote, [data-kd-keep] { break-inside: avoid; }
+  h1, h2, h3, h4 { break-after: avoid; }
+  [data-kd-page-break] { break-before: page; }
+}
 """
 
 
@@ -240,7 +262,9 @@ def render_document(design_id: str, slug: str, *, version: Optional[int] = None,
     system = design_systems.get(system_id) or design_systems.builtin()
     head = "\n".join([design_systems.font_faces(system["id"], font_base),
                       design_systems.tokens_css(system["tokens"], overrides),
-                      RESET % {"w": int(meta["w"]), "h": int(meta["h"]), "min": _min_height(meta)}])
+                      RESET % {"w": int(meta["w"]), "h": int(meta["h"]), "min": _min_height(meta)},
+                      print_rules(meta, design_systems.variables(system["tokens"], overrides),
+                                  (snap["manifest"] if version else data).get("title"))])
     script = f"<script>{VIEWER_SCRIPT}</script>" if viewer else ""
     title = html.escape(meta.get("title") or slug)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{title}</title>'
@@ -289,6 +313,23 @@ def render_sample(system_id: str, *, font_base: str = "/api/design-fonts", rt: O
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(look["name"])}</title>'
             f'<meta name="viewport" content="width=1200"><style>{head}</style></head>'
             f"<body>{design_looks.sample(look)}</body></html>")
+
+
+def print_rules(meta: dict, tokens: dict[str, str], title: Optional[str] = None) -> str:
+    """How the board prints: one page its own size, or a document's flowing pages."""
+    if not design_formats.paged(meta):
+        return BOARD_PRINT % {"w": int(meta["w"]), "h": int(meta["h"])}
+    name = design_formats.page(meta)[0]
+    header = re.sub(r'["\\<>{};\x00-\x1f]', " ", title or meta.get("title") or "")[:90].strip()
+    font = re.sub(r"[;{}<>\\]", "", tokens.get("--ds-font-sans") or "sans-serif")[:200]
+    return PAGED_PRINT % {"page": name, "m": design_formats.PAGE_MARGIN, "header": header, "font": font,
+                          "dim": _colour(tokens, "--ds-text-dim", "#666"), "bg": _colour(tokens, "--ds-bg", "#fff")}
+
+
+def _colour(tokens: dict[str, str], key: str, fallback: str) -> str:
+    """A token's colour for the @page rules, or the fallback if it isn't a plain colour."""
+    value = tokens.get(key) or ""
+    return value if re.fullmatch(r"#[0-9a-fA-F]{3,8}|[a-z]{3,20}|rgba?\([0-9., %]+\)", value) else fallback
 
 
 def _min_height(meta: dict) -> int:

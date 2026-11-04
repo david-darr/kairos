@@ -11,7 +11,9 @@ back as lint notes, never refusals:
 - empty placeholder boxes and grey "skeleton" bars where content should be
   (round shapes and aria-hidden elements are decoration, never flagged);
 - from the board's cached thumbnail, when the desktop app rendered one, a
-  page that is mostly empty.
+  page that is mostly empty; for a document, from its cached printed pages,
+  any page between the cover and the last that is mostly empty;
+- on a slide, more words than one idea needs.
 
 Contrast, raw colours and missing alt text stay in design_html.lint.
 """
@@ -24,8 +26,10 @@ from typing import Optional
 from core.design_html import Element, _resolve, _style_items
 
 # Smallest readable text, in CSS px at the board's own size.
-TYPE_FLOOR = {"slides": 24, "poster": 20, "social": 22, "banner": 12, "print": 12, "app": 12, "website": 12,
-              "email": 12, "custom": 12}
+TYPE_FLOOR = {"slides": 24, "poster": 20, "social": 22, "banner": 12, "print": 12, "document": 13, "app": 12,
+              "website": 12, "email": 12, "custom": 12}
+BLANK_PAGE = 0.8           # A printed page (not the cover or the last) more than this blank.
+SLIDE_WORDS = 60            # One idea per slide: more words than this reads as a document on a slide.
 MAX_FAMILIES = 3
 EMPTY_SHARE = 0.45          # A fixed-size board more than this blank reads as unfinished.
 FIXED = ("poster", "social", "slides", "print", "banner")
@@ -68,8 +72,9 @@ def _font_parts(style: dict[str, str]) -> tuple[Optional[str], Optional[str]]:
     return size, family
 
 
-def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Path] = None) -> list[str]:
-    """Notes for one board. `board` is its manifest entry (format, w, h)."""
+def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Path] = None,
+          pages: Optional[list[Path]] = None) -> list[str]:
+    """Notes for one board. `board` is its manifest entry (format, w, h); `pages` a document's printed pages."""
     fmt = board.get("format") or "custom"
     floor = TYPE_FLOOR.get(fmt, 12)
     area = max(1, int(board.get("w") or 1) * int(board.get("h") or 1))
@@ -116,7 +121,33 @@ def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Pa
     empty = empty_share(thumb) if thumb is not None and fmt in FIXED else None
     if empty is not None and empty > EMPTY_SHARE:
         notes.append(f"About {round(empty * 100)}% of this {fmt} is blank in its render; scale the content to fill the board.")
+    if fmt == "slides":
+        words = _words(root)
+        if words > SLIDE_WORDS:
+            notes.append(f"{words} words on one slide; a slide carries one idea. Cut to the point, or split it "
+                         "into two slides and move the detail to the speaker's notes.")
+    # Printed pages: the cover (page 1) and the last page may be sparse; a page between them more than
+    # BLANK_PAGE blank is a section cut off by a forced break (Phase 2 benchmark: such pages measured 0.91
+    # and 0.93; full pages, margins and all, measured 0.40 to 0.67, covers up to 0.79).
+    blank = [n for n, page in enumerate((pages or [])[1:-1], 2) if (empty_share(page) or 0) > BLANK_PAGE]
+    if blank:
+        notes.append(f"Page{'s' if len(blank) > 1 else ''} {', '.join(map(str, blank[:6]))} of the printed document "
+                     f"{'are' if len(blank) > 1 else 'is'} mostly blank: a section ran a few lines past a page before a "
+                     "data-kd-page-break, or a kept-together block didn't fit. Remove that page break (let sections "
+                     "follow on) or let the block split.")
     return notes
+
+
+def _words(node) -> int:
+    """Words a viewer reads: not a chart's hidden table, its drawing, or styles."""
+    count = 0
+    for child in node.children:
+        if isinstance(child, Element):
+            if child.tag not in ("svg", "style") and child.get("hidden") is None:
+                count += _words(child)
+        else:
+            count += sum(1 for w in child.data.split() if any(ch.isalnum() for ch in w))
+    return count
 
 
 def empty_share(png: Path, tile: int = 24) -> Optional[float]:
