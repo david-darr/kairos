@@ -667,15 +667,124 @@ async def build_in_forge(design_id: str, body: ForgeHandoff, user: str = Depends
 
 @systems_router.get("")
 async def list_systems(user: str = Depends(require_user)) -> list[dict]:
-    return design_systems.list_systems()
+    return design_systems.list_systems(user, _admin(user))
+
+
+def _preview_token(system_id: str) -> str:
+    return design_render.sign(system_id, "style-preview", 3600)
 
 
 @systems_router.get("/{system_id}")
 async def get_system(system_id: str, user: str = Depends(require_user)) -> dict:
     system = design_systems.get(system_id)
-    if system is None:
+    if not design_systems.visible(system, user, _admin(user)):
         raise HTTPException(404, "Design system not found")
-    return {**system, "variables": design_systems.variables(system["tokens"])}
+    out = {**system, "variables": design_systems.variables(system["tokens"])}
+    if system.get("style"):
+        out.update(preview_token=_preview_token(system_id), mine=system.get("owner") == user)
+    return out
+
+
+# -- styles from references (Creative Output Quality spec, Phase 1b) -----------------------
+
+_FONT_OPTIONS = None
+
+
+def _draft_reply(record: dict) -> dict:
+    from core import design_looks
+    global _FONT_OPTIONS
+    _FONT_OPTIONS = _FONT_OPTIONS or [{"id": key, "name": name} for key, (name, _) in design_looks.FAMILIES.items()]
+    return {**record, "preview_token": _preview_token(record["id"]), "font_options": _FONT_OPTIONS,
+            "variables": design_systems.variables(design_looks.tokens(record["look"]))}
+
+
+@systems_router.post("/drafts")
+async def draft_from_references(request: Request, user: str = Depends(require_user)) -> dict:
+    """Tool Store > New style from references: up to 8 files, read locally into a draft. The files
+    are parsed in a temporary folder and deleted at once; only the extracted values are kept (D12)."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from core import design_references
+    form = await request.form()
+    uploads = [item for item in form.getlist("files") if hasattr(item, "read")][: design_references.MAX_FILES + 1]
+    if not uploads:
+        raise HTTPException(422, "Add at least one photo, screenshot, PDF, PowerPoint or Word file.")
+    if len(uploads) > design_references.MAX_FILES:
+        raise HTTPException(422, f"At most {design_references.MAX_FILES} files per style.")
+    folder = Path(tempfile.mkdtemp(prefix="kairos-style-"))
+    evidence, skipped = [], []
+    try:
+        for n, upload in enumerate(uploads):
+            content = await upload.read(design_references.MAX_BYTES + 1)
+            name = (getattr(upload, "filename", None) or f"file {n + 1}")[:80]
+            if len(content) > design_references.MAX_BYTES:
+                skipped.append(f"{name}: over 25 MB")
+                continue
+            path = folder / f"{n}"
+            path.write_bytes(content)
+            try:
+                evidence.append(design_references.read(path, name))
+            except design_references.ReferenceError as error:
+                skipped.append(f"{name}: {error}")
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    if not evidence:
+        raise HTTPException(422, "None of the files could be read: " + "; ".join(skipped))
+    try:
+        result = design_references.draft(evidence, str(form.get("name") or "")[:60], str(form.get("notes") or "")[:300])
+    except design_references.ReferenceError as error:
+        raise HTTPException(422, str(error))
+    record = design_references.save_draft(result, user)
+    return {**_draft_reply(record), "skipped": skipped}
+
+
+class StyleAdjust(BaseModel):
+    colors: Optional[dict[str, str]] = None
+    fonts: Optional[dict[str, str]] = None
+    shape: Optional[dict[str, str]] = None
+    name: Optional[str] = Field(default=None, max_length=60)
+
+
+@systems_router.post("/drafts/{draft_id}")
+async def adjust_draft(draft_id: str, body: StyleAdjust, user: str = Depends(require_user)) -> dict:
+    from core import design_references
+    try:
+        record = design_references.load_draft(draft_id, user)
+        look, notes = design_references.adjust(record["look"], colors=body.colors, fonts=body.fonts,
+                                               shape=body.shape, name=body.name)
+    except LookupError as error:
+        raise HTTPException(404, str(error))
+    except design_references.ReferenceError as error:
+        raise HTTPException(422, str(error))
+    record = design_references.save_draft({"look": look, "changes": record["changes"] + notes,
+                                           "sources": record["sources"]}, user, draft_id)
+    return _draft_reply(record)
+
+
+@systems_router.post("/drafts/{draft_id}/save")
+async def save_draft(draft_id: str, user: str = Depends(require_user)) -> dict:
+    """The person's own click saves it: theirs, private until an admin shares it (D10)."""
+    from core import design_references
+    try:
+        record = design_references.load_draft(draft_id, user)
+    except LookupError as error:
+        raise HTTPException(404, str(error))
+    system = design_systems.save_style(record["look"], owner=user, sources=record["sources"])
+    design_references.drop_draft(draft_id)
+    return {**system, "variables": design_systems.variables(system["tokens"]), "preview_token": _preview_token(system["id"])}
+
+
+class ShareStyle(BaseModel):
+    shared: bool
+
+
+@systems_router.post("/{system_id}/share")
+async def share_style(system_id: str, body: ShareStyle, user: str = Depends(require_admin)) -> dict:
+    try:
+        return design_systems.share_style(system_id, body.shared)
+    except LookupError:
+        raise HTTPException(404, "Style not found")
 
 
 class NewSystem(BaseModel):
@@ -755,7 +864,8 @@ async def set_default_look(body: DefaultLook, user: str = Depends(require_admin)
 
 
 @systems_router.delete("/{system_id}")
-async def delete_system(system_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_system(system_id: str, user: str = Depends(require_user)) -> dict:
+    """An admin removes any saved system; a person removes their own style."""
     import shutil
     from pathlib import Path
     from core import design_looks
@@ -763,6 +873,9 @@ async def delete_system(system_id: str, user: str = Depends(require_admin)) -> d
         raise HTTPException(422, "The built-in Kairos system cannot be removed")
     if design_looks.get(system_id):
         raise HTTPException(422, "Bundled looks ship with Kairos and cannot be removed")
+    system = design_systems.get(system_id)
+    if not _admin(user) and not (system and system.get("style") and system.get("owner") == user):
+        raise HTTPException(403, "admin privileges required")
     shutil.rmtree(Path(design_systems.SYSTEMS_DIR, system_id), ignore_errors=True)
     return {"ok": True}
 
@@ -770,10 +883,11 @@ async def delete_system(system_id: str, user: str = Depends(require_admin)) -> d
 # -- fonts and the render worker --------------------------------------------------------
 
 @render_router.get("/api/design-looks/{system_id}/preview")
-async def look_preview(system_id: str, request: Request) -> HTMLResponse:
-    """A bundled look's (or Kairos's) preview board for Tool Store cards. Bundled content only, like
-    the fonts, so it needs no session (the card's frame is sandboxed and sends none); no script runs."""
-    page = design_render.render_sample(system_id) if design_systems.ID_RE.fullmatch(system_id or "") else None
+async def look_preview(system_id: str, request: Request, rt: Optional[str] = None) -> HTMLResponse:
+    """A look's preview board for Tool Store cards. Bundled looks and Kairos need no session (the
+    card's frame is sandboxed and sends none); a person's style or draft is private, so it needs the
+    token its owner's authenticated read handed out (rt). No script runs."""
+    page = design_render.render_sample(system_id, rt=rt) if design_systems.ID_RE.fullmatch(system_id or "") else None
     if page is None:
         raise HTTPException(404, "Not found")
     origin = f"{request.url.scheme}://{request.url.netloc}"

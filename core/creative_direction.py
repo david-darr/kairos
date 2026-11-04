@@ -105,6 +105,20 @@ def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] =
         score -= RECENT_PENALTY * recent.count(look["id"])
         tie = int(hashlib.sha1(f"{brief}|{look['id']}".encode()).hexdigest()[:6], 16) / 0xFFFFFF  # stable, per brief
         scored.append((score + tie * 0.5, look, tags + moods))
+    # The person's own styles (Phase 1b): a style the brief names comes first; one whose tags match ranks
+    # above the bundled looks; "my style" favours theirs. Others' styles only once an admin shares them.
+    words = set(_WORD.findall((brief or "").lower()))
+    for system in design_systems.styles_for(owner) if owner else []:
+        look = {**design_systems._style_look(system["id"]), "id": system["id"]}
+        name_words = {w for w in _WORD.findall(look["name"].lower()) if w not in ("style", "look", "my", "the")}
+        tags = _hits(terms, look["tags"])
+        score = 2.0 + 3.0 * len(tags) + (1.0 if kind in look["good_for"] else -3.0)
+        if name_words and name_words <= words:
+            score += 100.0
+            tags = [f"the brief names {look['name']}"] + tags
+        elif {"my", "our"} & words and {"style", "brand", "look"} & words and system.get("owner") == owner:
+            score += 4.0
+        scored.append((score if tags or score > 50 else score - 4.0, look, tags))
     scored.sort(key=lambda item: item[0], reverse=True)
     picks = [(look, why) for _, look, why in scored[:count]]
     kairos_asked = "kairos" in _WORD.findall((brief or "").lower()) or design_systems.default_id() == design_systems.BUILTIN_ID
@@ -114,7 +128,8 @@ def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] =
     for look, why in picks[: count - len(out)]:
         archetypes = [a for a in ARCHETYPES[kind] if a in look["archetypes"]] or ARCHETYPES[kind][:2]
         out.append({"look": look["id"], "name": look["name"], "mood": look["mood"],
-                    "why": (f"matches {', '.join(why[:4])}" if why else f"suits a {kind}"),
+                    "why": (why[0] if why and why[0].startswith("the brief names") else
+                            f"matches {', '.join(why[:4])}" if why else f"suits a {kind}"),
                     "palette": design_looks.summary(look)["palette"],
                     "fonts": design_looks.summary(look)["fonts"],
                     "layout": archetypes[:2], "imagery": look["imagery"],

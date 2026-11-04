@@ -19,6 +19,7 @@ them through the bridge; the CLI bridge always accepts them.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Optional
 
 from core import creative_direction, design_checks, design_formats, design_html, design_store, design_systems
@@ -206,8 +207,8 @@ async def _design_create(args, ctx):
         kind = kind if kind in creative_direction.KINDS else None
         return ("Not created yet: pick a look first. " + creative_direction.describe(brief, kind, owner=owner)
                 + "\nThen call design_create again with the same boards and look=\"...\".")
-    if design_systems.get(system_id) is None:
-        looks = ", ".join(s["id"] for s in design_systems.list_systems())
+    if not design_systems.visible(design_systems.get(system_id), owner, ctx.is_admin):
+        looks = ", ".join(s["id"] for s in design_systems.list_systems(owner, ctx.is_admin))
         return f"Not run: no look or design system `{system_id}`. Looks and systems: {looks}."
     data, notes = design_store.create(args.get("title") or "", owner=owner, chat_key_=key, by=_by(ctx),
                                       design_system=system_id, boards=args.get("boards"),
@@ -502,12 +503,118 @@ def board_action(data: dict, args: dict, *, by: str, session_id: Optional[str], 
 @_guard
 async def _design_tokens(args, ctx):
     data = _design(args, ctx)
+    owner = _owner(ctx)
     if not args.get("set") and not args.get("system") and not args.get("clear"):
         _taint(ctx)
         system = design_systems.get(data.get("design_system")) or design_systems.builtin()
-        others = ", ".join(s["id"] for s in design_systems.list_systems())
+        others = ", ".join(s["id"] for s in design_systems.list_systems(owner, ctx.is_admin))
         return design_systems.describe_tokens(system, data.get("token_overrides")) + f"\n\nSystems: {others}"
+    if args.get("system") and not design_systems.visible(design_systems.get(args["system"]), owner, ctx.is_admin):
+        return f"Not run: no look or design system `{args['system']}`."
     return tokens_change(data, args, by=_by(ctx), session_id=ctx.session_id, user_edit=False)
+
+
+def _owner(ctx: ToolContext) -> str:
+    """The person a chat belongs to (whose styles it may use)."""
+    if ctx.session_id:
+        from core.session_manager import session_manager
+        owner = (session_manager.get_session(ctx.session_id) or {}).get("owner_user")
+        if owner:
+            return owner
+    from core.auth import SINGLE_USER
+    return SINGLE_USER
+
+
+def _chat_references(session_id: Optional[str], wanted: list) -> tuple[list[tuple], list[str]]:
+    """The person's own attachments in this chat, by file name (or id), newest first. Never a path:
+    a reference resolves only to a file attached to this chat (core/attachments.py staging)."""
+    from core import attachments
+    from core.session_manager import session_manager
+    session = session_manager.get_session(session_id) if session_id else None
+    if not session:
+        return [], ["References come from files attached to this chat."]
+    attached = [a for m in reversed(session.get("messages") or []) if m.get("role") == "user"
+                for a in (m.get("attachments") or []) if isinstance(a, dict) and a.get("id")]
+    found, missing = [], []
+    for want in [str(w) for w in (wanted or [])][:8] or [a["filename"] for a in attached[:8]]:
+        name = want.replace("\\", "/").rsplit("/", 1)[-1]
+        match = next((a for a in attached if a["id"] == want or a.get("filename") == name), None)
+        info = attachments.staged_file_info(match["id"]) if match else None
+        if info:
+            found.append((Path(info[0]), match.get("filename") or info[1]))
+        else:
+            missing.append(want[:60])
+    notes = [f"Not attached to this chat: {', '.join(missing)}. Attached files: "
+             + (", ".join(a.get("filename", "?") for a in attached[:12]) or "none")] if missing else []
+    return found, notes
+
+
+@register("design_style_from_references",
+          "Make a design style (a look like the bundled ones) from photos, screenshots, a PDF, a PowerPoint or a Word "
+          "file the person attached to this chat. First call with name and references (the attachments' file names; "
+          "leave it out to use the latest ones): Kairos reads them locally and returns a draft with every colour role, "
+          "the fonts (bundled families only) and what it repaired for contrast. Adjust with draft + adjust {colors: "
+          "{role: '#RRGGBB'}, fonts: {display, body}, shape: {button, radius}}. Save with draft + save=true: it asks the "
+          "person, then the style is theirs (private until an admin shares it) and usable as design_create look=<id>.",
+          _object({"name": _str("The style's name, e.g. Bakery menus"),
+                   "references": {"type": "array", "items": {"type": "string"},
+                                  "description": "File names of this chat's attachments (up to 8)"},
+                   "notes": _str("A line of intent from the person, e.g. warm, for our menus"),
+                   "draft": _str("A draft id from an earlier call, to adjust or save"),
+                   "adjust": {"type": "object", "description": "{colors: {role: '#RRGGBB'}, fonts: {display, body}, shape: {button, radius}, name}"},
+                   "save": {"type": "boolean", "description": "Save the draft (asks the person first)"}}),
+          surfaces=ALL, effect=WRITE)
+@_guard
+async def _design_style_from_references(args, ctx):
+    from core import design_references, design_render, permissions
+    owner = _owner(ctx)
+    if args.get("draft"):
+        record = design_references.load_draft(str(args["draft"]), owner)
+        if args.get("adjust"):
+            adjust = args["adjust"] if isinstance(args["adjust"], dict) else {}
+            look, notes = design_references.adjust(record["look"], colors=adjust.get("colors"), fonts=adjust.get("fonts"),
+                                                   shape=adjust.get("shape"), name=adjust.get("name"))
+            record = design_references.save_draft({"look": look, "changes": record["changes"] + notes,
+                                                   "sources": record["sources"]}, owner, record["id"])
+        if not args.get("save"):
+            return design_references.describe(record) + f"\nPreview: {_style_preview(record['id'])}"
+        tainted = bool(ctx.turn_taint and ctx.turn_taint.tainted)
+        decision = await permissions.decide(
+            surface=ctx.permission_surface, tool="design_style_from_references",
+            arguments={"name": record["look"]["name"], "sources": record["sources"]},
+            title=f"Save style {record['look']['name'][:40]}",
+            description="A style made from your references: only you can use it until an admin shares it. "
+                        "The reference files are not kept.",
+            is_admin=ctx.is_admin, force_prompt=True)
+        if decision.behavior != "allow":
+            return f"Not saved: {decision.reason or 'the style was not approved'}"
+        system = design_systems.save_style(record["look"], owner=owner, sources=record["sources"])
+        design_references.drop_draft(record["id"])
+        return (f"Saved style {system['id']} \"{system['name']}\" (private to its owner until an admin shares it). "
+                f"Use it with design_create look=\"{system['id']}\", or switch a design with design_tokens system={system['id']}.")
+    files, notes = _chat_references(ctx.session_id, args.get("references") or [])
+    if not files:
+        return "Not run: " + (" ".join(notes) or "attach a photo, screenshot, PDF, PowerPoint or Word file first.")
+    evidence, skipped = [], []
+    for path, name in files:
+        try:
+            evidence.append(design_references.read(path, name))
+        except design_references.ReferenceError as error:
+            skipped.append(f"{name}: {error}")
+    if ctx.turn_taint:
+        ctx.turn_taint.mark("reference content")
+    if not evidence:
+        return "Not run: none of the references could be read (" + "; ".join(skipped) + ")."
+    record = design_references.save_draft(design_references.draft(evidence, args.get("name") or "", args.get("notes") or ""), owner)
+    extra = ("\nSkipped: " + "; ".join(skipped)) if skipped else ""
+    extra += ("\n" + " ".join(notes)) if notes else ""
+    return (design_references.describe(record) + extra + f"\nPreview: {_style_preview(record['id'])}\n"
+            "Next: adjust with draft + adjust if the person wants changes, then save with draft + save=true.")
+
+
+def _style_preview(system_id: str) -> str:
+    from core import design_render
+    return f"/api/design-looks/{system_id}/preview?rt={design_render.sign(system_id, 'style-preview', 3600)}"
 
 
 def tokens_change(data: dict, args: dict, *, by: str, session_id: Optional[str], user_edit: bool) -> str:
