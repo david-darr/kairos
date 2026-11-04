@@ -88,6 +88,74 @@ def _contrast(a: str, b: str) -> float:
     return contrast(_hex(a), _hex(b))
 
 
+def _rgb(value: str) -> tuple[int, int, int]:
+    value = value.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def to_hex(rgb) -> str:
+    return "#%02X%02X%02X" % tuple(max(0, min(255, round(c))) for c in rgb[:3])
+
+
+def mix(a: str, b: str, t: float) -> str:
+    """a moved toward b by t (0..1), in RGB."""
+    ra, rb = _rgb(a), _rgb(b)
+    return to_hex([x + (y - x) * t for x, y in zip(ra, rb)])
+
+
+def readable(fg: str, bg: str, target: float = 4.5) -> str:
+    """fg, with its lightness pushed away from bg until the pair reaches target (WCAG AA).
+    Keeps the hue: a dim grey stays grey, a brand red stays red, only lighter or darker."""
+    import colorsys
+    if _contrast(fg, bg) >= target:
+        return fg.upper()
+    r, g, b = (c / 255 for c in _rgb(fg))
+    h, light, s = colorsys.rgb_to_hls(r, g, b)
+    bg_light = colorsys.rgb_to_hls(*(c / 255 for c in _rgb(bg)))[1]
+    step = -0.02 if bg_light >= 0.5 else 0.02
+    for _ in range(60):
+        light = max(0.0, min(1.0, light + step))
+        candidate = to_hex([c * 255 for c in colorsys.hls_to_rgb(h, light, s)])
+        if _contrast(candidate, bg) >= target:
+            return candidate
+    return "#000000" if bg_light >= 0.5 else "#FFFFFF"
+
+
+def repair(color: dict) -> list[str]:
+    """Bring a colour set's text and accent pairs to WCAG AA in place; one plain note per change.
+    Used for styles made from references (core/design_references.py); bundled looks must already pass."""
+    notes = []
+    pairs = (("text", "bg"), ("text", "surface"), ("text-dim", "bg"), ("text-dim", "surface"), ("accent-text", "bg"))
+    # Aim a little above 4.5 so rounding never lands on 4.4999; loop because fixing a colour against the
+    # card can undo it against the page when both sit near mid-grey.
+    for _ in range(4):
+        changed = False
+        for fg, bg in pairs:
+            if _contrast(color[fg], color[bg]) < 4.5:
+                before = color[fg]
+                color[fg] = readable(before, color[bg], 4.6)
+                notes.append(f"{fg} changed from {before} to {color[fg]} so it reads on {bg} ({_contrast(color[fg], color[bg]):.1f}:1)")
+                changed = True
+        if not changed:
+            break
+    for fg in ("text", "text-dim", "accent-text"):  # A palette no hue can satisfy: plain black or white text.
+        if any(_contrast(color[fg], color[bg]) < 4.5 for f, bg in pairs if f == fg):
+            best = max(("#111111", "#FFFFFF"), key=lambda c: min(_contrast(c, color[bg]) for f, bg in pairs if f == fg))
+            notes.append(f"{fg} set to {best}: the page and card colours left no readable tint")
+            color[fg] = best
+    if _contrast(color["on-accent"], color["accent"]) < 4.5:
+        black, white = _contrast("#111111", color["accent"]), _contrast("#FFFFFF", color["accent"])
+        before = color["on-accent"]
+        color["on-accent"] = "#111111" if black >= white else "#FFFFFF"
+        if max(black, white) < 4.5:  # A mid-tone accent: move the accent itself, keep its hue.
+            old = color["accent"]
+            color["accent"] = readable(old, color["on-accent"])
+            notes.append(f"accent changed from {old} to {color['accent']} so button text reads on it")
+        elif before != color["on-accent"]:
+            notes.append(f"text on the accent set to {color['on-accent']} for contrast")
+    return notes
+
+
 def _validate(look_id: str, raw: dict) -> dict:
     missing = [f for f in LOOK_FIELDS if f not in raw]
     if missing:

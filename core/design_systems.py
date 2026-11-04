@@ -130,12 +130,13 @@ def tokens_css(tokens: dict, overrides: Optional[dict] = None) -> str:
     return ":root {\n" + "\n".join(lines) + "\n}\n"
 
 
-def font_faces(system_id: str, base: str) -> str:
+def font_faces(system_id: str, base: str, fonts: Optional[list] = None) -> str:
     """@font-face rules, from the design's own font route only (no CDN). A bundled look's
-    files are named by alias (`fraunces-0.ttf`); design_looks maps them back."""
-    faces = KAIROS_FONT_FACES if system_id == BUILTIN_ID else tuple(
+    files are named by alias (`fraunces-0.ttf`); design_looks maps them back. `fonts` gives the
+    faces directly, for a style draft that isn't saved yet."""
+    faces = KAIROS_FONT_FACES if system_id == BUILTIN_ID and fonts is None else tuple(
         (f.get("family"), f.get("file"), f.get("weight", "400"), f.get("style", "normal"))
-        for f in (get(system_id) or {}).get("fonts", []) if isinstance(f, dict))
+        for f in (fonts if fonts is not None else (get(system_id) or {}).get("fonts", [])) if isinstance(f, dict))
     rules = []
     for family, file, weight, style in faces:
         if not family or not file or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}\.(?:woff2?|ttf|otf)", file):
@@ -155,8 +156,13 @@ def font_path(system_id: str, file: str) -> Optional[Path]:
         return Path(STATIC_DIR, "fonts", file) if file in allowed else None
     if not ID_RE.fullmatch(system_id or ""):
         return None
-    if design_looks.get(system_id):
-        allowed = {face["file"] for face in design_looks.fonts(design_looks.get(system_id))}
+    if re.fullmatch(r"draft-[0-9a-f]{12}", system_id or ""):
+        # A style draft's preview: any bundled look font by alias (they are the app's public files).
+        return design_looks.font_path(file)
+    look = design_looks.get(system_id) or _style_look(system_id)
+    if look:
+        # A bundled look or a person's style: only the bundled OFL files its fonts name (D11).
+        allowed = {face["file"] for face in design_looks.fonts(look)}
         return design_looks.font_path(file) if file in allowed else None
     path = Path(SYSTEMS_DIR, system_id, "fonts", file)
     return path if path.is_file() else None
@@ -176,12 +182,75 @@ def default_id() -> Optional[str]:
         BUILTIN_ID if chosen == BUILTIN_ID else None)
 
 
-def look_system(look: dict) -> dict:
-    """A bundled look in the same shape as a saved system, so boards, exports and tools treat it alike."""
-    return {"id": look["id"], "name": look["name"], "builtin": False, "bundled": True,
-            "tokens": design_looks.tokens(look), "guide": design_looks.guide(look),
-            "components": design_looks.components(look), "fonts": design_looks.fonts(look),
-            "source": "bundled look", "created_by": None, "look": design_looks.summary(look)}
+def look_system(look: dict, meta: Optional[dict] = None) -> dict:
+    """A bundled look, or a person's style (meta from its system.json), in the same shape as a saved
+    system, so boards, exports and tools treat them alike."""
+    out = {"id": look["id"], "name": look["name"], "builtin": False, "bundled": meta is None,
+           "tokens": design_looks.tokens(look), "guide": design_looks.guide(look),
+           "components": design_looks.components(look), "fonts": design_looks.fonts(look),
+           "source": "bundled look" if meta is None else "references", "created_by": None,
+           "look": design_looks.summary(look)}
+    if meta is not None:
+        out.update(style=True, owner=meta.get("owner"), shared=bool(meta.get("shared")),
+                   sources=meta.get("sources") or [], created=meta.get("created"), created_by=meta.get("owner"))
+    return out
+
+
+def _style_look(system_id: str) -> Optional[dict]:
+    """A person's style (Phase 1b: styles from references): look.json beside system.json, validated
+    on every read like a bundled look, so a hand-edited file can't make unreadable boards."""
+    path = Path(SYSTEMS_DIR, system_id, "look.json")
+    if not ID_RE.fullmatch(system_id or "") or not path.is_file():
+        return None
+    raw = read_json(str(path), None)
+    try:
+        return design_looks._validate(system_id, raw) if isinstance(raw, dict) else None
+    except ValueError:
+        return None
+
+
+def visible(system: Optional[dict], user: Optional[str], is_admin: bool) -> bool:
+    """Who may see and use a system (David, D10): bundled looks, Kairos and admin-made systems are for
+    everyone; a person's style is theirs until an admin shares it. Admins see every style (to share it)."""
+    if system is None:
+        return False
+    if not system.get("style"):
+        return True
+    return bool(system.get("shared") or is_admin or (user is not None and system.get("owner") == user))
+
+
+def save_style(look: dict, *, owner: str, sources: list[str], system_id: Optional[str] = None) -> dict:
+    """Save a person's style: the look and its file names only, never the references (David, D12)."""
+    import time
+    from core import design_references
+    system_id = system_id or design_references.new_id(look.get("name") or "style")
+    if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id) or design_looks.get(system_id):
+        raise ValueError("That style id cannot be used.")
+    clean = design_looks._validate(system_id, {k: look[k] for k in design_looks.LOOK_FIELDS})
+    folder = Path(SYSTEMS_DIR, system_id)
+    with _lock:
+        folder.mkdir(parents=True, exist_ok=True)
+        existing = read_json(str(folder / "system.json"), {}) or {}
+        if existing and existing.get("owner") not in (None, owner):
+            raise ValueError("That style belongs to someone else.")
+        write_json_atomic(str(folder / "look.json"), {k: clean[k] for k in design_looks.LOOK_FIELDS})
+        write_json_atomic(str(folder / "system.json"), {
+            "name": clean["name"], "kind": "style", "owner": owner, "shared": bool(existing.get("shared")),
+            "source": "references", "sources": [str(s)[:80] for s in sources][:8],
+            "created": existing.get("created") or time.time()})
+    return get(system_id)
+
+
+def share_style(system_id: str, shared: bool) -> dict:
+    """Admin only (callers check): make a person's style everyone's, or theirs again."""
+    folder = Path(SYSTEMS_DIR, system_id)
+    with _lock:
+        data = read_json(str(folder / "system.json"), None)
+        if not isinstance(data, dict) or data.get("kind") != "style":
+            raise LookupError("No such style.")
+        data["shared"] = bool(shared)
+        write_json_atomic(str(folder / "system.json"), data)
+    return get(system_id)
 
 
 def get(system_id: Optional[str]) -> Optional[dict]:
@@ -192,6 +261,9 @@ def get(system_id: Optional[str]) -> Optional[dict]:
     look = design_looks.get(system_id)
     if look:
         return look_system(look)
+    style = _style_look(system_id)
+    if style:
+        return look_system(style, read_json(str(Path(SYSTEMS_DIR, system_id, "system.json")), {}) or {})
     folder = Path(SYSTEMS_DIR, system_id)
     data = read_json(str(folder / "system.json"), None)
     if not isinstance(data, dict):
@@ -204,15 +276,32 @@ def get(system_id: Optional[str]) -> Optional[dict]:
             "source": data.get("source"), "created_by": data.get("created_by")}
 
 
-def list_systems() -> list[dict]:
+def list_systems(user: Optional[str] = None, is_admin: bool = True) -> list[dict]:
+    """Every system this person may use (D10). The defaults list everything, as before, for callers
+    that only check an id exists; the routes and tools pass the person."""
     out = [{"id": BUILTIN_ID, "name": "Kairos", "builtin": True}]
     out += [{"id": look["id"], "name": look["name"], "builtin": False, "bundled": True, "mood": look["mood"]}
             for look in design_looks.load().values()]
     if os.path.isdir(SYSTEMS_DIR):
         for name in sorted(os.listdir(SYSTEMS_DIR)):
             system = get(name) if ID_RE.fullmatch(name) and not design_looks.get(name) else None
-            if system:
-                out.append({"id": system["id"], "name": system["name"], "builtin": False, "source": system.get("source")})
+            if system and visible(system, user, is_admin):
+                entry = {"id": system["id"], "name": system["name"], "builtin": False, "source": system.get("source")}
+                if system.get("style"):
+                    entry.update(style=True, owner=system.get("owner"), shared=system.get("shared"),
+                                 mood=system["look"]["mood"])
+                out.append(entry)
+    return out
+
+
+def styles_for(user: Optional[str], is_admin: bool = False) -> list[dict]:
+    """The people's styles this person may use, as full systems (for creative_direction)."""
+    out = []
+    for entry in list_systems(user, is_admin):
+        if entry.get("style"):
+            system = get(entry["id"])
+            if system and (system.get("shared") or system.get("owner") == user):
+                out.append(system)
     return out
 
 

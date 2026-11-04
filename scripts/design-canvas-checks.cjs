@@ -154,6 +154,19 @@ function serve(url, req, res) {
     { id: 'sport', name: 'Sport', builtin: false, bundled: true, mood: ['energetic', 'competitive', 'bold'] },
     { id: 'editorial', name: 'Editorial', builtin: false, bundled: true, mood: ['literate', 'considered', 'warm'] },
     { id: 'acme-1a2b3c', name: 'Acme', builtin: false, source: 'pasted CSS' }]);
+  // New style from references (Phase 1b): a draft, an adjust and a save.
+  const draftLook = () => ({ id: 'draft-0123456789ab', name: 'Bakery menus', mood: ['airy', 'warm', 'calm'], fonts: { display: state.draftFont || 'fraunces', body: 'manrope' },
+    shape: { button: 'soft', radius: '14px' }, color: { bg: '#F6EBDD', surface: '#FBF6F0', text: '#4A2E22', 'text-dim': '#7B655A', accent: '#D84D61',
+      'accent-text': '#C62C42', 'on-accent': '#111111', 'accent-2': '#8FD3B6' } });
+  const draftReply = () => ({ id: 'draft-0123456789ab', look: draftLook(), sources: ['menu.png'], skipped: [], preview_token: 'tok',
+    changes: ['colours read from 1 reference', 'text-dim changed from #816A5E to #7B655A so it reads on bg (4.6:1)'],
+    font_options: [{ id: 'fraunces', name: 'Fraunces' }, { id: 'lora', name: 'Lora' }, { id: 'manrope', name: 'Manrope' }] });
+  if (url.pathname === '/api/design-systems/drafts' && req.method === 'POST') {
+    let size = 0; req.on('data', c => { size += c.length; }); req.on('end', () => { state.posts.push({ path: url.pathname, body: { size } }); json(draftReply()); });
+    return true;
+  }
+  if (url.pathname === '/api/design-systems/drafts/draft-0123456789ab' && req.method === 'POST') return read(body => { state.draftFont = body.fonts?.display; json(draftReply()); });
+  if (url.pathname === '/api/design-systems/drafts/draft-0123456789ab/save' && req.method === 'POST') return read(() => json({ id: 'bakery-menus-a1b2c3', name: 'Bakery menus' }));
   if (url.pathname === '/api/design-systems/default/look' && req.method === 'GET') return json({ id: state.defaultLook ?? null });
   if (url.pathname === '/api/design-systems/default/look' && req.method === 'POST') return read(body => { state.defaultLook = body.id ?? null; json({ id: state.defaultLook }); });
   const sys = url.pathname.match(/^\/api\/design-systems\/([a-z0-9-]+)$/);
@@ -762,6 +775,28 @@ async function looks({ js, waitFor, delay, navigate, win, capture, overflow }) {
       assert.ok(await js("[...document.querySelectorAll('.design-look-card')].find(c => c.textContent.includes('Sport')).querySelector('[aria-pressed=\"true\"]')?.textContent === 'Stop using as default'"),
         'the default look says so and can be undone');
     }
+    // New style from references: a draft from a file, its editor, a font change, then Save.
+    const posts = state.posts.length;
+    await js(`(() => { const input = document.querySelector('.design-style-new input[type=file]');
+      const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
+      const bytes = atob(canvas.toDataURL('image/png').split(',')[1]); const data = new Uint8Array([...bytes].map(c => c.charCodeAt(0)));
+      const list = new DataTransfer(); list.items.add(new File([data], 'menu.png', { type: 'image/png' })); input.files = list.files;
+      document.querySelector('.design-style-new input[aria-label="Style name"]').value = 'Bakery menus';
+      [...document.querySelectorAll('.design-style-new button')].find(b => b.textContent === 'Make a draft').click(); })()`);
+    await waitFor("!document.querySelector('.design-style-draft').hidden && document.querySelectorAll('.design-style-draft input[type=color]').length === 7");
+    assert.ok(state.posts.slice(posts).some(p => p.path === '/api/design-systems/drafts' && p.body.size > 0), `the references are uploaded at ${width}`);
+    assert.ok(await js("document.querySelector('.design-style-draft').textContent.includes('reads on bg') && document.querySelector('.design-style-draft iframe').src.includes('/api/design-looks/draft-0123456789ab/preview?rt=tok')"),
+      `the draft shows what changed and its private preview at ${width}`);
+    assert.ok(await js("document.querySelector('.design-style-draft select[aria-label=\"Headline font\"]').value === 'fraunces'"), 'the matched font is selected');
+    if (overflow) assert.deepEqual(await overflow(), [], `no sideways scroll with the style draft open at ${width}`);
+    await js("document.querySelector('.design-style-new').scrollIntoView({ block: 'start' })"); await delay(200);
+    await capture(`design-style-draft-${width}`);
+    await js("(() => { const s = document.querySelector('.design-style-draft select[aria-label=\"Headline font\"]'); s.value = 'lora'; [...document.querySelectorAll('.design-style-draft button')].find(b => b.textContent === 'Save style').click(); })()");
+    // Saving re-renders Design systems, which closes the draft editor.
+    await waitFor("document.querySelector('.design-style-draft')?.hidden === true");
+    assert.ok(state.posts.slice(posts).some(p => p.path === '/api/design-systems/drafts/draft-0123456789ab' && p.body.fonts?.display === 'lora'), `the edit is sent at ${width}`);
+    assert.ok(state.posts.slice(posts).some(p => p.path === '/api/design-systems/drafts/draft-0123456789ab/save'), `Save style saves the draft at ${width}`);
+    state.draftFont = null;
     await capture(`design-looks-${width}`);
   }
   state.defaultLook = null;

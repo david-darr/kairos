@@ -258,20 +258,34 @@ def sample_csp(origin: str) -> str:
             "form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'; frame-ancestors 'self'")
 
 
-def render_sample(system_id: str, *, font_base: str = "/api/design-fonts") -> Optional[str]:
-    """Tool Store's 1200x800 preview of a bundled look or the Kairos system; None for saved systems."""
-    from core import design_looks
+def render_sample(system_id: str, *, font_base: str = "/api/design-fonts", rt: Optional[str] = None) -> Optional[str]:
+    """Tool Store's 1200x800 preview of a bundled look or the Kairos system, or of a person's style or
+    draft when `rt` is a token signed for it (they are private, and the frame sends no session).
+    None for anything else, saved token-only systems included."""
+    from core import design_looks, design_references
     look = design_looks.get(system_id)
+    system = None
     if look is None and system_id != design_systems.BUILTIN_ID:
-        return None
-    system = design_systems.get(system_id)
+        if not verify(system_id, "style-preview", rt):
+            return None
+        if design_references.DRAFT_RE.fullmatch(system_id):
+            try:
+                look = design_references.load_draft(system_id)["look"]
+            except LookupError:
+                return None
+            system = {"id": system_id, "tokens": design_looks.tokens(look), "fonts": design_looks.fonts(look)}
+        else:
+            look = design_systems._style_look(system_id)
+            if look is None:
+                return None
+    system = system or design_systems.get(system_id)
     if look is None:  # Kairos, drawn with the same preview as the looks.
         look = {"name": "Kairos", "mood": ["warm", "calm", "precise"], "imagery": "",
                 "guide": "Parchment grounds, bistre ink and a gold point. Warm, calm and precise.",
                 "shape": {"radius": "12px", "button": "pill", "border": "1px", "label_case": "none",
                           "label_tracking": "0.02em", "display_weight": "500", "display_style": "italic"}}
-    head = "\n".join([design_systems.font_faces(system["id"], font_base), design_systems.tokens_css(system["tokens"]),
-                      RESET % {"w": 1200, "h": 800, "min": 800}])
+    head = "\n".join([design_systems.font_faces(system["id"], font_base, system.get("fonts") if system.get("id", "").startswith("draft-") else None),
+                      design_systems.tokens_css(system["tokens"]), RESET % {"w": 1200, "h": 800, "min": 800}])
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(look["name"])}</title>'
             f'<meta name="viewport" content="width=1200"><style>{head}</style></head>'
             f"<body>{design_looks.sample(look)}</body></html>")

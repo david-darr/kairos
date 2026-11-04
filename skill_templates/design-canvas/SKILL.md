@@ -29,6 +29,26 @@ The Kairos look (parchment, bistre, gold) is only for work about Kairos itself,
 or when the person asks for it. If the person names colours, fonts or a brand,
 pick the closest look and change only those tokens with `design_tokens`.
 
+## A style from the person's own references
+
+When the person attaches photos, screenshots, a PDF, a PowerPoint or a Word
+file and wants their own style ("make a style from our brand deck"), use
+`design_style_from_references`:
+
+1. Call it with a `name` and the attachments' file names as `references`.
+   Kairos reads them on this computer and returns a draft: every colour role
+   with its value, the fonts (bundled families only; a reference's own font is
+   matched, never copied) and what it changed so text stays readable.
+2. If you can see the images, check the draft against them; change roles,
+   fonts or buttons with `draft` + `adjust` if the person wants.
+3. Save with `draft` + `save: true`. It asks the person; the style is theirs
+   and private until an admin shares it. Then use it: `design_create`
+   `look="<style id>"`. The reference files themselves are not kept.
+
+The person can also do this in Tool Store > Design systems > New style from
+references. A brief that names one of their styles gets it first from
+`creative_direction`.
+
 ## Formats: pick one from the request
 
 Every board is made in a named format, at that format's own size. Read what
