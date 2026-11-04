@@ -11,10 +11,18 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include StrFunc.nsh
-${StrStr}
-${UnStrStr}
-${UnStrRep}
+; electron-builder compiles the uninstaller in a pass of its own, with
+; BUILD_UNINSTALLER defined. Each helper is declared only in the pass that
+; uses it: an unused one is warning 6010, and the build treats warnings as
+; errors (the 2.2.0 installer build failed on exactly that).
+!ifdef BUILD_UNINSTALLER
+  ${UnStrStr}
+  ${UnStrRep}
+!else
+  ${StrStr}
 
+; The PATH page and its answer belong to the installer pass alone, for the
+; same reason.
 Var KairosCliPathBox
 Var KairosCliPathWanted
 
@@ -38,6 +46,7 @@ FunctionEnd
 Function KairosCliPathLeave
   ${NSD_GetState} $KairosCliPathBox $KairosCliPathWanted
 FunctionEnd
+!endif
 
 !macro customInstall
   CopyFiles /SILENT "$INSTDIR\resources\backend\cli\kairos.cmd" "$INSTDIR\kairos.cmd"
