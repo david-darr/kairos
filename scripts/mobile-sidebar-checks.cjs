@@ -175,7 +175,13 @@ module.exports = async function sidebarChecks(c) {
   await js("document.querySelector('.ms-more-sheet .ms-tab-tile[data-tab=botsChats]').click()");
   await waitFor("!!document.querySelector('.ms-bots-sheet[open] .ms-bots-list-host > *')");
   ok(true, 'Chats opens the bots’ list sheet');
-  await js("document.querySelector('.ms-bots-sheet').close()"); await delay(200);
+  // Closed as a person closes it (its Close button), so the list it mounted is taken down too.
+  await js("document.querySelector('.ms-bots-sheet .ms-sheet-grab').click()"); await waitFor("!document.querySelector('.ms-bots-sheet[open]')"); await delay(200);
+  // Chats tapped and left before the list has loaded never opens later over the next page (2026-11-03).
+  await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(300);
+  await js("document.querySelector('.ms-more-sheet .ms-tab-tile[data-tab=botsChats]').click(); import('/static/js/mobileBots.js').then(m => m.closeBotsList({ restoreFocus: false })); true");
+  await delay(1200);
+  ok(await js("!document.querySelector('.ms-bots-sheet[open]')"), 'A Chats sheet closed while it loads stays closed');
   await js(MORE + ".click()"); await waitFor("!!document.querySelector('.ms-more-sheet[open]')"); await delay(300);
   await js("document.querySelector('.ms-more-sheet .ms-tab-tile[data-tab=calendar]').click()");
   await waitFor("document.documentElement.dataset.appMode === 'kairos' && document.documentElement.dataset.view === 'calendar'"); await menuShown();

@@ -21,9 +21,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from core import bot_attention_store as store  # noqa: E402
 from core import permissions  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
-from routes import agent_routes, bot_attention_routes  # noqa: E402
+from routes import agent_routes, bot_attention_routes, session_routes  # noqa: E402
 from services import bot_attention, bot_push  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
 from services.task_service import task_service  # noqa: E402
@@ -32,7 +32,9 @@ CURRENT = {"user": "david"}
 app = FastAPI()
 app.include_router(bot_attention_routes.router)
 app.include_router(agent_routes.router)  # the older /api/agents/inbox that Updates reads
+app.include_router(session_routes.router)  # GET /api/sessions/{id} names a bot conversation's place in Bots
 app.dependency_overrides[require_admin] = lambda: CURRENT["user"]
+app.dependency_overrides[require_user] = lambda: CURRENT["user"]
 web = TestClient(app)
 BASE = "/api/bot-attention"
 
@@ -107,6 +109,15 @@ class InboxProjection(AttentionCase):
         self.assertEqual(web.post(f"{BASE}/inbox/item:{self.bot['id']}/read").status_code, 404)
         CURRENT["user"] = "david"
         self.assertEqual(len(web.get(f"{BASE}/inbox").json()["rows"]), 1)
+
+    def test_a_bot_conversation_names_its_place_in_bots(self):
+        got = web.get(f"/api/sessions/{self.session}").json()
+        self.assertEqual(got["bots_target"], {"tab": "botsShell", "agentId": self.bot["id"], "sessionId": self.session})
+        plain = session_manager.create_session("Plain chat", owner_user="david")["id"]
+        self.addCleanup(session_manager.delete_session, plain)
+        self.assertNotIn("bots_target", web.get(f"/api/sessions/{plain}").json(), "an ordinary chat stays in Chats")
+        with patch("core.bot_rooms_store.room_for_seat", return_value=("room1", self.bot["id"])):
+            self.assertEqual(web.get(f"/api/sessions/{self.session}").json()["bots_target"], {"tab": "botsRoom", "roomId": "room1"})
 
     def test_live_permission_is_projected_and_answerable_once(self):
         loop = asyncio.new_event_loop()

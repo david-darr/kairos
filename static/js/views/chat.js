@@ -2818,6 +2818,12 @@ async function openSession(sessionId, sessionsList, messages) {
     document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'forgeSession', sessionId } }));
     return;
   }
+  // A bot's conversation (Kip's too) never opens here, whatever link reached it (David, 2026-11-03).
+  if (session.bots_target) {
+    activeSessionId = null; setArtifactContext(null);
+    document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: session.bots_target }));
+    return;
+  }
   syncPermissionMode(session.permission_mode);
   messages.innerHTML = "";
   messages.dataset.sessionId = sessionId;

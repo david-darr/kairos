@@ -249,8 +249,10 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     // Simple chips: Weekly shows the days; Once asks for a date and refuses the past.
     await js("[...document.querySelectorAll('.bots-ed-chip')].find(n => n.textContent === 'Weekly').click()");
     assert.equal(await js("!document.querySelector('.bots-ed-field[data-field=\"weekdays\"]').hidden"), true, 'Weekly asks which days');
-    await js("[...document.querySelectorAll('.bots-ed-field[data-field=\"weekdays\"] .bots-ed-day')].find(n => n.textContent === 'Wed').click()");
-    assert.equal(await js("document.querySelectorAll('.bots-ed-field[data-field=\"weekdays\"] .bots-ed-day[aria-pressed=\"true\"]').length"), 2, 'today\'s day and Wednesday');
+    // Weekly starts on today's day, so add a different one (on a Wednesday, clicking Wed turned today off).
+    const otherDay = new Date().getDay() === 3 ? 'Thu' : 'Wed';
+    await js(`[...document.querySelectorAll('.bots-ed-field[data-field="weekdays"] .bots-ed-day')].find(n => n.textContent === ${JSON.stringify(otherDay)}).click()`);
+    assert.equal(await js("document.querySelectorAll('.bots-ed-field[data-field=\"weekdays\"] .bots-ed-day[aria-pressed=\"true\"]').length"), 2, `today's day and ${otherDay}`);
     await js("[...document.querySelectorAll('.bots-ed-chip')].find(n => n.textContent === 'Once').click()");
     await fill('.bots-ed-dialog input[name="date"]', '2020-01-02');
     await waitFor("document.querySelector('.bots-ed-dialog input[name=\"date\"]').getAttribute('aria-invalid') === 'true'");

@@ -305,6 +305,19 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, writes, de
     await goto('?chat=fedcba654321');
     await waitFor("!!document.querySelector('#chat-messages[data-session-id=\"fedcba654321\"]')", 15000);
     assert.equal(await view(), 'chat', 'a plain chat link stays in Chats');
+    // Every "open this conversation" shortcut (progress card, Updates, the notch, links in a reply) sends a bot's
+    // conversation to Bots, never into normal Chats (David, 2026-11-03).
+    await js("import('/static/js/floatingProgress.js').then(m => m.openSession('abc123def456')).then(() => true)");
+    await waitFor(`document.documentElement.dataset.botsAgent === ${JSON.stringify(botId)} && document.getElementById('view-content').dataset.view === 'botsShell'`, 15000);
+    assert.equal(await q('#chat-messages[data-session-id="abc123def456"]'), false, 'the shortcut never drew it in Chats');
+    await navigate('chat');
+    await waitFor("document.getElementById('view-content').dataset.view === 'chat' && !!document.getElementById('chat-messages')");
+    await js("import('/static/js/views/chat.js').then(m => m.openSessionById('abc123def456')).then(() => true)");
+    await waitFor(`document.documentElement.dataset.botsAgent === ${JSON.stringify(botId)} && document.getElementById('view-content').dataset.view === 'botsShell'`, 15000);
+    assert.equal(await q('#chat-messages[data-session-id="abc123def456"]'), false, 'reaching Chats directly hands it to Bots too');
+    await js("import('/static/js/floatingProgress.js').then(m => m.openSession('fedcba654321')).then(() => true)");
+    await waitFor("!!document.querySelector('#chat-messages[data-session-id=\"fedcba654321\"]')", 15000);
+    assert.equal(await view(), 'chat', 'an ordinary chat still opens in Chats');
     await js("localStorage.setItem('kairos:app-mode', 'kairos'); true");
     await goto('?agent=../x');
     await waitFor("location.pathname + location.search === '/'", 5000);

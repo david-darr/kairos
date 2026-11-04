@@ -51,10 +51,13 @@ const asQueue = raw => {
   return { items: list.map(i => ({ id: i.id, text: String(i.text || i.payload?.text || ''), state: i.state || 'pending', attachment_ids: i.attachment_ids || i.payload?.attachment_ids || [] })).filter(i => i.id && i.state !== 'cancelled' && i.state !== 'consumed'),
     revision: raw?.revision ?? 0, paused: !!raw?.paused || list.some(i => i.state === 'interrupted') };
 };
+// The server reports a session's newest turn for minutes after it ends; only one still processing is running here
+// (2026-11-03: a finished reply read as running, so reopening the chat showed "Thinking" for it).
+const runningTurnId = turn => turn && (turn.status ?? 'processing') === 'processing' ? turn.id || null : null;
 function readState(raw = {}) {
   const caps = raw.capabilities || {};
   return { leaf: raw.active_leaf_id ?? null, revision: raw.branch_revision ?? raw.revision ?? 0, readId: raw.last_read_message_id ?? null, pinnedId: raw.pinned_message_id ?? null,
-    queue: asQueue(raw.queue), goal: raw.goal || null, model: raw.model?.label || raw.effective_model?.label || '', turnId: raw.turn?.id || raw.running_turn_id || null,
+    queue: asQueue(raw.queue), goal: raw.goal || null, model: raw.model?.label || raw.effective_model?.label || '', turnId: runningTurnId(raw.turn) || raw.running_turn_id || null,
     caps: { steer: !!caps.steer, queueing: caps.queueing !== false, images: caps.images !== false, speech: caps.speech !== false }, contextPercent: raw.context?.percent ?? null };
 }
 

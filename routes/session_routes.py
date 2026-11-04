@@ -132,6 +132,13 @@ async def get_session(session_id: str, user: str = Depends(require_user)) -> dic
     result = _for_client(session)
     if not auth_manager.is_admin(user):
         result = {**result, "permission_mode": "base"}
+    if session.get("agent_id"):
+        # A bot's conversation only opens in Bots: its room for a room seat, else the bot and this conversation.
+        from services.bot_attention import target_for
+        target = target_for(session["agent_id"], user, {"session_id": session_id})
+        if target.get("tab") == "botsShell" and target.get("sessionId") != session_id:
+            target = {"tab": "botsShell", "agentId": session["agent_id"], "sessionId": session_id}
+        result = {**result, "bots_target": target}
     return result
 
 

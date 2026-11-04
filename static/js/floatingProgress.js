@@ -70,7 +70,16 @@ function updatePresentation() {
   }
 }
 
+// Every "open this conversation" shortcut comes here (the progress card, Updates, the notch). A bot's
+// conversation opens in Bots, never in normal Chats (David, 2026-11-03): ask first, so Chats never flashes up.
 async function jumpToSession(sessionId) {
+  // A plain read: importing api.js here would load the sheet and mascot modules at startup.
+  const session = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" })
+    .then(res => res.ok ? res.json() : null).catch(() => null);
+  if (session?.bots_target) {
+    document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: session.bots_target }));
+    return;
+  }
   await _switchTab("chat", { mobileConversation: true });
   const chatView = await import("./views/chat.js");
   chatView.openSessionById(sessionId);

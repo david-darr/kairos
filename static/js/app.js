@@ -685,7 +685,7 @@ async function startApp() {
     try {
       const session = await api(`/api/sessions/${id}`);
       // A chat that belongs to a bot opens inside that bot, wherever the link came from.
-      const { tab, ...options } = session.agent_id || session.forge ? sessionTarget(session, id) : { tab: 'chat', sessionId: id };
+      const { tab, ...options } = session.bots_target || (session.agent_id || session.forge ? sessionTarget(session, id) : { tab: 'chat', sessionId: id });
       await switchTab(tab, options);
       history.replaceState(null, '', '/');
       return true;

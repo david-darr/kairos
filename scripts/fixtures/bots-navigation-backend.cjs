@@ -12,7 +12,10 @@ module.exports = ({ state, now }) => {
       const match = route.match(/^\/api\/sessions\/([A-Za-z0-9_-]+)$/);
       const session = match && state.botsNavigation?.sessions?.[match[1]];
       if (!session) return undefined;
-      return { id: match[1], title: session.title || 'Conversation', agent_id: session.agent_id || null, forge: !!session.forge,
+      // As routes/session_routes.py: a bot's conversation names where it opens in Bots.
+      const botsTarget = !session.agent_id ? undefined : session.room_id ? { tab: 'botsRoom', roomId: session.room_id }
+        : { tab: 'botsShell', agentId: session.agent_id, sessionId: match[1] };
+      return { id: match[1], title: session.title || 'Conversation', agent_id: session.agent_id || null, forge: !!session.forge, bots_target: botsTarget,
         model_endpoint_id: 'm1', created_at: clock() - 100, updated_at: clock() - 10,
         messages: [{ role: 'user', content: 'Hello', ts: clock() - 100 }, { role: 'assistant', content: 'Hi there.', ts: clock() - 90 }] };
     },

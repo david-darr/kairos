@@ -6,6 +6,9 @@ import { attachSheetDrag, slideSheetAway } from './mobileSheet.js';
 import { button, mobileOn, phone, haptic } from './mobileShared.js';
 
 let sheet = null, cleanup = null, opener = null, offPanel = null;
+// The open that is still loading its modules. Closing, or leaving the page, before it shows cancels it
+// (2026-11-03: a slow load let the sheet open later over another page, modal, and it blocked swipes there).
+let pending = 0, opens = 0;
 
 // The grabber, Escape and a tap outside slide the sheet down; leaving the page closes it at once.
 const dismissList = () => slideSheetAway(sheet) || closeBotsList();
@@ -13,7 +16,8 @@ function closeOnLeave() { closeBotsList({ restoreFocus: false }); }
 function closeOnSize() { if (!mobileOn()) closeBotsList({ restoreFocus: false }); }
 
 export function closeBotsList({ restoreFocus = true } = {}) {
-  if (!sheet?.open) return;
+  pending = 0;
+  if (!sheet?.open) { document.removeEventListener('jarvis:navigate', closeOnLeave); return; }
   sheet.close(); sheet.removeAttribute('aria-modal');
   cleanup?.(); cleanup = null; offPanel?.(); offPanel = null;
   sheet.querySelector('.ms-bots-list-host').replaceChildren();
@@ -39,12 +43,16 @@ export async function openBotsList(from) {
   }
   opener = from || null; haptic();
   document.dispatchEvent(new CustomEvent('kairos:mobile-drawer-opening', { detail: { id: 'bots-list' } }));
+  const ticket = pending = ++opens;
+  // Listening from the tap, not from when it shows, so leaving while it loads cancels it.
+  document.addEventListener('jarvis:navigate', closeOnLeave);
   const [{ mountBotsRail }, { onBotPanelChange }] = await Promise.all([import('./botsRail.js'), import('./botsPanelHost.js')]);
-  if (!mobileOn() || sheet.open) return;
+  if (ticket !== pending) return;
+  pending = 0;
+  if (!mobileOn() || sheet.open) { if (!sheet.open) document.removeEventListener('jarvis:navigate', closeOnLeave); return; }
   cleanup = mountBotsRail(sheet.querySelector('.ms-bots-list-host'));
   // A bot's settings panel opens beside the page, under this sheet; make way for it.
   offPanel = onBotPanelChange(state => { if (state?.open) closeBotsList({ restoreFocus: false }); });
-  document.addEventListener('jarvis:navigate', closeOnLeave);
   phone.addEventListener?.('change', closeOnSize);
   sheet.showModal(); sheet.setAttribute('aria-modal', 'true');
 }
