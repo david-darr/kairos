@@ -27,6 +27,7 @@ const path = require("path");
 const { autoUpdater } = require("electron-updater");
 const sideBrowser = require("./browser");
 const forgePreview = require('./forgePreview');
+const textMenu = require('./contextMenu');
 const { installScreenGrab } = require("./screen-grab");
 const { createDesktopLog } = require("./desktop-log");
 const { createUiSecret, uiCookie, browserHandoffUrl } = require("./ui-access");
@@ -409,6 +410,7 @@ async function createWindow() {
   // A named instance keeps its name in the taskbar whatever the page calls itself.
   if (INSTANCE.name) win.on("page-title-updated", (event) => event.preventDefault());
   sideBrowser.attach(win, { backendOrigin: new URL(BACKEND_URL).origin });
+  textMenu.attach(win);
   forgePreview.attach(win, { backendOrigin: new URL(BACKEND_URL).origin,
     getAllowedPorts: async id => {
       const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/forge/sessions/${encodeURIComponent(id)}/app/allowed-ports`, { redirect: 'error', signal: AbortSignal.timeout(10000) });
