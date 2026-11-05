@@ -206,6 +206,7 @@ def post_meeting(due):
 async def presence(zone, language, *, now=None):
     # Only server time is accepted. Client timestamp fields are forbidden.
     now = time.time() if now is None else now
+    moved = store.settings().get("zone", "UTC") != zone
     store.settings(zone=zone, language=language)
     local_day = datetime.fromtimestamp(now, ZoneInfo(zone)).date().isoformat()
     with store.LOCK:
@@ -215,9 +216,13 @@ async def presence(zone, language, *, now=None):
         should_open = not skewed and (value.get("last_open_day") != local_day or now - last >= 10800)
         value.update(last_presence_at=now, last_open_day=local_day)
         store.write("presence", value)
-    if not should_open:
-        return {}
     from services.chat_live import is_processing
+    if not should_open:
+        # A new time zone (first visit, or travel) redraws today's brief in local time
+        # without opening it (2026-11-05: briefs were drawn in UTC).
+        if moved and not is_processing(store.main_thread_id()):
+            await refresh("presence")
+        return {}
     if is_processing(store.main_thread_id()):
         return {}
     result = await refresh("presence")

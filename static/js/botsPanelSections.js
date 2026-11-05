@@ -483,7 +483,10 @@ function routinesBasics(ctx) {
     note('The time zone and weekdays you set are saved with each routine. Catch-up and overlap rules arrive with scheduling.'));
   return wrap;
 }
-const routinesSection = ctx => h('div', { 'data-panel-card': 'routines' }, [modular(ctx, 'Routines', () => routinesBasics(ctx), { what: 'Routines' })]);
+// Kip's own day watch (botsSectionWatch.js) leads its Routines: pause, check now, morning brief (2026-11-05).
+const routinesSection = ctx => h('div', { 'data-panel-card': 'routines' }, [
+  ...(ctx.state.agent?.builtin === 'front_desk' ? [mountModule(ctx, 'Watch')] : []),
+  modular(ctx, 'Routines', () => routinesBasics(ctx), { what: 'Routines' })]);
 
 // -- Access ------------------------------------------------------------------------------------------------
 function accessBasics(ctx) {

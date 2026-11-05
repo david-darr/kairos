@@ -39,7 +39,7 @@ export function mount(host, ctx = {}) {
     label.textContent = stateLabel(data.state);
     const last = data.last_check_at ? new Date(data.last_check_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not checked yet';
     detail.textContent = [last, data.last_result === 'NOTHING NEW' ? 'Nothing new' : data.last_result,
-      data.edited ? 'You edited this routine' : '', data.available === false ? 'Routines are not available yet' : ''].filter(Boolean).join(' · ');
+      data.edited ? 'You edited this routine' : '', data.morning?.zone ? `Times in ${data.morning.zone.replace(/_/g, ' ')}` : '', data.available === false ? 'Routines are not available yet' : ''].filter(Boolean).join(' · ');
     toggle.textContent = data.enabled ? 'Pause' : 'Resume';
     toggle.hidden = !data.routine_id;
     toggle.disabled = busy || data.available === false;
@@ -88,6 +88,7 @@ export function mount(host, ctx = {}) {
     paint();
     try {
       await fn();
+      document.dispatchEvent(new CustomEvent('kairos:frontdesk-watch'));
       if (!disposed) await refresh();
     } catch (error) {
       if (!disposed) feedback.textContent = error.message || 'Could not save. Try again.';

@@ -138,11 +138,28 @@ export function mountFrontDesk(host, options = {}) {
   async function readCards() {
     try { const value = await call('/api/home/tab-cards'); tabCards = Array.isArray(value?.cards) ? value.cards : []; } catch { /* Keep the last cards. */ }
   }
+  // The brief keeps the person's time zone from this device (2026-11-05: nothing sent it, so it
+  // stayed UTC). Once per page; the server also opens the day's first brief from it.
+  let presenceSent = false;
+  function sendPresence() {
+    if (presenceSent) return;
+    presenceSent = true;
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const language = String(navigator.language || 'en').replace(/[^A-Za-z-]/g, '').slice(0, 20) || 'en';
+    if (zone) api('/api/front-desk/presence', { method: 'POST', toast: false, body: JSON.stringify({ zone, language }) }).catch(() => {});
+  }
   async function loadWatch() {
     try { watching = await call('/api/front-desk/watch'); } catch { watching = null; }
     if (disposed) return;
+    if (watching) sendPresence();
     const line = watchLine(watching, [...new Set(tabCards.map(card => card.tab_name).filter(Boolean))]);
-    for (const node of [watchHead, watchDock]) { node.textContent = line; node.hidden = !line; node.dataset.on = String(watching?.state === 'working'); }
+    const connect = watching?.state === 'not_connected';
+    for (const node of [watchHead, watchDock]) {
+      node.hidden = !line; node.dataset.on = String(watching?.state === 'working');
+      // Not connected: the line is the way to Connections.
+      node.replaceChildren(connect ? h('button', { type: 'button', class: 'fd-watching-link', text: line,
+        onclick: () => navigate({ tab: 'settings', section: 'integrations' }) }) : document.createTextNode(line));
+    }
   }
   async function loadToday() {
     if (disposed || !wide.matches) { today.hidden = true; return; }
@@ -166,6 +183,9 @@ export function mountFrontDesk(host, options = {}) {
   around();
   const onWork = event => { if (event.detail?.groups || Number.isFinite(event.detail?.needs_input_count)) setBadge(event.detail); else refresh(); };
   document.addEventListener('kairos:frontdesk-work', onWork); offs.push(() => document.removeEventListener('kairos:frontdesk-work', onWork));
+  // Pause or Resume from the watch card or Kip's settings: redraw the line now, not at the next poll.
+  const onWatch = () => loadWatch();
+  document.addEventListener('kairos:frontdesk-watch', onWatch); offs.push(() => document.removeEventListener('kairos:frontdesk-watch', onWatch));
   const loop = () => { paint(); later(loop, 1000); }; later(loop, 1000);
   const poll = async () => { await refresh(); later(poll, 15000); }; poll();
   // Subscription is lazy so a shell fixture does not need the whole chat runtime.
