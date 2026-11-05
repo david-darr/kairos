@@ -96,6 +96,41 @@ DESIGN_MODE_FIRST = (
     "returns in your reply.")
 
 
+LINKED_MAX = 5
+
+
+def _label(text) -> str:
+    """A title as a short single line; it came from a model or a person, so it carries no instructions' shape."""
+    return re.sub(r"[\s\"`]+", " ", str(text or "Untitled")).strip()[:80] or "Untitled"
+
+
+def linked_work_context(session_id: str) -> str:
+    """On later turns, name the videos and designs this chat already owns, so a follow-up such as "now add
+    Kip" changes that video in place instead of building a separate one with the shell (David, 2026-11-04)."""
+    if not session_id:
+        return ""
+    from core import video_store
+    from core.session_manager import session_manager
+    session = session_manager.get_session(session_id) or {}
+    if not any(m.get("role") == "assistant" for m in session.get("messages", [])):
+        return ""
+    recent = lambda rows: sorted(rows, key=lambda r: r.get("updated") or r.get("created") or 0, reverse=True)[:LINKED_MAX]
+    videos = recent(video_store.videos_for_chat(session_id))
+    designs = recent(design_store.designs_for_chat(session_id))
+    if not videos and not designs:
+        return ""
+    items = [f'video {v["id"]} "{_label(v.get("title"))}" (version {v.get("version", 1)})' for v in videos]
+    items += [f'design {d["id"]} "{_label(d.get("title"))}"' for d in designs]
+    tools = []
+    if videos:
+        tools.append("for a video, video_outline, then video_edit or video_add_image, video_preview and video_render")
+    if designs:
+        tools.append("for a design, design_edit or design_add_board")
+    return ("\n\n[Linked work] This chat already has: " + "; ".join(items) + ". When the user asks to change, extend "
+            "or redo it, change that one in place (" + "; ".join(tools) + "), passing its id. Do not build a separate "
+            "video or design with the shell, scripts or files, and make a new one only when the user asks for a new one.")
+
+
 def design_mode_context(session_id: str) -> str:
     """Design mode's pinned instruction, on the chat's first message."""
     if not design_store.design_mode(session_id):

@@ -256,7 +256,7 @@ def _chat_content(reference: dict, current_session_id: str) -> tuple[str, str]:
 
 def resolve(session_id: str, references: list[dict] | None, is_admin: bool = False, user: str | None = None) -> str:
     """Validate client IDs against current records and build bounded model context."""
-    mode = design_comments.design_mode_context(session_id)
+    mode = design_comments.design_mode_context(session_id) + design_comments.linked_work_context(session_id)
     if not references:
         return mode
     if not isinstance(references, list) or any(not isinstance(ref, dict) for ref in references):
