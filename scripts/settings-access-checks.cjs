@@ -67,6 +67,9 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   // -- 1. search -----------------------------------------------------------------------------
   await open('appearance'); await waitFor("document.querySelectorAll('.settings-nav-item').length > 5");
   const admin = await navIds();
+  assert.ok(admin.includes('images'), 'admins can reach Image generation');
+  assert.deepEqual(await js("[...document.querySelector('.settings-nav-item[data-section=images]').parentElement.querySelectorAll('.settings-nav-item')].map(n => n.dataset.section)"),
+    ['integrations', 'images', 'channels', 'remote'], 'Image generation follows Integrations under Connections');
   assert.deepEqual(admin.slice().sort(), sections.map(s => s.id).sort(), 'an admin reaches every section exactly once');
   assert.deepEqual(await js("[...document.querySelectorAll('.settings-nav-group')].map(n => n.textContent)"),
     ['General', 'Models', 'Connections', 'Agents', 'Bots', 'Your data', 'Access', 'Advanced'], 'final grouping');
@@ -100,6 +103,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   demoState.isAdmin = false;
   await open('permissions'); await waitFor("document.querySelectorAll('.settings-nav-item').length > 3");
   const member = await navIds();
+  assert.ok(!member.includes('images'), 'members cannot reach Image generation');
   assert.deepEqual(member.slice().sort(), memberIds.slice().sort(), 'a member reaches exactly the non-admin sections');
   for (const id of adminIds) assert.ok(!member.includes(id), `${id} is hidden from a member`);
   assert.ok(memberIds.includes(await js("document.querySelector('.settings-nav-item.active')?.dataset.section")), 'a deep link to an admin section lands on a reachable one');

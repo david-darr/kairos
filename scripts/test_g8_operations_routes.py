@@ -46,6 +46,7 @@ BY_DESIGN = {
     "/api/designs/{design_id}/boards/{slug}/assets/{name}": "same",
     "/api/design-fonts/{system_id}/{file}": "font files for sandboxed board frames",
     "/api/design-looks/{system_id}/preview": "a bundled look's script-free preview for a sandboxed Tool Store frame",
+    "/api/videos/{video_id}/assets/{name}": "content-addressed and immutable, like design assets; the render window sends no session",
     "/api/design-render/jobs": "Electron render worker; _worker() checks its own credential",
     "/api/design-render/result/{job_id}": "same",
     "/api/cli/local-path": "paired Kairos CLI on loopback; checks inside the handler (422 here is body validation first)",

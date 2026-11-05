@@ -277,18 +277,19 @@
 .design-system-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px 12px; }
 .design-system-colors input[type="color"] { width: 100%; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; }
 .design-system-pane[hidden] { display: none; }
-/* Looks: a 1200x800 preview board shown at a quarter scale (300x200), so a phone still fits a card. */
+/* Looks: a 1200x800 preview board scaled to the card's width, at most 300x200. */
 .design-look-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 316px), 1fr)); }
-.design-look-card { display: grid; gap: 8px; align-content: start; }
+.design-look-card { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .design-look-card.is-default { box-shadow: inset 0 0 0 2px var(--accent, currentColor); }
-.design-look-preview { position: relative; width: 300px; height: 200px; max-width: 100%; margin: 0 auto; overflow: hidden;
+.design-look-preview { position: relative; width: 100%; max-width: 300px; height: auto; aspect-ratio: 3 / 2; margin: 0 auto; overflow: hidden;
   border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); background: var(--surface-2, transparent); }
 .design-look-frame { position: absolute; top: 0; left: 0; width: 1200px; height: 800px; border: 0;
-  transform: scale(.25); transform-origin: 0 0; pointer-events: none; }
+  transform: scale(var(--look-scale, .25)); transform-origin: 0 0; pointer-events: none; }
 /* A card's content sits in one body, so the phone Tool Store's row rules (aimed at a card's direct
    children: name, first line, buttons) leave it alone. */
-.design-card-body { display: grid; gap: 8px; align-content: start; height: 100%; }
-.design-card-body > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.design-card-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; align-content: start; height: 100%; }
+.design-card-body > header { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.design-card-body > header > * { min-width: 0; overflow-wrap: anywhere; }
 .design-card-body > p { margin: 0; }
 .design-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .design-card-actions > .btn { flex: 1 1 auto; }

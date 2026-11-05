@@ -11,6 +11,8 @@
   "shape": {"radius": "24px", "button": "pill", "border": "2px", "label_case": "none", "label_tracking": "0",
             "display_weight": "700", "display_style": "normal"},
   "imagery": "chunky flat illustrations, rounded shapes, stickers; bright but never more than three colours",
+  "image_treatment": "posterize",
+  "pattern": "confetti",
   "archetypes": ["poster-stack", "bento", "hero-split"],
   "guide": "Round and warm: big bold rounded headline, coral and teal on cream, pill buttons, chunky cards. Readable for parents first, fun for kids second."
 }

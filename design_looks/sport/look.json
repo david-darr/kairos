@@ -11,6 +11,8 @@
   "shape": {"radius": "4px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.06em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "action photography with motion, diagonal cuts, stats as huge numbers",
+  "image_treatment": "halftone",
+  "pattern": "stripes",
   "archetypes": ["poster-stack", "big-number", "comparison", "timeline"],
   "guide": "Matchday energy: towering condensed capitals, one volt-green highlight, diagonal energy, stats as big numbers. Works for kids' leagues too; swap volt for the team colour."
 }

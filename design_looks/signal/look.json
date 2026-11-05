@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.2em",
             "display_weight": "900", "display_style": "normal"},
   "imagery": "black with one hard light, close crops, a red line or dot as the only colour",
+  "image_treatment": "halftone",
+  "pattern": "stripes",
   "archetypes": ["big-number", "poster-stack", "quote"],
   "guide": "Lights off, one red signal: heavy black-weight capitals on pure black, wide-tracked small labels, nothing else. One message per board, held long enough to read."
 }

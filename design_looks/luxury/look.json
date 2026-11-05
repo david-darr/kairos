@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "underline", "border": "1px", "label_case": "upper", "label_tracking": "0.28em",
             "display_weight": "500", "display_style": "italic"},
   "imagery": "dark, low-key product photography with one light source; lots of black",
+  "image_treatment": "grain",
+  "pattern": "waves",
   "archetypes": ["editorial-column", "quote", "hero-split"],
   "guide": "Whisper, don't shout: an italic serif headline, very wide-tracked small capitals, thin gold rules, black space. Fewer words than you think."
 }

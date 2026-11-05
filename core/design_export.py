@@ -104,6 +104,12 @@ def html_zip(design_id: str, boards: Optional[list] = None) -> bytes:
         manifest = {k: v for k, v in data.items() if k not in ("chat_ids", "owner", "visible_to")}
         manifest["boards"] = {slug: data["boards"][slug] for slug in slugs}  # a partial zip lists only what it holds
         archive.writestr("design.json", json.dumps(manifest, indent=2))
+        photo_credits = design_store.credits(design_id)
+        if photo_credits:
+            lines = [" ".join((credit.get("attribution") or
+                      f"Photo: {credit.get('title')} by {credit.get('creator')}, {credit.get('license')} {credit.get('license_url')} {credit.get('landing')}").split())
+                     for credit in photo_credits.values()]
+            archive.writestr("CREDITS.txt", "\n".join(lines) + "\n")
     return out.getvalue()
 
 

@@ -11,6 +11,8 @@
   "shape": {"radius": "14px", "button": "soft", "border": "1px", "label_case": "none", "label_tracking": "0.01em",
             "display_weight": "500", "display_style": "normal"},
   "imagery": "soft natural-light photography, linen and wood textures, lots of empty space",
+  "image_treatment": "grain",
+  "pattern": "waves",
   "archetypes": ["hero-split", "editorial-column", "bento"],
   "guide": "Quiet and tactile: medium-weight type, sentence case, soft corners, sand and clay. Let space do the work; one image per board at most."
 }

@@ -3,10 +3,57 @@ name: motion-video
 description: Make a polished animated video, motion graphics, explainer, promo, ad, intro or animated showcase rendered to MP4, with deterministic canvas animation and a soundtrack synthesized in code.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "2.0.0"
 ---
 
 # Motion video
+
+## Tool workflow (every model, no shell)
+
+1. Pick a look with `creative_direction` using `type: "video"` and the brief.
+2. Call `video_create` with that look and a beat sheet. Set the title, aspects,
+   BPM and music mood/volume. Use `video_outline` to read beat ids and timings.
+3. Call `video_preview` and inspect the contact sheet and check notes. Preview
+   needs the Kairos desktop app; FFmpeg is only required for the final encode.
+4. Fix issues with `video_edit`: set a beat field; insert, remove or move a beat;
+   or edit title, look, bpm, aspects or music with a project operation. Edits are
+   atomic. Preview again until the copy, timing, safe areas and contrast work.
+5. Call `video_render` for one aspect or `all`. Watch progress in Studio. Return
+   the exact download link, loudness and outstanding notes the tool provides.
+   Watch the final film with sound before claiming a full audiovisual review.
+   Kairos finds FFmpeg at runtime and never installs it for the person.
+
+### Beat sheet
+
+Hook the viewer in the first beat, develop the idea, show evidence and finish
+with an `end` card and a call to action. One idea per beat; aim for 3 to 8 words
+on screen and 1 to 2 bars per beat. Put numbers in `big-number` beats. Beat
+kinds are title, statement, big-number, list, image, quote, split, logo and end.
+Use photos from `image_generate`, `image_search` or `image_treat` in a design,
+then `video_add_image` with `{design_id, asset}` and set the beat's image to
+the returned asset. Respect the photo's license and retain its credit.
+
+Every beat has an id, kind and bars (0.5 to 8 in half-bar steps); optional text
+is at most 140 characters, sub 100, and items at most five with 60 characters
+each. Use 1 to 40 beats and at most 120 seconds. BPM is 60 to 180, default 120;
+seconds per bar = 240 / BPM. Hold the end card for at least 1.5 seconds and
+keep reading speed below 3.5 words per second. Music moods: energetic, calm,
+warm, dark or playful, with volume from 0 to 1.
+
+### Motion vocabulary and aspects
+
+Camera: `still` for calm copy; `push` to focus attention; `pull` to reveal context;
+`pan` to explore a photo; `shake` sparingly for impact. Transitions: `cut` for
+calm clarity, `whip` or `zoom` for energy, `flip` for a change of idea,
+`dither` or `mosaic` for retro looks, and `wipe` for a measured reveal.
+Do not animate every beat heavily; the story sets the pace.
+
+Choose 16:9 (1920 x 1080) for presentations and landscape video, 9:16
+(1080 x 1920) for vertical social, or 1:1 (1080 x 1080) for square feeds.
+Preview each requested aspect separately. Keep text inside 5% margins;
+vertical video also needs 8% at the top and 12% at the bottom for app controls.
+
+## Custom animation (advanced, needs a shell)
 
 Build a JavaScript canvas animation where each frame is a function of time,
 synthesize an original WAV soundtrack, capture with Playwright's Chromium,

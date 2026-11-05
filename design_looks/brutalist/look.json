@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "3px", "label_case": "upper", "label_tracking": "0.02em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "high-contrast black and white photos, photocopy grain, stickers and tape; type as image",
+  "image_treatment": "halftone",
+  "pattern": "noise",
   "archetypes": ["poster-stack", "grid-12", "big-number"],
   "guide": "Thick black borders, no radius, no shadow softening. Huge black headline, monospace body, a yellow block for the one thing to read first. Break the grid on purpose, once."
 }

@@ -33,6 +33,7 @@ const g4Backend = require('./g4-backend.cjs')({ state: demoState, notes: calenda
 // scripts/bots-<name>-checks.cjs runs behind --bots-<name>-only, and the full run includes them all.
 const botsBackends = fs.readdirSync(path.join(__dirname, 'fixtures')).filter(file => /^bots-.+-backend\.cjs$/.test(file)).sort()
   .map(file => require('./fixtures/' + file)({ state: demoState, data: calendarFixtures, now }));
+const imageBackend = require('./fixtures/bots-identity-backend.cjs')({ state: demoState, data: calendarFixtures, now });
 const botsChecks = fs.readdirSync(__dirname).filter(file => /^bots-.+-checks\.cjs$/.test(file)).sort();
 const botsAnswer = (call) => { if (!demoState.botsLive) return undefined; for (const backend of botsBackends) { const answer = call(backend); if (answer !== undefined) return answer; } return undefined; };
 const computerImage = fs.readFileSync(path.join(root, 'static', 'img', 'computer-fixture.jpg')).toString('base64');
@@ -140,7 +141,7 @@ const server = http.createServer(async (req, res) => {
         if (active) liveFinish(parsed.session_id, 'stopped');
         res.end(JSON.stringify({ stopping: active })); return;
       }
-      const updated = botsAnswer(backend => backend.mutate?.(url.pathname, req.method, parsed, Object.fromEntries(url.searchParams)))
+      const updated = (url.pathname.startsWith('/api/image-provider') && imageBackend.mutate(url.pathname, req.method, parsed)) || botsAnswer(backend => backend.mutate?.(url.pathname, req.method, parsed, Object.fromEntries(url.searchParams)))
         || (demoState.g4Live && g4Backend.mutate(url.pathname, req.method, parsed)) || mutate(url.pathname === '/api/chat/live' ? '/api/chat/stream' : url.pathname,
         req.method, parsed, Object.fromEntries(url.searchParams));
       if (updated?._appStart) {
@@ -213,7 +214,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(updated || (url.pathname === "/api/sessions" ? { id: "s1" } : { ok: true }))); return;
     }
     try {
-      const botsRead = botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
+      const botsRead = url.pathname === '/api/image-provider' ? imageBackend.read(url.pathname) : botsAnswer(backend => backend.read?.(url.pathname, Object.fromEntries(url.searchParams)));
       // A voice note's audio (Phase 6 voice lane): served as a real WAV, not JSON.
       // It answers byte ranges, because the media player only seeks when the server does.
       if (botsRead?._audioWav) {

@@ -11,6 +11,8 @@
   "shape": {"radius": "3px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.1em",
             "display_weight": "500", "display_style": "normal"},
   "imagery": "diagrams, figures with numbered captions, small seals or crests drawn simply",
+  "image_treatment": "posterize",
+  "pattern": "grid",
   "archetypes": ["editorial-column", "comparison", "timeline", "quote"],
   "guide": "A well-set paper: Garamond headings, a readable serif body, numbered sections, oxblood for section numbers and one rule. Clarity over decoration."
 }

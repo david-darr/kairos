@@ -11,6 +11,8 @@
   "shape": {"radius": "18px", "button": "pill", "border": "2px", "label_case": "none", "label_tracking": "-0.01em",
             "display_weight": "800", "display_style": "normal"},
   "imagery": "cut-out product shots with hard shadows, stickers, bold flat shapes",
+  "image_treatment": "posterize",
+  "pattern": "confetti",
   "archetypes": ["poster-stack", "bento", "big-number"],
   "guide": "Sunshine yellow, hot pink, black outlines. Tight, chunky, slightly squished headline. Cut-out images that overlap card edges. Fun, never messy: two colours plus black."
 }

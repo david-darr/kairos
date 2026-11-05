@@ -951,10 +951,12 @@ async def render_jobs(request: Request) -> StreamingResponse:
 
 
 @render_router.post("/api/design-render/result/{job_id}")
-async def render_result(job_id: str, request: Request) -> dict:
+async def render_result(job_id: str, request: Request, part: Optional[int] = None) -> dict:
     _worker(request)
     body = await request.body()
     error = request.headers.get("X-Kairos-Render-Error")
     if len(body) > 60 * 1024 * 1024:
         raise HTTPException(413, "Too large")
+    if job_id in design_render_bridge._video_parts:
+        return {"ok": await design_render_bridge.complete_video(job_id, body, part, error)}
     return {"ok": design_render_bridge.complete(job_id, body, error)}

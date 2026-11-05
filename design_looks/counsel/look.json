@@ -11,6 +11,8 @@
   "shape": {"radius": "2px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.12em",
             "display_weight": "700", "display_style": "normal"},
   "imagery": "no stock gavels: clean diagrams of issues, numbered elements, quotations from the record",
+  "image_treatment": "posterize",
+  "pattern": "stripes",
   "archetypes": ["editorial-column", "comparison", "timeline", "quote"],
   "guide": "A brief that wins: navy serif headings, a disciplined sans body, brass for numbering and one rule. Issues as numbered cards; citations small and exact."
 }

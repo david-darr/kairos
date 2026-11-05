@@ -11,6 +11,8 @@
   "shape": {"radius": "20px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0.02em",
             "display_weight": "500", "display_style": "italic"},
   "imagery": "soft florals, watercolour washes kept light, delicate line ornaments",
+  "image_treatment": "duotone",
+  "pattern": "confetti",
   "archetypes": ["editorial-column", "quote", "poster-stack"],
   "guide": "Blush and sage: an italic serif headline, rounded friendly body, berry for the one action. Delicate ornaments, soft rounded frames, airy spacing."
 }

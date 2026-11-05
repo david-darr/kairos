@@ -14,7 +14,6 @@ against the avatar snapshot taken when it was asked for, so a late result cannot
 overwrite a newer edit. A bot that does not exist yet stages its picture in an
 owner-bound draft scope, adopted into the bot after it is created.
 """
-import base64
 import hashlib
 import io
 import json
@@ -24,10 +23,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
 
-from core import secret_storage
-from core.atomic_io import read_json, write_json_atomic
+from core import image_providers
 from core.constants import DATA_DIR
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -41,10 +38,8 @@ DRAFT_TTL_SECONDS = 24 * 3600
 ASSET_ID = re.compile(r"[0-9a-f]{32}")
 FORMATS = {"PNG": ("image/png", "png"), "JPEG": ("image/jpeg", "jpg"), "GIF": ("image/gif", "gif"),
            "WEBP": ("image/webp", "webp")}
-PROVIDERS = {"openai": ("https://api.openai.com/v1", "gpt-image-1"),
-             "xai": ("https://api.x.ai/v1", "grok-2-image"),
-             "compatible": ("", "")}
-CONFIG_FILE = os.path.join(DATA_DIR, "avatar_provider.json")
+PROVIDERS = image_providers.PROVIDERS
+CONFIG_FILE = image_providers.CONFIG_FILE
 
 # Tests replace this with an httpx.MockTransport; production leaves it None.
 _transport = None
@@ -201,46 +196,27 @@ def framing(payload: dict) -> dict:
 
 # -- the saved image connection ----------------------------------------------------------------
 
-def _clean_base(kind: str, base_url: Optional[str]) -> str:
-    base = (base_url or "").strip() or PROVIDERS[kind][0]
-    parsed = urlparse(base)
-    local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    if parsed.scheme not in ("https", "http") or not parsed.hostname or (parsed.scheme == "http" and not local):
-        raise AvatarError("The image server address must start with https://.")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise AvatarError("The image server address cannot carry a login or query.")
-    return base.rstrip("/")
-
-
-def provider_state() -> dict:
-    """What the settings page may show. The key is never returned."""
-    data = read_json(CONFIG_FILE, {})
-    if not data.get("key"):
-        return {"configured": False, "kind": None, "base_url": None, "model": None}
-    return {"configured": True, "kind": data.get("kind"), "base_url": data.get("base_url"), "model": data.get("model")}
-
-
-def save_provider(kind: str, key: str, base_url: Optional[str] = None, model: Optional[str] = None) -> dict:
-    if kind not in PROVIDERS:
-        raise AvatarError("Choose OpenAI, xAI or a compatible server.")
-    if not isinstance(key, str) or not 8 <= len(key.strip()) <= 400:
-        raise AvatarError("Paste the connection's key.")
-    if kind == "compatible" and not (base_url or "").strip():
-        raise AvatarError("A compatible server needs its address.")
-    model = (model or "").strip() or PROVIDERS[kind][1]
-    if not model or len(model) > 120 or not re.fullmatch(r"[\w.:/-]+", model):
-        raise AvatarError("Give the image model's name.")
-    write_json_atomic(CONFIG_FILE, {"kind": kind, "base_url": _clean_base(kind, base_url), "model": model,
-                                    "key": secret_storage.encrypt(key.strip())})
-    return provider_state()
-
-
-def clear_provider() -> dict:
+def _delegate(name, *args, **kwargs):
     try:
-        os.remove(CONFIG_FILE)
-    except FileNotFoundError:
-        pass
-    return provider_state()
+        return getattr(image_providers, name)(*args, **kwargs)
+    except image_providers.ImageError as error:
+        raise AvatarError(str(error)) from error
+
+
+def _clean_base(kind, base_url):
+    return _delegate("_clean_base", kind, base_url)
+
+
+def provider_state():
+    return _delegate("provider_state")
+
+
+def save_provider(kind, key, base_url=None, model=None, daily_limit=None):
+    return _delegate("save_provider", kind, key, base_url, model, daily_limit)
+
+
+def clear_provider():
+    return _delegate("clear_provider")
 
 
 # -- generation --------------------------------------------------------------------------------
@@ -255,39 +231,11 @@ def clean_direction(text) -> str:
 
 async def generate(scope: str, direction: str) -> dict:
     """Ask the saved connection for one picture and stage it as an owned asset."""
-    import httpx
     prompt = clean_direction(direction)
-    config = read_json(CONFIG_FILE, {})
-    if not config.get("key"):
-        raise AvatarUnavailable("Save an image connection first.")
     try:
-        key = secret_storage.decrypt(config["key"])
-    except Exception as error:
-        raise AvatarUnavailable("The saved image connection cannot be read. Save it again.") from error
-    body = {"model": config["model"], "prompt": f"Avatar picture for an assistant: {prompt}", "n": 1,
-            "size": "1024x1024"}
-    if config.get("kind") != "openai" or not str(config["model"]).startswith("gpt-image"):
-        body["response_format"] = "b64_json"
-    try:
-        async with httpx.AsyncClient(timeout=GENERATE_TIMEOUT, follow_redirects=False, trust_env=False,
-                                     transport=_transport) as client:
-            response = await client.post(f"{config['base_url']}/images/generations",
-                                         headers={"Authorization": f"Bearer {key}"}, json=body)
-    except httpx.TimeoutException as error:
-        raise AvatarUnavailable("The image connection took too long. Try again.") from error
-    except httpx.HTTPError as error:
-        raise AvatarUnavailable("The image connection could not be reached.") from error
-    if response.status_code != 200:
-        raise AvatarUnavailable(f"The image connection refused the request ({response.status_code}).")
-    try:
-        item = response.json()["data"][0]
-        encoded = item["b64_json"]
-        if not isinstance(encoded, str) or len(encoded) > MAX_GENERATED_BYTES * 4 // 3 + 16:
-            raise ValueError
-        data = base64.b64decode(encoded, validate=True)
-    except Exception as error:
-        raise AvatarUnavailable("The image connection did not return a picture Kairos can use.") from error
-    try:
-        return store(scope, data, MAX_GENERATED_BYTES)
-    except AvatarError as error:
+        pictures = await image_providers.generate(f"Avatar picture for an assistant: {prompt}", transport=_transport)
+        return store(scope, pictures[0], MAX_GENERATED_BYTES)
+    except (image_providers.ImageUnavailable, AvatarError) as error:
         raise AvatarUnavailable(str(error)) from error
+    except image_providers.ImageError as error:
+        raise AvatarError(str(error)) from error

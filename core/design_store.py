@@ -616,6 +616,8 @@ def duplicate(design_id: str, *, owner: Optional[str], by: str, version: Optiona
     (folder / "boards").mkdir(parents=True)
     (folder / "versions").mkdir()
     shutil.copytree(_folder(design_id) / "assets", folder / "assets", dirs_exist_ok=True)
+    if (_folder(design_id) / "credits.json").is_file():
+        shutil.copy2(_folder(design_id) / "credits.json", folder / "credits.json")
     title = f"{snap['manifest'].get('title') or 'Design'} (copy)"[:120]
     fresh = {"v": 1, "id": new_id, "title": title, "owner": owner, "chat_ids": [chat_key_] if chat_key_ else [],
              "visible_to": [], "design_system": snap["manifest"].get("design_system") or design_systems.BUILTIN_ID,
@@ -779,3 +781,25 @@ def board_hash(design_id: str, slug: str) -> str:
     return hashlib.sha256(json.dumps([text, data.get("design_system"), data.get("token_overrides"),
                                       data["boards"][slug]["w"], data["boards"][slug]["h"],
                                       data.get("title")]).encode()).hexdigest()[:16]
+
+
+
+def credits(design_id: str) -> dict:
+    """Licensed photo attributions travel with the design and its exports."""
+    manifest(design_id)
+    stored = read_json(str(_folder(design_id) / "credits.json"), {})
+    return dict(list(stored.items())[-500:]) if isinstance(stored, dict) else {}
+
+
+def add_credit(design_id: str, asset: str, credit: dict) -> None:
+    """Keep at most 500 asset credits, with only the fields needed for attribution."""
+    if not isinstance(asset, str) or not asset.startswith("assets/"):
+        raise ValueError("A credit belongs to an asset in this design.")
+    asset_path(design_id, asset[len("assets/"):])
+    if not isinstance(credit, dict):
+        raise ValueError("Give the photo's credit details.")
+    with _lock(design_id):
+        stored = credits(design_id)
+        stored[asset] = {key: str(credit.get(key) or "")[:4000] for key in (
+            "title", "creator", "license", "license_version", "license_url", "landing", "attribution")}
+        write_json_atomic(str(_folder(design_id) / "credits.json"), dict(list(stored.items())[-500:]))

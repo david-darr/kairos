@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "1px", "label_case": "upper", "label_tracking": "0.12em",
             "display_weight": "400", "display_style": "normal"},
   "imagery": "captioned photographs in columns, simple charts, dateline and masthead",
+  "image_treatment": "halftone",
+  "pattern": "dots",
   "archetypes": ["editorial-column", "grid-12", "timeline"],
   "guide": "A front page: masthead, dateline, columns divided by black hairlines, a serif headline with a deck below it. Blue only for links and one label."
 }

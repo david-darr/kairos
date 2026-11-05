@@ -48,6 +48,9 @@ def _px(value: str, tokens: dict[str, str]) -> Optional[float]:
 
 
 def _has_content(node: Element) -> bool:
+    style = dict(_style_items(node.get("style") or ""))
+    if re.search(r"url\s*\(", style.get("background-image", "") + style.get("background", ""), re.I):
+        return True
     if node.tag in _CONTENT_TAGS or node.text(200).strip():
         return True
     return any(child.tag in _CONTENT_TAGS for child in node.elements())
@@ -73,7 +76,8 @@ def _font_parts(style: dict[str, str]) -> tuple[Optional[str], Optional[str]]:
 
 
 def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Path] = None,
-          pages: Optional[list[Path]] = None) -> list[str]:
+          pages: Optional[list[Path]] = None, *, assets: Optional[set[str]] = None,
+          credits: Optional[dict] = None) -> list[str]:
     """Notes for one board. `board` is its manifest entry (format, w, h); `pages` a document's printed pages."""
     fmt = board.get("format") or "custom"
     floor = TYPE_FLOOR.get(fmt, 12)
@@ -107,7 +111,7 @@ def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Pa
             elif (w and h and w * h >= 0.06 * area) or ("aspect-ratio" in style and (w or 0) >= 160) \
                     or (h is not None and h >= 160 and not w):
                 boxes.append(node.kd or node.tag)
-    notes = []
+    notes = _imagery_notes(root, fmt, assets, credits)
     if small:
         notes.append(f"Text under the {fmt} floor of {floor}px: {', '.join(small[:6])}. Make it larger or cut words.")
     if len(families) > MAX_FAMILIES:
@@ -136,6 +140,66 @@ def check(root: Element, board: dict, tokens: dict[str, str], thumb: Optional[Pa
                      "data-kd-page-break, or a kept-together block didn't fit. Remove that page break (let sections "
                      "follow on) or let the block split.")
     return notes
+
+
+def _imagery_notes(root: Element, fmt: str, assets: Optional[set[str]], credits: Optional[dict]) -> list[str]:
+    picture, drawn, used = False, False, set()
+    shapes = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon"}
+    for node in root.elements():
+        style = dict(_style_items(node.get("style") or ""))
+        background = style.get("background-image", "") or style.get("background", "")
+        if (node.tag in ("img", "picture", "svg") or
+                node.tag == "figure" and node.get("data-chart") is not None or
+                "background-image" in style or re.search(r"url\s*\(", background, re.I)):
+            picture = True
+        paths = [node.get("src") or ""] if node.tag == "img" else []
+        paths += [m.group(2).strip() for m in re.finditer(r"url\(\s*(['\"]?)(.*?)\1\s*\)", node.get("style") or "", re.I)]
+        for path in paths:
+            match = re.fullmatch(r"assets/([^/?#]+)(?:[?#].*)?", path)
+            if match:
+                used.add(match.group(1))
+        if node.tag == "svg" and fmt in ("poster", "social", "banner", "slides"):
+            ancestor = node
+            chart = False
+            while ancestor is not None:
+                chart |= ancestor.get("data-kd-chart-out") is not None
+                chart |= ancestor.tag == "figure" and ancestor.get("data-chart") is not None
+                ancestor = ancestor.parent
+            if not chart and sum(child.tag in shapes for child in node.elements()) > 40:
+                drawn = True
+    notes = []
+    if fmt in ("poster", "social", "banner") and not picture:
+        notes.append(f"This {fmt} has no picture. Add one: image_generate (if connected), image_search for a licensed photo, "
+                     "image_treat on the person's photo, or image_pattern for a texture. A finished "
+                     f"{fmt} has a picture or a texture; place it with design_edit.")
+    text = _board_text(root).casefold()
+    for name in sorted(used):
+        if assets is not None and name not in assets:
+            notes.append(f"Image {name} isn't in this design's assets; use a path an image tool returned.")
+        credit = (credits or {}).get(f"assets/{name}") or {}
+        creator = credit.get("creator") or ""
+        if creator and creator.casefold() not in text:
+            license = str(credit.get("license") or "").upper()
+            version = str(credit.get("license_version") or "")
+            label = f"{license} {version}".strip()
+            notes.append(f'Photo by {creator} needs its credit on the board: "Photo: {credit.get("title") or ""} '
+                         f'by {creator}, {label}" in small type.')
+    if drawn:
+        notes.append("This board draws a picture in code; use a real image (image_generate, image_search, image_treat) "
+                     "or a pattern (image_pattern) instead.")
+    return notes
+
+
+def _board_text(node: Element) -> str:
+    """Visible copy only: attributes, styles and hidden chart tables cannot supply a credit."""
+    parts = []
+    for child in node.children:
+        if isinstance(child, Element):
+            if child.tag not in ("style", "svg") and child.get("hidden") is None and child.get("aria-hidden") != "true":
+                parts.append(_board_text(child))
+        else:
+            parts.append(child.data)
+    return " ".join(parts)
 
 
 def _words(node) -> int:

@@ -31,6 +31,11 @@ module.exports = ({ state, data, now }) => {
   function read(route, query = {}) {
     let m;
     if (route === '/api/agents/section-modules') return { modules: state.botsSectionModules || [] };
+    if (route === '/api/image-provider') {
+      const p = lane().provider;
+      return p ? { configured: true, kind: p.kind, base_url: p.base_url, model: p.model, daily_limit: p.daily_limit ?? 50, used_today: p.used_today || 0 }
+        : { configured: false, kind: null, base_url: null, model: null, daily_limit: 50, used_today: 0 };
+    }
     if (route === '/api/agents/avatar-provider') {
       const p = lane().provider;
       return p ? { configured: true, kind: p.kind, base_url: p.base_url, model: p.model } : { configured: false, kind: null, base_url: null, model: null };
@@ -62,6 +67,24 @@ module.exports = ({ state, data, now }) => {
 
   function mutate(route, method, body = {}) {
     let m;
+    if (route === '/api/image-provider/test' && method === 'POST') return lane().testError ? { ok: false, error: lane().testError } : { ok: true };
+    if (route === '/api/image-provider') {
+      if (method === 'DELETE') { lane().provider = null; return read(route); }
+      if (method === 'PUT') {
+        if (lane().saveError) throw bad(lane().saveError);
+        const dailyLimit = body.daily_limit ?? lane().provider?.daily_limit ?? 50;
+        if (!Number.isInteger(dailyLimit) || dailyLimit < 0 || dailyLimit > 500) throw bad('Choose a daily limit from 0 to 500.');
+        if (Object.keys(body).length === 1 && lane().provider) lane().provider.daily_limit = dailyLimit;
+        else {
+          if (!['openai', 'xai', 'compatible'].includes(body.kind)) throw bad('Choose an image provider.');
+          if (!body.key) throw bad('Paste the connection key.');
+          if (body.kind === 'compatible' && (!body.base_url || !body.model)) throw bad('Enter an address and a model.');
+          lane().provider = { kind: body.kind, base_url: body.base_url || (body.kind === 'xai' ? 'https://api.x.ai/v1' : 'https://api.openai.com/v1'),
+            model: body.model || (body.kind === 'xai' ? 'grok-2-image' : 'gpt-image-1'), daily_limit: dailyLimit, used_today: 0 };
+        }
+        return read(route);
+      }
+    }
     const s = store();
     if (route === '/api/agents/avatar-provider') {
       if (method === 'PUT') {
@@ -170,12 +193,12 @@ module.exports = ({ state, data, now }) => {
 
   return {
     read(route, query = {}) {
-      if (!state.botsLive) return undefined;
+      if (!state.botsLive && !route.startsWith('/api/image-provider')) return undefined;
       try { return read(route, query); }
       catch (error) { if (error instanceof Refusal) return { _status: error.status, detail: error.message }; throw error; }
     },
     mutate(route, method, body = {}) {
-      if (!state.botsLive) return undefined;
+      if (!state.botsLive && !route.startsWith('/api/image-provider')) return undefined;
       try { return mutate(route, method, body || {}); }
       catch (error) { if (error instanceof Refusal) return { _status: error.status, detail: error.message }; throw error; }
     },

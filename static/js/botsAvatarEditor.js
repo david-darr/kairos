@@ -84,13 +84,6 @@ export function checkDirection(text) {
   return { direction: value };
 }
 
-export function checkProvider({ kind, key, base_url: baseUrl }) {
-  if (!PROVIDER_KINDS.some(p => p.value === kind)) return 'Choose OpenAI, xAI or another server.';
-  if (String(key || '').trim().length < 8) return 'Paste the connection key.';
-  if (kind === 'compatible' && !String(baseUrl || '').trim()) return 'Another server needs its address.';
-  return '';
-}
-
 // -- the component -----------------------------------------------------------------------------------
 
 const messageOf = error => String(error?.message || error).replace(/^\d+:\s*/, '');
@@ -200,24 +193,9 @@ export function mountAvatarEditor(host, { agent, draft = false, ctx } = {}) {
 
   // -- the image connection --------------------------------------------------------------------
   async function loadProvider() {
-    try { state.provider = await api('/api/agents/avatar-provider', { toast: false }); } catch { state.provider = { configured: false, unreadable: true }; }
+    try { state.provider = await api('/api/image-provider', { toast: false }); } catch { state.provider = { configured: false, unreadable: true }; }
     if (!destroyed) draw();
   }
-  async function saveProvider(form) {
-    const body = { kind: form.kind.value, key: form.key.value, ...(form.base.value.trim() ? { base_url: form.base.value.trim() } : {}), ...(form.model.value.trim() ? { model: form.model.value.trim() } : {}) };
-    const refusal = checkProvider({ ...body });
-    if (refusal) { say(refusal); return; }
-    state.busy = 'provider'; draw();
-    try { state.provider = await api('/api/agents/avatar-provider', { method: 'PUT', body: JSON.stringify(body), toast: false }); toast('Image connection saved', 'success'); }
-    catch (error) { say(messageOf(error)); }
-    form.key.value = '';
-    state.busy = ''; draw();
-  }
-  async function clearProvider() {
-    try { state.provider = await api('/api/agents/avatar-provider', { method: 'DELETE', toast: false }); } catch (error) { say(messageOf(error)); }
-    draw();
-  }
-
   // -- drawing ----------------------------------------------------------------------------------
   function preview(framing) {
     const box = el('div', { class: 'bots-avatar-preview', 'data-shape': framing?.shape || 'kip-look', tabindex: framing ? '0' : undefined,
@@ -287,21 +265,6 @@ export function mountAvatarEditor(host, { agent, draft = false, ctx } = {}) {
     return el('div', { class: 'bots-avatar-generate' }, [input, count,
       button(state.busy === 'generate' ? 'Making it…' : 'Generate', () => generate(input.value), { disabled: !!state.busy, name: 'generate' })]);
   }
-  function providerForm() {
-    const form = {
-      kind: el('select', { 'aria-label': 'Image service' }, PROVIDER_KINDS.map(p => el('option', { value: p.value, text: p.label }))),
-      key: el('input', { type: 'password', autocomplete: 'off', 'aria-label': 'Connection key', placeholder: 'Paste the key' }),
-      base: el('input', { type: 'text', 'aria-label': 'Server address', placeholder: 'https://… (another server only)' }),
-      model: el('input', { type: 'text', 'aria-label': 'Image model', placeholder: 'Model name (optional)' }),
-    };
-    const own = () => { form.base.hidden = form.kind.value !== 'compatible'; };
-    form.kind.addEventListener('change', own); own();
-    return el('div', { class: 'bots-avatar-provider' }, [
-      el('p', { class: 'bots-hint', text: 'To make pictures, save a connection to an image service. The key is stored encrypted and is never shown again.' }),
-      form.kind, form.base, form.key, form.model,
-      button('Save connection', () => saveProvider(form), { disabled: !!state.busy, name: 'save-provider' })]);
-  }
-
   // The Kip look picker is built once and moved into each redraw, so its focus and choices persist.
   let kipHolder = null;
   function kipDetails() {
@@ -348,11 +311,14 @@ export function mountAvatarEditor(host, { agent, draft = false, ctx } = {}) {
       picture.append(el('div', { class: 'bots-avatar-actions' }, [button(draft ? 'Use this picture' : 'Save picture', apply, { variant: 'primary', disabled: !!state.busy || !state.staged, name: 'apply' }),
         state.staged ? button('Cancel', () => { state.staged = null; draw(); }, { name: 'cancel' }) : null]));
     }
+    // App Settings sits outside the Bots shell, so this goes through the app's navigator, not ctx.navigate.
+    const navigate = target => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: target }));
     const make = el('details', { class: 'bots-avatar-make' }, [el('summary', { text: 'Make a picture' }),
-      state.provider === null ? el('p', { class: 'bots-hint', text: 'Checking…' })
-        : state.provider.configured ? el('div', {}, [generateForm(), el('p', { class: 'bots-hint', text: `Using ${PROVIDER_KINDS.find(p => p.value === state.provider.kind)?.label || 'your image service'}, ${state.provider.model}.` }),
-          button('Remove connection', clearProvider, { name: 'clear-provider' })])
-          : providerForm()]);
+      el('p', { class: 'bots-hint', text: 'Picture generation uses the image connection in Settings > Connections > Image generation.' }),
+      button('Image generation settings', () => navigate({ tab: 'settings', section: 'images' }), { name: 'image-settings' }),
+      state.provider === null ? el('p', { class: 'bots-hint', text: 'Checking...' })
+        : state.provider.configured ? el('div', {}, [generateForm(), el('p', { class: 'bots-hint', text: `Using ${PROVIDER_KINDS.find(p => p.value === state.provider.kind)?.label || 'your image service'}, ${state.provider.model}.` })])
+          : el('p', { class: 'bots-hint', role: 'status', text: state.provider.unreadable ? 'Could not read the image connection.' : 'No image connection saved.' })]);
     if (state.makeOpen) make.open = true;
     make.addEventListener('toggle', () => { state.makeOpen = make.open; });
     const error = state.error ? el('p', { class: 'bots-error', role: 'alert', text: state.error }) : null;

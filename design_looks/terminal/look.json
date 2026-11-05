@@ -11,6 +11,8 @@
   "shape": {"radius": "2px", "button": "square", "border": "1px", "label_case": "none", "label_tracking": "0",
             "display_weight": "700", "display_style": "normal"},
   "imagery": "prompt lines, ASCII diagrams, scanline texture; text is the image",
+  "image_treatment": "dither",
+  "pattern": "noise",
   "archetypes": ["editorial-column", "big-number", "timeline"],
   "guide": "Everything monospace. A prompt (>) before headlines, comments (//) as labels, bright green for the one command to run. Line art in ASCII, no photos."
 }

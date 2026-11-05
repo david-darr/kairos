@@ -11,6 +11,8 @@
   "shape": {"radius": "16px", "button": "pill", "border": "1px", "label_case": "none", "label_tracking": "0",
             "display_weight": "600", "display_style": "normal"},
   "imagery": "UI cards with real-looking figures, simple icons; numbers are the hero",
+  "image_treatment": "duotone",
+  "pattern": "grid",
   "archetypes": ["hero-split", "big-number", "bento", "comparison"],
   "guide": "Money made calm: deep green ground, mint for the one action and for good numbers. Large figures, tabular numerals, rounded cards that look like the product."
 }

@@ -135,9 +135,12 @@ def _lint(data: dict, slug: str, text: Optional[str] = None) -> list[str]:
     tokens = _tokens(data)
     thumb = design_store.thumb_path(data["id"], slug)
     from core import design_render_bridge
+    assets = {p.name for p in (design_store._folder(data["id"]) / "assets").iterdir() if p.is_file()}
     return design_html.lint(root, tokens) + design_checks.check(root, data["boards"].get(slug) or {}, tokens,
                                                                 thumb if thumb.is_file() else None,
-                                                                pages=design_render_bridge.cached_pages(data["id"], slug))
+                                                                pages=design_render_bridge.cached_pages(data["id"], slug),
+                                                                assets=assets,
+                                                                credits=design_store.credits(data["id"]))
 
 
 def _guard(handler):

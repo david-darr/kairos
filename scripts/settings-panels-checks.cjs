@@ -86,6 +86,81 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
   await navigate('home');
   await install();
 
+  // -- Shared image connection -------------------------------------------------------------------------------------
+  {
+    const input = name => '#image-provider-' + name;
+    const panelText = () => js("document.querySelector('.image-connection')?.textContent || ''");
+    const saved = async () => { await waitFor("[...document.querySelectorAll('.image-connection [role=status]')].some(n => n.textContent === 'Connection saved.')"); };
+    const imageWrites = async from => (await since(from)).filter(r => r.key === 'PUT /api/image-provider').map(r => r.body);
+    await open('images');
+    await waitFor("!!document.querySelector('#image-provider-key')");
+    assert.ok((await panelText()).includes('Not connected. Designs use openly licensed photos, your own photos and patterns instead.'));
+    assert.equal(await value(input('model')), 'gpt-image-1', 'OpenAI model is filled');
+    assert.equal(await js("document.querySelector('#image-provider-key').autocomplete"), 'off');
+    await setValue(input('key'), 'sk-images-test');
+    let from = await mark(); await clickText('Save'); await saved();
+    assert.deepEqual(await imageWrites(from), [{ kind: 'openai', key: 'sk-images-test', model: 'gpt-image-1', daily_limit: 50 }]);
+    assert.ok((await panelText()).includes('Connected: OpenAI, gpt-image-1. 0 of 50 images today.'));
+    assert.equal(await value(input('key')), '', 'key is cleared after saving');
+    assert.equal(await js("document.querySelector('#image-provider-key').placeholder"), 'Saved. Paste a new key to replace it');
+    await setValue(input('limit'), '25'); from = await mark(); await clickText('Save'); await saved();
+    assert.deepEqual(await imageWrites(from), [{ daily_limit: 25 }], 'limit-only update keeps the saved key');
+    await clickText('Test connection');
+    await waitFor("document.querySelector('.image-connection').textContent.includes('Works')");
+    demoState.botsIdentity.testError = 'The server did not answer.';
+    await clickText('Test connection');
+    await waitFor("document.querySelector('.image-connection').textContent.includes('The server did not answer.')");
+    delete demoState.botsIdentity.testError;
+    await failing('PUT /api/image-provider', 'That model is unavailable.');
+    await clickText('Save');
+    await waitFor("[...document.querySelectorAll('.image-connection [role=status]')].some(n => n.textContent === 'That model is unavailable.')");
+    await unfail();
+    await clickText('Remove'); await waitFor("!!document.querySelector('.confirm-panel')");
+    assert.ok((await panelText()).includes('Connected:'), 'connection stays until confirmed');
+    await clickText('Cancel', '.confirm-panel');
+    await clickText('Remove'); await waitFor("!!document.querySelector('.confirm-panel')");
+    await clickText('Remove', '.confirm-panel');
+    await waitFor("document.querySelector('.image-connection').textContent.includes('Not connected.')");
+    await setValue(input('kind'), 'xai', 'change');
+    assert.equal(await value(input('model')), 'grok-2-image', 'xAI model is filled');
+    await setValue(input('kind'), 'compatible', 'change');
+    assert.equal(await js("document.querySelector('#image-provider-address').closest('.set-row').hidden"), false, 'Compatible shows the address');
+    assert.equal(await value(input('model')), '', 'Compatible asks for its model');
+    await setValue(input('address'), 'https://images.example.test/v1');
+    await setValue(input('model'), 'my-image-model');
+    await setValue(input('key'), 'compatible-test-key');
+    await setValue(input('limit'), '0');
+    from = await mark(); await clickText('Save'); await saved();
+    assert.deepEqual(await imageWrites(from), [{ kind: 'compatible', key: 'compatible-test-key', model: 'my-image-model', daily_limit: 0, base_url: 'https://images.example.test/v1' }]);
+    for (const width of [1440, 390]) {
+      await close(); win.setContentSize(width, 900); await delay(350);
+      if (width === 390) {
+        await js(`(async () => {
+          const host = document.createElement('div'); host.id = 'image-phone-check'; host.className = 'settings-mobile-page';
+          host.style.cssText = 'position:fixed;inset:0;z-index:100;background:var(--bg)'; document.body.append(host);
+          await (await import('/static/js/views/settings.js')).renderMobilePage(host, 'images');
+        })()`);
+      } else await open('images');
+      await waitFor("!!document.querySelector('#image-provider-key')");
+      // The phone page slides in; measure once it has landed.
+      await waitFor("document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)");
+      const layout = await js(`(() => {
+        const root = document.querySelector(${width === 390 ? "'#image-phone-check .image-connection'" : "'.image-connection'"});
+        const controls = [...root.querySelectorAll('input,select')].filter(n => n.getClientRects().length);
+        return { labelled: controls.every(n => n.labels.length && n.labels[0].textContent.trim()),
+          targets: [...controls, ...root.querySelectorAll('button')].every(n => n.getBoundingClientRect().height >= 44),
+          fits: [root, ...root.querySelectorAll('*')].filter(n => n.getClientRects().length).every(n => {
+            const r = n.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1 && n.scrollWidth <= n.clientWidth + 1;
+          }) };
+      })()`);
+      assert.ok(layout.labelled, width + ': every input has a visible label');
+      assert.ok(layout.fits, width + ': no sideways scroll');
+      if (width === 390) assert.ok(layout.targets, 'phone controls are at least 44px tall');
+    }
+    await js("document.getElementById('image-phone-check')?.remove()");
+    win.setContentSize(1440, 900); await delay(350);
+  }
+
   // -- 1. Forge -----------------------------------------------------------------------------------------------------
   {
     const rootSel = 'input[aria-label="Forge root folder"]';

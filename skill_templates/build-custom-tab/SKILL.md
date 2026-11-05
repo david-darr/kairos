@@ -150,6 +150,15 @@ Module functions (call as `tab_api.<name>`):
 - `create_backlog_card(title, description, agent_id, owner_user=None)`: create a backlog card for an agent; pass the authenticated task owner for owner-scoped background reads.
 - `delete_backlog_card(card_id)`: delete a work card.
 - `unregister_sync(slug)`: remove a tab's sync providers; the loader handles this on retirement. Do not unregister other tabs.
+- `video_looks(user)`: the looks this person may use and the default look's id.
+- `video_look_tokens(look, user)`: a visible look's `--ds-*` variables and its font-face CSS, for a live motion preview.
+- `video_design_source(design_id, user)`: a design this person can open, as title, look, boards (title and HTML) and asset names.
+- `video_resources(video_id, user)`: a video's asset and render file names, its latest thumbnail and its render jobs.
+- `video_create_project(user, project)`: create a video owned by the signed-in person; the project is validated and its look must be visible.
+- `video_save_project(video_id, project, user)`: save a video this person can edit; validated like the video routes.
+- `video_delete_project(video_id, user)`: delete a video this person can edit.
+- `video_copy_design_asset(video_id, design_id, asset, user)`: copy an image from a design this person can open into the video.
+- `video_link_session(video_id, session_id, user)`: link this person's own chat to the video so a model can edit it there.
 
 Bound handle members (call as `api.<name>`):
 

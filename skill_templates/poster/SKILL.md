@@ -7,7 +7,7 @@ description: |
   asked to create, design or make a poster, flyer, or one-page promo graphic.
 license: MIT
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # Poster: a designed, legible poster on the Design canvas
@@ -16,6 +16,12 @@ A poster has to be read from across a room: one big idea, a few facts, one
 call to action, all as real text. Build it as a `poster` board on the Design
 canvas (read `design-canvas` for the tools), so every model makes it the same
 way, it is checked as it is built, and the person can change any word later.
+
+## Pictures
+
+Follow the Pictures section in `design-canvas` for photos, generation,
+licensed search and credits, treatments, patterns and placement. A type-led
+layout is fine; never draw people, objects or scenes with SVG or CSS.
 
 ## Steps
 
@@ -33,12 +39,19 @@ way, it is checked as it is built, and the person can change any word later.
      weight and case, two to five words;
    - the facts as a short block or grid (when, where, who, price), 28 to 40px;
    - one call to action on an accent fill with `var(--ds-on-accent)` text;
-   - a visual made of type, colour blocks, numbers or simple shapes when no
-     image exists. Never an empty box or grey bars.
-4. **Read the notes** the tool returns (type below 20px, empty boxes, contrast)
+   - room for the picture (step 4). Never an empty box or grey bars.
+4. **Pictures, every time.** Right after `design_create`, get the poster's
+   picture: `image_generate` when an image connection exists; otherwise
+   `image_search` for the subject, then call it again with `use` set to the best
+   photo's id; or `image_treat` on a photo the person gave you. Place it with
+   `design_edit` (`<img src="assets/...">`, `object-fit: cover`, a scrim under
+   any text on it, and the credit line `image_search` gives). Only when no photo
+   fits the subject, use `image_pattern` for a texture behind the type. A
+   finished poster always has a picture or a texture.
+5. **Read the notes** the tool returns (type below 20px, empty boxes, contrast)
    and fix each with `design_edit`. With image reading, `design_snapshot` and
    look at it: the headline should be readable at thumbnail size.
-5. **Hand it over.** `design_export` with `png` for sharing and printing at
+6. **Hand it over.** `design_export` with `png` for sharing and printing at
    home, `pdf` for a print shop, `pptx` if they want to change the words in
    PowerPoint (the text, shapes and pictures come out editable).
    Put the design link and the export link in your reply.

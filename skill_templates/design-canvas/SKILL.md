@@ -1,6 +1,8 @@
 ---
 name: design-canvas
 description: Design screens, pages, posters, slides, documents and PDFs, and social posts on Kairos's Design canvas with the design_* tools, in a look chosen for the brief, the same way on every model.
+metadata:
+  version: "1.1.0"
 ---
 
 # Design canvas
@@ -10,6 +12,25 @@ A design is a canvas of boards. Each board is one plain HTML fragment (no
 variables. Kairos gives every element a short id (`data-kd="btn7"`); edits
 address elements by those ids. For deeper UI and UX guidance read
 `ui-ux-pro-max` and call `ui_design`.
+
+## Pictures
+
+Use the person's own photos first: add them to the design's assets and use
+`image_treat` with the look's `image_treatment`. Next use `image_generate`
+when an image connection exists. Otherwise `image_search` for an openly
+licensed photo: search, pick one, call it again with `use` set to its id,
+and put the returned credit line on the board in small type.
+Use `image_pattern` with the look's `pattern` for backgrounds and textures.
+A type-led layout is always fine.
+
+For an `image_generate` prompt, name the subject, setting, light, framing and
+lens, and mood. The look's imagery style is added automatically. Never ask
+for text in the picture; set type in HTML on top.
+
+Place the returned path in `<img src="assets/...">` with real `alt` text and
+`object-fit: cover` in a sized frame. Text over a photo gets a scrim, a
+gradient from the look's `--ds-bg`, so contrast holds.
+Never draw people, objects or scenes with SVG or CSS.
 
 ## Direction first: pick a look for this brief
 

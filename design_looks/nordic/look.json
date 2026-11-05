@@ -11,6 +11,8 @@
   "shape": {"radius": "12px", "button": "soft", "border": "1px", "label_case": "none", "label_tracking": "0",
             "display_weight": "600", "display_style": "normal"},
   "imagery": "simple line icons, friendly spot illustrations, clean UI",
+  "image_treatment": "duotone",
+  "pattern": "waves",
   "archetypes": ["bento", "hero-split", "comparison"],
   "guide": "A service people trust: cool greys, one clear blue for actions, plenty of white cards, sentence case. Every screen has one obvious next step."
 }

@@ -274,3 +274,10 @@
 .layout-move:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
 .layout-move:disabled { opacity: .35; cursor: default; }
 
+
+/* Shared image connection form. */
+.image-connection { min-width: 0; }
+.image-connection .set-note { overflow-wrap: anywhere; }
+@media (max-width: 768px) {
+  .image-connection input, .image-connection select, .image-connection .btn { min-height: 44px; }
+}

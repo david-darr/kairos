@@ -801,8 +801,8 @@ async function documents({ js, waitFor, delay, navigate, win, capture, overflow 
 
 // Tool Store > Design systems: the looks with their previews, Use as default, on desktop and a phone.
 async function looks({ js, waitFor, delay, navigate, win, capture, overflow }) {
-  for (const width of [1440, 390]) {
-    win.setContentSize(width, width === 390 ? 844 : 900); await delay(300);
+  for (const width of [1440, 1240, 390, 320]) {
+    win.setContentSize(width, width <= 390 ? 844 : 900); await delay(300);
     state.previews = 0;
     await navigate('tool-store');
     await waitFor("!![...document.querySelectorAll('.tool-store-filters button')].find(b => b.textContent === 'Design systems')");
@@ -814,6 +814,18 @@ async function looks({ js, waitFor, delay, navigate, win, capture, overflow }) {
     assert.ok(await js("document.querySelector('.design-look-card').textContent.includes('Kairos brand') && [...document.querySelectorAll('.design-look-card')].some(c => c.textContent.includes('Bebas Neue + Barlow Condensed'))"),
       `each look shows its mood and type at ${width}`);
     assert.ok(await js("[...document.querySelectorAll('.design-look-preview')].every(p => p.getBoundingClientRect().right <= innerWidth + 0.5)"), `previews fit the window at ${width}`);
+    // The boards rescale in a ResizeObserver callback, a frame after the window changes size.
+    await waitFor("[...document.querySelectorAll('.design-look-frame')].every(f => Math.abs(f.getBoundingClientRect().width - f.closest('.design-look-preview').getBoundingClientRect().width) <= 1)");
+    assert.ok(await js(`([...document.querySelectorAll('.design-look-card')].every(card => {
+      const bounds = card.getBoundingClientRect();
+      return [...card.querySelectorAll('*')].every(element => {
+        const rect = element.getBoundingClientRect();
+        return !rect.width || !rect.height || (rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5
+          && rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5);
+      });
+    }))`), `look cards keep their contents inside at ${width}`);
+    assert.ok(await js("[...document.querySelectorAll('.design-look-frame')].every(f => Math.abs(f.getBoundingClientRect().width - f.closest('.design-look-preview').getBoundingClientRect().width) <= 1)"),
+      `the whole preview board shows at ${width}`);
     if (overflow) assert.deepEqual(await overflow(), [], `no sideways scroll on Design systems at ${width}`);
     if (width === 1440) {
       const before = state.posts.length;
@@ -822,6 +834,10 @@ async function looks({ js, waitFor, delay, navigate, win, capture, overflow }) {
       assert.ok(state.posts.slice(before).some(p => p.path === '/api/design-systems/default/look' && p.body.id === 'sport'), 'Use as default saves the look');
       assert.ok(await js("[...document.querySelectorAll('.design-look-card')].find(c => c.textContent.includes('Sport')).querySelector('[aria-pressed=\"true\"]')?.textContent === 'Stop using as default'"),
         'the default look says so and can be undone');
+    }
+    if (width !== 1440 && width !== 390) {
+      await capture(`design-looks-${width}`);
+      continue;
     }
     // New style from references: a draft from a file, its editor, a font change, then Save.
     const posts = state.posts.length;

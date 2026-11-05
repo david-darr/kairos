@@ -11,6 +11,8 @@
   "shape": {"radius": "0px", "button": "square", "border": "2px", "label_case": "upper", "label_tracking": "0.08em",
             "display_weight": "800", "display_style": "normal"},
   "imagery": "flat colour fields, strict photo crops on the grid, numbers as graphics",
+  "image_treatment": "halftone",
+  "pattern": "grid",
   "archetypes": ["grid-12", "big-number", "comparison", "timeline"],
   "guide": "Everything on a visible grid. Flush-left type, tight leading on headlines, heavy weight contrast. Red is a signal: one block or one rule per board. No rounded corners, no shadows."
 }

@@ -9,7 +9,7 @@ description: |
   or send as pages. Replaces hand-written ReportLab scripts.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # PDF document: real pages, designed, on the Design canvas
@@ -20,6 +20,12 @@ pages: the content flows across them, the header runs from page 2, every page
 is numbered, table headers repeat and headings stay with what follows. Every
 model makes it the same way, it is checked as it is built, and the PDF's text
 stays selectable.
+
+## Pictures
+
+Follow the Pictures section in `design-canvas` for photos, generation,
+licensed search and credits, treatments, patterns and placement. A type-led
+layout is fine; never draw people, objects or scenes with SVG or CSS.
 
 ## Steps
 

@@ -20,7 +20,7 @@ from typing import Optional
 
 from core import design_looks, design_systems
 
-KINDS = ("poster", "screen", "website", "slides", "social", "print", "email", "banner")
+KINDS = ("poster", "screen", "website", "slides", "social", "print", "email", "banner", "video")
 KIND_ALIASES = {"app": "screen", "mobile": "screen", "ui": "screen", "onboarding": "screen", "dashboard": "screen",
                 "landing": "website", "web": "website", "site": "website", "page": "website", "homepage": "website",
                 "deck": "slides", "presentation": "slides", "slide": "slides", "pitch": "slides",
@@ -38,6 +38,7 @@ ARCHETYPES = {
     "print": ["editorial-column", "grid-12", "comparison", "timeline"],
     "email": ["editorial-column", "hero-split"],
     "banner": ["hero-split", "big-number"],
+    "video": ["slide-title", "big-statement", "big-number", "image-led", "closing"],
 }
 RECENT = 5          # How many of the person's latest designs count as "recently used".
 RECENT_PENALTY = 2.5
@@ -47,7 +48,7 @@ BRIEF_WORDS = frozenset({"app", "design", "launch", "launching", "product", "pag
                          "guide", "post", "screen", "home", "video", "pdf", "pitch", "make", "new", "website", "site",
                          "landing", "instagram", "social", "email", "banner", "print", "flyer", "promo", "announcing"})
 # When a brief names several output words, the most specific wins ("a 3 page guide as a PDF" is print).
-KIND_PRIORITY = ("pdf", "document", "resume", "one-pager", "report", "letter", "deck", "presentation", "slides",
+KIND_PRIORITY = ("video", "pdf", "document", "resume", "one-pager", "report", "letter", "deck", "presentation", "slides",
                  "slide", "pitch", "instagram", "tiktok", "story", "social", "newsletter", "email", "banner", "header",
                  "cover", "poster", "flyer", "onboarding", "dashboard", "app", "mobile", "ui", "screen", "landing",
                  "homepage", "website", "web", "site", "guide", "post", "page", "print")
@@ -93,6 +94,12 @@ def _recent(owner: Optional[str]) -> list[str]:
     return [d.get("design_system") for d in mine[:RECENT] if d.get("design_system")]
 
 
+def _suits(look: dict, kind: str) -> bool:
+    """Video inherits the looks suited to slides and social, without changing bundled data."""
+    good_for = set(look["good_for"])
+    return kind in good_for or (kind == "video" and bool({"slides", "social"} & good_for))
+
+
 def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] = None, count: int = 3) -> list[dict]:
     """The best `count` directions for a brief, as plain dicts."""
     kind = kind_of(kind or brief)
@@ -102,7 +109,7 @@ def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] =
     for look in design_looks.load().values():
         tags = _hits(terms, look["tags"])
         moods = _hits(terms, look["mood"])
-        score = 3.0 * len(tags) + 1.0 * len(moods) + (1.0 if kind in look["good_for"] else -3.0)
+        score = 3.0 * len(tags) + 1.0 * len(moods) + (1.0 if _suits(look, kind) else -3.0)
         score -= RECENT_PENALTY * recent.count(look["id"])
         tie = int(hashlib.sha1(f"{brief}|{look['id']}".encode()).hexdigest()[:6], 16) / 0xFFFFFF  # stable, per brief
         scored.append((score + tie * 0.5, look, tags + moods))
@@ -113,7 +120,7 @@ def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] =
         look = {**design_systems._style_look(system["id"]), "id": system["id"]}
         name_words = {w for w in _WORD.findall(look["name"].lower()) if w not in ("style", "look", "my", "the")}
         tags = _hits(terms, look["tags"])
-        score = 2.0 + 3.0 * len(tags) + (1.0 if kind in look["good_for"] else -3.0)
+        score = 2.0 + 3.0 * len(tags) + (1.0 if _suits(look, kind) else -3.0)
         if name_words and name_words <= words:
             score += 100.0
             tags = [f"the brief names {look['name']}"] + tags
@@ -134,6 +141,7 @@ def directions(brief: str, kind: Optional[str] = None, *, owner: Optional[str] =
                     "palette": design_looks.summary(look)["palette"],
                     "fonts": design_looks.summary(look)["fonts"],
                     "layout": archetypes[:2], "imagery": look["imagery"],
+                    "image_treatment": look["image_treatment"], "pattern": look["pattern"],
                     "guide": look["guide"].split(". ")[0].rstrip(".") + "."})
     return out
 
@@ -144,25 +152,36 @@ def _kairos(kind: str) -> dict:
     return {"look": design_systems.BUILTIN_ID, "name": "Kairos", "mood": ["warm", "calm", "precise"],
             "why": "the brief is about Kairos" , "palette": {k: flat.get(f"--ds-{k}") for k in ("bg", "surface", "text", "accent")},
             "fonts": {"display": "Cormorant Garamond", "body": "Jost"}, "layout": ARCHETYPES[kind][:2],
-            "imagery": "Kairos's own screens, halftone and dither treatments", "guide": "Parchment, bistre ink, a gold point."}
+            "imagery": "Kairos's own screens, halftone and dither treatments",
+            "image_treatment": "halftone", "pattern": "dots", "guide": "Parchment, bistre ink, a gold point."}
 
 
 def describe(brief: str, kind: Optional[str] = None, *, owner: Optional[str] = None) -> str:
     """The tool's reply: three directions a model can pick from in one line."""
     kind = kind_of(kind or brief)
-    lines = [f"Three directions for this {kind}. Pick one and pass its look to design_create (look=\"...\"). "
+    tool = "video_create" if kind == "video" else "design_create"
+    lines = [f"Three directions for this {kind}. Pick one and pass its look to {tool} (look=\"...\"). "
              "Say which you chose and why in one line of your reply."]
     for n, d in enumerate(directions(brief, kind, owner=owner), 1):
         palette = ", ".join(f"{k} {v}" for k, v in d["palette"].items())
         fonts = " / ".join(f"{v} ({k})" for k, v in d["fonts"].items())
         lines.append(f"{n}. look=\"{d['look']}\" {d['name']} ({', '.join(d['mood'])}): {d['why']}. {d['guide']}\n"
-                     f"   Palette: {palette}. Type: {fonts}. Layout: {', '.join(d['layout'])}. Imagery: {d['imagery']}.")
+                     f"   Palette: {palette}. Type: {fonts}. Layout: {', '.join(d['layout'])}. Imagery: {d['imagery']}. "
+                     f"Pictures: image_generate (when connected), image_search for an openly licensed photo, "
+                     f"image_treat {d['image_treatment']} on the person's own photo, or image_pattern {d['pattern']}.")
     if kind == "print":
         lines.append("A document or PDF of more than one page is format document (its pages flow, with page numbers): "
                      "read_skill pdf-document. Exactly one printed page is format print.")
+    if kind == "video":
+        lines.append("Use video_create with a beat sheet: one idea per beat, 3 to 8 words on screen, 1 to 2 bars; "
+                     "hook first, end card last. Then video_preview, fix with video_edit and video_render.")
     if kind == "slides":
         lines.append("Mix the ten slide archetypes in the design-canvas skill, one idea per slide; charts are tables in "
                      "<figure data-chart>.")
+    if kind in ("poster", "social", "banner", "slides", "screen", "print"):
+        lines.append("After design_create, get the pictures before you finish: image_generate when connected, otherwise "
+                     "image_search then use, or image_treat on the person's photo; image_pattern when no photo fits. "
+                     "Place them with design_edit.")
     lines.append("Every look's tokens are the same var(--ds-...) names; headlines use var(--ds-font-display), "
                  "text on an accent fill uses var(--ds-on-accent). Layout skeletons are in the design-canvas skill.")
     return "\n".join(lines)

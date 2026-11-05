@@ -170,6 +170,8 @@ def font_path(system_id: str, file: str) -> Optional[Path]:
 
 def builtin() -> dict:
     return {"id": BUILTIN_ID, "name": "Kairos", "builtin": True, "tokens": kairos_tokens(),
+            "look": {"imagery": "Kairos's own screens, halftone and dither treatments",
+                     "image_treatment": "halftone", "pattern": "dots"},
             "guide": KAIROS_GUIDE, "components": COMPONENTS, "fonts": [
                 {"family": f, "file": file, "weight": w, "style": s} for f, file, w, s in KAIROS_FONT_FACES]}
 
@@ -226,7 +228,7 @@ def save_style(look: dict, *, owner: str, sources: list[str], system_id: Optiona
     system_id = system_id or design_references.new_id(look.get("name") or "style")
     if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id) or design_looks.get(system_id):
         raise ValueError("That style id cannot be used.")
-    clean = design_looks._validate(system_id, {k: look[k] for k in design_looks.LOOK_FIELDS})
+    clean = design_looks._validate(system_id, look)
     folder = Path(SYSTEMS_DIR, system_id)
     with _lock:
         folder.mkdir(parents=True, exist_ok=True)

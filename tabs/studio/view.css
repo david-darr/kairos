@@ -1,0 +1,46 @@
+.studio-view{max-width:none;min-width:0;color:var(--text)}
+.studio-view *{box-sizing:border-box;min-width:0}
+.studio-view h3{margin:12px 0}
+.studio-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.studio-view button,.studio-view select,.studio-view input:not([type=checkbox]),.studio-view summary,.studio-view a.btn{min-height:44px;max-width:100%}
+.studio-view input,.studio-view textarea,.studio-view select{font:inherit;color:var(--text);background:var(--bg-panel-solid);border:1px solid var(--border);border-radius:var(--radius);padding:8px;width:100%}
+.studio-view input[type=checkbox]{width:20px;height:20px;flex-shrink:0}
+.studio-view button,.studio-view a,.studio-view code{overflow-wrap:anywhere;white-space:normal}
+.studio-view button:focus-visible,.studio-view input:focus-visible,.studio-view select:focus-visible,.studio-view textarea:focus-visible,.studio-view summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.studio-view .studio-actions>input[type=search]{flex:1;min-width:140px}
+.studio-view .studio-actions>select{width:auto}
+.studio-banner{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.studio-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:16px;margin-top:16px}
+.studio-project{padding:16px;overflow:hidden;display:flex;flex-direction:column;align-items:stretch}
+.studio-project h3,.studio-project p{overflow-wrap:anywhere}
+.studio-thumbnail{display:block;width:100%;height:160px;object-fit:contain;background:var(--surface-2);border-radius:var(--radius)}
+.studio-project>.btn{margin-top:auto}
+.studio-columns{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(280px,2fr) minmax(240px,1fr);gap:16px;align-items:start}
+.studio-columns>aside,.studio-centre{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--bg-panel-solid)}
+/* On a wide screen the preview stays in view while the beat list and the fields scroll on their own. */
+@media(min-width:1101px){.studio-columns>aside,.studio-centre{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto}}
+.studio-beats{display:grid;gap:8px}
+.studio-beat{border:1px solid var(--border);border-radius:var(--radius);padding:6px}
+.studio-beat.selected{border-color:var(--accent);background:var(--surface-2)}
+.studio-beat>button{display:block;width:100%;text-align:left}
+.studio-beat .studio-actions button{flex:1;font-size:12px}
+.studio-stage{display:flex;align-items:center;justify-content:center;width:100%;height:360px;background:var(--surface-2);overflow:hidden;border-radius:var(--radius)}
+.studio-stage canvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+.studio-field{display:grid;gap:5px;margin:12px 0}
+.studio-field label,.studio-view legend{font-weight:600}
+.studio-view textarea{resize:vertical}
+.studio-error{color:var(--danger);white-space:pre-wrap;overflow-wrap:anywhere}
+.studio-error:empty{display:none}
+.studio-view [aria-invalid=true]{border-color:var(--danger)}
+.studio-check{display:flex;align-items:center;gap:8px;min-height:44px}
+.studio-view fieldset{border:1px solid var(--border);border-radius:var(--radius);margin:12px 0;padding:8px}
+.studio-markers{display:flex;gap:2px;width:100%;flex-wrap:wrap}
+.studio-markers button{padding:2px;flex-basis:28px!important;font-size:12px}
+.studio-swatches{display:flex;gap:8px}
+.studio-swatches span{display:block;width:28px;height:28px;border:1px solid var(--border-strong);border-radius:50%}
+.studio-job,.studio-download{padding:12px;margin:12px 0;overflow-wrap:anywhere}
+.studio-view video{width:100%;max-height:360px;display:block;background:var(--surface-2)}
+.studio-view progress{width:100%;accent-color:var(--accent)}
+.studio-note{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:1100px){.studio-columns{grid-template-columns:minmax(160px,.7fr) minmax(240px,1.7fr)}.studio-inspector{grid-column:1/-1}}
+@media(max-width:650px){.studio-columns{display:flex;flex-direction:column}.studio-columns>*{width:100%}.studio-centre{order:-1}.studio-stage{height:300px}.studio-actions>*{flex-grow:1}.studio-view{padding:8px}.studio-editor-top{position:static}}

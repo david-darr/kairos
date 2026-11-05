@@ -74,6 +74,9 @@ async def worker_stream():
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
                 continue
+            if job.get("kind") == "cancel":
+                yield f"data: {json.dumps(job)}\n\n"
+                continue
             future = _pending.get(job["id"])
             if future is None or future.done():
                 continue
@@ -251,3 +254,74 @@ def _refresh(packet: dict) -> None:
 
 
 design_store.on_change(_refresh)
+
+# Video jobs use ordered, acknowledged parts so a 120-second film never has
+# thousands of JPEGs resident in backend memory. The consumer owns encoding.
+_video_parts: dict[str, dict] = {}
+
+
+async def video(job: dict, consumer) -> dict:
+    """Queue one signed player job and consume each acknowledged part in order."""
+    if not available():
+        raise Unavailable("Video previews and renders need the Kairos desktop app. Open the desktop app and try again.")
+    job_id = job["id"]
+    future = asyncio.get_running_loop().create_future()
+    _pending[job_id] = future
+    state = {"next": 0, "count": 0, "consumer": consumer, "expected": len(job.get("times", [])) if job.get("preview") else job["frames"],
+             "layouts": 0, "lock": asyncio.Lock()}
+    _video_parts[job_id] = state
+    await _q().put({**job, "kind": "video"})
+    try:
+        return await asyncio.wait_for(future, timeout=600)
+    except asyncio.TimeoutError:
+        raise Unavailable("The desktop app did not finish the video within 10 minutes. Try a shorter video.") from None
+    finally:
+        _pending.pop(job_id, None)
+        _video_parts.pop(job_id, None)
+        await _q().put({"id": job_id, "kind": "cancel"})
+
+
+async def complete_video(job_id: str, data: bytes, part=None, error=None) -> bool:
+    """Reject duplicates, gaps and excess frames before delivering data to a sink."""
+    import base64
+    state = _video_parts.get(job_id)
+    future = _pending.get(job_id)
+    if state is None or future is None or future.done():
+        return False
+    async with state["lock"]:
+        if future.done():
+            return False
+        if error:
+            return complete(job_id, b"", error)
+        try:
+            packet = json.loads(data)
+            if not isinstance(packet, dict):
+                raise ValueError("Video results must be JSON objects.")
+            if part is None:
+                if packet.get("frames") != state["expected"] or state["count"] != state["expected"]:
+                    raise ValueError("Video ended before all requested frames arrived.")
+                future.set_result({"frames": state["count"]})
+                return True
+            if not isinstance(part, int) or part != state["next"]:
+                raise ValueError("Video parts must arrive once, in order, starting at zero.")
+            encoded = packet.get("frames")
+            if not isinstance(encoded, list) or not 1 <= len(encoded) <= 15 or state["count"] + len(encoded) > state["expected"]:
+                raise ValueError("Video parts hold 1 to 15 requested JPEG frames.")
+            frames = [base64.b64decode(value, validate=True) for value in encoded]
+            if any(not frame.startswith(b"\xff\xd8") or len(frame) > 8 * 1024 * 1024 for frame in frames):
+                raise ValueError("Video frames must be JPEGs under 8 MB.")
+            layouts = packet.get("layouts", [])
+            if not isinstance(layouts, list) or state["layouts"] + len(layouts) > 120:
+                raise ValueError("Video layout samples must be a list of at most 120 samples.")
+            for sample in layouts:
+                if not isinstance(sample, dict) or not isinstance(sample.get("elements"), list) or len(sample["elements"]) > 500:
+                    raise ValueError("Each video sample needs an elements list.")
+            await state["consumer"](frames, layouts)
+            state["count"] += len(frames)
+            state["layouts"] += len(layouts)
+            state["next"] += 1
+            return True
+        except Exception as exc:
+            if not future.done():
+                future.set_exception(RuntimeError(str(exc)))
+            return False

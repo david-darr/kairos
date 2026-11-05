@@ -14,6 +14,7 @@ from core.constants import DATA_DIR
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 DEFAULTS: dict[str, Any] = {
+    "image_daily_limit": 50,
     "forge_root": None,  # None resolves the OS Documents folder on first use.
     "forge_terminal_remote": False,
     "onboarding_complete": False,
