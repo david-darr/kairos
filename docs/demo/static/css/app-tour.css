@@ -1,10 +1,10 @@
 /* The Kairos tour (/demo, static/js/appTour.js). App tokens only, so it reads in
    Kairos, Forge and Bots, light and dark. Above every window, Settings included. */
 .app-tour { position: fixed; inset: 0; z-index: 12000; font: 400 14px/1.5 var(--font-sans, system-ui, sans-serif); color: var(--text); }
-.app-tour-shade { position: fixed; inset: 0; background: var(--scrim, rgba(0, 0, 0, .35)); }
+.app-tour-shade { position: fixed; inset: 0; background: var(--scrim); }
 .app-tour-shade[hidden], .app-tour-ring[hidden] { display: none; }
 .app-tour-ring { position: fixed; border: 2px solid var(--accent); border-radius: var(--radius, 12px); pointer-events: none;
-  box-shadow: 0 0 0 9999px var(--scrim, rgba(0, 0, 0, .35)); transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
+  box-shadow: 0 0 0 9999px var(--scrim); transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
 .app-tour-tip { position: fixed; width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box;
   padding: 20px; display: grid; gap: 10px; background: var(--bg-panel-solid, var(--bg)); color: var(--text);
   border: 1px solid var(--border-strong, var(--border)); border-radius: var(--radius, 12px); box-shadow: var(--popup-shadow, var(--shadow-elevated)); }

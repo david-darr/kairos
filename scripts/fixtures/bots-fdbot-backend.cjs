@@ -36,7 +36,8 @@ const CARD_SAMPLES = JSON.parse(String.raw`{
   "chips": {"options":["Yes","Later"]},
   "checkin": {"at":1,"summary":"One idea"},
   "welcome": {"title":"Hi","lines":["Ask","Plan","Make"]},
-  "reach": {"title":"What I can reach","connected":{"mail":false,"calendar":true,"forge_projects":2}}
+  "reach": {"title":"What I can reach","connected":{"mail":false,"calendar":true,"forge_projects":2}},
+  "watching": {"routine_id":"w1","title":"I'm keeping an eye on your day","lines":["Every 15 minutes I check your mail and calendar."]}
 }`);
 
 module.exports = context => {
