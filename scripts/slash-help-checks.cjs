@@ -45,7 +45,13 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       // phone actually does, through Send.
       await draft('/demo'); await key('Enter');
       if (label === 'desktop') {
-        await waitFor(`(${lastReply} || '').includes('A quick tour of Kairos')`);
+        // 2026-11-05: on a computer /demo starts the walk-through (appTour.js); close it to go on.
+        await waitFor(`(${lastReply} || '').includes('Starting the tour of Kairos')`);
+        await waitFor("!!document.querySelector('.app-tour .app-tour-tip h2')");
+        assert.equal(await js("document.querySelector('.app-tour h2').textContent"), 'Take a tour of Kairos', label + ' the tour opens on its start card');
+        assert.ok(await js("document.querySelectorAll('.app-tour input[type=checkbox]').length >= 8"), label + ' every tab can be left out');
+        await js("[...document.querySelectorAll('.app-tour button')].find(b => b.textContent === 'Not now').click()");
+        await waitFor("!document.querySelector('.app-tour')");
         assert.ok(await js(`${picker}.hidden`), label + ' a fully typed command runs on the first Enter');
       } else {
         assert.equal(await js("document.getElementById('chat-input').value"), '/demo', label + ' Return never sends');

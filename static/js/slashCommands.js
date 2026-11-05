@@ -26,22 +26,15 @@ export const COMMANDS = {
     handler: (args, ctx) => renderHelp(args[0], ctx),
   },
   demo: {
-    category: 'Getting started', help: 'Read a short tour of Kairos.', usage: '/demo',
-    handler: (_args, ctx) => [
-      'A quick tour of Kairos:',
-      'Chats: ask questions, attach files, choose a model, and keep separate conversations.',
-      'Agents: give a helper ongoing work and review its questions and results.',
-      ...(ctx.isAdmin?.() ? ['Forge: work on software projects with an agent.'] : []),
-      'Notes: keep your task list, with due dates that also appear on Calendar.',
-      'Tasks: schedule jobs for an agent to run.',
-      'Calendar: see events and due dates together.',
-      'Email: connect an account to read and compose messages.',
-      'Library: find documents, chat files and notes in your Vault folder.',
-      'Tool Store: add saved Skills and connected tools.',
-      'Cookbook: download and run a model on this computer.',
-      'Model setup: type /setup for help connecting your first model.',
-      'Computer use: ask the agent to open a website, then type /computer to see its computer. You can take over when needed.',
-    ].map((line, index) => index ? `- ${line}` : line + '\n').join('\n'),
+    category: 'Getting started', help: 'Take a guided tour of Kairos.', usage: '/demo',
+    details: 'On a computer, it opens each tab and shows its main features, one popup at a time. Skip any step or tab, or end the tour whenever you like. On a phone it lists the tabs instead.',
+    handler: async (_args, ctx) => {
+      const { startTour, tourText } = await import('./appTour.js');
+      const admin = !!ctx.isAdmin?.();
+      if (matchMedia('(max-width: 768px)').matches) return tourText({ admin });
+      await startTour({ isAdmin: admin, sessionId: ctx.sessionId?.() || null });
+      return 'Starting the tour of Kairos. Skip any step or tab, or end it whenever you like.';
+    },
   },
   setup: {
     category: 'Getting started', help: 'Open the guide to connecting a model.', usage: '/setup',

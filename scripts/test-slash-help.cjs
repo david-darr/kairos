@@ -8,8 +8,9 @@ const root = path.resolve(__dirname, '..');
 const calls = [], navigation = [];
 let session = { model_endpoint_id: null }, connections = [], confirmed = false, style = 'standard';
 const browser = {};
+const tours = []; let phone = false;
 const platform = { platform: 'Win32' };
-const context = vm.createContext({ navigator: platform, window: browser,
+const context = vm.createContext({ navigator: platform, window: browser, matchMedia: () => ({ matches: phone }),
   document: { dispatchEvent: event => navigation.push(event.detail) },
   CustomEvent: class { constructor(_type, { detail }) { this.detail = detail; } },
 });
@@ -26,6 +27,8 @@ const mocks = {
   'api.js': { api: fakeApi, confirmDialog: async () => confirmed },
   'appearance.js': { getAppearance: () => ({ chatStyle: style }), updateAppearance: value => { style = value.chatStyle; } },
   'app.js': { switchMode: async mode => navigation.push(mode) },
+  // The walk itself has its own test (test_app_tour.mjs); here only what /demo hands it.
+  'appTour.js': { startTour: async options => { tours.push(options); }, tourText: ({ admin }) => 'A quick tour of Kairos:' + (admin ? ' Forge' : '') },
 };
 const modules = new Map();
 async function load(name) {
@@ -92,8 +95,14 @@ async function load(name) {
   const admin = { ...ctx, isAdmin: () => true };
   assert.ok((await renderHelp(null, admin)).includes('/forge'));
   await run('/forge', admin); assert.equal(navigation.at(-1), 'forge');
-  assert.ok(!(await run('/demo', admin)).output.includes('Odysseus'));
-  for (const text of ['Chats:', 'Agents:', 'Forge:', 'Cookbook:', 'Model setup:', 'Computer use:']) assert.ok((await run('/demo', admin)).output.includes(text));
+  // /demo (2026-11-05): a computer starts the walk from this chat; a phone gets the text.
+  // sid is already 's1' here.
+  assert.match((await run('/demo', admin)).output, /Starting the tour of Kairos/);
+  assert.equal(JSON.stringify(tours.at(-1)), JSON.stringify({ isAdmin: true, sessionId: 's1' }));
+  phone = true;
+  assert.equal((await run('/demo', ctx)).output, 'A quick tour of Kairos:');
+  assert.equal(tours.length, 1, 'a phone never starts the walk');
+  phone = false;
   await run('/rename A new title', ctx);
   assert.equal(JSON.parse(calls.at(-1).options.body).title, 'A new title');
   session.starred = false; await run('/star', ctx); assert.equal(JSON.parse(calls.at(-1).options.body).starred, true);
