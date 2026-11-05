@@ -9,7 +9,9 @@ from core.untrusted import wrap_untrusted
 
 LINKED_TOOLS = frozenset({"video_outline", "video_edit", "video_add_image", "video_preview", "video_render"})
 FLOW = ("Workflow: creative_direction(type=video) -> video_create with a beat sheet (one idea per beat, "
-        "3 to 8 words on screen, 1 to 2 bars each, end card last) -> video_preview -> fix with video_edit -> video_render. ")
+        "3 to 8 words on screen, 1 to 2 bars each, end card last; vary the kinds: at most half statements, a big-number "
+        "for a figure, a list, a quote, and an image or split beat with a photo from image_search) -> video_preview -> "
+        "fix with video_edit -> video_render. ")
 _ID = _str("Video id; optional when this chat has one linked video")
 _ASPECT = {"type": "string", "enum": list(video_store.ASPECTS)}
 

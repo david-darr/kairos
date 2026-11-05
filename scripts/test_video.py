@@ -797,7 +797,7 @@ assert(!allowedRequest('https://example.com/static/motion/engine.js', origin, ''
         raw = (ROOT / "skill_templates/motion-video/SKILL.md").read_bytes()
         self.assertNotIn(b"\r", raw)
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
-        self.assertIn(b'version: "2.0.0"', raw)
+        self.assertIn(b'version: "2.1.0"', raw)
 
 
 if __name__ == "__main__":

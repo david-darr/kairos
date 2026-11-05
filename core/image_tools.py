@@ -14,6 +14,7 @@ NAMES = frozenset({"image_generate", "image_search", "image_treat", "image_patte
 NO_CONNECTION = ("No image generation is connected (Settings > Connections > Image generation). Use image_search for an openly licensed photo, "
                  "image_treat on the person's own photo, or image_pattern for a texture in the look.")
 _ID = _str("Design id; optional when this chat has one design")
+_VIDEO = _str("Video id, to save the picture into that video; optional when this chat has one video and no design")
 _SIZE = {"type": "string", "enum": ["square", "landscape", "portrait"]}
 
 
@@ -38,6 +39,29 @@ def _design(args, ctx, optional=False):
     if optional and not args.get("design_id") and (not key or not design_store.designs_for_chat(key)):
         return None
     return design_tools._design(args, ctx)
+
+
+def _video(args, ctx):
+    """The chat's video to save pictures into: named by video_id, or the chat's only video when it has no design.
+    A video-only chat used to get loose files here that no beat could use (2026-11-05 pass)."""
+    from core import video_store, video_tools
+    if args.get("design_id"):
+        return None
+    if args.get("video_id"):
+        return video_tools._video({"video_id": args["video_id"]}, ctx)
+    key = design_tools._key(ctx)
+    if not key or design_store.designs_for_chat(key) or not video_store.videos_for_chat(key):
+        return None
+    return video_tools._video({}, ctx)
+
+
+def _save_video(raw, ext, project):
+    from core import video_store
+    with Image.open(io.BytesIO(raw)) as source:
+        w, h = source.size
+    asset = video_store.add_asset(project["id"], raw, ext)
+    return asset, (f"{asset} ({w}x{h}) is in video {project['id']}: set an image or split beat's image to this path "
+                   "with video_edit.")
 
 
 def _look(data):
@@ -77,38 +101,48 @@ def _save(raw, ext, data, alt="Describe this picture"):
            "picture: set text in HTML over it. Returns assets/... paths for <img src>. Without a connection it says so: then "
            "use image_search, image_treat or image_pattern. Never draw pictures or clip art in code instead."),
           _object({"prompt": _str("Describe the picture"), "size": _SIZE,
-                   "count": {"type": "integer", "minimum": 1, "maximum": 4}, "design_id": _ID}, ("prompt",)),
+                   "count": {"type": "integer", "minimum": 1, "maximum": 4}, "design_id": _ID, "video_id": _VIDEO}, ("prompt",)),
           surfaces=ALL, effect=EXTERNAL)
 @_guard
 async def _generate(args, ctx):
     data = _design(args, ctx, optional=True)
+    video = None if data else _video(args, ctx)
     if not image_providers.provider_state()["configured"]:
         return NO_CONNECTION
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("Describe the picture you want.")
-    prompt += ". Style: " + str(_look(data).get("imagery") or "natural photography") + ". No text, letters, logos or watermarks."
+    look = _look(data if data else ({"design_system": video["look"]} if video else None))
+    prompt += ". Style: " + str(look.get("imagery") or "natural photography") + ". No text, letters, logos or watermarks."
     images = await image_providers.generate(prompt, args.get("size", "square"), args.get("count", 1))
-    lines = [_save(raw, "png", data)[1] for raw in images]
+    lines = [(_save_video(raw, "png", video) if video else _save(raw, "png", data))[1] for raw in images]
     return "\n".join(lines) + "\nWrite real alt text describing what each picture shows."
 
 
-@register("image_search", ("Find openly licensed photos (Openverse, free, no key) for a design. First call with query to list choices; then "
-           "call again with use set to the chosen photo id to save it into the design's assets. Every saved photo needs its "
-           "credit line on the board in small type; the reply gives the exact text."),
+@register("image_search", ("Find openly licensed photos (Openverse, free, no key) for a design or a video. First call with query to list "
+           "choices; then call again with use set to the chosen photo id to save it into the design's assets (or the chat's "
+           "video when it has no design). Every saved photo needs its credit line on screen in small type; the reply gives "
+           "the exact text."),
           _object({"query": _str("Photo subject"), "count": {"type": "integer", "minimum": 1, "maximum": 8},
-                   "orientation": _SIZE, "use": _str("Photo id from the search results"), "design_id": _ID}),
+                   "orientation": _SIZE, "use": _str("Photo id from the search results"), "design_id": _ID, "video_id": _VIDEO}),
           surfaces=ALL, effect=EXTERNAL)
 @_guard
 async def _search(args, ctx):
     data = _design(args, ctx, optional=True)
+    video = None if data else _video(args, ctx)
     design_tools._taint(ctx)
     if args.get("use"):
         raw, ext, item = await image_search.fetch(args["use"])
+        attribution = f"Photo: {item['title']} by {item['creator']}, {str(item['license']).upper()} {item['license_version']}".strip()
+        if video:
+            from core import video_store
+            asset, line = _save_video(raw, ext, video)
+            video_store.add_credit(video["id"], asset, item)
+            return line + ("\nCredit required: put this line in small type on screen, in that beat's sub or the end "
+                           "card's sub: ") + wrap_untrusted("photo credit", attribution)
         asset, line = _save(raw, ext, data)
         if data:
             design_store.add_credit(data["id"], asset, item)
-        attribution = f"Photo: {item['title']} by {item['creator']}, {str(item['license']).upper()} {item['license_version']}".strip()
         return line + "\nCredit required: put this line on the board in small type: " + wrap_untrusted("photo credit", attribution)
     items = await image_search.search(args.get("query"), args.get("count", 6), args.get("orientation"))
     lines = [f"{i}. {item['id']}: {item['title']} by {item['creator']}, {item['license']} {item['license_version']}, "
@@ -136,14 +170,16 @@ async def _treat(args, ctx):
            "a default) for backgrounds, covers and panels. Patterns never depict objects, icons or people. Returns an asset path."),
           _object({"kind": {"type": "string", "enum": list(image_treatments.PATTERNS)},
                    "size": {"type": "string", "enum": ["square", "landscape", "portrait", "wide"]},
-                   "seed": {"type": "integer"}, "design_id": _ID}), surfaces=ALL, effect=WRITE)
+                   "seed": {"type": "integer"}, "design_id": _ID, "video_id": _VIDEO}), surfaces=ALL, effect=WRITE)
 @_guard
 async def _pattern(args, ctx):
-    data = _design(args, ctx)
+    video = _video(args, ctx)
+    data = None if video else _design(args, ctx)
     sizes = {"square": (1600, 1600), "landscape": (1600, 1000), "portrait": (1000, 1600), "wide": (1600, 500)}
     if args.get("size", "landscape") not in sizes:
         raise ValueError("Choose square, landscape, portrait or wide.")
     w, h = sizes[args.get("size", "landscape")]
-    raw = image_treatments.pattern(args.get("kind") or _look(data).get("pattern") or "dots",
-                                   design_tools._tokens(data), w, h, args.get("seed", 0))
-    return _save(raw, "png", data)[1]
+    source = data if data else {"design_system": video["look"]}
+    raw = image_treatments.pattern(args.get("kind") or _look(source).get("pattern") or "dots",
+                                   design_tools._tokens(source), w, h, args.get("seed", 0))
+    return (_save_video(raw, "png", video) if video else _save(raw, "png", data))[1]

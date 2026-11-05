@@ -279,6 +279,26 @@ def add_asset(video_id, raw=None, ext=None, *, design_id=None, asset=None, user=
         return "assets/" + name
 
 
+def credits(video_id):
+    """Licensed photo attributions for this video's own assets."""
+    stored = read_json(str(_folder(video_id) / "credits.json"), {})
+    return dict(list(stored.items())[-200:]) if isinstance(stored, dict) else {}
+
+
+def add_credit(video_id, asset, credit):
+    """Keep the fields needed for attribution, for an asset this video holds."""
+    if not isinstance(asset, str) or not ASSET.fullmatch(asset):
+        raise ValueError("A credit belongs to an asset in this video.")
+    asset_path(video_id, asset[len("assets/"):])
+    if not isinstance(credit, dict):
+        raise ValueError("Give the photo's credit details.")
+    with _lock("video:" + video_id):
+        stored = credits(video_id)
+        stored[asset] = {key: str(credit.get(key) or "")[:4000] for key in (
+            "title", "creator", "license", "license_version", "license_url", "landing", "attribution")}
+        write_json_atomic(str(_folder(video_id) / "credits.json"), dict(list(stored.items())[-200:]))
+
+
 def asset_path(video_id, name):
     if not isinstance(name, str) or not ASSET.fullmatch("assets/" + name):
         raise LookupError("No such video asset.")

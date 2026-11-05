@@ -23,7 +23,7 @@ class MotionVideoSkillTests(unittest.TestCase):
         self.assertIsInstance(metadata["description"], str)
         self.assertTrue(metadata["description"].strip())
         self.assertEqual(metadata["license"], "MIT")
-        self.assertEqual(metadata["metadata"]["version"], "2.0.0")
+        self.assertEqual(metadata["metadata"]["version"], "2.1.0")
         # Check the app's lightweight parser agrees with YAML parsing.
         self.assertEqual(skills_service._parse(raw)["description"], metadata["description"])
 

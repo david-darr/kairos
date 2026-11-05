@@ -39,6 +39,33 @@ GENERATED_URL_PREFIX = "/generated-images"
 # different input shape (a local path, not a URL to fetch), kept apart so
 # neither path's tests/behavior needed touching to add the other.
 GENERATED_FILES_DIR = os.path.join(DATA_DIR, "generated_files")
+# Working files a model makes on the way to a deliverable: tool argument JSON, review screenshots, drafts.
+# Codex wrote these beside the deliverables (2026-11-05 pass); they live here and are swept after two days.
+SCRATCH_DIR = os.path.join(GENERATED_FILES_DIR, "scratch")
+SCRATCH_MAX_AGE = 2 * 86400
+
+
+def sweep_scratch(now: float | None = None) -> int:
+    """Remove scratch files older than two days; returns how many went. Never follows links out."""
+    import time
+    if not os.path.isdir(SCRATCH_DIR):
+        return 0
+    cutoff, removed = (now or time.time()) - SCRATCH_MAX_AGE, 0
+    for root, dirs, files in os.walk(SCRATCH_DIR, topdown=False, followlinks=False):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                if not os.path.islink(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                continue
+        if root != SCRATCH_DIR:
+            try:
+                os.rmdir(root)  # only when empty
+            except OSError:
+                pass
+    return removed
 GENERATED_FILES_URL_PREFIX = "/generated-files"
 
 
@@ -63,7 +90,10 @@ def register_generated_file(source_path: str) -> dict:
     original_name = os.path.basename(source_path)
     filename = f"{uuid.uuid4().hex[:12]}_{original_name}"
     dest = os.path.join(GENERATED_FILES_DIR, filename)
-    same_dir = os.path.dirname(os.path.abspath(source_path)) == os.path.abspath(GENERATED_FILES_DIR)
+    # normcase: on Windows the same folder can arrive as C:/Users/... or c:\users\... (Codex, 2026-11-05 pass left a
+    # duplicate beside its published copy because a case-sensitive compare said "different folder").
+    same = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    same_dir = same(os.path.dirname(os.path.abspath(source_path)), GENERATED_FILES_DIR)
     (shutil.move if same_dir else shutil.copyfile)(source_path, dest)
     return {"path": dest, "filename": filename, "url": f"{GENERATED_FILES_URL_PREFIX}/{quote(filename, safe='')}"}
 

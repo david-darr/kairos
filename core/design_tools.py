@@ -749,8 +749,9 @@ async def _design_export(args, ctx):
     if ctx.session_id:
         from core.session_manager import session_manager
         session_manager.register_artifact(ctx.session_id, published["url"])
+    facts = design_export.pdf_summary(raw) if args.get("format") == "pdf" else ""
     return (f"Exported {filename}. Include this exact markdown link in your reply so it renders as a download: "
-            f"[{filename}]({published['url']})" + _notes(notes))
+            f"[{filename}]({published['url']})" + (f"\n{facts}" if facts else "") + _notes(notes))
 
 
 @register("design_system_save",

@@ -150,7 +150,9 @@ export function fitStatement(text, box, { min, max, measure }) {
 // Marker and first-line cap centre share the same origin as the row's text.
 export function listMarker(box) {
   const y0 = box.y + (box.h - box.lines.length * box.lineHeight) * (box.composition === 'bottom' ? 1 : .5);
-  return { x: box.x - 24, y: y0 + box.size * .52, radius: 7 };
+  // The marker grows with the row, so a large list keeps its proportions.
+  const grow = Math.max(1, box.size / 90);
+  return { x: box.x - 24 * grow, y: y0 + box.size * .52, radius: 7 * grow };
 }
 
 // Display sizes account for a conservative .72em cap height. All aspects have S=1080.
@@ -206,11 +208,20 @@ export function beatLayout(beat, aspect, measure, style = {}) {
         add(beat.text, x, .73, widthFraction, .24, 'body', 1, [54, 86]);
       } break;
     case 'list': {
+      const titled = !!beat.text;
       add(beat.text, x, 0, widthFraction, .26);
-      const count = Math.max(1, beat.items.length), step = .70 / count;
+      // Without a heading the rows take the whole frame; few rows set large so they carry it (2026-11-05 pass:
+      // two untitled rows sat small in the upper left of an empty frame).
+      const count = Math.max(1, beat.items.length), start = titled ? .29 : .08, step = (titled ? .70 : .88) / count;
+      const bounds = count <= 3 ? (titled ? [72, 120] : [96, 150]) : [59.4, 86];
       // Fit all rows at one size, so the list reads as one typographic object.
-      beat.items.forEach((v, i) => add(v, x + .055, .29 + i * step, widthFraction - .055, step * .91, 'body', i + 1, [59.4, 86]));
-      const rows = boxes.filter(b => b.role === 'body'), size = Math.min(...rows.map(b => b.size));
+      beat.items.forEach((v, i) => add(v, x + .055, start + i * step, widthFraction - .055, step * .91, 'body', i + 1, bounds));
+      const rows = boxes.filter(b => b.role === 'body');
+      let size = Math.min(...rows.map(b => b.size));
+      // A row reads best on one line: take the largest in-range size at which every row fits whole, if there is one.
+      for (let n = bounds[1]; n >= bounds[0]; n -= 1) {
+        if (rows.every(row => measure(row.text, n, 'body') <= row.w)) { size = n; break; }
+      }
       for (const row of rows) Object.assign(row, { align: 'left' }, fitText(row.text, row, { min: size, max: size, measure: (v, n) => measure(v, n, 'body') }), { capHeight: size * .72 });
       break;
     }

@@ -435,6 +435,55 @@ class ToolTests(unittest.TestCase):
         self.assertIn("Not run:", self.invoke("image_treat", {"source": "assets/no.png"}, ctx))
         self.assertIn("Not run:", self.invoke("image_pattern", {}, ctx))
 
+    def test_video_only_chat_saves_pictures_into_its_video(self):
+        from core import video_checks, video_store
+        sid = session_manager.create_session("video", owner_user="local")["id"]
+        ctx = tool_registry.ToolContext(session_id=sid, surface=tool_registry.OPENAI, is_admin=True, turn_taint=TurnTaint())
+        beats = [{"id": "hook", "kind": "title", "bars": 1, "text": "Start here"}, {"id": "pic", "kind": "image", "bars": 1, "text": "Saturday"},
+                 {"id": "end", "kind": "end", "bars": 1, "text": "Join us"}]
+        video = video_store.create("Camp", look="sport", beats=beats, owner="local", chat_key_=sid)
+        def handler(req):
+            if req.url.host == "api.openverse.org":
+                return httpx.Response(200, json=photo())
+            return httpx.Response(200, content=png(), headers={"content-type": "image/png"})
+        photos._transport = httpx.MockTransport(handler)
+        result = self.invoke("image_search", {"use": "photo-1"}, ctx)
+        self.assertIn(f"is in video {video['id']}", result)
+        self.assertIn("Photo: Football by Alex", result)
+        asset = re.search(r"assets/[a-f0-9]{64}\.png", result).group(0)
+        self.assertTrue(video_store.asset_path(video["id"], asset[7:]).is_file())
+        self.assertEqual(video_store.credits(video["id"])[asset]["creator"], "Alex")
+        self.assertNotIn("/generated-images/", result, "the photo is not a loose chat file")
+        pattern = self.invoke("image_pattern", {"size": "wide"}, ctx)
+        self.assertIn(f"is in video {video['id']}", pattern)
+        # The beat uses the photo: its credit must be on screen.
+        project = dict(video_store.get(video["id"]))
+        project["beats"] = [dict(b, image=asset) if b["id"] == "pic" else b for b in project["beats"]]
+        self.assertTrue(any("credit is not on screen" in n for n in video_checks.check(project)))
+        project["beats"][-1]["sub"] = "Photo: Football by Alex, CC BY 4.0"
+        self.assertFalse(any("credit is not on screen" in n for n in video_checks.check(project)))
+        # A design in the chat keeps pictures in the design, as before.
+        self.assertIn("/generated-images/", self.invoke("image_search", {"use": "photo-1", "design_id": None} | {}, tool_registry.ToolContext(
+            session_id="designless-2", is_admin=True, surface=tool_registry.OPENAI)))
+
+    def test_video_thumbnail_is_mid_beat(self):
+        from core import video_render
+        project = {"bpm": 120, "beats": [{"id": "a", "kind": "title", "bars": 1}, {"id": "b", "kind": "list", "bars": 2},
+                                         {"id": "c", "kind": "statement", "bars": 2}, {"id": "end", "kind": "end", "bars": 1}]}
+        # 12 s total; the quarter mark (3 s) is inside beat b (2 to 6 s), whose middle is 4 s = frame 120.
+        self.assertEqual(video_render.thumb_frame(project, 30), 120)
+
+    def test_video_variety_note(self):
+        from core import video_checks
+        def project(kinds):
+            beats = [{"id": f"b{i}", "kind": k, "bars": 2, "text": "Short line here"} for i, k in enumerate(kinds)]
+            return {"id": "000000000000", "bpm": 120, "beats": beats}
+        flat = project(["title", "statement", "statement", "statement", "big-number", "end"])
+        self.assertIn(video_checks.VARIETY, video_checks.variety(flat))
+        mixed = project(["title", "statement", "big-number", "list", "image", "quote", "end"])
+        self.assertEqual(video_checks.variety(mixed), [])
+        self.assertEqual(video_checks.variety(project(["title", "statement", "statement", "end"])), [], "too short to judge")
+
     def test_tool_effects_and_surfaces(self):
         for name in image_tools.NAMES:
             spec = tool_registry._REGISTRY[name]

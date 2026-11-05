@@ -367,7 +367,7 @@ class CodexBrain:
             # _GENERATED_FILES_ADDENDUM), granted unconditionally: unlike
             # REPO_CODE_DIRS below this is just an output dropbox, not
             # source access, so it isn't admin-gated.
-            os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+            os.makedirs(image_gen.SCRATCH_DIR, exist_ok=True)  # inside generated files, so already writable
             if not auto:
                 args += ["--add-dir", image_gen.GENERATED_FILES_DIR]
             # Repo dev access mirrors core/brain.py's add_dirs=REPO_CODE_DIRS
@@ -397,6 +397,7 @@ class CodexBrain:
             roots.append(str(bot_memory_store.workspace(self.agent_id)))
         for root in roots:
             os.makedirs(root, exist_ok=True)
+        os.makedirs(image_gen.SCRATCH_DIR, exist_ok=True)
         return roots
 
     def _agent_args(self, codex: str) -> list[str]:

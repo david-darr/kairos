@@ -208,6 +208,37 @@ def _picture_slide(deck, meta: dict, slug: str, png: bytes):
     return slide
 
 
+def pdf_summary(raw: bytes) -> str:
+    """Page count, size and text per page, for the model: in the 2026-11-05 pass Claude ran Python on every export
+    just to count a guide's pages. A page with almost no text after the first is usually a spill-over."""
+    import pypdfium2 as pdfium
+    doc = pdfium.PdfDocument(raw)
+    try:
+        counts, size = [], None
+        for page in doc:
+            try:
+                size = size or (round(page.get_width()), round(page.get_height()))
+                text = page.get_textpage()
+                try:
+                    counts.append(len(text.get_text_range().strip()))
+                finally:
+                    text.close()
+            finally:
+                page.close()
+    finally:
+        doc.close()
+    if not counts:
+        return ""
+    paper = {(612, 792): "US Letter", (595, 842): "A4"}.get(size, f"{size[0]} x {size[1]} pt")
+    lines = [f"The PDF has {len(counts)} page{'s' if len(counts) != 1 else ''} ({paper}). Characters of text per page: "
+             + ", ".join(f"{i}: {n}" for i, n in enumerate(counts, 1)) + "."]
+    thin = [i for i, n in enumerate(counts, 1) if i > 1 and n < 60]
+    if thin:
+        lines.append(f"Page{'s' if len(thin) > 1 else ''} {', '.join(map(str, thin))} "
+                     f"{'have' if len(thin) > 1 else 'has'} almost no text: likely a spill-over or empty page to fix.")
+    return " ".join(lines)
+
+
 async def export(design_id: str, fmt: str, boards: Optional[list] = None, *, pptx_mode: str = "editable",
                  fonts: str = "office") -> tuple[str, bytes, list[str]]:
     """(filename, bytes, notes for the person). Raises design_render_bridge.Unavailable

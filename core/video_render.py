@@ -33,6 +33,17 @@ def outline(project):
     return out
 
 
+def thumb_frame(project, fps=30):
+    """The thumbnail frame: the middle of the beat playing a quarter of the way in, where its text has settled.
+    A flat quarter-way frame can land on a transition and come out blank (2026-11-05 pass)."""
+    beats = outline(project)
+    quarter = beats[-1]["end"] * .25
+    beat = next((b for b in beats if b["start"] <= quarter < b["end"]), beats[0])
+    if beat["kind"] == "end" and len(beats) > 1:
+        beat = beats[0]
+    return int((beat["start"] + beat["end"]) / 2 * fps)
+
+
 def _aspect(project, aspect):
     if aspect not in project["aspects"]:
         raise ValueError("aspect: choose one of this video's aspects: " + ", ".join(project["aspects"]))
@@ -123,7 +134,7 @@ async def _render(project, aspect, job_id):
         job = _job(project, aspect, job_id)
         total, seen = job["frames"], 0
         indices = {round(i * (total - 1) / 11) for i in range(12)}
-        thumb_index = min(total - 1, round(total * .25))
+        thumb_index = min(total - 1, thumb_frame(project, job["fps"]))
         samples, layouts, thumb = [], [], None
         state["status"] = f"rendering 0/{total}"
 

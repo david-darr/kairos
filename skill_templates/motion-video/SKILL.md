@@ -3,7 +3,7 @@ name: motion-video
 description: Make a polished animated video, motion graphics, explainer, promo, ad, intro or animated showcase rendered to MP4, with deterministic canvas animation and a soundtrack synthesized in code.
 license: MIT
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # Motion video
@@ -27,11 +27,26 @@ metadata:
 
 Hook the viewer in the first beat, develop the idea, show evidence and finish
 with an `end` card and a call to action. One idea per beat; aim for 3 to 8 words
-on screen and 1 to 2 bars per beat. Put numbers in `big-number` beats. Beat
-kinds are title, statement, big-number, list, image, quote, split, logo and end.
-Use photos from `image_generate`, `image_search` or `image_treat` in a design,
-then `video_add_image` with `{design_id, asset}` and set the beat's image to
-the returned asset. Respect the photo's license and retain its credit.
+on screen and 1 to 2 bars per beat. Beat kinds are title, statement, big-number,
+list, image, quote, split, logo and end.
+
+Vary the kinds so the video does not read like slides of text: at most half the
+body beats are statements, never three in a row. Put figures in `big-number`,
+three to five points in `list`, a line someone said in `quote`, and show the
+subject with at least one `image` or `split` beat.
+
+For a photo, call `image_search` with a query, then again with `use` set to the
+chosen id. In a chat with a video and no design it saves straight into the
+video and returns `assets/<sha>.<ext>`; set that beat's `image` to it with
+`video_edit`. `image_pattern` does the same for a texture. A photo from a design
+comes over with `video_add_image` and `{design_id, asset}`. Put each photo's
+credit line in that beat's `sub` or the end card's `sub`.
+
+### Later changes
+
+When the person asks for a change after the video exists, change that video:
+`video_outline`, then `video_edit`, `video_preview` and `video_render`. Do not
+start a new video or build one with the shell unless they ask for a new one.
 
 Every beat has an id, kind and bars (0.5 to 8 in half-bar steps); optional text
 is at most 140 characters, sub 100, and items at most five with 60 characters

@@ -393,7 +393,9 @@ def _shown(spec: ToolSpec, small_window: bool, session_id: str | None = None) ->
     from core import image_tools, video_tools
     if small_window and spec.name in image_tools.NAMES:  # Shown directly to a small model while it designs.
         from core import design_tools
-        return bool(session_id) and (design_tools.design_mode(session_id) or design_tools.linked(session_id))
+        # A video chat uses them too: pictures save straight into its video when it has no design.
+        return bool(session_id) and (design_tools.design_mode(session_id) or design_tools.linked(session_id)
+                                     or video_tools.linked(session_id))
     if small_window and (spec.name == 'video_create' or spec.name in video_tools.LINKED_TOOLS):
         # A small model sees the video tools while the chat makes a video (its mode, or a video linked).
         return bool(session_id) and (video_tools.video_mode(session_id) or video_tools.linked(session_id))

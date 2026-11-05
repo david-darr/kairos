@@ -97,6 +97,19 @@ const path = require('node:path');
       assert.equal(marker.y, y0 + row.size * .52, 'bullet follows first-line cap centre');
     }
   }
+  // A short list with no heading sets large and uses the frame (2026-11-05 pass: two rows sat small and empty).
+  for (const aspect of Object.keys(L.ASPECTS || { '16:9': 1, '9:16': 1, '1:1': 1 })) {
+    const short = L.normalizeProject({ beats: [{ kind: 'list', items: ['Automatic reminders', 'Card + bank payments'] }] }).beats[0];
+    const rows = L.beatLayout(short, aspect, measure, { composition: 'left' }).filter(b => b.role === 'body');
+    assert.ok(rows.every(row => row.size >= 96), `short list rows set large (${aspect}: ${rows.map(r => r.size)})`);
+    assert.ok(rows.every(row => !row.truncated), 'short list rows fit');
+    const safe = L.safeArea(aspect);
+    for (const row of rows) {
+      const marker = L.listMarker(row);
+      assert.ok(marker.x - marker.radius >= safe.x, 'a grown marker stays inside the safe area');
+      assert.ok(row.y + row.h <= safe.y + safe.h + .5, 'rows stay inside the safe area');
+    }
+  }
   const sequenceProject = L.normalizeProject({ beats: Array.from({ length: 30 }, (_, i) => ({ kind: L.KINDS[i % L.KINDS.length], text: 'Designed for motion' })) });
   const compositions = sequenceProject.beats.map((_, i) => L.compositionAt(sequenceProject.beats, i));
   assert.deepEqual(compositions, sequenceProject.beats.map((_, i) => L.compositionAt(sequenceProject.beats, i)));

@@ -127,6 +127,8 @@ async def lifespan(_app: FastAPI):
     # was full of them). See core/vault_sync.py.
     from core import tool_access
     tool_access.sweep_screens()
+    from core import image_gen
+    image_gen.sweep_scratch()
     vault_sync.sync_on_startup()
     if _RESTORED:  # a backup swapped in before the imports (core/backup.py)
         from core import events

@@ -232,6 +232,7 @@ Available subcommands (a true|false flag alone means true; ID,ID is a comma-sepa
 {_codex_commands(is_admin, agent, session_id)}
 
 {_GENERATED_FILES_ADDENDUM("your shell tool", "run save_generated_file --path PATH")} HTML previews are static: scripts and network access are disabled. Office files are downloadable, not editable inside Chat.
+Working files you make along the way (JSON for --*_file and --args_file, review screenshots, drafts) go in {image_gen.SCRATCH_DIR}, never beside deliverables; Kairos clears them after two days.
 
 Before telling a user you don't know something, or that nothing's recorded/scheduled, check first: priorities/todos → list_notes; scheduled/automated jobs, or what one actually produced → list_tasks / list_task_runs; what's coming up → list_upcoming_events; a saved document → list_documents/read_document; a person → list_contacts; something discussed in a different conversation → search_sessions; a procedure Kairos already knows → search_skills/read_skill; how Kairos itself is built → list_specs/read_spec.
 
