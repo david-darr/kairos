@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 _LOCK = threading.RLock()
 KINDS = {"brief", "prep", "reminder", "task_link", "suggestion", "route", "forge", "make", "chips",
-         "checkin", "welcome", "reach"}
+         "checkin", "welcome", "reach", "watching"}
 STATUSES = {"open", "started", "hidden", "done", "dismissed", "working", "failed", "sent", "discarded"}
 
 
@@ -29,7 +29,7 @@ def clean_data(kind, data):
     required = {"task_link": ("task_id",), "route": ("bot_id", "bot_name", "card_id"),
                 "forge": ("project_id", "project_name", "task"), "make": ("task_id", "kind"),
                 "suggestion": ("suggestion_id", "title", "detail", "source_label"),
-                "checkin": ("at", "summary"), "brief": ("date_label", "greeting", "sections"),
+                "checkin": ("at", "summary"), "watching": ("routine_id",), "brief": ("date_label", "greeting", "sections"),
                 "prep": ("title", "when_label", "lines"), "reminder": ("title", "when_label", "lines")}
     if any(key not in value for key in required.get(kind, ())):
         raise ValueError("The card is missing a field")

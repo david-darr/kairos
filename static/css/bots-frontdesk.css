@@ -9,6 +9,9 @@
 [data-app-mode="bots"] .fd-glyph { display:inline-flex; }
 [data-app-mode="bots"] .fd-watching { margin:2px 0 0; font:400 var(--bots-text-hint-lg)/1.4 var(--bots-font-sans); color:var(--bots-ink-secondary); }
 [data-app-mode="bots"] .fd-watching[hidden], [data-app-mode="bots"] .fd-watching-dock { display:none; }
+[data-app-mode="bots"] .fd-watching-link { padding:0; border:0; background:none; font:inherit; color:inherit; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+[data-app-mode="bots"] .fd-watching-link:hover { color:var(--bots-ink); }
+[data-app-mode="bots"] .fd-watching-link:focus-visible { outline:2px solid currentColor; outline-offset:2px; border-radius:2px; }
 [data-app-mode="bots"] .fd-body { grid-column:1 / -1; min-height:0; min-width:0; display:flex; }
 [data-app-mode="bots"] .bots-frontdesk > .fd-tabs { align-self:center; margin-right:24px; }
 [data-app-mode="bots"] .fd-today { flex:none; width:320px; box-sizing:border-box; padding:24px 20px; overflow:auto; border-left:1px solid var(--bots-hairline); display:flex; flex-direction:column; gap:20px; }

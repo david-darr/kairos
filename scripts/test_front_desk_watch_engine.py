@@ -28,7 +28,7 @@ class WatchOnTheEngine(RoutineCase):
         adapter._registered = None
         adapter._pending.clear()
         self.now = time.time()
-        self.inbox = []
+        self.inbox, self.posted, self.post_fails = [], [], False
         folder = str(Path(support.DATA.name) / ("fd-" + uuid.uuid4().hex))
         for p in (patch.object(watch, "DIRECTORY", folder),
                   patch.object(watch, "bot_id", return_value=self.bot["id"]),
@@ -38,10 +38,25 @@ class WatchOnTheEngine(RoutineCase):
                   patch.object(checks, "read_mail", AsyncMock(side_effect=lambda now, since: list(self.inbox))),
                   patch.object(checks, "calendar_rows", AsyncMock(return_value=[])),
                   patch.object(brief, "refresh", AsyncMock(return_value={"sections": [], "has_content": False})),
-                  patch.object(adapter, "post_card", lambda *a, **k: None),
+                  patch.object(adapter, "post_card", side_effect=self.post_card),
                   patch.object(adapter, "notify", lambda *a, **k: None)):
             p.start()
             self.addCleanup(p.stop)
+
+    async def settle(self, task_id=None):
+        # The first routine run of a cold process loads the chat stack and can pass the
+        # shared six-second wait (seen 2026-11-05); give this suite up to a minute.
+        for attempt in range(10):
+            try:
+                return await super().settle(task_id)
+            except AssertionError:
+                if attempt == 9:
+                    raise
+
+    def post_card(self, kind, data, *, key, **kwargs):
+        if self.post_fails:
+            raise KeyError("Front desk conversation not found")
+        self.posted.append((kind, key, data))
 
     def mail(self, n, **fields):
         return {"id": f"mail:{n:024x}", "uid": str(n), "uidvalidity": "1", "account": "acct", "date": self.now - n,
@@ -67,6 +82,22 @@ class WatchOnTheEngine(RoutineCase):
         state = watch.state()
         self.assertEqual((state["state"], state["edited"]), ("working", False))
         self.assertTrue(state["next_at"])
+
+    async def test_the_watch_says_once_that_it_started_and_retries_a_failed_card(self):
+        self.post_fails = True
+        await asyncio.to_thread(watch.ensure_watch)
+        self.assertTrue(self.made(), "a card that fails never stops the watch")
+        self.assertEqual(self.posted, [])
+        self.assertFalse(watch.read("watch").get("announced"))
+        self.post_fails = False
+        await asyncio.to_thread(watch.ensure_watch)
+        await asyncio.to_thread(watch.ensure_watch)
+        self.assertEqual([(kind, key) for kind, key, _ in self.posted], [("watching", "front-desk:watching")])
+        data = self.posted[0][2]
+        self.assertEqual(data["routine_id"], watch.read("watch")["routine_id"])
+        self.assertIn("never send", " ".join(data["lines"]))
+        from services import front_desk_cards
+        self.assertEqual(front_desk_cards.clean_data("watching", data)["routine_id"], data["routine_id"])
 
     async def test_mail_to_sort_runs_the_model_and_the_answer_reaches_the_brief(self):
         await asyncio.to_thread(watch.ensure_watch)

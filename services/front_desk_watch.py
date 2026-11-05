@@ -4,6 +4,7 @@ The minute tick installs/checks metadata only. Execution belongs to the routine
 engine; an unavailable engine never turns into a second background runner.
 """
 import hashlib
+import logging
 import json
 import os
 import re
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 from core.atomic_io import write_json_atomic
 from core.constants import DATA_DIR
 
+logger = logging.getLogger(__name__)
 DIRECTORY = os.path.join(DATA_DIR, "front_desk")
 LOCK = threading.RLock()
 
@@ -81,12 +83,34 @@ def fingerprint(routine):
     return hashlib.sha256(json.dumps({k: config.get(k) for k in keys}, sort_keys=True).encode()).hexdigest()
 
 
+WATCHING_CARD = {"title": "I'm keeping an eye on your day",
+                 "lines": ["Every 15 minutes I check your mail and calendar.",
+                           "I only read and save drafts. I never send, reply or change anything.",
+                           "What needs you goes in your brief."]}
+
+
+def announce(stamp):
+    """Tell the person once that the watch started (2026-11-05). A failure only
+    retries on the next tick; it never stops the watch."""
+    from core import front_desk_watch_adapter as adapter
+    if stamp.get("announced") or not stamp.get("routine_id"):
+        return stamp
+    try:
+        adapter.post_card("watching", {**WATCHING_CARD, "routine_id": stamp["routine_id"]}, key="front-desk:watching")
+    except Exception:
+        logger.exception("Could not post the watch card")
+        return stamp
+    stamp = {**stamp, "announced": time.time()}
+    write("watch", stamp)
+    return stamp
+
+
 def ensure_watch():
     from core import front_desk_watch_adapter as adapter
     with LOCK:
         stamp = read("watch")
         if stamp.get("created_at"):
-            return stamp
+            return announce(stamp)
         if not bot_id() or not any(connected().values()):
             return None
         if not adapter.available():
@@ -105,7 +129,7 @@ def ensure_watch():
         routine = adapter.create(config, owner=owner(), key="front-desk-watch")
         stamp = {"created_at": now, "routine_id": routine["id"], "as_made": fingerprint(routine)}
         write("watch", stamp)
-        return stamp
+        return announce(stamp)
 
 
 def state():

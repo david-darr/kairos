@@ -83,6 +83,17 @@ class BriefTests(Harness):
             watch.write("presence", {})
             self.assertEqual(self.run_async(brief.presence("UTC", "en", now=self.now)), {})
 
+    def test_a_new_time_zone_redraws_the_brief_without_opening_it(self):
+        self.reference()
+        with patch("services.chat_live.is_processing", return_value=False),                 patch.object(brief, "refresh", AsyncMock(return_value={"has_content": True})) as redraw:
+            self.run_async(brief.presence("UTC", "en", now=self.now))
+            self.assertEqual(redraw.await_count, 1, "first visit of the day")
+            self.assertEqual(self.run_async(brief.presence("UTC", "en", now=self.now + 60)), {})
+            self.assertEqual(redraw.await_count, 1, "same zone, same day: nothing to redraw")
+            self.assertEqual(self.run_async(brief.presence("America/New_York", "en", now=self.now + 120)), {})
+            self.assertEqual(redraw.await_count, 2, "a new zone redraws today's brief in local time")
+            self.assertEqual(watch.settings()["zone"], "America/New_York")
+
     def test_morning_dst_named_zone_repeat_hour_and_twenty_minute_wait(self):
         watch.settings(zone="America/New_York", morning_time="01:30")
         self.reference()

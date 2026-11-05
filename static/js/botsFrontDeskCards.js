@@ -4,7 +4,7 @@ import { safeHttps, swipeMove, entranceDelay } from './botsFrontDeskModel.js';
 const enc = encodeURIComponent;
 const sharedApi = async (...args) => (await import('./api.js')).api(...args);
 const text = (tag, value, className = '') => h(tag, { text: String(value ?? ''), class: className });
-const KINDS = new Set(['brief', 'prep', 'reminder', 'task_link', 'suggestion', 'route', 'forge', 'make', 'chips', 'checkin', 'welcome', 'reach']);
+const KINDS = new Set(['brief', 'prep', 'reminder', 'task_link', 'suggestion', 'route', 'forge', 'make', 'chips', 'checkin', 'welcome', 'reach', 'watching']);
 const STATUS = { working: 'Working', needs_input: 'Needs input', ready_for_review: 'Ready for review', failed: 'Failed', resolved: 'Resolved' };
 
 // Returns a DOM row or null. The transcript owns row.dispose() and row.release().
@@ -158,6 +158,25 @@ export function renderFrontDeskCard(message, ctx = {}) {
   } else if (kind === 'checkin') {
     const at = typeof data.at === 'number' ? new Date(data.at < 1e12 ? data.at * 1000 : data.at) : new Date(data.at);
     row.append(text('p', [data.summary || 'Checked for you', Number.isNaN(at.getTime()) ? '' : at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })].filter(Boolean).join(' · '), 'fd-caption'));
+  } else if (kind === 'watching') {
+    // Posted once when the day watch starts (2026-11-05): what it does, with Pause right here.
+    title(data.title || 'I am keeping an eye on your day');
+    for (const line of (Array.isArray(data.lines) ? data.lines : []).slice(0, 4)) row.append(text('p', String(line).slice(0, 300)));
+    const state = text('p', '', 'fd-caption');
+    const flip = button('Pause', async () => {
+      const watch = await call('/api/front-desk/watch');
+      if (!watch?.routine_id) throw new Error('The watch is not set up yet.');
+      await api(`/api/bot-routines/${enc(watch.routine_id)}`, { method: 'PATCH', toast: false,
+        body: JSON.stringify({ enabled: !watch.enabled, expected_revision: watch.revision }) });
+      if (disposed) return;
+      flip.textContent = watch.enabled ? 'Resume' : 'Pause';
+      state.textContent = watch.enabled ? 'Paused. I will not check until you resume.' : 'Watching again.';
+      document.dispatchEvent(new CustomEvent('kairos:frontdesk-watch'));
+    });
+    call('/api/front-desk/watch').then(watch => { if (!disposed && watch && !watch.enabled && watch.routine_id) flip.textContent = 'Resume'; }).catch(() => {});
+    const settingsButton = button('Watch settings', () => import('./botsPanelHost.js').then(m => m.openBotSettings(ctx.agent?.id || ctx.agentId, { section: 'routines' })));
+    actions([flip, settingsButton]);
+    row.append(state);
   } else if (kind === 'welcome') {
     title(data.title || `Hi, I am ${ctx.agent?.name || 'Kip'}.`);
     row.append(text('p', data.text || data.greeting || 'Tell me what you need a hand with.'));

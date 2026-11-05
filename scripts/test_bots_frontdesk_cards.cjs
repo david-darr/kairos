@@ -33,11 +33,12 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const { renderFrontDeskCard: render } = await import(pathToFileURL(path.join(__dirname, '../static/js/botsFrontDeskCards.js')));
   const calls = [], nav = [], cards = [];
-  let fail = false, pending;
+  let fail = false, pending, watchState = { routine_id: 'w1', enabled: true, revision: '3' };
   const api = async (url, options = {}) => {
     calls.push({ url, body: options.body ? JSON.parse(options.body) : null, method: options.method || 'GET' });
     if (fail) throw new Error('Try again later');
     if (pending) await pending;
+    if (url === '/api/front-desk/watch') return { ...watchState };
     if (url === '/api/front-desk/work') return { groups: { ready_for_review: [{ id: 't1', title: 'Report ready' }] } };
     if (url === '/api/forge/sessions') return { id: 'forge1' };
     if (url.endsWith('/state')) return { active_leaf_id: 'leaf', branch_revision: 3 };
@@ -81,6 +82,17 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   for (const kind of ['welcome', 'reach']) assert.ok(make(kind).textContent.length > 0);
   assert.ok(!make('welcome').attrs.class.includes('fd-build'), 'history never animates');
   const held = make('forge', { task: 'Work' }, {}, { streaming: true, history: false }); assert.equal(held.hidden, true); held.release(); assert.equal(held.hidden, false);
+  // The watch's one-time card (2026-11-05): plain text, Pause flips the routine, settings open Kip's Routines.
+  const watching = make('watching', { routine_id: 'w1', title: poison, lines: ['Every 15 minutes I check your mail and calendar.', poison] });
+  assert.ok(watching.textContent.includes(poison)); assert.equal(watching.querySelectorAll('img').length, 0);
+  find(watching, 'Pause').click(); await tick(); await tick();
+  const paused = calls.find(c => c.url === '/api/bot-routines/w1');
+  assert.deepEqual([paused.method, paused.body], ['PATCH', { enabled: false, expected_revision: '3' }]);
+  assert.ok(find(watching, 'Resume'), 'the button flips to Resume'); assert.ok(watching.textContent.includes('Paused.'));
+  assert.ok(find(watching, 'Watch settings'));
+  watchState = { ...watchState, enabled: false };
+  const later = make('watching', { routine_id: 'w1' }); await tick(); await tick();
+  assert.ok(find(later, 'Resume'), 'a paused watch shows Resume when the card is drawn again');
   for (const node of cards) node.dispose();
   console.log('PASS: every card kind, safe text and links, live task status, actions, failures, duplicate taps, chips and held cards');
 })().catch(e => { console.error(e); process.exitCode = 1; });
