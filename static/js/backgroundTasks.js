@@ -6,6 +6,8 @@ import { desktopPanes } from './chatPaneStack.js';
 const kinds = { subagent: 'Subagent', command: 'Command', agent: 'Agent', helper: 'Helper', computer: 'Computer', app_server: 'App server', scheduled: 'Scheduled', task: 'Task' };
 const statuses = { running: 'Running', queued: 'Queued', waiting: 'Waiting on you', scheduled: 'Scheduled', done: 'Done', failed: 'Failed', stopped: 'Stopped' };
 const active = item => ['running', 'queued', 'waiting'].includes(item.status);
+// The pill shows only while work is live, and for this long after the last of it ends (David, 2026-11-04).
+export const LINGER_MS = 5000;
 let sequence = 0;
 function node(tag, cls, text) {
   const element = document.createElement(tag);
@@ -28,6 +30,9 @@ function elapsed(item) {
 export function mountBackgroundTasks({ host, messages, getSessionId, onOpenComputer }) {
   let sessionId = null, items = [], opened = false, selected = null, disposed = false;
   let sheet = null, revision = 0, detailTimer = null, detailAt = 0, request = 0, dock = null;
+  let wasLive = false, lingerUntil = 0, lingerTimer = null;
+  // Hidden unless something is running, it just finished, or its list is open.
+  const syncHidden = () => { host.hidden = !(items.some(active) || opened || Date.now() < lingerUntil); };
   const canDock = () => typeof window !== 'undefined' && desktopPanes(host.closest('.chat-layout'));
   const notify = () => { if (typeof document.dispatchEvent === 'function') document.dispatchEvent(new CustomEvent('kairos:background-ui')); };
   const seen = new Set();
@@ -47,12 +52,13 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     if (dock) { const old = dock; dock = null; old.layout.dispose(); old.root.remove(); }
     if (!host.contains(panel)) host.append(panel);
     panel.hidden = true; pill.setAttribute('aria-expanded', 'false');
+    syncHidden();
     notify();
     if (pill.isConnected && !host.hidden) pill.focus({ preventScroll: true });
   }
   function open(id = null) {
     if (disposed || !sessionId) return;
-    opened = true; panel.hidden = false; pill.setAttribute('aria-expanded', 'true');
+    opened = true; panel.hidden = false; pill.setAttribute('aria-expanded', 'true'); syncHidden();
     if (!dock && canDock()) {
       const root = node('section', 'chat-background-pane'); root.setAttribute('aria-label', 'Background tasks');
       const header = node('header', 'chat-side-pane-header');
@@ -67,7 +73,7 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     }
     if (!sheet && matchMedia('(max-width: 768px)').matches && document.querySelector('.kairos-redesign')) {
       sheet = openMobileSheet({ title: 'In the background', content: panel, opener: pill, onClose: () => {
-        sheet = null; opened = false; panel.hidden = true; host.append(panel); pill.setAttribute('aria-expanded', 'false');
+        sheet = null; opened = false; panel.hidden = true; host.append(panel); pill.setAttribute('aria-expanded', 'false'); syncHidden();
       } });
       sheet.dialog.classList.add('ms-background-sheet');
       // The counts sit under the sheet's title, as in the board.
@@ -81,8 +87,15 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
     panel.querySelector('button')?.focus();
   }
   function renderPill() {
-    host.hidden = !items.length;
     const count = items.filter(active).length, waiting = items.filter(i => i.status === 'waiting').length;
+    if (count) { lingerUntil = 0; clearTimeout(lingerTimer); lingerTimer = null; }
+    else if (wasLive) {
+      // The last live task just ended: keep the "finished" pill up briefly, then hide it.
+      lingerUntil = Date.now() + LINGER_MS; clearTimeout(lingerTimer);
+      lingerTimer = setTimeout(() => { lingerTimer = null; if (!disposed) syncHidden(); }, LINGER_MS);
+    }
+    wasLive = count > 0;
+    syncHidden();
     const finished = items.filter(i => ['done', 'failed', 'stopped'].includes(i.status)).length;
     caption.textContent = count ? `${count} running in background${waiting ? ` · ${waiting} waiting on you` : ''}`
       : finished ? `${finished} finished in background` : `${items.length} scheduled in background`;
@@ -240,9 +253,13 @@ export function mountBackgroundTasks({ host, messages, getSessionId, onOpenCompu
   return {
     toggle() { opened ? close() : open(); },
     getState: () => ({ opened, count: items.filter(active).length, available: items.length > 0 }),
-    setSession(sid) { close(); sessionId = sid; items = []; seen.clear(); renderPill(); refetch(); },
+    setSession(sid) {
+      close(); sessionId = sid; items = []; seen.clear();
+      wasLive = false; lingerUntil = 0; clearTimeout(lingerTimer); lingerTimer = null;
+      renderPill(); refetch();
+    },
     dispose() {
-      disposed = true; close(); clearInterval(tick); revision++;
+      disposed = true; close(); clearInterval(tick); clearTimeout(lingerTimer); revision++;
       document.removeEventListener('kairos:bg-tasks', packet); document.removeEventListener('kairos:live-snapshot', refetch);
       document.removeEventListener('click', outside); document.removeEventListener('keydown', escape); host.replaceChildren();
     },

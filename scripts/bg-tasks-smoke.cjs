@@ -86,8 +86,9 @@ app.whenReady().then(async () => {
   const reload = async () => {
     await new Promise(resolve => { win.webContents.once('did-finish-load', resolve); win.reload(); });
     await mount();
-    // openSession hands the session to the pill last; wait for it before clicking.
-    await wait("!document.querySelector('.bg-tasks').hidden");
+    // openSession hands the session to the pill last; wait for its caption before clicking. With only
+    // finished work the pill itself stays hidden, so its caption is the ready signal.
+    await wait("document.querySelector('.bg-tasks-caption')?.textContent.includes('in background')");
   };
   const pill = '.bg-tasks-pill';
   const survey = '.bg-task-row[data-item-id^="claude:survey-"]';
@@ -166,6 +167,9 @@ app.whenReady().then(async () => {
     await capture('desktop-agent-timeline');
     await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await wait("document.querySelector('.bg-tasks-caption')?.textContent.includes('finished in background')", 45000);
+    // With nothing running and the list closed, the pill goes away a few seconds after the last task ends.
+    await js("document.querySelector('.chat-background-pane .chat-pane-icon[aria-label=\"Close background tasks\"]')?.click(), true");
+    await wait("document.querySelector('.bg-tasks').hidden", 15000);
     await wait("document.querySelector('#chat-messages').textContent.includes('The slow suite passed.') && document.querySelector('#chat-messages').textContent.includes('The repo survey finished: 14 TODOs.')");
     assert(await js("document.querySelectorAll('#chat-messages .bg-followup-caption').length >= 2", 'Follow-up captions'), 'Both follow-ups have After background work captions');
     assert(await js("document.querySelectorAll('.bg-task-note').length >= 4"), 'Transcript has completion notes');

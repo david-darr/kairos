@@ -49,6 +49,7 @@ class Element {
   const ui = mountBackgroundTasks({ host, messages, getSessionId: () => 'sid' });
   const flush = () => new Promise(resolve => setImmediate(resolve));
   ui.setSession('sid'); await flush();
+  assert.equal(host.hidden, true, 'A chat with only finished background work shows no pill');
   assert.equal(messages.children.length, 3, 'Historical run sits between two cards');
   assert.deepEqual(messages.children[1].children.map(n => n.dataset.ts), ['10', '20'], 'Out-of-order historical notes stay chronological');
   assert.equal(messages.children[1].attrs.role, 'note');
@@ -89,7 +90,24 @@ class Element {
   mobile.setSession('sid'); await flush(); host.querySelector('.bg-tasks-pill').click();
   assert(sheet.querySelector('.bg-tasks-list'), 'Phone sheet has the list');
   assert.equal(sheet.querySelector('.bg-tasks-heading'), null, 'Phone list has no duplicate title');
-  mobile.dispose(); global.setInterval = interval;
+  mobile.dispose(); phone = false;
+  // The pill shows while work runs, lingers briefly after the last task ends, then hides.
+  const liveHost = new Element('div');
+  const live = mountBackgroundTasks({ host: liveHost, messages: new Element('div'), getSessionId: () => 'sid' });
+  live.setSession('sid'); await flush();
+  const send = status => document.listeners['kairos:bg-tasks']({ detail: { sessionId: 'sid', items: [{ ...item, status }], notes: [] } });
+  send('running');
+  assert.equal(liveHost.hidden, false, 'Running work shows the pill');
+  send('done');
+  assert.equal(liveHost.hidden, false, 'The pill stays up just after the last task finishes');
+  const realNow = Date.now; Date.now = () => realNow() + 6000;
+  send('done');
+  assert.equal(liveHost.hidden, true, 'A few seconds later the pill hides');
+  liveHost.querySelector('.bg-tasks-pill').click();
+  assert.equal(liveHost.hidden, false, 'Opening the list from elsewhere shows it');
+  document.listeners.keydown({ key: 'Escape', defaultPrevented: false, preventDefault() {}, target: liveHost });
+  assert.equal(liveHost.hidden, true, 'Closing it hides the idle pill again');
+  Date.now = realNow; live.dispose(); global.setInterval = interval;
   const el = (tag, attrs = {}, children = []) => {
     const n = new Element(tag); n.className = attrs.class || '';
     if (attrs.text) n.textContent = attrs.text;

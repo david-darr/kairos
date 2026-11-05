@@ -51,9 +51,9 @@ export function createChatActivity() {
     detail.hidden = !shown;
     if (noticeOn && !notice) previous = '';  // back to the plain label for whatever state it is now
     noticeOn = !!notice;
+    // Computer steps join the list but never open it: the card stays collapsed until the person opens it.
     for (const step of (entry.toolEvents || []).slice(computerCount)) {
       list.append(el('li', { class: 'chat-computer-step' }, [stepRow(step)]));
-      node.open = true;
     }
     computerCount = (entry.toolEvents || []).length;
     const state = notice?.state === 'disconnected' ? 'disconnected' : entry.status === 'failed' ? 'failed' : entry.status === 'stopped' ? 'stopped' : entry.status === 'done' ? 'done' : entry.text ? 'responding' : entry.connected ? 'waiting' : 'sending';

@@ -151,6 +151,8 @@
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-messages .msg.user .msg-body :is(a, code) { color: inherit; }
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) #chat-messages .chat-prose { font: 15px/1.65 var(--rd-font-ui); }
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .chat-activity { border: 1px solid var(--rd-line); border-radius: var(--rd-radius-pill); background: var(--rd-surface); color: var(--rd-ink-dim); }
+/* A pill radius on the tall open card bends it into a circle; open, it is a card. */
+.kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]):not([data-chat-style=terminal]) .chat-activity[open] { border-radius: var(--rd-radius-card); }
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-tasks-pill, .bg-tasks-panel, .bg-task-row, .question-card) { background: var(--rd-surface-solid); border-color: var(--rd-line-strong); box-shadow: var(--rd-shadow); }
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .bg-tasks-pill { margin: 0 auto 8px; border-radius: var(--rd-radius-pill); }
 .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) :is(.bg-tasks-panel, .question-card) { border-radius: var(--rd-radius-card); }
