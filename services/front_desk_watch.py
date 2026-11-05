@@ -94,7 +94,7 @@ def ensure_watch():
         adapter.register()
         now = time.time()
         config = {"agent_id": bot_id(), "name": "Keep an eye on my day",
-                  "instructions": "Check my day. Read and save local drafts only. Never send or change outside data.",
+                  "instructions": adapter.SORT_INSTRUCTIONS,
                   "schedule": {"kind": "interval", "every_minutes": 15,
                                "anchor_at": datetime.fromtimestamp(now + 900, timezone.utc).isoformat()},
                   "timeout_minutes": 15, "checks": ["calendar", "mail", "runs"],
@@ -148,7 +148,8 @@ def run_now():
         last = max(value.get("last_run_at", 0), value.get("last_manual_run_at", 0))
         if last and now - last < 600:
             raise ValueError("I checked recently. Try again in a few minutes.")
-        result = adapter.run_now(stamp["routine_id"], owner=owner())
         value["last_manual_run_at"] = now
         write("checks", value)
-        return result
+    # Outside the lock: the run's own checks read this store on the app's loop
+    # while this thread waits for the run to start.
+    return adapter.run_now(stamp["routine_id"], owner=owner())

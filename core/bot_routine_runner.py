@@ -608,7 +608,10 @@ async def execute(task: dict, source: str) -> None:
     session_id = None
     try:
         findings = None
-        if config["checks"] and source in ("schedule", "retry", "startup"):
+        # A routine that delivers to a sink (the front-desk brief) is driven by its checks, so
+        # "Check now" runs them too; other routines skip checks when started by hand.
+        if config["checks"] and (source in ("schedule", "retry", "startup") or
+                                 (source == "manual" and checks_module.has_sink(config["deliver"]))):
             round_ = await checks_module.run_checks(tid, task["agent_id"], context["owner"], config["checks"],
                                                     status.get("check_state") or {})
             status["check_state"] = round_.state

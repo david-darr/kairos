@@ -26,11 +26,21 @@ class Harness(unittest.TestCase):
         self.cards, self.notifications, self.routines, self.run_rows, self.created = {}, [], {}, [], []
         self.now = time.time()
         self.connected = {"mail": False, "calendar": False}
+        # A stand-in with the real services.bot_routines signatures (2026-11-05: the
+        # old stand-in had a planned contract the engine never had, so the watch
+        # passed here and never ran; test_front_desk_watch_engine.py uses the real one).
         self.fake = types.ModuleType("services.bot_routines")
+        self.fake.RoutineError = type("RoutineError", (Exception,), {})
+        self.fake.normalize_config = lambda raw, owner=None, bot_id=None: {
+            **{k: v for k, v in raw.items() if k != "instructions"}, "prompt": raw.get("instructions")}
         self.fake.create = self.create
-        self.fake.get = lambda owner, ident: self.routines.get(ident)
-        self.fake.run_now = lambda owner, ident: {"id": "manual-run", "routine_id": ident}
-        self.fake.runs = lambda owner, since: [r for r in self.run_rows if checks.stamp(r.get("ended_at")) >= since]
+        self.fake.get_routine = self.get_routine
+        async def run_now(owner, is_admin, ident, request_id=None):
+            return {"started": True, "run": {"id": "manual-run", "routine_id": ident}}
+        self.fake.run_now = run_now
+        self.fake.list_routines = lambda owner, is_admin: [{"id": i} for i in dict.fromkeys(
+            [*self.routines, *(r["routine_id"] for r in self.run_rows)])]
+        self.fake.list_runs = lambda owner, is_admin, ident: [r for r in self.run_rows if r["routine_id"] == ident]
         self.callbacks, self.sinks = {}, {}
         self.check_module = types.ModuleType("core.bot_routine_checks")
         self.check_module.register_check = lambda name, fn: self.callbacks.update({name: fn})
@@ -59,14 +69,20 @@ class Harness(unittest.TestCase):
         self.cards[key] = row
         return row
 
-    def create(self, owner, config, *, idempotency_key):
-        if idempotency_key in self.routines:
-            return self.routines[idempotency_key]
-        self.assertEqual(owner, "david")
-        row = {**config, "id": idempotency_key, "revision": 1}
+    def create(self, owner, bot_id, spec, *, application_id=None):
+        if application_id in self.routines:
+            return self.routines[application_id]
+        self.assertEqual((owner, bot_id), ("david", "kip"))
+        row = {**{k: v for k, v in spec.items() if k != "prompt"}, "instructions": spec["prompt"],
+               "id": application_id, "revision": 1}
         self.routines[row["id"]] = row
         self.created.append(row)
         return row
+
+    def get_routine(self, owner, is_admin, ident):
+        if ident not in self.routines:
+            raise self.fake.RoutineError("routine not found")
+        return self.routines[ident]
 
     def mail(self, n, **fields):
         return {"id": "m" + str(n), "uid": str(n + 1), "uidvalidity": "1", "account": "acct", "date": self.now - n,
@@ -111,7 +127,7 @@ class Installation(Harness):
         adapter.register()
         self.assertEqual(set(self.callbacks), {"mail", "calendar", "runs"})
         self.assertEqual(set(self.sinks), {"brief"})
-        self.assertEqual(adapter.create({"name": "watch"}, owner="david", key="key")["id"], "key")
+        self.assertEqual(adapter.create({"agent_id": "kip", "name": "watch", "instructions": "x"}, owner="david", key="key")["id"], "key")
         with patch.object(adapter, "_routines", side_effect=ModuleNotFoundError(name="services.bot_routines")):
             self.assertFalse(adapter.available())
             self.connected["mail"] = True

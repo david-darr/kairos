@@ -27,6 +27,8 @@ async def _loop():
 
 def start():
     global _task
+    from core import front_desk_watch_adapter
+    front_desk_watch_adapter.bind_loop(asyncio.get_running_loop())
     if _task is None or _task.done():
         _task = asyncio.create_task(_loop(), name="front-desk-tick")
     return _task
