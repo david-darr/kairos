@@ -213,7 +213,8 @@ export function beatLayout(beat, aspect, measure, style = {}) {
       // Without a heading the rows take the whole frame; few rows set large so they carry it (2026-11-05 pass:
       // two untitled rows sat small in the upper left of an empty frame).
       const count = Math.max(1, beat.items.length), start = titled ? .29 : .08, step = (titled ? .70 : .88) / count;
-      const bounds = count <= 3 ? (titled ? [72, 120] : [96, 150]) : [59.4, 86];
+      // Four or five rows also have room to set larger than body text (Studio click-through: four untitled rows filled a third of the frame).
+      const bounds = count <= 3 ? (titled ? [72, 120] : [96, 150]) : count <= 5 ? (titled ? [59.4, 96] : [72, 120]) : [59.4, 86];
       // Fit all rows at one size, so the list reads as one typographic object.
       beat.items.forEach((v, i) => add(v, x + .055, start + i * step, widthFraction - .055, step * .91, 'body', i + 1, bounds));
       const rows = boxes.filter(b => b.role === 'body');

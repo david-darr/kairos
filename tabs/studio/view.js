@@ -277,7 +277,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     list.replaceChildren();
     state.p.beats.forEach((beat, index) => {
       const row = el('div', { class: 'studio-beat' + (index === selected ? ' selected' : ''), draggable: true, role: 'listitem', 'data-index': index });
-      row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || 'No text'} (${seconds(beat.bars * 240 / state.p.bpm)})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
+      row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || (beat.items || []).filter(Boolean).join(', ') || 'No text'} (${seconds(beat.bars * 240 / state.p.bpm)})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
         el('div', { class: 'studio-actions' }, [button('Move up', () => move(index, index - 1), { disabled: index === 0, 'aria-label': `Move beat ${index + 1} up` }), button('Move down', () => move(index, index + 1), { disabled: index === state.p.beats.length - 1, 'aria-label': `Move beat ${index + 1} down` })]));
       row.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', String(index)));
       row.addEventListener('dragover', event => event.preventDefault());
@@ -330,18 +330,23 @@ async function editor(host, id, looks, back, parentDisposed) {
       input.addEventListener('input', () => { setBeat(key, input.value); node.querySelector('.meta').textContent = `${input.value.length}/${limit} characters`; });
       return node;
     };
+    // Show only the fields this kind of beat draws (static/motion/layout.js); the rest stay hidden, not cleared,
+    // so switching kinds back keeps what was typed.
+    const kind = beat.kind, pictured = ['image', 'split', 'logo'].includes(kind);
+    const only = (node, shown) => { node.hidden = !shown; return node; };
     inspector.append(el('h3', { text: `Beat ${selected + 1}` }), field('Kind', select('Beat kind', KINDS, beat.kind, v => { setBeat('kind', v); drawInspector(); }), path + '.kind'),
-      textField('Text', 'text', 140, true), textField('Supporting text', 'sub', 100), textField('Number', 'number', 140));
+      textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
+      only(textField('Number', 'number', 140), kind === 'big-number'));
     const items = el('textarea', { rows: 5, 'aria-label': 'List items, one per line', value: (beat.items || []).join('\n') });
     items.value = (beat.items || []).join('\n');
     const itemField = field('List items, one per line', items, path + '.items', `${(beat.items || []).length}/5 items; 60 characters each`);
     items.addEventListener('input', () => { const lines = items.value ? items.value.split('\n') : []; setBeat('items', lines); itemField.querySelector('.meta').textContent = `${lines.length}/5 items; ${lines.map(s => s.length + '/60').join(', ')} characters`; });
-    inspector.append(itemField);
+    inspector.append(only(itemField, kind === 'list'));
     const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
     inspector.append(field('Bars', bars, path + '.bars', '0.5 to 8, in half-bar steps. Total video: at most 120 seconds.'),
       field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
-      field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition'), textField('Image treatment', 'treatment', 80));
-    inspector.append(field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'));
+      field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition'), only(textField('Image treatment', 'treatment', 80), pictured));
+    inspector.append(only(field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'), pictured));
     const upload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
     upload.addEventListener('change', async () => {
       if (!upload.files[0]) return;
@@ -352,7 +357,7 @@ async function editor(host, id, looks, back, parentDisposed) {
         changed(p => { const target = p.beats.find(b => b.id === targetId); if (target) target.image = result.asset; }); drawInspector();
       } catch (error) { toast(error.message, 'error'); } finally { upload.disabled = false; }
     });
-    inspector.append(field('Upload an image', upload, '', 'PNG, JPEG, GIF or WebP. Up to 25 MB and 40 megapixels.'), button('Choose image from a design', async () => {
+    inspector.append(only(field('Upload an image', upload, '', 'PNG, JPEG, GIF or WebP. Up to 25 MB and 40 megapixels.'), pictured), only(button('Choose image from a design', async () => {
       const designs = await api('/api/designs');
       const targetId = beat.id;
       const assetsHost = el('div');
@@ -370,7 +375,7 @@ async function editor(host, id, looks, back, parentDisposed) {
         } catch (error) { toast(error.message, 'error'); }
       });
       inspector.append(field('Design images', designPicker), assetsHost); designPicker.focus();
-    }), el('div', { class: 'studio-actions' }, [button('Duplicate beat', () => {
+    }), pictured), el('div', { class: 'studio-actions' }, [button('Duplicate beat', () => {
       if (state.p.beats.length >= 40) throw Error('A video can have at most 40 beats.');
       changed(p => p.beats.splice(selected + 1, 0, { ...clone(p.beats[selected]), id: beatId() })); selected++; drawBeats(); drawInspector();
     }), button('Delete beat', () => {

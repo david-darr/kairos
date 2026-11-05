@@ -156,6 +156,15 @@ app.whenReady().then(async () => {
     await wait("!!document.querySelector('.studio-stage canvas')");
     assert.equal(await js('location.hash'), '#/studio/' + id);
     assert.equal(await js(`(() => { const c=document.querySelector('.studio-stage canvas'), pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data; return pixels.some((v,i)=>i%4===3 && v>0) && new Set(pixels).size>8; })()`), true, 'Preview draws real content');
+    // A title beat shows only the fields it draws (click-through 2026-11-05: every field showed on every beat).
+    const shown = label => js(`!document.querySelector('[aria-label=${JSON.stringify(label)}]').closest('[hidden]')`);
+    assert.deepEqual([await shown('Text'), await shown('Supporting text'), await shown('Number'), await shown('List items, one per line'), await shown('Video image'), await shown('Upload an image')],
+      [true, true, false, false, false, false], 'Title beat fields');
+    await js("document.querySelector('[aria-label=\"Beat kind\"]').value='list'; document.querySelector('[aria-label=\"Beat kind\"]').dispatchEvent(new Event('change',{bubbles:true}))");
+    await wait("!document.querySelector('[aria-label=\"List items, one per line\"]').closest('[hidden]')");
+    assert.equal(await shown('Supporting text'), false, 'A list has no supporting text');
+    await js("document.querySelector('[aria-label=\"Beat kind\"]').value='title'; document.querySelector('[aria-label=\"Beat kind\"]').dispatchEvent(new Event('change',{bubbles:true}))");
+    await wait("!!document.querySelector('[aria-label=\"List items, one per line\"]').closest('[hidden]')");
     await edit('Text', 'Changed opening');
     await wait("document.querySelector('.studio-editor-top [role=status]').textContent==='Saved'");
     assert.ok(writes.some(w => w.method === 'PUT' && w.body.beats[0].text === 'Changed opening'));
