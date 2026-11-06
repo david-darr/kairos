@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
-from core import model_catalog, model_endpoints, projects
+from core import accounts as app_accounts, model_catalog, model_endpoints, projects
 from core.swarm import accounts, architect
 from core.swarm.adapters import WorkerContext, build_worker, capability_for
 from core.swarm.budget import BudgetLimit
@@ -233,11 +233,10 @@ class SwarmService:
 
     @staticmethod
     def _memory_owner_scope(owner):
-        """Whose chats a company's memory search may read: None means all (an admin or
-        accounts off); otherwise the company owner, so a member's company finds only theirs."""
-        from core.auth import auth_enabled, auth_manager
-        if owner and auth_manager.is_admin(owner):
-            return None
+        """Whose chats a company's memory search may read: the company owner's, admin or not. Chats
+        live per account and the cycle runs as the owner's account, so nobody searches everyone's.
+        None only when accounts are off and there is no owner (the one local user's chats)."""
+        from core.auth import auth_enabled
         if not owner and not auth_enabled():
             return None
         return owner or ""
@@ -285,27 +284,28 @@ class SwarmService:
         """Linked teammates follow their agent's current name and role; a
         deleted agent leaves an ordinary teammate behind."""
         from services.agent_service import agent_service
+        owner = self.store.get_system(system_id).get("owner")
         for member in self.store.team(system_id):
             agent_id = member.get("jarvis_agent_id")
             if not agent_id:
                 continue
             agent = agent_service.get(agent_id)
             if agent is None:
-                self.store.unlink_agent(agent_id)
+                self.store.unlink_agent(agent_id, owner)
             elif (member["name"], member["role"]) != (agent["name"], _role(agent, member["is_lead"])):
-                self.store.agent_renamed(agent_id, agent["name"], _role(agent, member["is_lead"]))
+                self.store.agent_renamed(agent_id, agent["name"], _role(agent, member["is_lead"]), owner)
 
-    def agent_changed(self, agent, *, deleted=False):
+    def agent_changed(self, agent, owner=None, *, deleted=False):
         """An agent was renamed or deleted (routes/agent_routes.py). Each
         cycle also runs refresh_links, so a change made while Swarm was
         unavailable is still picked up before the team works again."""
         if self.store is None:
             return
         if deleted:
-            self.store.unlink_agent(agent["id"])
+            self.store.unlink_agent(agent["id"], owner)
             return
-        for team in self.store.teams_for_agent(agent["id"]):
-            self.store.agent_renamed(agent["id"], agent["name"], _role(agent, team["is_lead"]))
+        for team in self.store.teams_for_agent(agent["id"], owner):
+            self.store.agent_renamed(agent["id"], agent["name"], _role(agent, team["is_lead"]), owner)
 
     def sync_agents(self, system_id):
         """Carry new team events back to the linked agents, once each.
@@ -384,8 +384,18 @@ class SwarmService:
         """An owner's answer that arrived through an agent's inbox (the app,
         Discord or a connector), delivered as an owner message."""
         owner = self.store.get_system(system_id)["owner"]
-        return self.message(owner, system_id, body, "answer:" + hashlib.sha256(
-            f"{system_id}:{body}:{self.store.clock()}".encode()).hexdigest()[:24])
+        acct = self._owner_account(owner)
+        if acct is None:
+            raise ValueError("this company's owner no longer exists")
+        with app_accounts.as_account(acct):
+            return self.message(owner, system_id, body, "answer:" + hashlib.sha256(
+                f"{system_id}:{body}:{self.store.clock()}".encode()).hexdigest()[:24])
+
+    @staticmethod
+    def _owner_account(owner):
+        """The account a company's background work runs as: its owner's, or None when that user is
+        gone. Never another account's: a company with no owner account does no background work."""
+        return app_accounts.account_for_user(owner)
 
     FIRST_OBJECTIVE = "Read the owner's messages and the mission, then assign the work to your team."
     NEXT_OBJECTIVE = ("Review what this company has produced against its mission. If the mission is met, "
@@ -581,6 +591,24 @@ class SwarmService:
             logger.exception("swarm: syncing the team's agents failed; it is retried after the next cycle")
 
     async def _cycle(self, system_id):
+        """One company's work, run as its owner's account (workers, memory, bridges and every task they
+        start copy this context)."""
+        try:
+            owner = self.store.get_system(system_id).get("owner")
+            acct = self._owner_account(owner)
+        except Exception:
+            logger.exception("swarm: could not read the company's owner; its cycle is skipped")
+            self.cycles.pop(system_id, None)
+            return
+        if acct is None:
+            logger.warning("swarm: company %s belongs to %r, who no longer exists; its work is skipped",
+                           system_id, owner)
+            self.cycles.pop(system_id, None)
+            return
+        with app_accounts.as_account(acct):
+            await self._cycle_as_owner(system_id)
+
+    async def _cycle_as_owner(self, system_id):
         try:
             self.refresh_links(system_id)
             while True:
@@ -660,15 +688,21 @@ class SwarmService:
                 fresh = self.store.get_system(system["id"])
                 if fresh["state"] == "paused" or self.store.mission_concluded(system["id"]):
                     continue
-                if self.agent_blockers(system["id"]):
+                acct = self._owner_account(system.get("owner"))
+                if acct is None:
+                    logger.warning("swarm: scheduled company %s belongs to %r, who no longer exists; skipped",
+                                   system["id"], system.get("owner"))
                     continue
-                if fresh["state"] == "stopped":
-                    self.store.reopen_for_start(system["id"])
-                    fresh = self.store.get_system(system["id"])
-                if fresh["state"] != "idle" or system["id"] in self.cycles:
-                    continue
-                self._seed_run(system["id"], shift_id=shift["id"])
-                self._dispatch(system["id"])
+                with app_accounts.as_account(acct):
+                    if self.agent_blockers(system["id"]):
+                        continue
+                    if fresh["state"] == "stopped":
+                        self.store.reopen_for_start(system["id"])
+                        fresh = self.store.get_system(system["id"])
+                    if fresh["state"] != "idle" or system["id"] in self.cycles:
+                        continue
+                    self._seed_run(system["id"], shift_id=shift["id"])
+                    self._dispatch(system["id"])
 
     async def _schedule_loop(self):
         try:

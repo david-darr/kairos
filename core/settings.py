@@ -92,9 +92,27 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+def _other_account():
+    """The current account when it is not the first admin's (whose personal settings stay in the install's
+    settings.json, as before accounts), else None. Nobody signed in reads the install's file, as before."""
+    from core import accounts
+    try:
+        account_id = accounts.effective_account()
+    except accounts.NoAccount:
+        return None
+    return None if account_id == accounts.local_account() else account_id
+
+
 def load_settings() -> dict:
     stored = read_json(SETTINGS_FILE, {})
-    return {**DEFAULTS, **stored}
+    merged = {**DEFAULTS, **stored}
+    other = _other_account()
+    if other:
+        # "My account" keys come from the account's own file, defaulting fresh, never from the first admin's.
+        mine = read_json(_account_file(other), {})
+        for key in ACCOUNT_KEYS:
+            merged[key] = mine[key] if key in mine else DEFAULTS.get(key)
+    return merged
 
 
 def get_setting(key: str) -> Any:
@@ -102,19 +120,27 @@ def get_setting(key: str) -> Any:
 
 
 def update_settings(**fields) -> dict:
-    current = load_settings()
-    for key, value in fields.items():
+    for key in fields:
         if key not in DEFAULTS:
             raise ValueError(f"unknown setting: {key}")
-        current[key] = value
-    write_json_atomic(SETTINGS_FILE, current)
-    return current
+    other = _other_account()
+    personal = {k: v for k, v in fields.items() if other and k in ACCOUNT_KEYS}
+    install = {k: v for k, v in fields.items() if k not in personal}
+    if personal:
+        update_account_settings(other, **personal)
+    if install or not personal:
+        current = {**DEFAULTS, **read_json(SETTINGS_FILE, {})}
+        current.update(install)
+        write_json_atomic(SETTINGS_FILE, current)
+    return load_settings()
 
 
-# Settings that belong to one account rather than the install (Multi-Account group 2, 2026-11-06): kept
-# in the account's own folder. Only the vault location so far; group 8 splits the rest of settings.json
-# into "My account" and "This Kairos". The first admin's vault stays in settings.json (core/vault.py).
-ACCOUNT_KEYS = {"vault_dir", "auto_enabled_builtins", "seeded_skills", "seeded_skill_hashes"}
+# "My account" settings (Multi-Account groups 2 and 8b, 2026-11-06): for every account but the first
+# admin's they live in the account's own settings.json, and get_setting/update_settings route them there.
+# The first admin keeps them in the install's settings.json, as before. Everything else is "This Kairos".
+ACCOUNT_KEYS = {"vault_dir", "auto_enabled_builtins", "seeded_skills", "seeded_skill_hashes",
+                "vault_pins", "vault_daily_folder", "vault_daily_template", "forge_root", "design_default_look",
+                "onboarding_complete", "auto_compact", "helper_endpoint_id", "computer_steps_days"}
 
 
 def _account_file(account_id=None) -> str:

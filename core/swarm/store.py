@@ -1608,30 +1608,39 @@ class SwarmStore:
 
     # -- JARVIS agents on teams (agents phase 5) --------------------------
 
-    def teams_for_agent(self, jarvis_agent_id):
+    # Agent ids are only unique inside one account's folder, so two accounts can hold the same id
+    # string. Every helper below takes the owner (the company's creating username) and then touches
+    # only that owner's companies; owner=None means no filter.
+
+    def teams_for_agent(self, jarvis_agent_id, owner=None):
         """The companies this JARVIS agent sits on, and as whom."""
         with self._lock:
             return [dict(row) for row in self.db.execute(
                 """SELECT y.id, y.name, y.state, a.id AS member_id, a.is_lead FROM agent_settings s
                    JOIN agents a ON a.id=s.agent_id JOIN systems y ON y.id=a.system_id
-                   WHERE s.jarvis_agent_id=? AND s.enabled=1 ORDER BY y.created_at""", (jarvis_agent_id,))]
+                   WHERE s.jarvis_agent_id=? AND s.enabled=1 AND (? IS NULL OR y.owner=?)
+                   ORDER BY y.created_at""", (jarvis_agent_id, owner, owner))]
 
-    def agent_renamed(self, jarvis_agent_id, name, role):
+    def agent_renamed(self, jarvis_agent_id, name, role, owner=None):
         """Teammates follow their agent's name and role. Teammates message
         each other by name, so a stale one would be unreachable."""
         with self.transaction() as db:
             members = [row[0] for row in db.execute(
-                "SELECT agent_id FROM agent_settings WHERE jarvis_agent_id=?", (jarvis_agent_id,))]
+                """SELECT s.agent_id FROM agent_settings s JOIN agents a ON a.id=s.agent_id
+                   JOIN systems y ON y.id=a.system_id
+                   WHERE s.jarvis_agent_id=? AND (? IS NULL OR y.owner=?)""", (jarvis_agent_id, owner, owner))]
             for member in members:
                 db.execute("UPDATE agents SET name=?,role=? WHERE id=?", (name, role, member))
             return len(members)
 
-    def unlink_agent(self, jarvis_agent_id):
+    def unlink_agent(self, jarvis_agent_id, owner=None):
         """The agent was deleted: its teammates stay, under the name they
         had, as ordinary teammates with no agent behind them."""
         with self.transaction() as db:
-            return db.execute("UPDATE agent_settings SET jarvis_agent_id=NULL WHERE jarvis_agent_id=?",
-                              (jarvis_agent_id,)).rowcount
+            return db.execute(
+                """UPDATE agent_settings SET jarvis_agent_id=NULL WHERE jarvis_agent_id=? AND (? IS NULL OR agent_id IN
+                   (SELECT a.id FROM agents a JOIN systems y ON y.id=a.system_id WHERE y.owner=?))""",
+                (jarvis_agent_id, owner, owner)).rowcount
 
     def events_to_sync(self, system_id, limit=200):
         """Events not yet carried back to the team's agents."""

@@ -125,6 +125,9 @@ class TeamTests(unittest.IsolatedAsyncioTestCase):
         await self.service.start()
         self.assertIsNone(self.service.fault)
         swarm_module.current = self.service
+        # "alice" is not a registered user here: her companies run as the local account the agents live in.
+        from core import accounts as app_accounts
+        patch.object(app_accounts, "account_for_user", lambda user: app_accounts.local_account() if user else None).start()
         self.notify = patch.object(agent_service, "notify", Mock()).start()
 
     async def asyncTearDown(self):
@@ -177,6 +180,11 @@ class TeamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(team["Bo"]["jarvis_agent_id"], self.writer["id"])
         self.assertIsNone(team["Checker"]["jarvis_agent_id"], "an ordinary teammate stays ordinary")
         self.assertEqual([t["id"] for t in self.service.store.teams_for_agent(self.writer["id"])], [system_id])
+        # the same agent id in another account's company is not ours: helpers filter by the owner
+        self.assertEqual([t["id"] for t in self.service.store.teams_for_agent(self.writer["id"], "alice")], [system_id])
+        self.assertEqual(self.service.store.teams_for_agent(self.writer["id"], "mallory"), [])
+        self.assertEqual(self.service.store.agent_renamed(self.writer["id"], "X", "Y", "mallory"), 0)
+        self.assertEqual(self.service.store.unlink_agent(self.writer["id"], "mallory"), 0)
 
     async def test_bad_rosters_are_refused(self):
         self.serve(lambda body: reply([]))

@@ -638,6 +638,13 @@ class CycleTests(unittest.IsolatedAsyncioTestCase):
         self.root = tempfile.TemporaryDirectory(dir=environment.name)
         self.server = None
         self.service = SwarmService(Path(self.root.name))
+        # Companies run as their owner's account; these owners are not registered users, so give each
+        # an account id (users listed in self.gone have none, like a deleted user).
+        self.gone = set()
+        patcher = patch("services.swarm_service.app_accounts.account_for_user",
+                        lambda user: None if (not user or user in self.gone) else f"acct{user}")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         await self.service.start()
         self.assertIsNone(self.service.fault)
 
@@ -650,6 +657,58 @@ class CycleTests(unittest.IsolatedAsyncioTestCase):
     def endpoint(self):
         return {"id": "endpoint-a", "name": "Stub", "kind": "api",
                 "base_url": self.server.base_url, "model": "stub", "api_key": None, "num_ctx": None}
+
+    def scheduled_payload(self):
+        return {**setup_payload(), "mode": "scheduled",
+                "schedule": {"enabled": True, "days": [0], "start_time": "09:00", "end_time": "17:00",
+                             "max_cycles": 3, "auto_spend_confirmed": True}}
+
+    async def test_a_scheduled_cycle_runs_as_its_owners_account(self):
+        from core import accounts as app_accounts
+        endpoint = {"id": "endpoint-a", "name": "Stub", "kind": "api", "model": "stub"}
+        now = datetime.fromisoformat("2026-09-21T10:00:00-04:00")
+        seen = {}
+
+        async def spy(system_id, *args, **kwargs):
+            seen[system_id] = app_accounts.effective_account()
+            raise RuntimeError("stop after recording")  # _cycle logs it and ends cleanly
+
+        with patch.object(SwarmService, "_resolved", staticmethod(lambda endpoint_id: endpoint)), \
+             patch.object(SwarmService, "_connection", staticmethod(lambda endpoint_id: endpoint)):
+            first = await self.service.create("bob", self.scheduled_payload(), "acct-create-bob")
+            second = await self.service.create("carol", self.scheduled_payload(), "acct-create-carol")
+            with patch.object(self.service.runtime, "run_cycle", spy):
+                await self.service.tick_schedules(now)
+                for system_id in (first["id"], second["id"]):
+                    cycle = self.service.cycles.get(system_id)
+                    if cycle:
+                        await asyncio.wait_for(cycle, timeout=30)
+        self.assertEqual(seen, {first["id"]: "acctbob", second["id"]: "acctcarol"})
+
+    async def test_a_company_whose_owner_is_gone_does_no_background_work(self):
+        endpoint = {"id": "endpoint-a", "name": "Stub", "kind": "api", "model": "stub"}
+        now = datetime.fromisoformat("2026-09-21T10:00:00-04:00")
+        with patch.object(SwarmService, "_resolved", staticmethod(lambda endpoint_id: endpoint)), \
+             patch.object(SwarmService, "_connection", staticmethod(lambda endpoint_id: endpoint)):
+            created = await self.service.create("dave", self.scheduled_payload(), "acct-create-dave")
+            self.gone.add("dave")
+            dispatched = Mock()
+            with patch.object(self.service, "_dispatch", dispatched), self.assertLogs("services.swarm_service", "WARNING"):
+                await self.service.tick_schedules(now)
+            dispatched.assert_not_called()
+            self.assertEqual(self.service.store.run_count(created["id"]), 0)
+            # a cycle started some other way (start, resume) is skipped too and leaves no stale entry
+            self.service.cycles[created["id"]] = object()
+            with self.assertLogs("services.swarm_service", "WARNING"):
+                await self.service._cycle(created["id"])
+            self.assertNotIn(created["id"], self.service.cycles)
+
+    async def test_an_admins_company_searches_only_its_own_chats(self):
+        from core.auth import auth_manager
+        with patch.object(auth_manager, "is_admin", lambda user: True):
+            self.assertEqual(SwarmService._memory_owner_scope("boss"), "boss")
+        with patch("core.auth.auth_enabled", lambda: False):
+            self.assertIsNone(SwarmService._memory_owner_scope(None))
 
     async def test_schedule_tick_opens_one_durable_shift_and_one_cycle(self):
         endpoint = {"id": "endpoint-a", "name": "Stub", "kind": "api", "model": "stub"}

@@ -237,7 +237,7 @@ def _summary(agent: dict, user: str | None = None) -> dict:
             "needs_you": needs_you, "runs_today": agent_service.runs_today(agent["id"])}
 
 
-def _teams(agent_id: str) -> list[dict]:
+def _teams(agent_id: str, owner: str) -> list[dict]:
     """The teams (Swarm companies) this agent sits on; none when Swarm is
     unavailable."""
     from services import swarm_service
@@ -245,7 +245,7 @@ def _teams(agent_id: str) -> list[dict]:
     if team is None or team.store is None:
         return []
     try:
-        return team.store.teams_for_agent(agent_id)
+        return team.store.teams_for_agent(agent_id, owner)
     except Exception:
         return []
 
@@ -255,11 +255,11 @@ def _triggers(agent_id: str) -> list[dict]:
     return trigger_service.for_agent(agent_id)
 
 
-def _team_change(agent: dict, deleted: bool = False) -> None:
+def _team_change(agent: dict, owner: str, deleted: bool = False) -> None:
     from services import swarm_service
     if swarm_service.current is not None:
         try:
-            swarm_service.current.agent_changed(agent, deleted=deleted)
+            swarm_service.current.agent_changed(agent, owner, deleted=deleted)
         except Exception:
             # Each team cycle refreshes its links first, so this is caught up.
             import logging
@@ -513,7 +513,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
         "inbox": person_inbox(agent_id),
         "answered": agent_service.inbox(agent_id, status=None)[:20],
         "runs": [r for r in task_service.list_runs() if r["task_id"] in owned_ids][:50],
-        "teams": _teams(agent_id),
+        "teams": _teams(agent_id, user),
         "triggers": _triggers(agent_id),
         "avatar_snapshot": bot_avatar_service.snapshot_of(agent),
     }
@@ -530,7 +530,7 @@ async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(requi
     except ValueError as e:
         raise _refused(e)
     if "name" in fields or "role" in fields:
-        _team_change(agent)
+        _team_change(agent, user)
     return _summary(agent)
 
 
@@ -672,7 +672,7 @@ async def delete_agent(agent_id: str, user: str = Depends(require_admin)) -> dic
     session_manager.release_agent_chats(agent_id)
     agent_service.delete(agent_id)
     # Its team seats stay, as ordinary teammates under the same name.
-    _team_change({"id": agent_id}, deleted=True)
+    _team_change({"id": agent_id}, user, deleted=True)
     return {"ok": True, "removed_work": removed}
 
 

@@ -1783,5 +1783,56 @@ class TabDataMigration(unittest.TestCase):
         account_migration._moved.pop(str(self.data), None)
 
 
+class SettingsSplit(unittest.TestCase):
+    """Group 8b: "My account" settings are each account's own; "This Kairos" settings are shared."""
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+        from core import settings
+        self.settings = settings
+        before = Path(settings.SETTINGS_FILE).read_bytes() if Path(settings.SETTINGS_FILE).exists() else None
+        def restore():
+            if before is None:
+                Path(settings.SETTINGS_FILE).unlink(missing_ok=True)
+            else:
+                Path(settings.SETTINGS_FILE).write_bytes(before)
+            Path(accounts.ACCOUNTS_DIR, self.second, "settings.json").unlink(missing_ok=True)
+        self.addCleanup(restore)
+
+    def test_a_personal_setting_is_kept_apart_and_starts_fresh(self):
+        s = self.settings
+        with accounts.as_account(self.first):
+            s.update_settings(forge_root="C:/first", auto_compact=False)
+        with accounts.as_account(self.second):
+            self.assertIsNone(s.get_setting("forge_root"), "a new account starts from the default")
+            self.assertTrue(s.get_setting("auto_compact"))
+            self.assertFalse(s.get_setting("onboarding_complete"), "a new account gets its own first run")
+            s.update_settings(forge_root="C:/second")
+            self.assertEqual(s.get_setting("forge_root"), "C:/second")
+        with accounts.as_account(self.first):
+            self.assertEqual(s.get_setting("forge_root"), "C:/first")
+        self.assertEqual(json.loads(Path(s.SETTINGS_FILE).read_text(encoding="utf-8"))["forge_root"], "C:/first",
+                         "the first admin keeps the install's file")
+
+    def test_an_install_setting_is_shared(self):
+        s = self.settings
+        with accounts.as_account(self.second):
+            s.update_settings(image_daily_limit=7, forge_root="C:/second")
+        with accounts.as_account(self.first):
+            self.assertEqual(s.get_setting("image_daily_limit"), 7)
+            self.assertNotEqual(s.get_setting("forge_root"), "C:/second")
+        mine = json.loads(Path(accounts.ACCOUNTS_DIR, self.second, "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(mine, {"forge_root": "C:/second"})
+
+    def test_bots_start_in_the_accounts_vault(self):
+        from core import bot_policy, vault
+        with accounts.as_account(self.second):
+            self.assertEqual(bot_policy.default_cwd(None), vault.resolve_vault_dir())
+            self.assertIsNotNone(bot_policy.default_cwd(None))
+
+
 if __name__ == "__main__":
     unittest.main()

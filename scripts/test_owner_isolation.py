@@ -206,7 +206,7 @@ class OwnerIsolation(unittest.TestCase):
         self.assertEqual(SwarmMemory(settings, owner_user=None, account=ids["boss"]).search("quokkaberry"), [],
                          "an admin's company searches the admin's own account only (D2)")
         from services.swarm_service import SwarmService
-        self.assertIsNone(SwarmService._memory_owner_scope("boss"), "an admin owner searches every chat")
+        self.assertEqual(SwarmService._memory_owner_scope("boss"), "boss", "an admin owner searches their own chats")
         self.assertEqual(SwarmService._memory_owner_scope("bob"), "bob")
         with self.as_owner("alice"):
             session_manager.delete_session(sid)

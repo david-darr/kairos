@@ -711,7 +711,7 @@ def default_cwd(session: Optional[dict]) -> Optional[str]:
     if isinstance(workspace, str) and workspace:
         return workspace
     try:
-        from core.workspace import resolve_vault_dir
+        from core.vault import resolve_vault_dir
         return resolve_vault_dir()
     except Exception:
         return None
