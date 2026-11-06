@@ -109,3 +109,29 @@ def update_settings(**fields) -> dict:
         current[key] = value
     write_json_atomic(SETTINGS_FILE, current)
     return current
+
+
+# Settings that belong to one account rather than the install (Multi-Account group 2, 2026-11-06): kept
+# in the account's own folder. Only the vault location so far; group 8 splits the rest of settings.json
+# into "My account" and "This Kairos". The first admin's vault stays in settings.json (core/vault.py).
+ACCOUNT_KEYS = {"vault_dir"}
+
+
+def _account_file(account_id=None) -> str:
+    from core import accounts
+    return os.path.join(accounts.account_dir(account_id), "settings.json")
+
+
+def get_account_setting(key: str, account_id=None) -> Any:
+    return read_json(_account_file(account_id), {}).get(key)
+
+
+def update_account_settings(account_id=None, **fields) -> dict:
+    path = _account_file(account_id)
+    current = read_json(path, {})
+    for key, value in fields.items():
+        if key not in ACCOUNT_KEYS:
+            raise ValueError(f"not an account setting: {key}")
+        current[key] = value
+    write_json_atomic(path, current)
+    return current

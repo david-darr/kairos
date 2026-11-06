@@ -127,7 +127,7 @@ class FrontDeskCase(unittest.TestCase):
         from core import backup
         with patch.object(front_desk, "STATE_FILE", Path(_DATA.name) / "front_desk" / "state.json"):
             front_desk.ensure()
-            with patch.object(backup, "_vault_inside", return_value=None):
+            with patch.object(backup, "_vaults_inside", return_value=set()):
                 names = {relative for _, relative in backup._files(_DATA.name)}
             self.assertIn("front_desk/state.json", names)
 

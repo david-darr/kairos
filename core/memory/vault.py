@@ -9,7 +9,7 @@ the day before. Claude and Codex read the vault with their own file tools and
 never went through it; local/API models and Swarm did.
 
 The index is SQLite FTS5, like the chat store (core/session_manager_store.py),
-one file per vault in DATA_DIR/memory/. It keeps itself current by comparing
+one file per vault in the account's memory/ folder (index_dir()). It keeps itself current by comparing
 modification times before each search: new and edited notes are re-read,
 deleted ones dropped. A note's path and title weigh more than its body, so a
 note named for the thing ranks above one that mentions it once.
@@ -21,13 +21,20 @@ import sqlite3
 import threading
 from typing import Optional
 
-from core.constants import DATA_DIR
+from core import accounts
 from core.memory import MemoryBackend
 from core.session_manager_store import _fts_query
 
 logger = logging.getLogger(__name__)
 
-INDEX_DIR = os.path.join(DATA_DIR, "memory")
+INDEX_DIR: Optional[str] = None  # a test can point every index at its own folder
+
+
+def index_dir() -> str:
+    """Where the current account keeps its search indexes (Multi-Account group 2): the index holds the
+    notes' text, so it lives with the account even when two accounts point at the same vault."""
+    return INDEX_DIR or accounts.path("memory")
+
 READ_MAX_CHARS = 60_000
 SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
 
@@ -50,20 +57,22 @@ class VaultMemory(MemoryBackend):
 
     @classmethod
     def for_dir(cls, vault_dir: str) -> "VaultMemory":
-        key = os.path.realpath(vault_dir)
+        folder = index_dir()
+        key = (os.path.realpath(vault_dir), folder)
         with cls._instances_lock:
             if key not in cls._instances:
-                cls._instances[key] = cls(key)
+                cls._instances[key] = cls(key[0], folder)
             return cls._instances[key]
 
-    def __init__(self, vault_dir: str):
+    def __init__(self, vault_dir: str, folder: Optional[str] = None):
         self.vault_dir = os.path.realpath(vault_dir)
+        self.index_dir = folder or index_dir()
         digest = hashlib.sha1(self.vault_dir.lower().encode("utf-8")).hexdigest()[:12]
-        self.db_path = os.path.join(INDEX_DIR, f"vault-{digest}.db")
+        self.db_path = os.path.join(self.index_dir, f"vault-{digest}.db")
         self._lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
-        os.makedirs(INDEX_DIR, exist_ok=True)
+        os.makedirs(self.index_dir, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)

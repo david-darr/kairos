@@ -205,7 +205,7 @@ class VaultMemoryTests(unittest.TestCase):
     def setUp(self):
         shutil.rmtree(VAULT, ignore_errors=True)
         VAULT.mkdir()
-        shutil.rmtree(vault_index.INDEX_DIR, ignore_errors=True)
+        shutil.rmtree(vault_index.index_dir(), ignore_errors=True)
         vault_index.VaultMemory._instances.clear()
         self.memory = vault_memory(str(VAULT))
 

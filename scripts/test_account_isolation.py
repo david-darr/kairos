@@ -111,9 +111,13 @@ def fill(account):
     account.seed("model connections", "POST", "/api/models", {"name": f"{m} model", "base_url": "http://127.0.0.1:9/v1", "model": "x", "api_key": account.secret}, "endpoint")
     account.seed("tasks", "POST", "/api/tasks", {"name": f"{m} task", "prompt": m, "schedule_kind": "once", "run_at": "2030-01-01T00:00:00Z"}, "task")
     account.seed("bots", "POST", "/api/agents", {"name": f"{m} bot", "role": m, "instructions": m}, "agent")
-    # The vault save route only edits an existing note, so the note is written as a file. Until phase 2 the vault
-    # is one folder for everyone; then this writes into the account's own vault.
-    vault = Path(os.environ["JARVIS_VAULT_DIR"]); vault.mkdir(parents=True, exist_ok=True)
+    # The vault save route only edits an existing note, so the note is written as a file, into the account's own
+    # vault (group 2): the first admin's is JARVIS_VAULT_DIR, everyone else's is in their account folder.
+    from core import accounts
+    from core.auth import auth_manager
+    from core.vault import resolve_vault_dir
+    with accounts.as_account(auth_manager.account_id(account.name)):
+        vault = Path(resolve_vault_dir())
     (vault / f"{account.name}-{m}.md").write_text(f"# {m} vault note\n", encoding="utf-8")
     account.seeded["vault"] = "file"
     account.seed("designs", "POST", "/api/designs", {"title": f"{m} design"}, "design")

@@ -7,11 +7,12 @@ a real, working vault from first boot rather than an empty directory or
 literal unfilled {{placeholder}} tokens.
 """
 import os
+from typing import Optional
 
+from core import accounts
 from core.constants import DATA_DIR
 from core import settings as settings_store
 
-DEFAULT_VAULT_DIR = os.path.join(DATA_DIR, "vault")
 
 _VAULT_INDEX = """---
 status: active
@@ -70,13 +71,36 @@ AREA_FOLDERS = {
 
 
 def resolve_vault_dir() -> str:
-    """Resolution order: settings.json's user-chosen path (Settings tab's
-    "select an existing vault on your device" — David's ask, 2026-08-31) >
-    JARVIS_VAULT_DIR env var (dev override) > the seeded default under
-    data/vault."""
-    vault_dir = settings_store.get_setting("vault_dir") or os.getenv("JARVIS_VAULT_DIR", DEFAULT_VAULT_DIR)
+    """The current account's vault, seeded with starter notes if the folder is new or empty."""
+    vault_dir = chosen_vault_dir()
     seed_vault_if_empty(vault_dir)
     return vault_dir
+
+
+def chosen_vault_dir(account_id: Optional[str] = None) -> str:
+    """Where an account's vault is (Multi-Account group 2, 2026-11-06), without seeding it.
+
+    The first admin (the only user when accounts are off) keeps the order it always had: settings.json's
+    chosen folder (Settings > "select an existing vault on your device", David's ask 2026-08-31), then
+    JARVIS_VAULT_DIR (dev override), then the seeded default, which the migration moved into their
+    account folder. Every other account has its own: a folder an admin chose for it, else vault/ in its
+    account folder. Never another account's default vault."""
+    account_id = account_id or accounts.effective_account()
+    if account_id == accounts.local_account():
+        chosen = settings_store.get_setting("vault_dir") or os.getenv("JARVIS_VAULT_DIR")
+        if chosen:
+            return chosen
+        with accounts.as_account(account_id):
+            return accounts.path("vault")
+    return settings_store.get_account_setting("vault_dir", account_id) or         os.path.join(accounts.account_dir(account_id), "vault")
+
+
+def set_vault_dir(vault_dir: str) -> None:
+    """Choose the current account's vault folder."""
+    if accounts.effective_account() == accounts.local_account():
+        settings_store.update_settings(vault_dir=vault_dir)
+    else:
+        settings_store.update_account_settings(vault_dir=vault_dir)
 
 
 def seed_vault_if_empty(vault_dir: str) -> None:

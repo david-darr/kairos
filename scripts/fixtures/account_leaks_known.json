@@ -5,7 +5,6 @@
   "bea reads david's data via GET /api/models/choices",
   "bea reads david's data via GET /api/skills",
   "bea reads david's data via GET /api/skills/{slug}",
-  "bea reads david's data via GET /api/vault/graph",
   "david changes bea's data via DELETE /api/designs/{design_id}",
   "david changes bea's data via DELETE /api/forge/projects/{project_id}",
   "david changes bea's data via DELETE /api/sessions/{session_id}",
@@ -23,9 +22,7 @@
   "david reads bea's data via GET /api/skills/{slug}",
   "david reads bea's data via GET /api/system/status",
   "david reads bea's data via GET /api/tasks",
-  "david reads bea's data via GET /api/tasks/{task_id}",
-  "david reads bea's data via GET /api/vault/activity",
-  "david reads bea's data via GET /api/vault/graph"
+  "david reads bea's data via GET /api/tasks/{task_id}"
  ],
  "bea_denied": [
   "bea cannot create bots: denied 403",

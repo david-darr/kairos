@@ -119,10 +119,12 @@ def sync_from_vault() -> dict:
         if note.get("vault_source"):
             index.setdefault(_note_key(note), []).append(note)
     matched: set[str] = set()
+    present: set[str] = set()
     for filename in TASK_FILES:
         path = os.path.join(vault_dir, filename)
         if not os.path.isfile(path):
             continue
+        present.add(filename)
         summary["files"] += 1
         for item in parse_task_file(path):
             candidates = index.get((filename, item["heading"], _norm_line(item["line"])))
@@ -161,9 +163,12 @@ def sync_from_vault() -> dict:
 
     # Anything previously imported that's no longer in the vault is gone from
     # the source of truth, so it goes here too. App-native notes (no
-    # vault_source) are never considered.
+    # vault_source) are never considered, and neither are notes from a file
+    # that is missing altogether: a vault that moved, or a setting pointing at
+    # an empty folder, must not wipe them (2026-11-06; it did, in a rehearsal).
     for note in list(notes_service.list_notes(include_dismissed=True)):
-        if note.get("vault_source") and note["id"] not in matched:
+        source = note.get("vault_source")
+        if source and source.get("file") in present and note["id"] not in matched:
             notes_service.delete_note(note["id"])
             summary["removed"] += 1
 
@@ -240,9 +245,13 @@ def _note_key(note: dict) -> tuple:
 
 
 def sync_on_startup() -> None:
-    """Called once from app.py's lifespan. Never raises: a malformed or
-    unreadable vault must not stop the app from booting."""
-    try:
-        sync_from_vault()
-    except Exception:
-        logger.exception("vault_sync: startup sync failed")
+    """Called once from app.py's lifespan, for every account: each one's own
+    vault into its own notes. Never raises: a malformed or unreadable vault
+    must not stop the app from booting."""
+    from core import accounts
+    for account_id in accounts.all_accounts():
+        try:
+            with accounts.as_account(account_id):
+                sync_from_vault()
+        except Exception:
+            logger.exception("vault_sync: startup sync failed for account %s", account_id)

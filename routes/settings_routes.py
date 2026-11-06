@@ -14,6 +14,7 @@ from core.channels import discord_channel
 from core.middleware import require_admin
 from core.session_manager import session_manager
 from core.vault import build_custom_vault, resolve_vault_dir, seed_vault_if_empty
+from core import vault as vault_store
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -67,7 +68,7 @@ async def get_settings(user: str = Depends(require_admin)) -> dict:
     raw = settings_store.load_settings()
     return {
         "onboarding_complete": raw["onboarding_complete"],
-        "vault_dir": raw["vault_dir"] or resolve_vault_dir(),
+        "vault_dir": resolve_vault_dir(),
         "disabled_tools": raw["disabled_tools"],
         "auto_compact": raw["auto_compact"],
         "computer_use": raw["computer_use"],
@@ -163,7 +164,7 @@ async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_admin
         seed_vault_if_empty(path)
     except OSError as error:
         raise HTTPException(status_code=400, detail=f"That folder cannot be used: {error}")
-    settings_store.update_settings(vault_dir=path)
+    vault_store.set_vault_dir(path)  # the signed-in admin's own vault
     # Only affects *new* Brain connections (new sessions, or existing
     # sessions after their next reconnect) — a session with an already-open
     # Claude Agent SDK connection keeps its original cwd until it reconnects.
@@ -178,7 +179,7 @@ async def setup_vault(body: VaultSetupRequest, user: str = Depends(require_admin
     structure shaped to the areas the user said they want tracked, replacing
     the generic seed if nothing real has touched it yet (see
     core/vault.py::build_custom_vault's untouched-seed guard)."""
-    vault_dir = settings_store.get_setting("vault_dir") or resolve_vault_dir()
+    vault_dir = resolve_vault_dir()
     applied = build_custom_vault(vault_dir, body.areas, body.profile_note or "")
     return {"ok": True, "vault_dir": vault_dir, "applied": applied}
 

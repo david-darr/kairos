@@ -66,22 +66,44 @@ def _data_dir() -> str:
     return DATA_DIR
 
 
-def _vault_inside(data_dir: str) -> Optional[str]:
+def _account_vaults(data_dir: str) -> list[str]:
+    """Each account's default vault, accounts/<id>/vault (Multi-Account group 2): like every vault, the
+    person's own folder, never in a backup and never replaced by a restore."""
+    root = os.path.join(data_dir, "accounts")
     try:
-        from core.vault import resolve_vault_dir
-        vault = os.path.realpath(resolve_vault_dir())
-    except Exception:
-        return None
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    return [os.path.join("accounts", name, "vault") for name in names
+            if os.path.isdir(os.path.join(root, name, "vault"))]
+
+
+def _vaults_inside(data_dir: str) -> set:
+    """Real paths of the vaults kept inside the data folder: the first admin's chosen or default one,
+    and every account's default one."""
     root = os.path.realpath(data_dir)
-    return vault if os.path.commonpath([vault, root]) == root else None
+    found = {os.path.realpath(os.path.join(data_dir, rel)) for rel in _account_vaults(data_dir)}
+    # The first admin's chosen folder, or the shared default from before the migration. Read straight from
+    # settings, not through core.vault: a restore runs this before the sign-in store may be loaded.
+    try:
+        from core import settings as settings_store
+        chosen = settings_store.get_setting("vault_dir") or os.getenv("JARVIS_VAULT_DIR")
+    except Exception:
+        chosen = None
+    for vault in (chosen, os.path.join(data_dir, "vault")):
+        if vault:
+            vault = os.path.realpath(vault)
+            if os.path.commonpath([vault, root]) == root:
+                found.add(vault)
+    return found
 
 
 def _files(data_dir: str):
-    vault = _vault_inside(data_dir)
+    vaults = _vaults_inside(data_dir)
     for folder, dirs, files in os.walk(data_dir):
         dirs[:] = [d for d in dirs if d not in SKIPPED_DIRS and not d.startswith("pre-")
                    and os.path.relpath(os.path.join(folder, d), data_dir).replace(os.sep, "/") != "computer/profiles"
-                   and os.path.realpath(os.path.join(folder, d)) != vault
+                   and os.path.realpath(os.path.join(folder, d)) not in vaults
                    and not os.path.islink(os.path.join(folder, d))]
         for name in files:
             path = os.path.join(folder, name)
@@ -252,9 +274,9 @@ def _entries(data_dir: str) -> list[str]:
     """What a restore replaces: everything but the restore area and a vault
     kept inside the data folder (the default one is), which is the person's
     own and never in a backup."""
-    vault = _vault_inside(data_dir)
+    vaults = _vaults_inside(data_dir)
     return [name for name in os.listdir(data_dir) if name not in (RESTORE_DIR, LAYOUT_DIR)
-            and os.path.realpath(os.path.join(data_dir, name)) != vault]
+            and os.path.realpath(os.path.join(data_dir, name)) not in vaults]
 
 
 def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
@@ -279,6 +301,7 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
     os.makedirs(safety)
     moved = []
     swapped = False
+    kept_vaults = []  # accounts/<id>/vault folders put back from the safety copy
     try:
         for name in _entries(data_dir):
             shutil.move(os.path.join(data_dir, name), os.path.join(safety, name))
@@ -298,6 +321,13 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
             source = os.path.join(safety, kept)
             if os.path.isdir(source) and not os.path.exists(os.path.join(data_dir, kept)):
                 shutil.copytree(source, os.path.join(data_dir, kept))
+        # Each account's own vault was moved aside with the accounts folder; it goes back where it was.
+        for rel in _account_vaults(safety):
+            destination = os.path.join(data_dir, rel)
+            if not os.path.exists(destination):
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                shutil.move(os.path.join(safety, rel), destination)
+                kept_vaults.append(rel)
         from core.atomic_io import read_json
         options = read_json(os.path.join(folder, PENDING_OPTIONS), {})
         if options.get("disable_automations"):
@@ -307,6 +337,8 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
             os.remove(os.path.join(folder, PENDING_OPTIONS))
         result.update(ok=True, backup_created_at=manifest.get("created_at"), includes_keys=manifest.get("includes_keys"))
     except Exception as e:  # put the data back exactly as it was
+        for rel in kept_vaults:  # out of the restored folders before they are removed
+            shutil.move(os.path.join(data_dir, rel), os.path.join(safety, rel))
         if swapped:
             for name in _entries(data_dir):
                 path = os.path.join(data_dir, name)
