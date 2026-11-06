@@ -69,8 +69,8 @@ def usage_summary():
 
 
 def reset_usage():
-    if os.path.exists(token_usage.USAGE_FILE):
-        os.remove(token_usage.USAGE_FILE)
+    if os.path.exists(token_usage.usage_file()):
+        os.remove(token_usage.usage_file())
 
 
 # -- usage ------------------------------------------------------------------------

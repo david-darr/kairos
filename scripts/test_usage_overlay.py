@@ -125,15 +125,15 @@ class QuotaUsageTests(unittest.TestCase):
         folder = Path(_fixture.name)
         with patch.object(token_usage, "DAILY_FILE", str(folder / "daily.json")), \
              patch.object(token_usage, "USAGE_FILE", str(folder / "totals.json")):
-            token_usage.write_json_atomic(token_usage.DAILY_FILE, {
+            token_usage.write_json_atomic(token_usage.daily_file(), {
                 "2026-10-18": {"l1": 7}, "2026-10-19": {"l1": 10}, "2026-10-21": {"l1": 5, "a1": 2}, "2026-10-22": "bad"})
             self.assertEqual(token_usage.get_recent_usage(date(2026, 10, 21)),
                              {"l1": {"today_tokens": 5, "week_tokens": 15}, "a1": {"today_tokens": 2, "week_tokens": 2}},
                              "the week starts Monday, as on Home; a Sunday before it is not counted")
-            token_usage.write_json_atomic(token_usage.DAILY_FILE, {"2000-01-01": {"l1": 99}})
+            token_usage.write_json_atomic(token_usage.daily_file(), {"2000-01-01": {"l1": 99}})
             token_usage.record_usage("l1", {"input_tokens": 40, "output_tokens": 10, "cache_read_input_tokens": 100})
             self.assertEqual(token_usage.get_recent_usage()["l1"], {"today_tokens": 50, "week_tokens": 50}, "cache reads are not counted")
-            self.assertNotIn("2000-01-01", token_usage.read_json(token_usage.DAILY_FILE, {}), "old days are pruned")
+            self.assertNotIn("2000-01-01", token_usage.read_json(token_usage.daily_file(), {}), "old days are pruned")
 
     def test_each_failure_says_what_kind_it_was_without_leaking_text(self):
         def refused():

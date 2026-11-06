@@ -68,7 +68,7 @@ class ProviderTests(unittest.TestCase):
     def setUp(self):
         providers.clear_provider()
         providers.set_daily_limit(50)
-        Path(providers.USAGE_FILE).unlink(missing_ok=True)
+        Path(providers.usage_file()).unlink(missing_ok=True)
         self.addCleanup(providers.clear_provider)
         self.addCleanup(setattr, providers, "_transport", None)
 
@@ -179,7 +179,7 @@ class ProviderTests(unittest.TestCase):
         run(providers.generate("photo", transport=transport))
         with self.assertRaises(providers.ImageUnavailable):
             run(providers.generate("photo", transport=transport))
-        write_json_atomic(providers.USAGE_FILE, {"date": "2000-01-01", "count": 500})
+        write_json_atomic(providers.usage_file(), {"date": "2000-01-01", "count": 500})
         self.assertEqual(providers.provider_state()["used_today"], 0)
         run(providers.generate("photo", transport=transport))
         providers.set_daily_limit(0)

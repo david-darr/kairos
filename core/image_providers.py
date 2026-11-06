@@ -17,7 +17,12 @@ from core.constants import DATA_DIR
 PROVIDERS = {"openai": ("https://api.openai.com/v1", "gpt-image-1"),
              "xai": ("https://api.x.ai/v1", "grok-2-image"), "compatible": ("", "")}
 CONFIG_FILE = os.path.join(DATA_DIR, "avatar_provider.json")
-USAGE_FILE = os.path.join(DATA_DIR, "image_usage.json")
+USAGE_FILE = None  # a test can point it at its own file; otherwise the current account's (Multi-Account group 8)
+
+
+def usage_file() -> str:
+    from core import accounts
+    return USAGE_FILE or accounts.path("image_usage.json")
 GENERATE_TIMEOUT = 120
 MAX_GENERATED_BYTES = 15 * 1024 * 1024
 SIZES = {"square": "1024x1024", "landscape": "1536x1024", "portrait": "1024x1536"}
@@ -47,7 +52,7 @@ def set_daily_limit(value):
 
 
 def _usage_state():
-    usage = read_json(USAGE_FILE, {})
+    usage = read_json(usage_file(), {})
     count = usage.get("count", 0) if usage.get("date") == date.today().isoformat() else 0
     return {"daily_limit": max(0, min(500, int(settings.get_setting("image_daily_limit")))),
             "used_today": max(0, int(count))}
@@ -154,7 +159,7 @@ async def generate(prompt, size="square", count=1, *, transport=None) -> list[by
                 raise ValueError()
             # The provider bills what it sent, so it counts toward the cap even if Kairos can't use it.
             with _usage_lock:
-                write_json_atomic(USAGE_FILE, {"date": date.today().isoformat(), "count": _usage_state()["used_today"] + len(items)})
+                write_json_atomic(usage_file(), {"date": date.today().isoformat(), "count": _usage_state()["used_today"] + len(items)})
             pictures = []
             for item in items:
                 encoded = item["b64_json"]

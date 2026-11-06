@@ -110,6 +110,9 @@ STEPS: list[Step] = [
     Step(7, "skills, designs, videos, generated files, Forge, checkpoints and computer use",
          ("skills", "designs", "design_systems", "design_style_drafts", "videos", "generated_files",
           "generated_images", "forge", "file_checkpoints", "computer")),
+    # Token and image usage counts (the daily image limit itself stays an install setting; each account
+    # counts its own). Bots' usage moved with step 4.
+    Step(8, "usage counts", ("token_usage.json", "token_usage_daily.json", "image_usage.json")),
 ]
 
 
